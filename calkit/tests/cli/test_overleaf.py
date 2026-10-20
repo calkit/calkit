@@ -2,6 +2,7 @@
 
 import io
 import os
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -16,6 +17,7 @@ import calkit
 import calkit.latex
 from calkit.cli.overleaf import (
     _extract_title_from_tex,
+    _get_overleaf_auth,
     _get_pulled_overleaf_repo,
     overleaf_app,
 )
@@ -1208,7 +1210,139 @@ def test_overleaf_sync_drops_legacy_sync_paths(tmp_dir):
     assert not repo.git.status("--porcelain")
 
 
-def test_get_pulled_overleaf_repo_asks_for_new_token(monkeypatch):
+class _FakeWebClient(calkit.overleaf.WebClient):
+    """Stands in for Overleaf's web app, holding a project's files."""
+
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self.files = files
+        self.uploads: list[str] = []
+
+    def download(self, project_id: str) -> bytes:
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for path, content in self.files.items():
+                z.writestr(path, content)
+        return buf.getvalue()
+
+    def get_root_folder(self, project_id: str) -> dict:
+        root: dict = {"_id": "root", "docs": [], "fileRefs": [], "folders": []}
+        for path in self.files:
+            folder = root
+            *dirs, name = path.split("/")
+            for d in dirs:
+                subs = [f for f in folder["folders"] if f["name"] == d]
+                if not subs:
+                    subs = [
+                        {"name": d, "docs": [], "fileRefs": [], "folders": []}
+                    ]
+                    folder["folders"].append(subs[0])
+                folder = subs[0]
+            key = "docs" if path.endswith((".tex", ".bib")) else "fileRefs"
+            folder[key].append({"name": name, "_id": path})
+        return root
+
+    def upload(
+        self, project_id: str, root_folder_id: str, path: str, content: bytes
+    ) -> None:
+        assert root_folder_id == "root"
+        self.uploads.append(path)
+        self.files[path] = content
+
+    def delete(
+        self, project_id: str, entity_type: str, entity_id: str
+    ) -> None:
+        del self.files[entity_id]
+
+
+def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
+    overleaf = _FakeWebClient(
+        {
+            "main.tex": b"Initial text\n",
+            "refs.bib": b"@article{a}\n",
+        }
+    )
+    monkeypatch.setattr(
+        "calkit.cli.overleaf._get_overleaf_auth", lambda: overleaf
+    )
+    subprocess.run(["calkit", "init"], check=True)
+    repo = git.Repo()
+    remote = tempfile.mkdtemp()
+    git.Repo.init(path=remote, bare=True)
+    repo.git.remote(["add", "origin", remote])
+    url = "https://www.overleaf.com/project/abc123"
+    res = runner.invoke(
+        overleaf_app, ["import", url, "paper", "--title", "A paper"]
+    )
+    assert res.exit_code == 0, res.output
+    with open("paper/main.tex") as f:
+        assert f.read() == "Initial text\n"
+    # Files are pulled from and pushed to Overleaf both ways, and a deletion
+    # in the project deletes the file from Overleaf
+    overleaf.files["main.tex"] += b"From Overleaf\n"
+    os.makedirs("paper/figs")
+    with open("paper/figs/fig.txt", "w") as f:
+        f.write("A figure")
+    repo.git.add("paper/figs/fig.txt")
+    repo.git.commit(["-m", "Add figure"])
+
+    def sync():
+        res = runner.invoke(overleaf_app, ["sync", "--allow-stale"])
+        assert res.exit_code == 0, res.output
+        return res
+
+    sync()
+    with open("paper/main.tex") as f:
+        assert f.read() == "Initial text\nFrom Overleaf\n"
+    assert overleaf.files["figs/fig.txt"] == b"A figure"
+    assert overleaf.uploads == ["figs/fig.txt"]
+    assert not repo.git.status("--porcelain")
+    repo.git.rm("paper/figs/fig.txt")
+    repo.git.commit(["-m", "Remove figure"])
+    sync()
+    assert "figs/fig.txt" not in overleaf.files
+    # Nothing is sent when nothing changed
+    overleaf.uploads.clear()
+    sync()
+    assert overleaf.uploads == []
+    # On another machine there's no mirror, so the last sync is rebuilt from
+    # the project history: edits on both sides survive rather than Overleaf
+    # overwriting the project's
+    shutil.rmtree(calkit.overleaf.get_project_dir("abc123"))
+    overleaf.files["main.tex"] += b"More from Overleaf\n"
+    with open("paper/refs.bib", "a") as f:
+        f.write("@article{b}\n")
+    repo.git.commit(["paper/refs.bib", "-m", "Add reference"])
+    res = sync()
+    assert "Rebuilding the last sync" in res.output
+    with open("paper/main.tex") as f:
+        assert f.read().endswith("More from Overleaf\n")
+    with open("paper/refs.bib") as f:
+        assert f.read() == "@article{a}\n@article{b}\n"
+    assert overleaf.files["refs.bib"] == b"@article{a}\n@article{b}\n"
+    assert overleaf.uploads == ["refs.bib"]
+    # Conflicting edits are resolved the same as with Git integration
+    overleaf.files["main.tex"] += b"Overleaf's ending\n"
+    with open("paper/main.tex", "a") as f:
+        f.write("Project's ending\n")
+    repo.git.commit(["paper/main.tex", "-m", "Local edit"])
+    res = runner.invoke(overleaf_app, ["sync", "--allow-stale"])
+    assert res.exit_code != 0
+    with open("paper/main.tex") as f:
+        assert ">>>>>>>" in f.read()
+    with open("paper/main.tex", "w") as f:
+        f.write("Resolved\n")
+    res = runner.invoke(overleaf_app, ["sync", "--allow-stale", "--resolve"])
+    assert res.exit_code == 0, res.output
+    assert overleaf.files["main.tex"] == b"Resolved\n"
+    # Status works from the mirror too
+    res = runner.invoke(overleaf_app, ["status"])
+    assert res.exit_code == 0, res.output
+    assert "Changed files" not in res.output
+
+
+def test_overleaf_credentials(monkeypatch):
     tokens_tried = []
 
     def get_repo(project_id, token):
@@ -1250,3 +1384,55 @@ def test_get_pulled_overleaf_repo_asks_for_new_token(monkeypatch):
     with pytest.raises(typer.Exit):
         _get_pulled_overleaf_repo("abc", "expired")
     assert saved == ["fresh"]
+    # A rejected session should prompt for a new one the same way
+    sessions_tried = []
+
+    def pull_mirror(repo, client, project_id):
+        session = client.http.cookies[calkit.overleaf.SESSION_COOKIE]
+        sessions_tried.append(session)
+        if session == "expired":
+            raise calkit.overleaf.AuthError("Session expired")
+
+    monkeypatch.setattr(calkit.overleaf, "get_mirror", lambda pid: "mirror")
+    monkeypatch.setattr(calkit.overleaf, "pull_mirror", pull_mirror)
+    monkeypatch.setattr(
+        type(calkit.config.read()),
+        "write",
+        lambda self: saved.append(self.overleaf_session),
+    )
+    monkeypatch.setattr("sys.stdin", Terminal())
+    repo, client = _get_pulled_overleaf_repo(
+        "abc", calkit.overleaf.WebClient("expired")
+    )
+    assert repo == "mirror"
+    assert isinstance(client, calkit.overleaf.WebClient)
+    assert sessions_tried == ["expired", "fresh"]
+    assert saved == ["fresh", "fresh"]
+    monkeypatch.setattr("sys.stdin", io.StringIO())
+    with pytest.raises(typer.Exit):
+        _get_pulled_overleaf_repo("abc", calkit.overleaf.WebClient("expired"))
+    # Logging in checks the session with Overleaf before storing it, and a
+    # stored session is used when there's no Git token
+    config = calkit.config.read()
+    config.overleaf_token = None
+    config.overleaf_session = None
+    monkeypatch.setattr(calkit.config, "read", lambda: config)
+    monkeypatch.setattr(calkit.overleaf.WebClient, "csrf_token", "tok")
+    res = runner.invoke(overleaf_app, ["login", "--session", "abc"])
+    assert res.exit_code == 0, res.output
+    assert config.overleaf_session == "abc"
+    assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    config.overleaf_token = calkit.config.KeyringOptionalSecret("tok")
+    assert _get_overleaf_auth() == "tok"
+    config.overleaf_session = None
+
+    def reject(self):
+        raise calkit.overleaf.AuthError("Overleaf rejected the session")
+
+    monkeypatch.setattr(
+        calkit.overleaf.WebClient, "csrf_token", property(reject)
+    )
+    res = runner.invoke(overleaf_app, ["login", "--session", "bad"])
+    assert res.exit_code != 0
+    assert "rejected" in res.output
+    assert config.overleaf_session is None

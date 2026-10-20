@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import sys
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -72,6 +73,7 @@ def _get_overleaf_token(rejected: bool = False) -> str:
             "A new one can be generated at:\n\n"
             "    https://www.overleaf.com/user/settings\n\n"
             "under the 'Git Integration' section.\n"
+            "Without Overleaf Premium, run 'calkit overleaf login' instead.\n"
         )
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise_error(
@@ -91,23 +93,93 @@ def _get_overleaf_token(rejected: bool = False) -> str:
     return overleaf_token
 
 
-def _get_pulled_overleaf_repo(
-    project_id: str, token: str
-) -> tuple[git.Repo, str]:
-    """Clone or pull an Overleaf project, asking for a new token whenever
-    Overleaf rejects the current one.
+def _get_overleaf_session(rejected: bool = False) -> str:
+    """Prompt for an Overleaf browser session cookie and store it."""
+    if rejected:
+        warn("Overleaf rejected your session", prefix="")
+    typer.echo(calkit.overleaf.SESSION_HELP + "\n")
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise_error(
+            "Set one with 'calkit overleaf login --session' and try again"
+        )
+    session = typer.prompt("Enter Overleaf session cookie", hide_input=True)
+    calkit_config = calkit.config.read()
+    calkit_config.overleaf_session = session
+    calkit_config.write()
+    return str(session)
 
-    Returns the repo and the token that worked, so later projects use it too.
+
+def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
+    """Get a Git token, or, if only a session is set, a web client for
+    syncing without Overleaf Premium.
+    """
+    calkit_config = calkit.config.read()
+    if not calkit_config.overleaf_token and calkit_config.overleaf_session:
+        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
+    return _get_overleaf_token()
+
+
+def _get_pulled_overleaf_repo(
+    project_id: str, auth: str | calkit.overleaf.WebClient
+) -> tuple[git.Repo, str | calkit.overleaf.WebClient]:
+    """Clone or pull an Overleaf project, asking for new credentials
+    whenever Overleaf rejects the current ones.
+
+    Returns the repo and the credentials that worked, so later projects use
+    them too.
     """
     while True:
         try:
-            repo = calkit.overleaf.get_repo(project_id, token)
-            calkit.overleaf.pull(repo)
-            return repo, token
-        except calkit.overleaf.AuthError:
-            token = _get_overleaf_token(rejected=True)
+            if isinstance(auth, calkit.overleaf.WebClient):
+                repo = calkit.overleaf.get_mirror(project_id)
+                calkit.overleaf.pull_mirror(repo, auth, project_id)
+            else:
+                repo = calkit.overleaf.get_repo(project_id, auth)
+                calkit.overleaf.pull(repo)
+            return repo, auth
+        except calkit.overleaf.AuthError as e:
+            if isinstance(auth, calkit.overleaf.WebClient):
+                warn(str(e), prefix="")
+                auth = calkit.overleaf.WebClient(
+                    _get_overleaf_session(rejected=True)
+                )
+            else:
+                auth = _get_overleaf_token(rejected=True)
         except Exception as e:
             raise_error(str(e))
+
+
+@overleaf_app.command(name="login")
+def login(
+    session: Annotated[
+        str | None,
+        typer.Option(
+            "--session",
+            help="Value of the 'overleaf_session2' cookie from your browser.",
+        ),
+    ] = None,
+) -> None:
+    """Sign in with a browser session to sync without Overleaf Premium."""
+    if session is None:
+        typer.echo(calkit.overleaf.SESSION_HELP + "\n")
+        session = str(
+            typer.prompt("Enter Overleaf session cookie", hide_input=True)
+        )
+    try:
+        calkit.overleaf.WebClient(session).csrf_token
+    except Exception as e:
+        raise_error(str(e))
+    calkit_config = calkit.config.read()
+    calkit_config.overleaf_session = calkit.config.KeyringOptionalSecret(
+        session
+    )
+    calkit_config.write()
+    typer.echo("Stored Overleaf session in Calkit config")
+    if calkit_config.overleaf_token:
+        warn(
+            "An Overleaf Git token is also set and will be used instead; "
+            "remove it with 'calkit config unset overleaf_token'"
+        )
 
 
 @overleaf_app.command(name="import")
@@ -199,8 +271,8 @@ def import_publication(
     from calkit.cli.main import ignore as git_ignore
     from calkit.cli.new import new_latex_stage
 
-    # First check that the user has an Overleaf token set
-    overleaf_token = _get_overleaf_token()
+    # First check that the user can access Overleaf
+    overleaf_auth = _get_overleaf_auth()
     if (
         not src_url.startswith("https://www.overleaf.com/project/")
         and calkit.config.get_env() != "test"
@@ -233,7 +305,7 @@ def import_publication(
         shutil.rmtree(overleaf_project_dir)
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
-    _get_pulled_overleaf_repo(overleaf_project_id, overleaf_token)
+    _get_pulled_overleaf_repo(overleaf_project_id, overleaf_auth)
     # Detect target path if not specified
     if target_path is None:
         ol_contents = os.listdir(
@@ -578,8 +650,7 @@ def sync(
             "Overleaf.\nRun 'calkit run' first, or use --allow-stale to sync "
             "anyway."
         )
-    # First check our config for an Overleaf token
-    overleaf_token = _get_overleaf_token()
+    overleaf_auth = _get_overleaf_auth()
     repo = calkit.git.get_repo()
     conflict_fpath = calkit.overleaf.get_conflict_fpath()
     in_am_session = "in the middle of an am session" in repo.git.status()
@@ -646,8 +717,8 @@ def sync(
         # Keep other processes from using the clone until we're done
         with calkit.overleaf.lock(overleaf_project_id, typer.echo):
             typer.echo("Pulling the latest version from Overleaf")
-            overleaf_repo, overleaf_token = _get_pulled_overleaf_repo(
-                overleaf_project_id, overleaf_token
+            overleaf_repo, overleaf_auth = _get_pulled_overleaf_repo(
+                overleaf_project_id, overleaf_auth
             )
             # Reread the checkpoint in case a sync we waited on just moved it
             sync_data = calkit.overleaf.get_sync_info().get(
@@ -657,6 +728,20 @@ def sync(
                 last_sync_commit = resolving_info["last_overleaf_commit"]
             else:
                 last_sync_commit = sync_data.get("last_sync_commit")
+            push = None
+            if isinstance(overleaf_auth, calkit.overleaf.WebClient):
+                last_sync_commit = calkit.overleaf.ensure_sync_base(
+                    overleaf_repo,
+                    main_repo=repo,
+                    path_in_project=synced_folder,
+                    last_sync_commit=last_sync_commit,
+                    print_info=typer.echo,
+                )
+                push = partial(
+                    calkit.overleaf.push_mirror,
+                    client=overleaf_auth,
+                    project_id=overleaf_project_id,
+                )
             commits_since = calkit.overleaf.get_commits_since_last_sync(
                 overleaf_repo=overleaf_repo,
                 last_sync_commit=last_sync_commit,
@@ -679,6 +764,7 @@ def sync(
                     print_info=typer.echo,
                     push_only=push_only,
                     force=force,
+                    push=push,
                 )
             except Exception as e:
                 raise_error(str(e))
@@ -751,8 +837,7 @@ def get_status(
         for path in paths:
             if path not in overleaf_sync_dirs:
                 raise_error(f"Path '{path}' is not synced with Overleaf")
-    # First check our config for an Overleaf token
-    overleaf_token = _get_overleaf_token()
+    overleaf_auth = _get_overleaf_auth()
     first = True
     for path_in_project, sync_data in overleaf_info.items():
         if paths is not None and path_in_project not in paths:
@@ -779,14 +864,22 @@ def get_status(
                 overleaf_project_id
             )
             typer.echo("Pulling the latest version from Overleaf")
-            overleaf_repo, overleaf_token = _get_pulled_overleaf_repo(
-                overleaf_project_id, overleaf_token
+            overleaf_repo, overleaf_auth = _get_pulled_overleaf_repo(
+                overleaf_project_id, overleaf_auth
             )
             # Reread the checkpoint in case a sync we waited on just moved it
             sync_data = calkit.overleaf.get_sync_info().get(
                 path_in_project, sync_data
             )
             last_sync_commit = sync_data.get("last_sync_commit")
+            if isinstance(overleaf_auth, calkit.overleaf.WebClient):
+                last_sync_commit = calkit.overleaf.ensure_sync_base(
+                    overleaf_repo,
+                    main_repo=calkit.git.get_repo(),
+                    path_in_project=path_in_project,
+                    last_sync_commit=last_sync_commit,
+                    print_info=typer.echo,
+                )
             if last_sync_commit:
                 commits_since = calkit.overleaf.get_commits_since_last_sync(
                     overleaf_repo=overleaf_repo,

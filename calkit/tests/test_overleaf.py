@@ -226,3 +226,146 @@ def test_lock(tmp_dir):
     other = FileLock(lock_path)
     other.acquire(timeout=0)
     other.release()
+
+
+def test_web_client():
+    import io
+    import zipfile
+    from types import SimpleNamespace
+
+    def response(text="", status=200, url="https://www.overleaf.com/x", **kw):
+        return SimpleNamespace(
+            ok=status < 400,
+            status_code=status,
+            url=url,
+            text=text,
+            content=kw.get("content", text.encode()),
+            json=lambda: kw.get("json"),
+        )
+
+    class Http:
+        def __init__(self, responses):
+            self.responses = responses
+            self.requests = []
+
+        def request(self, method, url, **kwargs):
+            self.requests.append((method, url, kwargs))
+            for (m, part), resp in self.responses.items():
+                if m == method and part in url:
+                    return resp() if callable(resp) else resp
+            return response()
+
+        def get(self, url, **kwargs):
+            return self.request("GET", url, **kwargs)
+
+        def post(self, url, **kwargs):
+            return self.request("POST", url, **kwargs)
+
+        def delete(self, url, **kwargs):
+            return self.request("DELETE", url, **kwargs)
+
+    client = calkit.overleaf.WebClient("overleaf_session2=abc ")
+    assert client.http.cookies["overleaf_session2"] == "abc"
+    # The CSRF token comes from the project dashboard
+    page = '<meta name="ol-csrfToken" content="tok123">'
+    client.http = Http({("GET", "/project"): response(page)})
+    assert client.csrf_token == "tok123"
+    # A session Overleaf doesn't accept is sent to the login page
+    client = calkit.overleaf.WebClient("expired")
+    client.http = Http(
+        {("GET", "/project"): response(url="https://www.overleaf.com/login")}
+    )
+    with pytest.raises(calkit.overleaf.AuthError):
+        client.csrf_token
+    # Downloads must actually be zip archives
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("main.tex", "Hi")
+    client.http = Http(
+        {("GET", "/download/zip"): response(content=buf.getvalue())}
+    )
+    assert client.download("p1") == buf.getvalue()
+    client.http = Http({("GET", "/download/zip"): response("<html>")})
+    with pytest.raises(calkit.overleaf.AuthError):
+        client.download("p1")
+    # The file tree arrives over socket.io long polling, possibly after
+    # other messages, framed together, including a heartbeat to answer
+    root = {"_id": "root", "docs": [], "fileRefs": [], "folders": []}
+    join = json.dumps(
+        {
+            "name": "joinProjectResponse",
+            "args": [{"project": {"rootFolder": [root]}}],
+        }
+    )
+    accepted = '5:::{"name":"connectionAccepted"}'
+    frames = [
+        "1::",
+        f"�{len(accepted)}�{accepted}�3�2::",
+        f"5:::{join}",
+    ]
+    client.http = Http(
+        {
+            ("GET", "/socket.io/1/xhr-polling/sid9"): lambda: response(
+                frames.pop(0)
+            ),
+            ("GET", "/socket.io/1/"): response("sid9:60:60:xhr-polling"),
+        }
+    )
+    assert client.get_root_folder("p1") == root
+    sent = [
+        (m, kw.get("data")) for m, _, kw in client.http.requests if m == "POST"
+    ]
+    assert sent == [("POST", "2::"), ("POST", "0::")]
+    assert all(
+        kw["params"]["projectId"] == "p1"
+        for m, _, kw in client.http.requests
+        if m == "GET"
+    )
+    rejected = '5:::{"name":"connectionRejected","args":["not authorized"]}'
+    client.http = Http(
+        {
+            ("GET", "/socket.io/1/xhr-polling/"): response(rejected),
+            ("GET", "/socket.io/1/"): response("sid9:60:60:xhr-polling"),
+        }
+    )
+    with pytest.raises(calkit.overleaf.AuthError):
+        client.get_root_folder("p1")
+    # Uploads go to the root folder, with Overleaf creating any folders on
+    # the way to the file
+    client.csrf_token = "tok123"
+    client.http = Http({("POST", "/upload"): response(json={"success": True})})
+    client.upload("p1", "root", "figs/a.png", b"png")
+    _, url, kw = client.http.requests[0]
+    assert url.endswith("/project/p1/upload")
+    assert kw["params"] == {"folder_id": "root"}
+    assert kw["data"] == {"name": "a.png", "relativePath": "figs/a.png"}
+    assert kw["files"]["qqfile"][1] == b"png"
+    assert kw["headers"]["X-CSRF-Token"] == "tok123"
+    client.upload("p1", "root", "main.tex", b"Hi")
+    assert client.http.requests[1][2]["data"] == {"name": "main.tex"}
+    client.http = Http(
+        {
+            ("POST", "/upload"): response(
+                json={"success": False, "error": "invalid_filename"}
+            )
+        }
+    )
+    with pytest.raises(RuntimeError, match="invalid_filename"):
+        client.upload("p1", "root", "bad", b"")
+    # Entities are found by path for deleting
+    tree = {
+        "docs": [{"name": "main.tex", "_id": "d1"}],
+        "fileRefs": [],
+        "folders": [
+            {
+                "name": "figs",
+                "docs": [],
+                "fileRefs": [{"name": "a.png", "_id": "f1"}],
+                "folders": [],
+            }
+        ],
+    }
+    assert calkit.overleaf._find_entity(tree, "main.tex") == ("doc", "d1")
+    assert calkit.overleaf._find_entity(tree, "figs/a.png") == ("file", "f1")
+    assert calkit.overleaf._find_entity(tree, "figs/b.png") is None
+    assert calkit.overleaf._find_entity(tree, "other/a.png") is None

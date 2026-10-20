@@ -3895,13 +3895,32 @@ calkit latex|tex comments COMMAND [ARGS]...
 
 Interact with Overleaf.
 
-| Command                                           | Description                                                    |
-| ------------------------------------------------- | -------------------------------------------------------------- |
-| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                 |
-| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                    |
-| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project. |
-| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.       |
-| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.   |
+| Command                                           | Description                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| [`login`](#subcommand-overleaf-ol-login)          | Sign in with a browser session to sync without Overleaf Premium. |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                   |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                      |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project.   |
+| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.         |
+| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.     |
+
+<a id="subcommand-overleaf-ol-login"></a>
+
+#### `calkit overleaf|ol login`
+
+Sign in with a browser session to sync without Overleaf Premium.
+
+Usage:
+
+```text
+calkit overleaf|ol login [OPTIONS]
+```
+
+Options:
+
+| Option      | Type | Required | Default | Description                                                |
+| ----------- | ---- | -------- | ------- | ---------------------------------------------------------- |
+| `--session` | str  | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
 
 <a id="subcommand-overleaf-ol-import"></a>
 

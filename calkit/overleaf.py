@@ -1,5 +1,7 @@
 """Functionality for working with Overleaf."""
 
+from __future__ import annotations
+
 import json
 import os
 import shutil
@@ -11,11 +13,14 @@ from copy import deepcopy
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
 
 import git
 
 import calkit
+
+if TYPE_CHECKING:
+    import requests
 
 PRIVATE_KEYS = ["project_id", "last_sync_commit"]
 
@@ -148,6 +153,9 @@ def get_repo(project_id: str, token: str) -> git.Repo:
     # main project repo in a parent directory instead
     if os.path.isdir(dest) and not os.path.exists(os.path.join(dest, ".git")):
         shutil.rmtree(dest)
+    # A mirror kept by session sync has no remote to pull from
+    if os.path.isdir(dest) and not git.Repo(dest).remotes:
+        shutil.rmtree(dest)
     if not os.path.isdir(dest):
         return clone(project_id, token)
     repo = git.Repo(dest)
@@ -173,6 +181,334 @@ def pull(repo: git.Repo) -> None:
         raise _git_error(e, "pull")
     repo.git.reset("--hard", "@{upstream}")
     repo.git.clean("-fdx")
+
+
+OVERLEAF_URL = "https://www.overleaf.com"
+SESSION_COOKIE = "overleaf_session2"
+# Where a session-synced mirror records the commit matching Overleaf's files,
+# like a remote-tracking branch does for a Git integration clone
+MIRROR_REF = "refs/calkit/overleaf"
+
+SESSION_HELP = (
+    "Copy the value of the 'overleaf_session2' cookie from a browser signed "
+    "in to overleaf.com: open developer tools, then go to Application > "
+    "Cookies (Chrome, Edge) or Storage > Cookies (Firefox)."
+)
+
+SESSION_REJECTED_ADVICE = (
+    "Your Overleaf session may have expired, e.g., by signing out of "
+    "overleaf.com, or you may not have edit access to this project. "
+    "Sign in again with 'calkit overleaf login'."
+)
+
+
+class WebClient:
+    """Access Overleaf projects with a browser session, the same way the
+    editor does, so syncing doesn't require Git integration, which is an
+    Overleaf Premium feature.
+
+    Follows https://github.com/moritzgloeckl/overleaf-sync, updated for
+    Overleaf's current realtime API.
+    """
+
+    def __init__(self, session: str, url: str = OVERLEAF_URL) -> None:
+        import requests
+
+        self.url = url.rstrip("/")
+        self.http = requests.Session()
+        self.http.headers["User-Agent"] = f"calkit/{calkit.__version__}"
+        session = session.strip().removeprefix(f"{SESSION_COOKIE}=")
+        self.http.cookies.set(SESSION_COOKIE, session)
+
+    def _check(self, resp: requests.Response, action: str) -> None:
+        # A missing or expired session redirects to the login page
+        if resp.status_code in (401, 403) or "/login" in resp.url:
+            raise AuthError(
+                f"Overleaf rejected the session when trying to {action}.\n"
+                + SESSION_REJECTED_ADVICE
+            )
+        if not resp.ok:
+            raise RuntimeError(
+                f"Failed to {action} on Overleaf (HTTP {resp.status_code})"
+            )
+
+    @cached_property
+    def csrf_token(self) -> str:
+        """The token Overleaf requires on requests that change a project,
+        which also checks the session is signed in.
+        """
+        import re
+
+        resp = self.http.get(f"{self.url}/project", timeout=60)
+        self._check(resp, "sign in")
+        match = re.search(
+            r'<meta\s+name="ol-csrfToken"\s+content="([^"]+)"', resp.text
+        )
+        if match is None:
+            raise AuthError(
+                "Overleaf didn't recognize the session.\n"
+                + SESSION_REJECTED_ADVICE
+            )
+        return match.group(1)
+
+    def download(self, project_id: str) -> bytes:
+        """Download a project's files as a zip archive."""
+        resp = self.http.get(
+            f"{self.url}/project/{project_id}/download/zip", timeout=300
+        )
+        self._check(resp, "download the project")
+        if not resp.content.startswith(b"PK"):
+            raise AuthError(
+                "Overleaf didn't send the project's files.\n"
+                + SESSION_REJECTED_ADVICE
+            )
+        return resp.content
+
+    def get_root_folder(self, project_id: str) -> dict:
+        """Get the project's file tree, which has the IDs needed to upload
+        and delete files.
+
+        Overleaf only sends it to an editor connecting over its socket.io
+        (v0.9) realtime API, which is spoken here over long polling, so
+        nothing beyond ``requests`` is needed.
+        """
+        import time
+
+        def get(url: str) -> requests.Response:
+            params = {
+                "projectId": project_id,
+                "t": str(int(time.time() * 1e3)),
+            }
+            resp = self.http.get(url, params=params, timeout=60)
+            self._check(resp, "open the project")
+            return resp
+
+        base = f"{self.url}/socket.io/1"
+        sid = get(base + "/").text.split(":")[0]
+        poll_url = f"{base}/xhr-polling/{sid}"
+        try:
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                text = get(poll_url).text
+                # Several messages in one response are each framed by their
+                # length between U+FFFD markers
+                if text.startswith("\ufffd"):
+                    msgs = text.split("\ufffd")[2::2]
+                else:
+                    msgs = [text]
+                for msg in msgs:
+                    if msg.startswith("2:"):
+                        # Heartbeats need answering to stay connected
+                        self.http.post(poll_url, data="2::", timeout=60)
+                    elif msg.startswith(("0:", "7:")):
+                        raise RuntimeError(
+                            "Overleaf closed the connection to the project: "
+                            + msg
+                        )
+                    elif msg.startswith("5:"):
+                        event = json.loads(msg.split(":", 3)[3])
+                        if event.get("name") == "joinProjectResponse":
+                            project = event["args"][0]["project"]
+                            root: dict = project["rootFolder"][0]
+                            return root
+                        if event.get("name") == "connectionRejected":
+                            raise AuthError(
+                                "Overleaf refused to open the project: "
+                                f"{event.get('args')}\n"
+                                + SESSION_REJECTED_ADVICE
+                            )
+            raise RuntimeError("Timed out waiting for Overleaf's file list")
+        finally:
+            try:
+                self.http.post(poll_url, data="0::", timeout=10)
+            except Exception:
+                pass
+
+    def upload(
+        self, project_id: str, root_folder_id: str, path: str, content: bytes
+    ) -> None:
+        """Create or replace a file, creating any folders it's in."""
+        name = path.split("/")[-1]
+        form = {"name": name}
+        if "/" in path:
+            form["relativePath"] = path
+        resp = self.http.post(
+            f"{self.url}/project/{project_id}/upload",
+            params={"folder_id": root_folder_id},
+            data=form,
+            files={"qqfile": (name, content, "application/octet-stream")},
+            headers={"X-CSRF-Token": self.csrf_token},
+            timeout=300,
+        )
+        self._check(resp, f"upload {path}")
+        body = resp.json()
+        if not body.get("success"):
+            raise RuntimeError(
+                f"Overleaf rejected {path}: {body.get('error', body)}"
+            )
+
+    def delete(
+        self, project_id: str, entity_type: str, entity_id: str
+    ) -> None:
+        """Delete a doc, file, or folder by ID."""
+        resp = self.http.delete(
+            f"{self.url}/project/{project_id}/{entity_type}/{entity_id}",
+            headers={"X-CSRF-Token": self.csrf_token},
+            timeout=60,
+        )
+        self._check(resp, "delete a file")
+
+
+def get_mirror(project_id: str) -> git.Repo:
+    """Return the local Git mirror of an Overleaf project synced with a
+    session, creating it if necessary.
+
+    Calkit writes this repo's history itself, one commit per change seen on
+    Overleaf, so the sync works the same as with a Git integration clone,
+    which serves as a mirror just as well if one is already there.
+    """
+    dest = get_project_dir(project_id)
+    # Opening a directory without its own .git would find the main project
+    # repo in a parent directory instead
+    if os.path.isdir(dest) and not os.path.exists(os.path.join(dest, ".git")):
+        shutil.rmtree(dest)
+    if not os.path.isdir(dest):
+        return git.Repo.init(dest)
+    return git.Repo(dest)
+
+
+def pull_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
+    """Commit Overleaf's current files to the mirror if they've changed.
+
+    Anything left by a sync that failed partway is discarded first, as with
+    ``pull``.
+    """
+    import io
+    import zipfile
+
+    archive = zipfile.ZipFile(io.BytesIO(client.download(project_id)))
+    if repo.head.is_valid():
+        try:
+            repo.git.rev_parse("--verify", "--quiet", MIRROR_REF)
+            synced = MIRROR_REF
+        except git.GitCommandError:
+            synced = "HEAD"
+        repo.git.reset("--hard", synced)
+        repo.git.rm("-r", "-q", "--cached", "--ignore-unmatch", ".")
+    repo.git.clean("-fdx")
+    root = Path(str(repo.working_dir)).resolve()
+    for entry in archive.infolist():
+        dest = (root / entry.filename).resolve()
+        # Never write outside the mirror or into its .git
+        if entry.is_dir() or root not in dest.parents:
+            continue
+        if dest.relative_to(root).parts[0] == ".git":
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(archive.read(entry))
+    # Everything is tracked, even what an Overleaf .gitignore would exclude,
+    # as the Git integration does
+    repo.git.add("-A", "-f")
+    if not repo.head.is_valid() or repo.git.diff("--staged"):
+        repo.git.commit("--allow-empty", "-m", "Update on Overleaf.")
+    repo.git.update_ref(MIRROR_REF, "HEAD")
+
+
+def push_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
+    """Send what's been committed to the mirror since it last matched
+    Overleaf.
+    """
+    changes = repo.git.diff(
+        "--name-status", "--no-renames", "-z", MIRROR_REF, "HEAD"
+    ).split("\0")
+    if changes == [""]:
+        return
+    root = client.get_root_folder(project_id)
+    for status, path in zip(changes[::2], changes[1::2]):
+        if status == "D":
+            entity = _find_entity(root, path)
+            if entity is not None:
+                client.delete(project_id, *entity)
+            continue
+        with open(os.path.join(str(repo.working_dir), path), "rb") as f:
+            client.upload(project_id, root["_id"], path, f.read())
+    repo.git.update_ref(MIRROR_REF, "HEAD")
+
+
+def _find_entity(folder: dict, path: str) -> tuple[str, str] | None:
+    """Find the type and ID of a doc or file in an Overleaf file tree."""
+    *dirs, name = path.split("/")
+    for d in dirs:
+        sub = [f for f in folder.get("folders", []) if f["name"] == d]
+        if not sub:
+            return None
+        folder = sub[0]
+    for kind, key in (("doc", "docs"), ("file", "fileRefs")):
+        for entity in folder.get(key, []):
+            if entity["name"] == name:
+                return kind, entity["_id"]
+    return None
+
+
+def ensure_sync_base(
+    repo: git.Repo,
+    main_repo: git.Repo,
+    path_in_project: str,
+    last_sync_commit: str | None,
+    print_info: Callable[[str], None] = print,
+) -> str | None:
+    """Make sure a mirror has the commit a sync is based on, returning the
+    commit to use.
+
+    Mirror history is local, so a checkpoint recorded on another machine, or
+    with Git integration, may not exist. What Overleaf held then is rebuilt
+    from the project commit that recorded the checkpoint, when the synced
+    folder matched it, and inserted beneath Overleaf's current files.
+    """
+    from gitdb import IStream  # type: ignore[import-untyped]
+
+    if not last_sync_commit:
+        return last_sync_commit
+    try:
+        repo.commit(last_sync_commit)
+        return last_sync_commit
+    except (ValueError, git.BadName):
+        pass
+    fpath = Path(get_sync_info_fpath()).as_posix()
+    found = main_repo.git.log(
+        "-1", "--format=%H", f"-S{last_sync_commit}", "--", fpath
+    )
+    prefix = Path(path_in_project).as_posix().strip("/")
+    try:
+        tree = main_repo.commit(found).tree if found else None
+        if tree is not None and prefix:
+            tree = tree / prefix
+    except KeyError:
+        tree = None
+    if tree is None:
+        print_info(
+            "Warning: could not find the last sync in the project history; "
+            "syncing as if for the first time"
+        )
+        return None
+    print_info("Rebuilding the last sync from project history")
+    # Git objects are the same in any repo, so the folder's tree can be
+    # copied over as is
+    for obj in [tree, *tree.traverse()]:
+        if isinstance(obj, (git.Blob, git.Tree)):
+            stream = IStream(str(obj.type).encode(), obj.size, obj.data_stream)
+            repo.odb.store(stream)
+    head = repo.head.commit
+    parents = [p for c in head.parents for p in ("-p", c.hexsha)]
+    base: str = repo.git.commit_tree(
+        tree.hexsha, *parents, "-m", "Overleaf at last sync"
+    )
+    new_head = repo.git.commit_tree(
+        head.tree.hexsha, "-p", base, "-m", head.message
+    )
+    repo.git.update_ref("HEAD", new_head)
+    repo.git.update_ref(MIRROR_REF, new_head)
+    return base
 
 
 def project_id_to_url(project_id: str) -> str:
@@ -958,6 +1294,7 @@ def sync(
     resolving_conflict: bool = False,
     push_only: bool = False,
     force: bool = False,
+    push: Callable[[git.Repo], None] | None = None,
 ) -> dict:
     """Sync between the main project repo and Overleaf repo.
 
@@ -1000,6 +1337,9 @@ def sync(
     When push_only is True, only push local files to Overleaf without pulling
     or applying changes from Overleaf to local. Useful for initializing a new
     Overleaf project from local files.
+
+    ``push`` sends the Overleaf repo's new commit to Overleaf, by default with
+    ``git push``; a session-synced mirror passes ``push_mirror`` instead.
 
     When no_commit is True, changes are still pulled from Overleaf and pushed
     to Overleaf, but no commit is created in the main project repo; the pulled
@@ -1275,7 +1615,10 @@ def sync(
         commit_message = "Sync with Calkit project"
         overleaf_repo.git.commit("-m", commit_message)
         print_info("Pushing changes to Overleaf")
-        overleaf_repo.git.push()
+        if push is None:
+            overleaf_repo.git.push()
+        else:
+            push(overleaf_repo)
         res["committed_overleaf"] = True
     # Update the last sync commit
     last_overleaf_commit = overleaf_repo.head.commit.hexsha

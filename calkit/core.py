@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import csv
 import functools
 import glob
@@ -31,7 +32,7 @@ except ImportError:
     UTC = _timezone.utc
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Iterator, Literal
 
 if TYPE_CHECKING:
     from calkit.models import ProjectInfo, ProjectStatus
@@ -332,6 +333,21 @@ DVC_SIZE_THRESH_BYTES = 5_000_000
 STAGE_RUNS_FPATH = os.path.join(".calkit", "stage-runs.json")
 
 
+def read_stage_runs(wdir: str | None = None) -> dict:
+    """The recorded runs of the stages a project's ``dvc.lock`` records, by
+    their names there.
+
+    Kept beside that ``dvc.lock``, so a subproject's are in its own
+    directory whether its stages ran from it or from its parent.
+    """
+    try:
+        with open(os.path.join(wdir or "", STAGE_RUNS_FPATH)) as f:
+            stage_runs = json.load(f)
+    except OSError:
+        return {}
+    return stage_runs if isinstance(stage_runs, dict) else {}
+
+
 def check_or_x(val: bool | int) -> str:
     """A check mark for something that holds, an X for something that does
     not.
@@ -436,6 +452,104 @@ def load_calkit_info(
         if comment and not read_only:
             info.yaml_set_start_comment(comment)
     return info
+
+
+def iter_projects(
+    wdir: str | None = None,
+    ck_info: dict | None = None,
+    read_only: bool = True,
+    _seen: set[str] | None = None,
+) -> Iterator[tuple[str, dict]]:
+    """Yield ``(wdir, ck_info)`` for a project and each of its subprojects.
+
+    Parent first, depth first, with paths relative to ``wdir``. A check
+    that loops over this covers everything ``calkit run`` would run, which
+    is what makes a subproject's requirements and environments part of the
+    parent's rather than something only found by going in there.
+    """
+    base = os.path.normpath(wdir) if wdir else "."
+    if ck_info is None:
+        ck_info = load_calkit_info(wdir=base, read_only=read_only)
+    yield base, ck_info
+    # A subproject declaring its parent, or itself, would otherwise recurse
+    # until the stack runs out
+    seen = _seen if _seen is not None else {os.path.realpath(base)}
+    for subproject in ck_info.get("subprojects") or []:
+        path = subproject.get("path") if isinstance(subproject, dict) else None
+        if not isinstance(path, str):
+            continue
+        sp_wdir = os.path.normpath(os.path.join(base, path))
+        real = os.path.realpath(sp_wdir)
+        if real in seen or not os.path.isfile(
+            os.path.join(sp_wdir, "calkit.yaml")
+        ):
+            continue
+        seen.add(real)
+        yield from iter_projects(wdir=sp_wdir, read_only=read_only, _seen=seen)
+
+
+def get_subprojects(ck_info: dict | None = None) -> dict[str, dict]:
+    """Map each subproject's path, relative to the project, to the project
+    declaring it (``parent``), its entry there, and its own ``ck_info``.
+
+    Nested subprojects are included, in the order ``iter_projects`` visits
+    them.
+    """
+    from pathlib import Path
+
+    projects = {
+        Path(wdir).as_posix(): info
+        for wdir, info in iter_projects(ck_info=ck_info)
+    }
+    found: dict[str, dict] = {}
+    for wdir, info in projects.items():
+        for entry in info.get("subprojects") or []:
+            if not isinstance(entry, dict) or not isinstance(
+                entry.get("path"), str
+            ):
+                continue
+            sp = Path(os.path.normpath(os.path.join(wdir, entry["path"])))
+            sp_posix = sp.as_posix()
+            if sp_posix in projects and sp_posix != ".":
+                found.setdefault(
+                    sp_posix,
+                    {
+                        "parent": wdir,
+                        "entry": entry,
+                        "ck_info": projects[sp_posix],
+                    },
+                )
+    return {p: found[p] for p in projects if p in found}
+
+
+def describe_project(wdir: str) -> str:
+    """How to name a subproject in a message, and nothing for the project
+    itself."""
+    return "" if wdir in (".", "") else f"subproject '{wdir}': "
+
+
+def qualify_with_project(wdir: str, name: str) -> str:
+    """Name something in a subproject the way its stages are named."""
+    if wdir in (".", ""):
+        return name
+    from pathlib import Path
+
+    return f"{Path(os.path.normpath(wdir)).as_posix()}:{name}"
+
+
+@contextlib.contextmanager
+def in_project(wdir: str) -> Iterator[None]:
+    """Work from a project's directory, with its ``.env`` loaded, as if
+    running from there."""
+    import dotenv
+
+    prev_wdir = os.getcwd()
+    os.chdir(wdir)
+    try:
+        dotenv.load_dotenv(dotenv_path=".env")
+        yield
+    finally:
+        os.chdir(prev_wdir)
 
 
 def save_calkit_info(

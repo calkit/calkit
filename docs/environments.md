@@ -162,13 +162,18 @@ If it's convenient, e.g., if an image already contains all the necessary
 dependencies, go with a Docker environment.
 However, in some cases Docker may be a bit heavier than necessary.
 
-If you're running Python code, a `uv-venv` environment is a good default choice.
-`uv` is very easy to install and very fast.
+If you're running Python code,
+a `uv` project environment is a good default choice.
+It's defined by a `pyproject.toml` and locked by a `uv.lock`,
+the standard files for a Python project,
+and `uv` is very easy to install and very fast.
+If your project already has a `requirements.txt` you'd like to keep,
+a `uv-venv` environment can use it as is.
 
 If you have non-Python dependencies that depend on complex compiled binaries
 (as scientific and engineering oriented tooling often does)
-and a `uv-venv` can't be built on your machine,
-A Conda environment is a good choice.
+and a `uv` environment can't be built on your machine,
+a Conda environment is a good choice.
 However, Pixi has access to the same packages and is a bit faster.
 It's sort of like `uv` for Conda packages,
 and is similarly very easy to install.
@@ -488,9 +493,10 @@ inside a project directory run something like:
 calkit new uv-env -n my-env "polars>=1.0" matplotlib
 ```
 
-By default, this will create a `pyproject.toml` file in
-`.calkit/envs/my-env/pyproject.toml`,
-but the path can be controlled with the `--path` option.
+If it's the project's first environment,
+this will create a `pyproject.toml` file in the project directory,
+and otherwise in `.calkit/envs/my-env/pyproject.toml`.
+The path can be controlled with the `--path` option.
 
 To create a new uv venv,
 simply replace `uv-env` with `uv-venv` in the above command and a

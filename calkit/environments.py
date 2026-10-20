@@ -459,12 +459,15 @@ STAGED_CALKIT_PATHS = [
 ]
 
 
-def stage_calkit_files(wdir: str | None = None) -> None:
+def stage_calkit_files(
+    wdir: str | None = None, extra_paths: list[str] | None = None
+) -> None:
     """Stage what Calkit has written to be committed, when autostaging.
 
     DVC stages ``dvc.lock``, which records hashes of, e.g., env locks and
     stage command files, so a commit of it without them leaves a clone
-    without what its stages depend on.
+    without what its stages depend on. ``extra_paths`` are others Calkit
+    wrote, relative to ``wdir`` like the rest.
     """
     import calkit.dvc
     import calkit.git
@@ -474,13 +477,22 @@ def stage_calkit_files(wdir: str | None = None) -> None:
         return
     paths = [
         os.path.abspath(p)
-        for p in [os.path.join(wdir or "", p) for p in STAGED_CALKIT_PATHS]
+        for p in [
+            os.path.join(wdir or "", p)
+            for p in STAGED_CALKIT_PATHS + (extra_paths or [])
+        ]
         if os.path.exists(p)
     ]
     if not paths:
         return
     try:
-        calkit.git.get_repo(wdir).git.add("-A", "--", *paths)
+        repo = calkit.git.get_repo(wdir)
+        # A project that ignores one of these has chosen not to commit it,
+        # and naming it to 'git add' would fail the whole call
+        ignored = {os.path.abspath(p) for p in repo.ignored(*paths)}
+        paths = [p for p in paths if p not in ignored]
+        if paths:
+            repo.git.add("-A", "--", *paths)
     except Exception as e:
         warn(f"Couldn't stage the files Calkit wrote: {e}")
 

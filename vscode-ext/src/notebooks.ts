@@ -13,8 +13,20 @@ function normalizeNotebookPath(notebookPath: string): string {
 }
 
 // Repo-relative path of a notebook's executed HTML, mirroring
-// calkit.notebooks.get_executed_notebook_path (the no-parameters case).
-export function getExecutedNotebookHtmlPath(notebookRelPath: string): string {
+// calkit.notebooks.get_executed_notebook_path (the no-parameters case). A
+// subproject's goes under its own .calkit, since it runs from there.
+export function getExecutedNotebookHtmlPath(
+  notebookRelPath: string,
+  projectDir = ".",
+): string {
+  if (projectDir !== ".") {
+    return path.join(
+      projectDir,
+      getExecutedNotebookHtmlPath(
+        path.posix.relative(projectDir, normalizeNotebookPath(notebookRelPath)),
+      ),
+    );
+  }
   const dir = path.dirname(notebookRelPath);
   const htmlName =
     path.basename(notebookRelPath).replace(/\.ipynb$/, "") + ".html";

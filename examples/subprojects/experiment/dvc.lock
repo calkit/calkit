@@ -1,0 +1,22 @@
+schema: '2.0'
+stages:
+  collect:
+    cmd: calkit xenv -n py --no-check -- python scripts/collect.py
+    deps:
+    - path: calibration/results/calibration.json
+      hash: md5
+      md5: 9140d119090326fcfadb06966600772a
+      size: 20
+    - path: scripts/collect.py
+      hash: md5
+      md5: e039d521f7de582ce843dd2092445935
+      size: 487
+    - path: uv.lock
+      hash: md5
+      md5: 77c49601b7164cec934f82031d17a75c
+      size: 17617
+    outs:
+    - path: data/measurements.csv
+      hash: md5
+      md5: dbd52cae8d18d77a79547258a7a46b0f
+      size: 952

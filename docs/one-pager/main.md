@@ -2,20 +2,20 @@
 
 ![Calkit system](../img/pipeline.png)
 
-**[TODO: One sentence on what Calkit is, e.g., "Calkit is an open-source
-framework that ..."]**
+**Calkit is an open-source framework and platform that keeps figures,
+tables, and values in research articles connected to the code and data
+that calculated them, for fast iteration and full _observability_.**
 
 <!-- calkit values path=results/traction.json -->
 
 ## By the numbers
 
 - **<!-- calkit value key=hub_users -->137<!-- /calkit value -->**
-  users on calkit.io, plus others on their own Git and DVC remotes
+  users on calkit.io
 - **<!-- calkit value key=pypi_downloads_last_month format="{:,.0f}" -->3,616<!-- /calkit value -->**
   downloads from PyPI last month
 - **<!-- calkit value key=papers_shipped -->6<!-- /calkit value -->**
-  papers, including a PhD dissertation, published or submitted with a
-  Calkit project
+  reproducible publications shipped
 
 As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 

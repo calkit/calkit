@@ -37,14 +37,13 @@ Many open science or reproducibility
 solutions focus on embedding code in documents (literate programming)
 or helping researchers share and obtain credit for
 outputs like code and data after a project is done.
-Calkit takes a more integrated, modular approach,
-where different stages like analysis and writing
-are allowed to remain as separate contexts while
-information flows freely between them for fast iteration.
+Calkit takes a more integrated, modular approach.
 Version control (including large data files),
 environment management, pipelines with hashed I/O,
-and provenance definition, are all included,
-so users don't need to assemble their own bespoke workflows.
+and provenance definition are all included,
+so researchers don't need to assemble bespoke workflows,
+while stages like analysis and writing remain separate,
+with information flowing freely between them for fast iteration.
 An optional, self-hostable web app
 facilitates collaboration during the project
 and sharing once it's done, like a GitHub for science.
@@ -68,23 +67,21 @@ it becomes much easier to review work done by AI agents or humans.
 
 <!-- calkit values path=results/2027-budget.json -->
 
-## The ask: \$<!-- calkit value key=total_rounded_thousands format="{:.0f}" -->100<!-- /calkit value -->k toward widespread adoption
+## The ask: \$<!-- calkit value key=total_rounded_thousands format="{:.0f}" -->100<!-- /calkit value -->k to bring Calkit to researchers
 
 Thus far we've seen the most interest from Overleaf users
 who appreciate its user friendliness but want to connect it to their analyses
 to eliminate error-prone and tedious manual uploads.
 In 2027 we'll take Calkit on tour, starting at Caltech and several
-universities in Boston,
-teaching researchers how to integrate and automate their workflows with our
-new
+universities in Boston.
+In <!-- calkit value key=workshops -->8<!-- /calkit value --> workshops,
+roughly <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
+researchers will connect their own projects to Overleaf with our new
 [browser extension](https://chromewebstore.google.com/detail/calkit/idhdomgapfolnpffanajdckdaojencal),
-hosting <!-- calkit value key=workshops -->8<!-- /calkit value -->
-workshops, helping roughly <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
-researchers connect their own projects, with follow-up support
+with follow-up support
 for about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
 of them.
-Learnings from these will be published openly and fed back
-into improving Calkit.
+What we learn will be published openly and will drive Calkit's development.
 
 ![](../img/2027-budget.png)
 

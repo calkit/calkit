@@ -10,6 +10,7 @@ from pathlib import Path
 
 import git
 import pytest
+import requests
 from fastapi import HTTPException
 
 import app.git
@@ -738,8 +739,26 @@ def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
 
     project = _StubProject(f"ck-overleaf-{random.randint(0, 10**9)}")
     user = SimpleNamespace(github_username="ck-test-user")
-    monkeypatch.setattr(app.git.users, "get_overleaf_token", lambda **k: "t")
-    monkeypatch.setattr(app.git, "_configure_committer", lambda *a, **k: None)
+    # Without a global identity, committing fails until the hub sets one
+    git_config = tmp_path / "gitconfig"
+    git_config.write_text("[user]\n\tuseConfigOnly = true\n")
+
+    def no_session(**kwargs):
+        raise HTTPException(404)
+
+    def stub_credentials():
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+        monkeypatch.setattr(
+            app.git.users, "get_overleaf_token", lambda **k: "t"
+        )
+        monkeypatch.setattr(app.git.users, "get_overleaf_session", no_session)
+        monkeypatch.setattr(
+            app.git,
+            "_configure_committer",
+            lambda repo, *a, **k: _identify(repo),
+        )
+
+    stub_credentials()
     # Stand in for Overleaf with a local repo, cloned where the hub keeps it
     remote = git.Repo.init(tmp_path / "remote")
     _identify(remote)
@@ -811,6 +830,23 @@ def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
         with get():
             pass
     assert e.value.status_code == 401
+    # A rejected token falls back to a browser session saved since, e.g.,
+    # after Premium ends
+    web_client = app.git.calkit.overleaf.WebClient
+
+    class SavedSession(_FakeOverleafWeb):
+        def __init__(self, session: str) -> None:
+            assert session == "cookie"
+            super().__init__({"main.tex": b"from the session"})
+
+    monkeypatch.setattr(app.git.calkit.overleaf, "WebClient", SavedSession)
+    monkeypatch.setattr(
+        app.git.users, "get_overleaf_session", lambda **k: "cookie"
+    )
+    with get() as (repo, push):
+        assert push is not None
+        assert Path(repo_dir, "main.tex").read_text() == "from the session"
+    monkeypatch.setattr(app.git.calkit.overleaf, "WebClient", web_client)
     # With only a browser session, the repo is a mirror Calkit keeps, which
     # replaces any clone, and pushes go through Overleaf's web API
     client = _FakeOverleafWeb({"main.tex": b"from the web"})
@@ -830,8 +866,7 @@ def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
     assert e.value.detail == app.git.OVERLEAF_SESSION_REJECTED
     # Getting a token afterwards replaces the mirror with a clone
     monkeypatch.undo()
-    monkeypatch.setattr(app.git.users, "get_overleaf_token", lambda **k: "t")
-    monkeypatch.setattr(app.git, "_configure_committer", lambda *a, **k: None)
+    stub_credentials()
     monkeypatch.setattr(
         app.git.subprocess,
         "run",
@@ -916,8 +951,24 @@ def test_read_overleaf_title_finds_the_document_that_builds() -> None:
             user=object(), session=object(), overleaf_project_id="abc"
         )
     assert title == "From the web"
+    # A rejected session or a network error means asking for the title
     client.rejected = True
     with patch("app.git.users.get_overleaf_auth", return_value=client):
+        assert (
+            read_overleaf_title(
+                user=object(), session=object(), overleaf_project_id="abc"
+            )
+            is None
+        )
+    client.rejected = False
+    with (
+        patch("app.git.users.get_overleaf_auth", return_value=client),
+        patch.object(
+            client,
+            "download",
+            side_effect=requests.ConnectionError("Network down"),
+        ),
+    ):
         assert (
             read_overleaf_title(
                 user=object(), session=object(), overleaf_project_id="abc"

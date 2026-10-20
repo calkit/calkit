@@ -1,6 +1,7 @@
 """Tests for the Overleaf CLI commands."""
 
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -1336,10 +1337,98 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     res = runner.invoke(overleaf_app, ["sync", "--allow-stale", "--resolve"])
     assert res.exit_code == 0, res.output
     assert overleaf.files["main.tex"] == b"Resolved\n"
+    # A map-paths copy isn't in Git, so the rebuilt last sync takes it from
+    # its source at that commit, and a source edited since isn't overwritten
+    # with Overleaf's older copy
+    os.makedirs("shared")
+    with open("shared/refs.bib", "w") as f:
+        f.write("@article{shared}\n")
+    shutil.copy("shared/refs.bib", "paper/shared.bib")
+    ck_info = calkit.load_calkit_info()
+    ck_info.setdefault("pipeline", {}).setdefault("stages", {})["share"] = {
+        "kind": "map-paths",
+        "paths": [
+            {
+                "kind": "file-to-file",
+                "src": "shared/refs.bib",
+                "dest": "paper/shared.bib",
+            }
+        ],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    stage = {
+        "cmd": "calkit map-paths",
+        "deps": ["shared/refs.bib"],
+        "outs": [{"paper/shared.bib": {"cache": False}}],
+    }
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump({"stages": {"share": stage}}, f)
+    with open(".gitignore", "a") as f:
+        f.write("/paper/shared.bib\n")
+    repo.git.add(["shared", "calkit.yaml", "dvc.yaml", ".gitignore"])
+    repo.git.commit(["-m", "Share references"])
+    sync()
+    assert overleaf.files["shared.bib"] == b"@article{shared}\n"
+    with open("shared/refs.bib", "a") as f:
+        f.write("@article{newer}\n")
+    shutil.copy("shared/refs.bib", "paper/shared.bib")
+    repo.git.commit(["shared/refs.bib", "-m", "Add shared reference"])
+    shutil.rmtree(calkit.overleaf.get_project_dir("abc123"))
+    sync()
+    with open("shared/refs.bib") as f:
+        assert f.read() == "@article{shared}\n@article{newer}\n"
+    assert (
+        overleaf.files["shared.bib"] == b"@article{shared}\n@article{newer}\n"
+    )
+    # An edit on Overleaf between download and upload stops the upload
+    # rather than being overwritten, and the next sync merges it
+    download = overleaf.download
+    downloads = []
+
+    def racing_download(project_id):
+        downloads.append(project_id)
+        if len(downloads) == 2:
+            overleaf.files["refs.bib"] = (
+                b"% Racing\n" + overleaf.files["refs.bib"]
+            )
+        return download(project_id)
+
+    overleaf.download = racing_download  # type: ignore[method-assign]
+    with open("paper/refs.bib", "a") as f:
+        f.write("@article{c}\n")
+    repo.git.commit(["paper/refs.bib", "-m", "Add another reference"])
+    res = runner.invoke(overleaf_app, ["sync", "--allow-stale"])
+    assert res.exit_code != 0
+    assert "changed on Overleaf during the sync" in res.output
+    assert overleaf.files["refs.bib"].startswith(b"% Racing\n")
+    assert b"@article{c}" not in overleaf.files["refs.bib"]
+    sync()
+    expected = "% Racing\n@article{a}\n@article{b}\n@article{c}\n"
+    with open("paper/refs.bib") as f:
+        assert f.read() == expected
+    assert overleaf.files["refs.bib"] == expected.encode()
     # Status works from the mirror too
     res = runner.invoke(overleaf_app, ["status"])
     assert res.exit_code == 0, res.output
     assert "Changed files" not in res.output
+    # Without the last sync in the project history, syncing stops instead of
+    # copying Overleaf's files over the project's, though status still works
+    with open(calkit.overleaf.get_sync_info_fpath()) as f:
+        info = json.load(f)
+    info["paper"]["last_sync_commit"] = "deadbeef" * 5
+    with open(calkit.overleaf.get_sync_info_fpath(), "w") as f:
+        json.dump(info, f)
+    shutil.rmtree(calkit.overleaf.get_project_dir("abc123"))
+    overleaf.files["main.tex"] = b"Overwritten\n"
+    res = runner.invoke(overleaf_app, ["sync", "--allow-stale"])
+    assert res.exit_code != 0
+    assert "last_sync_commit" in res.output
+    with open("paper/main.tex") as f:
+        assert f.read() == "Resolved\n"
+    res = runner.invoke(overleaf_app, ["status"])
+    assert res.exit_code == 0, res.output
+    assert "Could not find the last sync" in res.output
 
 
 def test_overleaf_credentials(monkeypatch):
@@ -1467,3 +1556,12 @@ def test_overleaf_credentials(monkeypatch):
     hub["/user/overleaf-session"] = {"session": "expired"}
     with pytest.raises(typer.Exit):
         _get_pulled_overleaf_repo("abc", calkit.overleaf.WebClient("expired"))
+    # A rejected Git token falls back to a browser session if there is one,
+    # since tokens stop working when Premium ends
+    config.overleaf_session = calkit.config.KeyringOptionalSecret("fresh")
+    tokens_tried.clear()
+    sessions_tried.clear()
+    _, client = _get_pulled_overleaf_repo("abc", "expired")
+    assert tokens_tried == ["expired"]
+    assert isinstance(client, calkit.overleaf.WebClient)
+    assert sessions_tried == ["fresh"]

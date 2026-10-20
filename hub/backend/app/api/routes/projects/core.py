@@ -6913,10 +6913,8 @@ async def post_project_overleaf_publication(
                 token=overleaf_token,
                 expires=None,
             )
-        try:
-            users.get_overleaf_auth(session=session, user=current_user)
-        except HTTPException:
-            raise HTTPException(400, "No Overleaf token found")
+        # 401 like the other Overleaf routes, so clients offer to connect
+        users.get_overleaf_auth(session=session, user=current_user)
         try:
             with get_overleaf_repo(
                 project=project,

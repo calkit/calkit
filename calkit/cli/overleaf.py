@@ -175,7 +175,21 @@ def _get_pulled_overleaf_repo(
                     _get_overleaf_session(rejected=True, stale=auth.session)
                 )
             else:
-                auth = _get_overleaf_token(rejected=True)
+                # A token stops working when Premium ends, but a browser
+                # session still does
+                session = (
+                    calkit.config.read().overleaf_session
+                    or _get_overleaf_session_from_hub()
+                )
+                if session:
+                    warn(
+                        "Overleaf rejected your Git token; "
+                        "using your browser session instead",
+                        prefix="",
+                    )
+                    auth = calkit.overleaf.WebClient(str(session))
+                else:
+                    auth = _get_overleaf_token(rejected=True)
         except Exception as e:
             raise_error(str(e))
 
@@ -761,13 +775,16 @@ def sync(
                 last_sync_commit = sync_data.get("last_sync_commit")
             push = None
             if isinstance(overleaf_auth, calkit.overleaf.WebClient):
-                last_sync_commit = calkit.overleaf.ensure_sync_base(
-                    overleaf_repo,
-                    main_repo=repo,
-                    path_in_project=synced_folder,
-                    last_sync_commit=last_sync_commit,
-                    print_info=typer.echo,
-                )
+                try:
+                    last_sync_commit = calkit.overleaf.ensure_sync_base(
+                        overleaf_repo,
+                        main_repo=repo,
+                        path_in_project=synced_folder,
+                        last_sync_commit=last_sync_commit,
+                        print_info=typer.echo,
+                    )
+                except RuntimeError as e:
+                    raise_error(str(e))
                 push = partial(
                     calkit.overleaf.push_mirror,
                     client=overleaf_auth,
@@ -910,6 +927,7 @@ def get_status(
                     path_in_project=path_in_project,
                     last_sync_commit=last_sync_commit,
                     print_info=typer.echo,
+                    missing_ok=True,
                 )
             if last_sync_commit:
                 commits_since = calkit.overleaf.get_commits_since_last_sync(

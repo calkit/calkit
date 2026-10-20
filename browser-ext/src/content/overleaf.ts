@@ -151,6 +151,23 @@ function renderTokenForm(
 }
 
 /**
+ * Show a failure, offering to connect Overleaf when that's what's missing,
+ * so a first link or import works without Premium too.
+ */
+function renderOverleafFailure(e: unknown, reload: () => void): HTMLElement {
+  if (isOverleafTokenProblem(e)) {
+    const container = el("div");
+    renderTokenForm(
+      container,
+      e instanceof Error ? e.message : String(e),
+      reload,
+    );
+    return container;
+  }
+  return renderFailure(e, { onSignedIn: reload });
+}
+
+/**
  * Offer to save an Overleaf Git token to Calkit as soon as Overleaf shows
  * one, which it only does once, right after it's generated.
  *
@@ -436,9 +453,7 @@ async function renderPicker(
         ]),
       );
     } catch (e) {
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
+      clear(message).append(renderOverleafFailure(e, reload));
     }
   };
   const runSearch = async () => {
@@ -656,7 +671,7 @@ async function renderAttachForm(
       reload();
     } catch (e) {
       attach.disabled = false;
-      clear(message).append(renderFailure(e, { onSignedIn: reload }));
+      clear(message).append(renderOverleafFailure(e, reload));
     }
   });
   container.append(
@@ -722,9 +737,7 @@ function renderImportForm(
       reload();
     } catch (e) {
       importButton.disabled = false;
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
+      clear(message).append(renderOverleafFailure(e, reload));
     }
   });
   return [

@@ -21,25 +21,23 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 
 ## The problem
 
-- Most researchers paste figures and numbers into Overleaf by hand.
-  It feels fine, so they iterate less,
-  and one forgotten rerun ships inconsistent results
-- AI makes results cheap to produce and easy to get wrong,
-  so verifying them is now the bottleneck
-- The publisher PLOS found
-  [only 12% of articles sharing code](https://doi.org/10.1371/journal.pone.0311493),
-  and less of what's shared actually runs
+AI makes scientific results cheap to produce, shifting the bottleneck to
+verification, yet the reproducibility crisis persists:
+[only 12% of articles share code](https://doi.org/10.1371/journal.pone.0311493),
+and most results reach the paper through manual, disconnected steps.
+We've long taken computational methods on trust, and AI makes that
+unworkable.
 
 ## Our approach
 
-Instead of combining analysis and writing in one context
-(literate programming),
-Calkit keeps each in its own _module_, connected in one project.
-It bundles every pillar of reproducibility---version control, environments,
-a pipeline that reruns only what changed, and provenance---from open-source
-tools, so no one assembles a bespoke workflow.
+AI review overload and the reproducibility crisis have the same solution:
+producing every artifact automatically, from raw data to article,
+with no manual steps and no ambiguity.
+Calkit keeps analysis and writing as separate _modules_ connected in one
+project, bundling version control, environments, a pipeline with hashed
+inputs and outputs, and provenance from open-source tools.
 Every figure and number traces back to the code and data that made it,
-so an AI agent's work can be checked and rerun like ours.
+whether a person or an AI agent did the work.
 
 ## A sample success story {.box}
 

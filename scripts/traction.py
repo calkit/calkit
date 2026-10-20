@@ -1,4 +1,4 @@
-"""Fetch Calkit's usage numbers for the one-pager.
+"""Fetch Calkit's usage numbers for the one-pager, and count papers.
 
 The stage only reruns when this script changes, so the numbers stay frozen
 as of the date recorded with them.
@@ -7,6 +7,7 @@ Writes results/traction.json.
 """
 
 import argparse
+import csv
 import datetime
 import json
 import subprocess
@@ -28,6 +29,14 @@ def get_json(url: str) -> Any:
 
 repo = get_json("https://api.github.com/repos/calkit/calkit")
 pypi = get_json("https://pypistats.org/api/packages/calkit-python/recent")
+# Papers and theses out the door, i.e., published, submitted, or preprinted
+with open("data/calkit-projects/papers.csv", encoding="utf-8") as f:
+    papers = [
+        row
+        for row in csv.DictReader(f)
+        if row["kind"] in ("paper", "thesis")
+        and row["status"] in ("published", "submitted", "preprint")
+    ]
 tags = subprocess.check_output(["git", "tag", "-l", "v*"], text=True).split()
 results = {
     "date": datetime.date.today().isoformat(),
@@ -36,6 +45,7 @@ results = {
     "github_forks": repo["forks_count"],
     "pypi_downloads_last_month": pypi["data"]["last_month"],
     "releases": len(tags),
+    "papers_shipped": len(papers),
 }
 with open("results/traction.json", "w") as f:
     json.dump(results, f, indent=2)

@@ -13,8 +13,9 @@ framework that ..."]**
   users on calkit.io, plus others on their own Git and DVC remotes
 - **<!-- calkit value key=pypi_downloads_last_month format="{:,.0f}" -->3,616<!-- /calkit value -->**
   downloads from PyPI last month
-- **<!-- calkit value key=releases -->271<!-- /calkit value -->**
-  releases since August 2024
+- **<!-- calkit value key=papers_shipped -->6<!-- /calkit value -->**
+  papers, including a PhD dissertation, published or submitted with a
+  Calkit project
 
 As of <!-- calkit value key=date -->2026-10-19<!-- /calkit value -->.
 

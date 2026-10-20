@@ -201,6 +201,8 @@ pipeline:
         Fetch usage numbers for the one-pager, frozen as of when it last ran.
       args:
         - --hub-users=130
+      inputs:
+        - data/calkit-projects/papers.csv
       outputs:
         - path: results/traction.json
           storage: git
@@ -255,6 +257,18 @@ figures:
     description: >-
       Where the money for the 2027 workshop tour goes, by category.
     stage: budget-2027-figure
+
+datasets:
+  - path: data/calkit-projects/projects.csv
+    title: Calkit projects in the wild
+    description: >-
+      Projects with a calkit.yaml found on GitHub, Zenodo, CaltechDATA, and
+      figshare, as of 2026-10-20; see the README beside it for the queries.
+  - path: data/calkit-projects/papers.csv
+    title: Papers built with Calkit projects
+    description: >-
+      Papers, theses, and datasets from the projects in the wild, curated by
+      hand, with their status.
 
 tables:
   - path: docs/one-pager/2027-budget.csv

@@ -290,8 +290,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: cc10406d4dee2ff7ac1a41070b4ef506
-      size: 10287
+      md5: 396599e8628e13dfc1b3b9b4de92bee1
+      size: 10824
     - path: docs/img/2027-budget.png
       hash: md5
       md5: 7034eb6919ba172bd659d837cacafdad
@@ -302,8 +302,8 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: fa8bb74021a7546eccf250cdb2b078e0
-      size: 4385
+      md5: 4fc32d013c8afdc39487e7ad2614c540
+      size: 4447
     - path: docs/one-pager/one-pager.lua
       hash: md5
       md5: 1102b36541da50fb365f4eb12351f882
@@ -318,13 +318,13 @@ stages:
       size: 1971
     - path: results/traction.json
       hash: md5
-      md5: 6844468c21328fd5d17ea22fc7999c12
-      size: 147
+      md5: 9745f5a4c51d15abbf9816fbbf4f9bcc
+      size: 170
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: ad1316a561a17e3287a96954c28cc359
-      size: 179402
+      md5: 7b81b3456b119fd2ee938561bb3835ec
+      size: 179182
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:
@@ -357,10 +357,14 @@ stages:
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
       size: 5
+    - path: data/calkit-projects/papers.csv
+      hash: md5
+      md5: b4fa1c730c16c7470cd6a2575caed7eb
+      size: 2055
     - path: scripts/traction.py
       hash: md5
-      md5: 1460afad010127c45b8819f2199f6864
-      size: 1329
+      md5: 62d5d62baf3f850f29332edbfeb1f538
+      size: 1722
     - path: uv.lock
       hash: md5
       md5: 78cff1621fa9cb37be1d99412ed26e0f
@@ -368,5 +372,5 @@ stages:
     outs:
     - path: results/traction.json
       hash: md5
-      md5: 6844468c21328fd5d17ea22fc7999c12
-      size: 147
+      md5: 9745f5a4c51d15abbf9816fbbf4f9bcc
+      size: 170

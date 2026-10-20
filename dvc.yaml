@@ -96,6 +96,7 @@ stages:
       --hub-users=130
     deps:
       - scripts/traction.py
+      - data/calkit-projects/papers.csv
       - uv.lock
       - .python-version
     outs:

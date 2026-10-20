@@ -21,6 +21,7 @@ from calkit.models.pipeline import (
     Pipeline,
     ShellCommandStage,
     Stage,
+    is_flag_and_value,
 )
 
 
@@ -2293,7 +2294,7 @@ def to_dvc(
         resolve_env_var,
         write_switch_env_lock,
     )
-    from calkit.models.io import EnvVarInput
+    from calkit.models.io import EnvVarInput, ScheduleInput
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -2628,6 +2629,12 @@ def to_dvc(
                 marker="calkit stage env vars",
                 lines=["/.calkit/env-vars/"],
             )
+        # The current period of each schedule a stage runs on, so the stage
+        # goes out of date when the next period starts
+        for stage in pipeline.stages.values():
+            for i in stage.inputs:
+                if isinstance(i, ScheduleInput):
+                    i.write_period_file(wdir=wdir)
         # Remove files left by stages that were renamed, deleted, or no
         # longer need one, since the command files are committed
         for gen_dir, kept in [
@@ -2664,6 +2671,15 @@ def to_dvc(
         # parameters if any reference project-level parameters
         if stage.kind == "jupyter-notebook":
             stage.update_parameters(params=project_params)
+        # The one form of arg that isn't passed as a single argument
+        for arg in getattr(stage, "args", None) or []:
+            if is_flag_and_value(arg):
+                warnings.warn(
+                    f"Stage '{stage_name}' has the arg {arg!r}, which the "
+                    "shell splits into separate arguments. Write each as "
+                    f"its own item instead: {arg.split()}.",
+                    stacklevel=2,
+                )
         dvc_stage = stage.to_dvc()
         # Check if this stage iterates, which means we should create a matrix
         # stage

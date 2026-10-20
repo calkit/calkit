@@ -34,6 +34,7 @@ from calkit.models.io import (
     InputsFromStageOutputs,
     PathInput,
     PathOutput,
+    ScheduleInput,
 )
 from calkit.models.iteration import (
     ExpandedParametersType,
@@ -44,7 +45,44 @@ from calkit.models.iteration import (
 from calkit.models.requirements import RequirementType
 
 # What a stage's 'inputs' can list
-StageInput = str | EnvVarInput | PathInput | InputsFromStageOutputs
+StageInput = (
+    str | EnvVarInput | ScheduleInput | PathInput | InputsFromStageOutputs
+)
+
+
+def is_flag_and_value(arg: str) -> bool:
+    """Whether a stage arg is a flag and its value in one item, e.g.,
+    '--theta {theta}'.
+
+    The shell splits these into separate arguments, as it always has, and
+    existing projects rely on that, so they are left unquoted.
+    """
+    return (
+        arg.startswith("-")
+        and any(c.isspace() for c in arg)
+        and '"' not in arg
+        and "'" not in arg
+    )
+
+
+def quote_arg(arg: str) -> str:
+    """A stage arg as one word of the shell command that runs it.
+
+    Double quotes, since cmd.exe on Windows doesn't treat single quotes as
+    quoting. An arg with no whitespace, with quotes of its own, or that is
+    a flag and its value is left as it is, so commands compiled before
+    stay the same.
+    """
+    if (
+        not any(c.isspace() for c in arg)
+        or '"' in arg
+        or "'" in arg
+        or is_flag_and_value(arg)
+    ):
+        return arg
+    # Doubled, so a trailing backslash doesn't escape the closing quote
+    body = arg.rstrip("\\")
+    return '"' + body + "\\" * 2 * (len(arg) - len(body)) + '"'
 
 
 def check_path_relative_and_child_of_cwd(s: str) -> str:
@@ -304,8 +342,9 @@ class Stage(Model):
         default=[],
         description="Paths this stage depends on, which trigger a rerun when "
         "they change. Normally plain path strings; an object carrying a "
-        "'path' is also accepted, and an 'env-var' entry makes the stage "
-        "depend on an environment variable's value.",
+        "'path' is also accepted, an 'env-var' entry makes the stage "
+        "depend on an environment variable's value, and a 'schedule' entry "
+        "makes it run once per period, e.g., once a day.",
         json_schema_extra=_allow_null,
     )
     # TODO: Support database outputs
@@ -608,6 +647,22 @@ class Stage(Model):
         return rel_path
 
     @property
+    def input_paths(self) -> list[str]:
+        """The paths among this stage's inputs, i.e., not what's generated
+        for it, e.g., its schedule's period file.
+        """
+        paths = []
+        for i in self.inputs:
+            if isinstance(
+                i, (InputsFromStageOutputs, EnvVarInput, ScheduleInput)
+            ):
+                continue
+            path = i if isinstance(i, str) else i.path
+            if path not in paths:
+                paths.append(path)
+        return paths
+
+    @property
     def dvc_deps(self) -> list[str]:
         deps = []
         setup_file = self.setup_file_path
@@ -617,9 +672,11 @@ class Stage(Model):
         if env_var_file is not None:
             deps.append(self.path_from_wdir(env_var_file))
         for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
-                continue
-            path = i if isinstance(i, str) else i.path
+            if isinstance(i, ScheduleInput):
+                period_file = self.path_from_wdir(i.period_file_path)
+                if period_file not in deps:
+                    deps.append(period_file)
+        for path in self.input_paths:
             if path not in deps:
                 deps.append(path)
         return deps
@@ -823,10 +880,7 @@ class Stage(Model):
         """
         cmd = self.dvc_cmd
         deps = self.dvc_deps
-        for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
-                continue
-            path = i if isinstance(i, str) else i.path
+        for path in self.input_paths:
             if path not in deps:
                 deps.append(path)
         # Each path appears once: a stage that names the same one twice, e.g.
@@ -896,14 +950,15 @@ class PythonScriptStage(Stage):
         description="Path to the Python script to run."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
 
     @property
     def dvc_cmd(self) -> str:
         cmd = f"{self.xenv_cmd} python {self.script_path}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd.strip()
 
     @property
@@ -1123,7 +1178,8 @@ class LatexStage(Stage):
             "Calkit's dependencies.",
         )
         args: list[str] = Field(
-            default=[], description="Arguments passed to the script."
+            default=[],
+            description="Arguments passed to the script, each item one argument.",
         )
 
     kind: Literal["latex"] = "latex"
@@ -1468,7 +1524,7 @@ class QuartoStage(Stage):
         if self.to is not None:
             cmd += f" --to {self.to}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd.strip()
 
     @property
@@ -1501,9 +1557,9 @@ class JsonToLatexStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = "calkit latex from-json"
-        # dvc_deps rather than inputs, since an input can be an object
-        # carrying a path, which would otherwise interpolate its repr.
-        for input_path in self.dvc_deps:
+        # Only the declared paths, since what's generated for the stage, e.g.,
+        # its setup or schedule period file, isn't data
+        for input_path in self.input_paths:
             cmd += f" '{input_path}'"
         for out in self.outputs:
             if isinstance(out, str):
@@ -1703,7 +1759,8 @@ class ShellScriptStage(Stage):
         description="Path to the shell script to run."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
     shell: Literal["sh", "bash", "zsh"] = Field(
         default="bash", description="Shell in which to run the script."
@@ -1725,7 +1782,7 @@ class ShellScriptStage(Stage):
             cmd = self.scheduler_cmd
             cmd += f" -- {self.script_path}"
             for arg in self.args:
-                cmd += f" {arg}"
+                cmd += f" {quote_arg(arg)}"
             # Avoid duplicating the script path as both --dep and target.
             dep_txt = f"--dep {self.script_path} "
             if dep_txt in cmd:
@@ -1738,7 +1795,7 @@ class ShellScriptStage(Stage):
             norc_args = "--noprofile --norc"
         cmd += f" {self.shell} {norc_args} {self.script_path}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd.strip()
 
 
@@ -1768,7 +1825,8 @@ class RScriptStage(Stage):
         description="Path to the R script to run."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
 
     @property
@@ -1779,7 +1837,7 @@ class RScriptStage(Stage):
     def dvc_cmd(self) -> str:
         cmd = f"{self.xenv_cmd} Rscript {self.script_path}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd.strip()
 
 
@@ -1789,14 +1847,15 @@ class JuliaScriptStage(Stage):
         description="Path to the Julia script to run."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
 
     @property
     def dvc_cmd(self) -> str:
         cmd = f'{self.xenv_cmd} "{self.script_path}"'
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd
 
     @property
@@ -1827,7 +1886,8 @@ class SBatchStage(Stage):
         description="Path to the script to submit."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
     sbatch_options: list[str] = Field(
         default=[], description="Options passed to sbatch."
@@ -1905,7 +1965,7 @@ class SBatchStage(Stage):
         cmd = self.scheduler_cmd
         cmd += f" -- {self.script_path}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         # Remove the script path from deps for backward compatibility
         dep_txt = f"--dep {self.script_path} "
         if dep_txt in cmd:

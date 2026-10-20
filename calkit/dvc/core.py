@@ -941,9 +941,9 @@ def split_lock_stage_name(stage_name: str) -> tuple[str | None, str]:
     """The directory of the ``dvc.lock`` recording a stage, and its name there.
 
     A subproject's stage run from its parent is named, e.g.,
-    'sub/dvc.yaml:stage'.
+    'sub/dvc.yaml:stage', with a backslash on Windows.
     """
-    dvc_yaml, sep, name = stage_name.rpartition(":")
+    dvc_yaml, sep, name = stage_name.replace("\\", "/").rpartition(":")
     if sep and posixpath.basename(dvc_yaml) == "dvc.yaml":
         return posixpath.dirname(dvc_yaml) or None, name
     return None, stage_name

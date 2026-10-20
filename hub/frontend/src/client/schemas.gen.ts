@@ -44,6 +44,26 @@ export const AccountPublicSchema = {
   title: "AccountPublic",
 } as const
 
+export const ActiveCountsSchema = {
+  properties: {
+    last_day: {
+      type: "integer",
+      title: "Last Day",
+    },
+    last_7_days: {
+      type: "integer",
+      title: "Last 7 Days",
+    },
+    last_30_days: {
+      type: "integer",
+      title: "Last 30 Days",
+    },
+  },
+  type: "object",
+  required: ["last_day", "last_7_days", "last_30_days"],
+  title: "ActiveCounts",
+} as const
+
 export const AgentInfoSchema = {
   properties: {
     tool: {
@@ -116,6 +136,45 @@ export const AgentInfoSchema = {
   required: ["tool", "pid"],
   title: "AgentInfo",
   description: "A coding agent running in a workspace, e.g., Claude Code.",
+} as const
+
+export const AnalyticsStatsSchema = {
+  properties: {
+    active_users: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Likely human users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.",
+    },
+    active_visitors: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.",
+    },
+    human_visits: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Visitor-days from visitors who didn't accept analytics, i.e., distinct (UTC day, visitor) pairs with a page view in the window that followed input and wasn't from a bot. Not unique people: their IDs reset daily, so one person visiting on three days counts three times.",
+    },
+    human_project_visits: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Human visits as above that included a project page, leaving out projects owned by excluded accounts",
+    },
+    projects_viewed: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Distinct projects, not owned by excluded accounts, with human visits as above",
+    },
+  },
+  type: "object",
+  required: [
+    "active_users",
+    "active_visitors",
+    "human_visits",
+    "human_project_visits",
+    "projects_viewed",
+  ],
+  title: "AnalyticsStats",
 } as const
 
 export const Body_login_login_access_tokenSchema = {
@@ -3653,6 +3712,38 @@ export const HttpRequestAccessSchema = {
   type: "object",
   required: ["url", "http_method"],
   title: "HttpRequestAccess",
+} as const
+
+export const HubStatsSchema = {
+  properties: {
+    users: {
+      $ref: "#/components/schemas/UserStats",
+    },
+    projects: {
+      $ref: "#/components/schemas/ProjectStats",
+    },
+    excluded_accounts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Excluded Accounts",
+    },
+    analytics: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/AnalyticsStats",
+        },
+        {
+          type: "null",
+        },
+      ],
+      description: "From Mixpanel; null when not configured or unreachable",
+    },
+  },
+  type: "object",
+  required: ["users", "projects", "excluded_accounts"],
+  title: "HubStats",
 } as const
 
 export const HubVersionSchema = {
@@ -7538,6 +7629,45 @@ export const ProjectPushEventPostSchema = {
   title: "ProjectPushEventPost",
   description:
     "A push that happened somewhere else.\n\nWhat was pushed and where, recorded for reference: the hub works out the\ncurrent state from the repo itself, so none of this is trusted as input,\nbut it is what makes a log line worth reading.",
+} as const
+
+export const ProjectStatsSchema = {
+  properties: {
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    public: {
+      type: "integer",
+      title: "Public",
+    },
+    private: {
+      type: "integer",
+      title: "Private",
+    },
+    owners: {
+      type: "integer",
+      title: "Owners",
+    },
+    worked_on: {
+      type: "integer",
+      title: "Worked On",
+    },
+    updated_last_90_days: {
+      type: "integer",
+      title: "Updated Last 90 Days",
+    },
+  },
+  type: "object",
+  required: [
+    "total",
+    "public",
+    "private",
+    "owners",
+    "worked_on",
+    "updated_last_90_days",
+  ],
+  title: "ProjectStats",
 } as const
 
 export const ProjectStatusSchema = {
@@ -11611,6 +11741,28 @@ export const UserRegisterSchema = {
   type: "object",
   required: ["email", "password"],
   title: "UserRegister",
+} as const
+
+export const UserStatsSchema = {
+  properties: {
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    verified: {
+      type: "integer",
+      title: "Verified",
+    },
+    likely_human: {
+      type: "integer",
+      title: "Likely Human",
+      description:
+        "Users with a GitHub or other connected identity, a verified email, an invitation to a project or org, a personal access token, or sessions on two or more days. Password signup checks none of these, so it's how bot accounts get in.",
+    },
+  },
+  type: "object",
+  required: ["total", "verified", "likely_human"],
+  title: "UserStats",
 } as const
 
 export const UserSubscriptionSchema = {

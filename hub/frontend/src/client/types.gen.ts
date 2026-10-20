@@ -31,6 +31,24 @@ export type AccountPublic = {
 }
 
 /**
+ * ActiveCounts
+ */
+export type ActiveCounts = {
+  /**
+   * Last Day
+   */
+  last_day: number
+  /**
+   * Last 7 Days
+   */
+  last_7_days: number
+  /**
+   * Last 30 Days
+   */
+  last_30_days: number
+}
+
+/**
  * AgentInfo
  *
  * A coding agent running in a workspace, e.g., Claude Code.
@@ -64,6 +82,32 @@ export type AgentInfo = {
    * Status
    */
   status?: string | null
+}
+
+/**
+ * AnalyticsStats
+ */
+export type AnalyticsStats = {
+  /**
+   * Likely human users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.
+   */
+  active_users: ActiveCounts
+  /**
+   * Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.
+   */
+  active_visitors: ActiveCounts
+  /**
+   * Visitor-days from visitors who didn't accept analytics, i.e., distinct (UTC day, visitor) pairs with a page view in the window that followed input and wasn't from a bot. Not unique people: their IDs reset daily, so one person visiting on three days counts three times.
+   */
+  human_visits: ActiveCounts
+  /**
+   * Human visits as above that included a project page, leaving out projects owned by excluded accounts
+   */
+  human_project_visits: ActiveCounts
+  /**
+   * Distinct projects, not owned by excluded accounts, with human visits as above
+   */
+  projects_viewed: ActiveCounts
 }
 
 /**
@@ -2123,6 +2167,22 @@ export type HttpRequestAccess = {
    * Expires At
    */
   expires_at?: string | null
+}
+
+/**
+ * HubStats
+ */
+export type HubStats = {
+  users: UserStats
+  projects: ProjectStats
+  /**
+   * Excluded Accounts
+   */
+  excluded_accounts: Array<string>
+  /**
+   * From Mixpanel; null when not configured or unreachable
+   */
+  analytics?: AnalyticsStats | null
 }
 
 /**
@@ -4295,6 +4355,36 @@ export type ProjectPushEventPost = {
    * Targets
    */
   targets?: Array<string> | null
+}
+
+/**
+ * ProjectStats
+ */
+export type ProjectStats = {
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Public
+   */
+  public: number
+  /**
+   * Private
+   */
+  private: number
+  /**
+   * Owners
+   */
+  owners: number
+  /**
+   * Worked On
+   */
+  worked_on: number
+  /**
+   * Updated Last 90 Days
+   */
+  updated_last_90_days: number
 }
 
 /**
@@ -6625,6 +6715,26 @@ export type UserRegister = {
    * Analytics Consent
    */
   analytics_consent?: boolean | null
+}
+
+/**
+ * UserStats
+ */
+export type UserStats = {
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Verified
+   */
+  verified: number
+  /**
+   * Likely Human
+   *
+   * Users with a GitHub or other connected identity, a verified email, an invitation to a project or org, a personal access token, or sessions on two or more days. Password signup checks none of these, so it's how bot accounts get in.
+   */
+  likely_human: number
 }
 
 /**
@@ -9428,6 +9538,41 @@ export type PostDiscountCodeResponses = {
 
 export type PostDiscountCodeResponse =
   PostDiscountCodeResponses[keyof PostDiscountCodeResponses]
+
+export type GetHubStatsData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Exclude
+     */
+    exclude?: Array<string>
+    /**
+     * Include Superusers
+     */
+    include_superusers?: boolean
+  }
+  url: "/stats"
+}
+
+export type GetHubStatsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetHubStatsError = GetHubStatsErrors[keyof GetHubStatsErrors]
+
+export type GetHubStatsResponses = {
+  /**
+   * Successful Response
+   */
+  200: HubStats
+}
+
+export type GetHubStatsResponse =
+  GetHubStatsResponses[keyof GetHubStatsResponses]
 
 export type GetSubscriptionPlansData = {
   body?: never

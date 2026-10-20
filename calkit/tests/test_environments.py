@@ -2561,3 +2561,32 @@ def test_switch_env(tmp_dir, monkeypatch):
     assert "--setup-file .calkit/stage-setup/job.json" in cmd
     assert "module load" not in cmd
     assert ".calkit/stage-setup/job.json" in stages["job"]["deps"]
+
+
+def test_stage_calkit_files(tmp_dir):
+    import git
+
+    repo = git.Repo.init()
+    os.makedirs(".dvc")
+    with open(os.path.join(".dvc", "config"), "w") as f:
+        f.write("[core]\n    autostage = true\n")
+    os.makedirs(os.path.join(".calkit", "env-locks"))
+    with open(os.path.join(".calkit", "env-locks", "py.json"), "w") as f:
+        f.write("{}\n")
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        f.write("{}\n")
+    # Everything Calkit wrote is staged
+    calkit.environments.stage_calkit_files()
+    staged = repo.git.diff("--cached", "--name-only").split()
+    assert ".calkit/env-locks/py.json" in staged
+    assert ".calkit/stage-runs.json" in staged
+    # A file the project ignores is left out, without a warning, and the
+    # rest are still staged
+    repo.git.reset()
+    with open(".gitignore", "w") as f:
+        f.write(".calkit/stage-runs.json\n")
+    with mock.patch("calkit.cli.warn") as warn:
+        calkit.environments.stage_calkit_files()
+    warn.assert_not_called()
+    staged = repo.git.diff("--cached", "--name-only").split()
+    assert staged == [".calkit/env-locks/py.json"]

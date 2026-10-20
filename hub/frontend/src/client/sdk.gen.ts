@@ -109,6 +109,8 @@ import type {
   GetFeatureVoteStatusResponses,
   GetFeedbackErrors,
   GetFeedbackResponses,
+  GetHubStatsErrors,
+  GetHubStatsResponses,
   GetHubVersionResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
@@ -2681,6 +2683,49 @@ export class MiscService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Hub Stats
+   *
+   * Count the hub's users and projects, e.g., to report usage.
+   *
+   * Superusers and what their accounts own are left out by default, since
+   * staff and their demos aren't usage. ``exclude`` names more accounts to
+   * leave out, e.g., an org holding examples. Subprojects count with their
+   * parent rather than on their own. Activity follows ``Project.updated``,
+   * which tracks the latest commit the hub has seen. ``analytics`` comes from
+   * Mixpanel, when read access to it is configured.
+   */
+  public static getHubStats<ThrowOnError extends boolean = true>(
+    parameters?: {
+      exclude?: Array<string>
+      include_superusers?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetHubStatsResponses, GetHubStatsErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "exclude" },
+            { in: "query", key: "include_superusers" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetHubStatsResponses,
+      GetHubStatsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/stats",
+      ...options,
+      ...params,
     })
   }
 

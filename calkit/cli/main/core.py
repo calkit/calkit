@@ -124,10 +124,26 @@ def _to_shell_cmd(cmd: list[str]) -> str:
         return cmd[0]
     quoted_cmd = []
     for part in cmd:
-        # Find quotes within quotes and escape them
-        if " " in part or '"' in part[1:-1] or "'" in part[1:-1]:
-            part = part.replace('"', r"\"")
-            quoted_cmd.append(f'"{part}"')
+        if (
+            any(c.isspace() for c in part)
+            or '"' in part[1:-1]
+            or "'" in part[1:-1]
+        ):
+            # Quotes are escaped, and backslashes before one, including the
+            # closing quote, are doubled so they stay literal
+            escaped = ""
+            backslashes = 0
+            for c in part:
+                if c == "\\":
+                    backslashes += 1
+                    continue
+                if c == '"':
+                    escaped += "\\" * (2 * backslashes + 1) + c
+                else:
+                    escaped += "\\" * backslashes + c
+                backslashes = 0
+            escaped += "\\" * 2 * backslashes
+            quoted_cmd.append(f'"{escaped}"')
         else:
             quoted_cmd.append(part)
     return " ".join(quoted_cmd)
@@ -584,8 +600,14 @@ def get_status(
             git.Repo.init()
         # Likewise, if this isn't a DVC repo, initialize one so the pipeline
         # can be compiled and its status reported. DVC init requires a Git
-        # repo, which the block above ensures exists.
-        if not os.path.isfile(os.path.join(".dvc", "config")):
+        # repo, which the block above ensures exists. Ask DVC rather than
+        # looking for ./.dvc, since its discovery walks up and a subproject
+        # inside an initialized parent would otherwise get a nested repo.
+        from dvc.exceptions import NotDvcRepoError
+
+        try:
+            calkit.dvc.get_dvc_repo()
+        except NotDvcRepoError:
             typer.echo("Initializing DVC repository")
             try:
                 result = calkit.dvc.init(quiet=True)
@@ -593,6 +615,11 @@ def get_status(
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
                 raise_error(f"Failed to initialize DVC repository: {e}")
+        except Exception as e:
+            # E.g., DVC's site cache dir isn't writable, which init can't fix
+            raise_error(
+                f"Failed to open DVC repo: {e.__class__.__name__}: {e}"
+            )
     valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:
@@ -3762,12 +3789,19 @@ def run(
         for n, info in stage_run_info.items()
         if info.get("status") == "completed"
     ]
+    written: list[str] = []
     if ran and not dry:
-        try:
-            with open(STAGE_RUNS_FPATH) as f:
-                stage_runs = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            stage_runs = {}
+        # By the directory of the dvc.lock recording each stage, since a
+        # subproject's runs are kept with it. This project's too, for the
+        # records it holds of a subproject's from before.
+        stage_runs: dict[str | None, dict] = {}
+        for lock_dir in {None} | {
+            calkit.dvc.split_lock_stage_name(n)[0] for n in ran
+        }:
+            try:
+                stage_runs[lock_dir] = calkit.read_stage_runs(lock_dir)
+            except json.JSONDecodeError:
+                stage_runs[lock_dir] = {}
         # By machine env, where None is this machine; a remote machine's
         # properties were already read once this run
         machine_info: dict[str, dict | None] = {}
@@ -3837,15 +3871,34 @@ def run(
                 }
                 if isinstance(props.get("memory_gb"), (int, float)):
                     entry["system"]["memory_gb"] = round(props["memory_gb"], 1)
-            stage_runs[stage_name] = entry
-        # Sorted so runs on different machines merge cleanly
-        with open(STAGE_RUNS_FPATH, "w") as f:
-            json.dump(dict(sorted(stage_runs.items())), f, indent=2)
-            f.write("\n")
+            stage_runs[lock_dir][lock_name] = entry
+            # Replacing a record made from here, from before a subproject's
+            # were kept with it
+            if lock_dir is not None:
+                for key in list(stage_runs[None]):
+                    if calkit.dvc.split_lock_stage_name(key) == (
+                        lock_dir,
+                        lock_name,
+                    ):
+                        del stage_runs[None][key]
+        for lock_dir, runs in stage_runs.items():
+            fpath = os.path.join(lock_dir or "", STAGE_RUNS_FPATH)
+            if not runs and not os.path.exists(fpath):
+                continue
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            # Sorted so runs on different machines merge cleanly
+            with open(fpath, "w") as f:
+                json.dump(dict(sorted(runs.items())), f, indent=2)
+                f.write("\n")
+            written.append(fpath)
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-    calkit.environments.stage_calkit_files()
+    # A subproject's record is staged with this project's files, since
+    # whether to stage them is this project's setting
+    calkit.environments.stage_calkit_files(
+        extra_paths=[p for p in written if p != STAGE_RUNS_FPATH]
+    )
     if failed:
         try:
             calkit.dvc.restore_output_ignores()

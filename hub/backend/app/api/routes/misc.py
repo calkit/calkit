@@ -5,21 +5,23 @@ import hmac
 import json
 import logging
 import os
+import time
 import uuid
-from typing import Literal
+from datetime import timedelta
+from typing import Annotated, Any, Literal
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic.networks import EmailStr
-from sqlalchemy import func
+from sqlalchemy import exists, func
 from sqlalchemy.exc import DataError
-from sqlmodel import Session, and_, or_, select
+from sqlmodel import Session, and_, col, or_, select
 from starlette.requests import Request
 
 import app.tasks
-from app import arxiv, version
+from app import arxiv, mixpanel, version
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -41,9 +43,12 @@ from app.models import (
     Notification,
     Org,
     Project,
+    RefreshToken,
     User,
+    UserExternalCredential,
     UserOrgMembership,
     UserProjectAccess,
+    UserToken,
 )
 from app.stripe import stripe
 from app.subscriptions import SubscriptionPlan, get_plans
@@ -209,6 +214,246 @@ def post_discount_code(
     session.commit()
     session.refresh(code)
     return code
+
+
+class UserStats(BaseModel):
+    total: int
+    verified: int
+    likely_human: int = Field(
+        description=(
+            "Users with a GitHub or other connected identity, a verified "
+            "email, an invitation to a project or org, a personal access "
+            "token, or sessions on two or more days. Password signup checks "
+            "none of these, so it's how bot accounts get in."
+        )
+    )
+
+
+class ProjectStats(BaseModel):
+    total: int
+    public: int
+    private: int
+    # Distinct accounts, user or org, owning at least one
+    owners: int
+    # Committed to at least a day after creation, i.e., used rather than
+    # started and left
+    worked_on: int
+    updated_last_90_days: int
+
+
+class ActiveCounts(BaseModel):
+    last_day: int
+    last_7_days: int
+    last_30_days: int
+
+
+class AnalyticsStats(BaseModel):
+    active_users: ActiveCounts = Field(
+        description=(
+            "Likely human users with any event in Mixpanel, sent by the "
+            "hub's backend or frontend, so last_30_days is MAU. Only users "
+            "who accepted analytics are tracked, so this is a lower bound."
+        )
+    )
+    active_visitors: ActiveCounts = Field(
+        description=(
+            "Active users plus visitors who accepted analytics and, without "
+            "signing in, sent two or more events on a day, at least one "
+            "after input. Anonymous page views aren't counted, since their "
+            "IDs change daily."
+        )
+    )
+    human_visits: ActiveCounts = Field(
+        description=(
+            "Visitor-days from visitors who didn't accept analytics, i.e., "
+            "distinct (UTC day, visitor) pairs with a page view in the "
+            "window that followed input and wasn't from a bot. Not unique "
+            "people: their IDs reset daily, so one person visiting on three "
+            "days counts three times."
+        )
+    )
+    human_project_visits: ActiveCounts = Field(
+        description=(
+            "Human visits as above that included a project page, leaving out "
+            "projects owned by excluded accounts"
+        )
+    )
+    projects_viewed: ActiveCounts = Field(
+        description=(
+            "Distinct projects, not owned by excluded accounts, with human "
+            "visits as above"
+        )
+    )
+
+
+class HubStats(BaseModel):
+    users: UserStats
+    projects: ProjectStats
+    excluded_accounts: list[str]
+    analytics: AnalyticsStats | None = Field(
+        default=None,
+        description="From Mixpanel; null when not configured or unreachable",
+    )
+
+
+@router.get("/stats", dependencies=[Depends(get_current_active_superuser)])
+def get_hub_stats(
+    session: SessionDep,
+    exclude: Annotated[list[str], Query()] = [],
+    include_superusers: bool = False,
+) -> HubStats:
+    """Count the hub's users and projects, e.g., to report usage.
+
+    Superusers and what their accounts own are left out by default, since
+    staff and their demos aren't usage. ``exclude`` names more accounts to
+    leave out, e.g., an org holding examples. Subprojects count with their
+    parent rather than on their own. Activity follows ``Project.updated``,
+    which tracks the latest commit the hub has seen. ``analytics`` comes from
+    Mixpanel, when read access to it is configured.
+    """
+
+    def count_projects(*conditions: Any) -> int:
+        query = select(func.count()).select_from(Project)
+        return session.exec(query.where(*project_filter, *conditions)).one()
+
+    def count_active(last_seen: dict[str, float]) -> ActiveCounts:
+        now = time.time()
+        n = [
+            sum(t >= now - days * 86400 for t in last_seen.values())
+            for days in (1, 7, 30)
+        ]
+        return ActiveCounts(last_day=n[0], last_7_days=n[1], last_30_days=n[2])
+
+    # Accounts to leave out, by name and, unless asked not to, superusers'
+    excluded_conditions = [col(Account.name).in_({n.lower() for n in exclude})]
+    if not include_superusers:
+        superuser_ids = select(User.id).where(col(User.is_superuser))
+        excluded_conditions.append(col(Account.user_id).in_(superuser_ids))
+    excluded = session.exec(select(Account).where(or_(*excluded_conditions)))
+    excluded_accounts = sorted(excluded, key=lambda a: a.name)
+    excluded_account_ids = [a.id for a in excluded_accounts]
+    excluded_user_ids = [a.user_id for a in excluded_accounts if a.user_id]
+    # Users, and which of them look like people rather than bots, by
+    # anything a signup form alone can't produce
+    user_filter = col(User.id).not_in(excluded_user_ids)
+    likely_human = or_(
+        col(User.email_verified_at).is_not(None),
+        exists().where(
+            col(Account.user_id) == User.id,
+            col(Account.github_name).is_not(None),
+        ),
+        exists().where(col(UserExternalCredential.user_id) == User.id),
+        # Invited, as opposed to access cached from GitHub
+        exists().where(
+            col(UserProjectAccess.user_id) == User.id,
+            col(UserProjectAccess.role_id).is_not(None),
+        ),
+        exists().where(col(UserOrgMembership.user_id) == User.id),
+        exists().where(col(UserToken.user_id) == User.id),
+        # Refresh tokens are minted at login and each refresh, never deleted
+        select(func.count(func.distinct(func.date(RefreshToken.created))))
+        .where(col(RefreshToken.user_id) == User.id)
+        .scalar_subquery()
+        >= 2,
+    )
+    n_users = session.exec(
+        select(func.count()).select_from(User).where(user_filter)
+    ).one()
+    n_verified = session.exec(
+        select(func.count())
+        .select_from(User)
+        .where(user_filter, col(User.email_verified_at).is_not(None))
+    ).one()
+    n_likely_human = session.exec(
+        select(func.count()).select_from(User).where(user_filter, likely_human)
+    ).one()
+    # Projects
+    project_filter = [
+        col(Project.parent_project_id).is_(None),
+        col(Project.owner_account_id).not_in(excluded_account_ids),
+    ]
+    n_public = count_projects(col(Project.is_public))
+    n_private = count_projects(col(Project.is_public).is_(False))
+    n_owners = session.exec(
+        select(func.count(func.distinct(Project.owner_account_id))).where(
+            *project_filter
+        )
+    ).one()
+    # Analytics, counting users only if they're likely human and visitors
+    # only on days they looked like a person
+    analytics = None
+    usage = mixpanel.get_usage()
+    if usage is not None:
+        people = usage.people
+        excluded_ids = {str(i) for i in excluded_user_ids}
+        candidate_ids: set[uuid.UUID] = set()
+        for distinct_id, (_, _, is_account) in people.items():
+            if not is_account:
+                continue
+            try:
+                candidate_ids.add(uuid.UUID(distinct_id))
+            except ValueError:
+                pass
+        user_ids = {
+            str(user_id): is_human
+            for user_id, is_human in session.exec(
+                select(User.id, likely_human).where(
+                    col(User.id).in_(candidate_ids)
+                )
+            )
+        }
+        # Accounts no longer here, e.g., deleted, count as neither
+        active_users = {
+            k: t
+            for k, (t, _, is_account) in people.items()
+            if is_account and user_ids.get(k) and k not in excluded_ids
+        }
+        active_visitors = active_users | {
+            k: engaged
+            for k, (_, engaged, is_account) in people.items()
+            if not is_account and engaged
+        }
+        # Anonymous visits, by visitor-day and by project
+        excluded_names = {a.name.lower() for a in excluded_accounts}
+        visits: dict[str, float] = {}
+        project_visits: dict[str, float] = {}
+        projects_viewed: dict[str, float] = {}
+        for day, visitor, owner, project, t in usage.visits:
+            visit = f"{day} {visitor}"
+            visits[visit] = max(t, visits.get(visit, 0.0))
+            if owner and project and owner.lower() not in excluded_names:
+                project_visits[visit] = max(t, project_visits.get(visit, 0.0))
+                viewed = f"{owner.lower()}/{project.lower()}"
+                projects_viewed[viewed] = max(
+                    t, projects_viewed.get(viewed, 0.0)
+                )
+        analytics = AnalyticsStats(
+            active_users=count_active(active_users),
+            active_visitors=count_active(active_visitors),
+            human_visits=count_active(visits),
+            human_project_visits=count_active(project_visits),
+            projects_viewed=count_active(projects_viewed),
+        )
+    return HubStats(
+        users=UserStats(
+            total=n_users, verified=n_verified, likely_human=n_likely_human
+        ),
+        projects=ProjectStats(
+            total=n_public + n_private,
+            public=n_public,
+            private=n_private,
+            owners=n_owners,
+            worked_on=count_projects(
+                col(Project.updated)
+                >= col(Project.created) + timedelta(days=1)
+            ),
+            updated_last_90_days=count_projects(
+                col(Project.updated) >= utcnow() - timedelta(days=90)
+            ),
+        ),
+        excluded_accounts=[a.name for a in excluded_accounts],
+        analytics=analytics,
+    )
 
 
 @router.post("/events/github", include_in_schema=False)

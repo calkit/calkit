@@ -2239,34 +2239,71 @@ def check_stage_runs() -> None:
     mistakes and shortcuts, not forgery, since a matching entry can be
     written by anyone.
     """
+    # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
+    # subproject's, against the record kept beside its dvc.lock: any other
+    # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
+    # a wrapper stage, which doesn't record its stages.
     try:
-        with open(calkit.STAGE_RUNS_FPATH) as f:
-            stage_runs = json.load(f)
-    except OSError:
-        stage_runs = {}
-    except json.JSONDecodeError as e:
-        raise_error(f"Can't read {calkit.STAGE_RUNS_FPATH}: {e}")
-    # By directory, for a subproject's stages
-    lock_stages = {None: calkit.dvc.read_lock_stages()}
-    problems = []
-    for name in sorted(set(lock_stages[None]) | set(stage_runs)):
-        lock_dir, lock_name = calkit.dvc.split_lock_stage_name(name)
-        if lock_dir not in lock_stages:
-            lock_stages[lock_dir] = calkit.dvc.read_lock_stages(lock_dir)
-        locked = lock_stages[lock_dir].get(lock_name)
-        # One no longer in dvc.lock has nothing to vouch for
-        if not isinstance(locked, dict):
-            continue
-        recorded = stage_runs.get(name)
-        if not isinstance(recorded, dict):
-            problems.append(f"Stage '{name}' has no recorded run")
-        elif recorded.get("dvc_lock_hash") != calkit.dvc.stage_lock_hash(
-            locked
+        listed = subprocess.check_output(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*/dvc.yaml",
+            ],
+            text=True,
+        ).splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        listed = []
+    lock_dirs: list[str | None] = [None]
+    for path in sorted(listed):
+        parts = path.split("/")[:-1]
+        if not os.path.isfile(path) or any(
+            os.path.isdir(os.path.join(*parts[:i], ".dvc"))
+            for i in range(1, len(parts) + 1)
         ):
-            problems.append(
-                f"Stage '{name}' has changed in dvc.lock since its last "
-                "recorded run"
+            continue
+        lock_dirs.append("/".join(parts))
+    stage_runs: dict[str | None, dict] = {}
+    for lock_dir in lock_dirs:
+        try:
+            stage_runs[lock_dir] = calkit.read_stage_runs(lock_dir)
+        except json.JSONDecodeError as e:
+            fpath = os.path.join(lock_dir or "", calkit.STAGE_RUNS_FPATH)
+            raise_error(f"Can't read {fpath}: {e}")
+    # This project's records of other pipelines' stages, under the names
+    # they have here, from before they were kept beside their own dvc.lock
+    parent_runs = {
+        k.replace("\\", "/"): v for k, v in stage_runs[None].items()
+    }
+    problems = []
+    for lock_dir in lock_dirs:
+        lock_stages = calkit.dvc.read_lock_stages(lock_dir)
+        for lock_name, locked in sorted(lock_stages.items()):
+            if not isinstance(locked, dict):
+                continue
+            name = (
+                lock_name
+                if lock_dir is None
+                else f"{lock_dir}/dvc.yaml:{lock_name}"
             )
+            # Either record matching will do, since a stage may have been
+            # run from both directories before they were kept together
+            candidates = [stage_runs[lock_dir].get(lock_name)]
+            if lock_dir is not None:
+                candidates.append(parent_runs.get(name))
+            records = [r for r in candidates if isinstance(r, dict)]
+            lock_hash = calkit.dvc.stage_lock_hash(locked)
+            if not records:
+                problems.append(f"Stage '{name}' has no recorded run")
+            elif all(r.get("dvc_lock_hash") != lock_hash for r in records):
+                problems.append(
+                    f"Stage '{name}' has changed in dvc.lock since its last "
+                    "recorded run"
+                )
     for problem in problems:
         typer.echo(problem)
     if problems:

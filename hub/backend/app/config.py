@@ -346,6 +346,14 @@ class Settings(BaseSettings):
     STRIPE_PUBLISHABLE_KEY: str
     # Mixpanel
     MIXPANEL_TOKEN: str
+    # Read access to the project's events, for the usage numbers in
+    # superuser stats; unset leaves those out. The service account needs the
+    # download_events_csv permission, which Analyst has and Consumer doesn't
+    MIXPANEL_SERVICE_ACCOUNT_USERNAME: str | None = None
+    MIXPANEL_SERVICE_ACCOUNT_SECRET: str | None = None
+    MIXPANEL_PROJECT_ID: int | None = None
+    # data-eu.mixpanel.com or data-in.mixpanel.com with data residency
+    MIXPANEL_EXPORT_HOST: str = "data.mixpanel.com"
     # Zenodo
     ZENODO_CLIENT_ID: str
     ZENODO_CLIENT_SECRET: str

@@ -809,6 +809,26 @@ def test_to_shell_cmd():
     ]
     good_shell_cmd = 'sh -c "cd dir1 && ls"'
     assert _to_shell_cmd(cmd) == good_shell_cmd
+    # Arguments survive the shell as they were, backslashes and tabs too
+    args = [
+        "2026-06-09 12:00:00",
+        "a b\\",
+        "a b\\\\",
+        "a\tb",
+        'say "hi"',
+        'say \\"hi\\"',
+        "C:\\My Data\\x",
+    ]
+    shell_cmd = _to_shell_cmd(
+        [
+            sys.executable,
+            "-c",
+            "import json, sys; print(json.dumps(sys.argv[1:]))",
+        ]
+        + args
+    )
+    out = subprocess.check_output(shell_cmd, shell=True, text=True)
+    assert json.loads(out) == args
 
 
 def test_add(tmp_dir):
@@ -1579,6 +1599,29 @@ def test_run_isolated_subproject_stage_exit_code(tmp_dir):
             {"stages": {"stage-b": {"cmd": "python -c \"print('ok')\""}}}, f
         )
     subprocess.check_call(["calkit", "run", "isolated-sp:stage-b"])
+
+
+def test_status_in_subdir_uses_the_parent_dvc_repo(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # A subproject that is a plain subdirectory shares the parent's repos
+    os.makedirs("sub", exist_ok=True)
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump({"name": "sub"}, f)
+    proc = subprocess.run(
+        ["calkit", "status"], cwd="sub", capture_output=True, text=True
+    )
+    # Looking for ./.dvc rather than asking DVC used to nest a second repo
+    assert "Initializing DVC repository" not in proc.stdout + proc.stderr
+    assert not os.path.exists(os.path.join("sub", ".dvc"))
+    assert not os.path.exists(os.path.join("sub", ".dvcignore"))
+    assert os.path.isfile(os.path.join(".dvc", "config"))
+    # With no DVC repo anywhere above it, one is still created
+    shutil.rmtree(".dvc")
+    proc = subprocess.run(
+        ["calkit", "status"], cwd="sub", capture_output=True, text=True
+    )
+    assert "Initializing DVC repository" in proc.stdout + proc.stderr
+    assert os.path.isfile(os.path.join("sub", ".dvc", "config"))
 
 
 def test_run_ignore_errors(tmp_dir):
@@ -3718,3 +3761,50 @@ def test_run_reruns_when_an_env_var_input_changes(tmp_dir):
     env["CK_TEST_SITE"] = "y"
     out = subprocess.check_output(["calkit", "status"], env=env, text=True)
     assert "Stale stages" in out
+
+
+def test_run_reruns_once_per_schedule_period(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    period_file = ".calkit/local/current-periods/1-day-utc.txt"
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "daily": {
+                    "kind": "shell-command",
+                    "command": f"cat {period_file} >> out.txt",
+                    "environment": "_system",
+                    "inputs": [{"kind": "schedule", "period": "1 day"}],
+                    "outputs": [
+                        {
+                            "path": "out.txt",
+                            "storage": "git",
+                            "delete_before_run": False,
+                        }
+                    ],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = dict(os.environ) | {"CALKIT_NOW": "2026-10-20T08:00:00Z"}
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().split() == ["2026-10-20"]
+    with open("dvc.yaml") as f:
+        assert period_file in yaml.safe_load(f)["stages"]["daily"]["deps"]
+    # Later the same day it's up to date, so a run skips it
+    env["CALKIT_NOW"] = "2026-10-20T23:00:00Z"
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Pipeline is up to date" in out
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().split() == ["2026-10-20"]
+    # The next day it runs again, once
+    env["CALKIT_NOW"] = "2026-10-21T01:00:00Z"
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Stale stages" in out
+    subprocess.check_call(["calkit", "run"], env=env)
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().split() == ["2026-10-20", "2026-10-21"]

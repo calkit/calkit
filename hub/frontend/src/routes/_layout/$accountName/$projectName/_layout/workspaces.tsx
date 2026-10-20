@@ -180,10 +180,13 @@ function Workspaces() {
     refreshSessions,
     secondFactorError,
     retryRefused,
-  } = useOperatorConnections([
-    ...workspaces.filter((w) => w.operator_online).map((w) => w.operator_id),
-    ...(creatingOn ? [String(creatingOn.id)] : []),
-  ])
+  } = useOperatorConnections(
+    [
+      ...workspaces.filter((w) => w.operator_online).map((w) => w.operator_id),
+      ...(creatingOn ? [String(creatingOn.id)] : []),
+    ],
+    workspacesQuery.refetch,
+  )
   useEffect(() => {
     const state: WorkspacesState = {
       panes: search.panes,

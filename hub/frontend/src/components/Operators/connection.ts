@@ -150,6 +150,8 @@ export class OperatorConnection {
   statusListeners = new Set<() => void>()
   // Only once the Operator has accepted the channel, in a signed reply
   connected = false
+  // Connected at some point since the page opened
+  wasConnected = false
   closed = true
   // Why connecting failed, if the user has to do something about it
   error: string | null = null
@@ -280,6 +282,7 @@ export class OperatorConnection {
           channel.ready = true
           clearTimeout(readyTimer)
           this.connected = true
+          this.wasConnected = true
           this.retryDelay = 1000
           this.notify()
           return

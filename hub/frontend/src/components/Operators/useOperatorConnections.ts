@@ -4,8 +4,12 @@ import { OperatorConnection, type SessionInfo } from "./connection"
 
 // A page's connections to Operators through the relay, one each, open
 // while they're online and closed when the page goes, and the sessions on
-// each
-export default function useOperatorConnections(online: string[]) {
+// each. refetchOnline updates the list of online ones, which is called more
+// often while a connection is lost, so it's back soon after its Operator is.
+export default function useOperatorConnections(
+  online: string[],
+  refetchOnline?: () => void,
+) {
   const connections = useRef(new Map<string, OperatorConnection>())
   const [, setVersion] = useState(0)
   const rerender = useCallback(() => setVersion((v) => v + 1), [])
@@ -63,6 +67,16 @@ export default function useOperatorConnections(online: string[]) {
     const interval = window.setInterval(refreshSessions, 5000)
     return () => window.clearInterval(interval)
   }, [refreshSessions, onlineOperators])
+  const lost = [...connections.current.values()].some(
+    (c) => c.wasConnected && !c.connected,
+  )
+  const refetchRef = useRef(refetchOnline)
+  refetchRef.current = refetchOnline
+  useEffect(() => {
+    if (!lost) return
+    const interval = window.setInterval(() => refetchRef.current?.(), 5000)
+    return () => window.clearInterval(interval)
+  }, [lost])
   // Why connecting was refused, if the user has to do something about it
   const secondFactorError =
     [...connections.current.values()].find((c) => c.error)?.error ?? null

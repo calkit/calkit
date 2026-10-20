@@ -248,6 +248,7 @@ function Workspaces() {
     retryRefused,
   } = useOperatorConnections(
     operators.filter((op) => op.is_online).map((op) => String(op.id)),
+    operatorsQuery.refetch,
   )
   useEffect(() => {
     try {

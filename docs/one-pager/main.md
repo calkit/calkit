@@ -56,6 +56,10 @@ with an optional platform that makes both collaboration during
 and sharing after the project is complete,
 like a GitHub for science.
 
+The automation and transparency also makes it seamless to collaborate with
+AI agents,
+since they are also guided into working reproducibly.
+
 ## A success story {.box}
 
 > In the first conference paper I wrote back in 2022,

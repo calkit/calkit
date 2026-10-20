@@ -41,6 +41,8 @@ def get_json(url: str) -> Any:
 
 repo = get_json("https://api.github.com/repos/calkit/calkit")
 hub = calkit.hub.get("/stats", params={"exclude": args.exclude_hub_account})
+# Absent or null until the hub can read Mixpanel
+analytics = hub.get("analytics") or {}
 pypi = get_json("https://pypistats.org/api/packages/calkit-python/recent")
 # Papers out the door, i.e., published, preprinted, or archived, leaving out
 # examples' and tests'
@@ -59,10 +61,14 @@ results = {
     "hub_projects_worked_on": hub["projects"]["worked_on"],
     "hub_project_owners": hub["projects"]["owners"],
     "hub_excluded_accounts": hub["excluded_accounts"],
-    # Signed-in users active in the last 30 days, from Mixpanel via the hub,
-    # if it's set up to read it
-    "hub_monthly_active_users": (
-        (hub.get("analytics") or {}).get("active_users") or {}
+    # People active in the last 30 days, from Mixpanel via the hub, if it's
+    # set up to read it: signed in or not, since someone can use other
+    # people's projects without an account, and signed in only
+    "hub_monthly_active_users": analytics.get("active_visitors", {}).get(
+        "last_30_days"
+    ),
+    "hub_monthly_active_signed_in_users": analytics.get(
+        "active_users", {}
     ).get("last_30_days"),
     "github_stars": repo["stargazers_count"],
     "github_forks": repo["forks_count"],

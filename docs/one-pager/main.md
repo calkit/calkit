@@ -37,12 +37,14 @@ Many open science or reproducibility
 solutions focus on embedding code in documents (literate programming)
 or helping researchers share and obtain credit for
 outputs like code and data after a project is done.
-Calkit takes a more holistic approach,
-bundling version control (including large data files),
-environment management, pipelines with hashed I/O,
-and provenance definition, where different stages like analysis and writing
-are allowed to remain as separate contexts or modules while
+Calkit takes a more integrated, modular approach,
+where different stages like analysis and writing
+are allowed to remain as separate contexts while
 information flows freely between them for fast iteration.
+Version control (including large data files),
+environment management, pipelines with hashed I/O,
+and provenance definition, are all included,
+so users don't need to assemble their own bespoke workflows.
 An optional, self-hostable web app
 facilitates collaboration during the project
 and sharing once it's done, like a GitHub for science.

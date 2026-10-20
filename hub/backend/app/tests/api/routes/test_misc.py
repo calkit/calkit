@@ -1,11 +1,14 @@
 """Tests for app.api.routes.misc endpoints."""
 
+import json
+import time
 import uuid
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import requests
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
@@ -287,3 +290,93 @@ def test_get_hub_stats(
     # One project fewer for the excluded account, at least one more for
     # superusers
     assert stats["projects"]["total"] >= after["projects"]["total"]
+    # Without Mixpanel read access configured there are no analytics
+    assert after["analytics"] is None
+    # With it, people are counted from the event export, leaving out
+    # anonymous page views, bots, old events, and excluded users
+    now_ts = time.time()
+    events = [
+        {"distinct_id": str(user.id), "time": now_ts - 3600},
+        {"distinct_id": str(user.id), "time": now_ts - 20 * 86400},
+        {
+            "distinct_id": "$device:abc",
+            "$user_id": str(other.id),
+            "time": now_ts - 3 * 86400,
+        },
+        {"distinct_id": "$device:def", "time": now_ts - 10 * 86400},
+        {"distinct_id": str(superuser.id), "time": now_ts - 60},
+        {"distinct_id": "a1b2", "anonymous": True, "time": now_ts - 60},
+        {"distinct_id": "$device:bot", "bot": True, "time": now_ts - 60},
+        {"distinct_id": "$device:old", "time": now_ts - 40 * 86400},
+    ]
+    lines = [
+        json.dumps({"event": "e", "properties": p}).encode() for p in events
+    ]
+    resp = SimpleNamespace(
+        raise_for_status=lambda: None, iter_lines=lambda: iter([*lines, b""])
+    )
+    with (
+        patch.multiple(
+            settings,
+            MIXPANEL_SERVICE_ACCOUNT_USERNAME="sa",
+            MIXPANEL_SERVICE_ACCOUNT_SECRET="secret",
+            MIXPANEL_PROJECT_ID=123,
+        ),
+        patch("app.mixpanel.cache.get_json", return_value=None),
+        patch("app.mixpanel.cache.set_json") as set_json,
+        patch("app.mixpanel.requests.get", return_value=resp) as get,
+    ):
+        stats = client.get("/stats", headers=headers).json()
+        assert get.call_args.kwargs["auth"] == ("sa", "secret")
+        params = get.call_args.kwargs["params"]
+        assert params["project_id"] == 123
+        assert "anonymous" in params["where"]
+        set_json.assert_called_once()
+        assert stats["users"] == after["users"]
+        assert stats["analytics"] == {
+            "active_users": {
+                "last_day": 1,
+                "last_7_days": 2,
+                "last_30_days": 2,
+            },
+            "active_visitors": {
+                "last_day": 1,
+                "last_7_days": 2,
+                "last_30_days": 3,
+            },
+        }
+        # Excluded accounts are left out here too, and superusers come back
+        stats = client.get(
+            "/stats",
+            headers=headers,
+            params={
+                "exclude": [other.account.name],
+                "include_superusers": True,
+            },
+        ).json()
+        assert stats["analytics"]["active_users"] == {
+            "last_day": 2,
+            "last_7_days": 2,
+            "last_30_days": 2,
+        }
+        # A cached result is used without asking Mixpanel again
+        get.reset_mock()
+        cached = {str(user.id): now_ts - 60}
+        with patch("app.mixpanel.cache.get_json", return_value=cached):
+            stats = client.get("/stats", headers=headers).json()
+        get.assert_not_called()
+        assert stats["analytics"]["active_users"]["last_day"] == 1
+        # Mixpanel failing, by connection or status, leaves analytics out
+        # rather than failing the request
+        get.side_effect = requests.ConnectionError("down")
+        r = client.get("/stats", headers=headers)
+        assert r.status_code == 200
+        assert r.json()["analytics"] is None
+        assert r.json()["users"] == after["users"]
+        get.side_effect = None
+        get.return_value = SimpleNamespace(
+            raise_for_status=Mock(side_effect=requests.HTTPError("401"))
+        )
+        stats = client.get("/stats", headers=headers).json()
+        assert stats["analytics"] is None
+        assert stats["projects"] == after["projects"]

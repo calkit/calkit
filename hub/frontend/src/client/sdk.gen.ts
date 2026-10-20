@@ -2396,7 +2396,8 @@ export class MiscService {
    * staff and their demos aren't usage. ``exclude`` names more accounts to
    * leave out, e.g., an org holding examples. Subprojects count with their
    * parent rather than on their own. Activity follows ``Project.updated``,
-   * which tracks the latest commit the hub has seen.
+   * which tracks the latest commit the hub has seen. ``analytics`` comes from
+   * Mixpanel, when read access to it is configured.
    */
   public static getHubStats<ThrowOnError extends boolean = true>(
     parameters?: {

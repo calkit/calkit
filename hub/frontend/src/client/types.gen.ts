@@ -31,6 +31,38 @@ export type AccountPublic = {
 }
 
 /**
+ * ActiveCounts
+ */
+export type ActiveCounts = {
+  /**
+   * Last Day
+   */
+  last_day: number
+  /**
+   * Last 7 Days
+   */
+  last_7_days: number
+  /**
+   * Last 30 Days
+   */
+  last_30_days: number
+}
+
+/**
+ * AnalyticsStats
+ */
+export type AnalyticsStats = {
+  /**
+   * Signed-in users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.
+   */
+  active_users: ActiveCounts
+  /**
+   * Active users plus visitors who accepted analytics without signing in. Anonymous page views aren't counted, since their IDs change daily.
+   */
+  active_visitors: ActiveCounts
+}
+
+/**
  * Body_login-login_access_token
  */
 export type BodyLoginLoginAccessToken = {
@@ -1998,6 +2030,10 @@ export type HubStats = {
    * Excluded Accounts
    */
   excluded_accounts: Array<string>
+  /**
+   * From Mixpanel; null when not configured or unreachable
+   */
+  analytics?: AnalyticsStats | null
 }
 
 /**

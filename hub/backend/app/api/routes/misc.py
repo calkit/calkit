@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import timedelta
 from typing import Annotated, Any, Literal
@@ -12,7 +13,7 @@ from typing import Annotated, Any, Literal
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic.networks import EmailStr
 from sqlalchemy import func
 from sqlalchemy.exc import DataError
@@ -20,7 +21,7 @@ from sqlmodel import Session, and_, col, or_, select
 from starlette.requests import Request
 
 import app.tasks
-from app import arxiv, version
+from app import arxiv, mixpanel, version
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -229,10 +230,37 @@ class ProjectStats(BaseModel):
     updated_last_90_days: int
 
 
+class ActiveCounts(BaseModel):
+    last_day: int
+    last_7_days: int
+    last_30_days: int
+
+
+class AnalyticsStats(BaseModel):
+    active_users: ActiveCounts = Field(
+        description=(
+            "Signed-in users with any event in Mixpanel, sent by the hub's "
+            "backend or frontend, so last_30_days is MAU. Only users who "
+            "accepted analytics are tracked, so this is a lower bound."
+        )
+    )
+    active_visitors: ActiveCounts = Field(
+        description=(
+            "Active users plus visitors who accepted analytics without "
+            "signing in. Anonymous page views aren't counted, since their "
+            "IDs change daily."
+        )
+    )
+
+
 class HubStats(BaseModel):
     users: UserStats
     projects: ProjectStats
     excluded_accounts: list[str]
+    analytics: AnalyticsStats | None = Field(
+        default=None,
+        description="From Mixpanel; null when not configured or unreachable",
+    )
 
 
 @router.get("/stats", dependencies=[Depends(get_current_active_superuser)])
@@ -247,12 +275,21 @@ def get_hub_stats(
     staff and their demos aren't usage. ``exclude`` names more accounts to
     leave out, e.g., an org holding examples. Subprojects count with their
     parent rather than on their own. Activity follows ``Project.updated``,
-    which tracks the latest commit the hub has seen.
+    which tracks the latest commit the hub has seen. ``analytics`` comes from
+    Mixpanel, when read access to it is configured.
     """
 
     def count_projects(*conditions: Any) -> int:
         query = select(func.count()).select_from(Project)
         return session.exec(query.where(*project_filter, *conditions)).one()
+
+    def count_active(last_seen: dict[str, float]) -> ActiveCounts:
+        now = time.time()
+        n = [
+            sum(t >= now - days * 86400 for t in last_seen.values())
+            for days in (1, 7, 30)
+        ]
+        return ActiveCounts(last_day=n[0], last_7_days=n[1], last_30_days=n[2])
 
     # Accounts to leave out, by name and, unless asked not to, superusers'
     excluded_conditions = [col(Account.name).in_({n.lower() for n in exclude})]
@@ -285,6 +322,32 @@ def get_hub_stats(
             *project_filter
         )
     ).one()
+    # Analytics, leaving out the same users as above
+    analytics = None
+    last_seen = mixpanel.get_last_seen()
+    if last_seen is not None:
+        excluded_ids = {str(i) for i in excluded_user_ids}
+        last_seen = {
+            k: v for k, v in last_seen.items() if k not in excluded_ids
+        }
+        candidate_ids: set[uuid.UUID] = set()
+        for distinct_id in last_seen:
+            try:
+                candidate_ids.add(uuid.UUID(distinct_id))
+            except ValueError:
+                pass
+        user_ids = {
+            str(i)
+            for i in session.exec(
+                select(User.id).where(col(User.id).in_(candidate_ids))
+            )
+        }
+        analytics = AnalyticsStats(
+            active_users=count_active(
+                {k: v for k, v in last_seen.items() if k in user_ids}
+            ),
+            active_visitors=count_active(last_seen),
+        )
     return HubStats(
         users=UserStats(total=n_users, verified=n_verified),
         projects=ProjectStats(
@@ -301,6 +364,7 @@ def get_hub_stats(
             ),
         ),
         excluded_accounts=[a.name for a in excluded_accounts],
+        analytics=analytics,
     )
 
 

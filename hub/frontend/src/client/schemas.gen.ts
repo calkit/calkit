@@ -44,6 +44,44 @@ export const AccountPublicSchema = {
   title: "AccountPublic",
 } as const
 
+export const ActiveCountsSchema = {
+  properties: {
+    last_day: {
+      type: "integer",
+      title: "Last Day",
+    },
+    last_7_days: {
+      type: "integer",
+      title: "Last 7 Days",
+    },
+    last_30_days: {
+      type: "integer",
+      title: "Last 30 Days",
+    },
+  },
+  type: "object",
+  required: ["last_day", "last_7_days", "last_30_days"],
+  title: "ActiveCounts",
+} as const
+
+export const AnalyticsStatsSchema = {
+  properties: {
+    active_users: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Signed-in users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.",
+    },
+    active_visitors: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Active users plus visitors who accepted analytics without signing in. Anonymous page views aren't counted, since their IDs change daily.",
+    },
+  },
+  type: "object",
+  required: ["active_users", "active_visitors"],
+  title: "AnalyticsStats",
+} as const
+
 export const Body_login_login_access_tokenSchema = {
   properties: {
     analytics_consent: {
@@ -3433,6 +3471,17 @@ export const HubStatsSchema = {
       },
       type: "array",
       title: "Excluded Accounts",
+    },
+    analytics: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/AnalyticsStats",
+        },
+        {
+          type: "null",
+        },
+      ],
+      description: "From Mixpanel; null when not configured or unreachable",
     },
   },
   type: "object",

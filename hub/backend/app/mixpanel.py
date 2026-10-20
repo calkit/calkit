@@ -1,11 +1,72 @@
 """Functionality for working with Mixpanel."""
 
+import json
+import time
+from datetime import UTC, datetime, timedelta
+
+import requests
 from mixpanel import Mixpanel
 
+from app import cache
 from app.config import settings
+from app.core import logger
 from app.models import Project, User
 
 mp = Mixpanel(settings.MIXPANEL_TOKEN)
+
+
+def get_last_seen(days: int = 30) -> dict[str, float] | None:
+    """When each person tracked in the last ``days`` days was last seen.
+
+    Keys are distinct IDs, i.e., user IDs once signed in, and values are Unix
+    times. Read from the raw event export, since the Query API can't count
+    unique people across all events without a saved report. Anonymous page
+    views are left out, since their IDs change daily, as are bots. None when
+    reading isn't configured or fails.
+    """
+    username = settings.MIXPANEL_SERVICE_ACCOUNT_USERNAME
+    secret = settings.MIXPANEL_SERVICE_ACCOUNT_SECRET
+    if not (username and secret and settings.MIXPANEL_PROJECT_ID):
+        return None
+    # Cached since the export allows 60 requests an hour
+    key = cache.make_key("mixpanel", "last-seen", str(days))
+    cached: dict[str, float] | None = cache.get_json(key)
+    if cached is not None:
+        return cached
+    since = time.time() - days * 86400
+    # Export dates are UTC for projects created since 2023
+    today = datetime.now(UTC).date()
+    last_seen: dict[str, float] = {}
+    try:
+        resp = requests.get(
+            f"https://{settings.MIXPANEL_EXPORT_HOST}/api/2.0/export",
+            params={
+                "project_id": settings.MIXPANEL_PROJECT_ID,
+                "from_date": (today - timedelta(days=days)).isoformat(),
+                "to_date": today.isoformat(),
+                "where": 'not defined(properties["anonymous"])',
+            },
+            auth=(username, secret),
+            timeout=10,
+            stream=True,
+        )
+        resp.raise_for_status()
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            props = json.loads(line).get("properties", {})
+            t = props.get("time", 0)
+            if props.get("anonymous") or props.get("bot") or t < since:
+                continue
+            person = props.get("$user_id") or props.get("distinct_id")
+            if person:
+                last_seen[str(person)] = max(t, last_seen.get(str(person), 0))
+    except Exception as e:
+        # Usage numbers aren't worth failing a response over
+        logger.warning(f"Could not read events from Mixpanel: {e}")
+        return None
+    cache.set_json(key, last_seen, ttl=3600)
+    return last_seen
 
 
 def track(

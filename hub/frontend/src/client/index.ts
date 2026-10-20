@@ -16,11 +16,13 @@ export {
 } from "./sdk.gen"
 export type {
   AccountPublic,
+  ActiveCounts,
   AddOrgMemberData,
   AddOrgMemberError,
   AddOrgMemberErrors,
   AddOrgMemberResponse,
   AddOrgMemberResponses,
+  AnalyticsStats,
   AppApiRoutesLoginOAuthCodeExchange,
   AppApiRoutesUsersOAuthCodeExchange,
   BodyLoginLoginAccessToken,

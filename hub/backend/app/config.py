@@ -110,7 +110,7 @@ class Settings(BaseSettings):
         # Otherwise, use the same as server_host
         return self.server_host
 
-    # Where Operators and browsers open relay websockets
+    # Where machines and browsers open relay websockets
     RELAY_URL: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]

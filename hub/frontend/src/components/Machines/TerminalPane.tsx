@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react"
 import { FiMinus, FiX } from "react-icons/fi"
 
 import Tooltip from "../Common/Tooltip"
-import type { OperatorConnection, Pane } from "./connection"
+import type { MachineConnection, Pane } from "./connection"
 
 export default function TerminalPane({
   conn,
@@ -24,7 +24,7 @@ export default function TerminalPane({
   onDetach,
   height = "352px",
 }: {
-  conn: OperatorConnection
+  conn: MachineConnection
   pane: Pane
   label: string
   connected: boolean
@@ -88,7 +88,7 @@ export default function TerminalPane({
       term.dispose()
     }
   }, [conn, pane.session])
-  // Attach whenever the connection is (re)established; the Operator replays
+  // Attach whenever the connection is (re)established; the link replays
   // recent output onto a cleared screen
   useEffect(() => {
     const term = termRef.current

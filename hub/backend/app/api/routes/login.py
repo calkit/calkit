@@ -646,7 +646,7 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
             tokens = session.exec(
                 select(UserToken).where(UserToken.user_id == user.id)
             ).all()
-            for credential in [*tokens, *user.operators]:
+            for credential in [*tokens, *user.machines]:
                 credential.is_active = False
                 session.add(credential)
             session.commit()

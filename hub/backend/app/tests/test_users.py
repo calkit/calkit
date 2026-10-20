@@ -66,8 +66,6 @@ def test_create_user_reserved_account_names(db: Session) -> None:
         "CLOUD",
         "settings",
         "compute",
-        "operators",
-        "ops",
         "machines",
         "workspaces",
     ]:

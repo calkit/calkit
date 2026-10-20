@@ -40,7 +40,7 @@ import useCustomToast from "../../hooks/useCustomToast"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import Tooltip from "../Common/Tooltip"
-import type { OperatorConnection, SessionInfo } from "../Operators/connection"
+import type { MachineConnection, SessionInfo } from "../Machines/connection"
 import AddPath from "./AddPath"
 import DiscardChanges from "./DiscardChanges"
 import IgnorePath from "./IgnorePath"
@@ -108,7 +108,7 @@ export default function WorkspacePanel({
   setStageFilter,
 }: {
   ws: Workspace
-  conn: OperatorConnection
+  conn: MachineConnection
   connected: boolean
   modal: Modal | undefined
   setModal: (modal: Modal | undefined) => void
@@ -122,7 +122,7 @@ export default function WorkspacePanel({
   activeSession?: string
   onOpenSession?: (session: string) => void
   onNewSession?: () => void
-  // Following an agent running there outside the Operator's sessions, or
+  // Following an agent running there outside the link's sessions, or
   // attaching to one in tmux
   activeAgent?: number
   onViewAgent?: (pid: number) => void
@@ -145,14 +145,14 @@ export default function WorkspacePanel({
   // a while for a large pipeline, is worked out; it fetches, so the rest
   // needn't
   const gitQuery = useQuery({
-    queryKey: ["workspace-git-status", ws.operator_id, ws.path],
+    queryKey: ["workspace-git-status", ws.machine_id, ws.path],
     queryFn: () => request("workspace.git_status", { fetch: true }),
     enabled: connected,
     retry: false,
     refetchOnWindowFocus: false,
   })
   const statusQuery = useQuery({
-    queryKey: ["workspace-status", ws.operator_id, ws.path],
+    queryKey: ["workspace-status", ws.machine_id, ws.path],
     queryFn: () => request("workspace.status", { fetch: false }),
     enabled: connected,
     retry: false,
@@ -169,7 +169,7 @@ export default function WorkspacePanel({
   // The stage list alone is quick too, so every stage shows before their
   // states do
   const stagesQuery = useQuery({
-    queryKey: ["workspace-stages", ws.operator_id, ws.path],
+    queryKey: ["workspace-stages", ws.machine_id, ws.path],
     queryFn: () => request("workspace.stages"),
     enabled: connected,
     retry: false,
@@ -238,7 +238,7 @@ export default function WorkspacePanel({
     questions: number[]
     feeds_questions: number[]
   }
-  // Every stage, in order, from Operators that list them, with only the
+  // Every stage, in order, from machines that list them, with only the
   // running ones' state known until the status arrives, and a run reported
   // at check-in shown over a status from before it started
   const stageList: StageInfo[] | undefined = (
@@ -302,12 +302,12 @@ export default function WorkspacePanel({
       result.ok
         ? showToast(
             "Success!",
-            `Pipeline finished on ${ws.operator_name}.`,
+            `Pipeline finished on ${ws.machine_name}.`,
             "success",
           )
         : showToast(
             "Error",
-            `Pipeline failed on ${ws.operator_name}. See the run log for details.`,
+            `Pipeline failed on ${ws.machine_name}. See the run log for details.`,
             "error",
           ),
     onError: (err: Error) => showToast("Error", err.message, "error"),
@@ -327,7 +327,7 @@ export default function WorkspacePanel({
   }
   // The latest run's log, however it was started, followed while it runs
   const runLogQuery = useQuery({
-    queryKey: ["workspace-run-log", ws.operator_id, ws.path],
+    queryKey: ["workspace-run-log", ws.machine_id, ws.path],
     queryFn: () => request("workspace.run_log"),
     enabled: connected,
     retry: false,
@@ -371,11 +371,11 @@ export default function WorkspacePanel({
     .filter(Boolean)
     .join(", ")
   const changeCount = untracked.length + changed.length + staged.length
-  // Ones in the Operator's sessions are listed as those
+  // Ones in the link's sessions are listed as those
   const agents: AgentInfo[] = (ws.agents ?? []).filter(
     (a) => a.where !== "session",
   )
-  // An Operator from before Git's part came on its own only has the rest
+  // A link from before Git's part came on its own only has the rest
   const gitReady = connected && Boolean(gitQuery.data || statusQuery.data)
   const ready = connected && !statusQuery.isPending && !statusQuery.error
   const fileRow = (path: string, mark: string, color: string) => (
@@ -406,7 +406,7 @@ export default function WorkspacePanel({
           variant="ghost"
           onClick={toggleCollapsed}
         />
-        <Heading size="sm">{ws.operator_name}</Heading>
+        <Heading size="sm">{ws.machine_name}</Heading>
         <Tooltip label={ws.path}>
           <Code fontSize="xs" noOfLines={1} maxW="320px">
             {ws.path}
@@ -484,7 +484,7 @@ export default function WorkspacePanel({
             ) : (
               <Code fontSize="xs">{confirmRun}</Code>
             )}{" "}
-            on {ws.operator_name}?
+            on {ws.machine_name}?
           </Text>
           <Button
             size="xs"
@@ -504,7 +504,7 @@ export default function WorkspacePanel({
       )}
       {collapsed ? null : !connected ? (
         <Text mt={3} color="ui.dim">
-          Waiting for the Operator to connect.
+          Waiting for the machine to connect.
         </Text>
       ) : !gitReady && (gitQuery.isPending || statusQuery.isPending) ? (
         <LoadingSpinner />

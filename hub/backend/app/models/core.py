@@ -216,7 +216,7 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
-    operators: list["Operator"] = Relationship(
+    machines: list["Machine"] = Relationship(
         back_populates="user",
         cascade_delete=True,
     )
@@ -568,10 +568,10 @@ class UserTokenPublic(SQLModel):
     is_active: bool
     description: str | None = Field(default=None, max_length=256)
     last_used: datetime | None = Field(default=None)
-    # The Operator it was made for, as its machine's CLI token, which
-    # revoking the Operator deactivates
-    operator_id: uuid.UUID | None = Field(
-        default=None, foreign_key="operator.id", ondelete="CASCADE"
+    # The machine it was made for, as its CLI token, which
+    # revoking the machine deactivates
+    machine_id: uuid.UUID | None = Field(
+        default=None, foreign_key="machine.id", ondelete="CASCADE"
     )
 
 
@@ -594,7 +594,7 @@ class UserToken(UserTokenPublic, table=True):
 class UserTOTP(SQLModel, table=True):
     """An authenticator app generating time-based one-time passwords
     (TOTP), used as a second factor before sensitive actions, e.g.,
-    opening sessions on an Operator.
+    opening sessions on a machine.
     """
 
     user_id: uuid.UUID = Field(
@@ -624,17 +624,17 @@ class UserTOTP(SQLModel, table=True):
     email_code_attempts: int = 0
 
 
-class OperatorPublic(SQLModel):
+class MachinePublic(SQLModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(
         foreign_key="user.id", index=True, ondelete="CASCADE"
     )
     name: str = Field(min_length=1, max_length=64)
     hostname: str | None = Field(default=None, max_length=255)
-    machine_id: str | None = Field(default=None, max_length=255)
+    system_machine_id: str | None = Field(default=None, max_length=255)
     platform: str | None = Field(default=None, max_length=64)
     calkit_version: str | None = Field(default=None, max_length=64)
-    # Hosts this Operator serves, so stages whose environment names one can
+    # Hosts this machine serves, so stages whose environment names one can
     # run through it
     hosts: list[str] = Field(
         default_factory=list,
@@ -647,10 +647,10 @@ class OperatorPublic(SQLModel):
     # How it runs: "service", "foreground", or "cron", which only connects
     # when asked
     mode: str | None = Field(default=None, max_length=16)
-    # Whether it was connected to the relay at its latest check-in, which an
-    # Operator in cron mode that's only asking whether to connect isn't
+    # Whether it was connected to the relay at its latest check-in, which a
+    # machine in cron mode that's only asking whether to connect isn't
     connected: bool = False
-    # When the owner last asked it to connect, for Operators in cron mode
+    # When the owner last asked it to connect, for machines in cron mode
     connect_requested_at: datetime | None = Field(default=None)
     # Whether it will restart once idle, e.g., after Calkit was upgraded
     restart_pending: bool = False
@@ -659,12 +659,12 @@ class OperatorPublic(SQLModel):
     is_active: bool = True
 
 
-class Operator(OperatorPublic, table=True):
-    # Names are unique among the user's active Operators, so a revoked
+class Machine(MachinePublic, table=True):
+    # Names are unique among the user's active machines, so a revoked
     # one's name can be used again
     __table_args__ = (
         sqlalchemy.Index(
-            "uq_operator_user_name_active",
+            "uq_machine_user_name_active",
             "user_id",
             "name",
             unique=True,
@@ -681,33 +681,31 @@ class Operator(OperatorPublic, table=True):
     # When its owner asked for a CLI token to be issued to it
     cli_token_requested_at: datetime | None = Field(default=None)
     # Relationships
-    user: User = Relationship(back_populates="operators")
-    workspaces: list["OperatorWorkspace"] = Relationship(
-        back_populates="operator", cascade_delete=True
+    user: User = Relationship(back_populates="machines")
+    workspaces: list["MachineWorkspace"] = Relationship(
+        back_populates="machine", cascade_delete=True
     )
 
 
-class OperatorWorkspace(SQLModel, table=True):
-    """A project checkout on an Operator's machine, as of its latest
-    check-in.
-    """
+class MachineWorkspace(SQLModel, table=True):
+    """A project checkout on a machine, as of its latest check-in."""
 
     __table_args__ = (
         sqlalchemy.UniqueConstraint(
-            "operator_id", "path", name="uq_operatorworkspace_operator_path"
+            "machine_id", "path", name="uq_machineworkspace_machine_path"
         ),
         sqlalchemy.Index(
-            "ix_operatorworkspace_project", "owner_name", "project_name"
+            "ix_machineworkspace_project", "owner_name", "project_name"
         ),
     )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    operator_id: uuid.UUID = Field(
-        foreign_key="operator.id", index=True, ondelete="CASCADE"
+    machine_id: uuid.UUID = Field(
+        foreign_key="machine.id", index=True, ondelete="CASCADE"
     )
     path: str = Field(max_length=4096)
     # "personal" checkouts, or "managed" ones Calkit uses to run stages
     kind: str = Field(max_length=16)
-    # The project, lowercased for matching, if the Operator could tell
+    # The project, lowercased for matching, if the machine could tell
     owner_name: str | None = Field(default=None, max_length=255)
     project_name: str | None = Field(default=None, max_length=255)
     branch: str | None = Field(default=None, max_length=256)
@@ -718,7 +716,7 @@ class OperatorWorkspace(SQLModel, table=True):
     # Whether a pipeline run held DVC's lock at the check-in
     running: bool = False
     # Which stages were running and since when, and how the latest run
-    # ended, as the Operator reported them
+    # ended, as the machine reported them
     run_state: dict = Field(
         default_factory=dict,
         sa_column=sqlalchemy.Column(
@@ -727,7 +725,7 @@ class OperatorWorkspace(SQLModel, table=True):
     )
     updated: datetime = Field(default_factory=utcnow)
     # Relationships
-    operator: Operator = Relationship(back_populates="workspaces")
+    machine: Machine = Relationship(back_populates="workspaces")
 
 
 class DeviceAuth(SQLModel, table=True):

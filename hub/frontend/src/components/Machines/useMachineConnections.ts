@@ -1,47 +1,47 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { OperatorConnection, type SessionInfo } from "./connection"
+import { MachineConnection, type SessionInfo } from "./connection"
 
-// A page's connections to Operators through the relay, one each, open
+// A page's connections to machines through the relay, one each, open
 // while they're online and closed when the page goes, and the sessions on
 // each. refetchOnline updates the list of online ones, which is called more
-// often while a connection is lost, so it's back soon after its Operator is.
-export default function useOperatorConnections(
+// often while a connection is lost, so it's back soon after its machine is.
+export default function useMachineConnections(
   online: string[],
   refetchOnline?: () => void,
 ) {
-  const connections = useRef(new Map<string, OperatorConnection>())
+  const connections = useRef(new Map<string, MachineConnection>())
   const [, setVersion] = useState(0)
   const rerender = useCallback(() => setVersion((v) => v + 1), [])
-  // Listed over the relay, so undefined until an Operator answers
+  // Listed over the relay, so undefined until a machine answers
   const [sessions, setSessions] = useState<Record<string, SessionInfo[]>>({})
-  // Stable while the set of Operators is, however the list was built
+  // Stable while the set of machines is, however the list was built
   const onlineKey = [...new Set(online)].sort().join(",")
-  const onlineOperators = useMemo(
+  const onlineMachines = useMemo(
     () => (onlineKey ? onlineKey.split(",") : []),
     [onlineKey],
   )
-  // Any Operator's, which only connects while it's online
+  // Any machine's, which only connects while it's online
   const getConnection = useCallback(
-    (operatorId: string) => {
-      let conn = connections.current.get(operatorId)
+    (machineId: string) => {
+      let conn = connections.current.get(machineId)
       if (!conn) {
-        conn = new OperatorConnection(operatorId)
+        conn = new MachineConnection(machineId)
         conn.statusListeners.add(rerender)
-        connections.current.set(operatorId, conn)
-        if (onlineOperators.includes(operatorId)) conn.open()
+        connections.current.set(machineId, conn)
+        if (onlineMachines.includes(machineId)) conn.open()
       }
       return conn
     },
-    [rerender, onlineOperators],
+    [rerender, onlineMachines],
   )
   useEffect(() => {
-    for (const operatorId of onlineOperators) getConnection(operatorId).open()
+    for (const machineId of onlineMachines) getConnection(machineId).open()
     // Gone offline, so asking for relay tokens would only be refused
-    for (const [operatorId, conn] of connections.current) {
-      if (!onlineOperators.includes(operatorId)) conn.close()
+    for (const [machineId, conn] of connections.current) {
+      if (!onlineMachines.includes(machineId)) conn.close()
     }
-  }, [onlineOperators, getConnection])
+  }, [onlineMachines, getConnection])
   useEffect(() => {
     const conns = connections.current
     return () => {
@@ -51,10 +51,10 @@ export default function useOperatorConnections(
   }, [])
   const refreshSessions = useCallback(async () => {
     const next: Record<string, SessionInfo[]> = {}
-    for (const [operatorId, conn] of connections.current) {
+    for (const [machineId, conn] of connections.current) {
       if (!conn.connected) continue
       try {
-        next[operatorId] = (await conn.request("sessions.list")).sessions
+        next[machineId] = (await conn.request("sessions.list")).sessions
       } catch {
         // Shown as disconnected instead
       }
@@ -62,11 +62,11 @@ export default function useOperatorConnections(
     setSessions(next)
   }, [])
   useEffect(() => {
-    // Sessions are per Operator, so refresh when the set of them changes
-    if (onlineOperators.length) refreshSessions()
+    // Sessions are per machine, so refresh when the set of them changes
+    if (onlineMachines.length) refreshSessions()
     const interval = window.setInterval(refreshSessions, 5000)
     return () => window.clearInterval(interval)
-  }, [refreshSessions, onlineOperators])
+  }, [refreshSessions, onlineMachines])
   const lost = [...connections.current.values()].some(
     (c) => c.wasConnected && !c.connected,
   )
@@ -88,7 +88,7 @@ export default function useOperatorConnections(
   return {
     connections: connections.current,
     getConnection,
-    onlineOperators,
+    onlineMachines,
     sessions,
     refreshSessions,
     secondFactorError,

@@ -1,4 +1,4 @@
-import { OperatorsService } from "../../client"
+import { MachinesService } from "../../client"
 
 export interface SessionInfo {
   id: string
@@ -10,11 +10,11 @@ export interface SessionInfo {
 type Listener = (msg: any) => void
 
 // Signed along with each message, so a signature means nothing elsewhere.
-// The Operator checks the same text (calkit/operator.py).
-export const MESSAGE_SIGNATURE_CONTEXT = "calkit-operator-message"
-// Signed along with each of the Operator's replies, as is the ID of the
+// The link checks the same text (calkit/hub_link.py).
+export const MESSAGE_SIGNATURE_CONTEXT = "calkit-machine-message"
+// Signed along with each of the link's replies, as is the ID of the
 // grant the channel was opened with, so a reply is good on that one only
-export const REPLY_SIGNATURE_CONTEXT = "calkit-operator-reply"
+export const REPLY_SIGNATURE_CONTEXT = "calkit-machine-reply"
 
 export function signedText(seq: number, body: string): string {
   return `${MESSAGE_SIGNATURE_CONTEXT}\n${seq}\n${body}`
@@ -30,7 +30,7 @@ function toBase64Url(bytes: ArrayBuffer): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
 
-// A message as the Operator takes it: its JSON text, signed as sent with
+// A message as the link takes it: its JSON text, signed as sent with
 // this connection's key, right after the last one, so the relay can
 // neither forge, replay, nor drop one
 export async function signMessage(
@@ -46,8 +46,8 @@ export async function signMessage(
   return { seq, body, sig: toBase64Url(sig) }
 }
 
-// The Operator's public key, as the API gives it over HTTPS, never the relay
-export function importOperatorKey(jwk: {
+// The machine's public key, as the API gives it over HTTPS, never the relay
+export function importMachineKey(jwk: {
   x: string
   y: string
 }): Promise<CryptoKey> {
@@ -60,7 +60,7 @@ export function importOperatorKey(jwk: {
   )
 }
 
-// A frame from the relay, opened if the Operator signed it for this channel
+// A frame from the relay, opened if the link signed it for this channel
 // right after the last one, else refused, since the relay could have
 // forged, replayed, reordered, or dropped something
 export async function openReply(
@@ -98,7 +98,7 @@ export async function openReply(
   return msg
 }
 
-// One WebSocket's channel to the Operator: the keys each end signs with,
+// One WebSocket's channel to the link: the keys each end signs with,
 // and how far each has got
 interface Channel {
   ws: WebSocket
@@ -106,7 +106,7 @@ interface Channel {
   seq: number
   // Signing is asynchronous, so messages queue to keep their order
   outbound: Promise<void>
-  operatorKey: CryptoKey
+  machineKey: CryptoKey
   grantId: string
   replySeq: number
   // As is checking replies
@@ -130,14 +130,14 @@ const UNTIMED_REQUESTS = new Set([
   "workspace.new",
   "workspaces.clone",
 ])
-// How long the Operator has to accept the channel once the relay has it
+// How long the link has to accept the channel once the relay has it
 const READY_TIMEOUT_MS = 20 * 1000
 
-// One browser connection to an Operator through the relay, opened while
-// the Operator is online. See docs/dev/operator-protocol.md for the
+// One browser connection to a machine through the relay, opened while
+// the machine is online. See docs/dev/hub-link-protocol.md for the
 // messages.
-export class OperatorConnection {
-  operatorId: string
+export class MachineConnection {
+  machineId: string
   channel: Channel | null = null
   // Bumped on each attempt to connect, so a stale one gives up
   attempt = 0
@@ -148,7 +148,7 @@ export class OperatorConnection {
   >()
   sessionListeners = new Map<string, Set<Listener>>()
   statusListeners = new Set<() => void>()
-  // Only once the Operator has accepted the channel, in a signed reply
+  // Only once the link has accepted the channel, in a signed reply
   connected = false
   // Connected at some point since the page opened
   wasConnected = false
@@ -158,8 +158,8 @@ export class OperatorConnection {
   retryDelay = 1000
   retryTimer: ReturnType<typeof setTimeout> | undefined = undefined
 
-  constructor(operatorId: string) {
-    this.operatorId = operatorId
+  constructor(machineId: string) {
+    this.machineId = machineId
   }
 
   open() {
@@ -176,7 +176,7 @@ export class OperatorConnection {
     let token: string
     try {
       // A key for this connection only, which can't leave the browser. Its
-      // public half goes in the grant the Operator checks, so the relay
+      // public half goes in the grant the link checks, so the relay
       // carrying the grant can't use it.
       const keys = await crypto.subtle.generateKey(
         { name: "ECDSA", namedCurve: "P-256" },
@@ -184,9 +184,9 @@ export class OperatorConnection {
         ["sign", "verify"],
       )
       const jwk = await crypto.subtle.exportKey("jwk", keys.publicKey)
-      const resp = await OperatorsService.postOperatorRelayToken(
+      const resp = await MachinesService.postMachineRelayToken(
         {
-          operator_id: this.operatorId,
+          machine_id: this.machineId,
           relayTokenReq: {
             public_key: {
               kty: "EC",
@@ -200,11 +200,11 @@ export class OperatorConnection {
         { withCredentials: true },
       )
       // Closed while the token was on its way, e.g., by leaving the page,
-      // so it mustn't open a channel that would keep the Operator awake
+      // so it mustn't open a channel that would keep the machine awake
       if (this.closed || attempt !== this.attempt) return
-      const { relay_url, operator_public_key, grant_id } = resp.data
+      const { relay_url, machine_public_key, grant_id } = resp.data
       token = resp.data.token
-      const operatorKey = await importOperatorKey(operator_public_key)
+      const machineKey = await importMachineKey(machine_public_key)
       if (this.closed || attempt !== this.attempt) return
       const ws = new WebSocket(`${relay_url}/browser`)
       channel = {
@@ -212,7 +212,7 @@ export class OperatorConnection {
         key: keys.privateKey,
         seq: 0,
         outbound: Promise.resolve(),
-        operatorKey,
+        machineKey,
         grantId: grant_id,
         replySeq: 0,
         inbound: Promise.resolve(),
@@ -244,7 +244,7 @@ export class OperatorConnection {
     const { ws } = channel
     const isCurrent = () => this.channel === channel
     // Sent in a message rather than the URL to stay out of logs, and the
-    // channel isn't used until the Operator says it's ready
+    // channel isn't used until the link says it's ready
     let readyTimer: ReturnType<typeof setTimeout> | undefined
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "auth", token }))
@@ -259,13 +259,13 @@ export class OperatorConnection {
         let msg: Record<string, any>
         try {
           msg = await openReply(
-            channel.operatorKey,
+            channel.machineKey,
             channel.grantId,
             channel.replySeq,
             event.data,
           )
         } catch (e) {
-          console.warn("Dropping Operator connection:", e)
+          console.warn("Dropping machine connection:", e)
           this.channel = null
           ws.close()
           this.disconnected()
@@ -303,7 +303,7 @@ export class OperatorConnection {
 
   rejectPending() {
     for (const p of this.pending.values()) {
-      p.reject(new Error("Disconnected from Operator"))
+      p.reject(new Error("Disconnected from machine"))
     }
     this.pending.clear()
   }
@@ -354,7 +354,7 @@ export class OperatorConnection {
           channel.ws.send(JSON.stringify(signed))
         }
       })
-      // The Operator takes each message only right after the last, so
+      // The link takes each message only right after the last, so
       // one that can't be signed means starting over
       .catch(() => channel.ws.close())
   }
@@ -363,14 +363,14 @@ export class OperatorConnection {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       if (!this.connected) {
-        reject(new Error("Not connected to Operator"))
+        reject(new Error("Not connected to machine"))
         return
       }
       const timer = UNTIMED_REQUESTS.has(type)
         ? undefined
         : setTimeout(() => {
             this.pending.delete(id)
-            reject(new Error("The Operator didn't answer in time"))
+            reject(new Error("The machine didn't answer in time"))
           }, REQUEST_TIMEOUT_MS)
       this.pending.set(id, {
         resolve: (r) => {
@@ -406,13 +406,13 @@ export class OperatorConnection {
     const start = Date.now()
     while (!this.connected) {
       if (Date.now() - start > timeoutMs) {
-        throw new Error("Could not connect to Operator")
+        throw new Error("Could not connect to machine")
       }
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
   }
 
-  // Until opened again, e.g., when the Operator comes back online
+  // Until opened again, e.g., when the machine comes back online
   close() {
     this.closed = true
     this.attempt += 1
@@ -429,6 +429,6 @@ export class OperatorConnection {
 }
 
 export interface Pane {
-  operatorId: string
+  machineId: string
   session: string
 }

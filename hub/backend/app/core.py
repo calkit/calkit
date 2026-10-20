@@ -130,7 +130,7 @@ INVALID_ACCOUNT_NAMES = [
     "checks",
     "cloud",
     "clouds",
-    # The user's own Operators, workspaces, and sessions
+    # The user's own machines, workspaces, and sessions
     "compute",
     "create",
     "data",
@@ -151,13 +151,10 @@ INVALID_ACCOUNT_NAMES = [
     "hubs",
     "latex",
     "login",
-    # Kept for pages about the machines Operators run on
+    # Kept for pages about the machines users link to the hub
     "machines",
     "new",
     "notifications",
-    # Kept for pages about Operators
-    "operators",
-    "ops",
     "organizations",
     "orgs",
     "pipeline",
@@ -190,7 +187,7 @@ INVALID_ACCOUNT_NAMES = [
     "user",
     "users",
     "workflows",
-    # Kept for pages about Operators' workspaces
+    # Kept for pages about machines' workspaces
     "workspaces",
 ]
 

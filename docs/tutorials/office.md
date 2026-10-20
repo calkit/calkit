@@ -109,25 +109,25 @@ Creating the project on calkit.io.
 ///
 
 Next, we'll do the only command line thing in this whole process
-and install the Calkit Operator.
+and link our computer to the Calkit Hub.
 This will allow us to connect to the web app
 and enable us to modify the project on our local machine.
-To install Calkit along with the Operator,
+To install Calkit and link the computer,
 open up a command prompt and run:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm install-ps1.calkit.org))) --operator"
+powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm install-ps1.calkit.org))) --link"
 ```
 
 Or on macOS or Linux:
 
 ```sh
-curl -LsSf install.calkit.org | sh -s -- --operator
+curl -LsSf install.calkit.org | sh -s -- --link
 ```
 
-If Calkit is already installed, run `calkit operator install` instead.
+If Calkit is already installed, run `calkit hub link` instead.
 
-The Operator starts on its own from now on,
+The link starts on its own from now on,
 so we won't need to do this again.
 If we navigate to our project page on [calkit.io](https://calkit.io),
 then go to the Workspaces page, we see that the repo has never been

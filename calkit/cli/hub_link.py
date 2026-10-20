@@ -1,4 +1,4 @@
-"""CLI for managing this machine's Operator."""
+"""CLI for linking this machine to hubs."""
 
 from __future__ import annotations
 
@@ -9,67 +9,68 @@ from typing_extensions import Annotated
 
 from calkit.cli import AliasGroup, raise_error, warn
 
-operator_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+link_app = typer.Typer(cls=AliasGroup, invoke_without_command=True)
 
 HubOption = Annotated[
     str | None,
     typer.Option(
         "--hub",
         help=(
-            "URL of the hub the Operator is for, e.g., https://calkit.io; "
+            "URL of the hub the link is for, e.g., https://calkit.io; "
             "a machine can have one per hub. Defaults to the only one here, "
-            "or for install, to your default hub."
+            "or for linking, to your default hub."
         ),
     ),
 ]
 
 
-def _select_hub(hub: str | None, installing: bool = False) -> None:
-    """Choose which hub's Operator a command acts on."""
-    from calkit import operator
+def _select_hub(hub: str | None, linking: bool = False) -> None:
+    """Choose which hub's link a command acts on."""
+    from calkit import hub_link
 
     if hub is not None:
         if hub in ["test", "local", "staging", "production"]:
             raise_error("--hub takes a hub URL, e.g., https://calkit.io")
-        operator.select_hub(hub)
+        hub_link.select_hub(hub)
         return
-    hubs = [] if installing else operator.list_configured_hubs()
+    hubs = [] if linking else hub_link.list_configured_hubs()
     if len(hubs) > 1:
         raise_error(
-            "This machine has Operators for more than one hub ("
+            "This machine is linked to more than one hub ("
             + ", ".join(hubs)
             + "); choose one with --hub"
         )
-    operator.select_hub(hubs[0] if hubs else None)
+    hub_link.select_hub(hubs[0] if hubs else None)
 
 
 def _each_hub(hub: str | None) -> list[str | None]:
     """The hubs a command acts on: the one asked for, else every one this
-    machine has an Operator for.
+    machine is linked to.
     """
-    from calkit import operator
+    from calkit import hub_link
 
     if hub is not None:
         return [hub]
     # None, for the user's own hub, so a machine with none says so
-    return list(operator.list_configured_hubs()) or [None]
+    return list(hub_link.list_configured_hubs()) or [None]
 
 
 def _require_config() -> dict:
-    from calkit import operator
+    from calkit import hub_link
 
-    cfg = operator.load_config()
+    cfg = hub_link.load_config()
     if cfg is None:
         raise_error(
-            "No Operator for this hub is installed on this machine; "
-            "run 'calkit operator install' first"
+            "This machine isn't linked to this hub; run 'calkit hub link' "
+            "first"
         )
     assert cfg is not None
     return cfg
 
 
-@operator_app.command(name="install")
-def install(
+@link_app.callback()
+def link(
+    ctx: typer.Context,
     hub: HubOption = None,
     login: Annotated[
         bool,
@@ -96,7 +97,7 @@ def install(
         typer.Option(
             "--ssh",
             help=(
-                "Install it on another machine over SSH, e.g., "
+                "Link another machine over SSH, e.g., "
                 "'user@cluster.example.edu' or a host from ~/.ssh/config, "
                 "installing Calkit there if needed."
             ),
@@ -107,17 +108,14 @@ def install(
         typer.Option(
             "--no-service",
             help=(
-                "Only register it, e.g., to run it with 'calkit operator "
+                "Only register it, e.g., to run it with 'calkit hub link "
                 "start' inside tmux on a cluster."
             ),
         ),
     ] = False,
 ) -> None:
-    """Register this machine as an Operator and run it as a service.
-
-    Also available as 'calkit install operator'.
-    """
-    from calkit import operator
+    """Link this machine to a hub and run the link as a service."""
+    from calkit import hub_link
     from calkit.cli import warn
 
     def explain(e: Exception) -> str:
@@ -132,18 +130,26 @@ def install(
             )
         return str(e)
 
+    if ctx.invoked_subcommand is not None:
+        # Otherwise they'd be ignored, e.g., --hub before 'stop'
+        if hub is not None or login or cron or ssh is not None or no_service:
+            raise_error(
+                "Put options after the subcommand, e.g., "
+                "'calkit hub link status --hub URL'"
+            )
+        return
     # Sessions would be root shells, and it asks for sudo when it needs it
     try:
-        operator.refuse_root()
-        _select_hub(hub, installing=True)
-        hub_url = operator.use_own_hub()
+        hub_link.refuse_root()
+        _select_hub(hub, linking=True)
+        hub_url = hub_link.use_own_hub()
     except ValueError as e:
         raise_error(str(e))
     if ssh is not None:
         from calkit.core import is_tty
 
         try:
-            remote = operator.install_remote(
+            remote = hub_link.install_remote(
                 ssh,
                 cron=cron,
                 no_service=no_service,
@@ -151,71 +157,67 @@ def install(
                 interactive=is_tty(),
             )
         except Exception as e:
-            raise_error(
-                f"Failed to install the Operator on {ssh}: {explain(e)}"
-            )
-        typer.echo(f"✅ Installed Operator '{remote['name']}' on {ssh}")
+            raise_error(f"Failed to link {ssh}: {explain(e)}")
+        typer.echo(f"✅ Linked machine '{remote['name']}' on {ssh}")
         return
-    cfg = operator.load_config()
+    cfg = hub_link.load_config()
     # One whose key the hub refused can't connect, so it's revoked, in case
     # someone else holds its token, and registered again
     if cfg is not None and cfg.get("key_rejected"):
         typer.echo(
-            f"The hub refused Operator '{cfg.get('name')}', so it will be "
+            f"The hub refused machine '{cfg.get('name')}', so it will be "
             "registered again"
         )
         try:
-            operator.revoke_self(cfg)
+            hub_link.revoke_self(cfg)
         except Exception as e:
             warn(f"Couldn't revoke '{cfg.get('name')}' on the hub ({e})")
         cfg = None
-    # A revoked Operator, or one from another hub, would exit at its first
+    # A revoked machine, or one from another hub, would exit at its first
     # check-in, so it's registered again
-    if cfg is not None and not operator.is_registered(cfg):
-        typer.echo(f"Operator '{cfg.get('name')}' is no longer registered")
+    if cfg is not None and not hub_link.is_registered(cfg):
+        typer.echo(f"Machine '{cfg.get('name')}' is no longer registered")
         cfg = None
     if cfg is None:
         typer.echo(f"Registering this machine with {hub_url}")
         try:
-            cfg = operator.register()
+            cfg = hub_link.register()
         except Exception as e:
             raise_error(f"Failed to register this machine: {explain(e)}")
-        typer.echo(f"✅ Registered Operator '{cfg['name']}'")
+        typer.echo(f"✅ Registered machine '{cfg['name']}'")
     else:
-        typer.echo(f"Operator '{cfg['name']}' is already registered")
+        typer.echo(f"Machine '{cfg['name']}' is already registered")
     # Whatever ran it before is replaced, e.g., a service when switching to
-    # cron mode, or one installed before Operators were kept per hub, so
-    # the two don't both run it
-    operator.uninstall_service()
-    operator.uninstall_service(key="")
+    # cron mode, so the two don't both run it
+    hub_link.uninstall_service()
     if no_service:
-        typer.echo("Run 'calkit operator start' to connect it")
+        typer.echo("Run 'calkit hub link start' to connect it")
         return
     if cron:
         try:
-            operator.install_cron()
+            hub_link.install_cron()
         except NotImplementedError as e:
             raise_error(str(e))
         typer.echo(
-            "✅ Installed the Operator in cron mode. It checks in every "
+            "✅ Installed the link in cron mode. It checks in every "
             "5 minutes and connects when you open a workspace from the hub."
         )
         return
     try:
-        notes = operator.install_service(login=login)
+        notes = hub_link.install_service(login=login)
     except NotImplementedError as e:
         raise_error(str(e))
     from calkit.hub import get_hub_url
 
     typer.echo(
-        "✅ Installed the Operator. Its workspaces will show at "
+        "✅ Linked this machine. Its workspaces will show at "
         f"{get_hub_url()}/workspaces."
     )
     for note in notes:
         warn(note)
 
 
-@operator_app.command(name="start")
+@link_app.command(name="start")
 def start(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Log in more detail.")
@@ -227,19 +229,19 @@ def start(
     # Set for a service whose manager would otherwise open the log as root
     log_file: Annotated[bool, typer.Option("--log-file", hidden=True)] = False,
 ) -> None:
-    """Run the Operator in the foreground, e.g., inside tmux."""
+    """Run the link in the foreground, e.g., inside tmux."""
     import logging
 
-    from calkit import operator
+    from calkit import hub_link
 
     try:
-        operator.refuse_root()
+        hub_link.refuse_root()
     except ValueError as e:
         raise_error(str(e))
     _select_hub(hub)
     cfg = _require_config()
     if log_file:
-        operator.log_to_file()
+        hub_link.log_to_file()
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
@@ -247,27 +249,27 @@ def start(
     if mode not in ("foreground", "service", "cron"):
         raise_error(f"Unknown mode '{mode}'")
     if mode == "foreground":
-        typer.echo(f"Starting Operator '{cfg['name']}' (Ctrl+C to stop)")
+        typer.echo(f"Starting link for '{cfg['name']}' (Ctrl+C to stop)")
     try:
-        if not operator.run(cfg, mode=mode):
+        if not hub_link.run(cfg, mode=mode):
             # Cron starts one every few minutes, so this is routine there
             if mode != "cron":
-                typer.echo("Another Operator is already running here")
-    except operator.OperatorKeyRejected:
+                typer.echo("Another link to this hub is already running here")
+    except hub_link.LinkKeyRejected:
         # Already logged, and a clean exit, so a service manager doesn't
         # restart it
         pass
-    except operator.OperatorRevoked:
+    except hub_link.LinkRevoked:
         # A clean exit, so a service manager doesn't restart it
-        typer.echo("This Operator has been revoked on the hub; stopping")
+        typer.echo("This machine has been revoked on the hub; stopping")
     except KeyboardInterrupt:
         typer.echo("Stopped")
 
 
-@operator_app.command(name="status")
+@link_app.command(name="status")
 def status(hub: HubOption = None) -> None:
-    """Show this machine's Operators and their workspaces."""
-    from calkit import operator
+    """Show this machine's links and their workspaces."""
+    from calkit import hub_link
 
     for i, hub_url in enumerate(_each_hub(hub)):
         if i:
@@ -275,99 +277,99 @@ def status(hub: HubOption = None) -> None:
         _select_hub(hub_url)
         cfg = _require_config()
         typer.echo(f"Name: {cfg['name']}")
-        typer.echo(f"Hub: {operator.get_hub_url()}")
-        service = operator.get_service_status()
+        typer.echo(f"Hub: {hub_link.get_hub_url()}")
+        service = hub_link.get_service_status()
         typer.echo(f"Installed as: {service or 'nothing; run it with start'}")
-        pid = operator.get_running_pid()
+        pid = hub_link.get_running_pid()
         typer.echo(f"Running: {f'yes (PID {pid})' if pid else 'no'}")
         typer.echo("Workspaces:")
-        for ws in operator.discover_workspaces(cfg):
+        for ws in hub_link.discover_workspaces(cfg):
             project = ws.get("project") or "unknown project"
             typer.echo(f"  {ws['path']} ({ws['kind']}, {project})")
 
 
-@operator_app.command(name="stop")
+@link_app.command(name="stop")
 def stop(hub: HubOption = None) -> None:
-    """Stop the Operator's service until it's restarted, for every hub
+    """Stop the link's service until it's restarted, for every hub
     unless one is given.
     """
-    from calkit import operator
+    from calkit import hub_link
 
     hubs = _each_hub(hub)
     failed = False
     for hub_url in hubs:
         _select_hub(hub_url)
         _require_config()
-        name = f" for {operator.get_hub_url()}" if len(hubs) > 1 else ""
+        name = f" for {hub_link.get_hub_url()}" if len(hubs) > 1 else ""
         try:
-            operator.set_service_running(False)
+            hub_link.set_service_running(False)
         except RuntimeError as e:
-            warn(f"Couldn't stop the Operator{name}: {e}")
+            warn(f"Couldn't stop the link{name}: {e}")
             failed = True
             continue
-        typer.echo(f"Stopped the Operator{name}")
+        typer.echo(f"Stopped the link{name}")
     if failed:
         raise typer.Exit(1)
 
 
-@operator_app.command(name="restart")
+@link_app.command(name="restart")
 def restart(hub: HubOption = None) -> None:
-    """Restart the Operator's service, e.g., after updating Calkit, for
+    """Restart the link's service, e.g., after updating Calkit, for
     every hub unless one is given.
     """
     import subprocess
 
-    from calkit import operator
+    from calkit import hub_link
 
     hubs = _each_hub(hub)
     failed = False
     for hub_url in hubs:
         _select_hub(hub_url)
         _require_config()
-        name = f" for {operator.get_hub_url()}" if len(hubs) > 1 else ""
+        name = f" for {hub_link.get_hub_url()}" if len(hubs) > 1 else ""
         try:
-            operator.restart_service()
+            hub_link.restart_service()
         except (RuntimeError, subprocess.CalledProcessError) as e:
-            warn(f"Couldn't restart the Operator{name}: {e}")
+            warn(f"Couldn't restart the link{name}: {e}")
             failed = True
             continue
-        typer.echo(f"Restarted the Operator{name}")
+        typer.echo(f"Restarted the link{name}")
     if failed:
         raise typer.Exit(1)
 
 
-@operator_app.command(name="logs")
+@link_app.command(name="logs")
 def logs(
     follow: Annotated[
         bool, typer.Option("--follow", "-f", help="Keep printing new lines.")
     ] = False,
     hub: HubOption = None,
 ) -> None:
-    """Show the Operator service's logs."""
+    """Show the link service's logs."""
     import platform
     import subprocess
 
-    from calkit import operator
+    from calkit import hub_link
 
     _select_hub(hub)
     _require_config()
     # Only a systemd service logs to the journal; cron and the others log
     # to a file
     if platform.system() == "Linux" and os.path.isfile(
-        operator._systemd_unit_path()
+        hub_link._systemd_unit_path()
     ):
-        cmd = ["journalctl", "--user", "-u", operator.systemd_unit()]
+        cmd = ["journalctl", "--user", "-u", hub_link.systemd_unit()]
         cmd += ["-f"] if follow else ["-n", "100", "--no-pager"]
     else:
         cmd = ["tail", "-n", "100"] + (["-f"] if follow else [])
-        cmd.append(operator.get_log_path())
+        cmd.append(hub_link.get_log_path())
     try:
         subprocess.run(cmd)
     except KeyboardInterrupt:
         pass
 
 
-@operator_app.command(name="add-workspace")
+@link_app.command(name="add-workspace")
 def add_workspace(
     path: Annotated[
         str, typer.Argument(help="Path to a Calkit project.")
@@ -375,7 +377,7 @@ def add_workspace(
     hub: HubOption = None,
 ) -> None:
     """Add a project outside ~/calkit and ~/dev as a workspace."""
-    from calkit import operator
+    from calkit import hub_link
 
     _select_hub(hub)
     cfg = _require_config()
@@ -387,25 +389,24 @@ def add_workspace(
         typer.echo(f"{path} is already a workspace")
         return
     workspaces.append(path)
-    operator.save_config(cfg)
+    hub_link.save_config(cfg)
     typer.echo(f"Added {path}; it will show on the hub at the next check-in")
 
 
-@operator_app.command(name="uninstall")
-def uninstall(hub: HubOption = None) -> None:
-    """Revoke this machine's Operator on the hub and remove it here."""
-    from calkit import operator
+def unlink(hub: HubOption = None) -> None:
+    """Revoke this machine on the hub and remove its link here."""
+    from calkit import hub_link
 
     _select_hub(hub)
     cfg = _require_config()
-    operator.uninstall_service()
+    hub_link.uninstall_service()
     # With its own token, so it works however you're signed in here
     try:
-        operator.revoke_self(cfg)
+        hub_link.revoke_self(cfg)
     except Exception as e:
         typer.echo(
             f"Could not revoke '{cfg['name']}' on the hub ({e}); "
             "revoke it from your hub settings"
         )
-    os.remove(operator.get_config_path())
-    typer.echo(f"Uninstalled Operator '{cfg['name']}'")
+    os.remove(hub_link.get_config_path())
+    typer.echo(f"Unlinked machine '{cfg['name']}'")

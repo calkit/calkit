@@ -42,19 +42,19 @@ import { FiPlus } from "react-icons/fi"
 import { z } from "zod"
 
 import {
-  type OperatorOut,
-  OperatorsService,
+  type MachineOut,
+  MachinesService,
   type Workspace,
 } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Tooltip from "../../../../../components/Common/Tooltip"
-import SecondFactorPrompt from "../../../../../components/Operators/SecondFactorPrompt"
-import TerminalPane from "../../../../../components/Operators/TerminalPane"
+import SecondFactorPrompt from "../../../../../components/Machines/SecondFactorPrompt"
+import TerminalPane from "../../../../../components/Machines/TerminalPane"
 import type {
-  OperatorConnection,
+  MachineConnection,
   Pane,
-} from "../../../../../components/Operators/connection"
-import useOperatorConnections from "../../../../../components/Operators/useOperatorConnections"
+} from "../../../../../components/Machines/connection"
+import useMachineConnections from "../../../../../components/Machines/useMachineConnections"
 import WorkspaceBadges from "../../../../../components/Workspace/WorkspaceBadges"
 import WorkspacePanel, {
   type Modal as WorkspaceModal,
@@ -64,16 +64,16 @@ import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject from "../../../../../hooks/useProject"
 
 const workspacesSearchSchema = z.object({
-  // Open terminal panes, as "<operator ID>:<session ID>", so a link reopens
+  // Open terminal panes, as "<machine ID>:<session ID>", so a link reopens
   // them
   panes: z.array(z.string()).optional(),
-  // The workspace whose details are shown, as "<operator ID>:<path>"
+  // The workspace whose details are shown, as "<machine ID>:<path>"
   workspace: z.string().optional(),
   // An open modal for acting on that workspace
   modal: z.enum(["save", "discard", "new_stage", "new_workspace"]).optional(),
   // Which of its pipeline's stages are listed, if not all
   stages: z.enum(["not_up_to_date", "running"]).optional(),
-  // The Operator a workspace is being created on, by ID
+  // The machine a workspace is being created on, by ID
   create: z.string().optional(),
 })
 
@@ -141,48 +141,48 @@ function Workspaces() {
   })
   const showToast = useCustomToast()
   const project = useProject(accountName, projectName).projectRequest.data
-  // Operators in cron mode asked to connect, which do at their next check-in
+  // Machines in cron mode asked to connect, which do at their next check-in
   const [waking, setWaking] = useState<Set<string>>(new Set())
   const workspacesQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "workspaces"],
     queryFn: () =>
-      OperatorsService.getProjectWorkspaces({
+      MachinesService.getProjectWorkspaces({
         owner_name: accountName,
         project_name: projectName,
       }).then((r) => r.data),
-    // Faster while waiting for a woken Operator to show up
+    // Faster while waiting for a woken machine to show up
     refetchInterval: waking.size ? 10000 : 30000,
   })
   const workspaces = workspacesQuery.data ?? []
-  // Operators without this project, which a workspace can be created on
-  const operatorsQuery = useQuery({
-    queryKey: ["user", "operators"],
-    queryFn: () => OperatorsService.getOperators().then((r) => r.data),
+  // Machines without this project, which a workspace can be created on
+  const machinesQuery = useQuery({
+    queryKey: ["user", "machines"],
+    queryFn: () => MachinesService.getMachines().then((r) => r.data),
   })
-  const operators = operatorsQuery.data ?? []
-  const createTargets = operators.filter(
-    (op) =>
-      (op.is_online || op.is_asleep) &&
+  const machines = machinesQuery.data ?? []
+  const createTargets = machines.filter(
+    (machine) =>
+      (machine.is_online || machine.is_asleep) &&
       !workspaces.some(
-        (ws) => ws.operator_id === op.id && ws.kind === "personal",
+        (ws) => ws.machine_id === machine.id && ws.kind === "personal",
       ),
   )
   const creatingOn = createTargets.find(
-    (op) => op.is_online && String(op.id) === search.create,
+    (machine) => machine.is_online && String(machine.id) === search.create,
   )
-  // Connect to every online Operator with a workspace for this project, and
+  // Connect to every online machine with a workspace for this project, and
   // the one a workspace is being created on
   const {
     connections,
     getConnection,
-    onlineOperators,
+    onlineMachines,
     sessions,
     refreshSessions,
     secondFactorError,
     retryRefused,
-  } = useOperatorConnections(
+  } = useMachineConnections(
     [
-      ...workspaces.filter((w) => w.operator_online).map((w) => w.operator_id),
+      ...workspaces.filter((w) => w.machine_online).map((w) => w.machine_id),
       ...(creatingOn ? [String(creatingOn.id)] : []),
     ],
     workspacesQuery.refetch,
@@ -202,28 +202,28 @@ function Workspaces() {
     }
   }, [accountName, projectName, search.panes, search.workspace])
   const panes: Pane[] = (search.panes ?? []).map((p) => {
-    const [operatorId, session] = p.split(":")
-    return { operatorId, session }
+    const [machineId, session] = p.split(":")
+    return { machineId, session }
   })
   const setPanes = (next: Pane[]) =>
     navigate({
       search: (prev) => ({
         ...prev,
         panes: next.length
-          ? next.map((p) => `${p.operatorId}:${p.session}`)
+          ? next.map((p) => `${p.machineId}:${p.session}`)
           : undefined,
       }),
     })
-  const openPane = (operatorId: string, session: string) => {
+  const openPane = (machineId: string, session: string) => {
     if (!panes.some((p) => p.session === session)) {
-      setPanes([...panes, { operatorId, session }])
+      setPanes([...panes, { machineId, session }])
     }
   }
   const getLabel = (pane: Pane) =>
-    sessions[pane.operatorId]?.find((s) => s.id === pane.session)?.label ??
+    sessions[pane.machineId]?.find((s) => s.id === pane.session)?.label ??
     "shell"
   const newSession = async (ws: Workspace, command?: string) => {
-    const conn = getConnection(ws.operator_id)
+    const conn = getConnection(ws.machine_id)
     try {
       const { session } = await conn.request("sessions.open", {
         workspace: ws.path,
@@ -231,28 +231,28 @@ function Workspaces() {
         rows: 24,
         command,
       })
-      openPane(ws.operator_id, session)
+      openPane(ws.machine_id, session)
       refreshSessions()
     } catch (e: any) {
       showToast("Could not start a session", e.message, "error")
     }
   }
-  const wakeOperator = async (operatorId: string) => {
+  const wakeMachine = async (machineId: string) => {
     try {
-      await OperatorsService.postOperatorWake({ operator_id: operatorId })
-      setWaking((prev) => new Set(prev).add(operatorId))
+      await MachinesService.postMachineWake({ machine_id: machineId })
+      setWaking((prev) => new Set(prev).add(machineId))
     } catch (e: any) {
-      showToast("Could not wake Operator", e.message, "error")
+      showToast("Could not wake machine", e.message, "error")
     }
   }
-  // Stop waiting on Operators once they're online
+  // Stop waiting on machines once they're online
   useEffect(() => {
-    const online = new Set(onlineOperators)
+    const online = new Set(onlineMachines)
     if ([...waking].some((id) => online.has(id))) {
       setWaking(new Set([...waking].filter((id) => !online.has(id))))
     }
-  }, [onlineOperators, waking])
-  const workspaceKey = (ws: Workspace) => `${ws.operator_id}:${ws.path}`
+  }, [onlineMachines, waking])
+  const workspaceKey = (ws: Workspace) => `${ws.machine_id}:${ws.path}`
   const selected = workspaces.find(
     (ws) => workspaceKey(ws) === search.workspace,
   )
@@ -267,10 +267,10 @@ function Workspaces() {
     })
   const setModal = (modal: WorkspaceModal | undefined) =>
     navigate({ search: (prev) => ({ ...prev, modal }) })
-  const setCreate = (operatorId: string | undefined) =>
-    navigate({ search: (prev) => ({ ...prev, create: operatorId }) })
+  const setCreate = (machineId: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, create: machineId }) })
   const closePane = (pane: Pane, end: boolean) => {
-    const conn = connections.get(pane.operatorId)
+    const conn = connections.get(pane.machineId)
     if (conn) {
       conn.send({
         type: end ? "sessions.close" : "sessions.detach",
@@ -280,7 +280,7 @@ function Workspaces() {
     setPanes(panes.filter((p) => p.session !== pane.session))
     refreshSessions()
   }
-  if (workspacesQuery.isPending || operatorsQuery.isPending) {
+  if (workspacesQuery.isPending || machinesQuery.isPending) {
     return <LoadingSpinner />
   }
   return (
@@ -289,23 +289,23 @@ function Workspaces() {
         Workspaces
       </Heading>
       <SecondFactorPrompt error={secondFactorError} onVerified={retryRefused} />
-      {operators.length === 0 ? (
+      {machines.length === 0 ? (
         <Text mb={4}>
-          No Operators yet. Install the Calkit CLI and run{" "}
-          <Code>calkit operator install</Code> to install the Operator and
-          connect to a workspace.
+          No machines yet. Install the Calkit CLI and run{" "}
+          <Code>calkit hub link</Code> to link a machine and connect to a
+          workspace.
         </Text>
       ) : workspaces.length === 0 ? (
         <Text mb={4}>
           No workspaces for this project yet. Create one on a machine below, or
-          if it's already on one, run <Code>calkit operator add-workspace</Code>{" "}
+          if it's already on one, run <Code>calkit hub link add-workspace</Code>{" "}
           there.
         </Text>
       ) : (
         <Table size="sm" mb={6}>
           <Thead>
             <Tr>
-              <Th>Operator</Th>
+              <Th>Machine</Th>
               <Th>Path</Th>
               <Th>State</Th>
               <Th>Sessions</Th>
@@ -314,19 +314,19 @@ function Workspaces() {
           </Thead>
           <Tbody>
             {workspaces.map((ws) => {
-              const conn = connections.get(ws.operator_id)
-              const wsSessions = (sessions[ws.operator_id] ?? []).filter(
+              const conn = connections.get(ws.machine_id)
+              const wsSessions = (sessions[ws.machine_id] ?? []).filter(
                 (s) => s.workspace === ws.path,
               )
               // Listed over the relay once it connects, which takes a moment
               const sessionsLoading =
-                ws.operator_online &&
+                ws.machine_online &&
                 ws.kind === "personal" &&
-                ws.operator_platform !== "windows" &&
+                ws.machine_platform !== "windows" &&
                 !conn?.error &&
-                sessions[ws.operator_id] === undefined
+                sessions[ws.machine_id] === undefined
               return (
-                <Tr key={`${ws.operator_id}:${ws.path}`}>
+                <Tr key={`${ws.machine_id}:${ws.path}`}>
                   <Td>
                     <Flex align="center" gap={2}>
                       <Box
@@ -334,17 +334,17 @@ function Workspaces() {
                         h={2}
                         borderRadius="full"
                         bg={
-                          ws.operator_online
+                          ws.machine_online
                             ? "ui.success"
-                            : ws.operator_asleep
+                            : ws.machine_asleep
                               ? "yellow.400"
                               : "gray.400"
                         }
                       />
-                      {ws.operator_name}
-                      {ws.operator_asleep && (
+                      {ws.machine_name}
+                      {ws.machine_asleep && (
                         <Badge fontSize="2xs">
-                          {waking.has(ws.operator_id) ? "waking" : "asleep"}
+                          {waking.has(ws.machine_id) ? "waking" : "asleep"}
                         </Badge>
                       )}
                     </Flex>
@@ -377,7 +377,7 @@ function Workspaces() {
                           key={s.id}
                           size="xs"
                           variant="outline"
-                          onClick={() => openPane(ws.operator_id, s.id)}
+                          onClick={() => openPane(ws.machine_id, s.id)}
                         >
                           {s.label}
                         </Button>
@@ -385,25 +385,25 @@ function Workspaces() {
                     </Flex>
                   </Td>
                   <Td>
-                    {ws.kind === "personal" && ws.operator_asleep && (
+                    {ws.kind === "personal" && ws.machine_asleep && (
                       <Button
                         size="xs"
-                        isLoading={waking.has(ws.operator_id)}
+                        isLoading={waking.has(ws.machine_id)}
                         loadingText="Waking"
-                        onClick={() => wakeOperator(ws.operator_id)}
+                        onClick={() => wakeMachine(ws.machine_id)}
                       >
                         Wake
                       </Button>
                     )}
                     <Flex gap={1}>
                       {ws.kind === "personal" &&
-                        !ws.operator_asleep &&
-                        ws.operator_platform !== "windows" && (
+                        !ws.machine_asleep &&
+                        ws.machine_platform !== "windows" && (
                           <Tooltip
                             label={
                               secondFactorError
                                 ? "Enter a code from your authenticator app above first"
-                                : "Waiting for the Operator to connect"
+                                : "Waiting for the machine to connect"
                             }
                             isDisabled={!!conn?.connected}
                           >
@@ -420,7 +420,7 @@ function Workspaces() {
                             </span>
                           </Tooltip>
                         )}
-                      {ws.operator_online && (
+                      {ws.machine_online && (
                         <Button
                           size="xs"
                           variant={
@@ -448,29 +448,29 @@ function Workspaces() {
               ? "Create a workspace on"
               : "Create a workspace on another machine"}
           </Text>
-          {createTargets.map((op) => (
-            <Flex key={op.id} align="center" gap={2} mb={1}>
+          {createTargets.map((machine) => (
+            <Flex key={machine.id} align="center" gap={2} mb={1}>
               <Box
                 w={2}
                 h={2}
                 borderRadius="full"
-                bg={op.is_online ? "ui.success" : "yellow.400"}
+                bg={machine.is_online ? "ui.success" : "yellow.400"}
               />
-              <Text fontSize="sm">{op.name}</Text>
-              {op.is_online ? (
+              <Text fontSize="sm">{machine.name}</Text>
+              {machine.is_online ? (
                 <Button
                   size="xs"
                   leftIcon={<FiPlus />}
-                  onClick={() => setCreate(String(op.id))}
+                  onClick={() => setCreate(String(machine.id))}
                 >
                   Create workspace
                 </Button>
               ) : (
                 <Button
                   size="xs"
-                  isLoading={waking.has(String(op.id))}
+                  isLoading={waking.has(String(machine.id))}
                   loadingText="Waking"
-                  onClick={() => wakeOperator(String(op.id))}
+                  onClick={() => wakeMachine(String(machine.id))}
                 >
                   Wake
                 </Button>
@@ -481,13 +481,13 @@ function Workspaces() {
       )}
       {creatingOn && project?.git_repo_url && (
         <CreateWorkspace
-          operator={creatingOn}
+          machine={creatingOn}
           conn={getConnection(String(creatingOn.id))}
           gitRepoUrl={project.git_repo_url}
           defaultPath={`~/calkit/${projectName}`}
           onClose={() => setCreate(undefined)}
           onCreated={() => {
-            operatorsQuery.refetch()
+            machinesQuery.refetch()
             workspacesQuery.refetch()
           }}
         />
@@ -508,8 +508,8 @@ function Workspaces() {
             <WorkspacePanel
               key={workspaceKey(selected)}
               ws={selected}
-              conn={getConnection(selected.operator_id)}
-              connected={getConnection(selected.operator_id).connected}
+              conn={getConnection(selected.machine_id)}
+              connected={getConnection(selected.machine_id).connected}
               modal={search.modal}
               stageFilter={search.stages}
               setStageFilter={(stages) =>
@@ -532,7 +532,7 @@ function Workspaces() {
         {panes.length > 0 && (
           <Box minW={0}>
             {panes.map((pane) => {
-              const conn = getConnection(pane.operatorId)
+              const conn = getConnection(pane.machineId)
               return (
                 <TerminalPane
                   key={pane.session}
@@ -552,7 +552,7 @@ function Workspaces() {
   )
 }
 
-// What the Operator found the machine still needs before cloning, from
+// What the link found the machine still needs before cloning, from
 // 'machine.check'
 type MachineSetup = {
   git_name: string | null
@@ -561,18 +561,18 @@ type MachineSetup = {
   token: boolean
 }
 
-// Creates a workspace for the project on an Operator's machine, setting up
+// Creates a workspace for the project on a machine, setting up
 // what it needs first, e.g., Git's name and email
 function CreateWorkspace({
-  operator,
+  machine,
   conn,
   gitRepoUrl,
   defaultPath,
   onClose,
   onCreated,
 }: {
-  operator: OperatorOut
-  conn: OperatorConnection
+  machine: MachineOut
+  conn: MachineConnection
   gitRepoUrl: string
   defaultPath: string
   onClose: () => void
@@ -588,7 +588,7 @@ function CreateWorkspace({
   // click
   const [checkAsked, setCheckAsked] = useState(false)
   const setupQuery = useQuery({
-    queryKey: ["operators", operator.id, "machine-setup", gitRepoUrl],
+    queryKey: ["machines", machine.id, "machine-setup", gitRepoUrl],
     queryFn: async (): Promise<MachineSetup> => {
       await conn.waitUntilConnected()
       return conn.request("machine.check", { git_repo_url: gitRepoUrl })
@@ -614,10 +614,10 @@ function CreateWorkspace({
       const fields: Record<string, string | boolean> = {}
       if (!setup.git_name) fields.git_name = gitName
       if (!setup.git_email) fields.git_email = gitEmail
-      // The Operator fetches its token from the hub itself, once asked here
+      // The link fetches its token from the hub itself, once asked here
       if (!setup.token && makeToken) {
-        await OperatorsService.postOperatorCliTokenRequest(
-          { operator_id: String(operator.id) },
+        await MachinesService.postMachineCliTokenRequest(
+          { machine_id: String(machine.id) },
           // For the second factor's cookie
           { withCredentials: true },
         )
@@ -636,7 +636,7 @@ function CreateWorkspace({
     onSuccess: (result: { path: string }) => {
       showToast(
         "Workspace created",
-        `${result.path} on ${operator.name}`,
+        `${result.path} on ${machine.name}`,
         "success",
       )
       onCreated()
@@ -654,7 +654,7 @@ function CreateWorkspace({
     <Modal isOpen onClose={onClose} size="lg">
       <ModalOverlay />
       <ModalContent>
-        <ModalHeader>Create workspace on {operator.name}</ModalHeader>
+        <ModalHeader>Create workspace on {machine.name}</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
           <FormControl mb={4}>
@@ -671,7 +671,7 @@ function CreateWorkspace({
           {!checkAsked ? (
             <Flex align="center" gap={2} fontSize="sm">
               <Text>
-                {operator.name} will check it can reach{" "}
+                {machine.name} will check it can reach{" "}
                 <Code fontSize="xs" wordBreak="break-all">
                   {gitRepoUrl}
                 </Code>
@@ -683,7 +683,7 @@ function CreateWorkspace({
           ) : setupQuery.isPending ? (
             <Flex align="center" gap={2} fontSize="sm" color="ui.dim">
               <Spinner size="sm" />
-              Checking {operator.name}
+              Checking {machine.name}
             </Flex>
           ) : setupQuery.error ? (
             <Text fontSize="sm" color="red.400">
@@ -698,8 +698,7 @@ function CreateWorkspace({
                     {setup.repo.ssh ? (
                       <>
                         <Text>
-                          {operator.name} can't reach {setup.repo.host} over
-                          SSH.
+                          {machine.name} can't reach {setup.repo.host} over SSH.
                         </Text>
                         {sshKey ? (
                           <>
@@ -744,7 +743,7 @@ function CreateWorkspace({
                       </>
                     ) : (
                       <Text>
-                        {operator.name} can't reach the repository on{" "}
+                        {machine.name} can't reach the repository on{" "}
                         {setup.repo.host}. Sign in to {setup.repo.host} on that
                         machine, e.g., with <Code>gh auth login</Code>.
                       </Text>
@@ -765,7 +764,7 @@ function CreateWorkspace({
               {needsGit && (
                 <Box mb={4}>
                   <Text fontSize="sm" mb={2}>
-                    Git needs a name and email for commits on {operator.name}.
+                    Git needs a name and email for commits on {machine.name}.
                   </Text>
                   <Flex gap={2}>
                     <Input
@@ -797,7 +796,7 @@ function CreateWorkspace({
                     isChecked={makeToken}
                     onChange={(e) => setMakeToken(e.target.checked)}
                   >
-                    Authenticate this Operator with the Calkit CLI.
+                    Authenticate this machine with the Calkit CLI.
                   </Checkbox>
                   <FormHelperText>
                     So it can pull and push data with the hub.

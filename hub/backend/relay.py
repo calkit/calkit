@@ -1,4 +1,4 @@
-"""The relay: pairs browsers with Operators over websockets.
+"""The relay: pairs browsers with machines over websockets.
 
 It runs as one process, separate from the API, so both ends of a pairing
 meet in memory. It has no database and trusts only relay tokens the API
@@ -6,7 +6,7 @@ signed, so the only setting it needs is ``RELAY_SECRET_KEY``, which can't
 sign logins. It lives outside
 the ``app`` package because importing that loads the API's settings,
 which require all of its secrets.
-See docs/dev/operator-protocol.md.
+See docs/dev/hub-link-protocol.md.
 """
 
 import asyncio
@@ -36,13 +36,13 @@ CLOSE_UNSUPPORTED = 1003
 CLOSE_TOO_BIG = 1009
 CLOSE_TRY_AGAIN = 1013
 CLOSE_UNAUTHORIZED = 4401
-CLOSE_OPERATOR_OFFLINE = 4404
+CLOSE_MACHINE_OFFLINE = 4404
 CLOSE_REPLACED = 4409
-CLOSE_OPERATOR_GONE = 4410
+CLOSE_MACHINE_GONE = 4410
 
 
 def decode_relay_token(
-    token: str, kind: Literal["operator", "browser"]
+    token: str, kind: Literal["machine", "browser"]
 ) -> dict | None:
     """Decode a relay token, returning None if it's invalid or expired."""
     try:
@@ -71,7 +71,7 @@ class Closed(Exception):
 
 
 async def authenticate(
-    ws: WebSocket, kind: Literal["operator", "browser"]
+    ws: WebSocket, kind: Literal["machine", "browser"]
 ) -> dict | None:
     """Accept a connection and take its token from its first message.
 
@@ -102,7 +102,7 @@ async def authenticate(
     return payload
 
 
-class Operator:
+class Machine:
     def __init__(self, ws: WebSocket, user_id: str, exp: float) -> None:
         self.ws = ws
         self.user_id = user_id
@@ -111,21 +111,21 @@ class Operator:
         self.channels: dict[str, WebSocket] = {}
 
 
-operators: dict[str, Operator] = {}
+machines: dict[str, Machine] = {}
 # Connections that haven't sent a token yet
 unauthenticated = 0
 # IDs of relay tokens already used, with when they expire
 used_tokens: dict[str, float] = {}
-# Bytes relayed per Operator since the last log, as (to Operator, from it)
+# Bytes relayed per machine since the last log, as (to machine, from it)
 meter: dict[str, list[int]] = defaultdict(lambda: [0, 0])
 
 
 async def log_meter() -> None:
     while True:
         await asyncio.sleep(METER_LOG_INTERVAL_SECONDS)
-        for operator_id, (to_op, from_op) in list(meter.items()):
+        for machine_id, (to_op, from_op) in list(meter.items()):
             logger.info(
-                f"Relayed for Operator {operator_id}: "
+                f"Relayed for machine {machine_id}: "
                 f"{to_op} B to, {from_op} B from"
             )
         meter.clear()
@@ -177,62 +177,62 @@ async def _send(ws: WebSocket, msg: dict) -> int:
     return len(text)
 
 
-@app.websocket("/operator")
-async def operator_ws(ws: WebSocket) -> None:
-    payload = await authenticate(ws, "operator")
+@app.websocket("/machine")
+async def machine_ws(ws: WebSocket) -> None:
+    payload = await authenticate(ws, "machine")
     if payload is None:
         return
-    operator_id = payload["sub"]
-    existing = operators.get(operator_id)
+    machine_id = payload["sub"]
+    existing = machines.get(machine_id)
     if existing is not None:
         try:
             await existing.ws.close(CLOSE_REPLACED)
         except Exception:
             pass
-    operator = Operator(
+    machine = Machine(
         ws, user_id=payload["user_id"], exp=float(payload["exp"])
     )
-    operators[operator_id] = operator
-    logger.info(f"Operator {operator_id} connected")
+    machines[machine_id] = machine
+    logger.info(f"Machine {machine_id} connected")
     loop = asyncio.get_running_loop()
     try:
         while True:
             # Its token has to be refreshed before it expires, which it is
             # after each check-in, so one revoked, or taken by someone who
             # can't check in, doesn't stay connected
-            deadline = loop.time() + operator.exp - time.time()
+            deadline = loop.time() + machine.exp - time.time()
             try:
                 async with asyncio.timeout_at(deadline):
                     msg = await _receive(ws)
             except TimeoutError:
-                logger.info(f"Operator {operator_id}'s token expired")
+                logger.info(f"Machine {machine_id}'s token expired")
                 await ws.close(CLOSE_UNAUTHORIZED)
                 break
             if msg.get("type") == "auth.refresh":
                 token = msg.get("token")
                 refreshed = (
-                    decode_relay_token(token, "operator")
+                    decode_relay_token(token, "machine")
                     if isinstance(token, str)
                     else None
                 )
                 if (
                     refreshed is None
-                    or refreshed.get("sub") != operator_id
-                    or refreshed.get("user_id") != operator.user_id
+                    or refreshed.get("sub") != machine_id
+                    or refreshed.get("user_id") != machine.user_id
                 ):
-                    logger.info(f"Operator {operator_id} sent a bad refresh")
+                    logger.info(f"Machine {machine_id} sent a bad refresh")
                     continue
-                operator.exp = float(refreshed["exp"])
+                machine.exp = float(refreshed["exp"])
                 continue
             ch = msg.get("ch")
             if not isinstance(ch, str):
                 continue
-            browser = operator.channels.get(ch)
+            browser = machine.channels.get(ch)
             if browser is None:
                 continue
-            # The Operator closed it, e.g., because its sign-in ended
+            # The machine closed it, e.g., because its sign-in ended
             if msg.get("type") == "channel.close":
-                operator.channels.pop(ch, None)
+                machine.channels.pop(ch, None)
                 try:
                     await browser.close(CLOSE_UNAUTHORIZED)
                 except Exception:
@@ -240,19 +240,19 @@ async def operator_ws(ws: WebSocket) -> None:
                 continue
             if "msg" not in msg:
                 continue
-            meter[operator_id][1] += await _send(browser, msg["msg"])
+            meter[machine_id][1] += await _send(browser, msg["msg"])
     except (WebSocketDisconnect, Closed):
         pass
     finally:
         # A replaced connection must not tear down its replacement
-        if operators.get(operator_id) is operator:
-            del operators[operator_id]
-        for browser in list(operator.channels.values()):
+        if machines.get(machine_id) is machine:
+            del machines[machine_id]
+        for browser in list(machine.channels.values()):
             try:
-                await browser.close(CLOSE_OPERATOR_GONE)
+                await browser.close(CLOSE_MACHINE_GONE)
             except Exception:
                 pass
-        logger.info(f"Operator {operator_id} disconnected")
+        logger.info(f"Machine {machine_id} disconnected")
 
 
 @app.websocket("/browser")
@@ -260,24 +260,24 @@ async def browser_ws(ws: WebSocket) -> None:
     payload = await authenticate(ws, "browser")
     if payload is None:
         return
-    operator_id = payload["sub"]
-    operator = operators.get(operator_id)
-    if operator is None:
-        await ws.close(CLOSE_OPERATOR_OFFLINE)
+    machine_id = payload["sub"]
+    machine = machines.get(machine_id)
+    if machine is None:
+        await ws.close(CLOSE_MACHINE_OFFLINE)
         return
     # Only its owner can reach it
-    if payload.get("user_id") != operator.user_id:
+    if payload.get("user_id") != machine.user_id:
         await ws.close(CLOSE_UNAUTHORIZED)
         return
     ch = uuid.uuid4().hex[:12]
-    operator.channels[ch] = ws
-    meter[operator_id][0] += await _send(
-        operator.ws,
+    machine.channels[ch] = ws
+    meter[machine_id][0] += await _send(
+        machine.ws,
         {
             "type": "channel.open",
             "ch": ch,
             "user_id": payload["user_id"],
-            # Signed by the API for the Operator to check, since it doesn't
+            # Signed by the API for the machine to check, since it doesn't
             # take the relay's word for who opened the channel
             "grant": payload.get("grant"),
         },
@@ -285,16 +285,16 @@ async def browser_ws(ws: WebSocket) -> None:
     try:
         while True:
             msg = await _receive(ws)
-            # The Operator may have reconnected since this browser did
-            if operators.get(operator_id) is not operator:
-                await ws.close(CLOSE_OPERATOR_GONE)
+            # The machine may have reconnected since this browser did
+            if machines.get(machine_id) is not machine:
+                await ws.close(CLOSE_MACHINE_GONE)
                 break
-            meter[operator_id][0] += await _send(
-                operator.ws, {"type": "channel.message", "ch": ch, "msg": msg}
+            meter[machine_id][0] += await _send(
+                machine.ws, {"type": "channel.message", "ch": ch, "msg": msg}
             )
     except (WebSocketDisconnect, Closed):
         pass
     finally:
-        operator.channels.pop(ch, None)
-        if operators.get(operator_id) is operator:
-            await _send(operator.ws, {"type": "channel.close", "ch": ch})
+        machine.channels.pop(ch, None)
+        if machines.get(machine_id) is machine:
+            await _send(machine.ws, {"type": "channel.close", "ch": ch})

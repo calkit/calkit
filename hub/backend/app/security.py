@@ -76,43 +76,43 @@ def create_access_token(
 
 
 @lru_cache
-def _operator_grant_key() -> Ed25519PrivateKey:
-    """The key that signs grants to use an Operator, derived from
-    SECRET_KEY, so Operators that pinned its public key stop trusting the
+def _machine_grant_key() -> Ed25519PrivateKey:
+    """The key that signs grants to use a machine, derived from
+    SECRET_KEY, so machines that pinned its public key stop trusting the
     hub if that's rotated, and have to be registered again.
     """
     seed = hmac.new(
-        settings.SECRET_KEY.encode(), b"operator-grant", "sha256"
+        settings.SECRET_KEY.encode(), b"machine-grant", "sha256"
     ).digest()
     return Ed25519PrivateKey.from_private_bytes(seed)
 
 
-def get_operator_grant_public_key() -> str:
-    """The public key Operators pin to check grants, base64-encoded."""
+def get_machine_grant_public_key() -> str:
+    """The public key machines pin to check grants, base64-encoded."""
     raw = (
-        _operator_grant_key()
+        _machine_grant_key()
         .public_key()
         .public_bytes(Encoding.Raw, PublicFormat.Raw)
     )
     return base64.b64encode(raw).decode()
 
 
-def create_operator_grant(
-    operator_id: uuid.UUID,
+def create_machine_grant(
+    machine_id: uuid.UUID,
     user_id: uuid.UUID,
     expires_delta: timedelta,
     browser_key: dict[str, str],
     session_id: uuid.UUID,
     second_factor_expires: int,
 ) -> tuple[str, str]:
-    """Create a grant for a user to open one channel to an Operator,
+    """Create a grant for a user to open one channel to a machine,
     returning it and its ID.
 
-    It's signed with a key only the API holds, and the Operator checks it,
+    It's signed with a key only the API holds, and the machine checks it,
     so the relay, which carries it, can't open channels of its own. It
-    names the browser's public key, which the Operator checks every message
+    names the browser's public key, which the machine checks every message
     on the channel is signed with, so the relay can't act inside a channel
-    either, and the sign-in it came from, so the Operator can close the
+    either, and the sign-in it came from, so the machine can close the
     channel once that sign-in ends, or when the second factor that
     authorized it expires (``tfa_exp``).
     """
@@ -121,20 +121,20 @@ def create_operator_grant(
     payload = {
         "exp": now + expires_delta,
         "iat": int(now.timestamp()),
-        "aud": str(operator_id),
+        "aud": str(machine_id),
         "sub": str(user_id),
         "jti": grant_id,
         "cnf": {"jwk": browser_key},
         "sid": str(session_id),
         "tfa_exp": second_factor_expires,
     }
-    token = jwt.encode(payload, _operator_grant_key(), algorithm="EdDSA")
+    token = jwt.encode(payload, _machine_grant_key(), algorithm="EdDSA")
     return token, grant_id
 
 
 def create_relay_token(
-    kind: Literal["operator", "browser"],
-    operator_id: uuid.UUID,
+    kind: Literal["machine", "browser"],
+    machine_id: uuid.UUID,
     user_id: uuid.UUID,
     expires_delta: timedelta,
     grant: str | None = None,
@@ -147,7 +147,7 @@ def create_relay_token(
     """
     payload = {
         "exp": datetime.now(timezone.utc) + expires_delta,
-        "sub": str(operator_id),
+        "sub": str(machine_id),
         "user_id": str(user_id),
         "scope": f"relay:{kind}",
         "jti": secrets.token_hex(16),

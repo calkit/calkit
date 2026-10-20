@@ -2,16 +2,16 @@
 # Install Calkit with uv (installing the latter if it isn't yet)
 #
 # Options, passed with `curl -LsSf install.calkit.org | sh -s -- <options>`:
-#   --operator             Also install the Calkit Operator, which connects
-#                          this machine's workspaces to the hub
-#                          (or set CALKIT_INSTALL_OPERATOR=1)
+#   --link                 Also link this machine to the hub, which connects
+#                          its workspaces to the hub
+#                          (or set CALKIT_INSTALL_LINK=1)
 #   --no-shell-completion  Skip installing shell completion
 
-OPERATOR="${CALKIT_INSTALL_OPERATOR:-0}"
+LINK="${CALKIT_INSTALL_LINK:-0}"
 COMPLETION=1
 for arg in "$@"; do
     case "$arg" in
-        --operator) OPERATOR=1 ;;
+        --link) LINK=1 ;;
         --no-shell-completion) COMPLETION=0 ;;
         *) echo "⚠️ Ignoring unknown option '$arg'" ;;
     esac
@@ -53,17 +53,17 @@ if [ "$COMPLETION" = 1 ]; then
     done
 fi
 
-if [ "$OPERATOR" = 1 ]; then
-    echo "Installing the Calkit Operator"
+if [ "$LINK" = 1 ]; then
+    echo "Linking this machine to the hub"
     # When piped into sh, this script is sh's input, so logging in to the hub
     # needs the terminal's
     if (exec </dev/tty) 2>/dev/null; then
-        "$BIN/calkit" operator install </dev/tty
+        "$BIN/calkit" hub link </dev/tty
     else
-        "$BIN/calkit" operator install
+        "$BIN/calkit" hub link
     fi
     if [ $? -ne 0 ]; then
-        echo "❌ Failed to install the Operator; run 'calkit operator install' to try again"
+        echo "❌ Failed to link this machine; run 'calkit hub link' to try again"
         exit 1
     fi
 fi

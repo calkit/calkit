@@ -734,15 +734,15 @@ export const CheckInSchema = {
   },
   type: "object",
   title: "CheckIn",
-  description: "What an Operator reports each time it checks in.",
+  description: "What a machine reports each time it checks in.",
 } as const
 
 export const CheckInRespSchema = {
   properties: {
-    operator_id: {
+    machine_id: {
       type: "string",
       format: "uuid",
-      title: "Operator Id",
+      title: "Machine Id",
     },
     name: {
       type: "string",
@@ -792,7 +792,7 @@ export const CheckInRespSchema = {
   },
   type: "object",
   required: [
-    "operator_id",
+    "machine_id",
     "name",
     "user_id",
     "relay_url",
@@ -800,7 +800,7 @@ export const CheckInRespSchema = {
     "grant_public_key",
   ],
   title: "CheckInResp",
-  description: "Where and how an Operator connects to the relay.",
+  description: "Where and how a machine connects to the relay.",
 } as const
 
 export const CliTokenSchema = {
@@ -4408,6 +4408,417 @@ export const LogoutRequestSchema = {
   title: "LogoutRequest",
 } as const
 
+export const MachineOutSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+    name: {
+      type: "string",
+      maxLength: 64,
+      minLength: 1,
+      title: "Name",
+    },
+    hostname: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hostname",
+    },
+    system_machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "System Machine Id",
+    },
+    platform: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Platform",
+    },
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    hosts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Hosts",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    last_seen: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Seen",
+    },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 16,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: false,
+    },
+    connect_requested_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Connect Requested At",
+    },
+    restart_pending: {
+      type: "boolean",
+      title: "Restart Pending",
+      default: false,
+    },
+    restart_requested: {
+      type: "boolean",
+      title: "Restart Requested",
+      default: false,
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_online: {
+      type: "boolean",
+      title: "Is Online",
+    },
+    is_asleep: {
+      type: "boolean",
+      title: "Is Asleep",
+    },
+    workspace_count: {
+      type: "integer",
+      title: "Workspace Count",
+    },
+  },
+  type: "object",
+  required: ["user_id", "name", "is_online", "is_asleep", "workspace_count"],
+  title: "MachineOut",
+  description:
+    "A machine as the API returns it: its record plus its current state.",
+} as const
+
+export const MachinePostSchema = {
+  properties: {
+    name: {
+      anyOf: [
+        {
+          type: "string",
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    hostname: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hostname",
+    },
+    machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Machine Id",
+    },
+    platform: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Platform",
+    },
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    hosts: {
+      items: {
+        type: "string",
+        maxLength: 255,
+      },
+      type: "array",
+      maxItems: 20,
+      title: "Hosts",
+      default: [],
+    },
+    public_key: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/PublicKey",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+  },
+  type: "object",
+  title: "MachinePost",
+  description: "What a machine reports about itself when registering.",
+} as const
+
+export const MachineRegisteredSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+    name: {
+      type: "string",
+      maxLength: 64,
+      minLength: 1,
+      title: "Name",
+    },
+    hostname: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hostname",
+    },
+    system_machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "System Machine Id",
+    },
+    platform: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Platform",
+    },
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    hosts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Hosts",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    last_seen: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Seen",
+    },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 16,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: false,
+    },
+    connect_requested_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Connect Requested At",
+    },
+    restart_pending: {
+      type: "boolean",
+      title: "Restart Pending",
+      default: false,
+    },
+    restart_requested: {
+      type: "boolean",
+      title: "Restart Requested",
+      default: false,
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_online: {
+      type: "boolean",
+      title: "Is Online",
+    },
+    is_asleep: {
+      type: "boolean",
+      title: "Is Asleep",
+    },
+    workspace_count: {
+      type: "integer",
+      title: "Workspace Count",
+    },
+    token: {
+      type: "string",
+      title: "Token",
+    },
+    grant_public_key: {
+      type: "string",
+      title: "Grant Public Key",
+    },
+  },
+  type: "object",
+  required: [
+    "user_id",
+    "name",
+    "is_online",
+    "is_asleep",
+    "workspace_count",
+    "token",
+    "grant_public_key",
+  ],
+  title: "MachineRegistered",
+  description: "A newly registered machine, with the token only returned here.",
+} as const
+
 export const MapPathEntrySchema = {
   properties: {
     src: {
@@ -4924,418 +5335,6 @@ export const OperationResultSchema = {
   required: ["success"],
   title: "OperationResult",
   description: "Result for file operations like delete, move, copy.",
-} as const
-
-export const OperatorOutSchema = {
-  properties: {
-    id: {
-      type: "string",
-      format: "uuid",
-      title: "Id",
-    },
-    user_id: {
-      type: "string",
-      format: "uuid",
-      title: "User Id",
-    },
-    name: {
-      type: "string",
-      maxLength: 64,
-      minLength: 1,
-      title: "Name",
-    },
-    hostname: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 255,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Hostname",
-    },
-    machine_id: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 255,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Machine Id",
-    },
-    platform: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 64,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Platform",
-    },
-    calkit_version: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 64,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Calkit Version",
-    },
-    hosts: {
-      items: {
-        type: "string",
-      },
-      type: "array",
-      title: "Hosts",
-    },
-    created: {
-      type: "string",
-      format: "date-time",
-      title: "Created",
-    },
-    last_seen: {
-      anyOf: [
-        {
-          type: "string",
-          format: "date-time",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Last Seen",
-    },
-    mode: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 16,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Mode",
-    },
-    connected: {
-      type: "boolean",
-      title: "Connected",
-      default: false,
-    },
-    connect_requested_at: {
-      anyOf: [
-        {
-          type: "string",
-          format: "date-time",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Connect Requested At",
-    },
-    restart_pending: {
-      type: "boolean",
-      title: "Restart Pending",
-      default: false,
-    },
-    restart_requested: {
-      type: "boolean",
-      title: "Restart Requested",
-      default: false,
-    },
-    is_active: {
-      type: "boolean",
-      title: "Is Active",
-      default: true,
-    },
-    is_online: {
-      type: "boolean",
-      title: "Is Online",
-    },
-    is_asleep: {
-      type: "boolean",
-      title: "Is Asleep",
-    },
-    workspace_count: {
-      type: "integer",
-      title: "Workspace Count",
-    },
-  },
-  type: "object",
-  required: ["user_id", "name", "is_online", "is_asleep", "workspace_count"],
-  title: "OperatorOut",
-  description:
-    "An Operator as the API returns it: its record plus its current state.",
-} as const
-
-export const OperatorPostSchema = {
-  properties: {
-    name: {
-      anyOf: [
-        {
-          type: "string",
-          pattern: "^[a-z0-9][a-z0-9-]{0,63}$",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Name",
-    },
-    hostname: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 255,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Hostname",
-    },
-    machine_id: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 255,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Machine Id",
-    },
-    platform: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 64,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Platform",
-    },
-    calkit_version: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 64,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Calkit Version",
-    },
-    hosts: {
-      items: {
-        type: "string",
-        maxLength: 255,
-      },
-      type: "array",
-      maxItems: 20,
-      title: "Hosts",
-      default: [],
-    },
-    public_key: {
-      anyOf: [
-        {
-          $ref: "#/components/schemas/PublicKey",
-        },
-        {
-          type: "null",
-        },
-      ],
-    },
-  },
-  type: "object",
-  title: "OperatorPost",
-  description: "What a machine reports about itself when registering.",
-} as const
-
-export const OperatorRegisteredSchema = {
-  properties: {
-    id: {
-      type: "string",
-      format: "uuid",
-      title: "Id",
-    },
-    user_id: {
-      type: "string",
-      format: "uuid",
-      title: "User Id",
-    },
-    name: {
-      type: "string",
-      maxLength: 64,
-      minLength: 1,
-      title: "Name",
-    },
-    hostname: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 255,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Hostname",
-    },
-    machine_id: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 255,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Machine Id",
-    },
-    platform: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 64,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Platform",
-    },
-    calkit_version: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 64,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Calkit Version",
-    },
-    hosts: {
-      items: {
-        type: "string",
-      },
-      type: "array",
-      title: "Hosts",
-    },
-    created: {
-      type: "string",
-      format: "date-time",
-      title: "Created",
-    },
-    last_seen: {
-      anyOf: [
-        {
-          type: "string",
-          format: "date-time",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Last Seen",
-    },
-    mode: {
-      anyOf: [
-        {
-          type: "string",
-          maxLength: 16,
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Mode",
-    },
-    connected: {
-      type: "boolean",
-      title: "Connected",
-      default: false,
-    },
-    connect_requested_at: {
-      anyOf: [
-        {
-          type: "string",
-          format: "date-time",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Connect Requested At",
-    },
-    restart_pending: {
-      type: "boolean",
-      title: "Restart Pending",
-      default: false,
-    },
-    restart_requested: {
-      type: "boolean",
-      title: "Restart Requested",
-      default: false,
-    },
-    is_active: {
-      type: "boolean",
-      title: "Is Active",
-      default: true,
-    },
-    is_online: {
-      type: "boolean",
-      title: "Is Online",
-    },
-    is_asleep: {
-      type: "boolean",
-      title: "Is Asleep",
-    },
-    workspace_count: {
-      type: "integer",
-      title: "Workspace Count",
-    },
-    token: {
-      type: "string",
-      title: "Token",
-    },
-    grant_public_key: {
-      type: "string",
-      title: "Grant Public Key",
-    },
-  },
-  type: "object",
-  required: [
-    "user_id",
-    "name",
-    "is_online",
-    "is_asleep",
-    "workspace_count",
-    "token",
-    "grant_public_key",
-  ],
-  title: "OperatorRegistered",
-  description:
-    "A newly registered Operator, with the token only returned here.",
 } as const
 
 export const OrgMemberPostSchema = {
@@ -7769,7 +7768,7 @@ export const PublicKeySchema = {
   required: ["kty", "crv", "x", "y"],
   title: "PublicKey",
   description:
-    "A P-256 public key as a JSON Web Key, e.g., a browser's for one\nconnection, or an Operator's own.\n\nThe browser signs every message it sends the Operator with the private\nhalf of its key, which it can't export, so a grant naming this key is\nno use to the relay that carries it, and the Operator signs its replies\nwith its own, so the relay can't forge those either.",
+    "A P-256 public key as a JSON Web Key, e.g., a browser's for one\nconnection, or a machine's own.\n\nThe browser signs every message it sends the machine with the private\nhalf of its key, which it can't export, so a grant naming this key is\nno use to the relay that carries it, and the machine signs its replies\nwith its own, so the relay can't forge those either.",
 } as const
 
 export const PublicationSchema = {
@@ -9084,7 +9083,7 @@ export const RelayTokenReqSchema = {
   type: "object",
   required: ["public_key"],
   title: "RelayTokenReq",
-  description: "What a browser asking to connect to an Operator sends.",
+  description: "What a browser asking to connect to a machine sends.",
 } as const
 
 export const RelayTokenRespSchema = {
@@ -9097,7 +9096,7 @@ export const RelayTokenRespSchema = {
       type: "string",
       title: "Token",
     },
-    operator_public_key: {
+    machine_public_key: {
       $ref: "#/components/schemas/PublicKey",
     },
     grant_id: {
@@ -9106,10 +9105,10 @@ export const RelayTokenRespSchema = {
     },
   },
   type: "object",
-  required: ["relay_url", "token", "operator_public_key", "grant_id"],
+  required: ["relay_url", "token", "machine_public_key", "grant_id"],
   title: "RelayTokenResp",
   description:
-    "Where and how a browser connects to an Operator through the relay,\nand how it checks the replies it gets are the Operator's.",
+    "Where and how a browser connects to a machine through the relay,\nand how it checks the replies it gets are the machine's.",
 } as const
 
 export const ReleaseCommentPostSchema = {
@@ -11365,7 +11364,7 @@ export const TokenRespSchema = {
       ],
       title: "Last Used",
     },
-    operator_id: {
+    machine_id: {
       anyOf: [
         {
           type: "string",
@@ -11375,7 +11374,7 @@ export const TokenRespSchema = {
           type: "null",
         },
       ],
-      title: "Operator Id",
+      title: "Machine Id",
     },
   },
   type: "object",
@@ -11971,7 +11970,7 @@ export const UserTokenPublicSchema = {
       ],
       title: "Last Used",
     },
-    operator_id: {
+    machine_id: {
       anyOf: [
         {
           type: "string",
@@ -11981,7 +11980,7 @@ export const UserTokenPublicSchema = {
           type: "null",
         },
       ],
-      title: "Operator Id",
+      title: "Machine Id",
     },
   },
   type: "object",
@@ -12316,24 +12315,24 @@ export const WorkspaceSchema = {
       title: "Agents",
       default: [],
     },
-    operator_id: {
+    machine_id: {
       type: "string",
       format: "uuid",
-      title: "Operator Id",
+      title: "Machine Id",
     },
-    operator_name: {
+    machine_name: {
       type: "string",
-      title: "Operator Name",
+      title: "Machine Name",
     },
-    operator_online: {
+    machine_online: {
       type: "boolean",
-      title: "Operator Online",
+      title: "Machine Online",
     },
-    operator_asleep: {
+    machine_asleep: {
       type: "boolean",
-      title: "Operator Asleep",
+      title: "Machine Asleep",
     },
-    operator_platform: {
+    machine_platform: {
       anyOf: [
         {
           type: "string",
@@ -12342,7 +12341,7 @@ export const WorkspaceSchema = {
           type: "null",
         },
       ],
-      title: "Operator Platform",
+      title: "Machine Platform",
     },
     updated: {
       type: "string",
@@ -12356,16 +12355,16 @@ export const WorkspaceSchema = {
   type: "object",
   required: [
     "path",
-    "operator_id",
-    "operator_name",
-    "operator_online",
-    "operator_asleep",
-    "operator_platform",
+    "machine_id",
+    "machine_name",
+    "machine_online",
+    "machine_asleep",
+    "machine_platform",
     "updated",
     "on_hub",
   ],
   title: "Workspace",
-  description: "A workspace along with the Operator it's on.",
+  description: "A workspace along with the machine it's on.",
 } as const
 
 export const WorkspaceInfoSchema = {
@@ -12528,7 +12527,7 @@ export const WorkspaceInfoSchema = {
   type: "object",
   required: ["path"],
   title: "WorkspaceInfo",
-  description: "A workspace as an Operator reports it at check-in.",
+  description: "A workspace as a machine reports it at check-in.",
 } as const
 
 export const ZoteroAuthFinishSchema = {

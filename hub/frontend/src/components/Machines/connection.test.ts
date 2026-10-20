@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { OperatorsService } from "../../client"
+import { MachinesService } from "../../client"
 import {
-  OperatorConnection,
-  importOperatorKey,
+  MachineConnection,
+  importMachineKey,
   openReply,
   replyText,
   signMessage,
@@ -11,7 +11,7 @@ import {
 } from "./connection"
 
 vi.mock("../../client", () => ({
-  OperatorsService: { postOperatorRelayToken: vi.fn() },
+  MachinesService: { postMachineRelayToken: vi.fn() },
 }))
 
 function fromBase64Url(value: string): Uint8Array {
@@ -44,7 +44,7 @@ async function verify(
   )
 }
 
-// A frame as the Operator sends it
+// A frame as the link sends it
 async function signReply(
   key: CryptoKey,
   grantId: string,
@@ -60,7 +60,7 @@ async function signReply(
   return JSON.stringify({ seq, body, sig: toBase64Url(sig) })
 }
 
-async function generateOperatorKeys() {
+async function generateMachineKeys() {
   const keys = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     true,
@@ -106,21 +106,21 @@ afterEach(() => {
 })
 
 describe("signMessage", () => {
-  it("signs what the Operator checks", async () => {
-    // Signed by the Operator's test (calkit/tests/test_operator.py), which
+  it("signs what the link checks", async () => {
+    // Signed by the link's test (calkit/tests/test_hub_link.py), which
     // checks the same vector, so both ends sign the same text the same way
     const vector = {
       jwk: {
         kty: "EC",
         crv: "P-256",
-        x: "QF8jZqZXlCI2kwXe6F3IGC3DlMRjap4e8f1DV0uWNiQ",
-        y: "GAhXTzjif_yPldGN07yo6alEe_o-IyFSC83KEKILGdE",
+        x: "ZfNFdAzsfpIWhDie2L9NwSNt6d6a2lwlSMf3MzH-XVk",
+        y: "Hh0kg1uyGNF6Zd34yhdohtFps5dU_GcMu5ZyZ-YL7LM",
       },
       seq: 7,
       body: '{"type":"sessions.input","session":"s1","data":"ls ─\\n"}',
-      sig: "Cml8CVzkHw2lLu6pU4A4BLtI17I6xUkJ_onoD76cKc10ZP4CjQ6_-XvcP3DmUqpni_b8crjTTi1SDU8jBZpumw",
+      sig: "xshOHd9lW3FQS3_FXFFzmZU8wWUPdrVR6VmguNFs9Xr-kxLc2jzVSXqYlOfXn9DWeTjonww_5a6Rio0iIGGpZA",
     }
-    expect(signedText(7, "{}")).toBe("calkit-operator-message\n7\n{}")
+    expect(signedText(7, "{}")).toBe("calkit-machine-message\n7\n{}")
     expect(await verify(vector.jwk, vector)).toBe(true)
     expect(await verify(vector.jwk, { ...vector, seq: 8 })).toBe(false)
     // And what this end signs verifies with the public key it sends
@@ -140,23 +140,23 @@ describe("signMessage", () => {
 })
 
 describe("openReply", () => {
-  it("opens only the Operator's replies for this channel, in order", async () => {
-    expect(replyText("g", 1, "{}")).toBe("calkit-operator-reply\ng\n1\n{}")
-    // Signed with Python's cryptography as the Operator signs, so both ends
+  it("opens only the link's replies for this channel, in order", async () => {
+    expect(replyText("g", 1, "{}")).toBe("calkit-machine-reply\ng\n1\n{}")
+    // Signed with Python's cryptography as the link signs, so both ends
     // agree on the text and encoding
     const vector = {
       jwk: {
-        x: "5YtFRcSRiwuNrdvSRdV_jzLq2qCcFl9mBn91tFGvoQA",
-        y: "4fmPbfjiTqr-CEFQXN7Up-JsNu1HlTdCnAhY3P0yZfM",
+        x: "DPLpRtfVMoc5Ym_OxUQESNigOKHp_0PSeevg5ixXoG4",
+        y: "yxGTKYCbKo3idx-9brKxpv9vsipfal9VL731aHJ8L0U",
       },
       grantId: "3f9c1e2a-7b4d-4e8f-9a0b-1c2d3e4f5a6b",
       frame: JSON.stringify({
         seq: 3,
-        body: '{"type":"result","id":2,"result":{"public_key":"ssh-ed25519 AAAA ─ me@host"}}',
-        sig: "j8Tp5gJFGucn6QrRsNabwDsiyXRVCxetc2iEnsiEgZCUGN3Lut_37KBe_0EoWnT1lnM3SUMsmYK6wlMqCa-uvg",
+        body: '{"type": "result", "id": 2, "result": {"public_key": "ssh-ed25519 AAAA ─ me@host"}}',
+        sig: "WobqWZ5dnbSEdEon79x_YFqp5qaCt9oCRJXS7UQOjuS7S29yan0PAheCB5nRkoMFWyu9VD6dlqO5SbNcKZoEyA",
       }),
     }
-    const vectorKey = await importOperatorKey(vector.jwk)
+    const vectorKey = await importMachineKey(vector.jwk)
     expect(await openReply(vectorKey, vector.grantId, 2, vector.frame)).toEqual(
       {
         type: "result",
@@ -165,19 +165,19 @@ describe("openReply", () => {
       },
     )
     // A good reply, and the same reply as anything else
-    const operator = await generateOperatorKeys()
-    const key = await importOperatorKey(operator.jwk)
+    const machine = await generateMachineKeys()
+    const key = await importMachineKey(machine.jwk)
     const ready = { type: "channel.ready" }
-    const good = await signReply(operator.privateKey, "g1", 1, ready)
+    const good = await signReply(machine.privateKey, "g1", 1, ready)
     expect(await openReply(key, "g1", 0, good)).toEqual(ready)
     // Repeated or after a gap
     await expect(openReply(key, "g1", 1, good)).rejects.toThrow("sequence")
-    const later = await signReply(operator.privateKey, "g1", 3, ready)
+    const later = await signReply(machine.privateKey, "g1", 3, ready)
     await expect(openReply(key, "g1", 1, later)).rejects.toThrow("sequence")
     // For another channel
     await expect(openReply(key, "g2", 0, good)).rejects.toThrow("signature")
     // Signed by someone else, e.g., the relay
-    const relay = await generateOperatorKeys()
+    const relay = await generateMachineKeys()
     const forged = await signReply(relay.privateKey, "g1", 1, ready)
     await expect(openReply(key, "g1", 0, forged)).rejects.toThrow("signature")
     // Changed on the way
@@ -197,25 +197,25 @@ describe("openReply", () => {
     await expect(openReply(key, "g1", 0, new ArrayBuffer(4))).rejects.toThrow(
       "text",
     )
-    const list = await signReply(operator.privateKey, "g1", 1, [])
+    const list = await signReply(machine.privateKey, "g1", 1, [])
     await expect(openReply(key, "g1", 0, list)).rejects.toThrow("malformed")
   })
 })
 
-describe("OperatorConnection", () => {
-  it("connects once the Operator is ready and drops on a bad reply", async () => {
+describe("MachineConnection", () => {
+  it("connects once the link is ready and drops on a bad reply", async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket)
-    const operator = await generateOperatorKeys()
-    const relayToken = vi.mocked(OperatorsService.postOperatorRelayToken)
+    const machine = await generateMachineKeys()
+    const relayToken = vi.mocked(MachinesService.postMachineRelayToken)
     relayToken.mockResolvedValue({
       data: {
         relay_url: "wss://relay.example",
         token: "relay-token",
-        operator_public_key: { kty: "EC", crv: "P-256", ...operator.jwk },
+        machine_public_key: { kty: "EC", crv: "P-256", ...machine.jwk },
         grant_id: "g1",
       },
     } as any)
-    const conn = new OperatorConnection("op1")
+    const conn = new MachineConnection("m1")
     conn.open()
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     const ws = FakeWebSocket.instances[0]
@@ -225,12 +225,12 @@ describe("OperatorConnection", () => {
       type: "auth",
       token: "relay-token",
     })
-    // Open isn't enough: nothing goes out until the Operator says so
+    // Open isn't enough: nothing goes out until the link says so
     expect(conn.connected).toBe(false)
     await expect(conn.request("sessions.list")).rejects.toThrow("Not connected")
     conn.send({ type: "sessions.input", session: "s1", data: "x" })
     const reply = (seq: number, msg: object) =>
-      signReply(operator.privateKey, "g1", seq, msg)
+      signReply(machine.privateKey, "g1", seq, msg)
     ws.onmessage?.({ data: await reply(1, { type: "channel.ready" }) })
     await vi.waitFor(() => expect(conn.connected).toBe(true))
     // Requests are signed with the key named in the grant, in sequence

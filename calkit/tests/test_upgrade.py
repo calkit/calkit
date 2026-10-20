@@ -226,8 +226,8 @@ def test_get_dev_upgrade_cmds(tmp_path, monkeypatch):
         upgrade.get_dev_upgrade_cmds()
 
 
-def test_upgrade_with_operators(tmp_path, monkeypatch, capsys):
-    from calkit import operator
+def test_upgrade_with_hub_links(tmp_path, monkeypatch, capsys):
+    from calkit import hub_link
 
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
     requests = []
@@ -237,23 +237,23 @@ def test_upgrade_with_operators(tmp_path, monkeypatch, capsys):
         requests.append(stop)
         return running
 
-    monkeypatch.setattr(operator, "request_restarts", request_restarts)
-    # Elsewhere, running Operators restart once it's done, which also
+    monkeypatch.setattr(hub_link, "request_restarts", request_restarts)
+    # Elsewhere, running hub links restart once it's done, which also
     # catches a dev install updated without a new version
     monkeypatch.setattr(sys, "platform", "linux")
     marker = tmp_path / "upgraded"
     upgrade.run_upgrade_cmds([["touch", str(marker)]])
     assert marker.exists()
     assert requests == [False]
-    assert "Operators will restart" in capsys.readouterr().out
+    assert "hub links will restart" in capsys.readouterr().out
     # On Windows they stop so their files can be replaced, the upgrade
     # waits for them, and those installed as a service start again either
     # way
     monkeypatch.setattr(sys, "platform", "win32")
-    startup = tmp_path / "calkit-operator-calkit.io.vbs"
+    startup = tmp_path / "calkit-hub-link-calkit.io.vbs"
     startup.write_text("")
     monkeypatch.setattr(
-        operator,
+        hub_link,
         "_windows_startup_path",
         lambda key: str(startup if key == "calkit.io" else tmp_path / "none"),
     )

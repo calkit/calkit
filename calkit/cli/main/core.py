@@ -61,7 +61,6 @@ from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
-from calkit.cli.operator import operator_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.scheduler import scheduler_app
 from calkit.cli.show import show_app
@@ -100,14 +99,6 @@ app.add_typer(
 )
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
 app.add_typer(sync_app, name="sync", help="Sync with external systems.")
-app.add_typer(
-    operator_app,
-    name="operator",
-    help=(
-        "Manage this machine's Operator, which connects its workspaces to "
-        "the hub."
-    ),
-)
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:
@@ -2517,7 +2508,7 @@ def _get_latest_run_log_content(wdir: str = ".") -> str | None:
     if latest is None:
         return None
     # Only the end of a large one, which is read while a run goes, e.g., by
-    # an Operator at every check-in
+    # a hub link at every check-in
     try:
         with open(latest, "rb") as f:
             f.seek(0, os.SEEK_END)
@@ -2545,7 +2536,7 @@ def _get_latest_run_log_path(wdir: str = ".") -> str | None:
                 os.path.join(d, f) for f in os.listdir(d) if f.endswith(".log")
             ]
     # A repo can commit a link named like a log to any file, e.g., an SSH
-    # key, which an Operator would send the hub
+    # key, which a hub link would send the hub
     candidates = [
         c
         for c in candidates
@@ -4758,8 +4749,7 @@ def run_in_env(
     name="install",
     help=(
         "Install a registered native dependency (e.g., pixi, uv) via its "
-        "upstream installer for the current platform, or 'operator' to "
-        "connect this machine's workspaces to the hub."
+        "upstream installer for the current platform."
     ),
 )
 def install_app(
@@ -4777,68 +4767,9 @@ def install_app(
             help="Skip the confirmation prompt and install immediately.",
         ),
     ] = False,
-    login: Annotated[
-        bool,
-        typer.Option(
-            "--login",
-            help=(
-                "For the Operator, start at login instead of at boot "
-                "(requires sudo on macOS and Linux)."
-            ),
-        ),
-    ] = False,
-    cron: Annotated[
-        bool,
-        typer.Option(
-            "--cron",
-            help=(
-                "For the Operator, have cron start it when the hub asks "
-                "rather than running it as a service, e.g., on a cluster's "
-                "login node."
-            ),
-        ),
-    ] = False,
-    ssh: Annotated[
-        str | None,
-        typer.Option(
-            "--ssh",
-            help=(
-                "For the Operator, install it on another machine over SSH, "
-                "e.g., 'user@cluster.example.edu' or a host from "
-                "~/.ssh/config, installing Calkit there if needed."
-            ),
-        ),
-    ] = None,
-    no_service: Annotated[
-        bool,
-        typer.Option(
-            "--no-service",
-            help=(
-                "For the Operator, only register it, e.g., to run it with "
-                "'calkit operator start' inside tmux on a cluster."
-            ),
-        ),
-    ] = False,
-    hub: Annotated[
-        str | None,
-        typer.Option(
-            "--hub",
-            help=(
-                "For the Operator, the URL of the hub it's for, e.g., "
-                "https://calkit.io; a machine can have one per hub."
-            ),
-        ),
-    ] = None,
 ) -> None:
     from calkit import install as _install
 
-    if name == "operator":
-        from calkit.cli.operator import install as install_operator
-
-        install_operator(
-            hub=hub, login=login, cron=cron, ssh=ssh, no_service=no_service
-        )
-        return
     # Surface a platform-specific "use X instead" message before the
     # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
     unsupported = _install.get_unsupported_message(name)

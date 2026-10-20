@@ -1,10 +1,10 @@
 # Install Calkit with uv (installing the latter if it isn't yet)
 #
 # Options, passed by running it as a script block, e.g.,
-# & ([scriptblock]::Create((irm install-ps1.calkit.org))) --operator
-#   --operator             Also install the Calkit Operator, which connects
-#                          this machine's workspaces to the hub
-#                          (or set CALKIT_INSTALL_OPERATOR=1, which also works
+# & ([scriptblock]::Create((irm install-ps1.calkit.org))) --link
+#   --link                 Also link this machine to the hub, which connects
+#                          its workspaces to the hub
+#                          (or set CALKIT_INSTALL_LINK=1, which also works
 #                          with `irm ... | iex`)
 #   --no-shell-completion  Skip installing shell completion
 
@@ -13,7 +13,7 @@
 # happens if the quoting around `irm ... | iex` is lost and the outer shell,
 # rather than the inner one, ends up handling the pipe (see issue #1569)
 
-$InstallOperator = ($args -contains "--operator") -or ($env:CALKIT_INSTALL_OPERATOR -eq "1")
+$InstallLink = ($args -contains "--link") -or ($env:CALKIT_INSTALL_LINK -eq "1")
 $InstallCompletion = -not ($args -contains "--no-shell-completion")
 
 # Check if uv is installed
@@ -36,6 +36,6 @@ $Bin = (uv tool dir --bin).Trim()
 # Install shell completion, per command name, so the `ck` alias gets it too
 if ($InstallCompletion) { Write-Host "Installing shell completion"; foreach ($cmd in @("calkit", "ck")) { & "$Bin\$cmd.exe" --install-completion; if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to install shell completion for '$cmd'; run '$cmd --install-completion' manually" } } }
 
-if ($InstallOperator) { Write-Host "Installing the Calkit Operator"; & "$Bin\calkit.exe" operator install; if ($LASTEXITCODE -ne 0) { throw "Failed to install the Operator; run 'calkit operator install' to try again" } }
+if ($InstallLink) { Write-Host "Linking this machine to the hub"; & "$Bin\calkit.exe" hub link; if ($LASTEXITCODE -ne 0) { throw "Failed to link this machine; run 'calkit hub link' to try again" } }
 
 Write-Host "Success! Restart your shell to pick up Calkit on your PATH."

@@ -318,18 +318,18 @@ def run_after_exit(cmds: list[list[str]], pids: list[int]) -> list[str]:
 
     On Windows, files of a running program can't be replaced, so an
     upgrade has to wait for every Calkit process involved to exit, and
-    the waiting can't be done by Calkit's own Python. Running Operators
+    the waiting can't be done by Calkit's own Python. Running hub links
     hold them too, so they stop once idle and those installed as a service
     start again afterwards; the hub keys of those stopped are returned.
     """
     log_fpath = get_log_fpath()
     if sys.platform == "win32":
-        from calkit import operator
+        from calkit import hub_link
 
         def quote(s: str) -> str:
             return "'" + s.replace("'", "''") + "'"
 
-        stopped = operator.request_restarts(stop=True)
+        stopped = hub_link.request_restarts(stop=True)
         pids = pids + [pid for _, pid in stopped]
         script = "".join(
             f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue; "
@@ -344,7 +344,7 @@ def run_after_exit(cmds: list[list[str]], pids: list[int]) -> list[str]:
             )
         # Whether or not the upgrade worked
         for key, _ in stopped:
-            fpath = operator._windows_startup_path(key)
+            fpath = hub_link._windows_startup_path(key)
             if os.path.isfile(fpath):
                 script += f"& wscript {quote(fpath)}; "
         script += "exit $failed"
@@ -376,7 +376,7 @@ def run_upgrade_cmds(cmds: list[list[str]]) -> None:
 
     import typer
 
-    from calkit import operator
+    from calkit import hub_link
 
     if sys.platform == "win32":
         stopped = run_after_exit(cmds, get_calkit_pids())
@@ -386,7 +386,7 @@ def run_upgrade_cmds(cmds: list[list[str]]) -> None:
         )
         if stopped:
             typer.echo(
-                "Running Operators will stop for it once nothing is using "
+                "Running hub links will stop for it once nothing is using "
                 "them, and those installed as a service will start again"
             )
         return
@@ -397,9 +397,9 @@ def run_upgrade_cmds(cmds: list[list[str]]) -> None:
     typer.echo("Success!")
     # They notice a new version themselves, but not a dev install's update
     # of the same one
-    if operator.request_restarts():
+    if hub_link.request_restarts():
         typer.echo(
-            "Running Operators will restart with it once nothing is using them"
+            "Running hub links will restart with it once nothing is using them"
         )
 
 

@@ -194,12 +194,13 @@ A few deployment notes:
   for common documents via a fallback, but classes/packages outside the bundled
   subset (e.g. `revtex`/AASTeX) won't compile.
 
-### Operator relay
+### Machine relay
 
-The stack includes a `relay` service that pairs browsers with Operators, the
-Calkit processes users run on their own machines, over websockets (see
-`docs/dev/adrs/0001-operators.md` and `docs/dev/operator-protocol.md` at the
-repo root). It's served at `relay.$DOMAIN`.
+The stack includes a `relay` service that pairs browsers with links, the
+Calkit processes users run to link their own machines to the hub, over
+websockets (see `docs/dev/adrs/0001-linked-machines.md` and
+`docs/dev/hub-link-protocol.md` at the repo root).
+It's served at `relay.$DOMAIN`.
 
 - No extra DNS: `relay.$DOMAIN` is covered by the wildcard subdomain, and
   Traefik issues its certificate automatically.
@@ -208,7 +209,7 @@ repo root). It's served at `relay.$DOMAIN`.
 - It only needs `RELAY_SECRET_KEY`, which must match the backend's, since it
   verifies relay tokens the backend signs.
   It doesn't get `SECRET_KEY`, so it can't sign logins.
-- The backend tells Operators and browsers where it is with `RELAY_URL`, which
+- The backend tells links and browsers where it is with `RELAY_URL`, which
   defaults to `wss://relay.$DOMAIN`.
 
 ## Continuous Deployment (CD)
@@ -331,7 +332,7 @@ Adminer: `https://adminer.calkit.io`
 
 LaTeX preview texmf proxy: `https://texmf.calkit.io`
 
-Operator relay: `wss://relay.calkit.io`
+Machine relay: `wss://relay.calkit.io`
 
 ### Staging
 
@@ -345,4 +346,4 @@ Adminer: `https://adminer.staging.calkit.io`
 
 LaTeX preview texmf proxy: `https://texmf.staging.calkit.io`
 
-Operator relay: `wss://relay.staging.calkit.io`
+Machine relay: `wss://relay.staging.calkit.io`

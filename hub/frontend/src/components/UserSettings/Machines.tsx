@@ -23,7 +23,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { QRCodeSVG } from "qrcode.react"
 import { useState } from "react"
 
-import { OperatorsService, UsersService } from "../../client"
+import { MachinesService, UsersService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 
@@ -31,8 +31,8 @@ import useCustomToast from "../../hooks/useCustomToast"
 // verified email first, from app/users.py
 const VERIFY_EMAIL_FIRST = "Verify your email first"
 
-// Opening sessions on an Operator takes an authenticator code, since it
-// gives shell access to the machine
+// Opening sessions on a machine takes an authenticator code, since it
+// gives shell access to it
 function TwoFactor() {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
@@ -267,42 +267,42 @@ function TwoFactor() {
   )
 }
 
-function Operators() {
+function Machines() {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  // The Operator whose revoke button has been clicked once
+  // The machine whose revoke button has been clicked once
   const [confirming, setConfirming] = useState<string | null>(null)
-  const operatorsQuery = useQuery({
-    queryKey: ["user", "operators"],
-    queryFn: () => OperatorsService.getOperators().then((r) => r.data),
+  const machinesQuery = useQuery({
+    queryKey: ["user", "machines"],
+    queryFn: () => MachinesService.getMachines().then((r) => r.data),
     refetchInterval: 30000,
   })
   const revokeMutation = useMutation({
-    mutationFn: (operatorId: string) =>
-      OperatorsService.deleteOperator({ operator_id: operatorId }),
+    mutationFn: (machineId: string) =>
+      MachinesService.deleteMachine({ machine_id: machineId }),
     onSuccess: () => setConfirming(null),
     onError: (e: any) =>
-      showToast("Could not revoke Operator", e.message, "error"),
+      showToast("Could not revoke machine", e.message, "error"),
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["user", "operators"] }),
+      queryClient.invalidateQueries({ queryKey: ["user", "machines"] }),
   })
   const restartMutation = useMutation({
-    mutationFn: (operatorId: string) =>
-      OperatorsService.postOperatorRestart({ operator_id: operatorId }),
+    mutationFn: (machineId: string) =>
+      MachinesService.postMachineRestart({ machine_id: machineId }),
     onError: (e: any) =>
-      showToast("Could not restart Operator", e.message, "error"),
+      showToast("Could not restart link", e.message, "error"),
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["user", "operators"] }),
+      queryClient.invalidateQueries({ queryKey: ["user", "machines"] }),
   })
   return (
     <Container maxW="full">
       <Heading size="md" py={4}>
-        Operators
+        Machines
       </Heading>
       <TwoFactor />
       <Text mb={4}>
         To connect a machine, install the Calkit CLI on it and run{" "}
-        <Code>calkit operator install</Code>.
+        <Code>calkit hub link</Code>.
       </Text>
       <TableContainer>
         <Table size={{ base: "sm", md: "md" }}>
@@ -319,7 +319,7 @@ function Operators() {
             </Tr>
           </Thead>
           <Tbody>
-            {operatorsQuery.isPending ? (
+            {machinesQuery.isPending ? (
               <Tr>
                 {new Array(8).fill(null).map((_, index) => (
                   <Td key={index}>
@@ -328,8 +328,8 @@ function Operators() {
                 ))}
               </Tr>
             ) : (
-              operatorsQuery.data?.map((op) => (
-                <Tr key={op.id}>
+              machinesQuery.data?.map((machine) => (
+                <Tr key={machine.id}>
                   <Td>
                     <Flex align="center" gap={2}>
                       <Box
@@ -337,26 +337,28 @@ function Operators() {
                         h={2}
                         borderRadius="full"
                         bg={
-                          op.is_online
+                          machine.is_online
                             ? "ui.success"
-                            : op.is_asleep
+                            : machine.is_asleep
                               ? "yellow.400"
                               : "gray.400"
                         }
                       />
-                      {op.name}
-                      {op.is_asleep && <Badge fontSize="2xs">asleep</Badge>}
+                      {machine.name}
+                      {machine.is_asleep && (
+                        <Badge fontSize="2xs">asleep</Badge>
+                      )}
                     </Flex>
                   </Td>
                   <Td>
-                    {op.hostname}
-                    {op.platform ? ` (${op.platform})` : ""}
+                    {machine.hostname}
+                    {machine.platform ? ` (${machine.platform})` : ""}
                   </Td>
                   <Td>
                     <Flex align="center" gap={2}>
                       {/* Dev versions carry a long local suffix */}
-                      {op.calkit_version?.split("+")[0]}
-                      {op.restart_pending && (
+                      {machine.calkit_version?.split("+")[0]}
+                      {machine.restart_pending && (
                         <Tooltip label="Restarts when idle">
                           <Badge fontSize="2xs">restart pending</Badge>
                         </Tooltip>
@@ -365,32 +367,37 @@ function Operators() {
                   </Td>
                   {/* To tell an impostor from the real thing */}
                   <Td>
-                    {op.machine_id && (
-                      <Tooltip label={op.machine_id}>
-                        <Code fontSize="xs">{op.machine_id.slice(0, 12)}</Code>
+                    {machine.system_machine_id && (
+                      <Tooltip label={machine.system_machine_id}>
+                        <Code fontSize="xs">
+                          {machine.system_machine_id.slice(0, 12)}
+                        </Code>
                       </Tooltip>
                     )}
                   </Td>
                   <Td>
-                    {op.created && new Date(`${op.created}Z`).toLocaleString()}
+                    {machine.created &&
+                      new Date(`${machine.created}Z`).toLocaleString()}
                   </Td>
                   <Td>
-                    {op.last_seen
-                      ? new Date(`${op.last_seen}Z`).toLocaleString()
+                    {machine.last_seen
+                      ? new Date(`${machine.last_seen}Z`).toLocaleString()
                       : "Never"}
                   </Td>
-                  <Td>{op.workspace_count}</Td>
+                  <Td>{machine.workspace_count}</Td>
                   <Td>
-                    {op.is_online && !op.restart_pending && (
+                    {machine.is_online && !machine.restart_pending && (
                       <Button
                         size="xs"
                         variant="outline"
                         mr={2}
                         isLoading={
                           restartMutation.isPending &&
-                          restartMutation.variables === op.id
+                          restartMutation.variables === machine.id
                         }
-                        onClick={() => restartMutation.mutate(String(op.id))}
+                        onClick={() =>
+                          restartMutation.mutate(String(machine.id))
+                        }
                       >
                         Restart
                       </Button>
@@ -398,19 +405,19 @@ function Operators() {
                     <Button
                       size="xs"
                       colorScheme="red"
-                      variant={confirming === op.id ? "solid" : "outline"}
+                      variant={confirming === machine.id ? "solid" : "outline"}
                       isLoading={
                         revokeMutation.isPending &&
-                        revokeMutation.variables === op.id
+                        revokeMutation.variables === machine.id
                       }
                       onClick={() =>
-                        confirming === op.id
-                          ? revokeMutation.mutate(String(op.id))
-                          : setConfirming(String(op.id))
+                        confirming === machine.id
+                          ? revokeMutation.mutate(String(machine.id))
+                          : setConfirming(String(machine.id))
                       }
                       onBlur={() => setConfirming(null)}
                     >
-                      {confirming === op.id ? "Confirm revoke" : "Revoke"}
+                      {confirming === machine.id ? "Confirm revoke" : "Revoke"}
                     </Button>
                   </Td>
                 </Tr>
@@ -423,4 +430,4 @@ function Operators() {
   )
 }
 
-export default Operators
+export default Machines

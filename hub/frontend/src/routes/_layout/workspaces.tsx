@@ -30,30 +30,26 @@ import {
 } from "react-icons/fi"
 import { z } from "zod"
 
-import {
-  type OperatorOut,
-  OperatorsService,
-  type Workspace,
-} from "../../client"
+import { type MachineOut, MachinesService, type Workspace } from "../../client"
 import ClearableInput from "../../components/Common/ClearableInput"
 import LoadingSpinner from "../../components/Common/LoadingSpinner"
 import Markdown from "../../components/Common/Markdown"
 import Tooltip from "../../components/Common/Tooltip"
-import SecondFactorPrompt from "../../components/Operators/SecondFactorPrompt"
-import TerminalPane from "../../components/Operators/TerminalPane"
+import SecondFactorPrompt from "../../components/Machines/SecondFactorPrompt"
+import TerminalPane from "../../components/Machines/TerminalPane"
 import type {
-  OperatorConnection,
+  MachineConnection,
   SessionInfo,
-} from "../../components/Operators/connection"
-import useOperatorConnections from "../../components/Operators/useOperatorConnections"
+} from "../../components/Machines/connection"
+import useMachineConnections from "../../components/Machines/useMachineConnections"
 import WorkspaceBadges from "../../components/Workspace/WorkspaceBadges"
 import WorkspacePanel from "../../components/Workspace/WorkspacePanel"
 import useCustomToast from "../../hooks/useCustomToast"
 
 const workspacesSearchSchema = z.object({
-  // The workspace shown, as "<operator ID>:<path>"
+  // The workspace shown, as "<machine ID>:<path>"
   workspace: z.string().optional(),
-  // The session shown, as "<operator ID>:<session ID>", in its workspace
+  // The session shown, as "<machine ID>:<session ID>", in its workspace
   session: z.string().optional(),
   // An open modal for acting on the workspace
   modal: z.enum(["save", "discard", "new_stage", "new_workspace"]).optional(),
@@ -66,11 +62,11 @@ const workspacesSearchSchema = z.object({
     .optional(),
   // Most recently active first, unless sorted by name
   sort: z.enum(["name"]).optional(),
-  // IDs of Operators whose workspaces are hidden, and projects whose are,
-  // as "<operator ID>:<project>"
+  // IDs of machines whose workspaces are hidden, and projects whose are,
+  // as "<machine ID>:<project>"
   collapsed: z.array(z.string()).optional(),
   // An agent followed in the workspace, by its PID, when it isn't in one
-  // of the Operator's sessions
+  // of the link's sessions
   agent: z.coerce.number().optional(),
 })
 
@@ -104,7 +100,7 @@ export const Route = createFileRoute("/_layout/workspaces")({
   },
 })
 
-const workspaceKey = (ws: Workspace) => `${ws.operator_id}:${ws.path}`
+const workspaceKey = (ws: Workspace) => `${ws.machine_id}:${ws.path}`
 
 // The end of an agent's conversation, from the log it keeps, followed while
 // it runs
@@ -114,7 +110,7 @@ function AgentLog({
   pid,
   onClose,
 }: {
-  conn: OperatorConnection
+  conn: MachineConnection
   workspace: Workspace
   pid: number
   onClose: () => void
@@ -122,7 +118,7 @@ function AgentLog({
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
   const agent = (workspace.agents ?? []).find((a) => a.pid === pid)
   const logQuery = useQuery({
-    queryKey: ["agent-log", workspace.operator_id, workspace.path, pid],
+    queryKey: ["agent-log", workspace.machine_id, workspace.path, pid],
     queryFn: () =>
       conn.request("workspace.agent_log", { workspace: workspace.path, pid }),
     enabled: conn.connected,
@@ -165,7 +161,7 @@ function AgentLog({
         </Text>
       ) : entries === null ? (
         <Text color="ui.dim" fontSize="sm">
-          Couldn't find this agent's conversation log on the Operator.
+          Couldn't find this agent's conversation log on the machine.
         </Text>
       ) : (
         <Box ref={logRef} maxH="70vh" overflowY="auto">
@@ -224,31 +220,33 @@ function Workspaces() {
   const showToast = useCustomToast()
   const selectedBg = useColorModeValue("gray.100", "whiteAlpha.100")
   const listBorder = useColorModeValue("gray.200", "whiteAlpha.200")
-  // Operators in cron mode asked to connect, which do at their next check-in
+  // Machines in cron mode asked to connect, which do at their next check-in
   const [waking, setWaking] = useState<Set<string>>(new Set())
-  const operatorsQuery = useQuery({
-    queryKey: ["user", "operators"],
-    queryFn: () => OperatorsService.getOperators().then((r) => r.data),
+  const machinesQuery = useQuery({
+    queryKey: ["user", "machines"],
+    queryFn: () => MachinesService.getMachines().then((r) => r.data),
     refetchInterval: waking.size ? 10000 : 30000,
   })
   const workspacesQuery = useQuery({
     queryKey: ["user", "workspaces"],
-    queryFn: () => OperatorsService.getWorkspaces().then((r) => r.data),
+    queryFn: () => MachinesService.getWorkspaces().then((r) => r.data),
     refetchInterval: waking.size ? 10000 : 30000,
   })
-  const operators = operatorsQuery.data ?? []
+  const machines = machinesQuery.data ?? []
   const workspaces = workspacesQuery.data ?? []
   const {
     connections,
     getConnection,
-    onlineOperators,
+    onlineMachines,
     sessions,
     refreshSessions,
     secondFactorError,
     retryRefused,
-  } = useOperatorConnections(
-    operators.filter((op) => op.is_online).map((op) => String(op.id)),
-    operatorsQuery.refetch,
+  } = useMachineConnections(
+    machines
+      .filter((machine) => machine.is_online)
+      .map((machine) => String(machine.id)),
+    machinesQuery.refetch,
   )
   useEffect(() => {
     try {
@@ -263,19 +261,19 @@ function Workspaces() {
       // Only a convenience
     }
   }, [search.workspace, search.session])
-  // Stop waiting on Operators once they're online
+  // Stop waiting on machines once they're online
   useEffect(() => {
-    const online = new Set(onlineOperators)
+    const online = new Set(onlineMachines)
     if ([...waking].some((id) => online.has(id))) {
       setWaking(new Set([...waking].filter((id) => !online.has(id))))
     }
-  }, [onlineOperators, waking])
-  const wakeOperator = async (operatorId: string) => {
+  }, [onlineMachines, waking])
+  const wakeMachine = async (machineId: string) => {
     try {
-      await OperatorsService.postOperatorWake({ operator_id: operatorId })
-      setWaking((prev) => new Set(prev).add(operatorId))
+      await MachinesService.postMachineWake({ machine_id: machineId })
+      setWaking((prev) => new Set(prev).add(machineId))
     } catch (e: any) {
-      showToast("Could not wake Operator", e.message, "error")
+      showToast("Could not wake machine", e.message, "error")
     }
   }
   const select = (next: Partial<WorkspacesSearch>) =>
@@ -292,13 +290,13 @@ function Workspaces() {
   const selectedWorkspace = workspaces.find(
     (ws) => workspaceKey(ws) === search.workspace,
   )
-  const [sessionOperator, sessionId] = (search.session ?? "").split(":")
+  const [sessionMachine, sessionId] = (search.session ?? "").split(":")
   const selectedSession = sessionId
-    ? sessions[sessionOperator]?.find((s) => s.id === sessionId)
+    ? sessions[sessionMachine]?.find((s) => s.id === sessionId)
     : undefined
   // A shell, or one attached to an agent's tmux pane
   const newSession = async (ws: Workspace, attach?: number) => {
-    const conn = getConnection(ws.operator_id)
+    const conn = getConnection(ws.machine_id)
     try {
       const { session } = await conn.request("sessions.open", {
         workspace: ws.path,
@@ -308,7 +306,7 @@ function Workspaces() {
       })
       select({
         workspace: workspaceKey(ws),
-        session: `${ws.operator_id}:${session}`,
+        session: `${ws.machine_id}:${session}`,
       })
       refreshSessions()
     } catch (e: any) {
@@ -316,7 +314,7 @@ function Workspaces() {
     }
   }
   const closeSession = (end: boolean) => {
-    const conn = connections.get(sessionOperator)
+    const conn = connections.get(sessionMachine)
     conn?.send({
       type: end ? "sessions.close" : "sessions.detach",
       session: sessionId,
@@ -325,13 +323,13 @@ function Workspaces() {
     refreshSessions()
   }
   const getSessions = (ws: Workspace) =>
-    (sessions[ws.operator_id] ?? []).filter((s) => s.workspace === ws.path)
+    (sessions[ws.machine_id] ?? []).filter((s) => s.workspace === ws.path)
   // What the filters leave, by the text in the box and the state chosen;
   // projects that aren't on the hub are only shown when asked for
   const query = (search.q ?? "").toLowerCase()
   const shown = (ws: Workspace) =>
     (!query ||
-      `${ws.project ?? ""} ${ws.path} ${ws.operator_name}`
+      `${ws.project ?? ""} ${ws.path} ${ws.machine_name}`
         .toLowerCase()
         .includes(query)) &&
     (search.show === "not_on_hub" ? !ws.on_hub : ws.on_hub) &&
@@ -348,8 +346,8 @@ function Workspaces() {
   const byActivity = (a: Workspace, b: Workspace) =>
     (b.last_activity ?? "").localeCompare(a.last_activity ?? "")
   const collapsed = new Set(search.collapsed ?? [])
-  // Operators by ID, and projects' groups of workspaces as
-  // "<operator ID>:<project>"
+  // Machines by ID, and projects' groups of workspaces as
+  // "<machine ID>:<project>"
   const toggleCollapsed = (key: string) => {
     const next = new Set(collapsed)
     next.has(key) ? next.delete(key) : next.add(key)
@@ -361,14 +359,14 @@ function Workspaces() {
     })
   }
   // Online first, since that's what can be used
-  const sortedOperators = [...operators].sort(
+  const sortedMachines = [...machines].sort(
     (a, b) =>
       Number(b.is_online) - Number(a.is_online) || a.name.localeCompare(b.name),
   )
-  const operatorStatus = (op: OperatorOut) =>
-    op.is_online ? "online" : op.is_asleep ? "asleep" : "offline"
+  const machineStatus = (machine: MachineOut) =>
+    machine.is_online ? "online" : machine.is_asleep ? "asleep" : "offline"
   const sessionRow = (ws: Workspace, s: SessionInfo, nested: boolean) => {
-    const key = `${ws.operator_id}:${s.id}`
+    const key = `${ws.machine_id}:${s.id}`
     return (
       <Flex
         key={s.id}
@@ -395,7 +393,7 @@ function Workspaces() {
       </Flex>
     )
   }
-  // A workspace, under its Operator, or its project when it has others
+  // A workspace, under its machine, or its project when it has others
   const workspaceRow = (ws: Workspace, nested: boolean) => {
     const key = workspaceKey(ws)
     const wsSessions = getSessions(ws)
@@ -447,13 +445,13 @@ function Workspaces() {
       </Box>
     )
   }
-  if (operatorsQuery.isPending || workspacesQuery.isPending) {
+  if (machinesQuery.isPending || workspacesQuery.isPending) {
     return <LoadingSpinner />
   }
   const selectedConn = selectedWorkspace
-    ? getConnection(selectedWorkspace.operator_id)
+    ? getConnection(selectedWorkspace.machine_id)
     : undefined
-  // Reported by the Operator, so only linked when it's a hub project name
+  // Reported by the machine, so only linked when it's a hub project name
   const projectMatch = selectedWorkspace?.project?.match(
     /^([a-z0-9][a-z0-9-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/,
   )
@@ -477,7 +475,7 @@ function Workspaces() {
         <ClearableInput
           size="sm"
           mb={2}
-          placeholder="Filter by project, path, or Operator"
+          placeholder="Filter by project, path, or machine"
           value={search.q ?? ""}
           onValueChange={(q) =>
             navigate({
@@ -528,43 +526,43 @@ function Workspaces() {
             <option value="name">Name</option>
           </Select>
         </Flex>
-        {operators.length === 0 && (
+        {machines.length === 0 && (
           <Text color="ui.dim" fontSize="sm">
-            No Operators yet. Install the Calkit CLI and run{" "}
-            <Code>calkit operator install</Code> to install the Operator and
-            connect to a workspace.
+            No machines yet. Install the Calkit CLI and run{" "}
+            <Code>calkit hub link</Code> to link a machine and connect to a
+            workspace.
           </Text>
         )}
-        {sortedOperators.map((op) => {
-          const opId = String(op.id)
-          const opWorkspaces = workspaces.filter(
-            (ws) => ws.operator_id === opId && shown(ws),
+        {sortedMachines.map((machine) => {
+          const machineId = String(machine.id)
+          const machineWorkspaces = workspaces.filter(
+            (ws) => ws.machine_id === machineId && shown(ws),
           )
-          if (search.sort !== "name") opWorkspaces.sort(byActivity)
-          if (filtering && opWorkspaces.length === 0) return null
+          if (search.sort !== "name") machineWorkspaces.sort(byActivity)
+          if (filtering && machineWorkspaces.length === 0) return null
           // A project's workspaces together, where its first one would be
           const projectGroups: [string, Workspace[]][] = []
-          for (const ws of opWorkspaces) {
+          for (const ws of machineWorkspaces) {
             const project = ws.project ?? ws.path
             const group = projectGroups.find(([p]) => p === project)
             group ? group[1].push(ws) : projectGroups.push([project, [ws]])
           }
-          const isCollapsed = collapsed.has(opId)
-          const conn = connections.get(opId)
+          const isCollapsed = collapsed.has(machineId)
+          const conn = connections.get(machineId)
           // Listed over the relay once it connects, which takes a moment
           const sessionsLoading =
-            op.is_online &&
-            op.platform !== "windows" &&
+            machine.is_online &&
+            machine.platform !== "windows" &&
             !conn?.error &&
-            sessions[opId] === undefined
+            sessions[machineId] === undefined
           return (
-            <Box key={opId} mb={4}>
+            <Box key={machineId} mb={4}>
               <Flex
                 align="center"
                 gap={2}
                 mb={1}
                 cursor="pointer"
-                onClick={() => toggleCollapsed(opId)}
+                onClick={() => toggleCollapsed(machineId)}
               >
                 {isCollapsed ? <FiChevronRight /> : <FiChevronDown />}
                 <Box
@@ -573,43 +571,43 @@ function Workspaces() {
                   borderRadius="full"
                   flexShrink={0}
                   bg={
-                    op.is_online
+                    machine.is_online
                       ? "ui.success"
-                      : op.is_asleep
+                      : machine.is_asleep
                         ? "yellow.400"
                         : "gray.400"
                   }
                 />
                 <Tooltip
-                  label={`${op.hostname ?? ""}${op.platform ? ` (${op.platform})` : ""}, ${operatorStatus(op)}`}
+                  label={`${machine.hostname ?? ""}${machine.platform ? ` (${machine.platform})` : ""}, ${machineStatus(machine)}`}
                 >
                   <Text fontWeight="semibold" noOfLines={1}>
-                    {op.name}
+                    {machine.name}
                   </Text>
                 </Tooltip>
                 <Text fontSize="xs" color="ui.dim">
-                  {opWorkspaces.length}
+                  {machineWorkspaces.length}
                 </Text>
-                {op.restart_pending && (
+                {machine.restart_pending && (
                   <Badge fontSize="2xs">restart pending</Badge>
                 )}
                 {sessionsLoading && <Spinner size="xs" color="ui.dim" />}
-                {op.is_asleep && (
+                {machine.is_asleep && (
                   <Button
                     size="xs"
                     ml="auto"
-                    isLoading={waking.has(opId)}
+                    isLoading={waking.has(machineId)}
                     loadingText="Waking"
                     onClick={(e) => {
                       e.stopPropagation()
-                      wakeOperator(opId)
+                      wakeMachine(machineId)
                     }}
                   >
                     Wake
                   </Button>
                 )}
               </Flex>
-              {!isCollapsed && opWorkspaces.length === 0 && (
+              {!isCollapsed && machineWorkspaces.length === 0 && (
                 <Text fontSize="sm" color="ui.dim" pl={4}>
                   No workspaces
                 </Text>
@@ -617,7 +615,7 @@ function Workspaces() {
               {!isCollapsed &&
                 projectGroups.map(([project, group]) => {
                   if (group.length === 1) return workspaceRow(group[0], false)
-                  const groupKey = `${opId}:${project}`
+                  const groupKey = `${machineId}:${project}`
                   const isGroupCollapsed = collapsed.has(groupKey)
                   return (
                     <Box key={groupKey}>
@@ -692,7 +690,7 @@ function Workspaces() {
                 )}
               </Flex>
             </Flex>
-            {selectedWorkspace.operator_online && selectedConn ? (
+            {selectedWorkspace.machine_online && selectedConn ? (
               // The details and the session side by side, when there's
               // room for both
               <Grid
@@ -726,7 +724,7 @@ function Workspaces() {
                     clearConfirmRun={() => {}}
                     narrow={Boolean(search.session || search.agent)}
                     sessions={
-                      selectedWorkspace.operator_platform === "windows"
+                      selectedWorkspace.machine_platform === "windows"
                         ? undefined
                         : getSessions(selectedWorkspace)
                     }
@@ -734,7 +732,7 @@ function Workspaces() {
                     onOpenSession={(id) =>
                       select({
                         workspace: search.workspace,
-                        session: `${selectedWorkspace.operator_id}:${id}`,
+                        session: `${selectedWorkspace.machine_id}:${id}`,
                       })
                     }
                     onNewSession={
@@ -769,7 +767,7 @@ function Workspaces() {
                     <TerminalPane
                       key={search.session}
                       conn={selectedConn}
-                      pane={{ operatorId: sessionOperator, session: sessionId }}
+                      pane={{ machineId: sessionMachine, session: sessionId }}
                       label={selectedSession?.label ?? "shell"}
                       connected={selectedConn.connected}
                       onClose={() => closeSession(true)}
@@ -781,7 +779,7 @@ function Workspaces() {
               </Grid>
             ) : (
               <Text color="ui.dim">
-                {selectedWorkspace.operator_name} isn't connected.
+                {selectedWorkspace.machine_name} isn't connected.
               </Text>
             )}
           </>

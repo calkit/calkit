@@ -36,9 +36,9 @@ import type {
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
-  DeleteOperatorErrors,
-  DeleteOperatorResponses,
-  DeleteOperatorSelfResponses,
+  DeleteMachineErrors,
+  DeleteMachineResponses,
+  DeleteMachineSelfResponses,
   DeleteProjectByIdErrors,
   DeleteProjectByIdResponses,
   DeleteProjectCollaboratorErrors,
@@ -112,9 +112,9 @@ import type {
   GetHubStatsErrors,
   GetHubStatsResponses,
   GetHubVersionResponses,
+  GetMachinesResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
-  GetOperatorsResponses,
   GetOrgsErrors,
   GetOrgsResponses,
   GetOrgStorageErrors,
@@ -289,6 +289,7 @@ import type {
   LoginWithGoogleErrors,
   LoginWithGoogleResponses,
   LogoutRequest,
+  MachinePost,
   MapPathsPost,
   MarkAllNotificationsReadResponses,
   MarkNotificationReadErrors,
@@ -298,7 +299,6 @@ import type {
   NativeCollaboratorPost,
   NewPassword,
   OnboardingFlagPost,
-  OperatorPost,
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
@@ -338,19 +338,19 @@ import type {
   PostLoginDeviceTokenResponses,
   PostLogoutErrors,
   PostLogoutResponses,
-  PostOperatorCheckInErrors,
-  PostOperatorCheckInResponses,
-  PostOperatorCliTokenRequestErrors,
-  PostOperatorCliTokenRequestResponses,
-  PostOperatorCliTokenResponses,
-  PostOperatorErrors,
-  PostOperatorRelayTokenErrors,
-  PostOperatorRelayTokenResponses,
-  PostOperatorResponses,
-  PostOperatorRestartErrors,
-  PostOperatorRestartResponses,
-  PostOperatorWakeErrors,
-  PostOperatorWakeResponses,
+  PostMachineCheckInErrors,
+  PostMachineCheckInResponses,
+  PostMachineCliTokenRequestErrors,
+  PostMachineCliTokenRequestResponses,
+  PostMachineCliTokenResponses,
+  PostMachineErrors,
+  PostMachineRelayTokenErrors,
+  PostMachineRelayTokenResponses,
+  PostMachineResponses,
+  PostMachineRestartErrors,
+  PostMachineRestartResponses,
+  PostMachineWakeErrors,
+  PostMachineWakeResponses,
   PostOrgErrors,
   PostOrgResponses,
   PostProjectCollaboratorByEmailErrors,
@@ -9683,50 +9683,50 @@ export class FeedbackService {
   }
 }
 
-export class OperatorsService {
+export class MachinesService {
   /**
-   * Get Operators
+   * Get Machines
    *
-   * List the user's Operators that haven't been revoked.
+   * List the user's machines that haven't been revoked.
    */
-  public static getOperators<ThrowOnError extends boolean = true>(
+  public static getMachines<ThrowOnError extends boolean = true>(
     options?: Options<never, ThrowOnError>,
-  ): RequestResult<GetOperatorsResponses, unknown, ThrowOnError> {
+  ): RequestResult<GetMachinesResponses, unknown, ThrowOnError> {
     return (options?.client ?? client).get<
-      GetOperatorsResponses,
+      GetMachinesResponses,
       unknown,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators",
+      url: "/machines",
       ...options,
     })
   }
 
   /**
-   * Post Operator
+   * Post Machine
    *
-   * Register a machine as one of the user's Operators.
+   * Register a machine as one of the user's.
    */
-  public static postOperator<ThrowOnError extends boolean = true>(
+  public static postMachine<ThrowOnError extends boolean = true>(
     parameters: {
-      operatorPost: OperatorPost
+      machinePost: MachinePost
     },
     options?: Options<never, ThrowOnError>,
-  ): RequestResult<PostOperatorResponses, PostOperatorErrors, ThrowOnError> {
+  ): RequestResult<PostMachineResponses, PostMachineErrors, ThrowOnError> {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "operatorPost", map: "body" }] }],
+      [{ args: [{ key: "machinePost", map: "body" }] }],
     )
     return (options?.client ?? client).post<
-      PostOperatorResponses,
-      PostOperatorErrors,
+      PostMachineResponses,
+      PostMachineErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators",
+      url: "/machines",
       ...options,
       ...params,
       headers: {
@@ -9738,71 +9738,67 @@ export class OperatorsService {
   }
 
   /**
-   * Delete Operator Self
+   * Delete Machine Self
    *
-   * Revoke the Operator making the request, e.g., when it's uninstalled.
+   * Revoke the machine making the request, e.g., when it's unlinked.
    */
-  public static deleteOperatorSelf<ThrowOnError extends boolean = true>(
+  public static deleteMachineSelf<ThrowOnError extends boolean = true>(
     options?: Options<never, ThrowOnError>,
-  ): RequestResult<DeleteOperatorSelfResponses, unknown, ThrowOnError> {
+  ): RequestResult<DeleteMachineSelfResponses, unknown, ThrowOnError> {
     return (options?.client ?? client).delete<
-      DeleteOperatorSelfResponses,
+      DeleteMachineSelfResponses,
       unknown,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators/self",
+      url: "/machines/self",
       ...options,
     })
   }
 
   /**
-   * Delete Operator
+   * Delete Machine
    *
-   * Revoke an Operator, which takes a signed-in session, not a token.
+   * Revoke a machine, which takes a signed-in session, not a token.
    */
-  public static deleteOperator<ThrowOnError extends boolean = true>(
+  public static deleteMachine<ThrowOnError extends boolean = true>(
     parameters: {
-      operator_id: string
+      machine_id: string
     },
     options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    DeleteOperatorResponses,
-    DeleteOperatorErrors,
-    ThrowOnError
-  > {
+  ): RequestResult<DeleteMachineResponses, DeleteMachineErrors, ThrowOnError> {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "operator_id" }] }],
+      [{ args: [{ in: "path", key: "machine_id" }] }],
     )
     return (options?.client ?? client).delete<
-      DeleteOperatorResponses,
-      DeleteOperatorErrors,
+      DeleteMachineResponses,
+      DeleteMachineErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators/{operator_id}",
+      url: "/machines/{machine_id}",
       ...options,
       ...params,
     })
   }
 
   /**
-   * Post Operator Check In
+   * Post Machine Check In
    *
-   * Record that an Operator is alive and what it has, and tell it how
+   * Record that a machine is alive and what it has, and tell it how
    * to connect.
    */
-  public static postOperatorCheckIn<ThrowOnError extends boolean = true>(
+  public static postMachineCheckIn<ThrowOnError extends boolean = true>(
     parameters: {
       checkIn: CheckIn
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostOperatorCheckInResponses,
-    PostOperatorCheckInErrors,
+    PostMachineCheckInResponses,
+    PostMachineCheckInErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
@@ -9810,13 +9806,13 @@ export class OperatorsService {
       [{ args: [{ key: "checkIn", map: "body" }] }],
     )
     return (options?.client ?? client).post<
-      PostOperatorCheckInResponses,
-      PostOperatorCheckInErrors,
+      PostMachineCheckInResponses,
+      PostMachineCheckInErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators/check-in",
+      url: "/machines/check-in",
       ...options,
       ...params,
       headers: {
@@ -9828,87 +9824,87 @@ export class OperatorsService {
   }
 
   /**
-   * Post Operator Wake
+   * Post Machine Wake
    *
-   * Ask an Operator in cron mode to connect at its next check-in.
+   * Ask a machine in cron mode to connect at its next check-in.
    */
-  public static postOperatorWake<ThrowOnError extends boolean = true>(
+  public static postMachineWake<ThrowOnError extends boolean = true>(
     parameters: {
-      operator_id: string
+      machine_id: string
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostOperatorWakeResponses,
-    PostOperatorWakeErrors,
+    PostMachineWakeResponses,
+    PostMachineWakeErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "operator_id" }] }],
+      [{ args: [{ in: "path", key: "machine_id" }] }],
     )
     return (options?.client ?? client).post<
-      PostOperatorWakeResponses,
-      PostOperatorWakeErrors,
+      PostMachineWakeResponses,
+      PostMachineWakeErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators/{operator_id}/wake",
+      url: "/machines/{machine_id}/wake",
       ...options,
       ...params,
     })
   }
 
   /**
-   * Post Operator Restart
+   * Post Machine Restart
    *
-   * Ask an Operator to restart, e.g., to run a newer Calkit, once no
+   * Ask a machine to restart, e.g., to run a newer Calkit, once no
    * session or run is using it.
    */
-  public static postOperatorRestart<ThrowOnError extends boolean = true>(
+  public static postMachineRestart<ThrowOnError extends boolean = true>(
     parameters: {
-      operator_id: string
+      machine_id: string
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostOperatorRestartResponses,
-    PostOperatorRestartErrors,
+    PostMachineRestartResponses,
+    PostMachineRestartErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "operator_id" }] }],
+      [{ args: [{ in: "path", key: "machine_id" }] }],
     )
     return (options?.client ?? client).post<
-      PostOperatorRestartResponses,
-      PostOperatorRestartErrors,
+      PostMachineRestartResponses,
+      PostMachineRestartErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators/{operator_id}/restart",
+      url: "/machines/{machine_id}/restart",
       ...options,
       ...params,
     })
   }
 
   /**
-   * Post Operator Relay Token
+   * Post Machine Relay Token
    *
-   * Let the user's browser connect to one of their online Operators.
+   * Let the user's browser connect to one of their online machines.
    *
    * This opens a shell on their machine, so it takes a signed-in session,
    * not a token, that entered a second factor recently.
    */
-  public static postOperatorRelayToken<ThrowOnError extends boolean = true>(
+  public static postMachineRelayToken<ThrowOnError extends boolean = true>(
     parameters: {
-      operator_id: string
+      machine_id: string
       relayTokenReq: RelayTokenReq
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostOperatorRelayTokenResponses,
-    PostOperatorRelayTokenErrors,
+    PostMachineRelayTokenResponses,
+    PostMachineRelayTokenErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
@@ -9916,20 +9912,20 @@ export class OperatorsService {
       [
         {
           args: [
-            { in: "path", key: "operator_id" },
+            { in: "path", key: "machine_id" },
             { key: "relayTokenReq", map: "body" },
           ],
         },
       ],
     )
     return (options?.client ?? client).post<
-      PostOperatorRelayTokenResponses,
-      PostOperatorRelayTokenErrors,
+      PostMachineRelayTokenResponses,
+      PostMachineRelayTokenErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators/{operator_id}/relay-token",
+      url: "/machines/{machine_id}/relay-token",
       ...options,
       ...params,
       headers: {
@@ -9941,57 +9937,55 @@ export class OperatorsService {
   }
 
   /**
-   * Post Operator Cli Token Request
+   * Post Machine Cli Token Request
    *
-   * Let one of the user's Operators fetch a CLI token for its machine,
+   * Let one of the user's machines fetch a CLI token for itself,
    * within the next 10 minutes, so the token never crosses the relay.
    */
-  public static postOperatorCliTokenRequest<
-    ThrowOnError extends boolean = true,
-  >(
+  public static postMachineCliTokenRequest<ThrowOnError extends boolean = true>(
     parameters: {
-      operator_id: string
+      machine_id: string
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostOperatorCliTokenRequestResponses,
-    PostOperatorCliTokenRequestErrors,
+    PostMachineCliTokenRequestResponses,
+    PostMachineCliTokenRequestErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "operator_id" }] }],
+      [{ args: [{ in: "path", key: "machine_id" }] }],
     )
     return (options?.client ?? client).post<
-      PostOperatorCliTokenRequestResponses,
-      PostOperatorCliTokenRequestErrors,
+      PostMachineCliTokenRequestResponses,
+      PostMachineCliTokenRequestErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators/{operator_id}/cli-token-request",
+      url: "/machines/{machine_id}/cli-token-request",
       ...options,
       ...params,
     })
   }
 
   /**
-   * Post Operator Cli Token
+   * Post Machine Cli Token
    *
-   * Issue the Operator's machine a CLI token, if its owner asked for one
+   * Issue the machine a CLI token, if its owner asked for one
    * recently, replacing any it was issued before.
    */
-  public static postOperatorCliToken<ThrowOnError extends boolean = true>(
+  public static postMachineCliToken<ThrowOnError extends boolean = true>(
     options?: Options<never, ThrowOnError>,
-  ): RequestResult<PostOperatorCliTokenResponses, unknown, ThrowOnError> {
+  ): RequestResult<PostMachineCliTokenResponses, unknown, ThrowOnError> {
     return (options?.client ?? client).post<
-      PostOperatorCliTokenResponses,
+      PostMachineCliTokenResponses,
       unknown,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/operators/cli-token",
+      url: "/machines/cli-token",
       ...options,
     })
   }
@@ -9999,7 +9993,7 @@ export class OperatorsService {
   /**
    * Get Workspaces
    *
-   * List the workspaces on all of the user's Operators.
+   * List the workspaces on all of the user's machines.
    */
   public static getWorkspaces<ThrowOnError extends boolean = true>(
     options?: Options<never, ThrowOnError>,
@@ -10019,7 +10013,7 @@ export class OperatorsService {
   /**
    * Get Project Workspaces
    *
-   * List a project's workspaces on the user's Operators.
+   * List a project's workspaces on the user's machines.
    */
   public static getProjectWorkspaces<ThrowOnError extends boolean = true>(
     parameters: {

@@ -181,9 +181,9 @@ def generate_two_factor_locked_email(email_to: str, minutes: int) -> EmailData:
     return EmailData(html_content=html_content, subject=subject)
 
 
-def generate_operator_email(
+def generate_machine_email(
     email_to: str,
-    event: Literal["registered", "revoked"],
+    event: Literal["linked", "unlinked"],
     name: str,
     hostname: str | None,
     platform: str | None,
@@ -191,11 +191,11 @@ def generate_operator_email(
 ) -> EmailData:
     project_name = settings.PROJECT_NAME
     subject = {
-        "registered": f"{project_name} - New Operator {name}",
-        "revoked": f"{project_name} - Operator {name} revoked",
+        "linked": f"{project_name} - New machine {name}",
+        "unlinked": f"{project_name} - Machine {name} revoked",
     }[event]
     html_content = render_email_template(
-        template_name=f"operator_{event}.html",
+        template_name=f"machine_{event}.html",
         context={
             "project_name": settings.PROJECT_NAME,
             "email": email_to,
@@ -203,7 +203,7 @@ def generate_operator_email(
             "hostname": hostname or "an unknown host",
             "platform": platform or "unknown platform",
             "machine_id": machine_id or "unknown",
-            "link": f"{settings.frontend_host}/settings?tab=operators",
+            "link": f"{settings.frontend_host}/settings?tab=machines",
         },
     )
     return EmailData(html_content=html_content, subject=subject)

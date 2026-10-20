@@ -40,7 +40,7 @@ import { z } from "zod"
 
 import { FaExclamationTriangle } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
-import { OperatorsService, ProjectsService } from "../../../../../client"
+import { MachinesService, ProjectsService } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import Mermaid, {
@@ -387,12 +387,12 @@ function ProjectPipeline() {
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const { user } = useAuth()
   // Where the pipeline is running, or how it last ran, on the user's own
-  // machines, from their Operators' check-ins; the same request as the
+  // machines, from their links' check-ins; the same request as the
   // sidebar's and the Workspaces page's
   const workspacesQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "workspaces"],
     queryFn: () =>
-      OperatorsService.getProjectWorkspaces({
+      MachinesService.getProjectWorkspaces({
         owner_name: accountName,
         project_name: projectName,
       }).then((r) => r.data),
@@ -410,7 +410,7 @@ function ProjectPipeline() {
   const runTargets = (workspacesQuery.data ?? []).filter(
     (ws) =>
       ws.kind === "personal" &&
-      ws.operator_online &&
+      ws.machine_online &&
       !ws.running &&
       !ws.in_use_by,
   )
@@ -419,7 +419,7 @@ function ProjectPipeline() {
     navigate({
       to: "/$accountName/$projectName/workspaces",
       params: { accountName, projectName },
-      search: { workspace: `${ws.operator_id}:${ws.path}` },
+      search: { workspace: `${ws.machine_id}:${ws.path}` },
       state: { confirmRun: stage ?? "*" },
     })
   const pipelineQuery = useQuery({
@@ -553,10 +553,10 @@ function ProjectPipeline() {
                         <MenuList>
                           {runTargets.map((ws) => (
                             <MenuItem
-                              key={`${ws.operator_id}:${ws.path}`}
+                              key={`${ws.machine_id}:${ws.path}`}
                               onClick={() => runOn(ws)}
                             >
-                              {ws.operator_name}: {ws.path}
+                              {ws.machine_name}: {ws.path}
                             </MenuItem>
                           ))}
                         </MenuList>
@@ -566,7 +566,7 @@ function ProjectPipeline() {
                       <Flex direction="column" gap={1} mb={2} fontSize="sm">
                         {runs.map((ws) => (
                           <Flex
-                            key={`${ws.operator_id}:${ws.path}`}
+                            key={`${ws.machine_id}:${ws.path}`}
                             align="center"
                             gap={2}
                             wrap="wrap"
@@ -592,7 +592,7 @@ function ProjectPipeline() {
                                 as={RouterLink}
                                 to={`/${accountName}/${projectName}/workspaces`}
                               >
-                                {ws.operator_name}
+                                {ws.machine_name}
                               </Link>
                               {ws.running
                                 ? ws.running_since

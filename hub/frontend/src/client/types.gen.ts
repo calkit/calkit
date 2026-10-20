@@ -367,7 +367,7 @@ export type BodyProjectsPutProjectContents = {
 /**
  * CheckIn
  *
- * What an Operator reports each time it checks in.
+ * What a machine reports each time it checks in.
  */
 export type CheckIn = {
   /**
@@ -400,13 +400,13 @@ export type CheckIn = {
 /**
  * CheckInResp
  *
- * Where and how an Operator connects to the relay.
+ * Where and how a machine connects to the relay.
  */
 export type CheckInResp = {
   /**
-   * Operator Id
+   * Machine Id
    */
-  operator_id: string
+  machine_id: string
   /**
    * Name
    */
@@ -2587,6 +2587,215 @@ export type LogoutRequest = {
 }
 
 /**
+ * MachineOut
+ *
+ * A machine as the API returns it: its record plus its current state.
+ */
+export type MachineOut = {
+  /**
+   * Id
+   */
+  id?: string
+  /**
+   * User Id
+   */
+  user_id: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Hostname
+   */
+  hostname?: string | null
+  /**
+   * System Machine Id
+   */
+  system_machine_id?: string | null
+  /**
+   * Platform
+   */
+  platform?: string | null
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Hosts
+   */
+  hosts?: Array<string>
+  /**
+   * Created
+   */
+  created?: string
+  /**
+   * Last Seen
+   */
+  last_seen?: string | null
+  /**
+   * Mode
+   */
+  mode?: string | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Connect Requested At
+   */
+  connect_requested_at?: string | null
+  /**
+   * Restart Pending
+   */
+  restart_pending?: boolean
+  /**
+   * Restart Requested
+   */
+  restart_requested?: boolean
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Online
+   */
+  is_online: boolean
+  /**
+   * Is Asleep
+   */
+  is_asleep: boolean
+  /**
+   * Workspace Count
+   */
+  workspace_count: number
+}
+
+/**
+ * MachinePost
+ *
+ * What a machine reports about itself when registering.
+ */
+export type MachinePost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Hostname
+   */
+  hostname?: string | null
+  /**
+   * Machine Id
+   */
+  machine_id?: string | null
+  /**
+   * Platform
+   */
+  platform?: string | null
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Hosts
+   */
+  hosts?: Array<string>
+  public_key?: PublicKey | null
+}
+
+/**
+ * MachineRegistered
+ *
+ * A newly registered machine, with the token only returned here.
+ */
+export type MachineRegistered = {
+  /**
+   * Id
+   */
+  id?: string
+  /**
+   * User Id
+   */
+  user_id: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Hostname
+   */
+  hostname?: string | null
+  /**
+   * System Machine Id
+   */
+  system_machine_id?: string | null
+  /**
+   * Platform
+   */
+  platform?: string | null
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Hosts
+   */
+  hosts?: Array<string>
+  /**
+   * Created
+   */
+  created?: string
+  /**
+   * Last Seen
+   */
+  last_seen?: string | null
+  /**
+   * Mode
+   */
+  mode?: string | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Connect Requested At
+   */
+  connect_requested_at?: string | null
+  /**
+   * Restart Pending
+   */
+  restart_pending?: boolean
+  /**
+   * Restart Requested
+   */
+  restart_requested?: boolean
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Online
+   */
+  is_online: boolean
+  /**
+   * Is Asleep
+   */
+  is_asleep: boolean
+  /**
+   * Workspace Count
+   */
+  workspace_count: number
+  /**
+   * Token
+   */
+  token: string
+  /**
+   * Grant Public Key
+   */
+  grant_public_key: string
+}
+
+/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -2880,215 +3089,6 @@ export type OperationResult = {
    * Message
    */
   message?: string | null
-}
-
-/**
- * OperatorOut
- *
- * An Operator as the API returns it: its record plus its current state.
- */
-export type OperatorOut = {
-  /**
-   * Id
-   */
-  id?: string
-  /**
-   * User Id
-   */
-  user_id: string
-  /**
-   * Name
-   */
-  name: string
-  /**
-   * Hostname
-   */
-  hostname?: string | null
-  /**
-   * Machine Id
-   */
-  machine_id?: string | null
-  /**
-   * Platform
-   */
-  platform?: string | null
-  /**
-   * Calkit Version
-   */
-  calkit_version?: string | null
-  /**
-   * Hosts
-   */
-  hosts?: Array<string>
-  /**
-   * Created
-   */
-  created?: string
-  /**
-   * Last Seen
-   */
-  last_seen?: string | null
-  /**
-   * Mode
-   */
-  mode?: string | null
-  /**
-   * Connected
-   */
-  connected?: boolean
-  /**
-   * Connect Requested At
-   */
-  connect_requested_at?: string | null
-  /**
-   * Restart Pending
-   */
-  restart_pending?: boolean
-  /**
-   * Restart Requested
-   */
-  restart_requested?: boolean
-  /**
-   * Is Active
-   */
-  is_active?: boolean
-  /**
-   * Is Online
-   */
-  is_online: boolean
-  /**
-   * Is Asleep
-   */
-  is_asleep: boolean
-  /**
-   * Workspace Count
-   */
-  workspace_count: number
-}
-
-/**
- * OperatorPost
- *
- * What a machine reports about itself when registering.
- */
-export type OperatorPost = {
-  /**
-   * Name
-   */
-  name?: string | null
-  /**
-   * Hostname
-   */
-  hostname?: string | null
-  /**
-   * Machine Id
-   */
-  machine_id?: string | null
-  /**
-   * Platform
-   */
-  platform?: string | null
-  /**
-   * Calkit Version
-   */
-  calkit_version?: string | null
-  /**
-   * Hosts
-   */
-  hosts?: Array<string>
-  public_key?: PublicKey | null
-}
-
-/**
- * OperatorRegistered
- *
- * A newly registered Operator, with the token only returned here.
- */
-export type OperatorRegistered = {
-  /**
-   * Id
-   */
-  id?: string
-  /**
-   * User Id
-   */
-  user_id: string
-  /**
-   * Name
-   */
-  name: string
-  /**
-   * Hostname
-   */
-  hostname?: string | null
-  /**
-   * Machine Id
-   */
-  machine_id?: string | null
-  /**
-   * Platform
-   */
-  platform?: string | null
-  /**
-   * Calkit Version
-   */
-  calkit_version?: string | null
-  /**
-   * Hosts
-   */
-  hosts?: Array<string>
-  /**
-   * Created
-   */
-  created?: string
-  /**
-   * Last Seen
-   */
-  last_seen?: string | null
-  /**
-   * Mode
-   */
-  mode?: string | null
-  /**
-   * Connected
-   */
-  connected?: boolean
-  /**
-   * Connect Requested At
-   */
-  connect_requested_at?: string | null
-  /**
-   * Restart Pending
-   */
-  restart_pending?: boolean
-  /**
-   * Restart Requested
-   */
-  restart_requested?: boolean
-  /**
-   * Is Active
-   */
-  is_active?: boolean
-  /**
-   * Is Online
-   */
-  is_online: boolean
-  /**
-   * Is Asleep
-   */
-  is_asleep: boolean
-  /**
-   * Workspace Count
-   */
-  workspace_count: number
-  /**
-   * Token
-   */
-  token: string
-  /**
-   * Grant Public Key
-   */
-  grant_public_key: string
 }
 
 /**
@@ -4437,11 +4437,11 @@ export type ProjectsPublic = {
  * PublicKey
  *
  * A P-256 public key as a JSON Web Key, e.g., a browser's for one
- * connection, or an Operator's own.
+ * connection, or a machine's own.
  *
- * The browser signs every message it sends the Operator with the private
+ * The browser signs every message it sends the machine with the private
  * half of its key, which it can't export, so a grant naming this key is
- * no use to the relay that carries it, and the Operator signs its replies
+ * no use to the relay that carries it, and the machine signs its replies
  * with its own, so the relay can't forge those either.
  */
 export type PublicKey = {
@@ -5155,7 +5155,7 @@ export type RefreshTokenRequest = {
 /**
  * RelayTokenReq
  *
- * What a browser asking to connect to an Operator sends.
+ * What a browser asking to connect to a machine sends.
  */
 export type RelayTokenReq = {
   public_key: PublicKey
@@ -5164,8 +5164,8 @@ export type RelayTokenReq = {
 /**
  * RelayTokenResp
  *
- * Where and how a browser connects to an Operator through the relay,
- * and how it checks the replies it gets are the Operator's.
+ * Where and how a browser connects to a machine through the relay,
+ * and how it checks the replies it gets are the machine's.
  */
 export type RelayTokenResp = {
   /**
@@ -5176,7 +5176,7 @@ export type RelayTokenResp = {
    * Token
    */
   token: string
-  operator_public_key: PublicKey
+  machine_public_key: PublicKey
   /**
    * Grant Id
    */
@@ -6528,9 +6528,9 @@ export type TokenResp = {
    */
   last_used?: string | null
   /**
-   * Operator Id
+   * Machine Id
    */
-  operator_id?: string | null
+  machine_id?: string | null
 }
 
 /**
@@ -6860,9 +6860,9 @@ export type UserTokenPublic = {
    */
   last_used?: string | null
   /**
-   * Operator Id
+   * Machine Id
    */
-  operator_id?: string | null
+  machine_id?: string | null
 }
 
 /**
@@ -6952,7 +6952,7 @@ export type ValidationError = {
 /**
  * Workspace
  *
- * A workspace along with the Operator it's on.
+ * A workspace along with the machine it's on.
  */
 export type Workspace = {
   /**
@@ -7013,25 +7013,25 @@ export type Workspace = {
    */
   agents?: Array<AgentInfo>
   /**
-   * Operator Id
+   * Machine Id
    */
-  operator_id: string
+  machine_id: string
   /**
-   * Operator Name
+   * Machine Name
    */
-  operator_name: string
+  machine_name: string
   /**
-   * Operator Online
+   * Machine Online
    */
-  operator_online: boolean
+  machine_online: boolean
   /**
-   * Operator Asleep
+   * Machine Asleep
    */
-  operator_asleep: boolean
+  machine_asleep: boolean
   /**
-   * Operator Platform
+   * Machine Platform
    */
-  operator_platform: string | null
+  machine_platform: string | null
   /**
    * Updated
    */
@@ -7045,7 +7045,7 @@ export type Workspace = {
 /**
  * WorkspaceInfo
  *
- * A workspace as an Operator reports it at check-in.
+ * A workspace as a machine reports it at check-in.
  */
 export type WorkspaceInfo = {
   /**
@@ -15898,271 +15898,270 @@ export type GetFeatureVotesResponses = {
 export type GetFeatureVotesResponse =
   GetFeatureVotesResponses[keyof GetFeatureVotesResponses]
 
-export type GetOperatorsData = {
+export type GetMachinesData = {
   body?: never
   path?: never
   query?: never
-  url: "/operators"
+  url: "/machines"
 }
 
-export type GetOperatorsResponses = {
+export type GetMachinesResponses = {
   /**
-   * Response Operators-Get Operators
+   * Response Machines-Get Machines
    *
    * Successful Response
    */
-  200: Array<OperatorOut>
+  200: Array<MachineOut>
 }
 
-export type GetOperatorsResponse =
-  GetOperatorsResponses[keyof GetOperatorsResponses]
+export type GetMachinesResponse =
+  GetMachinesResponses[keyof GetMachinesResponses]
 
-export type PostOperatorData = {
-  body: OperatorPost
+export type PostMachineData = {
+  body: MachinePost
   path?: never
   query?: never
-  url: "/operators"
+  url: "/machines"
 }
 
-export type PostOperatorErrors = {
+export type PostMachineErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostOperatorError = PostOperatorErrors[keyof PostOperatorErrors]
+export type PostMachineError = PostMachineErrors[keyof PostMachineErrors]
 
-export type PostOperatorResponses = {
+export type PostMachineResponses = {
   /**
    * Successful Response
    */
-  200: OperatorRegistered
+  200: MachineRegistered
 }
 
-export type PostOperatorResponse =
-  PostOperatorResponses[keyof PostOperatorResponses]
+export type PostMachineResponse =
+  PostMachineResponses[keyof PostMachineResponses]
 
-export type DeleteOperatorSelfData = {
+export type DeleteMachineSelfData = {
   body?: never
   path?: never
   query?: never
-  url: "/operators/self"
+  url: "/machines/self"
 }
 
-export type DeleteOperatorSelfResponses = {
+export type DeleteMachineSelfResponses = {
   /**
    * Successful Response
    */
-  200: OperatorOut
+  200: MachineOut
 }
 
-export type DeleteOperatorSelfResponse =
-  DeleteOperatorSelfResponses[keyof DeleteOperatorSelfResponses]
+export type DeleteMachineSelfResponse =
+  DeleteMachineSelfResponses[keyof DeleteMachineSelfResponses]
 
-export type DeleteOperatorData = {
+export type DeleteMachineData = {
   body?: never
   path: {
     /**
-     * Operator Id
+     * Machine Id
      */
-    operator_id: string
+    machine_id: string
   }
   query?: never
-  url: "/operators/{operator_id}"
+  url: "/machines/{machine_id}"
 }
 
-export type DeleteOperatorErrors = {
+export type DeleteMachineErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type DeleteOperatorError =
-  DeleteOperatorErrors[keyof DeleteOperatorErrors]
+export type DeleteMachineError = DeleteMachineErrors[keyof DeleteMachineErrors]
 
-export type DeleteOperatorResponses = {
+export type DeleteMachineResponses = {
   /**
    * Successful Response
    */
-  200: OperatorOut
+  200: MachineOut
 }
 
-export type DeleteOperatorResponse =
-  DeleteOperatorResponses[keyof DeleteOperatorResponses]
+export type DeleteMachineResponse =
+  DeleteMachineResponses[keyof DeleteMachineResponses]
 
-export type PostOperatorCheckInData = {
+export type PostMachineCheckInData = {
   body: CheckIn
   path?: never
   query?: never
-  url: "/operators/check-in"
+  url: "/machines/check-in"
 }
 
-export type PostOperatorCheckInErrors = {
+export type PostMachineCheckInErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostOperatorCheckInError =
-  PostOperatorCheckInErrors[keyof PostOperatorCheckInErrors]
+export type PostMachineCheckInError =
+  PostMachineCheckInErrors[keyof PostMachineCheckInErrors]
 
-export type PostOperatorCheckInResponses = {
+export type PostMachineCheckInResponses = {
   /**
    * Successful Response
    */
   200: CheckInResp
 }
 
-export type PostOperatorCheckInResponse =
-  PostOperatorCheckInResponses[keyof PostOperatorCheckInResponses]
+export type PostMachineCheckInResponse =
+  PostMachineCheckInResponses[keyof PostMachineCheckInResponses]
 
-export type PostOperatorWakeData = {
+export type PostMachineWakeData = {
   body?: never
   path: {
     /**
-     * Operator Id
+     * Machine Id
      */
-    operator_id: string
+    machine_id: string
   }
   query?: never
-  url: "/operators/{operator_id}/wake"
+  url: "/machines/{machine_id}/wake"
 }
 
-export type PostOperatorWakeErrors = {
+export type PostMachineWakeErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostOperatorWakeError =
-  PostOperatorWakeErrors[keyof PostOperatorWakeErrors]
+export type PostMachineWakeError =
+  PostMachineWakeErrors[keyof PostMachineWakeErrors]
 
-export type PostOperatorWakeResponses = {
+export type PostMachineWakeResponses = {
   /**
    * Successful Response
    */
-  200: OperatorOut
+  200: MachineOut
 }
 
-export type PostOperatorWakeResponse =
-  PostOperatorWakeResponses[keyof PostOperatorWakeResponses]
+export type PostMachineWakeResponse =
+  PostMachineWakeResponses[keyof PostMachineWakeResponses]
 
-export type PostOperatorRestartData = {
+export type PostMachineRestartData = {
   body?: never
   path: {
     /**
-     * Operator Id
+     * Machine Id
      */
-    operator_id: string
+    machine_id: string
   }
   query?: never
-  url: "/operators/{operator_id}/restart"
+  url: "/machines/{machine_id}/restart"
 }
 
-export type PostOperatorRestartErrors = {
+export type PostMachineRestartErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostOperatorRestartError =
-  PostOperatorRestartErrors[keyof PostOperatorRestartErrors]
+export type PostMachineRestartError =
+  PostMachineRestartErrors[keyof PostMachineRestartErrors]
 
-export type PostOperatorRestartResponses = {
+export type PostMachineRestartResponses = {
   /**
    * Successful Response
    */
-  200: OperatorOut
+  200: MachineOut
 }
 
-export type PostOperatorRestartResponse =
-  PostOperatorRestartResponses[keyof PostOperatorRestartResponses]
+export type PostMachineRestartResponse =
+  PostMachineRestartResponses[keyof PostMachineRestartResponses]
 
-export type PostOperatorRelayTokenData = {
+export type PostMachineRelayTokenData = {
   body: RelayTokenReq
   path: {
     /**
-     * Operator Id
+     * Machine Id
      */
-    operator_id: string
+    machine_id: string
   }
   query?: never
-  url: "/operators/{operator_id}/relay-token"
+  url: "/machines/{machine_id}/relay-token"
 }
 
-export type PostOperatorRelayTokenErrors = {
+export type PostMachineRelayTokenErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostOperatorRelayTokenError =
-  PostOperatorRelayTokenErrors[keyof PostOperatorRelayTokenErrors]
+export type PostMachineRelayTokenError =
+  PostMachineRelayTokenErrors[keyof PostMachineRelayTokenErrors]
 
-export type PostOperatorRelayTokenResponses = {
+export type PostMachineRelayTokenResponses = {
   /**
    * Successful Response
    */
   200: RelayTokenResp
 }
 
-export type PostOperatorRelayTokenResponse =
-  PostOperatorRelayTokenResponses[keyof PostOperatorRelayTokenResponses]
+export type PostMachineRelayTokenResponse =
+  PostMachineRelayTokenResponses[keyof PostMachineRelayTokenResponses]
 
-export type PostOperatorCliTokenRequestData = {
+export type PostMachineCliTokenRequestData = {
   body?: never
   path: {
     /**
-     * Operator Id
+     * Machine Id
      */
-    operator_id: string
+    machine_id: string
   }
   query?: never
-  url: "/operators/{operator_id}/cli-token-request"
+  url: "/machines/{machine_id}/cli-token-request"
 }
 
-export type PostOperatorCliTokenRequestErrors = {
+export type PostMachineCliTokenRequestErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostOperatorCliTokenRequestError =
-  PostOperatorCliTokenRequestErrors[keyof PostOperatorCliTokenRequestErrors]
+export type PostMachineCliTokenRequestError =
+  PostMachineCliTokenRequestErrors[keyof PostMachineCliTokenRequestErrors]
 
-export type PostOperatorCliTokenRequestResponses = {
+export type PostMachineCliTokenRequestResponses = {
   /**
    * Successful Response
    */
   200: Message
 }
 
-export type PostOperatorCliTokenRequestResponse =
-  PostOperatorCliTokenRequestResponses[keyof PostOperatorCliTokenRequestResponses]
+export type PostMachineCliTokenRequestResponse =
+  PostMachineCliTokenRequestResponses[keyof PostMachineCliTokenRequestResponses]
 
-export type PostOperatorCliTokenData = {
+export type PostMachineCliTokenData = {
   body?: never
   path?: never
   query?: never
-  url: "/operators/cli-token"
+  url: "/machines/cli-token"
 }
 
-export type PostOperatorCliTokenResponses = {
+export type PostMachineCliTokenResponses = {
   /**
    * Successful Response
    */
   200: CliToken
 }
 
-export type PostOperatorCliTokenResponse =
-  PostOperatorCliTokenResponses[keyof PostOperatorCliTokenResponses]
+export type PostMachineCliTokenResponse =
+  PostMachineCliTokenResponses[keyof PostMachineCliTokenResponses]
 
 export type GetWorkspacesData = {
   body?: never
@@ -16173,7 +16172,7 @@ export type GetWorkspacesData = {
 
 export type GetWorkspacesResponses = {
   /**
-   * Response Operators-Get Workspaces
+   * Response Machines-Get Workspaces
    *
    * Successful Response
    */
@@ -16211,7 +16210,7 @@ export type GetProjectWorkspacesError =
 
 export type GetProjectWorkspacesResponses = {
   /**
-   * Response Operators-Get Project Workspaces
+   * Response Machines-Get Project Workspaces
    *
    * Successful Response
    */

@@ -28,7 +28,7 @@ import { IoLibraryOutline } from "react-icons/io5"
 import { MdOutlineDashboard } from "react-icons/md"
 import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
-import { OperatorsService, ProjectsService } from "../../client"
+import { MachinesService, ProjectsService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import Tooltip from "./Tooltip"
 
@@ -89,24 +89,24 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     strict: false,
   }) as any
   const currentRef: string | undefined = layoutSearch?.ref
-  // Colors the Workspaces icon green when one of the user's Operators is
+  // Colors the Workspaces icon green when one of the user's machines is
   // online with a workspace for this project, and says when the pipeline is
   // running on one. Same key as the Workspaces and pipeline pages, so they
   // share one request.
   const workspacesQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "workspaces"],
     queryFn: () =>
-      OperatorsService.getProjectWorkspaces({
+      MachinesService.getProjectWorkspaces({
         owner_name: accountName,
         project_name: projectName,
       }).then((response) => response.data),
     enabled: Boolean(user),
     retry: false,
     refetchOnWindowFocus: false,
-    // As often as Operators check in
+    // As often as machines check in
     refetchInterval: 60000,
   })
-  const workspacesColor = workspacesQuery.data?.some((ws) => ws.operator_online)
+  const workspacesColor = workspacesQuery.data?.some((ws) => ws.machine_online)
     ? "ui.success"
     : "default"
   // A pipeline that has run but no longer matches the code. The checklist
@@ -130,7 +130,7 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
   // Running on one of the user's machines, which says more than stale
   const runningOn = (workspacesQuery.data ?? [])
     .filter((ws) => ws.running)
-    .map((ws) => ws.operator_name)
+    .map((ws) => ws.machine_name)
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {

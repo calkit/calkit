@@ -201,16 +201,16 @@ powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"
 ```
 
 Both install shell completion for `calkit` and `ck`.
-To also install the [Calkit Operator](https://docs.calkit.org/compute),
-which connects this machine's workspaces to the hub,
-pass `--operator`:
+To also [link this machine to the hub](https://docs.calkit.org/compute),
+which connects its workspaces to it,
+pass `--link`:
 
 ```sh
-curl -LsSf install.calkit.org | sh -s -- --operator
+curl -LsSf install.calkit.org | sh -s -- --link
 ```
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm install-ps1.calkit.org))) --operator"
+powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm install-ps1.calkit.org))) --link"
 ```
 
 Pass `--no-shell-completion` to skip installing shell completion.

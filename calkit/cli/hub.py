@@ -9,6 +9,7 @@ import typer
 import calkit
 from calkit.cli import raise_error
 from calkit.cli.config import hub_config_app
+from calkit.cli.hub_link import link_app, unlink
 
 hub_app = typer.Typer(no_args_is_help=True)
 hub_app.add_typer(
@@ -16,6 +17,7 @@ hub_app.add_typer(
     name="config",
     help="Work with per-hub credentials (tokens).",
 )
+hub_app.add_typer(link_app, name="link")
 
 _HUB_OPTION_HELP = (
     "URL of the hub to target, e.g., https://staging.calkit.io. Defaults "
@@ -100,3 +102,6 @@ def login(
         calkit.hub.run_device_flow()
     except calkit.hub.DeviceLoginError as e:
         raise_error(str(e))
+
+
+hub_app.command(name="unlink")(unlink)

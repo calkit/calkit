@@ -1,11 +1,12 @@
-"""The Operator: a long-running process that lets the hub use this machine.
+"""A machine's link to a hub: a long-running process that lets the hub use
+this machine.
 
 It checks in with the hub API periodically, reporting its workspaces, and
 holds a websocket to the relay, through which the owner's browser opens and
 attaches to shell sessions in those workspaces. Sessions belong to this
 process, so they survive browsers and relay connections coming and going.
 
-See docs/dev/adrs/0001-operators.md and docs/dev/operator-protocol.md.
+See docs/dev/adrs/0001-linked-machines.md and docs/dev/hub-link-protocol.md.
 """
 
 from __future__ import annotations
@@ -50,14 +51,14 @@ MAX_SEND_BYTES = 250_000
 MAX_CHANNEL_BACKLOG_BYTES = 8 * 1024 * 1024
 # How often channels are checked for an expired second factor
 CHANNEL_CHECK_SECONDS = 30
-# Without a check-in for this long, the Operator can't hear of ended
+# Without a check-in for this long, the link can't hear of ended
 # sign-ins, so it closes its channels until it can
 CHECK_IN_GRACE_SECONDS = 600
-# What the relay names channels, which the Operator logs
+# What the relay names channels, which the link logs
 CHANNEL_ID_PATTERN = r"[A-Za-z0-9_-]{1,64}"
 # Session input waiting for its terminal to drain, e.g., a long paste
 MAX_INPUT_BUFFER_BYTES = 1024 * 1024
-# In cron mode, the Operator exits after this long with no sessions or
+# In cron mode, the link exits after this long with no sessions or
 # browsers, and cron starts it again when the hub asks
 CRON_IDLE_EXIT_SECONDS = 900
 # So a file a repo committed as a link isn't followed out of it
@@ -74,25 +75,25 @@ REPEAT_LOG_SECONDS = 3600
 # Coding agents found running in workspaces, by command
 AGENT_TOOLS = ("claude", "codex", "opencode")
 
-# The hub the Operator commands in this process act on, by its web URL.
-# Each hub's Operator has its own config, service, lock, and log, named by
-# the hub's key, so Operators for several hubs can run side by side.
+# The hub the link commands in this process act on, by its web URL.
+# Each hub's link has its own config, service, lock, and log, named by
+# the hub's key, so links to several hubs can run side by side.
 _hub_url: str | None = None
-# Hub requests are pointed at the Operator's hub through CALKIT_HUB, but
+# Hub requests are pointed at the link's hub through CALKIT_HUB, but
 # what runs in workspaces gets the value it started with
 _inherited_hub = os.environ.get("CALKIT_HUB")
 
 
-class OperatorRevoked(Exception):
+class LinkRevoked(Exception):
     pass
 
 
-class OperatorKeyRejected(OperatorRevoked):
-    """The hub has another key for this Operator, so it mustn't connect."""
+class LinkKeyRejected(LinkRevoked):
+    """The hub has another key for this machine, so it mustn't connect."""
 
 
 def select_hub(hub_url: str | None = None) -> str:
-    """Choose the hub the Operator commands act on, or the user's own hub
+    """Choose the hub the link commands act on, or the user's own hub
     if not given, returning its key.
     """
     global _hub_url
@@ -126,74 +127,38 @@ def hub_key(hub_url: str | None = None) -> str:
     return _path_segment(re.sub(r"^[A-Za-z][A-Za-z0-9+.-]*://", "", url))
 
 
-def hub_url_from_api_url(api_url: str) -> str:
-    """The web URL of the hub serving an API, which is on its ``api``
-    subdomain.
-    """
-    from urllib.parse import urlparse
-
-    parsed = urlparse(api_url)
-    netloc = parsed.netloc
-    if netloc.startswith("api."):
-        netloc = netloc[len("api.") :]
-    return f"{parsed.scheme}://{netloc}"
-
-
-def operator_dir(key: str | None = None) -> str:
+def link_dir(key: str | None = None) -> str:
     return os.path.join(
         config.get_user_home(),
         ".calkit",
-        "operators",
+        "hubs",
         hub_key() if key is None else key,
     )
 
 
 def get_config_path() -> str:
-    return os.path.join(operator_dir(), "config.yaml")
-
-
-def _legacy_config_path() -> str:
-    return os.path.join(config.get_user_home(), ".calkit", "operator.yaml")
+    return os.path.join(link_dir(), "link.yaml")
 
 
 def list_configured_hubs() -> list[str]:
-    """The web URLs of the hubs this machine has Operators for."""
+    """The web URLs of the hubs this machine is linked to."""
     import yaml
 
-    # One from before Operators were kept per hub moves to its hub's place
-    legacy = _legacy_config_path()
-    if os.path.isfile(legacy):
-        with open(legacy) as f:
-            cfg = yaml.safe_load(f) or {}
-        if cfg.get("api_url"):
-            cfg.setdefault("hub_url", hub_url_from_api_url(cfg["api_url"]))
-            fpath = os.path.join(
-                config.get_user_home(),
-                ".calkit",
-                "operators",
-                hub_key(cfg["hub_url"]),
-                "config.yaml",
-            )
-            if not os.path.exists(fpath):
-                _write_private(fpath, yaml.safe_dump(cfg, sort_keys=False))
-        os.remove(legacy)
-    root = os.path.join(config.get_user_home(), ".calkit", "operators")
+    root = os.path.join(config.get_user_home(), ".calkit", "hubs")
     hubs = []
     for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
-        fpath = os.path.join(root, name, "config.yaml")
+        fpath = os.path.join(root, name, "link.yaml")
         if not os.path.isfile(fpath):
             continue
         with open(fpath) as f:
             cfg = yaml.safe_load(f) or {}
         if cfg.get("hub_url"):
             hubs.append(cfg["hub_url"])
-        elif cfg.get("api_url"):
-            hubs.append(hub_url_from_api_url(cfg["api_url"]))
     return hubs
 
 
 def _private_dir(path: str) -> str:
-    """Make a folder only the user can open, e.g., an Operator's, which on
+    """Make a folder only the user can open, e.g., a link's, which on
     a shared login node others could otherwise look in.
     """
     os.makedirs(path, mode=0o700, exist_ok=True)
@@ -229,14 +194,14 @@ def _private_log() -> str:
     return fpath
 
 
-def get_operator_key() -> Any:
-    """This Operator's own P-256 key, made the first time it's needed, which
+def get_link_key() -> Any:
+    """This link's own P-256 key, made the first time it's needed, which
     it signs what it sends browsers with, so they know it's from here.
     """
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ec
 
-    fpath = os.path.join(operator_dir(), "operator-key.pem")
+    fpath = os.path.join(link_dir(), "link-key.pem")
     if os.path.isfile(fpath):
         with open(fpath, "rb") as f:
             key = serialization.load_pem_private_key(f.read(), password=None)
@@ -255,11 +220,11 @@ def get_operator_key() -> Any:
     return key
 
 
-def get_operator_public_jwk() -> dict:
-    """The public half of this Operator's key, as a JSON Web Key."""
+def get_link_public_jwk() -> dict:
+    """The public half of this link's key, as a JSON Web Key."""
     import base64
 
-    numbers = get_operator_key().public_key().public_numbers()
+    numbers = get_link_key().public_key().public_numbers()
     return {
         "kty": "EC",
         "crv": "P-256",
@@ -273,7 +238,7 @@ def get_operator_public_jwk() -> dict:
 
 
 def _used_grants_path() -> str:
-    return os.path.join(operator_dir(), "used-grants.json")
+    return os.path.join(link_dir(), "used-grants.json")
 
 
 def load_used_grants() -> dict[str, float]:
@@ -309,7 +274,7 @@ def load_config() -> dict | None:
 
 
 def save_config(cfg: dict) -> None:
-    """Save the Operator's config, which holds its token.
+    """Save the link's config, which holds its token.
 
     It's a file only the user can read rather than a keyring entry, since
     a service started at boot often can't reach the user's keyring.
@@ -353,7 +318,7 @@ def use_own_hub() -> str:
 
 
 def is_registered(cfg: Any) -> bool:
-    """Whether a config is for one of the user's active Operators on their
+    """Whether a config is for one of the user's active machines on their
     own hub, rather than a revoked one or one from another hub, asked with
     the user's login so it works for another machine's config too.
     """
@@ -361,12 +326,12 @@ def is_registered(cfg: Any) -> bool:
 
     if not isinstance(cfg, dict) or cfg.get("api_url") != use_own_hub():
         return False
-    active = hub._request("get", "/operators")
+    active = hub._request("get", "/machines")
     return any(o.get("id") == cfg.get("id") for o in active)
 
 
 def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
-    """Register this machine as an Operator with the hub and save its
+    """Register this machine with the hub and save its link's
     config.
     """
     from calkit import hub
@@ -375,7 +340,7 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
     hostname = socket.gethostname()
     resp = hub._request(
         "post",
-        "/operators",
+        "/machines",
         json=dict(
             name=name,
             hostname=hostname,
@@ -384,7 +349,7 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
             calkit_version=calkit.__version__,
             hosts=hosts or [hostname],
             # So browsers can tell its replies from anyone else's
-            public_key=get_operator_public_jwk(),
+            public_key=get_link_public_jwk(),
         ),
     )
     cfg = dict(
@@ -402,7 +367,7 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
 
 
 def revoke_self(cfg: dict) -> None:
-    """Revoke an Operator on the hub with its own token, which works however
+    """Revoke a machine on the hub with its own token, which works however
     the user is signed in, taking one already revoked as done.
     """
     from requests.exceptions import HTTPError
@@ -412,7 +377,7 @@ def revoke_self(cfg: dict) -> None:
     try:
         hub._request(
             "delete",
-            "/operators/self",
+            "/machines/self",
             headers={"Authorization": f"Bearer {cfg['token']}"},
             auth=False,
             allow_login=False,
@@ -429,9 +394,7 @@ def revoke_self(cfg: dict) -> None:
 def refuse_root() -> None:
     """Refuse to run as root, since sessions would be root shells."""
     if hasattr(os, "geteuid") and os.geteuid() == 0:
-        raise ValueError(
-            "The Operator can't run as root; run it as your own user"
-        )
+        raise ValueError("The link can't run as root; run it as your own user")
 
 
 def install_remote(
@@ -441,7 +404,7 @@ def install_remote(
     login: bool = False,
     interactive: bool = True,
 ) -> dict:
-    """Install an Operator on another machine over SSH, returning its
+    """Link another machine over SSH, returning its
     config.
 
     It's registered from here, with this machine's hub login, since the
@@ -455,16 +418,16 @@ def install_remote(
     from calkit import workspace as ws
 
     use_own_hub()
-    # Where the other machine keeps this hub's Operator
-    remote_dir = f"~/.calkit/operators/{hub_key()}"
-    remote_config = f"{remote_dir}/config.yaml"
+    # Where the other machine keeps its link to this hub
+    remote_dir = f"~/.calkit/hubs/{hub_key()}"
+    remote_config = f"{remote_dir}/link.yaml"
     # Otherwise ssh would take it as an option
     if host.startswith("-"):
         raise ValueError(f"Invalid host '{host}'")
     target = ws.Workspace(host=host, wdir="~")
     target = ws.ensure_reachable(target, interactive=interactive)
     ws.ensure_calkit_installed(target, interactive=interactive, required=True)
-    # Reinstalling, e.g., to change mode, keeps the Operator it already has
+    # Reinstalling, e.g., to change mode, keeps the machine it already has
     # rather than leaving that one behind on the hub. Who it would run as is
     # asked at the same time, to save logging in again.
     out = subprocess.run(
@@ -479,7 +442,7 @@ def install_remote(
     uid, _, existing = out.partition("calkit-uid=")[2].partition("\n")
     if uid.strip() == "0":
         raise ValueError(
-            "The Operator can't run as root; install it as another user"
+            "The link can't run as root; install it as another user"
         )
     cfg = yaml.safe_load(existing) if existing.strip() else None
     registered = False
@@ -495,7 +458,7 @@ def install_remote(
         hostname = info.get("hostname") or host
         resp = hub._request(
             "post",
-            "/operators",
+            "/machines",
             json=dict(
                 hostname=hostname,
                 machine_id=info.get("machine_id"),
@@ -530,7 +493,7 @@ def install_remote(
                 text=True,
                 check=True,
             )
-        args = ["calkit", "operator", "install", "--hub", get_hub_url()]
+        args = ["calkit", "hub", "link", "--hub", get_hub_url()]
         if cron:
             args.append("--cron")
         if no_service:
@@ -559,7 +522,7 @@ def _open_in_workspace(wdir: str, path: str, mode: str = "r") -> Any:
         raise ValueError(f"{path} is outside the workspace")
     fpath = os.path.join(parent, os.path.basename(path))
     if os.path.islink(fpath):
-        raise ValueError(f"{path} is a link, which the Operator won't follow")
+        raise ValueError(f"{path} is a link, which won't be followed")
     flags = os.O_RDONLY if mode == "r" else os.O_WRONLY | os.O_CREAT
     if mode == "w":
         flags |= os.O_TRUNC
@@ -569,14 +532,14 @@ def _open_in_workspace(wdir: str, path: str, mode: str = "r") -> Any:
     return os.fdopen(fd, "r" if mode == "r" else "w")
 
 
-LOCK_PATH = ".calkit/local/operator.lock"
+LOCK_PATH = ".calkit/local/hub-link.lock"
 
 
 def workspace_lock_holder(wdir: str) -> dict | None:
-    """Who's using a workspace, if anyone: the hub whose Operator holds its
-    lock, as long as that Operator is still running.
+    """Who's using a workspace, if anyone: the hub whose link holds its
+    lock, as long as that link is still running.
 
-    The lock lives in the workspace, so Operators for different hubs on
+    The lock lives in the workspace, so links to different hubs on
     the same machine see each other's.
     """
     import psutil
@@ -597,13 +560,13 @@ def workspace_lock_holder(wdir: str) -> dict | None:
     # reused by something else
     try:
         proc = psutil.Process(pid)
-        if "operator" not in " ".join(proc.cmdline()):
+        if "hub link start" not in " ".join(proc.cmdline()):
             return None
         if hasattr(os, "getuid") and proc.uids().real != os.getuid():
             return None
     except (psutil.Error, SystemError):
         return None
-    # A repo can commit one, which no Operator wrote
+    # A repo can commit one, which no link wrote
     try:
         tracked = subprocess.run(
             ["git", "-c", "core.fsmonitor=false", "ls-files", "--", LOCK_PATH],
@@ -620,7 +583,7 @@ def workspace_lock_holder(wdir: str) -> dict | None:
 
 
 def claim_workspace(wdir: str) -> None:
-    """Take a workspace for this hub's Operator, refusing if another hub's
+    """Take a workspace for this hub's link, refusing if another hub's
     is using it, since two hubs changing one checkout would step on each
     other.
     """
@@ -630,8 +593,7 @@ def claim_workspace(wdir: str) -> None:
             return
         # Not saying which, since that's another hub's business
         raise ValueError(
-            "This workspace is in use by this machine's Operator for "
-            "another hub"
+            "This workspace is in use by this machine's link to another hub"
         )
     root = os.path.realpath(wdir)
     local = os.path.realpath(os.path.join(root, os.path.dirname(LOCK_PATH)))
@@ -657,15 +619,15 @@ def claim_workspace(wdir: str) -> None:
         )
     # Replacing a link, rather than writing through it
     os.replace(os.path.join(root, tmp), fpath)
-    # Another Operator may have claimed it at the same moment, in which
+    # Another link may have claimed it at the same moment, in which
     # case only one of the writes stands
     holder = workspace_lock_holder(wdir)
     if holder is None or holder.get("pid") != os.getpid():
-        raise ValueError("This workspace is in use by another Operator")
+        raise ValueError("This workspace is in use by another link")
 
 
 def release_workspace(wdir: str) -> None:
-    """Let other hubs' Operators use a workspace this one was using."""
+    """Let other hubs' links use a workspace this one was using."""
     holder = workspace_lock_holder(wdir)
     if holder is not None and holder.get("pid") == os.getpid():
         try:
@@ -687,7 +649,7 @@ SAFE_GIT = [
 
 
 def discover_workspaces(cfg: dict) -> list[dict]:
-    """Find the workspaces this Operator gives the hub access to.
+    """Find the workspaces this link gives the hub access to.
 
     These are Calkit projects directly under ``~/calkit`` or ``~/dev``,
     ones registered in the config, and the managed ones Calkit creates for
@@ -803,7 +765,7 @@ def discover_workspaces(cfg: dict) -> list[dict]:
             r"[A-Za-z0-9._-]{1,128}/[A-Za-z0-9._-]{1,128}", project
         ):
             project = None
-        # Another hub's Operator using it, which this one has to wait for,
+        # Another hub's link using it, which this one has to wait for,
         # without saying which hub, since that's none of this one's business
         holder = workspace_lock_holder(path)
         in_use_by = None
@@ -852,7 +814,7 @@ def check_in(
     try:
         resp: dict = hub._request(
             "post",
-            "/operators/check-in",
+            "/machines/check-in",
             json=dict(
                 calkit_version=calkit.__version__,
                 workspaces=workspaces,
@@ -862,7 +824,7 @@ def check_in(
                 channel_sessions=channel_sessions or [],
                 # Kept by the hub the first time, e.g., for one installed
                 # over SSH, and never replaced
-                public_key=get_operator_public_jwk(),
+                public_key=get_link_public_jwk(),
             ),
             headers={"Authorization": f"Bearer {cfg['token']}"},
             auth=False,
@@ -873,16 +835,16 @@ def check_in(
     except HTTPError as e:
         status = e.response.status_code if e.response is not None else None
         if status == 403:
-            raise OperatorRevoked(str(e))
+            raise LinkRevoked(str(e))
         if status == 409:
-            # So 'calkit operator install' registers it again
+            # So 'calkit hub link' registers it again
             cfg["key_rejected"] = True
             save_config(cfg)
             logger.error(
-                "The hub has a different key for this Operator, so it won't "
-                "connect; run 'calkit operator install' again"
+                "The hub has a different key for this machine, so it won't "
+                "connect; run 'calkit hub link' again"
             )
-            raise OperatorKeyRejected(str(e))
+            raise LinkKeyRejected(str(e))
         raise
     # The hub's, which came over HTTPS, so it's what grants are checked with
     key = resp.get("grant_public_key")
@@ -917,9 +879,9 @@ class ChannelAuth:
 
 
 # Signed with each browser message, so a signature means nothing elsewhere
-MESSAGE_SIGNATURE_CONTEXT = "calkit-operator-message"
+MESSAGE_SIGNATURE_CONTEXT = "calkit-machine-message"
 # Likewise for each reply, which browsers check
-REPLY_SIGNATURE_CONTEXT = "calkit-operator-reply"
+REPLY_SIGNATURE_CONTEXT = "calkit-machine-reply"
 # How many of its channels' sign-ins a check-in can ask about
 MAX_CHANNEL_SESSIONS = 100
 
@@ -934,7 +896,7 @@ def check_grant(
     cfg: dict, grant: Any, used: dict[str, float]
 ) -> ChannelAuth | None:
     """What a channel may do, if its grant is one the hub signed for this
-    Operator's owner, and hasn't been used or expired, nor has the second
+    machine's owner, and hasn't been used or expired, nor has the second
     factor it was issued with.
 
     This, rather than the relay's word, is what decides who opened a
@@ -1062,7 +1024,7 @@ def open_signed_message(auth: ChannelAuth, msg: Any) -> dict | None:
 
 
 def sign_reply(key: Any, auth: ChannelAuth, msg: dict) -> dict:
-    """A message for a browser, signed with this Operator's key as WebCrypto
+    """A message for a browser, signed with this link's key as WebCrypto
     would, for its channel, next in order, so the relay can neither forge,
     reorder, nor drop one, e.g., to swap the SSH key a user is shown.
     """
@@ -1102,7 +1064,7 @@ def get_shell() -> str:
 
 
 def child_env() -> dict[str, str]:
-    """The environment for what runs in workspaces, without the Operator's
+    """The environment for what runs in workspaces, without the link's
     own hub, so commands use the project's, as in any terminal.
     """
     env = dict(os.environ)
@@ -1113,7 +1075,7 @@ def child_env() -> dict[str, str]:
     return env
 
 
-# The Operator's own Calkit, since "-m calkit" would import modules in the
+# The link's own Calkit, since "-m calkit" would import modules in the
 # working directory first, e.g., a calkit package in a checkout of Calkit
 # itself, or a pty.py in the home folder a service starts in. On one line
 # without quotes, so it goes in a crontab, systemd unit, or VBScript as is.
@@ -1126,7 +1088,7 @@ CALKIT_COMMAND = [
 
 
 def _calkit(args: list[str], wdir: str) -> None:
-    """Run Calkit in the Operator's interpreter, raising with its output if
+    """Run Calkit in the link's interpreter, raising with its output if
     it fails.
     """
     result = subprocess.run(
@@ -1824,9 +1786,7 @@ def add_stage(
     # Both are written back, which mustn't go through a link
     for fname in ("dvc.yaml", "calkit.yaml"):
         if os.path.islink(os.path.join(wdir, fname)):
-            raise ValueError(
-                f"{fname} is a link, which the Operator won't follow"
-            )
+            raise ValueError(f"{fname} is a link, which won't be followed")
     if calkit_type is not None:
         if calkit_type not in ("figure", "dataset", "publication"):
             raise ValueError(f"Unknown object type '{calkit_type}'")
@@ -2084,7 +2044,7 @@ def check_machine_setup(git_repo_url: str) -> dict:
             "ssh": git_repo_url.startswith("git@"),
             "error": error,
         },
-        # This Operator's hub's, which the project is on
+        # This link's hub's, which the project is on
         "token": bool(config.read().token),
     }
 
@@ -2093,7 +2053,7 @@ def get_ssh_public_key() -> dict:
     """This machine's SSH public key, made first if it has none, for the
     owner to add to their Git host, as 'calkit config github-ssh' does.
 
-    A new key has no passphrase, since the Operator runs Git with nobody
+    A new key has no passphrase, since the link runs Git with nobody
     there to type one.
     """
     ssh_dir = os.path.join(config.get_user_home(), ".ssh")
@@ -2123,7 +2083,7 @@ def get_ssh_public_key() -> dict:
             "-N",
             "",
             "-C",
-            email or f"calkit-operator@{socket.gethostname()}",
+            email or f"calkit-hub-link@{socket.gethostname()}",
             "-f",
             key,
         ],
@@ -2147,7 +2107,7 @@ def request_cli_token(cfg: dict) -> str:
     try:
         resp = hub._request(
             "post",
-            "/operators/cli-token",
+            "/machines/cli-token",
             headers={"Authorization": f"Bearer {cfg['token']}"},
             auth=False,
             allow_login=False,
@@ -2278,7 +2238,7 @@ MACHINE_ACTIONS = {
     "machine.ssh_key",
 }
 # Actions that change nothing, so needn't take the workspace from other
-# hubs' Operators, and may act on managed workspaces too
+# hubs' links, and may act on managed workspaces too
 READ_ONLY_ACTIONS = {
     "workspace.status",
     "workspace.git_status",
@@ -2342,7 +2302,7 @@ def _chunks(text: str, size: int = OUTPUT_CHUNK_CHARS) -> list[str]:
     return [text[i : i + size] for i in range(0, len(text), size)] or [""]
 
 
-class Operator:
+class HubLink:
     def __init__(
         self,
         cfg: dict,
@@ -2371,7 +2331,7 @@ class Operator:
         # One Git or DVC operation at a time per workspace, and which
         self.workspace_locks: dict[str, asyncio.Lock] = {}
         self.workspace_actions: dict[str, str] = {}
-        # Workspaces this Operator holds the lock for, against other hubs'
+        # Workspaces this link holds the lock for, against other hubs'
         self.claimed: set[str] = set()
         self.connected_check_in: asyncio.Task | None = None
         # Asked for by the hub or 'calkit upgrade', and done once idle
@@ -2387,7 +2347,7 @@ class Operator:
         if auth is None or self.ws is None:
             return
         if self.key is None:
-            self.key = get_operator_key()
+            self.key = get_link_key()
         signed = sign_reply(self.key, auth, msg)
         text = json.dumps({"ch": ch, "msg": signed}, ensure_ascii=False)
         size = len(text.encode())
@@ -2460,7 +2420,7 @@ class Operator:
                 if personal and ws["kind"] != "personal":
                     raise ValueError("Managed workspaces can't be changed")
                 return path
-        raise ValueError("Not a workspace this Operator allows")
+        raise ValueError("Not a workspace this link allows")
 
     def open_session(
         self,
@@ -2482,7 +2442,7 @@ class Operator:
             tmux = _get_agent(workspace, attach).get("tmux")
             if tmux is None:
                 raise ValueError("Only agents running in tmux can be attached")
-            # Unset, in case the Operator itself runs in tmux, which won't
+            # Unset, in case the link itself runs in tmux, which won't
             # attach inside itself
             command = shlex.join(
                 [
@@ -2517,7 +2477,7 @@ class Operator:
             pid, fd = pty.fork()
         if pid == 0:
             # Child: a login shell in the workspace, as over SSH, without
-            # anything of the Operator's, e.g., other sessions' terminals
+            # anything of the link's, e.g., other sessions' terminals
             try:
                 os.closerange(3, max_fd)
                 os.chdir(cwd)
@@ -2736,7 +2696,7 @@ class Operator:
             logger.warning("Ignored a relay message with an invalid channel")
             return
         if kind == "channel.open":
-            # Only the owner may use this Operator, as the hub vouches with
+            # Only the owner may use this machine, as the hub vouches with
             # a grant it signed, whatever the relay says, and only while it
             # can hear from the hub which sign-ins have ended
             auth = None
@@ -2758,7 +2718,7 @@ class Operator:
                 return
             self.channels[ch] = auth
             # Browsers send nothing before this, which shows it's this
-            # Operator they reached
+            # machine they reached
             self.send_soon(ch, {"type": "channel.ready"})
             return
         if kind == "channel.close":
@@ -2828,7 +2788,7 @@ class Operator:
                 logger.info(f"Closed channel {ch}, since its sign-in ended")
 
     def hub_reachable(self) -> bool:
-        """Whether the hub was heard from lately enough for this Operator to
+        """Whether the hub was heard from lately enough for this link to
         know which sign-ins have ended.
         """
         import time
@@ -2876,7 +2836,7 @@ class Operator:
                     clone_project, msg["git_repo_url"], msg.get("path")
                 )
                 # One outside the folders workspaces are found in has to be
-                # added, as with 'calkit operator add-workspace'
+                # added, as with 'calkit hub link add-workspace'
                 home = config.get_user_home()
                 roots = [
                     os.path.realpath(os.path.join(home, r))
@@ -2931,7 +2891,7 @@ class Operator:
                 else:
                     async with lock:
                         # Reading status changes nothing, but anything else
-                        # takes the workspace from other hubs' Operators
+                        # takes the workspace from other hubs' links
                         if kind not in READ_ONLY_ACTIONS:
                             claim_workspace(wdir)
                             self.claimed.add(wdir)
@@ -3001,7 +2961,7 @@ class Operator:
         return resp
 
     def restart_pending(self) -> bool:
-        """Whether this Operator should restart or stop once idle, because
+        """Whether this link should restart or stop once idle, because
         it was asked to or Calkit was upgraded under it.
         """
         try:
@@ -3020,7 +2980,7 @@ class Operator:
 
     async def wait_to_restart(self) -> None:
         """Return once a restart is pending and nothing is using this
-        Operator, so no session or run is cut off.
+        link, so no session or run is cut off.
         """
         while True:
             await asyncio.sleep(RESTART_CHECK_SECONDS)
@@ -3044,7 +3004,7 @@ class Operator:
             trim_log()
             try:
                 await self.check_in()
-            except OperatorRevoked:
+            except LinkRevoked:
                 raise
             except Exception as e:
                 logger.warning(f"Check-in failed: {e}")
@@ -3052,7 +3012,7 @@ class Operator:
     async def connect(self, resp: dict) -> None:
         from websockets.asyncio.client import connect
 
-        url = f"{resp['relay_url']}/operator"
+        url = f"{resp['relay_url']}/machine"
         check_secure_url(url)
         async with connect(url, max_size=MAX_FRAME_BYTES) as ws:
             # Sent in a message rather than the URL to stay out of logs
@@ -3091,14 +3051,14 @@ class Operator:
                     session.channels.clear()
 
     async def wait_until_idle(self) -> None:
-        """Return once nothing has used this Operator for its idle limit."""
+        """Return once nothing has used this link for its idle limit."""
         assert self.idle_exit_seconds is not None
         loop = asyncio.get_running_loop()
         last_used = loop.time()
         while True:
             await asyncio.sleep(min(30, self.idle_exit_seconds))
             # Anything running or watching keeps it up, e.g., loops
-            # once Operators run them (see the ADR)
+            # once links run them (see the ADR)
             if self.sessions or self.channels:
                 last_used = loop.time()
             elif loop.time() - last_used >= self.idle_exit_seconds:
@@ -3134,7 +3094,7 @@ class Operator:
                         checker.result()
                     connection.result()
                     logger.info("Relay connection closed")
-                except OperatorRevoked:
+                except LinkRevoked:
                     raise
                 except Exception as e:
                     logger.warning(f"Connection failed: {e}")
@@ -3157,13 +3117,13 @@ class Operator:
 
 
 def acquire_lock() -> Any:
-    """Take the lock that keeps one Operator running per machine, user, and
-    hub, returning its file, or None if another Operator holds it.
+    """Take the lock that keeps one link running per machine, user, and
+    hub, returning its file, or None if another link holds it.
 
     Two would each replace the other's relay connection, and in cron mode
     cron starts one every few minutes regardless.
     """
-    fpath = os.path.join(_private_dir(operator_dir()), "operator.lock")
+    fpath = os.path.join(_private_dir(link_dir()), "link.lock")
     f = open(fpath, "w")
     try:
         if sys.platform == "win32":
@@ -3184,18 +3144,18 @@ def acquire_lock() -> Any:
 
 
 def _pid_path(key: str | None = None) -> str:
-    return os.path.join(operator_dir(key), "operator.pid")
+    return os.path.join(link_dir(key), "link.pid")
 
 
 def _restart_request_path(key: str | None = None) -> str:
-    return os.path.join(operator_dir(key), "restart")
+    return os.path.join(link_dir(key), "restart")
 
 
 def request_restarts(stop: bool = False) -> list[tuple[str, int]]:
-    """Ask every Operator running on this machine to restart, or to stop,
+    """Ask every link running on this machine to restart, or to stop,
     once nothing is using it, returning their hub keys and process IDs.
     """
-    root = os.path.join(config.get_user_home(), ".calkit", "operators")
+    root = os.path.join(config.get_user_home(), ".calkit", "hubs")
     running = []
     for key in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         pid = get_running_pid(key)
@@ -3208,7 +3168,7 @@ def request_restarts(stop: bool = False) -> list[tuple[str, int]]:
 
 def get_installed_version() -> str | None:
     """The Calkit version installed now, which an upgrade can change
-    under a running Operator.
+    under a running link.
     """
     from importlib.metadata import PackageNotFoundError, version
 
@@ -3219,7 +3179,7 @@ def get_installed_version() -> str | None:
 
 
 def restart_process(mode: str) -> None:
-    """Replace this process with an Operator running the Calkit installed
+    """Replace this process with a link running the Calkit installed
     now.
 
     Exec keeps the process ID, so the service manager that started it still
@@ -3241,7 +3201,7 @@ def restart_process(mode: str) -> None:
 
 
 def get_running_pid(key: str | None = None) -> int | None:
-    """The running Operator's process ID, if one is running."""
+    """The running link's process ID, if one is running."""
     import psutil
 
     try:
@@ -3254,14 +3214,14 @@ def get_running_pid(key: str | None = None) -> int | None:
     except (psutil.Error, SystemError):
         return None
     # The ID may have been reused by something else since
-    return pid if "operator" in cmdline else None
+    return pid if "hub link start" in cmdline else None
 
 
 def run(cfg: dict, mode: str = "foreground") -> bool:
-    """Run the Operator until it's revoked, interrupted, or, in cron mode,
+    """Run the link until it's revoked, interrupted, or, in cron mode,
     idle or not asked to connect.
 
-    Returns False if another Operator is already running.
+    Returns False if another link is already running.
     """
     import signal
 
@@ -3286,29 +3246,27 @@ def run(cfg: dict, mode: str = "foreground") -> bool:
         os.remove(_restart_request_path())
     except OSError:
         pass
-    operator = None
+    link = None
     try:
         if mode == "cron":
             workspaces = discover_workspaces(cfg)
             resp = check_in(cfg, workspaces, mode, connected=False)
             if not resp["connect"]:
                 return True
-            operator = Operator(
+            link = HubLink(
                 cfg, mode=mode, idle_exit_seconds=CRON_IDLE_EXIT_SECONDS
             )
         else:
-            operator = Operator(cfg, mode=mode)
-        asyncio.run(operator.run())
+            link = HubLink(cfg, mode=mode)
+        asyncio.run(link.run())
     finally:
         lock.close()
-    if operator is not None and operator.restarting:
+    if link is not None and link.restarting:
         restart_process(mode)
     return True
 
 
-# The service names below take a hub key, defaulting to the selected
-# hub's; an empty one gives the names used before Operators were kept per
-# hub, so an old install can be found and removed
+# The service names below take a hub key, defaulting to the selected hub's
 
 
 def _key(key: str | None) -> str:
@@ -3316,22 +3274,19 @@ def _key(key: str | None) -> str:
 
 
 def service_label(key: str | None = None) -> str:
-    k = _key(key)
-    return "io.calkit.operator" + (f".{k}" if k else "")
+    return f"io.calkit.hub-link.{_key(key)}"
 
 
 def systemd_unit(key: str | None = None) -> str:
-    k = _key(key)
-    return "calkit-operator" + (f"-{k}" if k else "") + ".service"
+    return f"calkit-hub-link-{_key(key)}.service"
 
 
 def cron_marker(key: str | None = None) -> str:
-    k = _key(key)
-    return "# calkit-operator" + (f" {k}" if k else "")
+    return f"# calkit-hub-link {_key(key)}"
 
 
 def get_log_path() -> str:
-    return os.path.join(operator_dir(), "operator.log")
+    return os.path.join(link_dir(), "link.log")
 
 
 # Whether this process writes its own log, rather than a service manager
@@ -3409,7 +3364,8 @@ def _service_command(mode: str = "service") -> list[str]:
     # The interpreter Calkit runs in, so the service doesn't depend on PATH
     return [
         *CALKIT_COMMAND,
-        "operator",
+        "hub",
+        "link",
         "start",
         "--hub",
         get_hub_url(),
@@ -3431,13 +3387,13 @@ def _write_crontab(lines: list[str]) -> None:
 
 
 def install_cron() -> None:
-    """Have cron start the Operator every few minutes and at boot, so it
+    """Have cron start the link every few minutes and at boot, so it
     checks in and connects only when the hub asks.
     """
     if shutil.which("crontab") is None:
         raise NotImplementedError(
             "This machine has no crontab; install with --no-service and run "
-            "'calkit operator start' yourself, e.g., inside tmux"
+            "'calkit hub link start' yourself, e.g., inside tmux"
         )
     # From / rather than the home folder, and with cron's own meaning of %
     # escaped, i.e., a newline
@@ -3473,7 +3429,7 @@ def _launchd_plist_path(at_boot: bool, key: str | None = None) -> str:
 def _launchd_plist(at_boot: bool) -> bytes:
     import plistlib
 
-    # At boot, launchd opens these as root, so the Operator writes its own
+    # At boot, launchd opens these as root, so the link writes its own
     # log instead
     log = "/dev/null" if at_boot else get_log_path()
     plist: dict[str, Any] = {
@@ -3509,7 +3465,7 @@ def _windows_startup_path(key: str | None = None) -> str:
         "Start Menu",
         "Programs",
         "Startup",
-        "calkit-operator" + (f"-{_key(key)}" if _key(key) else "") + ".vbs",
+        f"calkit-hub-link-{_key(key)}.vbs",
     )
 
 
@@ -3543,7 +3499,7 @@ def _systemd_unit() -> str:
         command = command.replace(char, escaped)
     return (
         "[Unit]\n"
-        "Description=Calkit Operator\n"
+        "Description=Calkit hub link\n"
         "After=network-online.target\n"
         "\n"
         "[Service]\n"
@@ -3569,7 +3525,7 @@ def _has_terminal() -> bool:
 
 
 def install_service(login: bool = False) -> list[str]:
-    """Install the Operator as a service that runs as this user, returning
+    """Install the link as a service that runs as this user, returning
     notes for the user.
 
     It starts at boot unless ``login``, which needs sudo on macOS, and on
@@ -3580,7 +3536,7 @@ def install_service(login: bool = False) -> list[str]:
     def can_sudo() -> bool:
         # Without asking, e.g., while sudo remembers the password, then by
         # asking, if there's a terminal to ask in, which there isn't when
-        # 'calkit operator install --ssh' runs this over SSH
+        # 'calkit hub link --ssh' runs this over SSH
         if not shutil.which("sudo"):
             return False
         cached = subprocess.run(["sudo", "-n", "true"], capture_output=True)
@@ -3589,7 +3545,7 @@ def install_service(login: bool = False) -> list[str]:
         if not _has_terminal():
             return False
         print(
-            "Starting the Operator at boot needs sudo. Press Ctrl+C to start "
+            "Starting the link at boot needs sudo. Press Ctrl+C to start "
             "it at login instead.",
             file=sys.stderr,
         )
@@ -3613,10 +3569,10 @@ def install_service(login: bool = False) -> list[str]:
         )
         if probe is None or probe.returncode != 0:
             raise NotImplementedError(
-                "This machine has no user systemd to run the Operator as a "
-                "service. Reinstall with --cron to have cron start it when "
+                "This machine has no user systemd to run the link as a "
+                "service. Link again with --cron to have cron start it when "
                 "the hub asks, or with --no-service and run "
-                "'calkit operator start' yourself, e.g., inside tmux"
+                "'calkit hub link start' yourself, e.g., inside tmux"
             )
         fpath = _systemd_unit_path()
         os.makedirs(os.path.dirname(fpath), exist_ok=True)
@@ -3646,7 +3602,7 @@ def install_service(login: bool = False) -> list[str]:
                 )
             if enabled.returncode != 0:
                 notes.append(
-                    "The Operator will only run while you're logged in. "
+                    "The link will only run while you're logged in. "
                     "To start it at boot, run: "
                     f"sudo loginctl enable-linger {user}"
                 )
@@ -3660,7 +3616,7 @@ def install_service(login: bool = False) -> list[str]:
         subprocess.run(
             [*sudo, "launchctl", "bootout", target], capture_output=True
         )
-        # Bootout returns before the old Operator has stopped, and loading
+        # Bootout returns before the old link has stopped, and loading
         # the new one fails until it has
         import time
 
@@ -3687,9 +3643,9 @@ def install_service(login: bool = False) -> list[str]:
         )
         if not at_boot and not login:
             notes.append(
-                "Starting at boot needs sudo, so the Operator will start "
-                "when you log in. To start it at boot, run 'calkit operator "
-                "install' again in a terminal."
+                "Starting at boot needs sudo, so the link will start "
+                "when you log in. To start it at boot, run 'calkit hub link' "
+                "again in a terminal."
             )
     elif system == "Windows":
         fpath = _windows_startup_path()
@@ -3698,18 +3654,18 @@ def install_service(login: bool = False) -> list[str]:
             script.write(_windows_startup_script())
         subprocess.Popen(["wscript", fpath])
         notes.append(
-            "The Operator will start when you log in. Shell sessions aren't "
+            "The link will start when you log in. Shell sessions aren't "
             "supported on Windows yet."
         )
     else:
         raise NotImplementedError(
-            f"Installing the Operator as a service isn't supported on "
-            f"{system} yet; run 'calkit operator start' instead"
+            f"Installing the link as a service isn't supported on "
+            f"{system} yet; run 'calkit hub link start' instead"
         )
     return notes
 
 
-def _stop_running_operator() -> None:
+def _stop_running_link() -> None:
     import psutil
 
     pid = get_running_pid()
@@ -3725,15 +3681,14 @@ def _stop_running_operator() -> None:
 
 
 def uninstall_service(key: str | None = None) -> None:
-    """Remove the selected hub's Operator service, or the one for the hub
-    with this key, where an empty key means one installed before Operators
-    were kept per hub.
+    """Remove the selected hub's link service, or the one for the hub
+    with this key.
     """
     if platform.system() == "Windows":
         if os.path.isfile(_windows_startup_path(key)):
             os.remove(_windows_startup_path(key))
         if key is None:
-            _stop_running_operator()
+            _stop_running_link()
         return
     if _cron_installed(key):
         _write_crontab(
@@ -3832,7 +3787,7 @@ def get_service_status() -> str | None:
 
 
 def restart_service() -> None:
-    """Restart the Operator's service, starting it if it isn't running."""
+    """Restart the link's service, starting it if it isn't running."""
     system = platform.system()
     if system == "Linux" and os.path.isfile(_systemd_unit_path()):
         subprocess.run(
@@ -3851,7 +3806,7 @@ def restart_service() -> None:
                 [*sudo, "launchctl", "print", target], capture_output=True
             )
             # Booting it out and in again races, since bootout returns
-            # before the Operator has stopped, so it's restarted in place
+            # before the link has stopped, so it's restarted in place
             if loaded.returncode == 0:
                 cmd = [*sudo, "launchctl", "kickstart", "-k", target]
             else:
@@ -3868,7 +3823,7 @@ def set_service_running(running: bool) -> None:
         if running:
             subprocess.Popen(["wscript", _windows_startup_path()])
         else:
-            _stop_running_operator()
+            _stop_running_link()
         return
     if system == "Linux" and os.path.isfile(_systemd_unit_path()):
         action = "start" if running else "stop"
@@ -3913,6 +3868,6 @@ def set_service_running(running: bool) -> None:
                     start_new_session=True,
                 )
         else:
-            _stop_running_operator()
+            _stop_running_link()
         return
-    raise RuntimeError("The Operator isn't installed as a service")
+    raise RuntimeError("The link isn't installed as a service")

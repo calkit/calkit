@@ -7,50 +7,49 @@
 
 ## Top-level commands
 
-| Command                                          | Description                                                                                                                                                                 |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`init`](#top-command-init)                      | Initialize the current working directory.                                                                                                                                   |
-| [`clone`](#top-command-clone)                    | Clone or download a copy of a project.                                                                                                                                      |
-| [`status\|st`](#top-command-status-st)           | View status (project, version control, and/or pipeline).                                                                                                                    |
-| [`diff`](#top-command-diff)                      | Get a unified Git and DVC diff.                                                                                                                                             |
-| [`add`](#top-command-add)                        | Add paths to the repo.                                                                                                                                                      |
-| [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                                                                                |
-| [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                                                                                       |
-| [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                                                                                 |
-| [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                                                                                |
-| [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                                                                                        |
-| [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                                                                                    |
-| [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                                                                                      |
-| [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                                                                                        |
-| [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform, or 'operator' to connect this machine's workspaces to the hub. |
-| [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                                                                                        |
-| [`calc`](#top-command-calc)                      | Run a project's calculation.                                                                                                                                                |
-| [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                                                                                           |
-| [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                                                                                             |
-| [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                                                                               |
-| [`stash`](#top-command-stash)                    | Stash workspace changes, including DVC-tracked data, or bring them back.                                                                                                    |
-| [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                                                                                             |
-| [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                                                                                         |
-| [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                                                                                     |
-| [`xr`](#top-command-xr)                          | Execute a command and if successful, record in the pipeline.                                                                                                                |
-| [`config`](#command-group-config)                | Configure Calkit.                                                                                                                                                           |
-| [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                                                                                 |
-| [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                                                                                     |
-| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                                                                                          |
-| [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                                                                                        |
-| [`show`](#command-group-show)                    | Show Calkit objects.                                                                                                                                                        |
-| [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                                                                                            |
-| [`import`](#command-group-import)                | Import objects.                                                                                                                                                             |
-| [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                                                                                 |
-| [`update`](#command-group-update)                | Update objects.                                                                                                                                                             |
-| [`check`](#command-group-check)                  | Check things.                                                                                                                                                               |
-| [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                                                                                            |
-| [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                                                                                     |
-| [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                                                                                 |
-| [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                                                                                   |
-| [`dev`](#command-group-dev)                      | Developer tools.                                                                                                                                                            |
-| [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                                                                                 |
-| [`operator`](#command-group-operator)            | Manage this machine's Operator, which connects its workspaces to the hub.                                                                                                   |
+| Command                                          | Description                                                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| [`init`](#top-command-init)                      | Initialize the current working directory.                                                                    |
+| [`clone`](#top-command-clone)                    | Clone or download a copy of a project.                                                                       |
+| [`status\|st`](#top-command-status-st)           | View status (project, version control, and/or pipeline).                                                     |
+| [`diff`](#top-command-diff)                      | Get a unified Git and DVC diff.                                                                              |
+| [`add`](#top-command-add)                        | Add paths to the repo.                                                                                       |
+| [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                 |
+| [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
+| [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
+| [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                 |
+| [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
+| [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
+| [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
+| [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
+| [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
+| [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                         |
+| [`calc`](#top-command-calc)                      | Run a project's calculation.                                                                                 |
+| [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                            |
+| [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
+| [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
+| [`stash`](#top-command-stash)                    | Stash workspace changes, including DVC-tracked data, or bring them back.                                     |
+| [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
+| [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
+| [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                      |
+| [`xr`](#top-command-xr)                          | Execute a command and if successful, record in the pipeline.                                                 |
+| [`config`](#command-group-config)                | Configure Calkit.                                                                                            |
+| [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                  |
+| [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                      |
+| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                           |
+| [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
+| [`show`](#command-group-show)                    | Show Calkit objects.                                                                                         |
+| [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
+| [`import`](#command-group-import)                | Import objects.                                                                                              |
+| [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
+| [`update`](#command-group-update)                | Update objects.                                                                                              |
+| [`check`](#command-group-check)                  | Check things.                                                                                                |
+| [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
+| [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
+| [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
+| [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
+| [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
+| [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
 
 ## Top-level command details
 
@@ -429,7 +428,7 @@ Options:
 
 ### `calkit install`
 
-Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform, or 'operator' to connect this machine's workspaces to the hub.
+Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform.
 
 Usage:
 
@@ -445,14 +444,9 @@ Arguments:
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                                                                                                                                 |
-| -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--yes`, `-y`  | boolean | no       | False   | Skip the confirmation prompt and install immediately.                                                                                                       |
-| `--login`      | boolean | no       | False   | For the Operator, start at login instead of at boot (requires sudo on macOS and Linux).                                                                     |
-| `--cron`       | boolean | no       | False   | For the Operator, have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                |
-| `--ssh`        | str     | no       |         | For the Operator, install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed. |
-| `--no-service` | boolean | no       | False   | For the Operator, only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                  |
-| `--hub`        | str     | no       |         | For the Operator, the URL of the hub it's for, e.g., https://calkit.io; a machine can have one per hub.                                                     |
+| Option        | Type    | Required | Default | Description                                           |
+| ------------- | ------- | -------- | ------- | ----------------------------------------------------- |
+| `--yes`, `-y` | boolean | no       | False   | Skip the confirmation prompt and install immediately. |
 
 <a id="top-command-xproc-runproc"></a>
 
@@ -3915,6 +3909,203 @@ Usage:
 calkit latex|tex comments COMMAND [ARGS]...
 ```
 
+| Command                                             | Description                                                          |
+| --------------------------------------------------- | -------------------------------------------------------------------- |
+| [`list`](#subcommand-latex-tex-comments-list)       | Same as 'calkit list comments'.                                      |
+| [`locate`](#subcommand-latex-tex-comments-locate)   | Find the paragraph some rendered text is in, or a source line is in. |
+| [`add`](#subcommand-latex-tex-comments-add)         | Same as 'calkit new comment'.                                        |
+| [`reply`](#subcommand-latex-tex-comments-reply)     | Same as 'calkit update comment --reply'.                             |
+| [`resolve`](#subcommand-latex-tex-comments-resolve) | Same as 'calkit update comment --resolve'.                           |
+| [`reopen`](#subcommand-latex-tex-comments-reopen)   | Same as 'calkit update comment --reopen'.                            |
+| [`delete`](#subcommand-latex-tex-comments-delete)   | Same as 'calkit delete comment'.                                     |
+
+<a id="subcommand-latex-tex-comments-list"></a>
+
+##### `calkit latex|tex comments list`
+
+Same as 'calkit list comments'.
+
+Usage:
+
+```text
+calkit latex|tex comments list [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description |
+| ---------- | ---- | -------- | ------- | ----------- |
+| `tex_path` | str  | yes      |         |             |
+
+Options:
+
+| Option               | Type    | Required | Default | Description |
+| -------------------- | ------- | -------- | ------- | ----------- |
+| `--unresolved`, `-u` | boolean | no       | False   |             |
+| `--json`             | boolean | no       | False   |             |
+
+<a id="subcommand-latex-tex-comments-locate"></a>
+
+##### `calkit latex|tex comments locate`
+
+Find the paragraph some rendered text is in, or a source line is in.
+
+This is how a place in a PDF built without SyncTeX, or by someone else, can be matched to the source.
+
+Usage:
+
+```text
+calkit latex|tex comments locate [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                    |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------- |
+| `tex_path` | str  | yes      |         | Document to search, including files it inputs. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                      |
+| -------------- | ------- | -------- | ------- | ------------------------------------------------ |
+| `--text`       | str     | no       |         | Rendered text, e.g., a line copied from the PDF. |
+| `--path`       | str     | no       |         | File with the line to look up.                   |
+| `--line`, `-l` | int     | no       |         | Line to look up in --path.                       |
+| `--json`       | boolean | no       | False   | Output result as JSON.                           |
+
+<a id="subcommand-latex-tex-comments-add"></a>
+
+##### `calkit latex|tex comments add`
+
+Same as 'calkit new comment'.
+
+Usage:
+
+```text
+calkit latex|tex comments add [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description |
+| ---------- | ---- | -------- | ------- | ----------- |
+| `tex_path` | str  | yes      |         |             |
+
+Options:
+
+| Option         | Type    | Required | Default | Description |
+| -------------- | ------- | -------- | ------- | ----------- |
+| `--line`, `-l` | int     | yes      |         |             |
+| `--text`, `-m` | str     | yes      |         |             |
+| `--highlight`  | str     | no       |         |             |
+| `--occ`        | int     | no       | 0       |             |
+| `--author`     | str     | no       |         |             |
+| `--email`      | str     | no       |         |             |
+| `--json`       | boolean | no       | False   |             |
+
+<a id="subcommand-latex-tex-comments-reply"></a>
+
+##### `calkit latex|tex comments reply`
+
+Same as 'calkit update comment --reply'.
+
+Usage:
+
+```text
+calkit latex|tex comments reply [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description |
+| ---------- | ---- | -------- | ------- | ----------- |
+| `tex_path` | str  | yes      |         |             |
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--text`, `-m` | str  | yes      |         |                                   |
+| `--id`         | str  | no       |         | ID of the thread.                 |
+| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
+| `--author`     | str  | no       |         |                                   |
+| `--email`      | str  | no       |         |                                   |
+
+<a id="subcommand-latex-tex-comments-resolve"></a>
+
+##### `calkit latex|tex comments resolve`
+
+Same as 'calkit update comment --resolve'.
+
+Usage:
+
+```text
+calkit latex|tex comments resolve [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description |
+| ---------- | ---- | -------- | ------- | ----------- |
+| `tex_path` | str  | yes      |         |             |
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--id`         | str  | no       |         | ID of the thread.                 |
+| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
+
+<a id="subcommand-latex-tex-comments-reopen"></a>
+
+##### `calkit latex|tex comments reopen`
+
+Same as 'calkit update comment --reopen'.
+
+Usage:
+
+```text
+calkit latex|tex comments reopen [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description |
+| ---------- | ---- | -------- | ------- | ----------- |
+| `tex_path` | str  | yes      |         |             |
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--id`         | str  | no       |         | ID of the thread.                 |
+| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
+
+<a id="subcommand-latex-tex-comments-delete"></a>
+
+##### `calkit latex|tex comments delete`
+
+Same as 'calkit delete comment'.
+
+Usage:
+
+```text
+calkit latex|tex comments delete [OPTIONS] TEX-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description |
+| ---------- | ---- | -------- | ------- | ----------- |
+| `tex_path` | str  | yes      |         |             |
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--id`         | str  | no       |         | ID of the thread.                 |
+| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
+
 <a id="command-group-overleaf-ol"></a>
 
 ### `calkit overleaf|ol`
@@ -4082,11 +4273,13 @@ Options:
 
 Interact with a Calkit hub.
 
-| Command                                  | Description                             |
-| ---------------------------------------- | --------------------------------------- |
-| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.        |
-| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                 |
-| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens). |
+| Command                                  | Description                                               |
+| ---------------------------------------- | --------------------------------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.                          |
+| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                                   |
+| [`unlink`](#subcommand-hub-cloud-unlink) | Revoke this machine on the hub and remove its link here.  |
+| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens).                   |
+| [`link`](#subcommand-hub-cloud-link)     | Link this machine to a hub and run the link as a service. |
 
 <a id="subcommand-hub-cloud-get"></a>
 
@@ -4133,6 +4326,24 @@ Options:
 | `--hub`         | str     | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
 | `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                       |
 
+<a id="subcommand-hub-cloud-unlink"></a>
+
+#### `calkit hub|cloud unlink`
+
+Revoke this machine on the hub and remove its link here.
+
+Usage:
+
+```text
+calkit hub|cloud unlink [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                  |
+| ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--hub` | str  | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
 <a id="subcommand-hub-cloud-config"></a>
 
 #### `calkit hub|cloud config`
@@ -4144,6 +4355,245 @@ Usage:
 ```text
 calkit hub|cloud config COMMAND [ARGS]...
 ```
+
+| Command                                       | Description                                             |
+| --------------------------------------------- | ------------------------------------------------------- |
+| [`list`](#subcommand-hub-cloud-config-list)   | List per-hub credential keys.                           |
+| [`set`](#subcommand-hub-cloud-config-set)     | Set a credential for the active or given hub.           |
+| [`get`](#subcommand-hub-cloud-config-get)     | Get and print a credential for the active or given hub. |
+| [`unset`](#subcommand-hub-cloud-config-unset) | Unset a credential for the active or given hub.         |
+
+<a id="subcommand-hub-cloud-config-list"></a>
+
+##### `calkit hub|cloud config list`
+
+List per-hub credential keys.
+
+Usage:
+
+```text
+calkit hub|cloud config list
+```
+
+<a id="subcommand-hub-cloud-config-set"></a>
+
+##### `calkit hub|cloud config set`
+
+Set a credential for the active or given hub.
+
+Usage:
+
+```text
+calkit hub|cloud config set [OPTIONS] KEY VALUE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | str  | yes      |         |             |
+| `value`  | str  | yes      |         |             |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                  |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub, e.g., https://staging.calkit.io. Defaults to the active hub. |
+
+<a id="subcommand-hub-cloud-config-get"></a>
+
+##### `calkit hub|cloud config get`
+
+Get and print a credential for the active or given hub.
+
+Usage:
+
+```text
+calkit hub|cloud config get [OPTIONS] KEY
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | str  | yes      |         |             |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                  |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub, e.g., https://staging.calkit.io. Defaults to the active hub. |
+
+<a id="subcommand-hub-cloud-config-unset"></a>
+
+##### `calkit hub|cloud config unset`
+
+Unset a credential for the active or given hub.
+
+Usage:
+
+```text
+calkit hub|cloud config unset [OPTIONS] KEY
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | str  | yes      |         |             |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                  |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub, e.g., https://staging.calkit.io. Defaults to the active hub. |
+
+<a id="subcommand-hub-cloud-link"></a>
+
+#### `calkit hub|cloud link`
+
+Link this machine to a hub and run the link as a service.
+
+Usage:
+
+```text
+calkit hub|cloud link [OPTIONS] COMMAND [ARGS]...
+```
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                                                                                                                                  |
+| -------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--hub`        | str     | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+| `--login`      | boolean | no       | False   | Start at login instead of at boot (requires sudo on macOS and Linux).                                                                                        |
+| `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                                   |
+| `--ssh`        | str     | no       |         | Link another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed.                             |
+| `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit hub link start' inside tmux on a cluster.                                                                     |
+
+| Command                                                     | Description                                                                                 |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [`start`](#subcommand-hub-cloud-link-start)                 | Run the link in the foreground, e.g., inside tmux.                                          |
+| [`status`](#subcommand-hub-cloud-link-status)               | Show this machine's links and their workspaces.                                             |
+| [`stop`](#subcommand-hub-cloud-link-stop)                   | Stop the link's service until it's restarted, for every hub unless one is given.            |
+| [`restart`](#subcommand-hub-cloud-link-restart)             | Restart the link's service, e.g., after updating Calkit, for every hub unless one is given. |
+| [`logs`](#subcommand-hub-cloud-link-logs)                   | Show the link service's logs.                                                               |
+| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace) | Add a project outside ~/calkit and ~/dev as a workspace.                                    |
+
+<a id="subcommand-hub-cloud-link-start"></a>
+
+##### `calkit hub|cloud link start`
+
+Run the link in the foreground, e.g., inside tmux.
+
+Usage:
+
+```text
+calkit hub|cloud link start [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                                                                  |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--verbose`, `-v` | boolean | no       | False   | Log in more detail.                                                                                                                                          |
+| `--hub`           | str     | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-status"></a>
+
+##### `calkit hub|cloud link status`
+
+Show this machine's links and their workspaces.
+
+Usage:
+
+```text
+calkit hub|cloud link status [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                  |
+| ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--hub` | str  | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-stop"></a>
+
+##### `calkit hub|cloud link stop`
+
+Stop the link's service until it's restarted, for every hub unless one is given.
+
+Usage:
+
+```text
+calkit hub|cloud link stop [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                  |
+| ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--hub` | str  | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-restart"></a>
+
+##### `calkit hub|cloud link restart`
+
+Restart the link's service, e.g., after updating Calkit, for every hub unless one is given.
+
+Usage:
+
+```text
+calkit hub|cloud link restart [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                  |
+| ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--hub` | str  | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-logs"></a>
+
+##### `calkit hub|cloud link logs`
+
+Show the link service's logs.
+
+Usage:
+
+```text
+calkit hub|cloud link logs [OPTIONS]
+```
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                                                  |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--follow`, `-f` | boolean | no       | False   | Keep printing new lines.                                                                                                                                     |
+| `--hub`          | str     | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-add-workspace"></a>
+
+##### `calkit hub|cloud link add-workspace`
+
+Add a project outside ~/calkit and ~/dev as a workspace.
+
+Usage:
+
+```text
+calkit hub|cloud link add-workspace [OPTIONS] [PATH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description               |
+| -------- | ---- | -------- | ------- | ------------------------- |
+| `path`   | str  | no       | .       | Path to a Calkit project. |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                  |
+| ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--hub` | str  | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
 
 <a id="command-group-scheduler-sch"></a>
 
@@ -4437,178 +4887,3 @@ Options:
 | `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
 | `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
 | `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
-
-<a id="command-group-operator"></a>
-
-### `calkit operator`
-
-Manage this machine's Operator, which connects its workspaces to the hub.
-
-| Command                                               | Description                                                                                     |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| [`install`](#subcommand-operator-install)             | Register this machine as an Operator and run it as a service.                                   |
-| [`start`](#subcommand-operator-start)                 | Run the Operator in the foreground, e.g., inside tmux.                                          |
-| [`status`](#subcommand-operator-status)               | Show this machine's Operators and their workspaces.                                             |
-| [`stop`](#subcommand-operator-stop)                   | Stop the Operator's service until it's restarted, for every hub unless one is given.            |
-| [`restart`](#subcommand-operator-restart)             | Restart the Operator's service, e.g., after updating Calkit, for every hub unless one is given. |
-| [`logs`](#subcommand-operator-logs)                   | Show the Operator service's logs.                                                               |
-| [`add-workspace`](#subcommand-operator-add-workspace) | Add a project outside ~/calkit and ~/dev as a workspace.                                        |
-| [`uninstall`](#subcommand-operator-uninstall)         | Revoke this machine's Operator on the hub and remove it here.                                   |
-
-<a id="subcommand-operator-install"></a>
-
-#### `calkit operator install`
-
-Register this machine as an Operator and run it as a service.
-
-Also available as 'calkit install operator'.
-
-Usage:
-
-```text
-calkit operator install [OPTIONS]
-```
-
-Options:
-
-| Option         | Type    | Required | Default | Description                                                                                                                                                      |
-| -------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub`        | str     | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
-| `--login`      | boolean | no       | False   | Start at login instead of at boot (requires sudo on macOS and Linux).                                                                                            |
-| `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                                       |
-| `--ssh`        | str     | no       |         | Install it on another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed.                        |
-| `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit operator start' inside tmux on a cluster.                                                                         |
-
-<a id="subcommand-operator-start"></a>
-
-#### `calkit operator start`
-
-Run the Operator in the foreground, e.g., inside tmux.
-
-Usage:
-
-```text
-calkit operator start [OPTIONS]
-```
-
-Options:
-
-| Option            | Type    | Required | Default | Description                                                                                                                                                      |
-| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--verbose`, `-v` | boolean | no       | False   | Log in more detail.                                                                                                                                              |
-| `--hub`           | str     | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
-
-<a id="subcommand-operator-status"></a>
-
-#### `calkit operator status`
-
-Show this machine's Operators and their workspaces.
-
-Usage:
-
-```text
-calkit operator status [OPTIONS]
-```
-
-Options:
-
-| Option  | Type | Required | Default | Description                                                                                                                                                      |
-| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
-
-<a id="subcommand-operator-stop"></a>
-
-#### `calkit operator stop`
-
-Stop the Operator's service until it's restarted, for every hub unless one is given.
-
-Usage:
-
-```text
-calkit operator stop [OPTIONS]
-```
-
-Options:
-
-| Option  | Type | Required | Default | Description                                                                                                                                                      |
-| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
-
-<a id="subcommand-operator-restart"></a>
-
-#### `calkit operator restart`
-
-Restart the Operator's service, e.g., after updating Calkit, for every hub unless one is given.
-
-Usage:
-
-```text
-calkit operator restart [OPTIONS]
-```
-
-Options:
-
-| Option  | Type | Required | Default | Description                                                                                                                                                      |
-| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
-
-<a id="subcommand-operator-logs"></a>
-
-#### `calkit operator logs`
-
-Show the Operator service's logs.
-
-Usage:
-
-```text
-calkit operator logs [OPTIONS]
-```
-
-Options:
-
-| Option           | Type    | Required | Default | Description                                                                                                                                                      |
-| ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--follow`, `-f` | boolean | no       | False   | Keep printing new lines.                                                                                                                                         |
-| `--hub`          | str     | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
-
-<a id="subcommand-operator-add-workspace"></a>
-
-#### `calkit operator add-workspace`
-
-Add a project outside ~/calkit and ~/dev as a workspace.
-
-Usage:
-
-```text
-calkit operator add-workspace [OPTIONS] [PATH]
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description               |
-| -------- | ---- | -------- | ------- | ------------------------- |
-| `path`   | str  | no       | .       | Path to a Calkit project. |
-
-Options:
-
-| Option  | Type | Required | Default | Description                                                                                                                                                      |
-| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |
-
-<a id="subcommand-operator-uninstall"></a>
-
-#### `calkit operator uninstall`
-
-Revoke this machine's Operator on the hub and remove it here.
-
-Usage:
-
-```text
-calkit operator uninstall [OPTIONS]
-```
-
-Options:
-
-| Option  | Type | Required | Default | Description                                                                                                                                                      |
-| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub` | str  | no       |         | URL of the hub the Operator is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for install, to your default hub. |

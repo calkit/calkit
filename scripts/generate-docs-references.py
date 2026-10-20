@@ -325,10 +325,6 @@ def _group_anchor(names: list[str]) -> str:
     return "command-group-" + _slug(names[0])
 
 
-def _subcommand_anchor(group_names: list[str], sub_names: list[str]) -> str:
-    return f"subcommand-{_slug(group_names[0])}-{_slug(sub_names[0])}"
-
-
 def _command_link_label(names: list[str], anchor: str) -> str:
     return f"[{_command_label(names)}](#{anchor})"
 
@@ -337,6 +333,40 @@ def generate_cli_markdown() -> str:
     root_cmd = typer.main.get_command(app)
     if not isinstance(root_cmd, TyperGroup):
         raise TypeError("Expected root CLI command to be a Typer group")
+
+    def _append_subcommands(
+        path: str, anchor: str, group: TyperGroup, level: int
+    ) -> None:
+        # Recurses into nested groups, e.g., `calkit hub link`
+        subcommands = _list_unique_commands(group)
+        lines.append(
+            make_table(
+                [
+                    (
+                        _command_link_label(
+                            names, f"{anchor}-{_slug(names[0])}"
+                        ),
+                        _command_desc(sub_cmd),
+                    )
+                    for names, sub_cmd in subcommands
+                ],
+                ["Command", "Description"],
+            ).rstrip()
+        )
+        lines.append("")
+        for sub_names, sub_obj in subcommands:
+            sub_path = _command_path_label(path, sub_names)
+            sub_anchor = f"{anchor}-{_slug(sub_names[0])}"
+            _append_command_details(
+                lines,
+                sub_path,
+                sub_obj,
+                heading="#" * level,
+                anchor=sub_anchor,
+            )
+            if isinstance(sub_obj, TyperGroup) and sub_obj.commands:
+                _append_subcommands(sub_path, sub_anchor, sub_obj, level + 1)
+
     top_summary = _command_desc(root_cmd)
     top_commands = [
         (names, cmd_obj, _command_desc(cmd_obj))
@@ -414,31 +444,12 @@ def generate_cli_markdown() -> str:
         if cmd_desc:
             lines.append(cmd_desc)
             lines.append("")
-        lines.append(
-            make_table(
-                [
-                    (
-                        _command_link_label(
-                            names, _subcommand_anchor(cmd_names, names)
-                        ),
-                        _command_desc(sub_cmd),
-                    )
-                    for names, sub_cmd in subcommands
-                ],
-                ["Command", "Description"],
-            ).rstrip()
+        _append_subcommands(
+            _command_path_label("calkit", cmd_names),
+            "subcommand-" + _slug(cmd_names[0]),
+            cmd_obj,
+            4,
         )
-        lines.append("")
-        for sub_names, sub_obj in subcommands:
-            _append_command_details(
-                lines,
-                _command_path_label(
-                    _command_path_label("calkit", cmd_names), sub_names
-                ),
-                sub_obj,
-                heading="####",
-                anchor=_subcommand_anchor(cmd_names, sub_names),
-            )
     if not found_group:
         lines.append("No command groups were detected.")
         lines.append("")

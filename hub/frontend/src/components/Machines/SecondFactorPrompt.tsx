@@ -10,7 +10,7 @@ import {
   SECOND_FACTOR_SETUP_REQUIRED,
 } from "./connection"
 
-// What to do when the hub won't connect to Operators without a second
+// What to do when the hub won't connect to machines without a second
 // factor: set one up, or enter a code
 export default function SecondFactorPrompt({
   error,
@@ -45,7 +45,7 @@ export default function SecondFactorPrompt({
           <AlertIcon />
           <Text>
             Connecting to a workspace requires two-factor authentication.{" "}
-            <RouterLink to="/settings" search={{ tab: "operators" }}>
+            <RouterLink to="/settings" search={{ tab: "machines" }}>
               <Text as="span" color="ui.main" textDecoration="underline">
                 Set it up
               </Text>

@@ -1,4 +1,4 @@
-"""Tests for ``calkit.operator``."""
+"""Tests for ``calkit.hub_link``."""
 
 import asyncio
 import json
@@ -14,13 +14,13 @@ from typing import Any, cast
 
 import pytest
 
-from calkit import operator
+from calkit import hub_link
 
 
 @pytest.fixture(autouse=True)
 def _hub(monkeypatch):
-    # Each test acts on one hub's Operator unless it chooses another
-    monkeypatch.setattr(operator, "_hub_url", "https://calkit.io")
+    # Each test acts on one hub's link unless it chooses another
+    monkeypatch.setattr(hub_link, "_hub_url", "https://calkit.io")
 
 
 def _init_project(path, owner="alice", name="demo"):
@@ -50,13 +50,13 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     monkeypatch.setenv("CALKIT_USER_HOME", home)
     # The config holds a token, so only the user can read it, even if it
     # was readable before
-    operator.save_config({"name": "box", "token": "cko_x", "workspaces": []})
+    hub_link.save_config({"name": "box", "token": "ckm_x", "workspaces": []})
     if sys.platform != "win32":
-        os.chmod(operator.get_config_path(), 0o644)
-        operator.save_config(
-            {"name": "box", "token": "cko_x", "workspaces": []}
+        os.chmod(hub_link.get_config_path(), 0o644)
+        hub_link.save_config(
+            {"name": "box", "token": "ckm_x", "workspaces": []}
         )
-        mode = stat.S_IMODE(os.stat(operator.get_config_path()).st_mode)
+        mode = stat.S_IMODE(os.stat(hub_link.get_config_path()).st_mode)
         assert mode == 0o600
     # Only encrypted connections are made, except locally
     for url in [
@@ -65,10 +65,10 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
         "http://api.localhost",
         "ws://localhost:8002",
     ]:
-        operator.check_secure_url(url)
+        hub_link.check_secure_url(url)
     for url in ["http://api.calkit.io", "ws://relay.calkit.io", "ftp://x"]:
         with pytest.raises(ValueError):
-            operator.check_secure_url(url)
+            hub_link.check_secure_url(url)
     # Registering uses the user's own hub, never one named by a project in
     # the working directory, which could be anyone's
     from calkit import config
@@ -81,15 +81,15 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     monkeypatch.setenv("CALKIT_HUB", "")
     monkeypatch.delenv("CALKIT_HUB")
     monkeypatch.setattr(config, "_get_default_hub", lambda: None)
-    assert operator.use_own_hub() == "https://api.calkit.io"
+    assert hub_link.use_own_hub() == "https://api.calkit.io"
     monkeypatch.setenv("CALKIT_HUB", "http://hub.example")
     with pytest.raises(ValueError):
-        operator.use_own_hub()
+        hub_link.use_own_hub()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CALKIT_ENV", "test")
-    assert operator.load_config() == {
+    assert hub_link.load_config() == {
         "name": "box",
-        "token": "cko_x",
+        "token": "ckm_x",
         "workspaces": [],
     }
     # Projects under ~/calkit and ~/dev are found; other folders there are
@@ -130,36 +130,36 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
         return {"grant_public_key": next(keys)}
 
     monkeypatch.setattr(hub, "_request", request)
-    cfg = {"token": "cko_x", "api_url": "https://api.hub", "workspaces": []}
-    operator.check_in(cfg, [], "service")
-    assert (operator.load_config() or {})["grant_public_key"] == "key1"
-    operator.check_in(cfg, [], "service")
-    assert (operator.load_config() or {})["grant_public_key"] == "key2"
-    # The Operator's own public key goes with each, which the hub keeps
+    cfg = {"token": "ckm_x", "api_url": "https://api.hub", "workspaces": []}
+    hub_link.check_in(cfg, [], "service")
+    assert (hub_link.load_config() or {})["grant_public_key"] == "key1"
+    hub_link.check_in(cfg, [], "service")
+    assert (hub_link.load_config() or {})["grant_public_key"] == "key2"
+    # The link's own public key goes with each, which the hub keeps
     # the first time, for browsers to check replies with
-    assert posted[0]["public_key"] == operator.get_operator_public_jwk()
+    assert posted[0]["public_key"] == hub_link.get_link_public_jwk()
     assert posted[1]["public_key"] == posted[0]["public_key"]
     # A hub that has another key for it is refused, and installing again
     # registers it anew
     response = SimpleNamespace(status_code=409)
 
     def conflict(*args: Any, **kwargs: Any) -> dict:
-        raise HTTPError("409: Operator key doesn't match", response=response)
+        raise HTTPError("409: Machine key doesn't match", response=response)
 
     monkeypatch.setattr(hub, "_request", conflict)
-    with pytest.raises(operator.OperatorKeyRejected):
-        operator.check_in(cfg, [], "service")
-    assert (operator.load_config() or {})["key_rejected"]
+    with pytest.raises(hub_link.LinkKeyRejected):
+        hub_link.check_in(cfg, [], "service")
+    assert (hub_link.load_config() or {})["key_rejected"]
     # Revoked, it stops
     response.status_code = 403
-    with pytest.raises(operator.OperatorRevoked) as revoked:
-        operator.check_in(cfg, [], "service")
-    assert not isinstance(revoked.value, operator.OperatorKeyRejected)
+    with pytest.raises(hub_link.LinkRevoked) as revoked:
+        hub_link.check_in(cfg, [], "service")
+    assert not isinstance(revoked.value, hub_link.LinkKeyRejected)
     # Registered projects elsewhere are found, but only once
     elsewhere = os.path.join(home, "src", "other")
     _init_project(elsewhere, name="other")
     # Managed workspaces are found under <hub>/<owner>/<name>, only for
-    # this Operator's hub
+    # this link's hub
     managed = os.path.join(
         home, ".calkit", "workspaces", "calkit.io", "alice", "demo"
     )
@@ -170,7 +170,7 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     cfg = {"workspaces": [elsewhere, elsewhere + "/"]}
     workspaces = {
         Path(os.path.relpath(w["path"], os.path.realpath(home))).as_posix(): w
-        for w in operator.discover_workspaces(cfg)
+        for w in hub_link.discover_workspaces(cfg)
     }
     assert set(workspaces) == {
         "calkit/demo",
@@ -194,7 +194,7 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     managed_ws = workspaces[".calkit/workspaces/calkit.io/alice/demo"]
     assert managed_ws["kind"] == "managed"
     # Managed workspaces can be read but not changed from the hub
-    op = operator.Operator(cfg)
+    op = hub_link.HubLink(cfg)
     op.workspaces = list(workspaces.values())
     assert op.get_workspace(managed, personal=False) == managed_ws["path"]
     with pytest.raises(ValueError):
@@ -265,7 +265,7 @@ def test_agents(tmp_path, monkeypatch):
                 },
                 f,
             )
-        found = operator.find_agents([wdir, other])
+        found = hub_link.find_agents([wdir, other])
         assert set(found) == {wdir}
         agents = {a["tool"]: a for a in found[wdir]}
         assert set(agents) == {"claude", "codex"}
@@ -292,17 +292,17 @@ def test_agents(tmp_path, monkeypatch):
 
         with monkeypatch.context() as m:
             m.setattr(psutil.Process, "cmdline", flaky)
-            assert {a["pid"] for a in operator.find_agents([wdir])[wdir]} == {
+            assert {a["pid"] for a in hub_link.find_agents([wdir])[wdir]} == {
                 claude,
                 codex,
             }
         # Only ones in tmux can be attached to, and only in their workspace
-        op = operator.Operator({"workspaces": []})
+        op = hub_link.HubLink({"workspaces": []})
         op.workspaces = [{"path": wdir, "kind": "personal"}]
         with pytest.raises(ValueError, match="tmux"):
             op.open_session(wdir, 80, 24, attach=claude)
         with pytest.raises(ValueError):
-            operator.get_agent_log(other, claude)
+            hub_link.get_agent_log(other, claude)
         # Their conversations are read from the logs they keep, ending with
         # the latest, leaving out what isn't said or done
         transcript = os.path.join(
@@ -352,7 +352,7 @@ def test_agents(tmp_path, monkeypatch):
         ]
         with open(transcript, "w") as f:
             f.write("".join(json.dumps(line) + "\n" for line in lines))
-        log = operator.get_agent_log(wdir, claude)
+        log = hub_link.get_agent_log(wdir, claude)
         assert log["entries"] == [
             {"role": "user", "text": "Hi", "time": "t1"},
             {"role": "assistant", "text": "Plotting", "time": "t2"},
@@ -370,7 +370,7 @@ def test_agents(tmp_path, monkeypatch):
                 "time": "t3",
             },
         ]
-        assert operator.get_agent_log(wdir, claude, limit=1)["entries"] == [
+        assert hub_link.get_agent_log(wdir, claude, limit=1)["entries"] == [
             log["entries"][-1]
         ]
         # Codex's are found by where they were started
@@ -406,7 +406,7 @@ def test_agents(tmp_path, monkeypatch):
                     },
                 ]:
                     f.write(json.dumps(line) + "\n")
-        assert operator.get_agent_log(wdir, codex)["entries"] == [
+        assert hub_link.get_agent_log(wdir, codex)["entries"] == [
             {"role": "user", "text": "Go", "time": "t3"},
             {"role": "assistant", "text": "Done", "time": "t4"},
         ]
@@ -414,7 +414,7 @@ def test_agents(tmp_path, monkeypatch):
         # attaching or reading their logs
         demo = next(
             ws
-            for ws in operator.discover_workspaces({"workspaces": []})
+            for ws in hub_link.discover_workspaces({"workspaces": []})
             if ws["path"] == wdir
         )
         assert sorted(a["tool"] for a in demo["agents"]) == ["claude", "codex"]
@@ -432,9 +432,9 @@ def test_agents(tmp_path, monkeypatch):
 async def test_sessions(tmp_path, monkeypatch):
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
     monkeypatch.setenv("SHELL", "/bin/sh")
-    # The Operator points its own requests at its hub, which commands in
+    # The link points its own requests at its hub, which commands in
     # sessions don't inherit, so they use the project's
-    monkeypatch.setattr(operator, "_inherited_hub", None)
+    monkeypatch.setattr(hub_link, "_inherited_hub", None)
     monkeypatch.setenv("CALKIT_HUB", "http://localhost")
     _init_project(os.path.join(tmp_path, "calkit", "demo"))
     import base64
@@ -466,8 +466,8 @@ async def test_sessions(tmp_path, monkeypatch):
         "grant_public_key": public_key,
         "workspaces": [],
     }
-    op = operator.Operator(cfg)
-    op.workspaces = operator.discover_workspaces(op.cfg)
+    op = hub_link.HubLink(cfg)
+    op.workspaces = hub_link.discover_workspaces(op.cfg)
     # Channels are only opened while the hub can be heard from
     op.last_check_in = time.monotonic()
 
@@ -522,7 +522,7 @@ async def test_sessions(tmp_path, monkeypatch):
         body = json.dumps(msg)
         r, s = decode_dss_signature(
             (key or browser).sign(
-                f"{operator.MESSAGE_SIGNATURE_CONTEXT}\n{seq}\n{body}".encode(),
+                f"{hub_link.MESSAGE_SIGNATURE_CONTEXT}\n{seq}\n{body}".encode(),
                 ec.ECDSA(hashes.SHA256()),
             )
         )
@@ -550,22 +550,22 @@ async def test_sessions(tmp_path, monkeypatch):
             {"type": "channel.open", "ch": ch, "grant": grant(**kwargs)}
         )
 
-    def operator_public_key() -> Any:
-        return operator.get_operator_key().public_key()
+    def link_public_key() -> Any:
+        return hub_link.get_link_key().public_key()
 
     def verify(signed: dict, grant_id: str) -> None:
         raw = base64.urlsafe_b64decode(signed["sig"] + "==")
-        operator_public_key().verify(
+        link_public_key().verify(
             encode_dss_signature(
                 int.from_bytes(raw[:32], "big"),
                 int.from_bytes(raw[32:], "big"),
             ),
-            f"{operator.REPLY_SIGNATURE_CONTEXT}\n{grant_id}\n"
+            f"{hub_link.REPLY_SIGNATURE_CONTEXT}\n{grant_id}\n"
             f"{signed['seq']}\n{signed['body']}".encode(),
             ec.ECDSA(hashes.SHA256()),
         )
 
-    # Replies a browser would take, each signed by the Operator for its
+    # Replies a browser would take, each signed by the link for its
     # channel's grant, in order
     # The last reply's sequence number on each channel before what's in
     # the log, which is cleared as the test goes
@@ -619,11 +619,11 @@ async def test_sessions(tmp_path, monkeypatch):
         )
 
     # Channels are refused unless the hub signed a grant for the owner to use
-    # this Operator, whatever the relay says, and each grant works once,
+    # this machine, whatever the relay says, and each grant works once,
     # even after a restart
     open_channel("u", jti="used")
     op.on_relay_message({"type": "channel.close", "ch": "u"})
-    restarted = operator.Operator(cfg)
+    restarted = hub_link.HubLink(cfg)
     restarted.ws = FakeSocket()
     restarted.last_check_in = time.monotonic()
     used = grant(jti="used")
@@ -636,9 +636,9 @@ async def test_sessions(tmp_path, monkeypatch):
         {"type": "channel.close", "ch": "u"}
     ]
     if sys.platform != "win32":
-        used_path = os.path.join(operator.operator_dir(), "used-grants.json")
+        used_path = os.path.join(hub_link.link_dir(), "used-grants.json")
         assert stat.S_IMODE(os.stat(used_path).st_mode) == 0o600
-        assert stat.S_IMODE(os.stat(operator.operator_dir()).st_mode) == 0o700
+        assert stat.S_IMODE(os.stat(hub_link.link_dir()).st_mode) == 0o700
     await asyncio.sleep(0.05)
     clear()
     for bad in [
@@ -670,7 +670,7 @@ async def test_sessions(tmp_path, monkeypatch):
         message("x", {"type": "sessions.list", "id": 1})
     # Nor while the hub can't be heard from, so ended sign-ins would go
     # unnoticed
-    op.last_check_in = time.monotonic() - operator.CHECK_IN_GRACE_SECONDS
+    op.last_check_in = time.monotonic() - hub_link.CHECK_IN_GRACE_SECONDS
     open_channel("x")
     op.last_check_in = time.monotonic()
     # The relay names channels, and only plainly
@@ -685,7 +685,7 @@ async def test_sessions(tmp_path, monkeypatch):
         '{"type": "channel.close", "ch": "x"}'
     }
     clear()
-    # A channel's first reply says it's ready, signed with the Operator's
+    # A channel's first reply says it's ready, signed with the link's
     # key for that channel's grant only, so the relay can't move replies
     # from one channel to another
     open_channel("a")
@@ -695,13 +695,13 @@ async def test_sessions(tmp_path, monkeypatch):
     with pytest.raises(InvalidSignature):
         verify(first, "another-grant")
     if sys.platform != "win32":
-        key_path = os.path.join(operator.operator_dir(), "operator-key.pem")
+        key_path = os.path.join(hub_link.link_dir(), "link-key.pem")
         assert stat.S_IMODE(os.stat(key_path).st_mode) == 0o600
     # It's the key the hub is told about
-    numbers = operator_public_key().public_numbers()
-    jwk = operator.get_operator_public_jwk()
+    numbers = link_public_key().public_numbers()
+    jwk = hub_link.get_link_public_jwk()
     assert jwk["kty"] == "EC" and jwk["crv"] == "P-256"
-    assert operator._b64url_decode(jwk["x"]) == numbers.x.to_bytes(32, "big")
+    assert hub_link._b64url_decode(jwk["x"]) == numbers.x.to_bytes(32, "big")
     assert len(jwk["x"]) == len(jwk["y"]) == 43
     # Replies go out unescaped, since escaping a TUI's box drawing makes
     # each character up to 12 bytes, which can pass the relay's limit
@@ -746,25 +746,25 @@ async def test_sessions(tmp_path, monkeypatch):
     assert "a" not in op.channels
     clear()
     # Signed as sent, as the hub's tests check with the same vector, from
-    # hub/frontend/src/components/Operators/connection.test.ts
+    # hub/frontend/src/components/Machines/connection.test.ts
     vector = {
         "jwk": {
             "kty": "EC",
             "crv": "P-256",
-            "x": "QF8jZqZXlCI2kwXe6F3IGC3DlMRjap4e8f1DV0uWNiQ",
-            "y": "GAhXTzjif_yPldGN07yo6alEe_o-IyFSC83KEKILGdE",
+            "x": "ZfNFdAzsfpIWhDie2L9NwSNt6d6a2lwlSMf3MzH-XVk",
+            "y": "Hh0kg1uyGNF6Zd34yhdohtFps5dU_GcMu5ZyZ-YL7LM",
         },
         "seq": 7,
         "body": '{"type":"sessions.input","session":"s1","data":"ls ─\\n"}',
         "sig": (
-            "Cml8CVzkHw2lLu6pU4A4BLtI17I6xUkJ_onoD76cKc10ZP4CjQ6_-XvcP3DmUqpn"
-            "i_b8crjTTi1SDU8jBZpumw"
+            "xshOHd9lW3FQS3_FXFFzmZU8wWUPdrVR6VmguNFs9Xr-kxLc2jzVSXqYlOfXn9DW"
+            "eTjonww_5a6Rio0iIGGpZA"
         ),
     }
-    auth = operator.check_grant(op.cfg, grant(jwk=vector["jwk"]), {})
+    auth = hub_link.check_grant(op.cfg, grant(jwk=vector["jwk"]), {})
     assert auth is not None
     auth.seq = 6
-    assert operator.open_signed_message(
+    assert hub_link.open_signed_message(
         auth, {k: vector[k] for k in ["seq", "body", "sig"]}
     ) == {"type": "sessions.input", "session": "s1", "data": "ls ─\n"}
     # A type that isn't a string is refused without ending the channel
@@ -779,8 +779,8 @@ async def test_sessions(tmp_path, monkeypatch):
     message("a", {"type": "sessions.open", "id": 3, "workspace": workspace})
     await wait_for(lambda: reply(3))
     sid = reply(3)["result"]["session"]
-    # Opening a session takes the workspace from other hubs' Operators
-    assert operator.workspace_lock_holder(workspace)["pid"] == os.getpid()
+    # Opening a session takes the workspace from other hubs' links
+    assert hub_link.workspace_lock_holder(workspace)["pid"] == os.getpid()
     message(
         "a",
         {
@@ -795,7 +795,7 @@ async def test_sessions(tmp_path, monkeypatch):
     message("a", {"type": "sessions.input", "session": sid, "data": paste})
     await wait_for(lambda: "PASTED-6" in output("a"), timeout=30)
     # A session doesn't get another's terminal, nor anything else the
-    # Operator has open, which a shell that lists what it has shows
+    # link has open, which a shell that lists what it has shows
     assert not os.get_inheritable(op.sessions[sid].fd)
     lister = tmp_path / "lister.sh"
     lister.write_text(
@@ -851,11 +851,11 @@ async def test_sessions(tmp_path, monkeypatch):
     op.send_soon("c", {"type": "result", "id": 9, "result": "\x1b" * 100_000})
     await wait_for(lambda: reply(9))
     assert reply(9)["type"] == "error"
-    monkeypatch.setattr(operator, "MAX_CHANNEL_BACKLOG_BYTES", 1000)
+    monkeypatch.setattr(hub_link, "MAX_CHANNEL_BACKLOG_BYTES", 1000)
     open_channel("slow")
     op.send_soon("slow", {"data": "x" * 900})
     assert "slow" not in op.channels
-    monkeypatch.setattr(operator, "MAX_CHANNEL_BACKLOG_BYTES", 2**20)
+    monkeypatch.setattr(hub_link, "MAX_CHANNEL_BACKLOG_BYTES", 2**20)
     await asyncio.sleep(0.1)
     clear()
     # Channels close once the sign-in they came from ends, e.g., with a
@@ -868,8 +868,8 @@ async def test_sessions(tmp_path, monkeypatch):
         checked_in.append(sessions)
         return {"ended_sessions": ["sign-in-2"], "relay_token": "tok2"}
 
-    monkeypatch.setattr(operator, "check_in", fake_check_in)
-    monkeypatch.setattr(operator, "discover_workspaces", lambda cfg: [])
+    monkeypatch.setattr(hub_link, "check_in", fake_check_in)
+    monkeypatch.setattr(hub_link, "discover_workspaces", lambda cfg: [])
     await op.check_in()
     assert checked_in == [["sign-in-1", "sign-in-2"]]
     assert set(op.channels) == {"c"}
@@ -890,7 +890,7 @@ async def test_sessions(tmp_path, monkeypatch):
         cfg["grant_public_key"] = "other"
         return {}
 
-    monkeypatch.setattr(operator, "check_in", new_key)
+    monkeypatch.setattr(hub_link, "check_in", new_key)
     await op.check_in()
     assert op.channels == {}
     cfg["grant_public_key"] = public_key
@@ -901,10 +901,10 @@ async def test_sessions(tmp_path, monkeypatch):
     op.channels["e"].tfa_exp = time.time() - 1
     op.expire_channels()
     assert set(op.channels) == {"f"}
-    op.last_check_in = time.monotonic() - operator.CHECK_IN_GRACE_SECONDS
+    op.last_check_in = time.monotonic() - hub_link.CHECK_IN_GRACE_SECONDS
     op.expire_channels()
     assert op.channels == {}
-    # With nothing using it, an Operator with an idle limit stops
+    # With nothing using it, a link with an idle limit stops
     op.idle_exit_seconds = 0.1
     await asyncio.wait_for(op.wait_until_idle(), 5)
 
@@ -914,14 +914,14 @@ def test_log(tmp_path, monkeypatch):
 
     # A log past its limit keeps its newest whole lines, in the same file
     # the service manager has open
-    fpath = str(tmp_path / "operator.log")
-    monkeypatch.setattr(operator, "LOG_MAX_BYTES", 100)
-    monkeypatch.setattr(operator, "LOG_KEEP_BYTES", 50)
-    monkeypatch.setattr(operator.sys, "platform", "linux")
+    fpath = str(tmp_path / "hub_link.log")
+    monkeypatch.setattr(hub_link, "LOG_MAX_BYTES", 100)
+    monkeypatch.setattr(hub_link, "LOG_KEEP_BYTES", 50)
+    monkeypatch.setattr(hub_link.sys, "platform", "linux")
     with open(fpath, "a") as service:
         service.write("".join(f"line {i:03d}\n" for i in range(20)))
         service.flush()
-        operator.trim_log(fpath)
+        hub_link.trim_log(fpath)
         service.write("after\n")
     with open(fpath) as f:
         lines = f.read().splitlines()
@@ -929,25 +929,25 @@ def test_log(tmp_path, monkeypatch):
     assert lines[0].startswith("line ") and len(lines) < 10
     assert lines[-2] == "line 019"
     # Under the limit, or missing, it's left alone
-    operator.trim_log(fpath)
+    hub_link.trim_log(fpath)
     with open(fpath) as f:
         assert f.read().splitlines() == lines
-    operator.trim_log(str(tmp_path / "missing.log"))
+    hub_link.trim_log(str(tmp_path / "missing.log"))
     # The same warning is only logged again after a while
     records = []
-    log = logging.getLogger("test_operator_log")
+    log = logging.getLogger("test_hub_link_log")
     log.propagate = False
     log.setLevel(logging.INFO)
     log.addHandler(logging.Handler())
     log.handlers[0].emit = records.append  # type: ignore[method-assign]
-    log.addFilter(operator.RepeatFilter())
+    log.addFilter(hub_link.RepeatFilter())
     for _ in range(3):
         log.warning("Check-in failed: 404")
         log.warning("Connection failed: 404")
         log.info("Connected to relay")
     assert [r.getMessage() for r in records].count("Check-in failed: 404") == 1
     assert len([r for r in records if r.levelno == logging.INFO]) == 3
-    monkeypatch.setattr(operator, "REPEAT_LOG_SECONDS", 0)
+    monkeypatch.setattr(hub_link, "REPEAT_LOG_SECONDS", 0)
     log.warning("Check-in failed: 404")
     assert [r.getMessage() for r in records].count("Check-in failed: 404") == 2
 
@@ -959,8 +959,9 @@ def test_service_files(tmp_path, monkeypatch):
     # Started from /, without what's there on the import path, so modules
     # in the home folder, e.g., a pty.py, can't stand in for its own
     command = [
-        *operator.CALKIT_COMMAND,
-        "operator",
+        *hub_link.CALKIT_COMMAND,
+        "hub",
+        "link",
         "start",
         "--hub",
         "https://calkit.io",
@@ -969,7 +970,7 @@ def test_service_files(tmp_path, monkeypatch):
     ]
     (tmp_path / "typer.py").write_text("raise SystemExit('shadowed')\n")
     version = subprocess.run(
-        [*operator.CALKIT_COMMAND, "--version"],
+        [*hub_link.CALKIT_COMMAND, "--version"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -977,37 +978,37 @@ def test_service_files(tmp_path, monkeypatch):
     assert version.returncode == 0, version.stderr
     # launchd restarts it on failure, but not after it exits because it
     # was revoked
-    agent = plistlib.loads(operator._launchd_plist(at_boot=False))
+    agent = plistlib.loads(hub_link._launchd_plist(at_boot=False))
     assert agent["ProgramArguments"] == command
     assert agent["KeepAlive"] == {"SuccessfulExit": False}
-    assert agent["StandardOutPath"] == operator.get_log_path()
+    assert agent["StandardOutPath"] == hub_link.get_log_path()
     assert agent["WorkingDirectory"] == "/"
     assert "UserName" not in agent
     # Not throttled like a background job
     assert agent["ProcessType"] == "Interactive"
-    assert operator._launchd_plist_path(at_boot=False).startswith(
+    assert hub_link._launchd_plist_path(at_boot=False).startswith(
         str(tmp_path)
     )
     # At boot it's a system daemon that still runs as this user, which only
     # macOS has
     if sys.platform != "win32":
-        daemon = plistlib.loads(operator._launchd_plist(at_boot=True))
+        daemon = plistlib.loads(hub_link._launchd_plist(at_boot=True))
         assert daemon["UserName"]
-        # launchd opens its log as root, so the Operator writes its own
+        # launchd opens its log as root, so the link writes its own
         assert daemon["StandardOutPath"] == "/dev/null"
         assert daemon["StandardErrorPath"] == "/dev/null"
         assert daemon["ProgramArguments"] == [*command, "--log-file"]
-        assert operator._launchd_plist_path(at_boot=True).startswith(
+        assert hub_link._launchd_plist_path(at_boot=True).startswith(
             "/Library/LaunchDaemons/"
         )
     # On Windows, a script in the Startup folder runs it hidden at login
-    script = operator._windows_startup_script()
+    script = hub_link._windows_startup_script()
     assert "--mode" in script and "service" in script
-    assert operator.get_log_path() in script
+    assert hub_link.get_log_path() in script
     # The whole command has its own quotes, since cmd strips the outer pair
     # of one with more than two (doubled here, for VBScript)
     assert 'cmd /c ""' in script and '2>&1"""' in script
-    unit = operator._systemd_unit()
+    unit = hub_link._systemd_unit()
     expected = shlex.join(command).replace("\\", "\\\\")
     assert f"ExecStart={expected}" in unit
     assert "WorkingDirectory=/\n" in unit
@@ -1016,10 +1017,10 @@ def test_service_files(tmp_path, monkeypatch):
     # What systemd would expand in a path is escaped
     with monkeypatch.context() as m:
         m.setattr(
-            operator, "CALKIT_COMMAND", ["/opt/py%x$y/python", "-c", "x"]
+            hub_link, "CALKIT_COMMAND", ["/opt/py%x$y/python", "-c", "x"]
         )
         assert (
-            "ExecStart='/opt/py%%x$$y/python' -c x" in operator._systemd_unit()
+            "ExecStart='/opt/py%%x$$y/python' -c x" in hub_link._systemd_unit()
         )
     # Restarting a loaded launchd agent happens in place, since booting it
     # out returns before it has stopped, so booting it in again fails;
@@ -1032,36 +1033,36 @@ def test_service_files(tmp_path, monkeypatch):
         code = 0 if cmd[:2] != ["launchctl", "print"] or loaded[0] else 113
         return subprocess.CompletedProcess(cmd, code)
 
-    monkeypatch.setattr(operator.subprocess, "run", run)
-    monkeypatch.setattr(operator.os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(hub_link.subprocess, "run", run)
+    monkeypatch.setattr(hub_link.os, "getuid", lambda: 501, raising=False)
     # Runners have no user 501, and Windows has no pwd module
     monkeypatch.setitem(
         sys.modules,
         "pwd",
         SimpleNamespace(getpwuid=lambda uid: SimpleNamespace(pw_name="me")),
     )
-    monkeypatch.setattr(operator.platform, "system", lambda: "Darwin")
-    agent_path = operator._launchd_plist_path(at_boot=False)
+    monkeypatch.setattr(hub_link.platform, "system", lambda: "Darwin")
+    agent_path = hub_link._launchd_plist_path(at_boot=False)
     os.makedirs(os.path.dirname(agent_path))
-    Path(agent_path).write_bytes(operator._launchd_plist(at_boot=False))
-    target = f"gui/501/{operator.service_label()}"
+    Path(agent_path).write_bytes(hub_link._launchd_plist(at_boot=False))
+    target = f"gui/501/{hub_link.service_label()}"
     for is_loaded, last in [
         (True, ["launchctl", "kickstart", "-k", target]),
         (False, ["launchctl", "bootstrap", "gui/501", agent_path]),
     ]:
         loaded[0] = is_loaded
         calls.clear()
-        operator.restart_service()
+        hub_link.restart_service()
         assert calls == [["launchctl", "print", target], last]
     # systemd restarts in one step too
-    monkeypatch.setattr(operator.platform, "system", lambda: "Linux")
-    unit_path = operator._systemd_unit_path()
+    monkeypatch.setattr(hub_link.platform, "system", lambda: "Linux")
+    unit_path = hub_link._systemd_unit_path()
     os.makedirs(os.path.dirname(unit_path))
     Path(unit_path).write_text(unit)
     calls.clear()
-    operator.restart_service()
+    hub_link.restart_service()
     assert calls == [
-        ["systemctl", "--user", "restart", operator.systemd_unit()]
+        ["systemctl", "--user", "restart", hub_link.systemd_unit()]
     ]
     # Installing starts it at boot unless told to start at login, falling
     # back to login when sudo can't be had without a terminal to ask in
@@ -1080,17 +1081,17 @@ def test_service_files(tmp_path, monkeypatch):
         stdout = "no" if "show-user" in cmd else ""
         return subprocess.CompletedProcess(cmd, code, stdout=stdout)
 
-    monkeypatch.setattr(operator.subprocess, "run", run_install)
-    monkeypatch.setattr(operator.shutil, "which", lambda name: f"/bin/{name}")
-    monkeypatch.setattr(operator, "_has_terminal", lambda: False)
-    monkeypatch.setattr(operator.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(hub_link.subprocess, "run", run_install)
+    monkeypatch.setattr(hub_link.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(hub_link, "_has_terminal", lambda: False)
+    monkeypatch.setattr(hub_link.platform, "system", lambda: "Darwin")
     daemon_bootstrap = [
         "sudo",
         "-n",
         "launchctl",
         "bootstrap",
         "system",
-        operator._launchd_plist_path(at_boot=True),
+        hub_link._launchd_plist_path(at_boot=True),
     ]
     agent_bootstrap = ["launchctl", "bootstrap", "gui/501", agent_path]
     for cached, login, bootstrap, noted in [
@@ -1100,7 +1101,7 @@ def test_service_files(tmp_path, monkeypatch):
     ]:
         sudo_cached[0] = cached
         calls.clear()
-        notes = operator.install_service(login=login)
+        notes = hub_link.install_service(login=login)
         assert bootstrap in calls
         assert any("needs sudo" in n for n in notes) == noted
         # Starting at login never asks for sudo
@@ -1108,7 +1109,7 @@ def test_service_files(tmp_path, monkeypatch):
             assert not any(c[:1] == ["sudo"] for c in calls)
     # On Linux, lingering is enabled with sudo if it can't be without, and
     # left alone when starting at login
-    monkeypatch.setattr(operator.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(hub_link.platform, "system", lambda: "Linux")
     user = os.environ.get("USER") or ""
     for cached, login, sudo_linger, noted in [
         (True, False, True, False),
@@ -1117,7 +1118,7 @@ def test_service_files(tmp_path, monkeypatch):
     ]:
         sudo_cached[0] = cached
         calls.clear()
-        notes = operator.install_service(login=login)
+        notes = hub_link.install_service(login=login)
         assert (
             ["sudo", "-n", "loginctl", "enable-linger", user] in calls
         ) == sudo_linger
@@ -1144,51 +1145,49 @@ def test_cron_and_lock(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     table.write_text("0 * * * * echo mine\n")
     # Installing twice leaves one set of entries and the user's own alone
-    operator.install_cron()
-    operator.install_cron()
+    hub_link.install_cron()
+    hub_link.install_cron()
     lines = table.read_text().splitlines()
     assert lines[0] == "0 * * * * echo mine"
-    ours = [line for line in lines if line.endswith(operator.cron_marker())]
+    ours = [line for line in lines if line.endswith(hub_link.cron_marker())]
     assert [line.split()[0] for line in ours] == ["*/5", "@reboot"]
     assert all("--mode cron" in line for line in ours)
     # From /, so nothing in the home folder is on its import path
     assert all(" cd / && " in line for line in ours)
-    log = operator.get_log_path()
+    log = hub_link.get_log_path()
     assert "%" in log
     assert all(log.replace("%", "\\%") in line for line in ours)
     assert all("%" not in line.replace("\\%", "") for line in ours)
     # Its folder and log are the user's alone, e.g., on a shared login node
     assert stat.S_IMODE(os.stat(log).st_mode) == 0o600
     assert stat.S_IMODE(os.stat(os.path.dirname(log)).st_mode) == 0o700
-    assert "cron" in operator.get_service_status()
-    operator.uninstall_service()
+    assert "cron" in hub_link.get_service_status()
+    hub_link.uninstall_service()
     assert table.read_text().splitlines() == ["0 * * * * echo mine"]
-    assert operator.get_service_status() is None
+    assert hub_link.get_service_status() is None
     # In cron mode, starting checks in now and stopping ends the running one
     started, stopped = [], []
     with monkeypatch.context() as m:
-        m.setattr(operator, "_cron_installed", lambda: True)
+        m.setattr(hub_link, "_cron_installed", lambda: True)
         m.setattr(
-            operator.subprocess,
+            hub_link.subprocess,
             "Popen",
             lambda argv, **kw: started.append(argv),
         )
-        m.setattr(
-            operator, "_stop_running_operator", lambda: stopped.append(True)
-        )
-        m.setattr(operator.platform, "system", lambda: "Linux")
-        operator.set_service_running(True)
-        operator.set_service_running(False)
-    assert started == [operator._service_command("cron")]
+        m.setattr(hub_link, "_stop_running_link", lambda: stopped.append(True))
+        m.setattr(hub_link.platform, "system", lambda: "Linux")
+        hub_link.set_service_running(True)
+        hub_link.set_service_running(False)
+    assert started == [hub_link._service_command("cron")]
     assert stopped == [True]
-    # Only one Operator runs at a time
-    lock = operator.acquire_lock()
+    # Only one link runs at a time
+    lock = hub_link.acquire_lock()
     assert lock is not None
-    with open(operator._pid_path()) as f:
+    with open(hub_link._pid_path()) as f:
         assert f.read() == str(os.getpid())
-    assert operator.acquire_lock() is None
+    assert hub_link.acquire_lock() is None
     lock.close()
-    second = operator.acquire_lock()
+    second = hub_link.acquire_lock()
     assert second is not None
     second.close()
 
@@ -1214,12 +1213,12 @@ def test_workspace_actions(tmp_path, monkeypatch):
         f.write("hi")
     with open(os.path.join(wdir, "scratch.log"), "w") as f:
         f.write("noise")
-    status = operator.get_workspace_status(wdir, fetch=False)
+    status = hub_link.get_workspace_status(wdir, fetch=False)
     assert status["errors"] == []
     git = status["status"]["git"]
     assert set(git["untracked_files"]) == {"notes.txt", "scratch.log"}
     # The Git part on its own says the same, without the pipeline's wait
-    git_status = operator.get_workspace_git_status(wdir, fetch=False)
+    git_status = hub_link.get_workspace_git_status(wdir, fetch=False)
     assert git_status["git"] == {
         k: git[k]
         for k in ["branch", "changed_files", "staged_files", "untracked_files"]
@@ -1230,7 +1229,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
     # What the pipeline is doing, or last did, comes cheaply from the files
     # a run leaves: DVC's lock, while a live process holds it, the run log
     # for the stage it's on, and the record of how the last run ended
-    assert operator.get_run_state(wdir) == {
+    assert hub_link.get_run_state(wdir) == {
         "running": False,
         "running_stages": [],
         "running_since": None,
@@ -1278,7 +1277,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
             },
             f,
         )
-    assert not operator.get_run_state(wdir)["running"]
+    assert not hub_link.get_run_state(wdir)["running"]
     with open(lock, "w") as f:
         json.dump(
             {
@@ -1287,7 +1286,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
             },
             f,
         )
-    assert operator.get_run_state(wdir) == {
+    assert hub_link.get_run_state(wdir) == {
         "running": True,
         "running_stages": ["train"],
         "running_since": "2026-09-29T12:05:00+00:00",
@@ -1295,7 +1294,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
     }
     with open(lock, "w") as f:
         f.write('{"read": {}, "write": {}}')
-    assert operator.get_run_state(wdir)["last_run"] == last_run
+    assert hub_link.get_run_state(wdir)["last_run"] == last_run
     shutil.rmtree(os.path.join(wdir, ".calkit"))
     # Paths from the hub have to be plain ones inside the workspace, so they
     # can't be taken as options or reach anything else on the machine
@@ -1309,15 +1308,15 @@ def test_workspace_actions(tmp_path, monkeypatch):
         "x\n!important",
     ]:
         with pytest.raises(ValueError):
-            operator.save_workspace(wdir, [bad])
+            hub_link.save_workspace(wdir, [bad])
         with pytest.raises(ValueError):
-            operator.ignore_path(wdir, bad)
+            hub_link.ignore_path(wdir, bad)
         with pytest.raises(ValueError):
-            operator.add_stage(wdir, name="bad", cmd="echo", deps=[bad])
+            hub_link.add_stage(wdir, name="bad", cmd="echo", deps=[bad])
     if sys.platform != "win32":
         os.symlink(str(tmp_path), os.path.join(wdir, "link"))
         with pytest.raises(ValueError):
-            operator.save_workspace(wdir, ["link/secret"])
+            hub_link.save_workspace(wdir, ["link/secret"])
         os.remove(os.path.join(wdir, "link"))
         # Nor are files a repo committed as links followed out of it, e.g.,
         # a .gitignore linked to ~/.bashrc, or a pipeline linked elsewhere
@@ -1331,11 +1330,11 @@ def test_workspace_actions(tmp_path, monkeypatch):
             os.symlink(outside, os.path.join(wdir, fname))
             with pytest.raises(ValueError, match="link"):
                 if fname == ".gitignore":
-                    operator.ignore_path(wdir, "scratch.log")
+                    hub_link.ignore_path(wdir, "scratch.log")
                 else:
-                    operator.add_stage(wdir, name="s", cmd="echo", outs=["o"])
+                    hub_link.add_stage(wdir, name="s", cmd="echo", outs=["o"])
             if fname == "dvc.yaml":
-                assert operator.get_stage_list(wdir, None) == []
+                assert hub_link.get_stage_list(wdir, None) == []
             os.remove(os.path.join(wdir, fname))
             if had:
                 os.rename(moved, os.path.join(wdir, fname))
@@ -1345,7 +1344,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
         logs = os.path.join(wdir, ".calkit", "logs")
         os.makedirs(logs)
         os.symlink(outside, os.path.join(logs, "9999-zz.log"))
-        assert operator.get_run_log(wdir) == {"name": None, "log": None}
+        assert hub_link.get_run_log(wdir) == {"name": None, "log": None}
         shutil.rmtree(os.path.join(wdir, ".calkit"))
         os.remove(outside)
     # The machine's credentials never go in a commit, even when a repo's
@@ -1370,24 +1369,24 @@ def test_workspace_actions(tmp_path, monkeypatch):
         ["."],
     ]:
         with pytest.raises(ValueError, match="credentials"):
-            operator.save_workspace(wdir, bad_paths)
+            hub_link.save_workspace(wdir, bad_paths)
     with open(dvc_ignore, "w") as f:
         f.write(dvc_ignored)
     # Ignoring commits the .gitignore change
-    operator.ignore_path(wdir, "scratch.log")
-    status = operator.get_workspace_status(wdir, fetch=False)
+    hub_link.ignore_path(wdir, "scratch.log")
+    status = hub_link.get_workspace_status(wdir, fetch=False)
     assert status["status"]["git"]["untracked_files"] == ["notes.txt"]
     assert status["status"]["git"]["changed_files"] == []
     # Saving commits only what it's given
-    operator.save_workspace(wdir, ["notes.txt"], message="Add notes", to="git")
-    status = operator.get_workspace_status(wdir, fetch=False)
+    hub_link.save_workspace(wdir, ["notes.txt"], message="Add notes", to="git")
+    status = hub_link.get_workspace_status(wdir, fetch=False)
     assert status["status"]["git"]["untracked_files"] == []
     log = subprocess.run(
         ["git", "log", "--format=%s"], cwd=wdir, capture_output=True, text=True
     ).stdout.splitlines()
     assert log[:2] == ["Add notes", "Ignore scratch.log"]
     # Stages are added and committed, with an object for their output
-    operator.add_stage(
+    hub_link.add_stage(
         wdir,
         name="plot",
         cmd="python plot.py",
@@ -1396,9 +1395,9 @@ def test_workspace_actions(tmp_path, monkeypatch):
         calkit_object={"title": "A plot", "description": "It plots"},
     )
     with pytest.raises(ValueError):
-        operator.add_stage(wdir, name="plot", cmd="echo")
+        hub_link.add_stage(wdir, name="plot", cmd="echo")
     with pytest.raises(ValueError):
-        operator.add_stage(wdir, name="other", cmd="echo", outs=["fig.png"])
+        hub_link.add_stage(wdir, name="other", cmd="echo", outs=["fig.png"])
     import calkit
 
     # A refusal over an object that's already there leaves nothing behind
@@ -1410,7 +1409,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
         ["git", "commit", "-qam", "Add figure"], cwd=wdir, check=True
     )
     with pytest.raises(ValueError):
-        operator.add_stage(
+        hub_link.add_stage(
             wdir,
             name="draw",
             cmd="echo",
@@ -1439,77 +1438,77 @@ def test_workspace_actions(tmp_path, monkeypatch):
     ]
     # Running without a terminal reports how it went; this stage's script
     # doesn't exist, so it fails
-    result = operator.run_pipeline(wdir)
+    result = hub_link.run_pipeline(wdir)
     assert result["ok"] is False
     assert result["output"]
     # Single stages can be run, and their names can't be options
-    result = operator.run_pipeline(wdir, stages=["plot"])
+    result = hub_link.run_pipeline(wdir, stages=["plot"])
     assert result["ok"] is False and "plot" in result["output"]
     for bad in ["--force", "-f", "a b", "x;y", ""]:
         with pytest.raises(ValueError):
-            operator.run_pipeline(wdir, stages=[bad])
+            hub_link.run_pipeline(wdir, stages=[bad])
     # The hub follows a run through its log, named by when it started
-    run_log = operator.get_run_log(wdir)
+    run_log = hub_link.get_run_log(wdir)
     assert run_log["name"].endswith(".log") and "plot" in run_log["log"]
     # Only the end of a run's output and its log is kept, however long
     with open(os.path.join(local, "logs", "9999-zz.log"), "w") as f:
         f.write("old\n" + "x" * 300_000 + "\nEND")
-    run_log = operator.get_run_log(wdir)
+    run_log = hub_link.get_run_log(wdir)
     assert len(run_log["log"]) == 50_000 and run_log["log"].endswith("END")
     os.remove(os.path.join(local, "logs", "9999-zz.log"))
     with monkeypatch.context() as m:
         m.setattr(
-            operator,
+            hub_link,
             "CALKIT_COMMAND",
             [sys.executable, "-c", "print('y' * 300_000, end='END')"],
         )
-        result = operator.run_pipeline(wdir)
+        result = hub_link.run_pipeline(wdir)
     assert result["ok"] and len(result["output"]) == 50_000
     assert result["output"].endswith("END")
     # Stopping needs a run in progress, and a run the hub started stops
     # with everything it started
     with pytest.raises(ValueError):
-        operator.stop_run(wdir)
+        hub_link.stop_run(wdir)
     if sys.platform != "win32":
         sleeper = subprocess.Popen(["sleep", "30"], start_new_session=True)
-        operator._runs[wdir] = sleeper
+        hub_link._runs[wdir] = sleeper
         try:
-            operator.stop_run(wdir)
+            hub_link.stop_run(wdir)
             assert sleeper.wait(timeout=10) != 0
         finally:
-            operator._runs.pop(wdir, None)
+            hub_link._runs.pop(wdir, None)
     # Another workspace for the project goes beside it in ~/calkit, where
     # it's found, and branch names can't be options or climb out of there
-    created = operator.new_workspace(wdir, "fix/axes")
+    created = hub_link.new_workspace(wdir, "fix/axes")
     assert created["path"] == os.path.join(tmp_path, "calkit", "demo-fix-axes")
     assert created["path"] in [
-        ws["path"] for ws in operator.discover_workspaces({"workspaces": []})
+        ws["path"] for ws in hub_link.discover_workspaces({"workspaces": []})
     ]
     for bad in ["--force", "-b", "../up", "a b", ""]:
         with pytest.raises(ValueError):
-            operator.new_workspace(wdir, bad)
+            hub_link.new_workspace(wdir, bad)
     # One from a worktree is named after the main checkout
     wt = os.path.join(tmp_path, "dev", "demo-wt")
     subprocess.run(
         ["git", "worktree", "add", "-q", "-b", "wt", wt], cwd=wdir, check=True
     )
-    created = operator.new_workspace(wt, "from-wt")
+    created = hub_link.new_workspace(wt, "from-wt")
     assert created["path"] == os.path.join(tmp_path, "calkit", "demo-from-wt")
     # A calkit package in the workspace, e.g., in a checkout of Calkit
-    # itself, doesn't stand in for the Operator's own
+    # itself, doesn't stand in for the link's own
     os.makedirs(os.path.join(wt, "calkit"))
     with open(os.path.join(wt, "calkit", "__init__.py"), "w") as f:
         f.write("raise SystemExit('shadowed')\n")
-    operator._calkit(["--version"], wt)
+    hub_link._calkit(["--version"], wt)
     # One from ~/dev goes beside it, and one from elsewhere in ~/calkit
     calls: list[list[str]] = []
     with monkeypatch.context() as m:
-        m.setattr(operator, "_calkit", lambda args, wdir: calls.append(args))
+        m.setattr(hub_link, "_calkit", lambda args, wdir: calls.append(args))
         for source, parent in [
             (os.path.join(tmp_path, "dev", "tool"), "dev"),
             (os.path.join(tmp_path, "src", "tool"), "calkit"),
         ]:
-            made = operator.new_workspace(source, "x")
+            made = hub_link.new_workspace(source, "x")
             assert made["path"] == os.path.join(
                 os.path.realpath(tmp_path), parent, "tool-x"
             )
@@ -1524,15 +1523,15 @@ def test_workspace_actions(tmp_path, monkeypatch):
         cwd=wdir,
         check=True,
     )
-    operator.save_workspace(wdir, ["big.csv.dvc", ".gitignore"], to="git")
+    hub_link.save_workspace(wdir, ["big.csv.dvc", ".gitignore"], to="git")
     with open(os.path.join(wdir, "big.csv"), "w") as f:
         f.write("3,4\n")
     with open(os.path.join(wdir, "notes.txt"), "w") as f:
         f.write("changed")
-    status = operator.get_workspace_status(wdir, fetch=False)
+    status = hub_link.get_workspace_status(wdir, fetch=False)
     assert status["status"]["dvc"]["uncommitted"]["modified"] == ["big.csv"]
     assert status["status"]["git"]["changed_files"] == ["notes.txt"]
-    result = operator.discard_changes(wdir)
+    result = hub_link.discard_changes(wdir)
     with open(os.path.join(wdir, "notes.txt")) as f:
         assert f.read() == "hi"
     with open(os.path.join(wdir, "big.csv")) as f:
@@ -1548,23 +1547,23 @@ def test_workspace_actions(tmp_path, monkeypatch):
     with open(os.path.join(wdir, "big.csv")) as f:
         assert f.read() == "3,4\n"
     # Discarding again, and with nothing to discard, nothing is stashed
-    assert operator.discard_changes(wdir) == {"stashed": True}
+    assert hub_link.discard_changes(wdir) == {"stashed": True}
     with open(os.path.join(wdir, "big.csv")) as f:
         assert f.read() == "1,2\n"
-    assert operator.discard_changes(wdir) == {"stashed": False}
+    assert hub_link.discard_changes(wdir) == {"stashed": False}
     # Cloning puts a project under ~/calkit, where it's a workspace, and
     # won't clone over anything or outside it
     calls = []
     monkeypatch.setattr(
-        operator, "_calkit", lambda args, wdir: calls.append(args)
+        hub_link, "_calkit", lambda args, wdir: calls.append(args)
     )
     url = "https://github.com/someone/other"
-    path = operator.clone_project(url)
+    path = hub_link.clone_project(url)
     assert path == os.path.join(tmp_path, "calkit", "other")
     assert calls == [["clone", url, path, "--no-dvc-pull"]]
     # Or into a folder chosen for it in the home folder, which is created
     calls.clear()
-    path = operator.clone_project(url, "~/work/other-copy")
+    path = hub_link.clone_project(url, "~/work/other-copy")
     assert path == os.path.join(tmp_path, "work", "other-copy")
     assert calls == [["clone", url, path, "--no-dvc-pull"]]
     assert os.path.isdir(os.path.join(tmp_path, "work"))
@@ -1578,7 +1577,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
         "~/calkit/demo",
     ]:
         with pytest.raises(ValueError):
-            operator.clone_project(url, bad_path)
+            hub_link.clone_project(url, bad_path)
 
     # Stages are listed in order with their state and the questions resting
     # on them, as evidence or upstream of it, matched through their paths,
@@ -1608,7 +1607,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
         )
     with open(os.path.join(pipeline_dir, "calkit.yaml"), "w") as f:
         f.write("pipeline:\n  stages:\n    plot:\n      kind: python-script\n")
-    stages = operator.get_stage_list(
+    stages = hub_link.get_stage_list(
         pipeline_dir,
         {
             "pipeline": {
@@ -1653,9 +1652,9 @@ def test_workspace_actions(tmp_path, monkeypatch):
             "feeds_questions": [],
         },
     ]
-    assert operator.get_stage_list(str(tmp_path), None) == []
+    assert hub_link.get_stage_list(str(tmp_path), None) == []
     # Without the status, every stage is there, with no state or questions
-    quick = operator.get_workspace_stages(pipeline_dir)["stages"]
+    quick = hub_link.get_workspace_stages(pipeline_dir)["stages"]
     assert [s["name"] for s in quick] == ["fetch", "sim", "plot", "other"]
     assert {s["state"] for s in quick} == {None}
     assert quick[2]["kind"] == "python-script" and not quick[2]["questions"]
@@ -1686,21 +1685,21 @@ def test_workspace_actions(tmp_path, monkeypatch):
     # Pulling clears the hub's token from remotes the repo points elsewhere,
     # e.g., with a scheme in capitals, before DVC sends it there
     assert "ckp_token" in open(local_config).read()
-    assert operator.pull_workspace(wdir) == {"diverged": False}
+    assert hub_link.pull_workspace(wdir) == {"diverged": False}
     assert os.path.isfile(os.path.join(wdir, "a.txt"))
     assert "ckp_token" not in open(local_config).read()
     commit("b.txt", "b", other)
     git("push", "-q", cwd=other)
     commit("c.txt", "c", wdir)
-    assert operator.pull_workspace(wdir) == {"diverged": True}
+    assert hub_link.pull_workspace(wdir) == {"diverged": True}
     assert not os.path.isfile(os.path.join(wdir, "b.txt"))
-    assert operator.pull_workspace(wdir, merge=True) == {"diverged": False}
+    assert hub_link.pull_workspace(wdir, merge=True) == {"diverged": False}
     assert os.path.isfile(os.path.join(wdir, "b.txt"))
     commit("notes.txt", "theirs", other)
     git("push", "-q", cwd=other)
     commit("notes.txt", "ours", wdir)
     with pytest.raises(ValueError, match="notes.txt"):
-        operator.pull_workspace(wdir, merge=True)
+        hub_link.pull_workspace(wdir, merge=True)
     assert not os.path.isfile(os.path.join(wdir, ".git", "MERGE_HEAD"))
     with open(os.path.join(wdir, "notes.txt")) as f:
         assert f.read() == "ours"
@@ -1714,7 +1713,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
         "/etc/other",
     ]:
         with pytest.raises(ValueError):
-            operator.clone_project(bad)
+            hub_link.clone_project(bad)
 
 
 def test_machine_setup(tmp_path, monkeypatch):
@@ -1740,7 +1739,7 @@ def test_machine_setup(tmp_path, monkeypatch):
     )
     # A fresh machine has no Git identity or token, but can reach an empty
     # repository
-    setup = operator.check_machine_setup(url)
+    setup = hub_link.check_machine_setup(url)
     assert setup == {
         "git_name": None,
         "git_email": None,
@@ -1759,18 +1758,18 @@ def test_machine_setup(tmp_path, monkeypatch):
         ],
         check=True,
     )
-    assert operator.check_machine_setup(missing)["repo"]["error"]
-    ssh = operator.check_machine_setup("git@example.com:someone/demo.git")
+    assert hub_link.check_machine_setup(missing)["repo"]["error"]
+    ssh = hub_link.check_machine_setup("git@example.com:someone/demo.git")
     assert ssh["repo"]["host"] == "example.com" and ssh["repo"]["ssh"]
     # What's missing can be set from the hub, which hands the token to the
-    # Operator over HTTPS when the owner asked for one, never through the
+    # link over HTTPS when the owner asked for one, never through the
     # relay
     from requests.exceptions import HTTPError
 
     from calkit import hub
 
     token = "ckp_" + "ab" * 32
-    cfg = {"token": "cko_op", "api_url": "https://api.hub"}
+    cfg = {"token": "ckm_op", "api_url": "https://api.hub"}
     hub_token: dict[str, str] | None = {"token": token}
     requests: list[tuple[str, str, dict]] = []
 
@@ -1782,17 +1781,17 @@ def test_machine_setup(tmp_path, monkeypatch):
         return hub_token
 
     monkeypatch.setattr(hub, "_request", request)
-    operator.configure_machine(
+    hub_link.configure_machine(
         git_name=" Ada Lovelace ",
         git_email="ada@example.com",
         token=True,
         cfg=cfg,
     )
     ((kind, req_path, kwargs),) = requests
-    assert (kind, req_path) == ("post", "/operators/cli-token")
-    assert kwargs["headers"] == {"Authorization": "Bearer cko_op"}
+    assert (kind, req_path) == ("post", "/machines/cli-token")
+    assert kwargs["headers"] == {"Authorization": "Bearer ckm_op"}
     assert kwargs["base_url"] == "https://api.hub" and not kwargs["auth"]
-    setup = operator.check_machine_setup(url)
+    setup = hub_link.check_machine_setup(url)
     assert setup["git_name"] == "Ada Lovelace"
     assert setup["git_email"] == "ada@example.com"
     assert setup["token"]
@@ -1810,13 +1809,13 @@ def test_machine_setup(tmp_path, monkeypatch):
     ]
     for kwargs in bad_kwargs:
         with pytest.raises(ValueError):
-            operator.configure_machine(**kwargs)
+            hub_link.configure_machine(**kwargs)
     # Nor one the hub didn't hand out, or one it sent wrong
     for hub_token in [None, {"token": token + "\n"}, {}]:
         with pytest.raises(ValueError):
-            operator.configure_machine(token=True, cfg=cfg)
+            hub_link.configure_machine(token=True, cfg=cfg)
     hub_token = {"token": token}
-    assert operator.check_machine_setup(url)["git_name"] == "Ada Lovelace"
+    assert hub_link.check_machine_setup(url)["git_name"] == "Ada Lovelace"
     bad_urls: list[Any] = [
         "",
         "/etc",
@@ -1832,7 +1831,7 @@ def test_machine_setup(tmp_path, monkeypatch):
     ]
     for bad in bad_urls:
         with pytest.raises(ValueError):
-            operator.check_machine_setup(bad)
+            hub_link.check_machine_setup(bad)
 
     # A keyring that can't be reached, e.g., from a service started at
     # boot, says what to do instead
@@ -1841,19 +1840,19 @@ def test_machine_setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config.Settings, "write", locked)
     with pytest.raises(RuntimeError, match="calkit config set token"):
-        operator.configure_machine(token=True, cfg=cfg)
+        hub_link.configure_machine(token=True, cfg=cfg)
     # A machine with no SSH key gets one to add to the Git host, and one that
     # has a key keeps it
     if shutil.which("ssh-keygen"):
-        made = operator.get_ssh_public_key()
+        made = hub_link.get_ssh_public_key()
         assert made["created"] and made["public_key"].startswith("ssh-ed25519")
         assert os.path.isfile(os.path.join(home, ".ssh", "id_ed25519"))
-        assert operator.get_ssh_public_key() == dict(made, created=False)
+        assert hub_link.get_ssh_public_key() == dict(made, created=False)
     # A clone outside the folders workspaces are found in is added to them,
     # so the hub lists it
     sent: list[dict] = []
     saved: list[dict] = []
-    op = operator.Operator({"workspaces": []})
+    op = hub_link.HubLink({"workspaces": []})
 
     async def send(ch, msg):
         sent.append(msg)
@@ -1863,9 +1862,9 @@ def test_machine_setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(op, "send", send)
     monkeypatch.setattr(op, "check_in", check_in)
-    monkeypatch.setattr(operator, "save_config", saved.append)
+    monkeypatch.setattr(hub_link, "save_config", saved.append)
     monkeypatch.setattr(
-        operator,
+        hub_link,
         "clone_project",
         lambda u, p: os.path.join(
             home, *(p[2:].split("/") if p else ["calkit", "demo"])
@@ -1906,7 +1905,7 @@ def test_install_remote(monkeypatch):
         },
     )
     posted = {}
-    # The user's active Operators, as the hub lists them
+    # The user's active machines, as the hub lists them
     active = []
 
     def request(kind, path, json=None, **kwargs):
@@ -1915,7 +1914,7 @@ def test_install_remote(monkeypatch):
         posted.update(json)
         active.append({"id": "op1"})
         return {"id": "op1", "name": "login1-cluster", "user_id": "u1"} | {
-            "token": "cko_secret",
+            "token": "ckm_secret",
             "grant_public_key": "key",
         }
 
@@ -1928,23 +1927,23 @@ def test_install_remote(monkeypatch):
 
     def run(argv, **kwargs):
         runs.append((argv, kwargs.get("input")))
-        if "cat ~/.calkit/operators/calkit.io/config.yaml 2>" in argv[-1]:
+        if "cat ~/.calkit/hubs/calkit.io/link.yaml 2>" in argv[-1]:
             # Anything a login prints comes first
             return SimpleNamespace(
                 stdout=f"Welcome\ncalkit-uid={uid[0]}\n{remote_config['text']}"
             )
-        if fail_install and "operator install" in argv[-1]:
+        if fail_install and "calkit hub link --hub" in argv[-1]:
             raise subprocess.CalledProcessError(1, argv)
         return SimpleNamespace(stdout="")
 
     fail_install = False
-    monkeypatch.setattr(operator.subprocess, "run", run)
-    cfg = operator.install_remote("cluster", cron=True)
+    monkeypatch.setattr(hub_link.subprocess, "run", run)
+    cfg = hub_link.install_remote("cluster", cron=True)
     # Registered from here with the far end's own details
     assert posted["hostname"] == "login1.cluster"
     assert posted["platform"] == "linux"
     assert posted["hosts"] == ["cluster", "login1.cluster"]
-    # without its key, which the Operator there sends at its first
+    # without its key, which the link there sends at its first
     # check-in
     assert "public_key" not in posted
     # Its config goes over SSH, readable only by the user, then Calkit there
@@ -1953,29 +1952,26 @@ def test_install_remote(monkeypatch):
     assert write_argv[0] == "ssh" and "cluster" in write_argv
     assert "umask 077" in write_argv[-1]
     assert yaml.safe_load(config_text) == cfg
-    assert cfg["token"] == "cko_secret" and cfg["api_url"] == "https://api.hub"
-    assert (
-        "calkit operator install --hub https://calkit.io --cron"
-        in install_argv[-1]
-    )
-    # It goes where the other machine keeps this hub's Operator
-    assert "~/.calkit/operators/calkit.io/config.yaml" in write_argv[-1]
-    # Reinstalling keeps the Operator already there
+    assert cfg["token"] == "ckm_secret" and cfg["api_url"] == "https://api.hub"
+    assert "calkit hub link --hub https://calkit.io --cron" in install_argv[-1]
+    # It goes where the other machine keeps its link to this hub
+    assert "~/.calkit/hubs/calkit.io/link.yaml" in write_argv[-1]
+    # Reinstalling keeps the machine already there
     remote_config["text"] = config_text
     posted.clear()
     runs.clear()
-    assert operator.install_remote("cluster") == cfg
+    assert hub_link.install_remote("cluster") == cfg
     assert posted == {}
     assert len(runs) == 2
     # Starting at login is passed along
     runs.clear()
-    operator.install_remote("cluster", login=True)
+    hub_link.install_remote("cluster", login=True)
     assert runs[-1][0][-1].endswith("--login'")
     # One that was revoked is registered again rather than kept, since it
     # would exit at its first check-in
     active.clear()
     runs.clear()
-    operator.install_remote("cluster")
+    hub_link.install_remote("cluster")
     assert posted["hostname"] == "login1.cluster"
     assert len(runs) == 3
     # As is one whose key the hub refused, which is revoked with its own
@@ -1993,10 +1989,10 @@ def test_install_remote(monkeypatch):
     remote_config["text"] = yaml.safe_dump(cfg | {"key_rejected": True})
     posted.clear()
     runs.clear()
-    operator.install_remote("cluster")
+    hub_link.install_remote("cluster")
     assert posted["hostname"] == "login1.cluster"
     assert deleted == [
-        ("/operators/self", {"Authorization": "Bearer cko_secret"})
+        ("/machines/self", {"Authorization": "Bearer ckm_secret"})
     ]
     # A registration whose install fails is revoked, with its own token,
     # since the user's may not be from a sign-in that can
@@ -2004,131 +2000,116 @@ def test_install_remote(monkeypatch):
     fail_install = True
     deleted.clear()
     with pytest.raises(subprocess.CalledProcessError):
-        operator.install_remote("cluster")
+        hub_link.install_remote("cluster")
     assert deleted == [
-        ("/operators/self", {"Authorization": "Bearer cko_secret"})
+        ("/machines/self", {"Authorization": "Bearer ckm_secret"})
     ]
     # Sessions would be root shells, so it's never installed as root there
     uid[0] = "0"
     posted.clear()
     with pytest.raises(ValueError, match="root"):
-        operator.install_remote("root@cluster")
+        hub_link.install_remote("root@cluster")
     assert posted == {}
 
 
 def test_hubs(tmp_path, monkeypatch):
-    import yaml
 
     home = str(tmp_path)
     monkeypatch.setenv("CALKIT_USER_HOME", home)
-    # A config from before Operators were kept per hub moves to its hub's
-    # place
-    legacy = tmp_path / ".calkit" / "operator.yaml"
-    legacy.parent.mkdir()
-    legacy.write_text(
-        yaml.safe_dump({"name": "box", "api_url": "https://api.calkit.io"})
-    )
-    assert operator.list_configured_hubs() == ["https://calkit.io"]
-    assert not legacy.exists()
-    assert operator.load_config()["name"] == "box"
-    # Each hub's Operator has its own config, service, lock, and log, keyed
+    # Each hub's link has its own config, service, lock, and log, keyed
     # like its managed workspaces, so they can run side by side
     monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
     keys = {}
     for url in ["https://calkit.io", "localhost", "http://localhost:5173"]:
-        keys[url] = operator.select_hub(url)
-        operator.save_config({"name": url, "hub_url": operator.get_hub_url()})
+        keys[url] = hub_link.select_hub(url)
+        hub_link.save_config({"name": url, "hub_url": hub_link.get_hub_url()})
     assert keys == {
         "https://calkit.io": "calkit.io",
         "localhost": "localhost",
         "http://localhost:5173": "localhost-5173",
     }
-    assert sorted(operator.list_configured_hubs()) == [
+    assert sorted(hub_link.list_configured_hubs()) == [
         "http://localhost",
         "http://localhost:5173",
         "https://calkit.io",
     ]
     names = set()
     for url in keys:
-        operator.select_hub(url)
-        assert operator.load_config()["name"] == url
+        hub_link.select_hub(url)
+        assert hub_link.load_config()["name"] == url
         names.add(
             (
-                operator.get_config_path(),
-                operator.get_log_path(),
-                operator._pid_path(),
-                operator.service_label(),
-                operator.systemd_unit(),
-                operator.cron_marker(),
-                operator._windows_startup_path(),
+                hub_link.get_config_path(),
+                hub_link.get_log_path(),
+                hub_link._pid_path(),
+                hub_link.service_label(),
+                hub_link.systemd_unit(),
+                hub_link.cron_marker(),
+                hub_link._windows_startup_path(),
             )
         )
     assert len(names) == 3
     assert len({n for group in names for n in group}) == 21
     # One hub's cron entries are never taken for another's, even when one
     # key starts with the other
-    operator.select_hub("localhost")
-    lines = [f"* * * * * x {operator.cron_marker(k)}" for k in keys.values()]
-    lines.append(f"* * * * * x {operator.cron_marker('')}")
+    hub_link.select_hub("localhost")
+    lines = [f"* * * * * x {hub_link.cron_marker(k)}" for k in keys.values()]
     assert [
-        line for line in lines if line.endswith(operator.cron_marker())
-    ] == ["* * * * * x # calkit-operator localhost"]
-    # The empty key gives the names used before, for removing them
-    assert operator.service_label("") == "io.calkit.operator"
-    assert operator.systemd_unit("") == "calkit-operator.service"
+        line for line in lines if line.endswith(hub_link.cron_marker())
+    ] == ["* * * * * x # calkit-hub-link localhost"]
 
 
 def test_workspace_lock(tmp_path, monkeypatch):
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
     wdir = os.path.join(tmp_path, "calkit", "demo")
     _init_project(wdir)
-    # An Operator takes a workspace while using it, in a lock inside the
+    # A link takes a workspace while using it, in a lock inside the
     # workspace that Git ignores, and can take it again
-    operator.claim_workspace(wdir)
-    operator.claim_workspace(wdir)
-    holder = operator.workspace_lock_holder(wdir)
+    hub_link.claim_workspace(wdir)
+    hub_link.claim_workspace(wdir)
+    holder = hub_link.workspace_lock_holder(wdir)
     assert holder["pid"] == os.getpid()
     assert holder["hub"] == "https://calkit.io"
     with open(os.path.join(wdir, ".calkit", "local", ".gitignore")) as f:
         assert f.read() == "*\n"
-    operator.release_workspace(wdir)
-    assert operator.workspace_lock_holder(wdir) is None
-    # Another hub's Operator using it keeps this one out, and shows on the
+    hub_link.release_workspace(wdir)
+    assert hub_link.workspace_lock_holder(wdir) is None
+    # Another hub's link using it keeps this one out, and shows on the
     # hub, until it stops, which leaves a stale lock anyone can take
     other = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)", "operator"]
+        [sys.executable, "-c", "import time; time.sleep(60)", "hub link start"]
     )
     try:
         with open(
-            os.path.join(wdir, ".calkit", "local", "operator.lock"), "w"
+            os.path.join(wdir, ".calkit", "local", "hub-link.lock"), "w"
         ) as f:
             json.dump({"hub": "http://localhost", "pid": other.pid}, f)
         # Without saying which hub, which is none of this one's business
         with pytest.raises(ValueError, match="another hub"):
-            operator.claim_workspace(wdir)
+            hub_link.claim_workspace(wdir)
         (ws,) = [
             w
-            for w in operator.discover_workspaces({})
+            for w in hub_link.discover_workspaces({})
             if w["path"] == os.path.realpath(wdir)
         ]
         assert ws["in_use_by"] == "another hub"
-        # One the repo committed was written by no Operator
+        # One the repo committed was written by no link
         subprocess.run(
-            ["git", "add", "-f", operator.LOCK_PATH], cwd=wdir, check=True
+            ["git", "add", "-f", hub_link.LOCK_PATH], cwd=wdir, check=True
         )
-        assert operator.workspace_lock_holder(wdir) is None
+        assert hub_link.workspace_lock_holder(wdir) is None
         subprocess.run(
-            ["git", "rm", "-q", "--cached", operator.LOCK_PATH],
+            ["git", "rm", "-q", "--cached", hub_link.LOCK_PATH],
             cwd=wdir,
             check=True,
         )
-        assert operator.workspace_lock_holder(wdir) is not None
+        assert hub_link.workspace_lock_holder(wdir) is not None
     finally:
         other.kill()
         other.wait()
-    operator.claim_workspace(wdir)
-    assert operator.workspace_lock_holder(wdir)["pid"] == os.getpid()
-    operator.release_workspace(wdir)
+    hub_link.claim_workspace(wdir)
+    assert hub_link.workspace_lock_holder(wdir)["pid"] == os.getpid()
+    hub_link.release_workspace(wdir)
     # Nor is a lock written through a link the repo committed
     if sys.platform != "win32":
         outside = tmp_path / "outside"
@@ -2136,16 +2117,16 @@ def test_workspace_lock(tmp_path, monkeypatch):
         shutil.rmtree(os.path.join(wdir, ".calkit", "local"))
         os.symlink(outside, os.path.join(wdir, ".calkit", "local"))
         with pytest.raises(ValueError):
-            operator.claim_workspace(wdir)
+            hub_link.claim_workspace(wdir)
         os.remove(os.path.join(wdir, ".calkit", "local"))
         os.makedirs(os.path.join(wdir, ".calkit", "local"))
         os.symlink(
             outside / "lock",
-            os.path.join(wdir, ".calkit", "local", "operator.lock"),
+            os.path.join(wdir, ".calkit", "local", "hub-link.lock"),
         )
-        assert operator.workspace_lock_holder(wdir) is None
-        operator.claim_workspace(wdir)
-        operator.release_workspace(wdir)
+        assert hub_link.workspace_lock_holder(wdir) is None
+        hub_link.claim_workspace(wdir)
+        hub_link.release_workspace(wdir)
         assert list(outside.iterdir()) == []
 
 
@@ -2182,7 +2163,7 @@ async def test_relay_connection(monkeypatch):
             return False
 
     monkeypatch.setattr(websockets.asyncio.client, "connect", FakeConnect)
-    op = operator.Operator({"name": "box", "workspaces": []})
+    op = hub_link.HubLink({"name": "box", "workspaces": []})
     check_ins = []
 
     async def check_in():
@@ -2201,7 +2182,7 @@ async def test_relay_connection(monkeypatch):
     await op.connect({"relay_url": "wss://relay.hub", "relay_token": "tok"})
     await op.connected_check_in
     assert handled == ["first", "second"]
-    # The token goes in the first message, and the Operator checks in as
+    # The token goes in the first message, and the link checks in as
     # connected right away, so the hub doesn't show it offline until the
     # next regular check-in
     assert sent == [{"type": "auth", "token": "tok"}]
@@ -2210,13 +2191,13 @@ async def test_relay_connection(monkeypatch):
 
 def test_restarts(tmp_path, monkeypatch):
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
-    monkeypatch.setattr(operator, "RESTART_CHECK_SECONDS", 0.01)
-    monkeypatch.setattr(operator.calkit, "__version__", "1.0.0")
+    monkeypatch.setattr(hub_link, "RESTART_CHECK_SECONDS", 0.01)
+    monkeypatch.setattr(hub_link.calkit, "__version__", "1.0.0")
     installed = ["1.0.0"]
     monkeypatch.setattr(
-        operator, "get_installed_version", lambda: installed[0]
+        hub_link, "get_installed_version", lambda: installed[0]
     )
-    op = operator.Operator({"name": "box", "workspaces": []})
+    op = hub_link.HubLink({"name": "box", "workspaces": []})
     assert not op.restart_pending()
     # A new version installed under it, e.g., by an automatic upgrade
     installed[0] = "1.1.0"
@@ -2225,14 +2206,14 @@ def test_restarts(tmp_path, monkeypatch):
     # A request from 'calkit upgrade' is read once
     pids = {"calkit.io": 123, "other.hub": None}
     for key in pids:
-        os.makedirs(operator.operator_dir(key))
+        os.makedirs(hub_link.link_dir(key))
     monkeypatch.setattr(
-        operator, "get_running_pid", lambda key=None: pids[key]
+        hub_link, "get_running_pid", lambda key=None: pids[key]
     )
-    assert operator.request_restarts() == [("calkit.io", 123)]
-    assert not os.path.exists(operator._restart_request_path("other.hub"))
+    assert hub_link.request_restarts() == [("calkit.io", 123)]
+    assert not os.path.exists(hub_link._restart_request_path("other.hub"))
     assert op.restart_pending()
-    assert not os.path.exists(operator._restart_request_path())
+    assert not os.path.exists(hub_link._restart_request_path())
     assert op.restart_requested and not op.stop_requested
     # As is one from the hub, which comes with a check-in
     op.restart_requested = False
@@ -2243,8 +2224,8 @@ def test_restarts(tmp_path, monkeypatch):
         reported.append(pending)
         return {"restart": True}
 
-    monkeypatch.setattr(operator, "discover_workspaces", lambda cfg: [])
-    monkeypatch.setattr(operator, "check_in", check_in)
+    monkeypatch.setattr(hub_link, "discover_workspaces", lambda cfg: [])
+    monkeypatch.setattr(hub_link, "check_in", check_in)
     asyncio.run(op.check_in())
     assert op.restart_requested
     asyncio.run(op.check_in())
@@ -2265,33 +2246,33 @@ def test_restarts(tmp_path, monkeypatch):
         assert op.restarting
         # Asked to stop, e.g., so an upgrade can replace its files on Windows,
         # it doesn't start again
-        stopping = operator.Operator({"name": "box", "workspaces": []})
-        operator.request_restarts(stop=True)
+        stopping = hub_link.HubLink({"name": "box", "workspaces": []})
+        hub_link.request_restarts(stop=True)
         await asyncio.wait_for(stopping.wait_to_restart(), 1)
         assert stopping.stop_requested and not stopping.restarting
 
     asyncio.run(wait_for_idle())
     # Restarting replaces the process with one running the same way
     execs = []
-    monkeypatch.setattr(operator.os, "execv", lambda *a: execs.append(a))
-    platform = operator.sys.platform
-    monkeypatch.setattr(operator.sys, "platform", "linux")
-    operator.restart_process("service")
-    cmd = operator._service_command("service")
+    monkeypatch.setattr(hub_link.os, "execv", lambda *a: execs.append(a))
+    platform = hub_link.sys.platform
+    monkeypatch.setattr(hub_link.sys, "platform", "linux")
+    hub_link.restart_process("service")
+    cmd = hub_link._service_command("service")
     assert execs == [(cmd[0], cmd)]
-    monkeypatch.setattr(operator.sys, "platform", platform)
-    # Run restarts once its Operator stops for one, and drops requests left
+    monkeypatch.setattr(hub_link.sys, "platform", platform)
+    # Run restarts once its link stops for one, and drops requests left
     # from before it started
     restarts: list[str] = []
-    monkeypatch.setattr(operator, "restart_process", restarts.append)
+    monkeypatch.setattr(hub_link, "restart_process", restarts.append)
 
     async def stop_to_restart(self) -> None:
         self.restarting = True
 
-    monkeypatch.setattr(operator.Operator, "run", stop_to_restart)
+    monkeypatch.setattr(hub_link.HubLink, "run", stop_to_restart)
     # Left alone, so SIGTERM still ends the tests that follow
     monkeypatch.setattr("signal.signal", lambda *args: None)
-    operator.request_restarts()
-    assert operator.run({"name": "box", "workspaces": []}, mode="service")
+    hub_link.request_restarts()
+    assert hub_link.run({"name": "box", "workspaces": []}, mode="service")
     assert restarts == ["service"]
-    assert not os.path.exists(operator._restart_request_path())
+    assert not os.path.exists(hub_link._restart_request_path())

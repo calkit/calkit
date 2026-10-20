@@ -48,7 +48,7 @@ export default function WorkspaceBadges({ ws }: { ws: Workspace }) {
       ) : null}
       {ws.in_use_by && (
         <Tooltip
-          label={`In use by this machine's Operator for ${ws.in_use_by}. Available here once it's done.`}
+          label={`In use by this machine's link to ${ws.in_use_by}. Available here once it's done.`}
         >
           <Badge ml={2} colorScheme="orange" fontSize="2xs">
             in use from {ws.in_use_by.replace(/^https?:\/\//, "")}

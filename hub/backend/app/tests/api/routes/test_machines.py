@@ -19,7 +19,7 @@ from app import users
 from app.config import settings
 from app.core import utcnow
 from app.models import (
-    Operator,
+    Machine,
     Project,
     RefreshToken,
     User,
@@ -36,7 +36,7 @@ from app.security import (
 from app.users import SECOND_FACTOR_REQUIRED, SECOND_FACTOR_SETUP_REQUIRED
 
 
-def test_operators(
+def test_machines(
     client: TestClient,
     db: Session,
     normal_user_token_headers: dict[str, str],
@@ -65,8 +65,8 @@ def test_operators(
     # What a browser sends to connect: the public half of a key it made
     jwk = make_jwk()
     browser_key = {"public_key": jwk}
-    # And the Operator's own, which it signs its replies with
-    operator_jwk = make_jwk()
+    # And the machine's own, which it signs its replies with
+    machine_jwk = make_jwk()
 
     def relay_token(
         headers: dict[str, str],
@@ -77,7 +77,7 @@ def test_operators(
         if second_factor is not None:
             client.cookies.set(users.SECOND_FACTOR_COOKIE, second_factor)
         return client.post(
-            f"/operators/{op['id']}/relay-token",
+            f"/machines/{op['id']}/relay-token",
             json=key or browser_key,
             headers=headers,
         )
@@ -91,7 +91,7 @@ def test_operators(
     db.add(user)
     db.commit()
     r = client.post(
-        "/operators",
+        "/machines",
         headers=normal_user_token_headers,
         json={"hostname": hostname},
     )
@@ -102,7 +102,7 @@ def test_operators(
     # Names are lowercase letters, digits, and dashes
     for name in ["Lab Box", "-lab", "lab_box", "a" * 65, ""]:
         r = client.post(
-            "/operators",
+            "/machines",
             headers=normal_user_token_headers,
             json={"name": name},
         )
@@ -111,18 +111,18 @@ def test_operators(
     for bad in [
         {"hosts": ["h"] * 21},
         {"hosts": ["h" * 256]},
-        {"public_key": operator_jwk | {"y": operator_jwk["x"]}},
+        {"public_key": machine_jwk | {"y": machine_jwk["x"]}},
     ]:
         r = client.post(
-            "/operators", headers=normal_user_token_headers, json=bad
+            "/machines", headers=normal_user_token_headers, json=bad
         )
         assert r.status_code == 422, bad
     # Names default to the slugified hostname, suffixed until unique, and the
     # owner hears about each one registered, so one they didn't expect
     # stands out
-    with patch("app.api.routes.operators.send_email") as send:
+    with patch("app.api.routes.machines.send_email") as send:
         r = client.post(
-            "/operators",
+            "/machines",
             headers=normal_user_token_headers,
             json={
                 "hostname": hostname,
@@ -135,34 +135,35 @@ def test_operators(
     assert send.call_args.kwargs["email_to"] == user.email
     assert op["name"] in send.call_args.kwargs["subject"]
     assert "m-123" in send.call_args.kwargs["html_content"]
+    assert op["system_machine_id"] == "m-123"
     assert op["name"] == hostname.lower()
     assert op["hosts"] == [hostname]
-    assert op["token"].startswith("cko_")
+    assert op["token"].startswith("ckm_")
     assert not op["is_online"]
     op_headers = {"Authorization": f"Bearer {op['token']}"}
     r = client.post(
-        "/operators",
+        "/machines",
         headers=normal_user_token_headers,
         json={"hostname": hostname},
     )
     assert r.json()["name"] == f"{hostname.lower()}-2"
     # An explicit name that's taken is refused rather than suffixed
     r = client.post(
-        "/operators",
+        "/machines",
         headers=normal_user_token_headers,
         json={"name": op["name"]},
     )
     assert r.status_code == 409
-    # Operator tokens only work for Operator routes, and vice versa
+    # Machine tokens only work for machine routes, and vice versa
     assert client.get("/user", headers=op_headers).status_code == 403
     r = client.post(
-        "/operators/check-in", headers=normal_user_token_headers, json={}
+        "/machines/check-in", headers=normal_user_token_headers, json={}
     )
     assert r.status_code == 403
     # Check in with workspaces from two projects
     project = f"someone/proj-{uuid.uuid4().hex[:6]}"
     r = client.post(
-        "/operators/check-in",
+        "/machines/check-in",
         headers=op_headers,
         json={
             "calkit_version": "1.2.3",
@@ -183,7 +184,7 @@ def test_operators(
         {"path": "/x", "agents": [{"tool": "claude", "pid": 2**40}]},
     ]:
         r = client.post(
-            "/operators/check-in",
+            "/machines/check-in",
             headers=op_headers,
             json={"workspaces": [bad]},
         )
@@ -194,7 +195,7 @@ def test_operators(
         settings.RELAY_SECRET_KEY,
         algorithms=["HS256"],
     )
-    assert payload["scope"] == "relay:operator"
+    assert payload["scope"] == "relay:machine"
     assert payload["sub"] == op["id"]
     # Relay tokens can't be used on the API
     r = client.get(
@@ -202,16 +203,16 @@ def test_operators(
         headers={"Authorization": f"Bearer {check_in['relay_token']}"},
     )
     assert r.status_code == 403
-    r = client.get("/operators", headers=normal_user_token_headers)
+    r = client.get("/machines", headers=normal_user_token_headers)
     listed = {o["id"]: o for o in r.json()}
     assert listed[op["id"]]["is_online"]
     assert listed[op["id"]]["calkit_version"] == "1.2.3"
     assert listed[op["id"]]["workspace_count"] == 4
     assert "token" not in listed[op["id"]]
     # Its token is stored as a fast hash, since it's checked every minute
-    operator = db.get(Operator, uuid.UUID(op["id"]))
-    assert operator is not None
-    assert len(operator.hashed_verifier) == 64
+    machine = db.get(Machine, uuid.UUID(op["id"]))
+    assert machine is not None
+    assert len(machine.hashed_verifier) == 64
     hub_project = Project(
         name=f"on-hub-{uuid.uuid4().hex[:6]}",
         title="On the hub",
@@ -254,7 +255,7 @@ def test_operators(
         "status": "busy",
     }
     r = client.post(
-        "/operators/check-in",
+        "/machines/check-in",
         headers=op_headers,
         json={
             "workspaces": [
@@ -292,10 +293,10 @@ def test_operators(
         },
     )
     assert r.status_code == 200, r.text
-    # All of the user's workspaces are listed across Operators, saying which
+    # All of the user's workspaces are listed across machines, saying which
     # projects are on the hub
     r = client.get("/workspaces", headers=normal_user_token_headers)
-    mine = [w for w in r.json() if w["operator_id"] == op["id"]]
+    mine = [w for w in r.json() if w["machine_id"] == op["id"]]
     assert [w["path"] for w in mine] == [
         "/home/me/calkit/a",
         "/home/me/calkit/b",
@@ -335,16 +336,16 @@ def test_operators(
     assert [w["path"] for w in workspaces] == ["/home/me/calkit/a"]
     assert workspaces[0]["project"] == project
     assert workspaces[0]["running"]
-    assert workspaces[0]["operator_name"] == op["name"]
-    assert workspaces[0]["operator_online"]
-    assert workspaces[0]["operator_platform"] == "linux"
-    # Other users see neither the Operator nor its workspaces
+    assert workspaces[0]["machine_name"] == op["name"]
+    assert workspaces[0]["machine_online"]
+    assert workspaces[0]["machine_platform"] == "linux"
+    # Other users see neither the machine nor its workspaces
     r = client.get(
         f"/projects/{owner}/{name}/workspaces", headers=superuser_token_headers
     )
     assert r.json() == []
     r = client.get("/workspaces", headers=superuser_token_headers)
-    assert op["id"] not in [w["operator_id"] for w in r.json()]
+    assert op["id"] not in [w["machine_id"] for w in r.json()]
     r = relay_token(superuser_token_headers, None)
     assert r.status_code == 404
     # Opening sessions takes two-factor authentication, set up and recent
@@ -424,21 +425,21 @@ def test_operators(
     pat_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
     r = relay_token(pat_headers, second_factor)
     assert r.status_code == 403
-    # Browsers check the Operator's replies with its key, so it has to have
-    # sent one, which an Operator installed over SSH does at its first
+    # Browsers check the machine's replies with its key, so it has to have
+    # sent one, which a machine installed over SSH does at its first
     # check-in, and which can't change after
     r = relay_token(normal_user_token_headers, second_factor)
     assert r.status_code == 409
-    assert r.json()["detail"] == "Operator hasn't sent its key yet"
+    assert r.json()["detail"] == "Machine hasn't sent its key yet"
     for key, status in [
-        (operator_jwk | {"y": operator_jwk["x"]}, 422),
-        (operator_jwk, 200),
-        (operator_jwk, 200),
+        (machine_jwk | {"y": machine_jwk["x"]}, 422),
+        (machine_jwk, 200),
+        (machine_jwk, 200),
         (make_jwk(), 409),
         (None, 200),
     ]:
         r = client.post(
-            "/operators/check-in",
+            "/machines/check-in",
             headers=op_headers,
             json={
                 "public_key": key,
@@ -449,17 +450,17 @@ def test_operators(
         )
         assert r.status_code == status, r.text
     assert r.json()["grant_public_key"] == op["grant_public_key"]
-    # Browsers get a short-lived relay token for an online Operator, and
+    # Browsers get a short-lived relay token for an online machine, and
     # its key, which comes from the API, not the relay
     r = relay_token(normal_user_token_headers, second_factor)
     assert r.status_code == 200, r.text
-    assert r.json()["operator_public_key"] == operator_jwk
+    assert r.json()["machine_public_key"] == machine_jwk
     payload = jwt.decode(
         r.json()["token"], settings.RELAY_SECRET_KEY, algorithms=["HS256"]
     )
     assert payload["scope"] == "relay:browser"
     assert payload["sub"] == op["id"]
-    # It carries a grant the API signed, which the Operator checks against
+    # It carries a grant the API signed, which the machine checks against
     # the key the hub gives it at registration and check-in, so the relay
     # can't forge one
     public_key = Ed25519PublicKey.from_public_bytes(
@@ -472,7 +473,7 @@ def test_operators(
     assert check_in["grant_public_key"] == op["grant_public_key"]
     # The grant names the browser's key, so only messages it signs count,
     # and the sign-in, so the channel closes once that ends, as it does once
-    # the second factor stops counting; its ID binds the Operator's replies
+    # the second factor stops counting; its ID binds the machine's replies
     # to it
     assert grant["cnf"] == {"jwk": jwk}
     assert grant["sid"] == str(session_id)
@@ -494,11 +495,11 @@ def test_operators(
             normal_user_token_headers, second_factor, {"public_key": bad}
         )
         assert r.status_code == 422, bad
-    # The machine's CLI token is fetched by the Operator over HTTPS, never
+    # The machine fetches its own CLI token over HTTPS, never
     # sent through the relay, and only once its owner has asked for one,
     # within 10 minutes, with a second factor
-    cli_token_request = f"/operators/{op['id']}/cli-token-request"
-    r = client.post("/operators/cli-token", headers=op_headers)
+    cli_token_request = f"/machines/{op['id']}/cli-token-request"
+    r = client.post("/machines/cli-token", headers=op_headers)
     assert r.status_code == 403
     assert r.json()["detail"] == "No token was requested"
     for headers, factor in [
@@ -511,20 +512,20 @@ def test_operators(
             client.cookies.set(users.SECOND_FACTOR_COOKIE, factor)
         r = client.post(cli_token_request, headers=headers)
         assert r.status_code in (403, 404), r.text
-    r = client.post("/operators/cli-token", headers=op_headers)
+    r = client.post("/machines/cli-token", headers=op_headers)
     assert r.status_code == 403
     client.cookies.set(users.SECOND_FACTOR_COOKIE, second_factor)
     tokens = []
     for _ in range(2):
         r = client.post(cli_token_request, headers=normal_user_token_headers)
         assert r.status_code == 200, r.text
-        r = client.post("/operators/cli-token", headers=op_headers)
+        r = client.post("/machines/cli-token", headers=op_headers)
         assert r.status_code == 200, r.text
         tokens.append(r.json()["token"])
         # Once
-        r = client.post("/operators/cli-token", headers=op_headers)
+        r = client.post("/machines/cli-token", headers=op_headers)
         assert r.status_code == 403
-    # It's a full token of the owner's, tied to the Operator, and a new one
+    # It's a full token of the owner's, tied to the machine, and a new one
     # replaces the one before
     first, cli_token = tokens
     assert cli_token.startswith("ckp_")
@@ -534,35 +535,35 @@ def test_operators(
     assert r.status_code == 403
     stored = db.exec(
         select(UserToken)
-        .where(UserToken.operator_id == uuid.UUID(op["id"]))
+        .where(UserToken.machine_id == uuid.UUID(op["id"]))
         .where(UserToken.is_active)
     ).one()
-    assert stored.description == f"Operator {op['name']}"
+    assert stored.description == f"Machine {op['name']}"
     # A request that's too old lapses
     r = client.post(cli_token_request, headers=normal_user_token_headers)
-    operator = db.get(Operator, uuid.UUID(op["id"]))
-    assert operator is not None
-    db.refresh(operator)
-    assert operator.cli_token_requested_at is not None
-    operator.cli_token_requested_at -= timedelta(minutes=11)
-    db.add(operator)
+    machine = db.get(Machine, uuid.UUID(op["id"]))
+    assert machine is not None
+    db.refresh(machine)
+    assert machine.cli_token_requested_at is not None
+    machine.cli_token_requested_at -= timedelta(minutes=11)
+    db.add(machine)
     db.commit()
-    r = client.post("/operators/cli-token", headers=op_headers)
+    r = client.post("/machines/cli-token", headers=op_headers)
     assert r.status_code == 403
-    # An Operator that stopped checking in is offline
-    operator.last_seen = utcnow() - timedelta(minutes=10)
-    db.add(operator)
+    # A machine that stopped checking in is offline
+    machine.last_seen = utcnow() - timedelta(minutes=10)
+    db.add(machine)
     db.commit()
     r = relay_token(normal_user_token_headers, second_factor)
     assert r.status_code == 409
     r = client.post(cli_token_request, headers=normal_user_token_headers)
     assert r.status_code == 409
-    # An Operator in cron mode that's between check-ins is asleep, and waking
+    # A machine in cron mode that's between check-ins is asleep, and waking
     # it tells it to connect at its next check-in
-    operator.mode = "cron"
-    db.add(operator)
+    machine.mode = "cron"
+    db.add(machine)
     db.commit()
-    r = client.get("/operators", headers=normal_user_token_headers)
+    r = client.get("/machines", headers=normal_user_token_headers)
     listed = {o["id"]: o for o in r.json()}
     assert listed[op["id"]]["is_asleep"]
     assert not listed[op["id"]]["is_online"]
@@ -570,61 +571,61 @@ def test_operators(
         f"/projects/{owner}/{name}/workspaces",
         headers=normal_user_token_headers,
     )
-    assert r.json()[0]["operator_asleep"]
+    assert r.json()[0]["machine_asleep"]
     r = client.post(
-        f"/operators/{op['id']}/wake", headers=superuser_token_headers
+        f"/machines/{op['id']}/wake", headers=superuser_token_headers
     )
     assert r.status_code == 404
     # Checking in only to ask whether to connect doesn't make it online
     r = client.post(
-        "/operators/check-in",
+        "/machines/check-in",
         headers=op_headers,
         json={"mode": "cron", "connected": False},
     )
     assert not r.json()["connect"]
-    r = client.get("/operators", headers=normal_user_token_headers)
+    r = client.get("/machines", headers=normal_user_token_headers)
     listed = {o["id"]: o for o in r.json()}
     assert listed[op["id"]]["is_asleep"]
     assert not listed[op["id"]]["is_online"]
     r = client.post(
-        f"/operators/{op['id']}/wake", headers=normal_user_token_headers
+        f"/machines/{op['id']}/wake", headers=normal_user_token_headers
     )
     assert r.status_code == 200, r.text
     r = client.post(
-        "/operators/check-in",
+        "/machines/check-in",
         headers=op_headers,
         json={"mode": "cron", "connected": False},
     )
     assert r.json()["connect"]
     # Once it has connected, the request is answered
     r = client.post(
-        "/operators/check-in", headers=op_headers, json={"mode": "cron"}
+        "/machines/check-in", headers=op_headers, json={"mode": "cron"}
     )
     r = client.post(
-        "/operators/check-in",
+        "/machines/check-in",
         headers=op_headers,
         json={"mode": "cron", "connected": False},
     )
     assert not r.json()["connect"]
-    # A restart is asked for once, and shows as pending until the Operator
+    # A restart is asked for once, and shows as pending until the machine
     # stops reporting it
     r = client.post(
-        f"/operators/{op['id']}/restart", headers=superuser_token_headers
+        f"/machines/{op['id']}/restart", headers=superuser_token_headers
     )
     assert r.status_code == 404
     r = client.post(
-        f"/operators/{op['id']}/restart", headers=normal_user_token_headers
+        f"/machines/{op['id']}/restart", headers=normal_user_token_headers
     )
     assert r.status_code == 200, r.text
     assert r.json()["restart_pending"]
     for restart, reported in [(True, True), (False, True), (False, False)]:
         r = client.post(
-            "/operators/check-in",
+            "/machines/check-in",
             headers=op_headers,
             json={"restart_pending": reported},
         )
         assert r.json()["restart"] == restart
-        r = client.get("/operators", headers=normal_user_token_headers)
+        r = client.get("/machines", headers=normal_user_token_headers)
         listed = {o["id"]: o for o in r.json()}
         assert listed[op["id"]]["restart_pending"] == reported
     # Check-ins hear which of their channels' sign-ins have ended, e.g.,
@@ -643,7 +644,7 @@ def test_operators(
 
     def ended(*session_ids: uuid.UUID) -> set[str]:
         r = client.post(
-            "/operators/check-in",
+            "/machines/check-in",
             headers=op_headers,
             json={"channel_sessions": [str(s) for s in session_ids]},
         )
@@ -659,58 +660,58 @@ def test_operators(
     # Revoking takes a signed-in session, not a token, stops its token
     # working, deactivates the CLI token issued to its machine, and tells
     # the owner
-    r = client.delete(f"/operators/{op['id']}", headers=pat_headers)
+    r = client.delete(f"/machines/{op['id']}", headers=pat_headers)
     assert r.status_code == 403
-    with patch("app.api.routes.operators.send_email") as send:
+    with patch("app.api.routes.machines.send_email") as send:
         r = client.delete(
-            f"/operators/{op['id']}", headers=normal_user_token_headers
+            f"/machines/{op['id']}", headers=normal_user_token_headers
         )
     assert r.status_code == 200
     assert send.call_args.kwargs["email_to"] == user.email
     assert "revoked" in send.call_args.kwargs["subject"]
-    r = client.post("/operators/check-in", headers=op_headers, json={})
+    r = client.post("/machines/check-in", headers=op_headers, json={})
     assert r.status_code == 403
     assert "revoked" in r.json()["detail"]
     r = client.get("/user", headers={"Authorization": f"Bearer {cli_token}"})
     assert r.status_code == 403
-    r = client.get("/operators", headers=normal_user_token_headers)
+    r = client.get("/machines", headers=normal_user_token_headers)
     assert op["id"] not in [o["id"] for o in r.json()]
-    # A revoked Operator's name can be used again
+    # A revoked machine's name can be used again
     r = client.post(
-        "/operators",
+        "/machines",
         headers=normal_user_token_headers,
-        json={"name": op["name"], "public_key": operator_jwk},
+        json={"name": op["name"], "public_key": machine_jwk},
     )
     assert r.status_code == 200, r.text
     assert r.json()["name"] == op["name"]
-    # An Operator can revoke itself, e.g., when it's uninstalled, which
+    # A machine can revoke itself, e.g., when it's unlinked, which
     # takes its CLI token with it too
     again = r.json()
     again_headers = {"Authorization": f"Bearer {again['token']}"}
     r = client.post(
-        f"/operators/{again['id']}/cli-token-request",
+        f"/machines/{again['id']}/cli-token-request",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 409
-    r = client.post("/operators/check-in", headers=again_headers, json={})
+    r = client.post("/machines/check-in", headers=again_headers, json={})
     r = client.post(
-        f"/operators/{again['id']}/cli-token-request",
+        f"/machines/{again['id']}/cli-token-request",
         headers=normal_user_token_headers,
     )
     assert r.status_code == 200, r.text
-    r = client.post("/operators/cli-token", headers=again_headers)
+    r = client.post("/machines/cli-token", headers=again_headers)
     again_cli = {"Authorization": f"Bearer {r.json()['token']}"}
-    with patch("app.api.routes.operators.send_email"):
-        r = client.delete("/operators/self", headers=again_headers)
+    with patch("app.api.routes.machines.send_email"):
+        r = client.delete("/machines/self", headers=again_headers)
     assert r.status_code == 200, r.text
     assert r.json()["id"] == again["id"] and not r.json()["is_active"]
-    r = client.post("/operators/check-in", headers=again_headers, json={})
+    r = client.post("/machines/check-in", headers=again_headers, json={})
     assert r.status_code == 403
     assert client.get("/user", headers=again_cli).status_code == 403
     client.cookies.clear()
 
 
-def test_operator_owner_limits(
+def test_machine_owner_limits(
     client: TestClient, db: Session, superuser_token_headers: dict[str, str]
 ) -> None:
     from app.tests import (
@@ -725,13 +726,13 @@ def test_operator_owner_limits(
     headers = authentication_token_from_email(
         client=client, email=user.email, db=db
     )
-    r = client.post("/operators", headers=headers, json={"name": "first"})
+    r = client.post("/machines", headers=headers, json={"name": "first"})
     assert r.status_code == 200, r.text
     op_headers = {"Authorization": f"Bearer {r.json()['token']}"}
-    # A user can only have so many active Operators
+    # A user can only have so many active machines
     for n in range(49):
         db.add(
-            Operator(
+            Machine(
                 user_id=user.id,
                 name=f"op-{n}",
                 selector=uuid.uuid4().hex,
@@ -739,9 +740,9 @@ def test_operator_owner_limits(
             )
         )
     db.commit()
-    r = client.post("/operators", headers=headers, json={"name": "another"})
+    r = client.post("/machines", headers=headers, json={"name": "another"})
     assert r.status_code == 409
-    # Deactivating the owner revokes their Operators, and ends every sign-in
+    # Deactivating the owner revokes their machines, and ends every sign-in
     # their channels came from
     session_id = uuid.uuid4()
     db.add(
@@ -755,24 +756,24 @@ def test_operator_owner_limits(
     )
     db.commit()
     r = client.post(
-        "/operators/check-in",
+        "/machines/check-in",
         headers=op_headers,
         json={"channel_sessions": [str(session_id)]},
     )
     assert r.json()["ended_sessions"] == []
-    operator = db.exec(
-        select(Operator)
-        .where(Operator.user_id == user.id)
-        .where(Operator.name == "first")
+    machine = db.exec(
+        select(Machine)
+        .where(Machine.user_id == user.id)
+        .where(Machine.name == "first")
     ).one()
     user.is_active = False
     db.add(user)
     db.commit()
-    from app.api.routes.operators import _ended_sessions
+    from app.api.routes.machines import _ended_sessions
 
-    db.refresh(operator)
-    assert _ended_sessions(db, operator, [session_id]) == [session_id]
-    r = client.post("/operators/check-in", headers=op_headers, json={})
+    db.refresh(machine)
+    assert _ended_sessions(db, machine, [session_id]) == [session_id]
+    r = client.post("/machines/check-in", headers=op_headers, json={})
     assert r.status_code == 403
     assert "revoked" in r.json()["detail"]
 
@@ -783,19 +784,19 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.security import create_relay_token
 
     monkeypatch.setenv("RELAY_SECRET_KEY", settings.RELAY_SECRET_KEY)
-    operator_id = uuid.uuid4()
+    machine_id = uuid.uuid4()
     user_id = uuid.uuid4()
 
     def token(
-        kind: Literal["operator", "browser"],
+        kind: Literal["machine", "browser"],
         grant: str | None = None,
         user: uuid.UUID = user_id,
-        operator: uuid.UUID = operator_id,
+        machine: uuid.UUID = machine_id,
         seconds: int = 60,
     ) -> str:
         return create_relay_token(
             kind,
-            operator_id=operator,
+            machine_id=machine,
             user_id=user,
             expires_delta=timedelta(seconds=seconds),
             grant=grant,
@@ -815,31 +816,31 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
             with connect(client, "/browser", used) as ws:
                 ws.receive_text()
         for path, tok in [
-            ("/operator", "nope"),
-            ("/operator", token("browser")),
-            ("/browser", token("operator")),
+            ("/machine", "nope"),
+            ("/machine", token("browser")),
+            ("/browser", token("machine")),
             ("/browser", used),
         ]:
             with pytest.raises(WebSocketDisconnect) as e:
                 with connect(client, path, tok) as ws:
                     ws.receive_text()
             assert e.value.code == relay.CLOSE_UNAUTHORIZED
-        # Browsers can't connect to an Operator that isn't connected
+        # Browsers can't connect to a machine that isn't connected
         with pytest.raises(WebSocketDisconnect) as e:
             with connect(client, "/browser", token("browser")) as ws:
                 ws.receive_text()
-        assert e.value.code == relay.CLOSE_OPERATOR_OFFLINE
-        with connect(client, "/operator", token("operator")) as op_ws:
+        assert e.value.code == relay.CLOSE_MACHINE_OFFLINE
+        with connect(client, "/machine", token("machine")) as op_ws:
             with connect(
                 client, "/browser", token("browser", grant="signed")
             ) as browser_ws:
                 opened = op_ws.receive_json()
                 assert opened["type"] == "channel.open"
                 assert opened["user_id"] == str(user_id)
-                # The grant is passed along for the Operator to check
+                # The grant is passed along for the machine to check
                 assert opened["grant"] == "signed"
                 ch = opened["ch"]
-                # Messages are wrapped on the way to the Operator...
+                # Messages are wrapped on the way to the machine...
                 browser_ws.send_json({"type": "sessions.list", "id": 1})
                 assert op_ws.receive_json() == {
                     "type": "channel.message",
@@ -856,7 +857,7 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
                     browser_ws.receive_text()
                 assert e.value.code == relay.CLOSE_TOO_BIG
             assert op_ws.receive_json() == {"type": "channel.close", "ch": ch}
-            # The Operator can close a channel, e.g., once its sign-in ends
+            # The machine can close a channel, e.g., once its sign-in ends
             with connect(
                 client, "/browser", token("browser", grant="signed")
             ) as browser_ws:
@@ -870,7 +871,7 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
         # A binary or oversized first message closes the connection, once
         big = "x" * (relay.MAX_MESSAGE_BYTES + 1)
         cases: list[tuple[str, bytes | str, int]] = [
-            ("/operator", b"\0", relay.CLOSE_UNSUPPORTED),
+            ("/machine", b"\0", relay.CLOSE_UNSUPPORTED),
             ("/browser", big, relay.CLOSE_TOO_BIG),
         ]
         for path, data, code in cases:
@@ -885,38 +886,34 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
         # Too many connections waiting to send a token are turned away
         monkeypatch.setattr(relay, "MAX_UNAUTHENTICATED", 0)
         with pytest.raises(WebSocketDisconnect) as e:
-            with client.websocket_connect("/operator") as ws:
+            with client.websocket_connect("/machine") as ws:
                 ws.receive_text()
         assert e.value.code == relay.CLOSE_TRY_AGAIN
         monkeypatch.undo()
         monkeypatch.setenv("RELAY_SECRET_KEY", settings.RELAY_SECRET_KEY)
-        with connect(client, "/operator", token("operator")) as op_ws:
-            # Browsers only reach their own user's Operators
+        with connect(client, "/machine", token("machine")) as op_ws:
+            # Browsers only reach their own user's machines
             stranger = token("browser", user=uuid.uuid4())
             with connect(client, "/browser", stranger) as browser_ws:
                 with pytest.raises(WebSocketDisconnect) as e:
                     browser_ws.receive_text()
             assert e.value.code == relay.CLOSE_UNAUTHORIZED
-        # An Operator's connection closes once its token expires, unless it
+        # A machine's connection closes once its token expires, unless it
         # sends a new one, which has to be for it
-        with connect(
-            client, "/operator", token("operator", seconds=2)
-        ) as op_ws:
+        with connect(client, "/machine", token("machine", seconds=2)) as op_ws:
             for bad in [
                 "nope",
                 token("browser"),
-                token("operator", operator=uuid.uuid4()),
-                token("operator", user=uuid.uuid4()),
+                token("machine", machine=uuid.uuid4()),
+                token("machine", user=uuid.uuid4()),
             ]:
                 op_ws.send_json({"type": "auth.refresh", "token": bad})
-            refreshed = token("operator", seconds=60)
+            refreshed = token("machine", seconds=60)
             op_ws.send_json({"type": "auth.refresh", "token": refreshed})
             time.sleep(2.5)
             with connect(client, "/browser", token("browser")):
                 assert op_ws.receive_json()["type"] == "channel.open"
-        with connect(
-            client, "/operator", token("operator", seconds=1)
-        ) as op_ws:
+        with connect(client, "/machine", token("machine", seconds=1)) as op_ws:
             with pytest.raises(WebSocketDisconnect) as e:
                 op_ws.receive_text()
             assert e.value.code == relay.CLOSE_UNAUTHORIZED

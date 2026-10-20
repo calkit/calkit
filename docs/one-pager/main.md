@@ -36,8 +36,12 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 Instead of combining computational analysis and writing into a single context
 (literate programming),
 Calkit allows each to exist as separate _modules_ integrated
-into a more comprehensive project context,
-integrated with open, user-friendly (graphical) interfaces.
+into a more holistic project context
+with user-friendly interfaces.
+All pillars of reproducibility---version control, environment management,
+a pipeline with hashed I/O, and defined provenance---are bundled
+from open-source components, so users don't need to assemble their own
+bespoke workflows.
 
 ## A sample success story {.box}
 

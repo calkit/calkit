@@ -959,6 +959,18 @@ def test_json_to_latex_cmd_uses_paths_not_objects():
     assert "'b.json'" in cmd
     assert "PathInput" not in cmd
     assert "from_stage_outputs" not in cmd
+    # A schedule's period file is a dependency, but not data to read
+    stage = JsonToLatexStage.model_validate(
+        {
+            "kind": "json-to-latex",
+            "inputs": ["a.json", {"kind": "schedule", "period": "1 day"}],
+            "outputs": ["out.tex"],
+        }
+    )
+    period_file = ".calkit/local/current-periods/1-day-utc.txt"
+    assert period_file in stage.to_dvc()["deps"]
+    assert "current-periods" not in stage.dvc_cmd
+    assert "'a.json'" in stage.dvc_cmd
 
 
 def test_system_env_can_wrap_a_runtime():

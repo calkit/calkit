@@ -2279,7 +2279,7 @@ def to_dvc(
         resolve_env_var,
         write_switch_env_lock,
     )
-    from calkit.models.io import EnvVarInput
+    from calkit.models.io import EnvVarInput, ScheduleInput
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -2614,6 +2614,12 @@ def to_dvc(
                 marker="calkit stage env vars",
                 lines=["/.calkit/env-vars/"],
             )
+        # The current period of each schedule a stage runs on, so the stage
+        # goes out of date when the next period starts
+        for stage in pipeline.stages.values():
+            for i in stage.inputs:
+                if isinstance(i, ScheduleInput):
+                    i.write_period_file(wdir=wdir)
         # Remove files left by stages that were renamed, deleted, or no
         # longer need one, since the command files are committed
         for gen_dir, kept in [

@@ -3672,6 +3672,53 @@ def test_run_reruns_when_an_env_var_input_changes(tmp_dir):
     assert "Stale stages" in out
 
 
+def test_run_reruns_once_per_schedule_period(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    period_file = ".calkit/local/current-periods/1-day-utc.txt"
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "daily": {
+                    "kind": "shell-command",
+                    "command": f"cat {period_file} >> out.txt",
+                    "environment": "_system",
+                    "inputs": [{"kind": "schedule", "period": "1 day"}],
+                    "outputs": [
+                        {
+                            "path": "out.txt",
+                            "storage": "git",
+                            "delete_before_run": False,
+                        }
+                    ],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = dict(os.environ) | {"CALKIT_NOW": "2026-10-20T08:00:00Z"}
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().split() == ["2026-10-20"]
+    with open("dvc.yaml") as f:
+        assert period_file in yaml.safe_load(f)["stages"]["daily"]["deps"]
+    # Later the same day it's up to date, so a run skips it
+    env["CALKIT_NOW"] = "2026-10-20T23:00:00Z"
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Pipeline is up to date" in out
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().split() == ["2026-10-20"]
+    # The next day it runs again, once
+    env["CALKIT_NOW"] = "2026-10-21T01:00:00Z"
+    out = subprocess.check_output(["calkit", "status"], env=env, text=True)
+    assert "Stale stages" in out
+    subprocess.check_call(["calkit", "run"], env=env)
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open("out.txt") as f:
+        assert f.read().split() == ["2026-10-20", "2026-10-21"]
+
+
 def test_stash(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     with open("input.txt", "w") as f:

@@ -1730,6 +1730,52 @@ def test_workspace_actions(tmp_path, monkeypatch):
             hub_link.clone_project(bad)
 
 
+def test_trim_status():
+    paths = [f"data/{i}.csv" for i in range(500)]
+    status: dict[str, Any] = {
+        "pipeline": {
+            "stale_stage_names": ["a", "b"],
+            "stale_stages": {
+                "a": {
+                    "modified_inputs": paths,
+                    "stale_outputs": ["out.csv"],
+                    "raw_status": [{"big": paths}],
+                    "ignored_files_in_inputs": {"x": paths},
+                    "modified_command": True,
+                },
+                "b": {"modified_outputs": paths[:3]},
+            },
+        },
+        "dvc": {
+            "unchanged": paths,
+            "not_in_cache": paths,
+            "uncommitted": {"modified": paths, "deleted": paths[:2]},
+            "committed": {},
+        },
+    }
+    # What isn't shown is dropped and long lists shortened to a count
+    hub_link.trim_status(status)
+    a = status["pipeline"]["stale_stages"]["a"]
+    assert a == {
+        "modified_inputs": paths[: hub_link.MAX_STALE_PATHS],
+        "modified_inputs_count": 500,
+        "stale_outputs": ["out.csv"],
+        "modified_command": True,
+    }
+    assert status["pipeline"]["stale_stages"]["b"] == {
+        "modified_outputs": paths[:3]
+    }
+    dvc = status["dvc"]
+    assert "unchanged" not in dvc
+    assert dvc["not_in_cache_count"] == 500
+    assert len(dvc["uncommitted"]["modified"]) == hub_link.MAX_CHANGED_PATHS
+    assert dvc["uncommitted"]["deleted"] == paths[:2]
+    # Too large even so, why stages are stale goes, but not which are
+    hub_link.trim_status(status, max_bytes=100)
+    assert status["pipeline"]["stale_stages"] == {}
+    assert status["pipeline"]["stale_stage_names"] == ["a", "b"]
+
+
 def test_machine_setup(tmp_path, monkeypatch):
     import keyring.errors
 

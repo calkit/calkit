@@ -46,6 +46,10 @@ RECONNECT_MAX_DELAY_SECONDS = 60
 MAX_FRAME_BYTES = 1024 * 1024
 # What the relay takes in one message, with room to spare
 MAX_SEND_BYTES = 250_000
+# Paths given for why a stage is stale, and of DVC's changes, past which
+# only a count goes, so a large project's status fits in one message
+MAX_STALE_PATHS = 10
+MAX_CHANGED_PATHS = 200
 # Replies waiting to go to one browser, past which it's too far behind and
 # its channel is closed, so a slow one can't make this hold everything
 MAX_CHANNEL_BACKLOG_BYTES = 8 * 1024 * 1024
@@ -1279,6 +1283,53 @@ def get_workspace_stages(wdir: str) -> dict:
     return {"stages": get_stage_list(wdir, None)}
 
 
+def trim_status(
+    status: dict, max_bytes: int = MAX_SEND_BYTES - 50_000
+) -> None:
+    """Drop what the hub doesn't show from ``calkit status --json`` and
+    shorten long path lists to their first few and a count, dropping why
+    stages are stale altogether if it's still too large for one message.
+    """
+
+    def shorten(d: dict, key: str, limit: int) -> None:
+        paths = d.get(key)
+        if isinstance(paths, list) and len(paths) > limit:
+            d[key] = paths[:limit]
+            d[f"{key}_count"] = len(paths)
+
+    pipeline = status.get("pipeline")
+    stale = (
+        pipeline.get("stale_stages") if isinstance(pipeline, dict) else None
+    )
+    if isinstance(stale, dict):
+        for detail in stale.values():
+            if not isinstance(detail, dict):
+                continue
+            detail.pop("raw_status", None)
+            detail.pop("ignored_files_in_inputs", None)
+            for key in (
+                "modified_inputs",
+                "modified_outputs",
+                "stale_outputs",
+            ):
+                shorten(detail, key, MAX_STALE_PATHS)
+    dvc = status.get("dvc")
+    if isinstance(dvc, dict):
+        dvc.pop("unchanged", None)
+        # Only whether there are any is shown
+        for key in ("not_in_cache", "not_in_remote"):
+            shorten(dvc, key, MAX_STALE_PATHS)
+        for key in ("uncommitted", "committed"):
+            if isinstance(dvc.get(key), dict):
+                for kind in list(dvc[key]):
+                    shorten(dvc[key], kind, MAX_CHANGED_PATHS)
+    if (
+        isinstance(stale, dict)
+        and len(json.dumps(status).encode()) > max_bytes
+    ):
+        pipeline["stale_stages"] = {}
+
+
 def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
     """A workspace's status as ``calkit status --json`` reports it, the same
     as the VS Code extension shows, plus how far it is from its remote.
@@ -1310,9 +1361,12 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
                 or "Failed to get status",
             )
         )
+    stages = get_stage_list(wdir, status)
+    if isinstance(status, dict):
+        trim_status(status)
     return {
         "status": status,
-        "stages": get_stage_list(wdir, status),
+        "stages": stages,
         "commits_ahead": git_status["commits_ahead"],
         "commits_behind": git_status["commits_behind"],
         "errors": errors,

@@ -279,16 +279,21 @@ export default function WorkspacePanel({
   // Say why a stage is stale, as VS Code's sidebar does
   const describeStale = (stage: string) => {
     const d = staleDetail[stage] ?? {}
+    // Long lists come as their first few and a count
+    const paths = (key: string) => {
+      const more = (d[`${key}_count`] ?? 0) - d[key].length
+      return `${d[key].join(", ")}${more > 0 ? ` and ${more} more` : ""}`
+    }
     const reasons = [
       d.modified_command ? "command changed" : "",
       d.modified_inputs?.length
-        ? `inputs changed: ${d.modified_inputs.join(", ")}`
+        ? `inputs changed: ${paths("modified_inputs")}`
         : "",
       d.modified_outputs?.length
-        ? `outputs changed: ${d.modified_outputs.join(", ")}`
+        ? `outputs changed: ${paths("modified_outputs")}`
         : "",
       d.stale_outputs?.length
-        ? `outputs missing or out of date: ${d.stale_outputs.join(", ")}`
+        ? `outputs missing or out of date: ${paths("stale_outputs")}`
         : "",
       d.always_run ? "always runs" : "",
     ].filter(Boolean)

@@ -618,6 +618,19 @@ def write_cited(folder: str) -> list[str]:
                 _write_if_changed(os.path.join(out, rel), f.read())
             kept.add(rel)
     lines = ["%% Written by Calkit from what the documents here cite.\n"]
+    # Where each citation links to, i.e., the project on its hub, when the
+    # project says where that is
+    try:
+        import calkit.config
+
+        hub = calkit.load_calkit_info(wdir=root).get("hub") or "calkit.io"
+        project = calkit.detect_project_name(wdir=root)
+        lines.append(
+            f"\\cklinkbase{{{calkit.config.normalize_hub_url(hub)}/"
+            f"{project}}}\n"
+        )
+    except Exception:
+        pass
     loaded: dict[str, Any] = {}
     for c in citations:
         if c.kind != "value":

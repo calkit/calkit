@@ -1776,6 +1776,31 @@ def get_map_paths_outputs(stage: dict) -> list[str]:
     ]
 
 
+def get_map_paths_source(stage: dict, path: str) -> str | None:
+    """Where a ``map-paths`` stage copied ``path`` from, both relative to the
+    project, so a copy can be followed back to whatever made the original.
+    """
+    from calkit.models.pipeline import MapPathsStage
+
+    if stage.get("kind") != "map-paths":
+        return None
+    try:
+        parsed = MapPathsStage.model_validate(stage)
+    except Exception:
+        return None
+    wdir = parsed.wdir or ""
+    target = posixpath.normpath(path)
+    for mapping in parsed.paths:
+        src = posixpath.normpath(posixpath.join(wdir, mapping.src))
+        out = posixpath.normpath(posixpath.join(wdir, mapping.out_path))
+        if target == out:
+            return src
+        # A directory copy maps everything inside it
+        if mapping.kind.startswith("dir-") and target.startswith(out + "/"):
+            return posixpath.join(src, target[len(out) + 1 :])
+    return None
+
+
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     """Return the name of the pipeline stage that produces ``path``, if any."""
     target = posixpath.normpath(Path(path).as_posix())

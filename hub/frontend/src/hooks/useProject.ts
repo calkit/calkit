@@ -173,6 +173,37 @@ const useProjectResults = (
   return { resultsRequest }
 }
 
+// Where a path, or one value in a results file, came from
+const useProjectProvenance = (
+  accountName: string,
+  projectName: string,
+  path: string | undefined,
+  key?: string,
+  ref?: string,
+) => {
+  const provenanceRequest = useQuery({
+    enabled: !!path,
+    queryKey: [
+      "projects",
+      accountName,
+      projectName,
+      "provenance",
+      path,
+      key,
+      ref,
+    ],
+    queryFn: () =>
+      ProjectsService.getProjectProvenance({
+        owner_name: accountName,
+        project_name: projectName,
+        path: path ?? "",
+        key,
+        ref,
+      }).then((response) => response.data),
+  })
+  return { provenanceRequest }
+}
+
 const useProjectFiles = (accountName: string, projectName: string) => {
   const filesRequest = useQuery({
     queryKey: ["projects", accountName, projectName, "files"],
@@ -444,6 +475,7 @@ export {
   useProjectFiles,
   useProjectFigures,
   useProjectResults,
+  useProjectProvenance,
   useProjectPublications,
   useProjectPresentations,
   useProjectTables,

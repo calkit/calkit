@@ -3814,7 +3814,7 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
 
 
 def test_get_stage_for_output_reads_map_paths_destinations():
-    from calkit.pipeline import get_stage_for_output
+    from calkit.pipeline import get_map_paths_source, get_stage_for_output
 
     ck_info = {
         "pipeline": {
@@ -3857,11 +3857,25 @@ def test_get_stage_for_output_reads_map_paths_destinations():
     # The original is still the plotting stage's
     assert get_stage_for_output("figures/a.png", ck_info) == "plot"
     assert get_stage_for_output("paper/figures/nope.png", ck_info) is None
-    # Paths in a stage are relative to its wdir
+    # A copy leads back to its original, which is how a paper's figure is
+    # traced to the stage that plotted it
     stages = ck_info["pipeline"]["stages"]
+    for copy, original in [
+        ("paper/figures/a.png", "figures/a.png"),
+        ("paper/figures/b.png", "figures/b.png"),
+        ("paper/shared/x/y.tex", "shared/x/y.tex"),
+        ("paper/figures/nope.png", None),
+    ]:
+        assert get_map_paths_source(stages["copy"], copy) == original
+    assert get_map_paths_source(stages["plot"], "figures/a.png") is None
+    # Paths in a stage are relative to its wdir
     stages["copy"]["wdir"] = "sub"
     stages["plot"]["wdir"] = "analysis"
     assert get_stage_for_output("sub/paper/figures/a.png", ck_info) == "copy"
+    assert (
+        get_map_paths_source(stages["copy"], "sub/paper/figures/a.png")
+        == "sub/figures/a.png"
+    )
     assert get_stage_for_output("paper/figures/a.png", ck_info) is None
     assert get_stage_for_output("analysis/figures/a.png", ck_info) == "plot"
     # A merge into the project root doesn't claim every path

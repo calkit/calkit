@@ -15,7 +15,7 @@ that produced them, for fast iteration and full transparency.**
 - **<!-- calkit value key=papers_shipped -->5<!-- /calkit value -->**
   reproducible publications shipped
 - **<!-- calkit value key=releases_per_week_last_90_days -->7.3<!-- /calkit value -->**
-  releases a week over 90 days
+  releases/week on average
 
 As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 
@@ -30,14 +30,31 @@ unworkable.
 
 ## Our approach
 
-AI review overload and the reproducibility crisis have the same solution:
-producing every artifact automatically, from raw data to article,
-with no manual steps and no ambiguity.
-Calkit keeps analysis and writing as separate _modules_ connected in one
-project, bundling version control, environments, a pipeline with hashed
-inputs and outputs, and provenance from open-source tools.
+AI review overload and failures to reproduce have the same solution:
+every artifact, from raw data to article,
+must clearly define where it came from,
+and most should come from a deterministic, automated pipeline.
+Calkit includes such a pipeline,
+with hashed I/O, version control, environment management,
+and provenance tracking all built in,
+allowing different stages to be done in different tools or programming
+languages, gluing everything together for single-button reproducibility.
 Every figure and number traces back to the code and data that made it,
 whether a person or an AI agent did the work.
+
+Open science or reproducibility tools
+typically fall into two categories:
+monolithic document-based workflows (literate programming)
+or platforms to help users gain credit for sharing more of their
+artifacts.
+
+Calkit has a different take on both.
+It allows different stages like writing and analysis to live in
+different contexts or modules,
+but keeps them tied together,
+with an optional platform that makes both collaboration during
+and sharing after the project is complete,
+like a GitHub for science.
 
 ## A success story {.box}
 

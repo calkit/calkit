@@ -1404,7 +1404,8 @@ async function load(url) {
     viewer.setDocument(doc);
     linkService.setDocument(doc);
     document.getElementById("page").textContent = "1 / " + doc.numPages;
-    old?.destroy();
+    // pdf.js 6 destroys a document through its loading task
+    void old?.loadingTask.destroy();
   } catch (err) {
     setStatus("Couldn't open the PDF: " + (err?.message ?? err));
   }

@@ -396,10 +396,10 @@ Model class: `JuliaCommandStage`
 
 Model class: `JuliaScriptStage`
 
-| Kind-specific parameter | Type      | Required | Default | Description                      |
-| ----------------------- | --------- | -------- | ------- | -------------------------------- |
-| `script_path`           | str       | yes      |         | Path to the Julia script to run. |
-| `args`                  | list[str] | no       |         | Arguments passed to the script.  |
+| Kind-specific parameter | Type      | Required | Default | Description                                             |
+| ----------------------- | --------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str       | yes      |         | Path to the Julia script to run.                        |
+| `args`                  | list[str] | no       |         | Arguments passed to the script, each item one argument. |
 
 ### `jupyter-notebook`
 
@@ -560,10 +560,10 @@ writes something else too, e.g., a file the instrument saves.
 
 Model class: `PythonScriptStage`
 
-| Kind-specific parameter | Type      | Required | Default | Description                       |
-| ----------------------- | --------- | -------- | ------- | --------------------------------- |
-| `script_path`           | str       | yes      |         | Path to the Python script to run. |
-| `args`                  | list[str] | no       |         | Arguments passed to the script.   |
+| Kind-specific parameter | Type      | Required | Default | Description                                             |
+| ----------------------- | --------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str       | yes      |         | Path to the Python script to run.                       |
+| `args`                  | list[str] | no       |         | Arguments passed to the script, each item one argument. |
 
 ### `quarto`
 
@@ -609,22 +609,22 @@ when an answer or a value it reads changes.
 
 Model class: `RScriptStage`
 
-| Kind-specific parameter | Type      | Required | Default | Description                     |
-| ----------------------- | --------- | -------- | ------- | ------------------------------- |
-| `script_path`           | str       | yes      |         | Path to the R script to run.    |
-| `args`                  | list[str] | no       |         | Arguments passed to the script. |
+| Kind-specific parameter | Type      | Required | Default | Description                                             |
+| ----------------------- | --------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str       | yes      |         | Path to the R script to run.                            |
+| `args`                  | list[str] | no       |         | Arguments passed to the script, each item one argument. |
 
 ### `sbatch`
 
 Model class: `SBatchStage`
 
-| Kind-specific parameter | Type                          | Required | Default | Description                         |
-| ----------------------- | ----------------------------- | -------- | ------- | ----------------------------------- |
-| `script_path`           | str                           | yes      |         | Path to the script to submit.       |
-| `args`                  | list[str]                     | no       |         | Arguments passed to the script.     |
-| `sbatch_options`        | list[str]                     | no       |         | Options passed to sbatch.           |
-| `log_path`              | str \| None                   | no       | null    | Path at which to write the job log. |
-| `log_storage`           | Literal['git', 'dvc'] \| None | no       | 'git'   | Where to store the job log.         |
+| Kind-specific parameter | Type                          | Required | Default | Description                                             |
+| ----------------------- | ----------------------------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str                           | yes      |         | Path to the script to submit.                           |
+| `args`                  | list[str]                     | no       |         | Arguments passed to the script, each item one argument. |
+| `sbatch_options`        | list[str]                     | no       |         | Options passed to sbatch.                               |
+| `log_path`              | str \| None                   | no       | null    | Path at which to write the job log.                     |
+| `log_storage`           | Literal['git', 'dvc'] \| None | no       | 'git'   | Where to store the job log.                             |
 
 ### `shell-command`
 
@@ -639,11 +639,11 @@ Model class: `ShellCommandStage`
 
 Model class: `ShellScriptStage`
 
-| Kind-specific parameter | Type                         | Required | Default | Description                       |
-| ----------------------- | ---------------------------- | -------- | ------- | --------------------------------- |
-| `script_path`           | str                          | yes      |         | Path to the shell script to run.  |
-| `args`                  | list[str]                    | no       |         | Arguments passed to the script.   |
-| `shell`                 | Literal['sh', 'bash', 'zsh'] | no       | 'bash'  | Shell in which to run the script. |
+| Kind-specific parameter | Type                         | Required | Default | Description                                             |
+| ----------------------- | ---------------------------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str                          | yes      |         | Path to the shell script to run.                        |
+| `args`                  | list[str]                    | no       |         | Arguments passed to the script, each item one argument. |
+| `shell`                 | Literal['sh', 'bash', 'zsh'] | no       | 'bash'  | Shell in which to run the script.                       |
 
 ### `word-to-pdf`
 
@@ -897,7 +897,7 @@ A Python script each marked-up document is piped through.
 | `kind`        | Literal['python-script'] | yes      |         | Run a Python script, reading the marked-up document on stdin and writing the result to stdout.                                    |
 | `script_path` | str                      | yes      |         | Path to the Python script to run.                                                                                                 |
 | `environment` | str \| None              | no       | null    | Environment to run the script in. Defaults to Calkit's own Python, which has only the standard library and Calkit's dependencies. |
-| `args`        | list[str]                | no       |         | Arguments passed to the script.                                                                                                   |
+| `args`        | list[str]                | no       |         | Arguments passed to the script, each item one argument.                                                                           |
 
 #### `CopyFileToFile`
 

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://docs.calkit.org/schemas/calkit.json
+name: example-subprojects-analysis
+title: Analysis
+
+requirements:
+  - uv
+
+environments:
+  py:
+    kind: uv
+    path: pyproject.toml
+
+pipeline:
+  stages:
+    fit:
+      kind: python-script
+      script_path: scripts/fit.py
+      environment: py
+      # A sibling subproject's output, so this runs after it
+      inputs:
+        - ../experiment/data/measurements.csv
+      outputs:
+        - path: results/fit.json
+          storage: git
+        - path: figures/fit.png
+          storage: git

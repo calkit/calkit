@@ -46,14 +46,20 @@ export function pipelineLatexDiffs(
     const stage = raw as {
       kind?: string;
       wdir?: string;
+      subproject_wdir?: string;
       target_path?: string;
       diffs?: (string | string[])[];
     };
     if (stage?.kind !== "latex" || !stage.target_path) {
       continue;
     }
-    const wdir = stage.wdir ?? "";
-    const target = stage.target_path;
+    // Diffs are built under the directory the stage runs in, which for a
+    // subproject's is its own, though its target is relative to the root
+    const wdir = stage.subproject_wdir ?? stage.wdir ?? "";
+    const target =
+      stage.subproject_wdir === undefined
+        ? stage.target_path
+        : path.posix.relative(stage.subproject_wdir, stage.target_path);
     for (const entry of stage.diffs ?? []) {
       const [fromRef, toRef] =
         typeof entry === "string" ? [entry, "HEAD"] : [entry[0], entry[1]];

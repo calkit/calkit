@@ -23,6 +23,10 @@ export interface PipelineStage {
   // When present, the stage is run once per iteration; its declared outputs are
   // templated with calkit's `{arg_name}` placeholders.
   iterate_over?: unknown;
+  // Not in calkit.yaml: where a stage merged in from a subproject runs,
+  // relative to the root, for paths derived from it since its own are
+  // already made relative to the root.
+  subproject_wdir?: string;
   [key: string]: unknown;
 }
 
@@ -88,6 +92,7 @@ export interface CalkitInfo {
   publications?: ArtifactEntry[];
   presentations?: ArtifactEntry[];
   apps?: Record<string, AppEntry>;
+  subprojects?: { path?: string; [key: string]: unknown }[];
   pipeline?: {
     stages?: Record<string, PipelineStage>;
   };

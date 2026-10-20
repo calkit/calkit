@@ -1,6 +1,7 @@
 """Tests for ``cli.describe``."""
 
 import json
+import os
 import subprocess
 
 import calkit
@@ -93,3 +94,75 @@ def test_describe_environments(tmp_dir):
     )
     assert proc.returncode != 0
     assert "not found" in proc.stderr
+
+
+def test_describe_subprojects(tmp_dir):
+    os.makedirs("sub/nested")
+    os.makedirs("iso/.dvc")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "subprojects": [
+                    {"path": "sub", "description": "Sub."},
+                    {"path": "iso"},
+                ]
+            },
+            f,
+        )
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "sub",
+                "title": "Sub",
+                "subprojects": [{"path": "nested"}],
+                "environments": {
+                    "py": {"kind": "uv", "path": "pyproject.toml"}
+                },
+                "pipeline": {"stages": {"a": {}, "b": {}}},
+            },
+            f,
+        )
+    for path in ["sub/nested", "iso"]:
+        with open(f"{path}/calkit.yaml", "w") as f:
+            calkit.ryaml.dump({}, f)
+    out = subprocess.check_output(
+        ["calkit", "describe", "subprojects", "--json"], text=True
+    )
+    assert json.loads(out) == {
+        "sub": {
+            "parent": ".",
+            "description": "Sub.",
+            "name": "sub",
+            "title": "Sub",
+            "isolated": False,
+            "environments": ["py"],
+            "stages": ["a", "b"],
+            "subprojects": ["sub/nested"],
+        },
+        "sub/nested": {
+            "parent": "sub",
+            "description": None,
+            "name": None,
+            "title": None,
+            "isolated": False,
+            "environments": [],
+            "stages": [],
+            "subprojects": [],
+        },
+        "iso": {
+            "parent": ".",
+            "description": None,
+            "name": None,
+            "title": None,
+            "isolated": True,
+            "environments": [],
+            "stages": [],
+            "subprojects": [],
+        },
+    }
+    # Human-readable output drops what's null
+    out = subprocess.check_output(
+        ["calkit", "describe", "subprojects"], text=True
+    )
+    assert "sub/nested:\n    parent: sub\n" in out
+    assert "title" not in out.split("sub/nested:")[1]

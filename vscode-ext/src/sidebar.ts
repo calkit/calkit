@@ -19,6 +19,7 @@ import {
   type StaleClassification,
   outputEntryPath,
 } from "./pipeline/core";
+import { envRefParts } from "./subprojects";
 
 // Singular node kinds and the matching calkit.yaml collection keys for the
 // artifact-style sections (figures, datasets, results, publications,
@@ -55,6 +56,9 @@ function answerText(question: string | QuestionEntry): string | undefined {
     .map(([clause, wording]) => `${clause}: ${wording}`)
     .join("; ");
 }
+
+// Where scheduler logs go, under a subproject's directory for its stages
+const SCHEDULER_LOG_DIR = /(^|\/)\.calkit\/scheduler\/logs\//;
 
 // Base codicon for each artifact kind (used when the artifact has provenance and
 // isn't stale; imported artifacts use a cloud icon instead).
@@ -865,7 +869,10 @@ export class CalkitSidebarProvider
       // The notebook itself opens when clicked in the tree, so no separate
       // "Open" child is needed. Offer the executed HTML when it has been
       // generated.
-      const htmlRel = getExecutedNotebookHtmlPath(nbPath);
+      const htmlRel = getExecutedNotebookHtmlPath(
+        nbPath,
+        stage?.subproject_wdir,
+      );
       if (fs.existsSync(path.join(this.workspaceRoot, htmlRel))) {
         const htmlItem = new SidebarItem(
           "Open executed HTML",
@@ -1203,7 +1210,7 @@ export class CalkitSidebarProvider
   // files for each part.
   private envFilePaths(envName: string): string[] {
     const paths: string[] = [];
-    for (const part of envName.split(":")) {
+    for (const part of this.envRefParts(envName)) {
       const desc = this.envDescriptions?.[part];
       if (desc?.spec_path) {
         paths.push(desc.spec_path);
@@ -1250,6 +1257,7 @@ export class CalkitSidebarProvider
               typeof calkitStage.environment === "string"
                 ? this.envFilePaths(calkitStage.environment)
                 : [],
+            projectDir: calkitStage.subproject_wdir,
           })
         : undefined;
     // An output is "modified" when its file changed on disk, or "stale" when an
@@ -1375,7 +1383,7 @@ export class CalkitSidebarProvider
       // "Output" row opens a real file. Scheduler logs get their own row below.
       const explicitOutputs = calkitStage.iterate_over
         ? dvcStageOutputPaths(this.dvcYaml?.stages?.[stageName] ?? {}).filter(
-            (p) => !p.startsWith(".calkit/scheduler/logs/"),
+            (p) => !SCHEDULER_LOG_DIR.test(p),
           )
         : Array.isArray(calkitStage.outputs)
         ? (calkitStage.outputs as (string | { path: string })[]).map(
@@ -1487,7 +1495,7 @@ export class CalkitSidebarProvider
     for (const out of outs) {
       const p =
         typeof out === "string" ? out : String(Object.keys(out)[0] ?? "");
-      if (p.startsWith(".calkit/scheduler/logs/")) {
+      if (SCHEDULER_LOG_DIR.test(p)) {
         return p;
       }
     }
@@ -1496,9 +1504,20 @@ export class CalkitSidebarProvider
       const override = stage.scheduler?.log_path;
       return typeof override === "string" && override
         ? override
-        : `.calkit/scheduler/logs/${stageName}.out`;
+        : path.posix.join(
+            stage.subproject_wdir ?? "",
+            ".calkit/scheduler/logs",
+            `${stageName.slice(stageName.lastIndexOf(":") + 1)}.out`,
+          );
     }
     return undefined;
+  }
+
+  private envRefParts(envRef: string): string[] {
+    return envRefParts(
+      envRef,
+      new Set(Object.keys(this.calkitConfig?.environments ?? {})),
+    );
   }
 
   // Whether a stage runs under a SLURM/PBS scheduler. Environments combine as
@@ -1509,7 +1528,7 @@ export class CalkitSidebarProvider
     if (typeof envRef !== "string") {
       return false;
     }
-    const outerName = envRef.split(":")[0];
+    const outerName = this.envRefParts(envRef)[0];
     const kind = this.calkitConfig?.environments?.[outerName]?.kind;
     return kind === "slurm" || kind === "pbs";
   }

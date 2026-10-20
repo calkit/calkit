@@ -2387,7 +2387,8 @@ def test_new_workspace(tmp_dir):
     assert result.returncode != 0 and not os.path.exists(flagged)
     # A branch from before DVC was set up gets no DVC config
     blob = git_out("hash-object", "-w", "--stdin", input="hi\n")
-    tree = git_out("mktree", input=f"100644 blob {blob}\tREADME.md\n")
+    # NUL-terminated, since text mode on Windows would make the name end in \r
+    tree = git_out("mktree", "-z", input=f"100644 blob {blob}\tREADME.md\0")
     git_out("branch", "before-dvc", git_out("commit-tree", tree, "-m", "Old"))
     old = os.path.join(os.path.dirname(root), "old")
     subprocess.check_call(

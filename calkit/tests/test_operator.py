@@ -1008,7 +1008,8 @@ def test_service_files(tmp_path, monkeypatch):
     # of one with more than two (doubled here, for VBScript)
     assert 'cmd /c ""' in script and '2>&1"""' in script
     unit = operator._systemd_unit()
-    assert f"ExecStart={shlex.join(command)}" in unit
+    expected = shlex.join(command).replace("\\", "\\\\")
+    assert f"ExecStart={expected}" in unit
     assert "WorkingDirectory=/\n" in unit
     assert "Restart=on-failure" in unit
     assert "WantedBy=default.target" in unit
@@ -1033,6 +1034,12 @@ def test_service_files(tmp_path, monkeypatch):
 
     monkeypatch.setattr(operator.subprocess, "run", run)
     monkeypatch.setattr(operator.os, "getuid", lambda: 501, raising=False)
+    # Runners have no user 501, and Windows has no pwd module
+    monkeypatch.setitem(
+        sys.modules,
+        "pwd",
+        SimpleNamespace(getpwuid=lambda uid: SimpleNamespace(pw_name="me")),
+    )
     monkeypatch.setattr(operator.platform, "system", lambda: "Darwin")
     agent_path = operator._launchd_plist_path(at_boot=False)
     os.makedirs(os.path.dirname(agent_path))

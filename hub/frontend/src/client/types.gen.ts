@@ -53,11 +53,11 @@ export type ActiveCounts = {
  */
 export type AnalyticsStats = {
   /**
-   * Signed-in users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.
+   * Likely human users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.
    */
   active_users: ActiveCounts
   /**
-   * Active users plus visitors who accepted analytics without signing in. Anonymous page views aren't counted, since their IDs change daily.
+   * Active users plus visitors who accepted analytics and did something without signing in. Anonymous page views aren't counted, since their IDs change daily.
    */
   active_visitors: ActiveCounts
 }
@@ -6216,6 +6216,12 @@ export type UserStats = {
    * Verified
    */
   verified: number
+  /**
+   * Likely Human
+   *
+   * Users with a GitHub or other connected identity, a verified email, an invitation to a project or org, a personal access token, or sessions on two or more days. Password signup checks none of these, so it's how bot accounts get in.
+   */
+  likely_human: number
 }
 
 /**

@@ -69,12 +69,12 @@ export const AnalyticsStatsSchema = {
     active_users: {
       $ref: "#/components/schemas/ActiveCounts",
       description:
-        "Signed-in users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.",
+        "Likely human users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.",
     },
     active_visitors: {
       $ref: "#/components/schemas/ActiveCounts",
       description:
-        "Active users plus visitors who accepted analytics without signing in. Anonymous page views aren't counted, since their IDs change daily.",
+        "Active users plus visitors who accepted analytics and did something without signing in. Anonymous page views aren't counted, since their IDs change daily.",
     },
   },
   type: "object",
@@ -10861,9 +10861,15 @@ export const UserStatsSchema = {
       type: "integer",
       title: "Verified",
     },
+    likely_human: {
+      type: "integer",
+      title: "Likely Human",
+      description:
+        "Users with a GitHub or other connected identity, a verified email, an invitation to a project or org, a personal access token, or sessions on two or more days. Password signup checks none of these, so it's how bot accounts get in.",
+    },
   },
   type: "object",
-  required: ["total", "verified"],
+  required: ["total", "verified", "likely_human"],
   title: "UserStats",
 } as const
 

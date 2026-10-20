@@ -15,28 +15,33 @@ from app.models import Project, User
 mp = Mixpanel(settings.MIXPANEL_TOKEN)
 
 
-def get_last_seen(days: int = 30) -> dict[str, float] | None:
-    """When each person tracked in the last ``days`` days was last seen.
+def get_active_people(days: int = 30) -> dict[str, tuple[float, bool]] | None:
+    """Everyone tracked in the last ``days`` days, keyed by distinct ID.
 
-    Keys are distinct IDs, i.e., user IDs once signed in, and values are Unix
-    times. Read from the raw event export, since the Query API can't count
-    unique people across all events without a saved report. Anonymous page
-    views are left out, since their IDs change daily, as are bots. None when
-    reading isn't configured or fails.
+    Values are when they were last seen, as a Unix time, and whether they
+    were seen doing something, i.e., any event besides a page view loaded
+    without input, which is what tells a person from a browser left running.
+    Keys are user IDs once signed in; a device's events from before signing
+    in are folded into its user when a later event links the two. Read from
+    the raw event export, since the Query API can't count unique people
+    across all events without a saved report. Anonymous page views are left
+    out, since their IDs change daily, as are events from automated browsers.
+    None when reading isn't configured or fails.
     """
     username = settings.MIXPANEL_SERVICE_ACCOUNT_USERNAME
     secret = settings.MIXPANEL_SERVICE_ACCOUNT_SECRET
     if not (username and secret and settings.MIXPANEL_PROJECT_ID):
         return None
     # Cached since the export allows 60 requests an hour
-    key = cache.make_key("mixpanel", "last-seen", str(days))
-    cached: dict[str, float] | None = cache.get_json(key)
+    key = cache.make_key("mixpanel", "active-people", str(days))
+    cached = cache.get_json(key)
     if cached is not None:
-        return cached
+        return {k: (v[0], v[1]) for k, v in cached.items()}
     since = time.time() - days * 86400
     # Export dates are UTC for projects created since 2023
     today = datetime.now(UTC).date()
-    last_seen: dict[str, float] = {}
+    people: dict[str, tuple[float, bool]] = {}
+    device_users: dict[str, str] = {}
     try:
         resp = requests.get(
             f"https://{settings.MIXPANEL_EXPORT_HOST}/api/2.0/export",
@@ -54,19 +59,44 @@ def get_last_seen(days: int = 30) -> dict[str, float] | None:
         for line in resp.iter_lines():
             if not line:
                 continue
-            props = json.loads(line).get("properties", {})
+            event = json.loads(line)
+            props = event.get("properties", {})
             t = props.get("time", 0)
-            if props.get("anonymous") or props.get("bot") or t < since:
+            if (
+                props.get("anonymous")
+                or props.get("bot")
+                or props.get("webdriver")
+                or t < since
+            ):
                 continue
-            person = props.get("$user_id") or props.get("distinct_id")
-            if person:
-                last_seen[str(person)] = max(t, last_seen.get(str(person), 0))
+            user_id = props.get("$user_id")
+            device_id = props.get("$device_id")
+            if user_id and device_id:
+                device_users[str(device_id)] = str(user_id)
+            person = str(user_id or props.get("distinct_id") or "")
+            if not person:
+                continue
+            # Page views carry whether there was input before them; the
+            # frontend's other events come from clicks, the backend's from
+            # requests a signed-in user made
+            engaged = props.get("interacted") is True or not str(
+                event.get("event", "$")
+            ).startswith("$")
+            last, was_engaged = people.get(person, (0.0, False))
+            people[person] = (max(t, last), engaged or was_engaged)
     except Exception as e:
         # Usage numbers aren't worth failing a response over
         logger.warning(f"Could not read events from Mixpanel: {e}")
         return None
-    cache.set_json(key, last_seen, ttl=3600)
-    return last_seen
+    # Fold devices into their users; the browser SDK prefixes device-only IDs
+    for device_id, user_id in device_users.items():
+        for device_key in (device_id, f"$device:{device_id}"):
+            if device_key in people:
+                t, engaged = people.pop(device_key)
+                last, was_engaged = people.get(user_id, (0.0, False))
+                people[user_id] = (max(t, last), engaged or was_engaged)
+    cache.set_json(key, people, ttl=3600)
+    return people
 
 
 def track(

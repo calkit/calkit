@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from pydantic.networks import EmailStr
-from sqlalchemy import func
+from sqlalchemy import exists, func
 from sqlalchemy.exc import DataError
 from sqlmodel import Session, and_, col, or_, select
 from starlette.requests import Request
@@ -43,9 +43,12 @@ from app.models import (
     Notification,
     Org,
     Project,
+    RefreshToken,
     User,
+    UserExternalCredential,
     UserOrgMembership,
     UserProjectAccess,
+    UserToken,
 )
 from app.stripe import stripe
 from app.subscriptions import SubscriptionPlan, get_plans
@@ -216,6 +219,14 @@ def post_discount_code(
 class UserStats(BaseModel):
     total: int
     verified: int
+    likely_human: int = Field(
+        description=(
+            "Users with a GitHub or other connected identity, a verified "
+            "email, an invitation to a project or org, a personal access "
+            "token, or sessions on two or more days. Password signup checks "
+            "none of these, so it's how bot accounts get in."
+        )
+    )
 
 
 class ProjectStats(BaseModel):
@@ -239,16 +250,16 @@ class ActiveCounts(BaseModel):
 class AnalyticsStats(BaseModel):
     active_users: ActiveCounts = Field(
         description=(
-            "Signed-in users with any event in Mixpanel, sent by the hub's "
-            "backend or frontend, so last_30_days is MAU. Only users who "
-            "accepted analytics are tracked, so this is a lower bound."
+            "Likely human users with any event in Mixpanel, sent by the "
+            "hub's backend or frontend, so last_30_days is MAU. Only users "
+            "who accepted analytics are tracked, so this is a lower bound."
         )
     )
     active_visitors: ActiveCounts = Field(
         description=(
-            "Active users plus visitors who accepted analytics without "
-            "signing in. Anonymous page views aren't counted, since their "
-            "IDs change daily."
+            "Active users plus visitors who accepted analytics and did "
+            "something without signing in. Anonymous page views aren't "
+            "counted, since their IDs change daily."
         )
     )
 
@@ -300,8 +311,29 @@ def get_hub_stats(
     excluded_accounts = sorted(excluded, key=lambda a: a.name)
     excluded_account_ids = [a.id for a in excluded_accounts]
     excluded_user_ids = [a.user_id for a in excluded_accounts if a.user_id]
-    # Users
+    # Users, and which of them look like people rather than bots, by
+    # anything a signup form alone can't produce
     user_filter = col(User.id).not_in(excluded_user_ids)
+    likely_human = or_(
+        col(User.email_verified_at).is_not(None),
+        exists().where(
+            col(Account.user_id) == User.id,
+            col(Account.github_name).is_not(None),
+        ),
+        exists().where(col(UserExternalCredential.user_id) == User.id),
+        # Invited, as opposed to access cached from GitHub
+        exists().where(
+            col(UserProjectAccess.user_id) == User.id,
+            col(UserProjectAccess.role_id).is_not(None),
+        ),
+        exists().where(col(UserOrgMembership.user_id) == User.id),
+        exists().where(col(UserToken.user_id) == User.id),
+        # Refresh tokens are minted at login and each refresh, never deleted
+        select(func.count(func.distinct(func.date(RefreshToken.created))))
+        .where(col(RefreshToken.user_id) == User.id)
+        .scalar_subquery()
+        >= 2,
+    )
     n_users = session.exec(
         select(func.count()).select_from(User).where(user_filter)
     ).one()
@@ -309,6 +341,9 @@ def get_hub_stats(
         select(func.count())
         .select_from(User)
         .where(user_filter, col(User.email_verified_at).is_not(None))
+    ).one()
+    n_likely_human = session.exec(
+        select(func.count()).select_from(User).where(user_filter, likely_human)
     ).one()
     # Projects
     project_filter = [
@@ -322,34 +357,44 @@ def get_hub_stats(
             *project_filter
         )
     ).one()
-    # Analytics, leaving out the same users as above
+    # Analytics, counting users only if they're likely human and visitors
+    # only if they did something
     analytics = None
-    last_seen = mixpanel.get_last_seen()
-    if last_seen is not None:
+    people = mixpanel.get_active_people()
+    if people is not None:
         excluded_ids = {str(i) for i in excluded_user_ids}
-        last_seen = {
-            k: v for k, v in last_seen.items() if k not in excluded_ids
-        }
         candidate_ids: set[uuid.UUID] = set()
-        for distinct_id in last_seen:
+        for distinct_id in people:
             try:
                 candidate_ids.add(uuid.UUID(distinct_id))
             except ValueError:
                 pass
         user_ids = {
-            str(i)
-            for i in session.exec(
-                select(User.id).where(col(User.id).in_(candidate_ids))
+            str(user_id): is_human
+            for user_id, is_human in session.exec(
+                select(User.id, likely_human).where(
+                    col(User.id).in_(candidate_ids)
+                )
             )
         }
+        active_users = {
+            k: t
+            for k, (t, _) in people.items()
+            if user_ids.get(k) and k not in excluded_ids
+        }
+        active_visitors = active_users | {
+            k: t
+            for k, (t, engaged) in people.items()
+            if engaged and k not in user_ids
+        }
         analytics = AnalyticsStats(
-            active_users=count_active(
-                {k: v for k, v in last_seen.items() if k in user_ids}
-            ),
-            active_visitors=count_active(last_seen),
+            active_users=count_active(active_users),
+            active_visitors=count_active(active_visitors),
         )
     return HubStats(
-        users=UserStats(total=n_users, verified=n_verified),
+        users=UserStats(
+            total=n_users, verified=n_verified, likely_human=n_likely_human
+        ),
         projects=ProjectStats(
             total=n_public + n_private,
             public=n_public,

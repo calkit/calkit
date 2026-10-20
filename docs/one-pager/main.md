@@ -65,20 +65,19 @@ Overleaf instead of Git.
 For most researchers, connecting an analysis to Overleaf is still too
 much work.
 In 2027 we'll take Calkit on tour, starting at Caltech with our browser
-extension's Overleaf sync, and run each workshop as an experiment:
-who connects a figure, who still uses it six weeks later, and why.
-What we learn drives development between them.
+extension's Overleaf sync,
+in <!-- calkit value key=workshops -->8<!-- /calkit value --> workshops that
+train some <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
+researchers and help
+about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
+of them convert active projects.
+Each workshop is an experiment: who connects a figure, who still uses it six
+weeks later, and why.
+Opt-in analytics in our tools will measure it, what we learn will drive
+development between workshops, and we'll publish an open curriculum and a
+report on what worked.
 
 ![](../img/2027-budget.png)
-
-- <!-- calkit value key=workshops -->8<!-- /calkit value --> workshops
-  for about
-  <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
-  researchers, with
-  <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
-  supported converting active projects
-- Opt-in analytics in our browser extension, CLI, and VS Code extension,
-  plus an open curriculum and a report on what worked
 
 ::: footer
 Calkit is led by its creator, Pete Bachant, with 25% of a Caltech Schmidt

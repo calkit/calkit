@@ -76,10 +76,10 @@ teaching researchers how to integrate and automate their workflows with our
 new
 [browser extension](https://chromewebstore.google.com/detail/calkit/idhdomgapfolnpffanajdckdaojencal),
 hosting <!-- calkit value key=workshops -->8<!-- /calkit value -->
-workshops to serve approximately <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
-researchers and help
-about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
-of them convert active projects.
+workshops where some <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
+researchers connect their own projects, with weeks of follow-up support
+for about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
+of them.
 Learnings from these will be published openly and fed back
 into improving Calkit.
 

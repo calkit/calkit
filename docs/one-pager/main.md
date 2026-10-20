@@ -73,7 +73,8 @@ to eliminate error-prone and tedious manual uploads.
 In 2027 we'll take Calkit on tour, starting at Caltech and several
 universities in Boston,
 teaching researchers how to integrate and automate their workflows with our
-new browser extension,
+new
+[browser extension](https://chromewebstore.google.com/detail/calkit/idhdomgapfolnpffanajdckdaojencal),
 hosting <!-- calkit value key=workshops -->8<!-- /calkit value -->
 workshops to serve approximately <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
 researchers.

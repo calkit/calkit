@@ -2,7 +2,9 @@
 
 ## Reporting a vulnerability
 
-Please email security@calkit.org rather than opening a public issue.
+Please email security@calkit.org or use GitHub's
+[private reporting form](https://github.com/calkit/calkit/security/advisories/new)
+rather than opening a public issue.
 Include what's affected (CLI, hub, an extension, etc.), its version,
 and how to reproduce the problem.
 We'll reply within a few days,

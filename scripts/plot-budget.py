@@ -9,7 +9,7 @@ LABELS = {
     "fellows": "Fellows teaching\nand supporting projects",
     "development": "Development",
     "workshops": "Workshops and travel",
-    "hosting": "Hosting",
+    "hosting": "Cloud hosting",
 }
 TEAL, INK, MUTED = "#3F8F80", "#1E2A2E", "#66737A"
 plt.rcParams.update(

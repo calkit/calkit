@@ -322,16 +322,33 @@ def use_own_hub() -> str:
 
 
 def is_registered(cfg: Any) -> bool:
-    """Whether a config is for one of the user's active machines on their
-    own hub, rather than a revoked one or one from another hub, asked with
-    the user's login so it works for another machine's config too.
+    """Whether a config is for an active machine on the user's own hub,
+    rather than a revoked one or one from another hub, asked with the
+    machine's own token so it works without the user's login there.
     """
+    from requests.exceptions import HTTPError
+
     from calkit.hub import core as hub
 
     if not isinstance(cfg, dict) or cfg.get("api_url") != use_own_hub():
         return False
-    active = hub._request("get", "/machines")
-    return any(o.get("id") == cfg.get("id") for o in active)
+    try:
+        resp = hub._request(
+            "get",
+            "/machines/self",
+            headers={"Authorization": f"Bearer {cfg.get('token')}"},
+            auth=False,
+            allow_login=False,
+            base_url=cfg["api_url"],
+            max_retries=2,
+        )
+    except HTTPError as e:
+        # Its token is refused once it's revoked
+        status = e.response.status_code if e.response is not None else None
+        if status in (401, 403, 410):
+            return False
+        raise
+    return bool(resp.get("id") == cfg.get("id"))
 
 
 def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
@@ -1711,15 +1728,12 @@ def pull_workspace(wdir: str, merge: bool = False) -> dict:
                 + (", ..." if len(conflicts) > 10 else "")
                 + "; resolve it in a session"
             )
-    # The pull may have pointed a remote that has the hub's token elsewhere
-    calkit.dvc.clear_off_hub_auth(wdir)
     _calkit(["dvc", "pull"], wdir)
     return {"diverged": False}
 
 
 def push_workspace(wdir: str) -> None:
     """Push with DVC, then with Git."""
-    calkit.dvc.clear_off_hub_auth(wdir)
     _calkit(["dvc", "push"], wdir)
     git_repo = calkit.git.get_repo(wdir)
     git_repo.git.push("origin", git_repo.active_branch.name)
@@ -1801,7 +1815,10 @@ def ignore_path(
         f.write(txt + path + "\n")
     if commit:
         git_repo.git.add(".gitignore")
-        git_repo.git.commit(["-m", message or f"Ignore {path}"])
+        # Only that file, leaving anything else the user staged
+        git_repo.git.commit(
+            ["-m", message or f"Ignore {path}", "--", ".gitignore"]
+        )
         if push:
             git_repo.git.push("origin", git_repo.active_branch.name)
 
@@ -1875,15 +1892,17 @@ def add_stage(
     with _open_in_workspace(wdir, "dvc.yaml", "w") as f:
         calkit.ryaml.dump(pipeline, f)
     repo = calkit.git.get_repo(wdir)
-    repo.git.add("dvc.yaml")
+    changed = ["dvc.yaml"]
     if calkit_type is not None:
         assert outs is not None and calkit_object is not None
         objs.append(dict(path=outs[0], stage=name) | calkit_object)
         ck_info[calkit_type + "s"] = objs
         with _open_in_workspace(wdir, "calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
-        repo.git.add("calkit.yaml")
-    repo.git.commit(["-m", f"Add pipeline stage {name}"])
+        changed.append("calkit.yaml")
+    repo.git.add(changed)
+    # Only those files, leaving anything else the user staged
+    repo.git.commit(["-m", f"Add pipeline stage {name}", "--", *changed])
     if push:
         repo.git.push(["origin", repo.active_branch.name])
 
@@ -2935,6 +2954,14 @@ class HubLink:
                 }
                 lock = self.workspace_locks.setdefault(wdir, asyncio.Lock())
                 action = WORKSPACE_ACTIONS[kind]
+                # Fetching alongside a pull, push, or status would race it
+                # for Git's ref locks
+                if (
+                    kind == "workspace.git_status"
+                    and self.workspace_actions.get(wdir)
+                    not in (None, "workspace.run")
+                ):
+                    kwargs["fetch"] = False
                 # A run holds the workspace for as long as it goes, so what
                 # follows or stops it can't wait for it to finish
                 if kind in LOCK_FREE_ACTIONS or (
@@ -3111,9 +3138,10 @@ class HubLink:
         last_used = loop.time()
         while True:
             await asyncio.sleep(min(30, self.idle_exit_seconds))
-            # Anything running or watching keeps it up, e.g., loops
-            # once links run them (see the ADR)
-            if self.sessions or self.channels:
+            # Anything running or watching keeps it up, e.g., a pipeline
+            # run with no browser left, or loops once links run them (see
+            # the ADR)
+            if self.sessions or self.channels or self.workspace_actions:
                 last_used = loop.time()
             elif loop.time() - last_used >= self.idle_exit_seconds:
                 logger.info("Idle, so stopping until the hub asks again")

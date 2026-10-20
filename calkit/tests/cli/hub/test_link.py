@@ -57,6 +57,31 @@ def test_link(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert [cfg["token"] for cfg in revoked] == ["ckm_old"]
     assert "Registered machine 'box-2'" in result.output
+    # One that's still registered is kept, which is checked with its own
+    # token, e.g., on a machine linked over SSH that never logged in
+    from calkit.hub import core as hub
+
+    hub_link.save_config(
+        {
+            "id": "m1",
+            "name": "box",
+            "token": "ckm_m1",
+            "api_url": "https://api.hub",
+        }
+    )
+    asked: list[dict] = []
+
+    def request(kind, path, **kwargs):
+        asked.append(kwargs)
+        assert (kind, path) == ("get", "/machines/self")
+        return {"id": "m1"}
+
+    monkeypatch.setattr(hub, "_request", request)
+    result = CliRunner().invoke(hub_app, ["link", "--no-service"])
+    assert result.exit_code == 0, result.output
+    assert "Machine 'box' is already registered" in result.output
+    assert asked[0]["auth"] is False
+    assert asked[0]["headers"] == {"Authorization": "Bearer ckm_m1"}
     # Sessions would be root shells, so it never runs as root, sudo or not
     if hasattr(os, "geteuid"):
         monkeypatch.setattr(hub_link.os, "geteuid", lambda: 0)

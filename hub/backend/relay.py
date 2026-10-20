@@ -168,13 +168,15 @@ async def _receive(ws: WebSocket) -> dict:
 
 
 async def _send(ws: WebSocket, msg: dict) -> int:
-    text = json.dumps(msg, separators=(",", ":"))
+    # Not escaping non-ASCII text, which would take up to 6 bytes for
+    # what UTF-8 takes 2 or 3 for
+    text = json.dumps(msg, separators=(",", ":"), ensure_ascii=False)
     try:
         await ws.send_text(text)
     except Exception:
         # The other end went away; its own handler cleans up
         return 0
-    return len(text)
+    return len(text.encode())
 
 
 @app.websocket("/machine")

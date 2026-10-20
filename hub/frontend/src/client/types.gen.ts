@@ -15960,6 +15960,23 @@ export type DeleteMachineSelfResponses = {
 export type DeleteMachineSelfResponse =
   DeleteMachineSelfResponses[keyof DeleteMachineSelfResponses]
 
+export type GetMachineSelfData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/machines/self"
+}
+
+export type GetMachineSelfResponses = {
+  /**
+   * Successful Response
+   */
+  200: MachineOut
+}
+
+export type GetMachineSelfResponse =
+  GetMachineSelfResponses[keyof GetMachineSelfResponses]
+
 export type DeleteMachineData = {
   body?: never
   path: {

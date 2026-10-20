@@ -1018,6 +1018,9 @@ def run_dvc_command(
     #942, where ``calkit pull`` failed and succeeded on a second try. See
     :func:`dvc_lock_timeout`.
     """
+    # DVC would send the hub's token wherever the repo points a remote,
+    # e.g., after a Git pull changed it
+    clear_off_hub_auth(wdir=cwd)
     if cwd:
         argv = ["--cd", cwd] + argv
     if lock_timeout is not None:
@@ -1104,8 +1107,8 @@ def clear_off_hub_auth(
     aren't on the hub, returning their names.
 
     The repo says where its remotes are, so a pull can point one that has
-    the token anywhere, which DVC would send it to. This runs before
-    anything that talks to remotes.
+    the token anywhere, which DVC would send it to. ``run_dvc_command``
+    runs this first.
     """
     import jwt
 

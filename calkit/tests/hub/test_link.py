@@ -904,9 +904,15 @@ async def test_sessions(tmp_path, monkeypatch):
     op.last_check_in = time.monotonic() - hub_link.CHECK_IN_GRACE_SECONDS
     op.expire_channels()
     assert op.channels == {}
-    # With nothing using it, a link with an idle limit stops
+    # With nothing using it, a link with an idle limit stops, but not while
+    # a run goes on with no browser left
     op.idle_exit_seconds = 0.1
-    await asyncio.wait_for(op.wait_until_idle(), 5)
+    op.workspace_actions["/ws"] = "workspace.run"
+    idle = asyncio.create_task(op.wait_until_idle())
+    await asyncio.sleep(0.35)
+    assert not idle.done()
+    op.workspace_actions.clear()
+    await asyncio.wait_for(idle, 5)
 
 
 def test_log(tmp_path, monkeypatch):
@@ -1386,8 +1392,21 @@ def test_workspace_actions(tmp_path, monkeypatch):
             hub_link.save_workspace(wdir, bad_paths)
     with open(dvc_ignore, "w") as f:
         f.write(dvc_ignored)
-    # Ignoring commits the .gitignore change
+
+    def committed() -> list[str]:
+        return subprocess.run(
+            ["git", "show", "--name-only", "--format="],
+            cwd=wdir,
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+
+    # Ignoring commits only the .gitignore change, leaving what the user
+    # staged
+    subprocess.run(["git", "add", "notes.txt"], cwd=wdir, check=True)
     hub_link.ignore_path(wdir, "scratch.log")
+    assert committed() == [".gitignore"]
+    subprocess.run(["git", "reset", "-q", "notes.txt"], cwd=wdir, check=True)
     status = hub_link.get_workspace_status(wdir, fetch=False)
     assert status["status"]["git"]["untracked_files"] == ["notes.txt"]
     assert status["status"]["git"]["changed_files"] == []
@@ -1408,6 +1427,7 @@ def test_workspace_actions(tmp_path, monkeypatch):
         calkit_type="figure",
         calkit_object={"title": "A plot", "description": "It plots"},
     )
+    assert sorted(committed()) == ["calkit.yaml", "dvc.yaml"]
     with pytest.raises(ValueError):
         hub_link.add_stage(wdir, name="plot", cmd="echo")
     with pytest.raises(ValueError):
@@ -1696,12 +1716,13 @@ def test_workspace_actions(tmp_path, monkeypatch):
 
     commit("a.txt", "a", other)
     git("push", "-q", cwd=other)
-    # Pulling clears the hub's token from remotes the repo points elsewhere,
-    # e.g., with a scheme in capitals, before DVC sends it there
-    assert "ckp_token" in open(local_config).read()
+    # DVC pulls with Calkit there, which clears the hub's token from
+    # remotes the repo points elsewhere using the project's hub, not the
+    # link's
+    calls.clear()
     assert hub_link.pull_workspace(wdir) == {"diverged": False}
     assert os.path.isfile(os.path.join(wdir, "a.txt"))
-    assert "ckp_token" not in open(local_config).read()
+    assert calls == [["dvc", "pull"]]
     commit("b.txt", "b", other)
     git("push", "-q", cwd=other)
     commit("c.txt", "c", wdir)
@@ -1944,6 +1965,23 @@ def test_machine_setup(tmp_path, monkeypatch):
     ]
     assert op.cfg["workspaces"] == [os.path.join(home, "work", "demo")]
     assert len(saved) == 1
+    # Git status doesn't fetch while something other than a run holds the
+    # workspace, e.g., a pull, which it would race for Git's ref locks
+    fetched: list[bool] = []
+    monkeypatch.setitem(
+        hub_link.WORKSPACE_ACTIONS,
+        "workspace.git_status",
+        lambda wdir, fetch=True: fetched.append(fetch) or {},
+    )
+    monkeypatch.setattr(op, "get_workspace", lambda path, personal: "/ws")
+    for holding in [None, "workspace.run", "workspace.pull"]:
+        op.workspace_actions.pop("/ws", None)
+        if holding is not None:
+            op.workspace_actions["/ws"] = holding
+        msg = {"type": "workspace.git_status", "id": 2, "workspace": "w"}
+        asyncio.run(op.run_action("ch", msg | {"fetch": True}))
+    op.workspace_actions.clear()
+    assert fetched == [True, True, False]
 
 
 def test_install_remote(monkeypatch):
@@ -1964,13 +2002,19 @@ def test_install_remote(monkeypatch):
             "calkit_version": "1.0",
         },
     )
+    from requests.exceptions import HTTPError
+
     posted = {}
     # The user's active machines, as the hub lists them
     active = []
 
     def request(kind, path, json=None, **kwargs):
         if kind == "get":
-            return active
+            # Asked with the machine's own token, so it works there too
+            assert path == "/machines/self" and kwargs["auth"] is False
+            if not active:
+                raise HTTPError(response=SimpleNamespace(status_code=403))
+            return active[-1]
         posted.update(json)
         active.append({"id": "op1"})
         return {"id": "op1", "name": "login1-cluster", "user_id": "u1"} | {

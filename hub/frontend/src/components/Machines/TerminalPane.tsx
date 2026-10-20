@@ -15,6 +15,10 @@ import { FiMinus, FiX } from "react-icons/fi"
 import Tooltip from "../Common/Tooltip"
 import type { MachineConnection, Pane } from "./connection"
 
+// The relay drops a message over 256 KiB, so a long paste goes in pieces
+// that fit even with every character escaped as JSON twice
+const MAX_INPUT_CHARS = 32 * 1024
+
 export default function TerminalPane({
   conn,
   pane,
@@ -58,7 +62,17 @@ export default function TerminalPane({
     let replaying = 0
     const input = term.onData((data) => {
       if (replaying) return
-      conn.send({ type: "sessions.input", session: pane.session, data })
+      for (let start = 0; start < data.length; ) {
+        let end = Math.min(start + MAX_INPUT_CHARS, data.length)
+        // Not between the two halves of a character outside the BMP
+        if (end < data.length && /[\uD800-\uDBFF]/.test(data[end - 1])) end--
+        conn.send({
+          type: "sessions.input",
+          session: pane.session,
+          data: data.slice(start, end),
+        })
+        start = end
+      }
     })
     const resize = term.onResize(({ cols, rows }) =>
       conn.send({ type: "sessions.resize", session: pane.session, cols, rows }),

@@ -538,7 +538,7 @@ def readable_project_clause(current_user: User) -> Any:
         Project.is_public,
         Project.owner_account_id == current_user.account.id,
         # A row in the unified access table with either a native Calkit
-        # grant (role_id, e.g. an invite redemption) or GitHub-derived
+        # grant (role_id, e.g., an invite redemption) or GitHub-derived
         # access. A row with both null is a cached "no access" result.
         and_(
             UserProjectAccess.user_id == current_user.id,

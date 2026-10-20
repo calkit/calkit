@@ -232,11 +232,14 @@ def post_machine(
         raise HTTPException(403, "Verify your email first")
     if req.public_key is not None:
         _check_public_key(req.public_key)
-    # Names default to the hostname, suffixed until unique for the user
-    base = req.name or re.sub(
-        r"[^a-z0-9-]+", "-", (req.hostname or "machine").lower()
-    ).strip("-")
-    base = base[:56] or "machine"
+    # Names default to the hostname, cut to leave room for a suffix added
+    # until unique for the user
+    base = req.name or (
+        re.sub(r"[^a-z0-9-]+", "-", (req.hostname or "machine").lower())
+        .strip("-")[:56]
+        .strip("-")
+        or "machine"
+    )
     taken = set(
         session.exec(
             select(Machine.name)
@@ -325,6 +328,14 @@ def _revoke(session: SessionDep, machine: Machine) -> MachineOut:
     session.commit()
     session.refresh(machine)
     _send_machine_email(machine, machine.user, "unlinked")
+    return _out(machine)
+
+
+@router.get("/machines/self")
+def get_machine_self(machine: CurrentMachine) -> MachineOut:
+    """Get the machine making the request, e.g., to check it's still
+    registered without its owner's login.
+    """
     return _out(machine)
 
 
@@ -457,50 +468,6 @@ def _ended_sessions(
     return sorted(set(session_ids) - set(live), key=str)
 
 
-def _update_workspaces(
-    session: SessionDep, machine: Machine, reported: list[WorkspaceInfo]
-) -> None:
-    """Make the machine's stored workspaces match what it reported."""
-    existing = {ws.path: ws for ws in machine.workspaces}
-    now = utcnow()
-    seen = set()
-    for info in reported:
-        # Only the first of any reported twice
-        if info.path in seen:
-            continue
-        seen.add(info.path)
-        ws = existing.pop(info.path, None)
-        if ws is None:
-            ws = MachineWorkspace(machine_id=machine.id, path=info.path)
-        owner = name = None
-        if info.project and PROJECT_PATTERN.match(info.project):
-            owner, name = info.project.lower().split("/", 1)
-        ws.kind = info.kind
-        ws.owner_name = owner
-        ws.project_name = name
-        ws.branch = info.branch
-        ws.commit = info.commit
-        ws.dirty = info.dirty
-        ws.ahead = info.ahead
-        ws.behind = info.behind
-        ws.running = info.running
-        ws.run_state = info.model_dump(
-            mode="json",
-            include={
-                "running_stages",
-                "running_since",
-                "last_run",
-                "in_use_by",
-                "last_activity",
-                "agents",
-            },
-        )
-        ws.updated = now
-        session.add(ws)
-    for ws in existing.values():
-        session.delete(ws)
-
-
 @router.post("/machines/check-in")
 def post_machine_check_in(
     session: SessionDep, machine: CurrentMachine, req: CheckIn
@@ -508,6 +475,50 @@ def post_machine_check_in(
     """Record that a machine is alive and what it has, and tell it how
     to connect.
     """
+
+    def update_workspaces(
+        session: SessionDep, machine: Machine, reported: list[WorkspaceInfo]
+    ) -> None:
+        """Make the machine's stored workspaces match what it reported."""
+        existing = {ws.path: ws for ws in machine.workspaces}
+        now = utcnow()
+        seen = set()
+        for info in reported:
+            # Only the first of any reported twice
+            if info.path in seen:
+                continue
+            seen.add(info.path)
+            ws = existing.pop(info.path, None)
+            if ws is None:
+                ws = MachineWorkspace(machine_id=machine.id, path=info.path)
+            owner = name = None
+            if info.project and PROJECT_PATTERN.match(info.project):
+                owner, name = info.project.lower().split("/", 1)
+            ws.kind = info.kind
+            ws.owner_name = owner
+            ws.project_name = name
+            ws.branch = info.branch
+            ws.commit = info.commit
+            ws.dirty = info.dirty
+            ws.ahead = info.ahead
+            ws.behind = info.behind
+            ws.running = info.running
+            ws.run_state = info.model_dump(
+                mode="json",
+                include={
+                    "running_stages",
+                    "running_since",
+                    "last_run",
+                    "in_use_by",
+                    "last_activity",
+                    "agents",
+                },
+            )
+            ws.updated = now
+            session.add(ws)
+        for ws in existing.values():
+            session.delete(ws)
+
     if req.public_key is not None:
         _check_public_key(req.public_key)
         key = req.public_key.model_dump()
@@ -516,7 +527,7 @@ def post_machine_check_in(
         elif machine.public_key != key:
             raise HTTPException(409, "Machine key doesn't match")
     machine.last_seen = utcnow()
-    _update_workspaces(session, machine, req.workspaces)
+    update_workspaces(session, machine, req.workspaces)
     if req.calkit_version is not None:
         machine.calkit_version = req.calkit_version
     if req.mode is not None:

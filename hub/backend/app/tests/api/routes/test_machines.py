@@ -154,6 +154,24 @@ def test_machines(
         json={"name": op["name"]},
     )
     assert r.status_code == 409
+    # An explicit name is kept whole, even past the length hostnames are
+    # cut to
+    long_name = "a" * 60 + uuid.uuid4().hex[:4]
+    for status in (200, 409):
+        r = client.post(
+            "/machines",
+            headers=normal_user_token_headers,
+            json={"name": long_name},
+        )
+        assert r.status_code == status, r.text
+        if status == 200:
+            assert r.json()["name"] == long_name
+    # A machine can check it's still registered with its own token
+    r = client.get("/machines/self", headers=op_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == op["id"]
+    r = client.get("/machines/self", headers=normal_user_token_headers)
+    assert r.status_code == 403
     # Machine tokens only work for machine routes, and vice versa
     assert client.get("/user", headers=op_headers).status_code == 403
     r = client.post(
@@ -707,6 +725,8 @@ def test_machines(
     assert r.json()["id"] == again["id"] and not r.json()["is_active"]
     r = client.post("/machines/check-in", headers=again_headers, json={})
     assert r.status_code == 403
+    r = client.get("/machines/self", headers=again_headers)
+    assert r.status_code == 403
     assert client.get("/user", headers=again_cli).status_code == 403
     client.cookies.clear()
 
@@ -850,6 +870,9 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
                 # ...and unwrapped on the way back
                 op_ws.send_json({"ch": ch, "msg": {"type": "result", "id": 1}})
                 assert browser_ws.receive_json() == {"type": "result", "id": 1}
+                # Non-ASCII text goes as is, not escaped to take more room
+                op_ws.send_json({"ch": ch, "msg": {"data": "é"}})
+                assert browser_ws.receive_text() == '{"data":"é"}'
                 # Messages over the limit close the connection, counted in
                 # bytes rather than characters
                 browser_ws.send_text("é" * (relay.MAX_MESSAGE_BYTES // 2 + 1))

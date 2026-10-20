@@ -112,6 +112,7 @@ import type {
   GetHubStatsErrors,
   GetHubStatsResponses,
   GetHubVersionResponses,
+  GetMachineSelfResponses,
   GetMachinesResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
@@ -9747,6 +9748,27 @@ export class MachinesService {
   ): RequestResult<DeleteMachineSelfResponses, unknown, ThrowOnError> {
     return (options?.client ?? client).delete<
       DeleteMachineSelfResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/machines/self",
+      ...options,
+    })
+  }
+
+  /**
+   * Get Machine Self
+   *
+   * Get the machine making the request, e.g., to check it's still
+   * registered without its owner's login.
+   */
+  public static getMachineSelf<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetMachineSelfResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetMachineSelfResponses,
       unknown,
       ThrowOnError
     >({

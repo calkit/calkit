@@ -714,6 +714,13 @@ def test_clear_off_hub_auth(
     assert dict(cfg['remote "local-url"']) == {
         "url": "https://elsewhere.example"
     }
+    # Every DVC command Calkit runs clears it first
+    cfg['remote "dav"']["token"] = "ckp_token"
+    cfg.write()
+    monkeypatch.setattr(calkit.dvc.core, "run_dvc_cli", lambda argv: 0)
+    assert calkit.dvc.run_dvc_command(["pull"], cwd=str(sub)) == 0
+    cfg = ConfigObj(str(local), encoding="utf-8")
+    assert dict(cfg['remote "dav"']) == {"ssl_verify": "false"}
     # Nothing to clear, or no DVC at all, changes nothing
     assert calkit.dvc.clear_off_hub_auth(wdir=str(tmp_path)) == []
     other = tmp_path.parent / f"{tmp_path.name}-nodvc"

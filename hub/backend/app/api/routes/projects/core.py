@@ -742,8 +742,8 @@ def get_owned_projects(
 ) -> ProjectsPublic:
     where_clause = or_(
         Project.owner_account_id == current_user.account.id,
-        # A native Calkit grant (role_id), e.g. an invite redemption, the only
-        # access path for GitHub-less collaborators.
+        # A native Calkit grant (role_id), e.g., an invite redemption, the
+        # only access path for GitHub-less collaborators.
         Project.user_access_records.any(  # type: ignore
             and_(
                 UserProjectAccess.user_id == current_user.id,

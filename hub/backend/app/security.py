@@ -78,8 +78,8 @@ def create_access_token(
 @lru_cache
 def _machine_grant_key() -> Ed25519PrivateKey:
     """The key that signs grants to use a machine, derived from
-    SECRET_KEY, so machines that pinned its public key stop trusting the
-    hub if that's rotated, and have to be registered again.
+    SECRET_KEY, so rotating that rotates this too, which machines take at
+    their next check-in, closing channels opened with the old one.
     """
     seed = hmac.new(
         settings.SECRET_KEY.encode(), b"machine-grant", "sha256"

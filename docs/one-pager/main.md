@@ -32,15 +32,14 @@ such that evidence can be traced all the way back to its origin.
 
 ## Our approach
 
-Whereas most open science or reproducibility
-solutions embed code in documents (literate programming)
-or help researchers share and get credit for
-artifacts after a project is done,
+Many open science or reproducibility
+solutions focus on embedding code in documents (literate programming)
+or helping researchers share and obtain credit for
+outputs like code and data after a project is done.
 Calkit takes a more holistic approach,
-bundling
-version control (including large data files),
-computational environment management, a pipeline with hashed I/O,
-and provenance, where different stages like analysis and writing
+bundling version control (including large data files),
+environment management, pipelines with hashed I/O,
+and provenance definition, where different stages like analysis and writing
 are allowed to remain as separate contexts or modules while
 information flows freely between them for fast iteration.
 An optional, self-hostable web app
@@ -48,7 +47,7 @@ facilitates collaboration during the project
 and sharing once it's done, like a GitHub for science.
 Since everything is integrated,
 every figure and number can be traced back to its origin,
-which makes it much easier to review work done by AI agents or humans.
+making it much easier to review work done by AI agents or humans.
 
 ## A success story {.box}
 
@@ -69,20 +68,26 @@ which makes it much easier to review work done by AI agents or humans.
 
 ## The ask: \$<!-- calkit value key=total_rounded format="{:,.0f}" -->100,000<!-- /calkit value --> to learn what sticks
 
-For most researchers, connecting an analysis to Overleaf is still too
-much work.
-In 2027 we'll take Calkit on tour, starting at Caltech with our browser
-extension's Overleaf sync,
-in <!-- calkit value key=workshops -->8<!-- /calkit value --> workshops that
-train some <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
+Thus far we've seen the most traction from Overleaf users
+who appreciate its user friendliness but want to connect it to their analyses
+to eliminate error-prone and tedious manual uploads.
+In 2027 we'll take Calkit on tour, starting at Caltech and various
+universities in Boston,
+teaching researchers how to integrate their workflows with our
+new browser extension,
+hosting
+
+<!-- calkit value key=workshops -->8<!-- /calkit value -->
+
+workshops with
+
+<!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
+
 researchers and help
 about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
 of them convert active projects.
-Each workshop is an experiment: who connects a figure, who still uses it six
-weeks later, and why.
-Opt-in analytics in our tools will measure it, what we learn will drive
-development between workshops, and we'll publish an open curriculum and a
-report on what worked.
+Learnings from the workshops will be published openly and fed back
+into improving Calkit.
 
 ![](../img/2027-budget.png)
 

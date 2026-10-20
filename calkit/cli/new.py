@@ -4508,8 +4508,12 @@ def new_workspace(
         repo.git.worktree("add", *args)
     except Exception as e:
         raise_error(f"Could not create the worktree: {e}")
+    # Never through a link the branch committed in place of .dvc, which
+    # could point outside the workspace
+    if os.path.islink(os.path.join(path, ".dvc")):
+        warn("Not setting up DVC there, since its .dvc is a link")
     # A branch can predate DVC being set up here, so it needs none
-    if os.path.isdir(os.path.join(root, ".dvc")) and os.path.isdir(
+    elif os.path.isdir(os.path.join(root, ".dvc")) and os.path.isdir(
         os.path.join(path, ".dvc")
     ):
         # The remotes' settings, e.g., their auth, live in the local config,

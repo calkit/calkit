@@ -2395,6 +2395,25 @@ def test_new_workspace(tmp_dir):
         ["calkit", "new", "workspace", "before-dvc", "--path", old]
     )
     assert not os.path.exists(os.path.join(old, ".dvc"))
+    # Nor does one whose .dvc is a link, which could point anywhere
+    target = os.path.join(os.path.dirname(root), "linked-target")
+    os.mkdir(target)
+    link_blob = git_out(
+        "hash-object", "-w", "--stdin", input="../linked-target"
+    )
+    tree = git_out("mktree", "-z", input=f"120000 blob {link_blob}\t.dvc\0")
+    git_out("branch", "linked", git_out("commit-tree", tree, "-m", "Link"))
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "workspace",
+            "linked",
+            "--path",
+            os.path.join(os.path.dirname(root), "linked"),
+        ]
+    )
+    assert os.listdir(target) == []
 
 
 def test_new_comment(tmp_dir):

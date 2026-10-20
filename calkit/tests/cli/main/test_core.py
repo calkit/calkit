@@ -3674,7 +3674,7 @@ def test_run_reruns_when_an_env_var_input_changes(tmp_dir):
 
 def test_run_reruns_once_per_schedule_period(tmp_dir):
     subprocess.check_call(["calkit", "init"])
-    period_file = ".calkit/local/current-periods/day-UTC.txt"
+    period_file = ".calkit/local/current-periods/1-day-UTC.txt"
     ck_info = {
         "pipeline": {
             "stages": {
@@ -3682,7 +3682,7 @@ def test_run_reruns_once_per_schedule_period(tmp_dir):
                     "kind": "shell-command",
                     "command": f"cat {period_file} >> out.txt",
                     "environment": "_system",
-                    "inputs": [{"kind": "schedule", "period": "day"}],
+                    "inputs": [{"kind": "schedule", "period": "1 day"}],
                     "outputs": [
                         {
                             "path": "out.txt",

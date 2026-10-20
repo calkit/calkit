@@ -43,6 +43,37 @@ def _get_tzinfo(name: str) -> Any:
         raise ValueError(f"unknown time zone '{name}'") from e
 
 
+# Unit names a period can be written with, e.g., '1d', '2 hours', or 'daily'
+_PERIOD_UNITS = {
+    "minute": ["m", "min", "mins", "minute", "minutes"],
+    "hour": ["h", "hr", "hrs", "hour", "hours", "hourly"],
+    "day": ["d", "day", "days", "daily"],
+    "week": ["w", "wk", "wks", "week", "weeks", "weekly"],
+    "month": ["mo", "mon", "mos", "month", "months", "monthly"],
+    "year": ["y", "yr", "yrs", "year", "years", "yearly", "annually"],
+}
+
+
+def parse_period(value: str) -> tuple[int, str]:
+    """Parse a period like '1 day', '1d', or 'daily' into a count and unit.
+
+    As with pandas' timedeltas, 'm' is a minute, so a month is 'mo'.
+    """
+    import re
+
+    m = re.fullmatch(r"\s*(\d+)?\s*([A-Za-z]+)\s*", value)
+    if m is not None:
+        count = int(m.group(1) or 1)
+        word = m.group(2).lower()
+        adjective = word.endswith("ly")
+        for unit, names in _PERIOD_UNITS.items():
+            if word in names and count > 0 and not (adjective and m.group(1)):
+                return count, unit
+    raise ValueError(
+        f"can't read period '{value}'; use, e.g., '1 day', '6h', or 'weekly'"
+    )
+
+
 class ScheduleInput(Model):
     """A schedule a stage runs on, e.g., once a day.
 
@@ -50,21 +81,32 @@ class ScheduleInput(Model):
     the stage depends on, so the stage reruns once each period and is
     skipped until the next one starts. The stage can read the file to learn
     which period it's running for, e.g.,
-    ``.calkit/local/current-periods/day-UTC.txt`` holds ``2026-10-20`` on
-    that day. Set ``CALKIT_NOW`` to an ISO 8601 time to compile as if it
+    ``.calkit/local/current-periods/1-day-UTC.txt`` holds ``2026-10-20`` on
+    that day. A period of more than one unit, e.g., '3 days', is counted
+    from the start of 1970 (or for weeks, its first Monday), so every machine
+    agrees where one starts, and is written as its first unit, e.g., the day
+    it starts. Set ``CALKIT_NOW`` to an ISO 8601 time to compile as if it
     were then, e.g., to redo a past day.
     """
 
     model_config = ConfigDict(extra="forbid")
     kind: Literal["schedule"] = Field(description="Always 'schedule'.")
-    period: Literal["hour", "day", "week", "month", "year"] = Field(
-        description="How often the stage runs, i.e., once per this period. "
-        "Weeks start on Monday."
+    period: str = Field(
+        description="How often the stage runs, i.e., once per this period, "
+        "e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are "
+        "minutes, hours, days, weeks (starting on Monday), months, and "
+        "years; 'm' is a minute and 'mo' a month."
     )
     timezone: str = Field(
         default="UTC",
         description="Time zone periods start in, e.g., 'America/New_York'.",
     )
+
+    @field_validator("period")
+    @classmethod
+    def _readable_period(cls, value: str) -> str:
+        parse_period(value)
+        return value
 
     @field_validator("timezone")
     @classmethod
@@ -75,11 +117,13 @@ class ScheduleInput(Model):
     @property
     def period_file_path(self) -> str:
         """Where the current period is written, relative to the project."""
-        name = f"{self.period}-{self.timezone.replace('/', '_')}.txt"
+        count, unit = parse_period(self.period)
+        tz = self.timezone.replace("/", "_")
+        name = f"{count}-{unit}-{tz}.txt"
         return "/".join([".calkit", "local", "current-periods", name])
 
     def get_current_period(self) -> str:
-        """The current period, e.g., '2026-10-20' for a day."""
+        """The start of the current period, e.g., '2026-10-20' for a day."""
         import datetime
 
         tz = _get_tzinfo(self.timezone)
@@ -90,14 +134,32 @@ class ScheduleInput(Model):
             now = now.astimezone(tz)
         else:
             now = datetime.datetime.now(tz)
+        count, unit = parse_period(self.period)
+        # Periods are counted in local time, so a day starts at midnight there
+        wall = now.replace(tzinfo=None)
+        if unit == "year":
+            return str(wall.year - wall.year % count)
+        if unit == "month":
+            months = wall.year * 12 + wall.month - 1
+            months -= months % count
+            return f"{months // 12:04d}-{months % 12 + 1:02d}"
+        units = {
+            "minute": datetime.timedelta(minutes=1),
+            "hour": datetime.timedelta(hours=1),
+            "day": datetime.timedelta(days=1),
+            "week": datetime.timedelta(weeks=1),
+        }
+        # The first Monday of 1970, so weeks start on Mondays
+        epoch = datetime.datetime(1970, 1, 5 if unit == "week" else 1)
+        n = (wall - epoch) // (units[unit] * count)
+        start = epoch + n * count * units[unit]
         formats = {
-            "hour": "%Y-%m-%dT%H",
+            "minute": "%Y-%m-%dT%H:%M",
+            "hour": "%Y-%m-%dT%H:%M",
             "day": "%Y-%m-%d",
             "week": "%G-W%V",
-            "month": "%Y-%m",
-            "year": "%Y",
         }
-        return now.strftime(formats[self.period])
+        return start.strftime(formats[unit])
 
     def write_period_file(self, wdir: str | None = None) -> str:
         """Write the current period, if it changed, and return the path."""

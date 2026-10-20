@@ -227,7 +227,7 @@ def test_get_dev_upgrade_cmds(tmp_path, monkeypatch):
 
 
 def test_upgrade_with_hub_links(tmp_path, monkeypatch, capsys):
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
     requests = []

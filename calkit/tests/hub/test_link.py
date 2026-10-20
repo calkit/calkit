@@ -14,7 +14,7 @@ from typing import Any, cast
 
 import pytest
 
-from calkit import hub_link
+from calkit.hub import link as hub_link
 
 
 @pytest.fixture(autouse=True)
@@ -120,7 +120,7 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     # checked with, so a new one replaces the old
     from requests.exceptions import HTTPError
 
-    from calkit import hub
+    from calkit.hub import core as hub
 
     keys = iter(["key1", "key2"])
     posted = []
@@ -1780,7 +1780,7 @@ def test_machine_setup(tmp_path, monkeypatch):
     # relay
     from requests.exceptions import HTTPError
 
-    from calkit import hub
+    from calkit.hub import core as hub
 
     token = "ckp_" + "ab" * 32
     cfg = {"token": "ckm_op", "api_url": "https://api.hub"}
@@ -1903,8 +1903,8 @@ def test_machine_setup(tmp_path, monkeypatch):
 def test_install_remote(monkeypatch):
     import yaml
 
-    from calkit import hub
     from calkit import workspace as ws
+    from calkit.hub import core as hub
 
     monkeypatch.setattr(ws, "ensure_reachable", lambda target, **kw: target)
     monkeypatch.setattr(ws, "ensure_calkit_installed", lambda *a, **kw: True)

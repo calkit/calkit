@@ -10,7 +10,7 @@ export interface SessionInfo {
 type Listener = (msg: any) => void
 
 // Signed along with each message, so a signature means nothing elsewhere.
-// The link checks the same text (calkit/hub_link.py).
+// The link checks the same text (calkit/hub/link.py).
 export const MESSAGE_SIGNATURE_CONTEXT = "calkit-machine-message"
 // Signed along with each of the link's replies, as is the ID of the
 // grant the channel was opened with, so a reply is good on that one only

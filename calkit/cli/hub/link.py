@@ -26,7 +26,7 @@ HubOption = Annotated[
 
 def _select_hub(hub: str | None, linking: bool = False) -> None:
     """Choose which hub's link a command acts on."""
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     if hub is not None:
         if hub in ["test", "local", "staging", "production"]:
@@ -47,7 +47,7 @@ def _each_hub(hub: str | None) -> list[str | None]:
     """The hubs a command acts on: the one asked for, else every one this
     machine is linked to.
     """
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     if hub is not None:
         return [hub]
@@ -56,7 +56,7 @@ def _each_hub(hub: str | None) -> list[str | None]:
 
 
 def _require_config() -> dict:
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     cfg = hub_link.load_config()
     if cfg is None:
@@ -115,8 +115,8 @@ def link(
     ] = False,
 ) -> None:
     """Link this machine to a hub and run the link as a service."""
-    from calkit import hub_link
     from calkit.cli import warn
+    from calkit.hub import link as hub_link
 
     def explain(e: Exception) -> str:
         # Registering takes a verified email, since setting up two-factor
@@ -235,7 +235,7 @@ def start(
     """Run the link in the foreground, e.g., inside tmux."""
     import logging
 
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     try:
         hub_link.refuse_root()
@@ -272,7 +272,7 @@ def start(
 @link_app.command(name="status")
 def status(hub: HubOption = None) -> None:
     """Show this machine's links and their workspaces."""
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     for i, hub_url in enumerate(_each_hub(hub)):
         if i:
@@ -296,7 +296,7 @@ def stop(hub: HubOption = None) -> None:
     """Stop the link's service until it's restarted, for every hub
     unless one is given.
     """
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     hubs = _each_hub(hub)
     failed = False
@@ -322,7 +322,7 @@ def restart(hub: HubOption = None) -> None:
     """
     import subprocess
 
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     hubs = _each_hub(hub)
     failed = False
@@ -352,7 +352,7 @@ def logs(
     import platform
     import subprocess
 
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     _select_hub(hub)
     _require_config()
@@ -380,7 +380,7 @@ def add_workspace(
     hub: HubOption = None,
 ) -> None:
     """Add a project outside ~/calkit and ~/dev as a workspace."""
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     _select_hub(hub)
     cfg = _require_config()
@@ -398,7 +398,7 @@ def add_workspace(
 
 def unlink(hub: HubOption = None) -> None:
     """Revoke this machine on the hub and remove its link here."""
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     _select_hub(hub)
     cfg = _require_config()

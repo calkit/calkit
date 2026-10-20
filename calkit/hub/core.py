@@ -19,7 +19,7 @@ import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError, Timeout
 
-from . import config
+from .. import config
 
 logger = logging.getLogger(__name__)
 

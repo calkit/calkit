@@ -9,8 +9,8 @@ import pytest
 from requests.exceptions import HTTPError
 from typer.testing import CliRunner
 
-from calkit import hub_link
 from calkit.cli.hub import hub_app
+from calkit.hub import link as hub_link
 
 
 def test_link(tmp_path, monkeypatch):
@@ -67,7 +67,7 @@ def test_link(tmp_path, monkeypatch):
 
 
 def test_unlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from calkit import hub
+    from calkit.hub import core as hub
 
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
     # Selecting a hub sets these, which the test puts back afterward

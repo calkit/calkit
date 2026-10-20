@@ -107,7 +107,7 @@ afterEach(() => {
 
 describe("signMessage", () => {
   it("signs what the link checks", async () => {
-    // Signed by the link's test (calkit/tests/test_hub_link.py), which
+    // Signed by the link's test (calkit/tests/hub/test_link.py), which
     // checks the same vector, so both ends sign the same text the same way
     const vector = {
       jwk: {

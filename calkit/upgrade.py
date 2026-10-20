@@ -324,7 +324,7 @@ def run_after_exit(cmds: list[list[str]], pids: list[int]) -> list[str]:
     """
     log_fpath = get_log_fpath()
     if sys.platform == "win32":
-        from calkit import hub_link
+        from calkit.hub import link as hub_link
 
         def quote(s: str) -> str:
             return "'" + s.replace("'", "''") + "'"
@@ -376,7 +376,7 @@ def run_upgrade_cmds(cmds: list[list[str]]) -> None:
 
     import typer
 
-    from calkit import hub_link
+    from calkit.hub import link as hub_link
 
     if sys.platform == "win32":
         stopped = run_after_exit(cmds, get_calkit_pids())

@@ -98,7 +98,7 @@ def select_hub(hub_url: str | None = None) -> str:
     """
     global _hub_url
     if hub_url is None:
-        from calkit import hub
+        from calkit.hub import core as hub
 
         use_own_hub()
         hub_url = hub.get_hub_url()
@@ -306,7 +306,7 @@ def use_own_hub() -> str:
     working directory, if any, and a cloned project mustn't be able to
     decide which hub gets to run commands on this machine.
     """
-    from calkit import hub
+    from calkit.hub import core as hub
 
     if not os.getenv("CALKIT_HUB") and os.getenv("CALKIT_ENV") != "test":
         os.environ["CALKIT_HUB"] = (
@@ -322,7 +322,7 @@ def is_registered(cfg: Any) -> bool:
     own hub, rather than a revoked one or one from another hub, asked with
     the user's login so it works for another machine's config too.
     """
-    from calkit import hub
+    from calkit.hub import core as hub
 
     if not isinstance(cfg, dict) or cfg.get("api_url") != use_own_hub():
         return False
@@ -334,7 +334,7 @@ def register(name: str | None = None, hosts: list[str] | None = None) -> dict:
     """Register this machine with the hub and save its link's
     config.
     """
-    from calkit import hub
+    from calkit.hub import core as hub
 
     use_own_hub()
     hostname = socket.gethostname()
@@ -372,7 +372,7 @@ def revoke_self(cfg: dict) -> None:
     """
     from requests.exceptions import HTTPError
 
-    from calkit import hub
+    from calkit.hub import core as hub
 
     try:
         hub._request(
@@ -414,8 +414,8 @@ def install_remote(
     """
     import yaml
 
-    from calkit import hub
     from calkit import workspace as ws
+    from calkit.hub import core as hub
 
     use_own_hub()
     # Where the other machine keeps its link to this hub
@@ -809,7 +809,7 @@ def check_in(
 ) -> dict:
     from requests.exceptions import HTTPError
 
-    from calkit import hub
+    from calkit.hub import core as hub
 
     try:
         resp: dict = hub._request(
@@ -2102,7 +2102,7 @@ def request_cli_token(cfg: dict) -> str:
     """
     from requests.exceptions import HTTPError
 
-    from calkit import hub
+    from calkit.hub import core as hub
 
     try:
         resp = hub._request(

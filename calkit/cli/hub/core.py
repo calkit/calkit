@@ -9,7 +9,7 @@ import typer
 import calkit
 from calkit.cli import raise_error
 from calkit.cli.config import hub_config_app
-from calkit.cli.hub_link import link_app, unlink
+from calkit.cli.hub.link import link_app, unlink
 
 hub_app = typer.Typer(no_args_is_help=True)
 hub_app.add_typer(

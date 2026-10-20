@@ -1,8 +1,9 @@
 """Models for inputs and outputs."""
 
+import os
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from calkit.models.base import Model
 
@@ -27,6 +28,94 @@ class EnvVarInput(Model):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["env-var"] = Field(description="Always 'env-var'.")
     name: str = Field(description="Name of the environment variable.")
+
+
+def _get_tzinfo(name: str) -> Any:
+    """The time zone named, without needing tzdata for UTC, e.g., on Windows."""
+    import datetime
+    import zoneinfo
+
+    if name.upper() == "UTC":
+        return datetime.timezone.utc
+    try:
+        return zoneinfo.ZoneInfo(name)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError) as e:
+        raise ValueError(f"unknown time zone '{name}'") from e
+
+
+class ScheduleInput(Model):
+    """A schedule a stage runs on, e.g., once a day.
+
+    Every compile writes the current period, e.g., today's date, to a file
+    the stage depends on, so the stage reruns once each period and is
+    skipped until the next one starts. The stage can read the file to learn
+    which period it's running for, e.g.,
+    ``.calkit/local/current-periods/day-UTC.txt`` holds ``2026-10-20`` on
+    that day. Set ``CALKIT_NOW`` to an ISO 8601 time to compile as if it
+    were then, e.g., to redo a past day.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["schedule"] = Field(description="Always 'schedule'.")
+    period: Literal["hour", "day", "week", "month", "year"] = Field(
+        description="How often the stage runs, i.e., once per this period. "
+        "Weeks start on Monday."
+    )
+    timezone: str = Field(
+        default="UTC",
+        description="Time zone periods start in, e.g., 'America/New_York'.",
+    )
+
+    @field_validator("timezone")
+    @classmethod
+    def _known_timezone(cls, value: str) -> str:
+        _get_tzinfo(value)
+        return value
+
+    @property
+    def period_file_path(self) -> str:
+        """Where the current period is written, relative to the project."""
+        name = f"{self.period}-{self.timezone.replace('/', '_')}.txt"
+        return "/".join([".calkit", "local", "current-periods", name])
+
+    def get_current_period(self) -> str:
+        """The current period, e.g., '2026-10-20' for a day."""
+        import datetime
+
+        tz = _get_tzinfo(self.timezone)
+        override = os.environ.get("CALKIT_NOW")
+        if override:
+            now = datetime.datetime.fromisoformat(override)
+            now = now.replace(tzinfo=tz) if now.tzinfo is None else now
+            now = now.astimezone(tz)
+        else:
+            now = datetime.datetime.now(tz)
+        formats = {
+            "hour": "%Y-%m-%dT%H",
+            "day": "%Y-%m-%d",
+            "week": "%G-W%V",
+            "month": "%Y-%m",
+            "year": "%Y",
+        }
+        return now.strftime(formats[self.period])
+
+    def write_period_file(self, wdir: str | None = None) -> str:
+        """Write the current period, if it changed, and return the path."""
+        from calkit.core import ensure_local_dir
+
+        ensure_local_dir(wdir=wdir)
+        fpath = os.path.join(wdir or ".", self.period_file_path)
+        content = self.get_current_period() + "\n"
+        try:
+            with open(fpath) as f:
+                if f.read() == content:
+                    return self.period_file_path
+        except OSError:
+            pass
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        with open(fpath, "w", newline="\n") as f:
+            f.write(content)
+        return self.period_file_path
 
 
 class PathInput(Model):

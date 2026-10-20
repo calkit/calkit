@@ -246,6 +246,32 @@ def test_update_user_me(
     db.refresh(user_db)
     assert user_db.email == email
     assert user_db.full_name == full_name
+    # Changing only the case keeps the address, so it's applied as is
+    r = client.patch("/user", headers=h, json={"email": email.upper()})
+    assert r.status_code == 200, r.text
+    assert r.json()["email"] == email.upper()
+    r = client.patch("/user", headers=h, json={"email": email})
+    assert r.json()["email"] == email
+    # A code sent to the old address doesn't verify a new one
+    db.refresh(user_db)
+    if user_db.email_verification is not None:
+        db.delete(user_db.email_verification)
+        db.commit()
+        db.refresh(user_db)
+    code, _ = users.create_email_verification(session=db, user=user_db)
+    email = random_email()
+    r = client.patch("/user", headers=h, json={"email": email})
+    assert r.status_code == 200, r.text
+    r = client.post(
+        "/user/email-verification/confirm", json={"code": code}, headers=h
+    )
+    assert r.status_code == 400
+    db.refresh(user_db)
+    assert not user_db.email_verified
+    assert user_db.email_verification is not None
+    db.delete(user_db.email_verification)
+    db.commit()
+    db.refresh(user_db)
     # A verified one takes a code sent to it, so a stolen session can't move
     # the account to an attacker's inbox, and the new one isn't verified
     user_db.email_verified_at = utcnow()

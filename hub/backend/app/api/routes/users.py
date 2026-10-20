@@ -209,7 +209,10 @@ def update_current_user(
 
     Changing the email takes a signed-in session, not a token.
     """
-    if user_in.email and user_in.email.lower() != current_user.email.lower():
+    if user_in.email and user_in.email.lower() == current_user.email.lower():
+        # Same address, so only the case changes
+        current_user.email = user_in.email
+    elif user_in.email:
         signed_in = get_current_session(session, token)
         existing_user = users.get_user_by_email(
             session=session, email=user_in.email

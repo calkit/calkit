@@ -333,17 +333,16 @@ def count_emailed_code(session: Session, user: User) -> None:
     session.add(row)
 
 
-def hash_email_verification_code(
-    code: str, new_email: str | None = None
-) -> str:
+def hash_email_verification_code(code: str, email: str | None = None) -> str:
     """The stored form of a code: an HMAC under the server's secret.
 
     Six digits is too small a space to protect with a slow hash alone,
     which is why guesses are counted; keying the hash keeps a leaked table
-    from being useful on its own. A code for changing the email is bound to
-    the new address, so it can't move the account anywhere else.
+    from being useful on its own. An emailed code is bound to the address
+    it proves: the current one for verifying, or the new one for changing
+    it, so it can't vouch for any other.
     """
-    message = code if new_email is None else f"{code}\n{new_email.lower()}"
+    message = code if email is None else f"{code}\n{email.lower()}"
     return hmac.new(
         settings.SECRET_KEY.encode(), message.encode(), "sha256"
     ).hexdigest()
@@ -372,14 +371,13 @@ def create_email_verification(
     count_emailed_code(session, user)
     code = f"{secrets.randbelow(10**6):06d}"
     expires = now + timedelta(minutes=EMAIL_VERIFICATION_CODE_MINUTES)
+    code_hash = hash_email_verification_code(code, new_email or user.email)
     if existing is None:
         existing = UserEmailVerification(
-            user_id=user.id,
-            code_hash=hash_email_verification_code(code, new_email),
-            expires=expires,
+            user_id=user.id, code_hash=code_hash, expires=expires
         )
     else:
-        existing.code_hash = hash_email_verification_code(code, new_email)
+        existing.code_hash = code_hash
         existing.created = now
         existing.expires = expires
         existing.attempts = 0
@@ -441,7 +439,7 @@ def check_email_verification_code(
     wrong_today = count_wrong_emailed_code(session, user)
     if not hmac.compare_digest(
         pending.code_hash,
-        hash_email_verification_code(code.strip(), new_email),
+        hash_email_verification_code(code.strip(), new_email or user.email),
     ):
         pending.attempts += 1
         wrong_today.count += 1

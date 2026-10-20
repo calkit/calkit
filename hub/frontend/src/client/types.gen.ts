@@ -60,6 +60,18 @@ export type AnalyticsStats = {
    * Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.
    */
   active_visitors: ActiveCounts
+  /**
+   * Visitor-days from visitors who didn't accept analytics, i.e., distinct (UTC day, visitor) pairs with a page view in the window that followed input and wasn't from a bot. Not unique people: their IDs reset daily, so one person visiting on three days counts three times.
+   */
+  human_visits: ActiveCounts
+  /**
+   * Human visits as above that included a project page, leaving out projects owned by excluded accounts
+   */
+  human_project_visits: ActiveCounts
+  /**
+   * Distinct projects, not owned by excluded accounts, with human visits as above
+   */
+  projects_viewed: ActiveCounts
 }
 
 /**

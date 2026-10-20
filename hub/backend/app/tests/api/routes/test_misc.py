@@ -385,6 +385,13 @@ def test_get_hub_stats(
         return midnight.timestamp() + 3600 + minute * 60
 
     pageview = "$mp_web_page_view"
+    anonymous = {
+        "anonymous": True,
+        "human": True,
+        "bot": False,
+        "interacted": True,
+        "time": at(2, 0),
+    }
     events = [
         ("Logged in", {"distinct_id": str(user.id), "time": now_ts - 3600}),
         (
@@ -510,6 +517,58 @@ def test_get_hub_stats(
             "Clicked",
             {"distinct_id": "$device:old", "time": now_ts - 40 * 86400},
         ),
+        # Anonymous visitors count by day when human: twice on one day is one
+        # visit, the same ID on another day is another, bots and visitors
+        # without input don't count, and a project page counts as a project
+        # visit unless an excluded account owns the project
+        *[
+            (pageview, {**anonymous, "distinct_id": "v1", "time": at(3, m)})
+            for m in (0, 5)
+        ],
+        (pageview, {**anonymous, "distinct_id": "v1", "time": at(12, 0)}),
+        (
+            pageview,
+            {
+                **anonymous,
+                "distinct_id": "v2",
+                "owner_name": user.account.name,
+                "project_name": "proj-a",
+                "time": at(4, 0),
+            },
+        ),
+        (
+            pageview,
+            {
+                **anonymous,
+                "distinct_id": "v3",
+                "owner_name": superuser.account.name,
+                "project_name": "mine",
+                "time": at(5, 0),
+            },
+        ),
+        (
+            pageview,
+            {**anonymous, "distinct_id": "v4", "human": False, "bot": True},
+        ),
+        (
+            pageview,
+            {
+                **anonymous,
+                "distinct_id": "v5",
+                "human": False,
+                "interacted": False,
+            },
+        ),
+        (
+            pageview,
+            {
+                **anonymous,
+                "distinct_id": "v6",
+                "owner_name": user.account.name.upper(),
+                "project_name": "Proj-A",
+                "time": now_ts - 60,
+            },
+        ),
     ]
     lines = [
         json.dumps({"event": e, "properties": p}).encode() for e, p in events
@@ -530,7 +589,6 @@ def test_get_hub_stats(
         assert get.call_args.kwargs["auth"] == ("sa", "secret")
         params = get.call_args.kwargs["params"]
         assert params["project_id"] == 123
-        assert "anonymous" in params["where"]
         set_json.assert_called_once()
         assert stats["users"] == base["users"]
         # The other user isn't likely human yet, so is in neither count
@@ -544,6 +602,21 @@ def test_get_hub_stats(
                 "last_day": 1,
                 "last_7_days": 2,
                 "last_30_days": 3,
+            },
+            "human_visits": {
+                "last_day": 1,
+                "last_7_days": 4,
+                "last_30_days": 5,
+            },
+            "human_project_visits": {
+                "last_day": 1,
+                "last_7_days": 2,
+                "last_30_days": 2,
+            },
+            "projects_viewed": {
+                "last_day": 1,
+                "last_7_days": 1,
+                "last_30_days": 1,
             },
         }
         # Once they are, they count, with their earlier device folded in
@@ -567,6 +640,21 @@ def test_get_hub_stats(
                 "last_7_days": 3,
                 "last_30_days": 4,
             },
+            "human_visits": {
+                "last_day": 1,
+                "last_7_days": 4,
+                "last_30_days": 5,
+            },
+            "human_project_visits": {
+                "last_day": 1,
+                "last_7_days": 2,
+                "last_30_days": 2,
+            },
+            "projects_viewed": {
+                "last_day": 1,
+                "last_7_days": 1,
+                "last_30_days": 1,
+            },
         }
         # Excluded accounts are left out here too, and superusers come back
         stats = client.get(
@@ -582,13 +670,27 @@ def test_get_hub_stats(
             "last_7_days": 2,
             "last_30_days": 2,
         }
+        assert stats["analytics"]["human_project_visits"] == {
+            "last_day": 1,
+            "last_7_days": 3,
+            "last_30_days": 3,
+        }
+        assert stats["analytics"]["projects_viewed"] == {
+            "last_day": 1,
+            "last_7_days": 2,
+            "last_30_days": 2,
+        }
         # A cached result is used without asking Mixpanel again
         get.reset_mock()
-        cached = {str(user.id): [now_ts - 60, 0.0, True]}
+        cached = {
+            "people": {str(user.id): [now_ts - 60, 0.0, True]},
+            "visits": [["2026-01-01", "v1", "", "", now_ts - 60]],
+        }
         with patch("app.mixpanel.cache.get_json", return_value=cached):
             stats = client.get("/stats", headers=headers).json()
         get.assert_not_called()
         assert stats["analytics"]["active_users"]["last_day"] == 1
+        assert stats["analytics"]["human_visits"]["last_day"] == 1
         # Mixpanel failing, by connection or status, leaves analytics out
         # rather than failing the request, and says why in the log
         get.side_effect = requests.ConnectionError("down")

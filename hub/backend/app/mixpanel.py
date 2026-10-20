@@ -3,6 +3,7 @@
 import json
 import time
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 import requests
 from mixpanel import Mixpanel
@@ -20,21 +21,27 @@ mp = Mixpanel(settings.MIXPANEL_TOKEN)
 AUTOMATIC_EVENTS = {"404 (front end)", "Session auto-logout"}
 
 
-def get_active_people(
-    days: int = 30,
-) -> dict[str, tuple[float, float, bool]] | None:
-    """Everyone tracked in the last ``days`` days, keyed by distinct ID.
+class Usage(NamedTuple):
+    # By distinct ID: when last seen and last engaged, as Unix times (0 if
+    # never), and whether the ID is an account's rather than a device's
+    people: dict[str, tuple[float, float, bool]]
+    # Anonymous visitors' human page views, as (UTC day, visitor ID, owner
+    # name, project name, latest time), one per page owner and project
+    visits: list[tuple[str, str, str, str, float]]
 
-    Values are when they were last seen and when they last looked like a
-    person, as Unix times (0 if never), and whether the ID is an account's
-    rather than a device's. A device looks like a person on a day it sent two
-    or more events, at least one after input: bots that rotate their user
-    agent or address get a fresh device for each request, and a page left
-    open sends no input. A device's events from before signing in are folded
+
+def get_usage(days: int = 30) -> Usage | None:
+    """Who used the hub in the last ``days`` days, from Mixpanel.
+
+    People are everyone who accepted analytics, keyed by distinct ID. A
+    device looks like a person on a day it sent two or more events, at least
+    one after input: bots that rotate their user agent or address get a
+    fresh device for each request, and a page left open sends no input. A device's events from before signing in are folded
     into the account when a later event links the two. Read from the raw
     event export, since the Query API can't count unique people across all
-    events without a saved report. Anonymous page views are left out, since
-    their IDs change daily, as are events from automated browsers. None when
+    events without a saved report. Anonymous page views are kept apart as
+    visits, since their IDs change daily, and only those the hub judged
+    human count. Events from automated browsers are left out. None when
     reading isn't configured or fails.
     """
     username = settings.MIXPANEL_SERVICE_ACCOUNT_USERNAME
@@ -42,10 +49,15 @@ def get_active_people(
     if not (username and secret and settings.MIXPANEL_PROJECT_ID):
         return None
     # Cached since the export allows 60 requests an hour
-    key = cache.make_key("mixpanel", "people", str(days))
+    key = cache.make_key("mixpanel", "usage", str(days))
     cached = cache.get_json(key)
     if cached is not None:
-        return {k: (v[0], v[1], v[2]) for k, v in cached.items()}
+        return Usage(
+            people={
+                k: (v[0], v[1], v[2]) for k, v in cached["people"].items()
+            },
+            visits=[(v[0], v[1], v[2], v[3], v[4]) for v in cached["visits"]],
+        )
     since = time.time() - days * 86400
     # Export dates are UTC for projects created since 2023
     today = datetime.now(UTC).date()
@@ -54,6 +66,7 @@ def get_active_people(
     # Event count, whether any followed input, and the latest, by ID and day
     days_seen: dict[tuple[str, str], tuple[int, bool, float]] = {}
     device_accounts: dict[str, str] = {}
+    visits: dict[tuple[str, str, str, str], float] = {}
     try:
         resp = requests.get(
             f"https://{settings.MIXPANEL_EXPORT_HOST}/api/2.0/export",
@@ -61,7 +74,6 @@ def get_active_people(
                 "project_id": settings.MIXPANEL_PROJECT_ID,
                 "from_date": (today - timedelta(days=days)).isoformat(),
                 "to_date": today.isoformat(),
-                "where": 'not defined(properties["anonymous"])',
             },
             auth=(username, secret),
             timeout=10,
@@ -78,12 +90,20 @@ def get_active_people(
             event = json.loads(line)
             props = event.get("properties", {})
             t = props.get("time", 0)
-            if (
-                props.get("anonymous")
-                or props.get("bot")
-                or props.get("webdriver")
-                or t < since
-            ):
+            if t < since:
+                continue
+            day = datetime.fromtimestamp(t, UTC).date().isoformat()
+            if props.get("anonymous"):
+                if props.get("human") is True:
+                    visit = (
+                        day,
+                        str(props.get("distinct_id") or ""),
+                        str(props.get("owner_name") or ""),
+                        str(props.get("project_name") or ""),
+                    )
+                    visits[visit] = max(t, visits.get(visit, 0.0))
+                continue
+            if props.get("bot") or props.get("webdriver"):
                 continue
             user_id = props.get("$user_id")
             distinct_id = str(props.get("distinct_id") or "")
@@ -106,7 +126,6 @@ def get_active_people(
                 had_input = not name.startswith("$") and (
                     name not in AUTOMATIC_EVENTS
                 )
-            day = datetime.fromtimestamp(t, UTC).date().isoformat()
             n, any_input, latest = days_seen.get(
                 (person, day), (0, False, 0.0)
             )
@@ -128,12 +147,15 @@ def get_active_people(
     for (person, _), (n, any_input, latest) in days_seen.items():
         if n >= 2 and any_input and person in last_seen:
             last_engaged[person] = max(latest, last_engaged.get(person, 0.0))
-    people = {
-        person: (t, last_engaged.get(person, 0.0), person in accounts)
-        for person, t in last_seen.items()
-    }
-    cache.set_json(key, people, ttl=3600)
-    return people
+    usage = Usage(
+        people={
+            person: (t, last_engaged.get(person, 0.0), person in accounts)
+            for person, t in last_seen.items()
+        },
+        visits=[(*visit, t) for visit, t in visits.items()],
+    )
+    cache.set_json(key, usage._asdict(), ttl=3600)
+    return usage
 
 
 def track(

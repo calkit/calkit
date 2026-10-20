@@ -76,9 +76,30 @@ export const AnalyticsStatsSchema = {
       description:
         "Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.",
     },
+    human_visits: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Visitor-days from visitors who didn't accept analytics, i.e., distinct (UTC day, visitor) pairs with a page view in the window that followed input and wasn't from a bot. Not unique people: their IDs reset daily, so one person visiting on three days counts three times.",
+    },
+    human_project_visits: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Human visits as above that included a project page, leaving out projects owned by excluded accounts",
+    },
+    projects_viewed: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Distinct projects, not owned by excluded accounts, with human visits as above",
+    },
   },
   type: "object",
-  required: ["active_users", "active_visitors"],
+  required: [
+    "active_users",
+    "active_visitors",
+    "human_visits",
+    "human_project_visits",
+    "projects_viewed",
+  ],
   title: "AnalyticsStats",
 } as const
 

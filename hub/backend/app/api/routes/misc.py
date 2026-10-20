@@ -263,6 +263,27 @@ class AnalyticsStats(BaseModel):
             "IDs change daily."
         )
     )
+    human_visits: ActiveCounts = Field(
+        description=(
+            "Visitor-days from visitors who didn't accept analytics, i.e., "
+            "distinct (UTC day, visitor) pairs with a page view in the "
+            "window that followed input and wasn't from a bot. Not unique "
+            "people: their IDs reset daily, so one person visiting on three "
+            "days counts three times."
+        )
+    )
+    human_project_visits: ActiveCounts = Field(
+        description=(
+            "Human visits as above that included a project page, leaving out "
+            "projects owned by excluded accounts"
+        )
+    )
+    projects_viewed: ActiveCounts = Field(
+        description=(
+            "Distinct projects, not owned by excluded accounts, with human "
+            "visits as above"
+        )
+    )
 
 
 class HubStats(BaseModel):
@@ -361,8 +382,9 @@ def get_hub_stats(
     # Analytics, counting users only if they're likely human and visitors
     # only on days they looked like a person
     analytics = None
-    people = mixpanel.get_active_people()
-    if people is not None:
+    usage = mixpanel.get_usage()
+    if usage is not None:
+        people = usage.people
         excluded_ids = {str(i) for i in excluded_user_ids}
         candidate_ids: set[uuid.UUID] = set()
         for distinct_id, (_, _, is_account) in people.items():
@@ -391,9 +413,26 @@ def get_hub_stats(
             for k, (_, engaged, is_account) in people.items()
             if not is_account and engaged
         }
+        # Anonymous visits, by visitor-day and by project
+        excluded_names = {a.name.lower() for a in excluded_accounts}
+        visits: dict[str, float] = {}
+        project_visits: dict[str, float] = {}
+        projects_viewed: dict[str, float] = {}
+        for day, visitor, owner, project, t in usage.visits:
+            visit = f"{day} {visitor}"
+            visits[visit] = max(t, visits.get(visit, 0.0))
+            if owner and project and owner.lower() not in excluded_names:
+                project_visits[visit] = max(t, project_visits.get(visit, 0.0))
+                viewed = f"{owner.lower()}/{project.lower()}"
+                projects_viewed[viewed] = max(
+                    t, projects_viewed.get(viewed, 0.0)
+                )
         analytics = AnalyticsStats(
             active_users=count_active(active_users),
             active_visitors=count_active(active_visitors),
+            human_visits=count_active(visits),
+            human_project_visits=count_active(project_visits),
+            projects_viewed=count_active(projects_viewed),
         )
     return HubStats(
         users=UserStats(

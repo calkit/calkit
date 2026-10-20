@@ -682,15 +682,18 @@ Every compile writes the current period, e.g., today's date, to a file
 the stage depends on, so the stage reruns once each period and is
 skipped until the next one starts. The stage can read the file to learn
 which period it's running for, e.g.,
-`.calkit/local/current-periods/day-UTC.txt` holds `2026-10-20` on
-that day. Set `CALKIT_NOW` to an ISO 8601 time to compile as if it
+`.calkit/local/current-periods/1-day-UTC.txt` holds `2026-10-20` on
+that day. A period of more than one unit, e.g., '3 days', is counted
+from the start of 1970 (or for weeks, its first Monday), so every machine
+agrees where one starts, and is written as its first unit, e.g., the day
+it starts. Set `CALKIT_NOW` to an ISO 8601 time to compile as if it
 were then, e.g., to redo a past day.
 
-| Parameter  | Type                                            | Required | Default | Description                                                                  |
-| ---------- | ----------------------------------------------- | -------- | ------- | ---------------------------------------------------------------------------- |
-| `kind`     | Literal['schedule']                             | yes      |         | Always 'schedule'.                                                           |
-| `period`   | Literal['hour', 'day', 'week', 'month', 'year'] | yes      |         | How often the stage runs, i.e., once per this period. Weeks start on Monday. |
-| `timezone` | str                                             | no       | 'UTC'   | Time zone periods start in, e.g., 'America/New_York'.                        |
+| Parameter  | Type                | Required | Default | Description                                                                                                                                                                                                                |
+| ---------- | ------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`     | Literal['schedule'] | yes      |         | Always 'schedule'.                                                                                                                                                                                                         |
+| `period`   | str                 | yes      |         | How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, and years; 'm' is a minute and 'mo' a month. |
+| `timezone` | str                 | no       | 'UTC'   | Time zone periods start in, e.g., 'America/New_York'.                                                                                                                                                                      |
 
 #### `PathInput`
 

@@ -18,7 +18,7 @@ that produced them, for fast iteration and full transparency.**
 - **<!-- calkit value key=releases_per_week_last_90_days -->7.3<!-- /calkit value -->**
   releases per week on average
 
-As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
+as of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->
 
 ## The problem
 
@@ -86,7 +86,8 @@ What we learn will be published openly and will drive Calkit's development.
 ![](../img/2027-budget.png)
 
 ::: footer
-Calkit is led by Pete Bachant, a Senior Research Software Engineer
+Calkit is led by [Pete Bachant](https://petebachant.me),
+a Senior Research Software Engineer
 and instructor at Caltech's
 [Schmidt Academy for Software Engineering](https://sase.caltech.edu),
 which funds 25% of his time on Calkit.

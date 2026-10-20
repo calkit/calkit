@@ -78,7 +78,7 @@ In <!-- calkit value key=workshops -->8<!-- /calkit value --> workshops,
 roughly <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
 researchers will connect their analyses to Overleaf with our new
 [browser extension](https://chromewebstore.google.com/detail/calkit/idhdomgapfolnpffanajdckdaojencal),
-and we'll provide follow-up support
+and we expect to provide follow-up support
 for about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
 of them.
 What we learn will be published openly and will drive Calkit's development.

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import os
+import posixpath
 import re
+from collections.abc import Callable
 
 # The artifact kinds whose provenance is *checked*. Each entry must say
 # where it came from: a pipeline stage, an import, or the person who
@@ -837,4 +840,206 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
     raise ValueError(
         "Nothing to fetch from: expected one of 'git', 'url', 'project', or "
         "'doi'"
+    )
+
+
+@dataclasses.dataclass
+class ProvenanceStep:
+    """A path on the way back from something shown, and the stage that
+    produces it, if one does.
+    """
+
+    path: str
+    stage: str | None = None
+
+
+@dataclasses.dataclass
+class ProvenanceGap:
+    """A path nothing records the origin of, and the chain from what's
+    shown back to it.
+    """
+
+    steps: list[ProvenanceStep]
+
+    @property
+    def path(self) -> str:
+        return self.steps[-1].path
+
+    def __str__(self) -> str:
+        if len(self.steps) == 1:
+            return f"nothing records where {self.path} came from"
+        chain = []
+        for step in self.steps:
+            chain.append(step.path)
+            if step.stage:
+                chain.append(f"stage {step.stage}")
+        return (
+            f"nothing records where {self.path} came from "
+            f"({' <- '.join(chain)})"
+        )
+
+
+def find_provenance_gaps(
+    paths: list[str],
+    ck_info: dict,
+    dvc_yaml: dict,
+    dvc_lock: dict,
+    is_data: Callable[[str], bool],
+) -> list[ProvenanceGap]:
+    """Follow each path back through the stages that produce it, to where
+    each chain starts, and return the starts nothing accounts for.
+
+    A chain starts somewhere accounted for at an entry recording an import
+    or who created it, or at code and config the authors wrote. Anything
+    else nothing produces, i.e., what ``is_data`` says is data, is a gap.
+    Stages are read from ``dvc.lock`` where they've run, and from
+    ``dvc.yaml`` where they haven't, except for matrix stages, whose
+    expansions aren't known until they run.
+    """
+
+    def norm(path: str, wdir: str = "") -> str:
+        return posixpath.normpath(posixpath.join(wdir, path))
+
+    def stage_paths(items: list | None, wdir: str) -> list[str]:
+        out = []
+        for item in items or []:
+            if isinstance(item, dict):
+                item = item.get("path") or next(iter(item), None)
+            if isinstance(item, str) and "${" not in item:
+                out.append(norm(item, wdir))
+        return out
+
+    def under(path: str, parent: str) -> bool:
+        return path == parent or path.startswith(parent.rstrip("/") + "/")
+
+    def producer(path: str) -> str | None:
+        for name, (_, outs) in stages.items():
+            if any(under(path, out) for out in outs):
+                return name
+        return None
+
+    def walk(path: str, trail: list[ProvenanceStep]) -> None:
+        entry = next(
+            (e for e in entries if under(path, norm(e["path"]))), None
+        )
+        if entry is not None and (
+            entry.get("imported_from") is not None
+            or entry.get("created_by") is not None
+        ):
+            return
+        stage = producer(path)
+        if stage is None:
+            # An entry naming a stage not compiled yet is taken at its word
+            if entry is None or entry.get("stage") is None:
+                if is_data(path) and path not in gaps:
+                    gaps[path] = ProvenanceGap(trail + [ProvenanceStep(path)])
+            return
+        if stage in walked:
+            return
+        walked.add(stage)
+        for dep in stages[stage][0]:
+            # Calkit's own bookkeeping, e.g., environment locks
+            if dep.startswith(".calkit/") or dep == "calkit.yaml":
+                continue
+            walk(dep, trail + [ProvenanceStep(path, stage)])
+
+    yaml_stages = dvc_yaml.get("stages") or {}
+    lock_stages = dvc_lock.get("stages") or {}
+    # Each stage's inputs and outputs, relative to the project
+    stages: dict[str, tuple[list[str], list[str]]] = {}
+    for name, stage in lock_stages.items():
+        base = (yaml_stages.get(name.split("@")[0]) or {}).get("wdir") or ""
+        stages[name] = (
+            stage_paths((stage or {}).get("deps"), base),
+            stage_paths((stage or {}).get("outs"), base),
+        )
+    for name, stage in yaml_stages.items():
+        if (
+            not isinstance(stage, dict)
+            or name in stages
+            or "matrix" in stage
+            or "foreach" in stage
+        ):
+            continue
+        wdir = stage.get("wdir") or ""
+        stages[name] = (
+            stage_paths(stage.get("deps"), wdir),
+            stage_paths(stage.get("outs"), wdir),
+        )
+    entries = [
+        entry
+        for items in ck_info.values()
+        if isinstance(items, list)
+        for entry in items
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    ]
+    gaps: dict[str, ProvenanceGap] = {}
+    walked: set[str] = set()
+    for path in paths:
+        walk(norm(path), [])
+    return list(gaps.values())
+
+
+def is_data_path(
+    path: str,
+    is_file: Callable[[str], bool],
+    is_dir: Callable[[str], bool],
+    listdir: Callable[[str], list[str]],
+) -> bool:
+    """Whether a path is data, which needs a recorded origin, rather than
+    code or config the authors wrote.
+
+    Data is anything DVC tracks, and otherwise files of a kind that isn't
+    code or config, including inside a directory. Takes the filesystem as
+    functions, so a project on disk and one read out of Git agree.
+    """
+    from calkit.detect import DATASET_EXTENSIONS
+    from calkit.reproducibility import MISC_EXTENSIONS_NEEDING_PROVENANCE
+
+    exts = MISC_EXTENSIONS_NEEDING_PROVENANCE | DATASET_EXTENSIONS | {".tsv"}
+    parts = path.split("/")
+    if any(
+        is_file("/".join(parts[:i]) + ".dvc") for i in range(1, len(parts) + 1)
+    ):
+        return True
+    if is_dir(path):
+        pending = [path]
+        while pending:
+            parent = pending.pop()
+            for name in listdir(parent):
+                child = f"{parent}/{name}"
+                if is_dir(child):
+                    pending.append(child)
+                elif posixpath.splitext(name)[1].lower() in exts:
+                    return True
+        return False
+    return posixpath.splitext(path)[1].lower() in exts
+
+
+def find_project_provenance_gaps(
+    paths: list[str], wdir: str = ".", ck_info: dict | None = None
+) -> list[ProvenanceGap]:
+    """:func:`find_provenance_gaps` for a project on disk."""
+    import calkit
+
+    def read_yaml(name: str) -> dict:
+        fpath = os.path.join(wdir, name)
+        if not os.path.isfile(fpath):
+            return {}
+        with open(fpath) as f:
+            return calkit.ryaml.load(f) or {}
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    return find_provenance_gaps(
+        paths,
+        ck_info=ck_info,
+        dvc_yaml=read_yaml("dvc.yaml"),
+        dvc_lock=read_yaml("dvc.lock"),
+        is_data=lambda path: is_data_path(
+            path,
+            is_file=lambda p: os.path.isfile(os.path.join(wdir, p)),
+            is_dir=lambda p: os.path.isdir(os.path.join(wdir, p)),
+            listdir=lambda p: os.listdir(os.path.join(wdir, p)),
+        ),
     )

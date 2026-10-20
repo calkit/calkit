@@ -1155,6 +1155,20 @@ class Result(SQLModel):
     stage_status: StageStatus | None = None
 
 
+class ProvenanceStep(SQLModel):
+    """A path on the way back from an artifact, and the stage producing it."""
+
+    path: str
+    stage: str | None = None
+
+
+class ProvenanceGap(SQLModel):
+    """Something nothing records the origin of, and the chain to it."""
+
+    path: str
+    steps: list[ProvenanceStep] = Field(default_factory=list)
+
+
 class Provenance(SQLModel):
     """Where an artifact, or one value inside a results file, came from."""
 
@@ -1176,6 +1190,14 @@ class Provenance(SQLModel):
     # from, and the stage that copied it; the rest describes the original
     copied_from: str | None = None
     copy_stage: str | None = None
+    # What calkit.yaml says about an artifact no stage produces: where it
+    # was imported from, or who created it, possibly recorded for a folder
+    # it's in
+    origin: str | None = None
+    origin_url: str | None = None
+    origin_path: str | None = None
+    # Data behind it that nothing records the origin of, however far back
+    gaps: list[ProvenanceGap] = Field(default_factory=list)
 
 
 class Table(SQLModel):

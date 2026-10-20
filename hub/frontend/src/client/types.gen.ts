@@ -4022,6 +4022,54 @@ export type Provenance = {
    * Copy Stage
    */
   copy_stage?: string | null
+  /**
+   * Origin
+   */
+  origin?: string | null
+  /**
+   * Origin Url
+   */
+  origin_url?: string | null
+  /**
+   * Origin Path
+   */
+  origin_path?: string | null
+  /**
+   * Gaps
+   */
+  gaps?: Array<ProvenanceGap>
+}
+
+/**
+ * ProvenanceGap
+ *
+ * Something nothing records the origin of, and the chain to it.
+ */
+export type ProvenanceGap = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Steps
+   */
+  steps?: Array<ProvenanceStep>
+}
+
+/**
+ * ProvenanceStep
+ *
+ * A path on the way back from an artifact, and the stage producing it.
+ */
+export type ProvenanceStep = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Stage
+   */
+  stage?: string | null
 }
 
 /**
@@ -5368,6 +5416,10 @@ export type ReproCheck = {
    * Misc Needing Provenance
    */
   misc_needing_provenance?: Array<string>
+  /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
   /**
    * Scripts Not In Pipeline
    */
@@ -6891,6 +6943,10 @@ export type ReproCheckWritable = {
    * Misc Needing Provenance
    */
   misc_needing_provenance?: Array<string>
+  /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
   /**
    * Scripts Not In Pipeline
    */

@@ -578,3 +578,134 @@ def test_import_search_is_wider_than_provenance_scoring():
         if kind in searched:
             continue
         assert kind in ("tables", "presentations"), kind
+
+
+def test_find_provenance_gaps():
+    import posixpath
+
+    from calkit.provenance import find_provenance_gaps
+
+    ck_info = {
+        "datasets": [
+            {"path": "data/imported", "imported_from": {"doi": "10.1/x"}},
+            {"path": "data/measured.csv", "created_by": {"email": "a@b.c"}},
+        ],
+        # Taken at its word, though the stage isn't compiled yet
+        "figures": [{"path": "figures/new.png", "stage": "not-compiled"}],
+    }
+    dvc_yaml = {
+        "stages": {
+            "clean": {
+                "cmd": "python clean.py",
+                "deps": ["clean.py", "../data/raw.csv"],
+                "outs": ["../data/clean"],
+                "wdir": "scripts",
+            },
+            "fit": {
+                "cmd": "python fit.py",
+                "deps": [
+                    "fit.py",
+                    "data/clean",
+                    "data/imported/a.csv",
+                    "data/measured.csv",
+                    ".calkit/env-locks/py.json",
+                ],
+                "outs": [{"figures/fit.png": {"cache": False}}],
+            },
+            # Never run, so its expansions aren't known
+            "sweep": {
+                "matrix": {"n": [1, 2]},
+                "cmd": "python sweep.py ${item.n}",
+                "deps": ["mystery.csv"],
+                "outs": ["figures/sweep-${item.n}.png"],
+            },
+            "summarize": {
+                "cmd": "python summarize.py",
+                "deps": ["summarize.py", "params.yaml", "data/loose.json"],
+                "outs": ["results/summary.json"],
+            },
+        }
+    }
+    # A run records its inputs, which is what's followed where it exists
+    dvc_lock = {
+        "stages": {
+            "summarize": {
+                "deps": [
+                    {"path": "summarize.py"},
+                    {"path": "params.yaml"},
+                    {"path": "data/loose.json"},
+                ],
+                "outs": [{"path": "results/summary.json"}],
+            }
+        }
+    }
+    data = {".csv", ".json", ".png"}
+
+    def gaps(paths: list[str]) -> list[str]:
+        return [
+            str(gap)
+            for gap in find_provenance_gaps(
+                paths,
+                ck_info=ck_info,
+                dvc_yaml=dvc_yaml,
+                dvc_lock=dvc_lock,
+                is_data=lambda p: (
+                    p.startswith("data/") or posixpath.splitext(p)[1] in data
+                ),
+            )
+        ]
+
+    # Followed back through two stages to raw data nothing accounts for,
+    # while an import, a measurement, code, and Calkit's bookkeeping are
+    # all fine
+    assert gaps(["figures/fit.png"]) == [
+        "nothing records where data/raw.csv came from (figures/fit.png "
+        "<- stage fit <- data/clean <- stage clean <- data/raw.csv)"
+    ]
+    # Something shown that nothing produces is a gap itself, unless it's
+    # written by hand, e.g., a table typed in LaTeX
+    assert gaps(["figures/drawn.png", "tables/typed.tex"]) == [
+        "nothing records where figures/drawn.png came from"
+    ]
+    # Config is fine, and loose data is reported once however many paths
+    # lead to it
+    assert gaps(["results/summary.json", "results/summary.json"]) == [
+        "nothing records where data/loose.json came from "
+        "(results/summary.json <- stage summarize <- data/loose.json)"
+    ]
+    assert gaps(["figures/new.png"]) == []
+    # A matrix stage that hasn't run produces nothing known yet
+    assert gaps(["figures/sweep-1.png"]) == [
+        "nothing records where figures/sweep-1.png came from"
+    ]
+
+
+def test_is_data_path(tmp_path):
+    from calkit.provenance import is_data_path
+
+    def is_data(path: str) -> bool:
+        return is_data_path(
+            path,
+            is_file=lambda p: (tmp_path / p).is_file(),
+            is_dir=lambda p: (tmp_path / p).is_dir(),
+            listdir=lambda p: [c.name for c in (tmp_path / p).iterdir()],
+        )
+
+    (tmp_path / "data" / "raw" / "deep").mkdir(parents=True)
+    (tmp_path / "data" / "raw" / "deep" / "x.csv").write_text("a\n")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "plot.py").write_text("")
+    (tmp_path / "big").mkdir()
+    (tmp_path / "big.dvc").write_text("outs: []\n")
+    # A data file, or a folder with one anywhere inside, is data
+    assert is_data("data/raw/deep/x.csv")
+    assert is_data("data")
+    assert is_data("figures/drawn.PNG")
+    # Code and config aren't, nor is a folder of code
+    assert not is_data("scripts/plot.py")
+    assert not is_data("scripts")
+    assert not is_data("params.yaml")
+    # Anything DVC tracks is, including inside a tracked folder, whatever
+    # its kind
+    assert is_data("big")
+    assert is_data("big/notes.txt")

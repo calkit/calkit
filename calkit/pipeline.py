@@ -21,6 +21,7 @@ from calkit.models.pipeline import (
     Pipeline,
     ShellCommandStage,
     Stage,
+    is_flag_and_value,
 )
 
 
@@ -2381,14 +2382,16 @@ def to_dvc(
         if not isinstance(subproject, dict) or not subproject.get("path"):
             raise ValueError("Subprojects must have a 'path' defined")
         sp = Path(subproject["path"]).as_posix()
-        if not os.path.isdir(sp):
+        # The path is relative to this project, which may itself be nested
+        sp_dir = os.path.join(wdir, sp) if wdir else sp
+        if not os.path.isdir(sp_dir):
             raise NotADirectoryError(f"Subproject path '{sp}' does not exist")
-        sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        sp_is_isolated = os.path.isdir(os.path.join(sp_dir, ".dvc"))
         # Always compile the subproject's dvc.yaml recursively.
         # Inline subprojects need their dvc.yaml written so DVC discovers them
         # via --all-pipelines; isolated subprojects get a wrapper stage instead.
         sp_dvc_stages = to_dvc(
-            wdir=sp,
+            wdir=sp_dir,
             write=write,
             verbose=verbose,
             manage_gitignore=manage_gitignore,
@@ -2685,6 +2688,15 @@ def to_dvc(
         # parameters if any reference project-level parameters
         if stage.kind == "jupyter-notebook":
             stage.update_parameters(params=project_params)
+        # The one form of arg that isn't passed as a single argument
+        for arg in getattr(stage, "args", None) or []:
+            if is_flag_and_value(arg):
+                warnings.warn(
+                    f"Stage '{stage_name}' has the arg {arg!r}, which the "
+                    "shell splits into separate arguments. Write each as "
+                    f"its own item instead: {arg.split()}.",
+                    stacklevel=2,
+                )
         dvc_stage = stage.to_dvc()
         # Check if this stage iterates, which means we should create a matrix
         # stage
@@ -3072,6 +3084,9 @@ def translate_run_targets(
       directly inside the subproject directory)
     - ``stage.diffs`` → every diff stage a latex stage generates
 
+    A subproject is named by its path; a declared one, and a nested one
+    whose directory name is unambiguous, by its directory name too.
+
     Any target that does not match a known subproject is passed through
     unchanged into the first return value.
 
@@ -3085,8 +3100,18 @@ def translate_run_targets(
     import calkit.latex
     import calkit.markdown
 
-    def expand_diffs(target: str, stages: dict) -> list[str]:
-        """Turn a target naming all of a latex stage's diffs into theirs."""
+    def expand(target: str, info: dict, wdir: str | None = None) -> list[str]:
+        """Turn a target standing for other stages into theirs."""
+        stages = info.get("pipeline", {}).get("stages", {})
+        # A markdown stage stands in for the stages its blocks declare
+        md_path = calkit.markdown.get_markdown_stages(info).get(target)
+        if md_path is not None:
+            return calkit.markdown.get_stage_names(
+                os.path.join(wdir, md_path) if wdir else md_path,
+                target,
+                pdf=bool(stages[target].get("pdf")),
+            )
+        # A latex stage's diffs are separate DVC stages
         stage_name = target.removesuffix(calkit.latex.DIFFS_TARGET_SUFFIX)
         if stage_name == target or stage_name not in stages:
             return [target]
@@ -3099,35 +3124,29 @@ def translate_run_targets(
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
-    subprojects = ck_info.get("subprojects", [])
-    sp_map: dict[str, dict] = {}
-    for sp_cfg in subprojects:
+    # A subproject is named by its path, as status names its stages, and
+    # one declared here by its directory name too
+    sp_map: dict[str, str] = {}
+    for sp_cfg in ck_info.get("subprojects", []):
         if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
             continue
         sp = Path(sp_cfg["path"]).as_posix()
-        sp_map[sp] = sp_cfg
-        sp_map[Path(sp).name] = sp_cfg
-    # A markdown stage stands in for the stages its blocks declare, so a
-    # target naming it has to become the stages DVC actually knows about.
-    # Done before subproject handling because a Markdown path contains no
-    # ':' and so can't be a subproject shorthand.
-    md_stages = calkit.markdown.get_markdown_stages(ck_info)
-    if md_stages:
-        expanded: list[str] = []
-        for target in targets:
-            md_path = md_stages.get(target)
-            if md_path is None:
-                expanded.append(target)
-                continue
-            cfg = ck_info.get("pipeline", {}).get("stages", {}).get(target)
-            expanded += calkit.markdown.get_stage_names(
-                md_path, target, pdf=bool(cfg.get("pdf"))
-            )
-        targets = expanded
-    # A latex stage's diffs are separate DVC stages, so a target addressing
-    # them all has to become their names
-    stages = ck_info.get("pipeline", {}).get("stages", {})
-    targets = [name for t in targets for name in expand_diffs(t, stages)]
+        sp_map[sp] = sp
+        sp_map[Path(sp).name] = sp
+    declared = set(sp_map.values())
+    root_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # A nested one by its directory name too, when that's unambiguous
+    nested_by_name: dict[str, list[str]] = {}
+    for sp_wdir, _ in calkit.iter_projects(ck_info=ck_info):
+        sp = Path(sp_wdir).as_posix()
+        if sp != ".":
+            sp_map.setdefault(sp, sp)
+            if sp not in declared:
+                nested_by_name.setdefault(Path(sp).name, []).append(sp)
+    # Targets have to become the stages DVC actually knows about. Done
+    # before subproject handling because a Markdown path contains no ':'
+    # and so can't be a subproject shorthand.
+    targets = [name for t in targets for name in expand(t, ck_info)]
     parent_targets: list[str] = []
     isolated_sp_targets: list[tuple[str, str | None]] = []
     for target in targets:
@@ -3136,28 +3155,61 @@ def translate_run_targets(
         else:
             sp_part = target
             stage_part = None
+        nested = nested_by_name.get(sp_part, [])
+        # A bare name is a stage of this project's before a nested
+        # subproject's
+        if (
+            sp_part not in sp_map
+            and nested
+            and (stage_part or sp_part not in root_stages)
+        ):
+            if len(nested) > 1:
+                raise ValueError(
+                    f"'{sp_part}' could be any of the subprojects "
+                    f"{', '.join(nested)}; name one by its path"
+                )
+            sp_map[sp_part] = nested[0]
         if sp_part not in sp_map:
             parent_targets.append(target)
             continue
-        sp_cfg = sp_map[sp_part]
-        sp = Path(sp_cfg["path"]).as_posix()
-        sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        sp = sp_map[sp_part]
+        # A nested subproject's stages are run by the nearest project with
+        # its own DVC repo, which is the parent's unless one is isolated
+        parts = sp.split("/")
+        dvc_root = next(
+            (
+                d
+                for d in (
+                    "/".join(parts[:i]) for i in range(len(parts), 0, -1)
+                )
+                if os.path.isdir(os.path.join(d, ".dvc"))
+            ),
+            None,
+        )
         if not stage_part:
-            if sp_is_isolated:
+            if dvc_root is None:
+                parent_targets.append(f"{sp}/dvc.yaml")
+            elif dvc_root != sp:
+                rel = sp.removeprefix(f"{dvc_root}/")
+                isolated_sp_targets.append((dvc_root, f"{rel}/dvc.yaml"))
+            elif sp in declared:
+                # The parent runs it through its wrapper stage
                 parent_targets.append(Path(sp).name)
             else:
-                parent_targets.append(f"{sp}/dvc.yaml")
+                isolated_sp_targets.append((sp, None))
             continue
-        # A subproject's diffs are named after its own stages
-        sp_stages: dict = {}
-        if stage_part.endswith(calkit.latex.DIFFS_TARGET_SUFFIX):
-            sp_info = calkit.load_calkit_info(wdir=sp)
-            sp_stages = sp_info.get("pipeline", {}).get("stages", {})
-        for stage_name in expand_diffs(stage_part, sp_stages):
-            if sp_is_isolated:
+        # A subproject's stages expand to its own
+        sp_info = calkit.load_calkit_info(wdir=sp)
+        for stage_name in expand(stage_part, sp_info, wdir=sp):
+            if dvc_root is None:
+                parent_targets.append(f"{sp}/dvc.yaml:{stage_name}")
+            elif dvc_root == sp:
                 isolated_sp_targets.append((sp, stage_name))
             else:
-                parent_targets.append(f"{sp}/dvc.yaml:{stage_name}")
+                rel = sp.removeprefix(f"{dvc_root}/")
+                isolated_sp_targets.append(
+                    (dvc_root, f"{rel}/dvc.yaml:{stage_name}")
+                )
     return parent_targets, isolated_sp_targets
 
 

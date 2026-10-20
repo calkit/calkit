@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://docs.calkit.org/schemas/calkit.json
+name: example-subprojects-experiment
+title: Experiment
+
+requirements:
+  - uv
+
+# Subprojects can be nested
+subprojects:
+  - path: calibration
+
+environments:
+  py:
+    kind: uv
+    path: pyproject.toml
+
+pipeline:
+  stages:
+    collect:
+      kind: python-script
+      script_path: scripts/collect.py
+      environment: py
+      inputs:
+        - calibration/results/calibration.json
+      outputs:
+        - path: data/measurements.csv
+          storage: git

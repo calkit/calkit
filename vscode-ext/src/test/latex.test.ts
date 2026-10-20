@@ -63,6 +63,25 @@ test("pipelineLatexDiffs mirrors the CLI's pipeline diff names and paths", () =>
       toRef: "origin/paper_v2",
     },
   ]);
+  // A subproject's stage, merged in with its target relative to the root,
+  // still builds its diffs under where it runs
+  assert.deepEqual(
+    pipelineLatexDiffs({
+      "sub:paper": {
+        kind: "latex",
+        target_path: "sub/pubs/tex/main.tex",
+        subproject_wdir: "sub/pubs",
+        diffs: ["main"],
+      },
+    }).map((d) => [d.path, d.document, d.stage]),
+    [
+      [
+        "sub/pubs/.calkit/latex-diffs/main/tex/main.pdf",
+        "sub/pubs/tex/main.tex",
+        "sub:paper-diff-main",
+      ],
+    ],
+  );
 });
 
 test("latexStagePdf and latexStageSource map a latex stage's document and PDF", () => {

@@ -536,3 +536,121 @@ def test_targeted_status_uses_full_subproject_status_for_stage_targets(
     )
     assert status.is_stale
     assert status.stale_stage_names == ["post-process"]
+
+
+def test_subproject_checks(tmp_dir, monkeypatch):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("sub")
+    with open("sub/requirements.txt", "w") as f:
+        f.write("")
+    with open("sub/ready", "w") as f:
+        f.write("")
+    subprocess.check_call(["git", "add", "sub/ready"])
+    write_ck_info(
+        "sub/calkit.yaml",
+        {
+            "requirements": [
+                {"kind": "env-var", "name": "SUBPROJECT_ONLY_VAR"},
+                # Only passes when checked from the subproject
+                {
+                    "kind": "setup",
+                    "name": "ready",
+                    "check_command": "git ls-files --error-unmatch ready",
+                },
+            ],
+            "environments": {
+                "sub-env": {
+                    "kind": "uv-venv",
+                    "path": "requirements.txt",
+                    "python": "3.12",
+                }
+            },
+            "pipeline": {
+                "stages": {
+                    "produce": make_stage(
+                        'echo "from sub" > a.txt',
+                        outputs=[{"path": "a.txt", "storage": "git"}],
+                    )
+                }
+            },
+        },
+    )
+    # A nested subproject, whose environment only exists once a run from
+    # the root builds it
+    os.makedirs("sub/nested")
+    with open("sub/nested/requirements.txt", "w") as f:
+        f.write("")
+    write_ck_info(
+        "sub/nested/calkit.yaml",
+        {
+            "environments": {
+                "nested-env": {
+                    "kind": "uv-venv",
+                    "path": "requirements.txt",
+                    "python": "3.12",
+                }
+            },
+            "pipeline": {
+                "stages": {
+                    "nested-produce": {
+                        "kind": "command",
+                        "environment": "nested-env",
+                        "command": "python -c \"open('b.txt', 'w')\"",
+                        "outputs": [{"path": "b.txt", "storage": "git"}],
+                    }
+                }
+            },
+        },
+    )
+    sub_ck = calkit.load_calkit_info(wdir="sub")
+    sub_ck["subprojects"] = [{"path": "nested"}]
+    write_ck_info("sub/calkit.yaml", sub_ck)
+    # The parent has nothing of its own: everything it runs is the
+    # subproject's
+    write_ck_info("calkit.yaml", {"subprojects": [{"path": "sub"}]})
+    monkeypatch.delenv("SUBPROJECT_ONLY_VAR", raising=False)
+
+    def run(*args):
+        return subprocess.run(
+            ["calkit"] + list(args),
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+
+    # The subproject's pipeline is the project's pipeline
+    res = run("check", "pipeline")
+    assert res.returncode == 0
+    # Its requirements are checked, and named so it's clear whose they are
+    res = run("check", "reqs")
+    assert res.returncode != 0
+    assert "subproject 'sub'" in res.stderr
+    assert "SUBPROJECT_ONLY_VAR" in res.stderr
+    res = run("check", "env-vars")
+    assert res.returncode != 0
+    assert "SUBPROJECT_ONLY_VAR" in res.stderr
+    # Status reports rather than enforces, naming it as it's set, from here
+    res = run("status")
+    assert (
+        "Missing environmental variable(s): SUBPROJECT_ONLY_VAR."
+        in res.stdout + res.stderr
+    )
+    # A run stops on an unmet requirement instead of starting work it
+    # can't finish
+    res = run("run")
+    assert res.returncode != 0
+    assert "SUBPROJECT_ONLY_VAR" in res.stderr
+    assert not os.path.isfile("sub/a.txt")
+    # With it set, everything passes and the stage runs
+    monkeypatch.setenv("SUBPROJECT_ONLY_VAR", "set")
+    res = run("check", "reqs")
+    assert res.returncode == 0, res.stderr
+    # The run builds the nested subproject's environment itself
+    subprocess.check_call(["calkit", "run"])
+    with open("sub/a.txt") as f:
+        assert "from sub" in f.read()
+    assert os.path.isfile("sub/nested/b.txt")
+    res = run("check", "environments")
+    assert res.returncode == 0, res.stderr
+    assert "sub-env" in res.stdout
+    assert "sub/nested:nested-env" in res.stdout

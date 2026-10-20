@@ -809,6 +809,26 @@ def test_to_shell_cmd():
     ]
     good_shell_cmd = 'sh -c "cd dir1 && ls"'
     assert _to_shell_cmd(cmd) == good_shell_cmd
+    # Arguments survive the shell as they were, backslashes and tabs too
+    args = [
+        "2026-06-09 12:00:00",
+        "a b\\",
+        "a b\\\\",
+        "a\tb",
+        'say "hi"',
+        'say \\"hi\\"',
+        "C:\\My Data\\x",
+    ]
+    shell_cmd = _to_shell_cmd(
+        [
+            sys.executable,
+            "-c",
+            "import json, sys; print(json.dumps(sys.argv[1:]))",
+        ]
+        + args
+    )
+    out = subprocess.check_output(shell_cmd, shell=True, text=True)
+    assert json.loads(out) == args
 
 
 def test_add(tmp_dir):
@@ -1488,6 +1508,29 @@ def test_run_isolated_subproject_stage_exit_code(tmp_dir):
             {"stages": {"stage-b": {"cmd": "python -c \"print('ok')\""}}}, f
         )
     subprocess.check_call(["calkit", "run", "isolated-sp:stage-b"])
+
+
+def test_status_in_subdir_uses_the_parent_dvc_repo(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # A subproject that is a plain subdirectory shares the parent's repos
+    os.makedirs("sub", exist_ok=True)
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump({"name": "sub"}, f)
+    proc = subprocess.run(
+        ["calkit", "status"], cwd="sub", capture_output=True, text=True
+    )
+    # Looking for ./.dvc rather than asking DVC used to nest a second repo
+    assert "Initializing DVC repository" not in proc.stdout + proc.stderr
+    assert not os.path.exists(os.path.join("sub", ".dvc"))
+    assert not os.path.exists(os.path.join("sub", ".dvcignore"))
+    assert os.path.isfile(os.path.join(".dvc", "config"))
+    # With no DVC repo anywhere above it, one is still created
+    shutil.rmtree(".dvc")
+    proc = subprocess.run(
+        ["calkit", "status"], cwd="sub", capture_output=True, text=True
+    )
+    assert "Initializing DVC repository" in proc.stdout + proc.stderr
+    assert os.path.isfile(os.path.join("sub", ".dvc", "config"))
 
 
 def test_run_ignore_errors(tmp_dir):

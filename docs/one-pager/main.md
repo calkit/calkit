@@ -73,7 +73,8 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 ## The ask: \$<!-- calkit value key=total_rounded format="{:,.0f}" -->100,000<!-- /calkit value --> to take Calkit on tour
 
 [TODO: A year of workshops on reproducibility and on getting AI agents to
-work transparently and observably]
+work transparently and observably, to reach beyond early adopters and learn
+what an even friendlier UX needs]
 
 ![](../img/2027-budget.png)
 

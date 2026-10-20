@@ -129,6 +129,9 @@ class ScheduleInput(Model):
         tz = _get_tzinfo(self.timezone)
         override = os.environ.get("CALKIT_NOW")
         if override:
+            # Python 3.10 can't read a trailing 'Z' for UTC
+            if override.endswith(("Z", "z")):
+                override = override[:-1] + "+00:00"
             now = datetime.datetime.fromisoformat(override)
             now = now.replace(tzinfo=tz) if now.tzinfo is None else now
             now = now.astimezone(tz)
@@ -138,11 +141,12 @@ class ScheduleInput(Model):
         # Periods are counted in local time, so a day starts at midnight there
         wall = now.replace(tzinfo=None)
         if unit == "year":
-            return str(wall.year - wall.year % count)
+            years = wall.year - 1970
+            return str(1970 + years - years % count)
         if unit == "month":
-            months = wall.year * 12 + wall.month - 1
+            months = (wall.year - 1970) * 12 + wall.month - 1
             months -= months % count
-            return f"{months // 12:04d}-{months % 12 + 1:02d}"
+            return f"{1970 + months // 12:04d}-{months % 12 + 1:02d}"
         units = {
             "minute": datetime.timedelta(minutes=1),
             "hour": datetime.timedelta(hours=1),

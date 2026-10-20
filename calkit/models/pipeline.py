@@ -647,6 +647,22 @@ class Stage(Model):
         return rel_path
 
     @property
+    def input_paths(self) -> list[str]:
+        """The paths among this stage's inputs, i.e., not what's generated
+        for it, e.g., its schedule's period file.
+        """
+        paths = []
+        for i in self.inputs:
+            if isinstance(
+                i, (InputsFromStageOutputs, EnvVarInput, ScheduleInput)
+            ):
+                continue
+            path = i if isinstance(i, str) else i.path
+            if path not in paths:
+                paths.append(path)
+        return paths
+
+    @property
     def dvc_deps(self) -> list[str]:
         deps = []
         setup_file = self.setup_file_path
@@ -660,12 +676,7 @@ class Stage(Model):
                 period_file = self.path_from_wdir(i.period_file_path)
                 if period_file not in deps:
                     deps.append(period_file)
-        for i in self.inputs:
-            if isinstance(
-                i, (InputsFromStageOutputs, EnvVarInput, ScheduleInput)
-            ):
-                continue
-            path = i if isinstance(i, str) else i.path
+        for path in self.input_paths:
             if path not in deps:
                 deps.append(path)
         return deps
@@ -869,12 +880,7 @@ class Stage(Model):
         """
         cmd = self.dvc_cmd
         deps = self.dvc_deps
-        for i in self.inputs:
-            if isinstance(
-                i, (InputsFromStageOutputs, EnvVarInput, ScheduleInput)
-            ):
-                continue
-            path = i if isinstance(i, str) else i.path
+        for path in self.input_paths:
             if path not in deps:
                 deps.append(path)
         # Each path appears once: a stage that names the same one twice, e.g.
@@ -1551,9 +1557,9 @@ class JsonToLatexStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = "calkit latex from-json"
-        # dvc_deps rather than inputs, since an input can be an object
-        # carrying a path, which would otherwise interpolate its repr.
-        for input_path in self.dvc_deps:
+        # Only the declared paths, since what's generated for the stage, e.g.,
+        # its setup or schedule period file, isn't data
+        for input_path in self.input_paths:
             cmd += f" '{input_path}'"
         for out in self.outputs:
             if isinstance(out, str):

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
+import pytest
 import requests
 from fastapi.testclient import TestClient
 from sqlmodel import Session
@@ -204,6 +205,7 @@ def test_get_hub_stats(
     db: Session,
     superuser_token_headers: dict[str, str],
     normal_user_token_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def add_project(account_id: uuid.UUID, **kwargs: Any) -> Project:
         project = Project(
@@ -218,6 +220,14 @@ def test_get_hub_stats(
         db.refresh(project)
         return project
 
+    # Mixpanel isn't read from until a scenario below configures it, even
+    # where a local .env has the credentials
+    for name in [
+        "MIXPANEL_SERVICE_ACCOUNT_USERNAME",
+        "MIXPANEL_SERVICE_ACCOUNT_SECRET",
+        "MIXPANEL_PROJECT_ID",
+    ]:
+        monkeypatch.setattr(settings, name, None)
     # Superusers only
     assert client.get("/stats").status_code == 401
     r = client.get("/stats", headers=normal_user_token_headers)

@@ -23,13 +23,13 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 ## The problem
 
 AI is making scientific output cheaper than ever to produce,
-shifting the bottleneck to verification and potentially deepening
+shifting the bottleneck to verification and deepening
 the still-unsolved reproducibility crisis,
 as agents will happily generate---and possibly hallucinate---artifacts
 without showing all their work.
 It's now essential to make it easy and intuitive
 to deliver research artifacts with their entire digital paper trail,
-such that evidence for claims can be traced all the way back to its origin.
+so evidence for claims can be traced all the way back to its origin.
 
 ## Our approach
 
@@ -41,8 +41,8 @@ Calkit takes a more integrated, modular approach.
 Version control (including large data files),
 environment management, pipelines with hashed I/O,
 and provenance definition are all included,
-so researchers don't need to assemble bespoke workflows,
-while stages like analysis and writing remain separate but connected,
+so researchers don't need to assemble bespoke workflows.
+Stages like analysis and writing remain separate,
 with information flowing freely between them for fast iteration.
 An optional, self-hostable web app
 facilitates collaboration during the project
@@ -69,16 +69,16 @@ it becomes much easier to review work done by AI agents or humans.
 
 ## The ask: \$<!-- calkit value key=total_rounded_thousands format="{:.0f}" -->100<!-- /calkit value -->k to bring Calkit to researchers
 
-Thus far we've seen the most interest from Overleaf users
-who appreciate its user friendliness but want to connect it to their analyses
+So far we've seen the most interest from Overleaf users
+who like its ease of use but want to connect it to their analyses
 to eliminate error-prone and tedious manual uploads.
 In 2027 we'll take Calkit on tour, starting at Caltech and several
 universities in Boston.
 In <!-- calkit value key=workshops -->8<!-- /calkit value --> workshops,
 roughly <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
-researchers will connect their own projects to Overleaf with our new
+researchers will connect their analyses to Overleaf with our new
 [browser extension](https://chromewebstore.google.com/detail/calkit/idhdomgapfolnpffanajdckdaojencal),
-providing follow-up support
+and we'll provide follow-up support
 for about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
 of them.
 What we learn will be published openly and will drive Calkit's development.
@@ -89,8 +89,7 @@ What we learn will be published openly and will drive Calkit's development.
 Calkit is led by Pete Bachant, a Senior Research Software Engineer
 and instructor at Caltech's
 [Schmidt Academy for Software Engineering](https://sase.caltech.edu),
-from whom 25% capacity is allocated.
-The main Calkit Hub instance at [calkit.io](https://calkit.io)
-has been hosted with support from Google Cloud.
+which funds 25% of his time on Calkit.
+Google Cloud supports hosting for [calkit.io](https://calkit.io).
 To learn more, visit [docs.calkit.org](https://docs.calkit.org) or email [pete@calkit.org](mailto:pete@calkit.org).
 :::

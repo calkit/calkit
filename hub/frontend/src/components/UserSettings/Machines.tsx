@@ -15,7 +15,6 @@ import {
   Text,
   Th,
   Thead,
-  Tooltip,
   Tr,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -26,6 +25,8 @@ import { useState } from "react"
 import { MachinesService, UsersService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
+import Tooltip from "../Common/Tooltip"
+import { timeAgo } from "../Projects/RecentChanges"
 
 // What the API says when setting up two-factor authentication needs a
 // verified email first, from app/users.py
@@ -305,7 +306,7 @@ function Machines() {
         <Code>calkit hub link</Code>.
       </Text>
       <TableContainer>
-        <Table size={{ base: "sm", md: "md" }}>
+        <Table size="sm">
           <Thead>
             <Tr>
               <Th>Name</Th>
@@ -377,12 +378,20 @@ function Machines() {
                   </Td>
                   <Td>
                     {machine.created &&
-                      new Date(`${machine.created}Z`).toLocaleString()}
+                      new Date(`${machine.created}Z`).toLocaleDateString()}
                   </Td>
                   <Td>
-                    {machine.last_seen
-                      ? new Date(`${machine.last_seen}Z`).toLocaleString()
-                      : "Never"}
+                    {machine.last_seen ? (
+                      <Tooltip
+                        label={new Date(
+                          `${machine.last_seen}Z`,
+                        ).toLocaleString()}
+                      >
+                        {timeAgo(`${machine.last_seen}Z`)}
+                      </Tooltip>
+                    ) : (
+                      "Never"
+                    )}
                   </Td>
                   <Td>{machine.workspace_count}</Td>
                   <Td>

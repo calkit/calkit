@@ -34,6 +34,7 @@ from calkit.models.io import (
     InputsFromStageOutputs,
     PathInput,
     PathOutput,
+    ScheduleInput,
 )
 from calkit.models.iteration import (
     ExpandedParametersType,
@@ -44,7 +45,9 @@ from calkit.models.iteration import (
 from calkit.models.requirements import RequirementType
 
 # What a stage's 'inputs' can list
-StageInput = str | EnvVarInput | PathInput | InputsFromStageOutputs
+StageInput = (
+    str | EnvVarInput | ScheduleInput | PathInput | InputsFromStageOutputs
+)
 
 
 def is_flag_and_value(arg: str) -> bool:
@@ -339,8 +342,9 @@ class Stage(Model):
         default=[],
         description="Paths this stage depends on, which trigger a rerun when "
         "they change. Normally plain path strings; an object carrying a "
-        "'path' is also accepted, and an 'env-var' entry makes the stage "
-        "depend on an environment variable's value.",
+        "'path' is also accepted, an 'env-var' entry makes the stage "
+        "depend on an environment variable's value, and a 'schedule' entry "
+        "makes it run once per period, e.g., once a day.",
         json_schema_extra=_allow_null,
     )
     # TODO: Support database outputs
@@ -652,7 +656,14 @@ class Stage(Model):
         if env_var_file is not None:
             deps.append(self.path_from_wdir(env_var_file))
         for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
+            if isinstance(i, ScheduleInput):
+                period_file = self.path_from_wdir(i.period_file_path)
+                if period_file not in deps:
+                    deps.append(period_file)
+        for i in self.inputs:
+            if isinstance(
+                i, (InputsFromStageOutputs, EnvVarInput, ScheduleInput)
+            ):
                 continue
             path = i if isinstance(i, str) else i.path
             if path not in deps:
@@ -859,7 +870,9 @@ class Stage(Model):
         cmd = self.dvc_cmd
         deps = self.dvc_deps
         for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
+            if isinstance(
+                i, (InputsFromStageOutputs, EnvVarInput, ScheduleInput)
+            ):
                 continue
             path = i if isinstance(i, str) else i.path
             if path not in deps:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import os
+import posixpath
 import re
 import textwrap
 from dataclasses import dataclass, field
@@ -463,6 +464,191 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
                         queue.append(Path(rel))
                     break
     return sorted(found)
+
+
+#: Where Calkit puts what the documents in a folder cite. Not hidden,
+#: since Overleaf drops dot-folders from an uploaded zip.
+CITED_DIR = "_calkit"
+CITED_VALUES_FNAME = "values.tex"
+STYLE_FNAME = "calkit.sty"
+# calkit.sty's commands, each with an optional [...] and its {...} args
+_CITE_RE = re.compile(
+    r"\\ck(value|figure|table)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}"
+    r"(?:\s*\{([^}]*)\})?"
+)
+_TEX_SPECIALS = {
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
+
+
+@dataclass(frozen=True)
+class Citation:
+    """Project content a document cites with one of calkit.sty's commands,
+    by its path relative to the project root.
+    """
+
+    kind: str
+    path: str
+    key: str | None = None
+    #: A Python format spec for a value, e.g., ``.2f``
+    format: str = ""
+
+
+def find_citations(document: str) -> list[Citation]:
+    """What a document cites with calkit.sty's commands, including in the
+    files it inputs, in order and without repeats.
+    """
+    text = "\n".join(_strip_comments(line.text) for line in flatten(document))
+    found: list[Citation] = []
+    for kind, option, first, second in _CITE_RE.findall(text):
+        if kind == "value":
+            found.append(
+                Citation(kind, first.strip(), second.strip(), option.strip())
+            )
+        else:
+            found.append(Citation(kind, first.strip()))
+    return list(dict.fromkeys(found))
+
+
+def root_documents(folder: str) -> list[str]:
+    """The documents directly in a folder, i.e., ``.tex`` files with a
+    ``\\documentclass``, rather than the files they input.
+    """
+    docs = []
+    for name in sorted(os.listdir(folder or ".")):
+        path = os.path.join(folder, name)
+        if not name.endswith(".tex") or not os.path.isfile(path):
+            continue
+        text = read_file(path) or ""
+        if re.search(r"^\s*\\documentclass", _strip_comments(text), re.M):
+            docs.append(path)
+    return docs
+
+
+def escape_tex(text: str) -> str:
+    """Escape TeX's special characters in plain text."""
+    return "".join(_TEX_SPECIALS.get(c, c) for c in str(text))
+
+
+def format_value(value: Any, spec: str = "") -> str:
+    """A value as text for a document, with an optional format spec."""
+    # MATLAB and NumPy write a scalar as a one-element array
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
+    if spec:
+        return format(value, spec)
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def _write_if_changed(path: str, content: str | bytes) -> None:
+    """Write a file only if its content differs, so latexmk, which goes by
+    content and timestamps, doesn't rebuild for nothing.
+    """
+    data = content.encode("utf-8") if isinstance(content, str) else content
+    if os.path.isfile(path):
+        with open(path, "rb") as f:
+            if f.read() == data:
+                return
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def write_cited(folder: str) -> list[str]:
+    """Bring what the documents in a folder cite into its ``_calkit``
+    folder, so they build without the rest of the project, e.g., on
+    Overleaf.
+
+    Cited files are copied, the values cited are written to
+    ``_calkit/values.tex`` formatted as asked, and ``calkit.sty`` is put
+    beside the documents. Anything no longer cited is removed, since
+    nothing else writes there.
+
+    Returns what couldn't be brought in, e.g., a file the pipeline hasn't
+    produced yet. Those print as ``??`` rather than failing the build.
+    """
+    import calkit.resources
+    from calkit.questions import read_evidence_file, resolve_key
+
+    citations = list(
+        dict.fromkeys(
+            c for doc in root_documents(folder) for c in find_citations(doc)
+        )
+    )
+    out = os.path.join(folder, CITED_DIR)
+    if not citations and not os.path.isdir(out):
+        return []
+    # Cited paths are relative to the project, wherever the document is
+    root = os.path.abspath(folder or ".")
+    while not os.path.isfile(os.path.join(root, "calkit.yaml")):
+        parent = os.path.dirname(root)
+        if parent == root:
+            root = os.path.abspath(folder or ".")
+            break
+        root = parent
+    problems: list[str] = []
+    kept = {".gitignore", CITED_VALUES_FNAME}
+    _write_if_changed(
+        os.path.join(out, ".gitignore"),
+        "# Calkit copies what the documents beside this folder cite into it\n"
+        "*\n",
+    )
+    for c in citations:
+        if c.kind == "value":
+            continue
+        rel = posixpath.normpath(Path(c.path).as_posix())
+        src = os.path.join(root, rel)
+        if rel.startswith("../") or os.path.isabs(c.path):
+            problems.append(f"{c.path} is outside the project")
+        elif not os.path.isfile(src):
+            problems.append(f"{c.path} is not in the project yet")
+        else:
+            with open(src, "rb") as f:
+                _write_if_changed(os.path.join(out, rel), f.read())
+            kept.add(rel)
+    lines = ["%% Written by Calkit from what the documents here cite.\n"]
+    loaded: dict[str, Any] = {}
+    for c in citations:
+        if c.kind != "value":
+            continue
+        try:
+            if c.path not in loaded:
+                loaded[c.path] = read_evidence_file(os.path.join(root, c.path))
+            text = escape_tex(
+                format_value(
+                    resolve_key(loaded[c.path], c.key or ""), c.format
+                )
+            )
+        except Exception as e:
+            problems.append(f"{c.key} from {c.path}: {e}")
+            continue
+        lines.append(
+            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{c.format}}}{{{text}}}\n"
+        )
+    _write_if_changed(os.path.join(out, CITED_VALUES_FNAME), "".join(lines))
+    for dirpath, _, filenames in os.walk(out, topdown=False):
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            if Path(os.path.relpath(path, out)).as_posix() not in kept:
+                os.remove(path)
+        if dirpath != out and not os.listdir(dirpath):
+            os.rmdir(dirpath)
+    _write_if_changed(
+        os.path.join(folder, STYLE_FNAME),
+        calkit.resources.read_text("latex", STYLE_FNAME),
+    )
+    return problems
 
 
 # Records of Word exports and merges: always kept on this machine, like run

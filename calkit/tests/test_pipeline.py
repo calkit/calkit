@@ -1720,6 +1720,49 @@ def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     assert "*.pdf" not in lines
 
 
+def test_to_dvc_latex_cited_deps(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("paper/sections")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\begin{document}\n"
+            "\\input{sections/results}\n"
+            "\\ckfigure{figures/plot.png}\n"
+            "\\end{document}\n"
+        )
+    with open("paper/sections/results.tex", "w") as f:
+        f.write("\\ckvalue[.2f]{results/metrics.json}{rmse}\n")
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                "build-paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                },
+                # Paths in a stage are relative to its wdir, while cited
+                # paths are relative to the project
+                "build-paper-wdir": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "wdir": "paper",
+                    "target_path": "main.tex",
+                },
+            }
+        },
+    }
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    deps = stages["build-paper"]["deps"]
+    assert "figures/plot.png" in deps
+    # Including what an input cites
+    assert "results/metrics.json" in deps
+    deps = stages["build-paper-wdir"]["deps"]
+    assert "../figures/plot.png" in deps
+    assert "../results/metrics.json" in deps
+
+
 def test_get_status(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = {

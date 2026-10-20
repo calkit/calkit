@@ -136,6 +136,88 @@ def test_get_sync_status(tmp_dir):
     assert status["files_to_delete"][0]["figure"]
 
 
+def test_sync_cited_content(tmp_dir):
+    import shutil
+
+    subprocess.run(["calkit", "init"], check=True)
+    repo = git.Repo()
+    os.makedirs("figures")
+    with open(os.path.join("figures", "plot.png"), "wb") as fb:
+        fb.write(b"png")
+    os.makedirs("results")
+    with open(os.path.join("results", "m.json"), "w") as f:
+        f.write('{"x": 1.5}')
+    os.makedirs("paper")
+    main_tex = (
+        "\\documentclass{article}\n\\usepackage{calkit}\n"
+        "\\begin{document}\n\\ckfigure{figures/plot.png}\n"
+        "\\ckvalue{results/m.json}{x}\n\\end{document}\n"
+    )
+    with open(os.path.join("paper", "main.tex"), "w") as f:
+        f.write(main_tex)
+    ck_info = calkit.load_calkit_info()
+    ck_info["overleaf_sync"] = {
+        "paper": {"url": "https://www.overleaf.com/project/abc123"}
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    overleaf_dir = tmp_dir / "overleaf"
+    os.makedirs(overleaf_dir)
+    overleaf_repo = git.Repo.init(path=overleaf_dir)
+    with open(os.path.join(overleaf_dir, "main.tex"), "w") as f:
+        f.write(main_tex)
+    _commit_all(overleaf_repo, "Initial commit")
+    sync_info = calkit.overleaf.get_sync_info()["paper"]
+
+    def status() -> dict:
+        return calkit.overleaf.get_sync_status(
+            main_repo=repo,
+            overleaf_repo=overleaf_repo,
+            path_in_project="paper",
+            sync_info_for_path=sync_info,
+        )
+
+    # Checking brings in what's cited, including calkit.sty, which is
+    # committed with the document like any other file
+    status()
+    _commit_all(repo, "Add paper")
+    pushes = {f["path"] for f in status()["files_to_push"]}
+    assert pushes == {
+        "calkit.sty",
+        "_calkit/figures/plot.png",
+        "_calkit/values.tex",
+    }
+    # Nothing under _calkit is committed to the project
+    assert not repo.ignored("paper/calkit.sty")
+    assert repo.ignored("paper/_calkit/values.tex")
+    # Represent a completed sync
+    for rel in pushes:
+        os.makedirs(os.path.dirname(overleaf_dir / rel) or ".", exist_ok=True)
+        shutil.copy(os.path.join("paper", rel), overleaf_dir / rel)
+    _commit_all(overleaf_repo, "Sync")
+    sync_info["last_sync_commit"] = overleaf_repo.head.commit.hexsha
+    assert status()["in_sync"]
+    # An edit made on Overleaf to a copy isn't pulled back
+    paths = calkit.overleaf.OverleafSyncPaths(
+        main_repo=repo,
+        overleaf_repo=overleaf_repo,
+        path_in_project="paper",
+        sync_info_for_path=sync_info,
+    )
+    assert "_calkit/values.tex" not in paths.files_to_copy_from_overleaf
+    # A new result is waiting to be pushed
+    with open(os.path.join("results", "m.json"), "w") as f:
+        f.write('{"x": 2.5}')
+    pushes = {f["path"] for f in status()["files_to_push"]}
+    assert pushes == {"_calkit/values.tex"}
+    # A figure no longer cited is deleted from Overleaf
+    with open(os.path.join("paper", "main.tex"), "w") as f:
+        f.write(main_tex.replace("\\ckfigure{figures/plot.png}\n", ""))
+    _commit_all(repo, "Drop figure")
+    deletes = [f["path"] for f in status()["files_to_delete"]]
+    assert deletes == ["_calkit/figures/plot.png"]
+
+
 def test_write_sync_info_without_calkit_dir(tmp_dir):
     """A repo that has never used Calkit locally has no ``.calkit`` dir.
 

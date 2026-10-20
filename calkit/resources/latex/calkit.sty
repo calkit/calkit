@@ -1,0 +1,36 @@
+%% calkit.sty -- content from a Calkit project, cited by its path in the
+%% project. Calkit copies what a document cites into _calkit/ beside it and
+%% writes the values it uses to _calkit/values.tex, so the document builds
+%% anywhere, including Overleaf. Written by Calkit; commit it with the
+%% document.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{calkit}[2026/10/16 v0.1 Calkit project content]
+\RequirePackage{graphicx}
+\def\ck@dir{_calkit}
+\let\ck@linkbase\@empty
+% Written by Calkit into _calkit/values.tex
+\newcommand\cklinkbase[1]{\def\ck@linkbase{#1}}
+\newcommand\cksetvalue[4]{%
+  \expandafter\def\csname ck@v@#1@#2@#3\endcsname{#4}}
+\InputIfFileExists{\ck@dir/values.tex}{}{}
+% Cited but not brought in yet, e.g., just inserted on Overleaf
+\newcommand\ck@missing[1]{%
+  \PackageWarning{calkit}{#1 hasn't been brought in yet; sync with Calkit}%
+  \textbf{??}}
+\newcommand\ck@link[2]{%
+  \ifx\ck@linkbase\@empty #2%
+  \else\ifdefined\href \href{\ck@linkbase/#1}{#2}\else #2\fi\fi}
+% \ckvalue[format]{path}{key}: a value from a results file. Calkit applies
+% the format, e.g., .2f, when it writes the value.
+\newcommand\ckvalue[3][]{%
+  \ifcsname ck@v@#2@#3@#1\endcsname
+    \ck@link{#2?key=#3}{\csname ck@v@#2@#3@#1\endcsname}%
+  \else\ck@missing{#3 from #2}\fi}
+% \ckfigure[graphics options]{path}
+\newcommand\ckfigure[2][]{%
+  \IfFileExists{\ck@dir/#2}%
+    {\ck@link{#2}{\includegraphics[#1]{\ck@dir/#2}}}%
+    {\ck@missing{#2}}}
+% \cktable{path}: a table or other TeX a stage generated
+\newcommand\cktable[1]{%
+  \IfFileExists{\ck@dir/#1}{\input{\ck@dir/#1}}{\ck@missing{#1}}}

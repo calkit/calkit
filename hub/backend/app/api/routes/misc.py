@@ -257,9 +257,10 @@ class AnalyticsStats(BaseModel):
     )
     active_visitors: ActiveCounts = Field(
         description=(
-            "Active users plus visitors who accepted analytics and did "
-            "something without signing in. Anonymous page views aren't "
-            "counted, since their IDs change daily."
+            "Active users plus visitors who accepted analytics and, without "
+            "signing in, sent two or more events on a day, at least one "
+            "after input. Anonymous page views aren't counted, since their "
+            "IDs change daily."
         )
     )
 
@@ -358,13 +359,15 @@ def get_hub_stats(
         )
     ).one()
     # Analytics, counting users only if they're likely human and visitors
-    # only if they did something
+    # only on days they looked like a person
     analytics = None
     people = mixpanel.get_active_people()
     if people is not None:
         excluded_ids = {str(i) for i in excluded_user_ids}
         candidate_ids: set[uuid.UUID] = set()
-        for distinct_id in people:
+        for distinct_id, (_, _, is_account) in people.items():
+            if not is_account:
+                continue
             try:
                 candidate_ids.add(uuid.UUID(distinct_id))
             except ValueError:
@@ -377,15 +380,16 @@ def get_hub_stats(
                 )
             )
         }
+        # Accounts no longer here, e.g., deleted, count as neither
         active_users = {
             k: t
-            for k, (t, _) in people.items()
-            if user_ids.get(k) and k not in excluded_ids
+            for k, (t, _, is_account) in people.items()
+            if is_account and user_ids.get(k) and k not in excluded_ids
         }
         active_visitors = active_users | {
-            k: t
-            for k, (t, engaged) in people.items()
-            if engaged and k not in user_ids
+            k: engaged
+            for k, (_, engaged, is_account) in people.items()
+            if not is_account and engaged
         }
         analytics = AnalyticsStats(
             active_users=count_active(active_users),

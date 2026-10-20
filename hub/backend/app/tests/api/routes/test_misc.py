@@ -3,10 +3,10 @@
 import json
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -362,19 +362,28 @@ def test_get_hub_stats(
     add_refresh_token(returning.id, now)
     add_refresh_token(returning.id, now - timedelta(days=2))
     one_day = add_user()
-    add_refresh_token(one_day.id, now)
-    add_refresh_token(one_day.id, now - timedelta(minutes=5))
+    add_refresh_token(one_day.id, now.replace(hour=1))
+    add_refresh_token(one_day.id, now.replace(hour=2))
     db.commit()
     base = client.get("/stats", headers=headers).json()
     assert base["users"]["total"] - after["users"]["total"] == 7
     assert base["users"]["likely_human"] - after["users"]["likely_human"] == 5
     # Without Mixpanel read access configured there are no analytics
     assert base["analytics"] is None
-    # With it, people are counted from the event export. Users count if
-    # they're likely human, and others only if they did something, with a
-    # device's events folded into the user it later signed in as. Anonymous
-    # page views, automated browsers, old events, and excluded users don't.
+    # With it, people are counted from the event export. Accounts count if
+    # they're likely human and still exist, with a device's events folded
+    # into the account it later signed in as. Devices count from the last day
+    # they sent two or more events with input among them, which leaves out
+    # idle pages, automatic events, and bots rotating their identity per
+    # request. Anonymous page views, automated browsers, old events, and
+    # excluded users don't count at all.
     now_ts = time.time()
+
+    def at(days_ago: int, minute: int) -> float:
+        day = datetime.now(UTC).date() - timedelta(days=days_ago)
+        midnight = datetime.combine(day, datetime.min.time(), UTC)
+        return midnight.timestamp() + 3600 + minute * 60
+
     pageview = "$mp_web_page_view"
     events = [
         ("Logged in", {"distinct_id": str(user.id), "time": now_ts - 3600}),
@@ -391,12 +400,24 @@ def test_get_hub_stats(
                 "time": now_ts - 3 * 86400,
             },
         ),
+        *[
+            (
+                pageview,
+                {
+                    "distinct_id": "$device:abc",
+                    "interacted": True,
+                    "time": at(5, minute),
+                },
+            )
+            for minute in (0, 5)
+        ],
+        # Engaged ten days ago and idle since, so a visitor in 30 days only
         (
             pageview,
             {
-                "distinct_id": "$device:abc",
-                "interacted": True,
-                "time": now_ts - 5 * 86400,
+                "distinct_id": "$device:def",
+                "interacted": False,
+                "time": at(10, 0),
             },
         ),
         (
@@ -404,35 +425,87 @@ def test_get_hub_stats(
             {
                 "distinct_id": "$device:def",
                 "interacted": True,
-                "time": now_ts - 10 * 86400,
+                "time": at(10, 2),
             },
         ),
         (
             pageview,
             {
-                "distinct_id": "$device:idle",
+                "distinct_id": "$device:def",
                 "interacted": False,
-                "time": now_ts - 2 * 86400,
+                "time": now_ts - 3600,
             },
         ),
+        # One page view with input, as from a bot rotating its identity
+        (
+            pageview,
+            {
+                "distinct_id": "$device:rotating",
+                "interacted": True,
+                "time": now_ts - 7200,
+            },
+        ),
+        *[
+            (
+                pageview,
+                {
+                    "distinct_id": "$device:idle",
+                    "interacted": False,
+                    "time": at(2, minute),
+                },
+            )
+            for minute in (0, 5)
+        ],
+        # From before the frontend sent input with every event, a click
+        # counts while an event that fires on its own doesn't
+        (
+            "Clicked sign up",
+            {"distinct_id": "$device:legacy", "time": at(4, 0)},
+        ),
+        (pageview, {"distinct_id": "$device:legacy", "time": at(4, 1)}),
+        ("404 (front end)", {"distinct_id": "$device:auto", "time": at(3, 0)}),
+        (pageview, {"distinct_id": "$device:auto", "time": at(3, 1)}),
+        # An account since deleted is neither a user nor a visitor
+        *[
+            (
+                "Clicked",
+                {
+                    "distinct_id": str(uuid.uuid4()),
+                    "interacted": True,
+                    "time": at(6, minute),
+                },
+            )
+            for minute in (0, 1)
+        ],
         ("Logged in", {"distinct_id": str(superuser.id), "time": now_ts - 60}),
         (
             pageview,
             {"distinct_id": "a1b2", "anonymous": True, "time": now_ts - 60},
         ),
-        (
-            "Clicked",
-            {"distinct_id": "$device:bot", "bot": True, "time": now_ts},
-        ),
-        (
-            pageview,
-            {
-                "distinct_id": "$device:driven",
-                "webdriver": True,
-                "interacted": True,
-                "time": now_ts,
-            },
-        ),
+        *[
+            (
+                "Clicked",
+                {
+                    "distinct_id": "$device:bot",
+                    "bot": True,
+                    "interacted": True,
+                    "time": at(2, minute),
+                },
+            )
+            for minute in (0, 1)
+        ],
+        *[
+            (
+                pageview,
+                {
+                    "distinct_id": "$device:driven",
+                    "webdriver": True,
+                    "interacted": True,
+                    "time": at(2, minute),
+                },
+            )
+            for minute in (0, 1)
+        ],
         (
             "Clicked",
             {"distinct_id": "$device:old", "time": now_ts - 40 * 86400},
@@ -441,9 +514,7 @@ def test_get_hub_stats(
     lines = [
         json.dumps({"event": e, "properties": p}).encode() for e, p in events
     ]
-    resp = SimpleNamespace(
-        raise_for_status=lambda: None, iter_lines=lambda: iter([*lines, b""])
-    )
+    resp = SimpleNamespace(ok=True, iter_lines=lambda: iter([*lines, b""]))
     with (
         patch.multiple(
             settings,
@@ -471,8 +542,8 @@ def test_get_hub_stats(
             },
             "active_visitors": {
                 "last_day": 1,
-                "last_7_days": 1,
-                "last_30_days": 2,
+                "last_7_days": 2,
+                "last_30_days": 3,
             },
         }
         # Once they are, they count, with their earlier device folded in
@@ -493,8 +564,8 @@ def test_get_hub_stats(
             },
             "active_visitors": {
                 "last_day": 1,
-                "last_7_days": 2,
-                "last_30_days": 3,
+                "last_7_days": 3,
+                "last_30_days": 4,
             },
         }
         # Excluded accounts are left out here too, and superusers come back
@@ -513,13 +584,13 @@ def test_get_hub_stats(
         }
         # A cached result is used without asking Mixpanel again
         get.reset_mock()
-        cached = {str(user.id): [now_ts - 60, True]}
+        cached = {str(user.id): [now_ts - 60, 0.0, True]}
         with patch("app.mixpanel.cache.get_json", return_value=cached):
             stats = client.get("/stats", headers=headers).json()
         get.assert_not_called()
         assert stats["analytics"]["active_users"]["last_day"] == 1
         # Mixpanel failing, by connection or status, leaves analytics out
-        # rather than failing the request
+        # rather than failing the request, and says why in the log
         get.side_effect = requests.ConnectionError("down")
         r = client.get("/stats", headers=headers)
         assert r.status_code == 200
@@ -527,8 +598,13 @@ def test_get_hub_stats(
         assert r.json()["users"]["total"] == base["users"]["total"]
         get.side_effect = None
         get.return_value = SimpleNamespace(
-            raise_for_status=Mock(side_effect=requests.HTTPError("401"))
+            ok=False,
+            status_code=403,
+            text="Service account is missing the download_events_csv permission",
         )
-        stats = client.get("/stats", headers=headers).json()
+        with patch("app.mixpanel.logger.warning") as warning:
+            stats = client.get("/stats", headers=headers).json()
+        assert "403" in warning.call_args.args[0]
+        assert "download_events_csv" in warning.call_args.args[0]
         assert stats["analytics"] is None
         assert stats["projects"] == base["projects"]

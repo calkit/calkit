@@ -15,33 +15,45 @@ from app.models import Project, User
 mp = Mixpanel(settings.MIXPANEL_TOKEN)
 
 
-def get_active_people(days: int = 30) -> dict[str, tuple[float, bool]] | None:
+# Frontend events that fire without input, for events from before the
+# frontend sent ``interacted`` with every event
+AUTOMATIC_EVENTS = {"404 (front end)", "Session auto-logout"}
+
+
+def get_active_people(
+    days: int = 30,
+) -> dict[str, tuple[float, float, bool]] | None:
     """Everyone tracked in the last ``days`` days, keyed by distinct ID.
 
-    Values are when they were last seen, as a Unix time, and whether they
-    were seen doing something, i.e., any event besides a page view loaded
-    without input, which is what tells a person from a browser left running.
-    Keys are user IDs once signed in; a device's events from before signing
-    in are folded into its user when a later event links the two. Read from
-    the raw event export, since the Query API can't count unique people
-    across all events without a saved report. Anonymous page views are left
-    out, since their IDs change daily, as are events from automated browsers.
-    None when reading isn't configured or fails.
+    Values are when they were last seen and when they last looked like a
+    person, as Unix times (0 if never), and whether the ID is an account's
+    rather than a device's. A device looks like a person on a day it sent two
+    or more events, at least one after input: bots that rotate their user
+    agent or address get a fresh device for each request, and a page left
+    open sends no input. A device's events from before signing in are folded
+    into the account when a later event links the two. Read from the raw
+    event export, since the Query API can't count unique people across all
+    events without a saved report. Anonymous page views are left out, since
+    their IDs change daily, as are events from automated browsers. None when
+    reading isn't configured or fails.
     """
     username = settings.MIXPANEL_SERVICE_ACCOUNT_USERNAME
     secret = settings.MIXPANEL_SERVICE_ACCOUNT_SECRET
     if not (username and secret and settings.MIXPANEL_PROJECT_ID):
         return None
     # Cached since the export allows 60 requests an hour
-    key = cache.make_key("mixpanel", "active-people", str(days))
+    key = cache.make_key("mixpanel", "people", str(days))
     cached = cache.get_json(key)
     if cached is not None:
-        return {k: (v[0], v[1]) for k, v in cached.items()}
+        return {k: (v[0], v[1], v[2]) for k, v in cached.items()}
     since = time.time() - days * 86400
     # Export dates are UTC for projects created since 2023
     today = datetime.now(UTC).date()
-    people: dict[str, tuple[float, bool]] = {}
-    device_users: dict[str, str] = {}
+    last_seen: dict[str, float] = {}
+    accounts: set[str] = set()
+    # Event count, whether any followed input, and the latest, by ID and day
+    days_seen: dict[tuple[str, str], tuple[int, bool, float]] = {}
+    device_accounts: dict[str, str] = {}
     try:
         resp = requests.get(
             f"https://{settings.MIXPANEL_EXPORT_HOST}/api/2.0/export",
@@ -55,7 +67,11 @@ def get_active_people(days: int = 30) -> dict[str, tuple[float, bool]] | None:
             timeout=10,
             stream=True,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            # The body says why, e.g., a permission the account lacks
+            raise RuntimeError(
+                f"export returned {resp.status_code}: {resp.text[:500]}"
+            )
         for line in resp.iter_lines():
             if not line:
                 continue
@@ -70,31 +86,52 @@ def get_active_people(days: int = 30) -> dict[str, tuple[float, bool]] | None:
             ):
                 continue
             user_id = props.get("$user_id")
+            distinct_id = str(props.get("distinct_id") or "")
             device_id = props.get("$device_id")
             if user_id and device_id:
-                device_users[str(device_id)] = str(user_id)
-            person = str(user_id or props.get("distinct_id") or "")
+                device_accounts[f"$device:{device_id}"] = str(user_id)
+            person = str(user_id or distinct_id)
             if not person:
                 continue
-            # Page views carry whether there was input before them; the
-            # frontend's other events come from clicks, the backend's from
-            # requests a signed-in user made
-            engaged = props.get("interacted") is True or not str(
-                event.get("event", "$")
-            ).startswith("$")
-            last, was_engaged = people.get(person, (0.0, False))
-            people[person] = (max(t, last), engaged or was_engaged)
+            # The browser SDK prefixes IDs that aren't signed in
+            if user_id or not distinct_id.startswith("$device:"):
+                accounts.add(person)
+            last_seen[person] = max(t, last_seen.get(person, 0.0))
+            # The frontend sends whether there was input yet with every
+            # event; older custom events mostly came from clicks
+            name = str(event.get("event", ""))
+            if "interacted" in props:
+                had_input = props["interacted"] is True
+            else:
+                had_input = not name.startswith("$") and (
+                    name not in AUTOMATIC_EVENTS
+                )
+            day = datetime.fromtimestamp(t, UTC).date().isoformat()
+            n, any_input, latest = days_seen.get(
+                (person, day), (0, False, 0.0)
+            )
+            days_seen[(person, day)] = (
+                n + 1,
+                any_input or had_input,
+                max(latest, t),
+            )
     except Exception as e:
         # Usage numbers aren't worth failing a response over
         logger.warning(f"Could not read events from Mixpanel: {e}")
         return None
-    # Fold devices into their users; the browser SDK prefixes device-only IDs
-    for device_id, user_id in device_users.items():
-        for device_key in (device_id, f"$device:{device_id}"):
-            if device_key in people:
-                t, engaged = people.pop(device_key)
-                last, was_engaged = people.get(user_id, (0.0, False))
-                people[user_id] = (max(t, last), engaged or was_engaged)
+    # Fold devices into the accounts they signed in as
+    for device, account in device_accounts.items():
+        if device in last_seen and device not in accounts:
+            t = last_seen.pop(device)
+            last_seen[account] = max(t, last_seen.get(account, 0.0))
+    last_engaged: dict[str, float] = {}
+    for (person, _), (n, any_input, latest) in days_seen.items():
+        if n >= 2 and any_input and person in last_seen:
+            last_engaged[person] = max(latest, last_engaged.get(person, 0.0))
+    people = {
+        person: (t, last_engaged.get(person, 0.0), person in accounts)
+        for person, t in last_seen.items()
+    }
     cache.set_json(key, people, ttl=3600)
     return people
 

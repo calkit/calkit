@@ -333,7 +333,8 @@ class Settings(BaseSettings):
     # Mixpanel
     MIXPANEL_TOKEN: str
     # Read access to the project's events, for the usage numbers in
-    # superuser stats; unset leaves those out
+    # superuser stats; unset leaves those out. The service account needs the
+    # download_events_csv permission, which Analyst has and Consumer doesn't
     MIXPANEL_SERVICE_ACCOUNT_USERNAME: str | None = None
     MIXPANEL_SERVICE_ACCOUNT_SECRET: str | None = None
     MIXPANEL_PROJECT_ID: int | None = None

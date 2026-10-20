@@ -74,7 +74,7 @@ export const AnalyticsStatsSchema = {
     active_visitors: {
       $ref: "#/components/schemas/ActiveCounts",
       description:
-        "Active users plus visitors who accepted analytics and did something without signing in. Anonymous page views aren't counted, since their IDs change daily.",
+        "Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.",
     },
   },
   type: "object",

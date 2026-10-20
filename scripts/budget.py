@@ -1,4 +1,4 @@
-"""Total up the budget for the 2027 pilot.
+"""Total up the budget for the 2027 workshop tour.
 
 The line items are data in docs/one-pager/2027-budget.csv, so the total and
 its parts, which the one-pager quotes, are computed here rather than typed,
@@ -47,6 +47,8 @@ results = {
     "indirect_rate": args.indirect_rate,
     "indirect": indirect,
     "total": total,
+    # The ask as it's pitched, to the nearest $10k
+    "total_rounded": round(total, -4),
     "workshops": args.workshops,
     "researchers_trained": trained,
     "projects_supported": args.supported,

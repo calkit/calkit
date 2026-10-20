@@ -24,6 +24,10 @@
   pdftitle={$title-meta$},pdfauthor={Calkit}}
 % Links, email addresses included, in the text's own font
 \urlstyle{same}
+% An ellipsis without the space LaTeX puts after it, which spreads one in
+% brackets, e.g., marking a cut in a quote, to "[. . . ]"
+\DeclareTextCommandDefault{\textellipsis}{%
+  .\kern\fontdimen3\font.\kern\fontdimen3\font.}
 % What pandoc's LaTeX writer leans on
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}

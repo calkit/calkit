@@ -56,7 +56,7 @@ it becomes much easier to review work done by AI agents or humans.
 > I had a scare where my process of manually screenshotting MATLAB figures and uploading them to Overleaf
 > almost led me to publish inconsistent results when I forgot to rerun some intermediate steps.
 >
-> […] Using Calkit significantly **relieved my anxiety** about inadvertently contributing to the replication crisis;
+> [\[…\]](https://docs.calkit.org/testimonials/#becca-mccabe) Using Calkit significantly **relieved my anxiety** about inadvertently contributing to the replication crisis;
 > streamlined review, collaboration, and reproduction workflows that would have been otherwise infeasible;
 > and improved the usability and visibility of my work for other researchers.
 > Importantly, Calkit scales to more complex projects, and I can't imagine how I would have

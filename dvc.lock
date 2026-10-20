@@ -294,24 +294,24 @@ stages:
       size: 10287
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: cbc6c05741c5f8efa2dacd66d42a851a
-      size: 48452
+      md5: 7034eb6919ba172bd659d837cacafdad
+      size: 48184
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 9811425fd91eda1a1b965db3df16efd8
-      size: 4363
+      md5: fa8bb74021a7546eccf250cdb2b078e0
+      size: 4385
     - path: docs/one-pager/one-pager.lua
       hash: md5
-      md5: 54871289c6274d3a1f536ca9de5b22c2
-      size: 2353
+      md5: 1102b36541da50fb365f4eb12351f882
+      size: 3327
     - path: docs/one-pager/template.tex
       hash: md5
-      md5: 1c04a112a81ce2fd2175a2e145cae009
-      size: 3689
+      md5: 2e35f6980f9fba731f326655c7c6b32a
+      size: 4282
     - path: results/2027-budget.json
       hash: md5
       md5: f28d1a9ad590fcff26d64c407ef02e28
@@ -323,8 +323,8 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 0a5f3a9af158ecfa5ac490b483efbf3d
-      size: 179658
+      md5: ad1316a561a17e3287a96954c28cc359
+      size: 179402
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:
@@ -338,8 +338,8 @@ stages:
       size: 1971
     - path: scripts/plot-budget.py
       hash: md5
-      md5: f9ac78b5698933f43043d79535783138
-      size: 1399
+      md5: 3993f83b5644335bf4a5a97a92104364
+      size: 1398
     - path: uv.lock
       hash: md5
       md5: 78cff1621fa9cb37be1d99412ed26e0f
@@ -347,8 +347,8 @@ stages:
     outs:
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: cbc6c05741c5f8efa2dacd66d42a851a
-      size: 48452
+      md5: 7034eb6919ba172bd659d837cacafdad
+      size: 48184
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
       --hub-users=130

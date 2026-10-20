@@ -39,7 +39,7 @@ As of <!-- calkit value key=date -->2026-10-19<!-- /calkit value -->.
 - **Calkit:** [TODO: modular but connected, one context at a time]
 - [TODO: Humans and AI agents verify each other's work]
 
-## A sample success story
+## A sample success story {.box}
 
 [Rebecca (Becca) McCabe](https://scholar.google.com/citations?user=r3eP1gIAAAAJ&hl=en)
 [TODO: who she is and what success meant]
@@ -88,6 +88,8 @@ work transparently and observably]
 
 [TODO: Pete; 25% of a Caltech Schmidt Academy RSE; Google Cloud credits]
 
+::: footer
 Learn more at [docs.calkit.org](https://docs.calkit.org) and
 [calkit.io](https://calkit.io), or email Pete Bachant at
 [pete@calkit.org](mailto:pete@calkit.org).
+:::

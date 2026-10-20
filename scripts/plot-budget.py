@@ -22,7 +22,7 @@ plt.rcParams.update(
 )
 cats = sorted(r["by_category"], key=r["by_category"].get)
 costs = [r["by_category"][c] for c in cats]
-fig, ax = plt.subplots(figsize=(3.45, 1.15))
+fig, ax = plt.subplots(figsize=(3.45, 1.0))
 ax.barh(range(len(cats)), costs, height=0.62, color=TEAL)
 # Each bar labeled with its amount and share of the total
 for i, cost in enumerate(costs):

@@ -19,14 +19,14 @@
     }
   },
   "budget-2027-figure": {
-    "start_time": "2026-10-20T04:18:06.342000",
-    "end_time": "2026-10-20T04:18:07.386000",
+    "start_time": "2026-10-20T04:26:42.914000",
+    "end_time": "2026-10-20T04:26:43.943000",
     "environment": "dev",
-    "git_rev": "4576c360c05f04b02b654c40eebccd46916c9cd1",
+    "git_rev": "8c62d75c9d6eb67e858eacc5d64c99798abf7235",
     "git_dirty": true,
-    "dvc_lock_hash": "sha256:5c41bebd49968e007a2654f1ad8b81ebd5acdb255e1ac742c49c75d9bb8265fd",
-    "calkit_version": "0.49.3.dev24+g4576c360c.d20261020",
-    "calkit_git_rev": "4576c360c05f04b02b654c40eebccd46916c9cd1",
+    "dvc_lock_hash": "sha256:8c4faa74bbff188411beba3a8ad9f9f22ff23cf8a01bd89d3239860096b5de2a",
+    "calkit_version": "0.49.3.dev25+g8c62d75c9",
+    "calkit_git_rev": "8c62d75c9d6eb67e858eacc5d64c99798abf7235",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
@@ -75,13 +75,13 @@
     }
   },
   "one-pager/pdf": {
-    "start_time": "2026-10-20T04:18:30.989000",
-    "end_time": "2026-10-20T04:18:35.382000",
-    "git_rev": "4576c360c05f04b02b654c40eebccd46916c9cd1",
+    "start_time": "2026-10-20T04:27:33.166000",
+    "end_time": "2026-10-20T04:27:37.225000",
+    "git_rev": "8c62d75c9d6eb67e858eacc5d64c99798abf7235",
     "git_dirty": true,
-    "dvc_lock_hash": "sha256:ce4d4997d7335889742635e859691e16b810ad60841da66d850e6050d543d03c",
-    "calkit_version": "0.49.3.dev24+g4576c360c.d20261020",
-    "calkit_git_rev": "4576c360c05f04b02b654c40eebccd46916c9cd1",
+    "dvc_lock_hash": "sha256:a60aeeee9d76daf00ac37b7982b2d222d200bec37466701a297964b3901b08ef",
+    "calkit_version": "0.49.3.dev25+g8c62d75c9",
+    "calkit_git_rev": "8c62d75c9d6eb67e858eacc5d64c99798abf7235",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",

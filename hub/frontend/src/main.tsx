@@ -29,9 +29,7 @@ client.instance.interceptors.request.use(async (config) => {
 
 const mixpanelToken = import.meta.env.VITE_MIXPANEL_TOKEN
 mixpanel.init(mixpanelToken, {
-  debug: String(import.meta.env.VITE_API_URL).startsWith(
-    "http://api.localhost",
-  ),
+  debug: String(import.meta.env.VITE_API_URL).startsWith("http://localhost"),
   // Page views are tracked in lib/analytics instead of automatically here, so
   // automated sessions can be tagged before any event is sent.
   track_pageview: false,

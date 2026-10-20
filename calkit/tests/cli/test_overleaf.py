@@ -1436,3 +1436,34 @@ def test_overleaf_credentials(monkeypatch):
     assert res.exit_code != 0
     assert "rejected" in res.output
     assert config.overleaf_session is None
+    # With nothing in config, a token saved to the hub comes first, then a
+    # session saved there, e.g., by the browser extension
+    hub = {"/user/overleaf-session": {"session": "from-hub"}}
+
+    def hub_get(path, **kwargs):
+        if path not in hub:
+            raise RuntimeError("404")
+        return hub[path]
+
+    monkeypatch.setattr(calkit.hub, "get", hub_get)
+    config.overleaf_token = None
+    config.token = calkit.config.KeyringOptionalSecret("hub-token")
+    auth = _get_overleaf_auth()
+    assert isinstance(auth, calkit.overleaf.WebClient)
+    assert auth.session == config.overleaf_session == "from-hub"
+    config.overleaf_session = None
+    hub["/user/overleaf-token"] = {"access_token": "olp_hub"}
+    assert _get_overleaf_auth() == config.overleaf_token == "olp_hub"
+    # A rejected session is replaced by a newer one on the hub without
+    # prompting, but the same one again isn't retried
+    config.overleaf_token = None
+    sessions_tried.clear()
+    hub["/user/overleaf-session"] = {"session": "fresh"}
+    monkeypatch.setattr("sys.stdin", io.StringIO())
+    _, client = _get_pulled_overleaf_repo(
+        "abc", calkit.overleaf.WebClient("expired")
+    )
+    assert sessions_tried == ["expired", "fresh"]
+    hub["/user/overleaf-session"] = {"session": "expired"}
+    with pytest.raises(typer.Exit):
+        _get_pulled_overleaf_repo("abc", calkit.overleaf.WebClient("expired"))

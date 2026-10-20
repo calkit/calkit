@@ -42,24 +42,11 @@ def _extract_title_from_tex(tex_file_path: str) -> str | None:
 
 
 def _get_overleaf_token(rejected: bool = False) -> str:
-    """Get the user's Overleaf token from config.
-
-    If not set, we'll try to get from the hub. If that fails, or Overleaf
-    ``rejected`` the one we have, we'll prompt the user to enter one.
+    """Get the user's Overleaf token from config, prompting for one if it
+    isn't set or Overleaf ``rejected`` it.
     """
     calkit_config = calkit.config.read()
     overleaf_token = None if rejected else calkit_config.overleaf_token
-    if not overleaf_token and not rejected:
-        # See if we can get it from the hub
-        if calkit_config.token is not None:
-            try:
-                typer.echo("Getting Overleaf token from the hub")
-                resp = calkit.hub.get("/user/overleaf-token")
-                overleaf_token = resp["access_token"]
-                calkit_config.overleaf_token = overleaf_token
-                calkit_config.write()
-            except Exception:
-                typer.echo("Failed to get Overleaf token from the hub")
     if not overleaf_token:
         if rejected:
             warn(
@@ -73,7 +60,8 @@ def _get_overleaf_token(rejected: bool = False) -> str:
             "A new one can be generated at:\n\n"
             "    https://www.overleaf.com/user/settings\n\n"
             "under the 'Git Integration' section.\n"
-            "Without Overleaf Premium, run 'calkit overleaf login' instead.\n"
+            "Without Overleaf Premium, run 'calkit overleaf login' instead, "
+            "or connect from the Calkit browser extension on overleaf.com.\n"
         )
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise_error(
@@ -93,10 +81,36 @@ def _get_overleaf_token(rejected: bool = False) -> str:
     return overleaf_token
 
 
-def _get_overleaf_session(rejected: bool = False) -> str:
-    """Prompt for an Overleaf browser session cookie and store it."""
+def _get_overleaf_session_from_hub(stale: str | None = None) -> str | None:
+    """Get an Overleaf session saved to the hub, e.g., by the browser
+    extension, other than a ``stale`` one, and store it in config.
+    """
+    calkit_config = calkit.config.read()
+    if calkit_config.token is None:
+        return None
+    try:
+        session = calkit.hub.get("/user/overleaf-session")["session"]
+    except Exception:
+        return None
+    if not session or session == stale:
+        return None
+    typer.echo("Using the Overleaf session saved to the hub")
+    calkit_config.overleaf_session = session
+    calkit_config.write()
+    return str(session)
+
+
+def _get_overleaf_session(
+    rejected: bool = False, stale: str | None = None
+) -> str:
+    """Get a new Overleaf session from the hub, or prompt for one, and store
+    it.
+    """
     if rejected:
         warn("Overleaf rejected your session", prefix="")
+    session = _get_overleaf_session_from_hub(stale=stale)
+    if session:
+        return session
     typer.echo(calkit.overleaf.SESSION_HELP + "\n")
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise_error(
@@ -110,12 +124,29 @@ def _get_overleaf_session(rejected: bool = False) -> str:
 
 
 def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
-    """Get a Git token, or, if only a session is set, a web client for
-    syncing without Overleaf Premium.
+    """Get a Git token, or, if only a session is available, a web client
+    for syncing without Overleaf Premium.
+
+    Credentials in config come first, then a token saved to the hub, then a
+    session saved to the hub, before prompting for a token.
     """
     calkit_config = calkit.config.read()
-    if not calkit_config.overleaf_token and calkit_config.overleaf_session:
+    if calkit_config.overleaf_token:
+        return calkit_config.overleaf_token
+    if calkit_config.overleaf_session:
         return calkit.overleaf.WebClient(calkit_config.overleaf_session)
+    if calkit_config.token is not None:
+        try:
+            typer.echo("Getting Overleaf token from the hub")
+            token = calkit.hub.get("/user/overleaf-token")["access_token"]
+            calkit_config.overleaf_token = token
+            calkit_config.write()
+            return str(token)
+        except Exception:
+            typer.echo("No Overleaf token on the hub")
+        session = _get_overleaf_session_from_hub()
+        if session:
+            return calkit.overleaf.WebClient(session)
     return _get_overleaf_token()
 
 
@@ -141,7 +172,7 @@ def _get_pulled_overleaf_repo(
             if isinstance(auth, calkit.overleaf.WebClient):
                 warn(str(e), prefix="")
                 auth = calkit.overleaf.WebClient(
-                    _get_overleaf_session(rejected=True)
+                    _get_overleaf_session(rejected=True, stale=auth.session)
                 )
             else:
                 auth = _get_overleaf_token(rejected=True)

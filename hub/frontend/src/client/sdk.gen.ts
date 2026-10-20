@@ -243,6 +243,7 @@ import type {
   GetUserGithubTokenResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
+  GetUserOverleafSessionResponses,
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
@@ -287,6 +288,7 @@ import type {
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
+  OverleafSessionPut,
   OverleafSyncPost,
   ParseReleaseUrlErrors,
   ParseReleaseUrlResponses,
@@ -438,6 +440,8 @@ import type {
   PutProjectReferenceNotesResponses,
   PutUserOnboardingFlagErrors,
   PutUserOnboardingFlagResponses,
+  PutUserOverleafSessionErrors,
+  PutUserOverleafSessionResponses,
   PutUserOverleafTokenErrors,
   PutUserOverleafTokenResponses,
   PutUserSubscriptionAdminErrors,
@@ -1926,6 +1930,62 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/overleaf-token",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Overleaf Session
+   */
+  public static getUserOverleafSession<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserOverleafSessionResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserOverleafSessionResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-session",
+      ...options,
+    })
+  }
+
+  /**
+   * Put User Overleaf Session
+   *
+   * Save the current user's Overleaf browser session, for syncing
+   * without Overleaf Premium.
+   */
+  public static putUserOverleafSession<ThrowOnError extends boolean = true>(
+    parameters: {
+      overleafSessionPut: OverleafSessionPut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutUserOverleafSessionResponses,
+    PutUserOverleafSessionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "overleafSessionPut", map: "body" }] }],
+    )
+    return (options?.client ?? client).put<
+      PutUserOverleafSessionResponses,
+      PutUserOverleafSessionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-session",
       ...options,
       ...params,
       headers: {

@@ -769,7 +769,8 @@ def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
             overleaf_project_id="abc",
         )
 
-    with get() as repo:
+    with get() as (repo, push):
+        assert push is None
         assert repo.head.commit.hexsha == head
         assert Path(repo_dir, "main.tex").read_text() == "v2"
         assert not Path(repo_dir, "leftover.tex").exists()
@@ -810,6 +811,65 @@ def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
         with get():
             pass
     assert e.value.status_code == 401
+    # With only a browser session, the repo is a mirror Calkit keeps, which
+    # replaces any clone, and pushes go through Overleaf's web API
+    client = _FakeOverleafWeb({"main.tex": b"from the web"})
+    monkeypatch.setattr(app.git.users, "get_overleaf_auth", lambda **k: client)
+    with get() as (repo, push):
+        assert not repo.remotes
+        assert Path(repo_dir, "main.tex").read_text() == "from the web"
+        Path(repo_dir, "fig.txt").write_text("figure")
+        repo.git.add("fig.txt")
+        repo.git.commit("-m", "Sync")
+        push(repo)
+    assert client.files["fig.txt"] == b"figure"
+    client.rejected = True
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.detail == app.git.OVERLEAF_SESSION_REJECTED
+    # Getting a token afterwards replaces the mirror with a clone
+    monkeypatch.undo()
+    monkeypatch.setattr(app.git.users, "get_overleaf_token", lambda **k: "t")
+    monkeypatch.setattr(app.git, "_configure_committer", lambda *a, **k: None)
+    monkeypatch.setattr(
+        app.git.subprocess,
+        "run",
+        lambda args, **k: SimpleNamespace(
+            returncode=0,
+            stderr="",
+            repo=git.Repo.clone_from(remote.working_dir, args[-1]),
+        ),
+    )
+    with get() as (repo, push):
+        assert repo.remotes
+        assert Path(repo_dir, "main.tex").read_text() == "v2"
+
+
+class _FakeOverleafWeb(app.git.calkit.overleaf.WebClient):
+    """Stands in for Overleaf's web app, holding a project's files."""
+
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self.files = files
+        self.rejected = False
+
+    def download(self, project_id: str) -> bytes:
+        import io
+        import zipfile
+
+        if self.rejected:
+            raise app.git.calkit.overleaf.AuthError("Session expired")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for path, content in self.files.items():
+                z.writestr(path, content)
+        return buf.getvalue()
+
+    def get_root_folder(self, project_id: str) -> dict:
+        return {"_id": "root", "docs": [], "fileRefs": [], "folders": []}
+
+    def upload(self, project_id, root_folder_id, path, content) -> None:
+        self.files[path] = content
 
 
 def _read_title(files: dict[str, str]):
@@ -843,6 +903,27 @@ def test_read_overleaf_title_finds_the_document_that_builds() -> None:
         }
     )
     assert title == "Coherent structures in boundary layers"
+    # With only a browser session, the project is downloaded instead
+    from unittest.mock import patch
+
+    from app.git import read_overleaf_title
+
+    client = _FakeOverleafWeb(
+        {"main.tex": b"\\documentclass{article}\n\\title{From the web}\n"}
+    )
+    with patch("app.git.users.get_overleaf_auth", return_value=client):
+        title = read_overleaf_title(
+            user=object(), session=object(), overleaf_project_id="abc"
+        )
+    assert title == "From the web"
+    client.rejected = True
+    with patch("app.git.users.get_overleaf_auth", return_value=client):
+        assert (
+            read_overleaf_title(
+                user=object(), session=object(), overleaf_project_id="abc"
+            )
+            is None
+        )
 
 
 def test_read_overleaf_title_prefers_a_conventional_name() -> None:

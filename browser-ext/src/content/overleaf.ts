@@ -50,12 +50,51 @@ function isOverleafTokenProblem(e: unknown): boolean {
   );
 }
 
-/** Ask for an Overleaf Git token, and save it to the hub. */
+/**
+ * Ask for an Overleaf Git token, and save it to the hub, or, without
+ * Overleaf Premium, connect the browser's Overleaf sign-in instead.
+ */
 function renderTokenForm(
   container: HTMLElement,
-  rejected: boolean,
+  problem: string,
   reload: () => void,
 ): void {
+  const rejected = problem.includes("rejected");
+  const sessionRejected = rejected && problem.includes("session");
+  const connectMessage = el("div", { class: "small" });
+  const connect = el("button", {
+    class: sessionRejected ? "action" : "action secondary",
+    text: "Connect Overleaf sign-in",
+  });
+  connect.addEventListener("click", async () => {
+    connect.disabled = true;
+    clear(connectMessage).append(loading("Connecting"));
+    try {
+      await send({ type: "overleaf.connectSession" });
+      reload();
+    } catch (e) {
+      connect.disabled = false;
+      clear(connectMessage).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  const connectSection = el("div", { style: { marginTop: "12px" } }, [
+    el("div", {
+      class: "small",
+      text: sessionRejected
+        ? "Overleaf no longer accepts the sign-in Calkit saved. Connect " +
+          "it again to keep syncing."
+        : "No Overleaf Premium? Calkit can sync using your Overleaf " +
+          "sign-in instead of a token.",
+    }),
+    el("div", { class: "actions" }, [connect]),
+    connectMessage,
+  ]);
+  if (sessionRejected) {
+    container.append(connectSection);
+    return;
+  }
   const input = textInput({ placeholder: "olp_..." });
   input.type = "password";
   const message = el("div", { class: "small" });
@@ -107,6 +146,7 @@ function renderTokenForm(
       }),
     ]),
     message,
+    connectSection,
   );
 }
 
@@ -821,11 +861,7 @@ async function load(overleafProjectId: string): Promise<void> {
       return;
     }
     if (isOverleafTokenProblem(e)) {
-      renderTokenForm(
-        body,
-        e instanceof Error && e.message.includes("rejected"),
-        reload,
-      );
+      renderTokenForm(body, e instanceof Error ? e.message : String(e), reload);
       return;
     }
     body.append(errorMessage(e instanceof Error ? e.message : String(e)));

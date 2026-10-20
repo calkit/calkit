@@ -16,7 +16,8 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import timezone
-from typing import Any, Iterator
+from functools import partial
+from typing import Any, Callable, Iterator
 
 import git
 from fastapi import HTTPException
@@ -1170,13 +1171,24 @@ OVERLEAF_TOKEN_REJECTED = (
 )
 
 
+OVERLEAF_SESSION_REJECTED = (
+    "Overleaf rejected your saved session, so you may have signed out of "
+    "Overleaf. Connect again from the Calkit browser extension on "
+    "overleaf.com."
+)
+
+
 @contextmanager
 def get_overleaf_repo(
     project: Project, user: User, session: Session, overleaf_project_id: str
-) -> Iterator[git.Repo]:
-    """Get a freshly pulled Overleaf repository for a user/project.
+) -> Iterator[tuple[git.Repo, Callable[[git.Repo], None] | None]]:
+    """Get a freshly pulled Overleaf repository for a user/project, and how
+    to push to it, which is ``None`` to use ``git push``.
 
-    The clone is locked while in use, since a sync resets it and copies files
+    With a Git token this is a clone. With only a browser session, for
+    users without Overleaf Premium, it's a mirror Calkit keeps itself.
+
+    The repo is locked while in use, since a sync resets it and copies files
     into it, so a concurrent sync or status check could wipe those files or
     record Overleaf edits as synced without pulling them.
     """
@@ -1187,11 +1199,7 @@ def get_overleaf_repo(
     )
     repo_dir = os.path.join(base_dir, "repo")
     os.makedirs(base_dir, exist_ok=True)
-    overleaf_token = users.get_overleaf_token(session=session, user=user)
-    # Plain URL — credentials supplied via credential helper
-    # (username "git" for Overleaf)
-    git_plain_url = f"https://git.overleaf.com/{overleaf_project_id}"
-    overleaf_auth = _make_git_auth_env(overleaf_token, username="git")
+    overleaf_auth = users.get_overleaf_auth(session=session, user=user)
     try:
         lock = FileLock(
             os.path.join(base_dir, "syncing.lock"),
@@ -1203,35 +1211,61 @@ def get_overleaf_repo(
             409, "Another Overleaf sync of this project is running"
         )
     try:
-        try:
-            if os.path.isdir(repo_dir):
-                repo = git.Repo(repo_dir)
-                repo.git.update_environment(**overleaf_auth)
-                # Resets rather than merges, so a sync that failed after
-                # committing to the clone can't block every later pull
-                calkit.overleaf.pull(repo)
-            else:
-                cloned = subprocess.run(
-                    ["git", "clone", git_plain_url, repo_dir],
-                    env={**os.environ, **overleaf_auth},
-                    timeout=300,
-                    capture_output=True,
-                    text=True,
+        push = None
+        if isinstance(overleaf_auth, calkit.overleaf.WebClient):
+            try:
+                repo = calkit.overleaf.get_mirror(
+                    overleaf_project_id, dest=repo_dir
                 )
-                if cloned.returncode != 0:
-                    raise calkit.overleaf._git_error(
-                        GitCommandError(
-                            ["git", "clone"], cloned.returncode, cloned.stderr
-                        ),
-                        "clone",
+                calkit.overleaf.pull_mirror(
+                    repo, overleaf_auth, overleaf_project_id
+                )
+            except calkit.overleaf.AuthError:
+                raise HTTPException(401, OVERLEAF_SESSION_REJECTED)
+            push = partial(
+                calkit.overleaf.push_mirror,
+                client=overleaf_auth,
+                project_id=overleaf_project_id,
+            )
+        else:
+            # Plain URL — credentials supplied via credential helper
+            # (username "git" for Overleaf)
+            git_plain_url = f"https://git.overleaf.com/{overleaf_project_id}"
+            git_auth = _make_git_auth_env(overleaf_auth, username="git")
+            # A mirror kept for a browser session has nothing to pull from
+            if os.path.isdir(repo_dir) and not git.Repo(repo_dir).remotes:
+                shutil.rmtree(repo_dir)
+            try:
+                if os.path.isdir(repo_dir):
+                    repo = git.Repo(repo_dir)
+                    repo.git.update_environment(**git_auth)
+                    # Resets rather than merges, so a sync that failed after
+                    # committing to the clone can't block every later pull
+                    calkit.overleaf.pull(repo)
+                else:
+                    cloned = subprocess.run(
+                        ["git", "clone", git_plain_url, repo_dir],
+                        env={**os.environ, **git_auth},
+                        timeout=300,
+                        capture_output=True,
+                        text=True,
                     )
-                repo = git.Repo(repo_dir)
-                repo.git.update_environment(**overleaf_auth)
-        except calkit.overleaf.AuthError:
-            raise HTTPException(401, OVERLEAF_TOKEN_REJECTED)
+                    if cloned.returncode != 0:
+                        raise calkit.overleaf._git_error(
+                            GitCommandError(
+                                ["git", "clone"],
+                                cloned.returncode,
+                                cloned.stderr,
+                            ),
+                            "clone",
+                        )
+                    repo = git.Repo(repo_dir)
+                    repo.git.update_environment(**git_auth)
+            except calkit.overleaf.AuthError:
+                raise HTTPException(401, OVERLEAF_TOKEN_REJECTED)
         # Run git config so we make commits as this user (with safe fallbacks)
         _configure_committer(repo, user, session=session)
-        yield repo
+        yield repo, push
     finally:
         lock.release()
 
@@ -1251,24 +1285,40 @@ def read_overleaf_title(
     outlive the read. Returns None whenever the title can't be worked out,
     since a project can still be created without one.
     """
-    overleaf_token = users.get_overleaf_token(session=session, user=user)
-    auth = _make_git_auth_env(overleaf_token, username="git")
+    import io
+    import zipfile
+
+    overleaf_auth = users.get_overleaf_auth(session=session, user=user)
     with tempfile.TemporaryDirectory(prefix="overleaf-title-") as tmp:
         repo_dir = os.path.join(tmp, "repo")
         try:
-            subprocess.check_call(
-                [
-                    "git",
-                    "clone",
-                    "--depth=1",
-                    f"https://git.overleaf.com/{overleaf_project_id}",
-                    repo_dir,
-                ],
-                env={**os.environ, **auth},
-                timeout=120,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-            logger.info(f"Could not clone Overleaf project for title: {e}")
+            if isinstance(overleaf_auth, calkit.overleaf.WebClient):
+                archive = overleaf_auth.download(overleaf_project_id)
+                # Extraction drops absolute paths and '..', so nothing lands
+                # outside the directory
+                zipfile.ZipFile(io.BytesIO(archive)).extractall(repo_dir)
+            else:
+                subprocess.check_call(
+                    [
+                        "git",
+                        "clone",
+                        "--depth=1",
+                        f"https://git.overleaf.com/{overleaf_project_id}",
+                        repo_dir,
+                    ],
+                    env={
+                        **os.environ,
+                        **_make_git_auth_env(overleaf_auth, username="git"),
+                    },
+                    timeout=120,
+                )
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            RuntimeError,
+            zipfile.BadZipFile,
+        ) as e:
+            logger.info(f"Could not read Overleaf project for title: {e}")
             return None
         tex_paths = sorted(
             os.path.join(root, f)

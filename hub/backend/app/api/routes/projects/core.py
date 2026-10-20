@@ -6914,7 +6914,7 @@ async def post_project_overleaf_publication(
                 expires=None,
             )
         try:
-            users.get_overleaf_token(session=session, user=current_user)
+            users.get_overleaf_auth(session=session, user=current_user)
         except HTTPException:
             raise HTTPException(400, "No Overleaf token found")
         try:
@@ -6923,7 +6923,7 @@ async def post_project_overleaf_publication(
                 user=current_user,
                 session=session,
                 overleaf_project_id=overleaf_project_id,
-            ) as overleaf_repo:
+            ) as (overleaf_repo, _):
                 # Snapshot the files and commit while the clone is locked, so
                 # a concurrent pull or sync can't change them mid-import; the
                 # directory is removed when the snapshot is garbage collected
@@ -7205,10 +7205,7 @@ def post_project_overleaf_sync(
     current_user: CurrentUser,
     session: SessionDep,
 ) -> OverleafSyncResponse:
-    try:
-        users.get_overleaf_token(session=session, user=current_user)
-    except HTTPException:
-        raise HTTPException(401, "Overleaf token not found")
+    users.get_overleaf_auth(session=session, user=current_user)
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7237,7 +7234,7 @@ def post_project_overleaf_sync(
             user=current_user,
             session=session,
             overleaf_project_id=overleaf_project_id,
-        ) as overleaf_repo:
+        ) as (overleaf_repo, overleaf_push):
             res = calkit.overleaf.sync(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,
@@ -7247,6 +7244,7 @@ def post_project_overleaf_sync(
                 sync_info_for_path=None,
                 print_info=logger.info,
                 no_commit=False,
+                push=overleaf_push,
             )
     except HTTPException:
         raise
@@ -7329,10 +7327,7 @@ def get_project_overleaf_sync_status(
     folder with ``path`` or to the folders synced with a single Overleaf
     project with ``overleaf_project_id``.
     """
-    try:
-        users.get_overleaf_token(session=session, user=current_user)
-    except HTTPException:
-        raise HTTPException(401, "Overleaf token not found")
+    users.get_overleaf_auth(session=session, user=current_user)
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7412,7 +7407,7 @@ def get_project_overleaf_sync_status(
             user=current_user,
             session=session,
             overleaf_project_id=this_overleaf_project_id,
-        ) as overleaf_repo:
+        ) as (overleaf_repo, _):
             status = calkit.overleaf.get_sync_status(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,

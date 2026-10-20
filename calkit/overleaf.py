@@ -13,14 +13,11 @@ from copy import deepcopy
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator
+from typing import Any, Callable, Iterator
 
 import git
 
 import calkit
-
-if TYPE_CHECKING:
-    import requests
 
 PRIVATE_KEYS = ["project_id", "last_sync_commit"]
 
@@ -198,7 +195,8 @@ SESSION_HELP = (
 SESSION_REJECTED_ADVICE = (
     "Your Overleaf session may have expired, e.g., by signing out of "
     "overleaf.com, or you may not have edit access to this project. "
-    "Sign in again with 'calkit overleaf login'."
+    "Sign in again with 'calkit overleaf login', or reconnect from the "
+    "Calkit browser extension on overleaf.com."
 )
 
 
@@ -217,10 +215,10 @@ class WebClient:
         self.url = url.rstrip("/")
         self.http = requests.Session()
         self.http.headers["User-Agent"] = f"calkit/{calkit.__version__}"
-        session = session.strip().removeprefix(f"{SESSION_COOKIE}=")
-        self.http.cookies.set(SESSION_COOKIE, session)
+        self.session = session.strip().removeprefix(f"{SESSION_COOKIE}=")
+        self.http.cookies.set(SESSION_COOKIE, self.session)
 
-    def _check(self, resp: requests.Response, action: str) -> None:
+    def _check(self, resp: Any, action: str) -> None:
         # A missing or expired session redirects to the login page
         if resp.status_code in (401, 403) or "/login" in resp.url:
             raise AuthError(
@@ -262,7 +260,8 @@ class WebClient:
                 "Overleaf didn't send the project's files.\n"
                 + SESSION_REJECTED_ADVICE
             )
-        return resp.content
+        content: bytes = resp.content
+        return content
 
     def get_root_folder(self, project_id: str) -> dict:
         """Get the project's file tree, which has the IDs needed to upload
@@ -274,7 +273,7 @@ class WebClient:
         """
         import time
 
-        def get(url: str) -> requests.Response:
+        def get(url: str) -> Any:
             params = {
                 "projectId": project_id,
                 "t": str(int(time.time() * 1e3)),
@@ -359,15 +358,16 @@ class WebClient:
         self._check(resp, "delete a file")
 
 
-def get_mirror(project_id: str) -> git.Repo:
+def get_mirror(project_id: str, dest: str | None = None) -> git.Repo:
     """Return the local Git mirror of an Overleaf project synced with a
-    session, creating it if necessary.
+    session, creating it if necessary, by default in ``get_project_dir``.
 
     Calkit writes this repo's history itself, one commit per change seen on
     Overleaf, so the sync works the same as with a Git integration clone,
     which serves as a mirror just as well if one is already there.
     """
-    dest = get_project_dir(project_id)
+    if dest is None:
+        dest = get_project_dir(project_id)
     # Opening a directory without its own .git would find the main project
     # repo in a parent directory instead
     if os.path.isdir(dest) and not os.path.exists(os.path.join(dest, ".git")):
@@ -388,12 +388,7 @@ def pull_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
 
     archive = zipfile.ZipFile(io.BytesIO(client.download(project_id)))
     if repo.head.is_valid():
-        try:
-            repo.git.rev_parse("--verify", "--quiet", MIRROR_REF)
-            synced = MIRROR_REF
-        except git.GitCommandError:
-            synced = "HEAD"
-        repo.git.reset("--hard", synced)
+        repo.git.reset("--hard", MIRROR_REF if is_mirror(repo) else "HEAD")
         repo.git.rm("-r", "-q", "--cached", "--ignore-unmatch", ".")
     repo.git.clean("-fdx")
     root = Path(str(repo.working_dir)).resolve()
@@ -412,6 +407,15 @@ def pull_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
     if not repo.head.is_valid() or repo.git.diff("--staged"):
         repo.git.commit("--allow-empty", "-m", "Update on Overleaf.")
     repo.git.update_ref(MIRROR_REF, "HEAD")
+
+
+def is_mirror(repo: git.Repo) -> bool:
+    """Whether a repo is kept up to date by ``pull_mirror``."""
+    try:
+        repo.git.rev_parse("--verify", "--quiet", MIRROR_REF)
+        return True
+    except git.GitCommandError:
+        return False
 
 
 def push_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
@@ -1205,6 +1209,14 @@ def get_sync_status(
         )
     if last_sync_commit is None:
         last_sync_commit = sync_info_for_path.get("last_sync_commit")
+    if is_mirror(overleaf_repo):
+        last_sync_commit = ensure_sync_base(
+            overleaf_repo,
+            main_repo=main_repo,
+            path_in_project=path_in_project,
+            last_sync_commit=last_sync_commit,
+            print_info=lambda _: None,
+        )
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=main_repo.working_dir)
     # Declared figures are stored relative to the repo root, but sync works
@@ -1361,6 +1373,14 @@ def sync(
     assert isinstance(sync_info_for_path, dict)
     if last_sync_commit is None:
         last_sync_commit = sync_info_for_path.get("last_sync_commit")
+    if is_mirror(overleaf_repo):
+        last_sync_commit = ensure_sync_base(
+            overleaf_repo,
+            main_repo=main_repo,
+            path_in_project=path_in_project,
+            last_sync_commit=last_sync_commit,
+            print_info=print_info,
+        )
     res["commits_since_last_sync"] = get_commits_since_last_sync(
         overleaf_repo=overleaf_repo, last_sync_commit=last_sync_commit
     )

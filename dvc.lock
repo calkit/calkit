@@ -318,12 +318,12 @@ stages:
       size: 2007
     - path: results/traction.json
       hash: md5
-      md5: 828badc953c14a0f83d777ea30b9788b
+      md5: a20f48bdb8f0576e6782caf59b151a8c
       size: 539
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 877f39e8b6d3899a568909b2cf9425d6
+      md5: 155434a6d0a69f6e0d2b5ff6619656f9
       size: 179242
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
@@ -342,8 +342,8 @@ stages:
       size: 1404
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: docs/img/2027-budget.png
       hash: md5
@@ -371,12 +371,12 @@ stages:
       size: 4216
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: results/traction.json
       hash: md5
-      md5: 828badc953c14a0f83d777ea30b9788b
+      md5: a20f48bdb8f0576e6782caf59b151a8c
       size: 539
   find-calkit-projects:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
@@ -395,12 +395,12 @@ stages:
       size: 9233
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 6345c591565147939716a675f0677165
+      md5: 2fdd3ccf061d838bf89d9aca1084624a
       size: 11725
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
@@ -415,7 +415,7 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 6345c591565147939716a675f0677165
+      md5: 2fdd3ccf061d838bf89d9aca1084624a
       size: 11725
     - path: scripts/find-calkit-papers.py
       hash: md5
@@ -423,8 +423,8 @@ stages:
       size: 6400
     - path: uv.lock
       hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
+      md5: 2f62f424413d77d2f5ff0274223128a7
+      size: 1727873
     outs:
     - path: data/calkit-projects/papers.csv
       hash: md5

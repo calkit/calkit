@@ -14,7 +14,7 @@ that calculated them, for fast iteration and full _observability_.**
   researchers and groups with projects on calkit.io
 - **<!-- calkit value key=papers_shipped -->5<!-- /calkit value -->**
   reproducible publications shipped
-- **<!-- calkit value key=releases_per_week_last_90_days -->2.5<!-- /calkit value -->**
+- **<!-- calkit value key=releases_per_week_last_90_days -->7.3<!-- /calkit value -->**
   releases a week over 90 days
 
 As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.

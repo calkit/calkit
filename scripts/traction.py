@@ -11,6 +11,7 @@ import argparse
 import csv
 import datetime
 import json
+import re
 import subprocess
 import time
 import urllib.error
@@ -53,20 +54,22 @@ with open("data/calkit-projects/papers.csv", encoding="utf-8") as f:
         if row["status"] in ("published", "preprint", "archived")
         and row["is_example_or_test"] == "False"
     ]
-tags = subprocess.check_output(["git", "tag", "-l", "v*"], text=True).split()
-# Release frequency, as in DORA's deployment frequency, over a recent window
-release_dates = [
-    datetime.date.fromisoformat(d)
-    for d in subprocess.check_output(
-        [
-            "git",
-            "for-each-ref",
-            "--format=%(creatordate:short)",
-            "refs/tags/v*",
-        ],
-        text=True,
-    ).split()
-]
+# Releases of every component, i.e., version tags with or without a prefix
+# like hub/ or vscode-ext/, and how often they happen, as in DORA's
+# deployment frequency, over a recent window
+release_dates = []
+for line in subprocess.check_output(
+    [
+        "git",
+        "for-each-ref",
+        "--format=%(creatordate:short) %(refname:short)",
+        "refs/tags",
+    ],
+    text=True,
+).splitlines():
+    date, tag = line.split(maxsplit=1)
+    if re.fullmatch(r"([a-z-]+/)?v\d+(\.\d+)*", tag):
+        release_dates.append(datetime.date.fromisoformat(date))
 recent_releases = sum(
     1
     for d in release_dates
@@ -99,7 +102,7 @@ results = {
     "github_stars": repo["stargazers_count"],
     "github_forks": repo["forks_count"],
     "pypi_downloads_last_month": pypi["data"]["last_month"],
-    "releases": len(tags),
+    "releases": len(release_dates),
     "releases_per_week_last_90_days": round(recent_releases / (90 / 7), 1),
     # By title, since a paper can be in more than one repo, e.g., a copy
     "papers_shipped": len(

@@ -302,7 +302,7 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: e2b1015cb7ba487e1a1063beb3ce6d61
+      md5: 028e96f38395d6eacd0fd85bc3a095fd
       size: 4886
     - path: docs/one-pager/one-pager.lua
       hash: md5
@@ -318,13 +318,13 @@ stages:
       size: 1971
     - path: results/traction.json
       hash: md5
-      md5: 5f480ca216632c852349aafd499e309d
+      md5: 828badc953c14a0f83d777ea30b9788b
       size: 539
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: af5d92ab398db1238d473e997ad5a385
-      size: 179702
+      md5: 7e7f0f29f18780b49999ff43d6e5ff90
+      size: 179545
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:
@@ -367,8 +367,8 @@ stages:
       size: 5125
     - path: scripts/traction.py
       hash: md5
-      md5: 36bd69fdcb937d66dc6303678b656c40
-      size: 4056
+      md5: 3c46a0f6c5ec81bddb3cfc6b089c173d
+      size: 4216
     - path: uv.lock
       hash: md5
       md5: 78cff1621fa9cb37be1d99412ed26e0f
@@ -376,7 +376,7 @@ stages:
     outs:
     - path: results/traction.json
       hash: md5
-      md5: 5f480ca216632c852349aafd499e309d
+      md5: 828badc953c14a0f83d777ea30b9788b
       size: 539
   find-calkit-projects:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py

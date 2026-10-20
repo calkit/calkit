@@ -54,6 +54,24 @@ with open("data/calkit-projects/papers.csv", encoding="utf-8") as f:
         and row["is_example_or_test"] == "False"
     ]
 tags = subprocess.check_output(["git", "tag", "-l", "v*"], text=True).split()
+# Release frequency, as in DORA's deployment frequency, over a recent window
+release_dates = [
+    datetime.date.fromisoformat(d)
+    for d in subprocess.check_output(
+        [
+            "git",
+            "for-each-ref",
+            "--format=%(creatordate:short)",
+            "refs/tags/v*",
+        ],
+        text=True,
+    ).split()
+]
+recent_releases = sum(
+    1
+    for d in release_dates
+    if d > datetime.date.today() - datetime.timedelta(days=90)
+)
 results = {
     "date": datetime.date.today().isoformat(),
     "hub_users": hub["users"]["total"],
@@ -82,6 +100,7 @@ results = {
     "github_forks": repo["forks_count"],
     "pypi_downloads_last_month": pypi["data"]["last_month"],
     "releases": len(tags),
+    "releases_per_week_last_90_days": round(recent_releases / (90 / 7), 1),
     # By title, since a paper can be in more than one repo, e.g., a copy
     "papers_shipped": len(
         {" ".join(p["title"].lower().split()) for p in papers}

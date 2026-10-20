@@ -99,6 +99,21 @@ questions:
 requirements:
   - docker
   - uv
+  - kind: setup
+    name: GitHub CLI logged in
+    # Not 'gh auth status', which calls the API, so fails when rate limited
+    check_command: gh auth token
+    setup_command: gh auth login
+    description: >-
+      For searching GitHub for Calkit projects. In CI, GH_TOKEN is set from
+      the workflow's token.
+  - kind: setup
+    name: Calkit CLI logged in
+    check_command: calkit hub get /user
+    setup_command: calkit hub login
+    description: >-
+      For reading the Calkit hub's API. In CI, the run action logs in with
+      GitHub's OIDC token.
 
 environments:
   dev:
@@ -193,17 +208,53 @@ pipeline:
         - results/2027-budget.json
       outputs:
         - docs/img/2027-budget.png
+    find-calkit-projects:
+      kind: python-script
+      script_path: scripts/find-calkit-projects.py
+      environment: dev
+      description: >-
+        Search GitHub, the Calkit hub, and DataCite for projects with a
+        calkit.yaml, once a day.
+      inputs:
+        - kind: schedule
+          period: 1 day
+      outputs:
+        - path: data/calkit-projects/projects.csv
+          storage: git
+    find-calkit-papers:
+      kind: python-script
+      script_path: scripts/find-calkit-papers.py
+      environment: dev
+      description: >-
+        Find papers built with those projects, from their calkit.yaml and
+        DataCite.
+      inputs:
+        - data/calkit-projects/projects.csv
+        - kind: schedule
+          period: 1 day
+      outputs:
+        - path: data/calkit-projects/papers.csv
+          storage: git
     traction:
       kind: python-script
       script_path: scripts/traction.py
       environment: dev
+      requirements:
+        - kind: setup
+          name: Calkit hub superuser access
+          check_command: calkit hub get /stats
+          description: >-
+            For reading the hub's usage stats, so CI, which isn't a
+            superuser, skips this stage.
       description: >-
-        Fetch usage numbers for the one-pager, frozen as of when it last ran.
+        Fetch usage numbers for the one-pager, once a day.
       args:
         - --exclude-hub-account=pwbachant
         - --exclude-hub-account=calkit
       inputs:
         - data/calkit-projects/papers.csv
+        - kind: schedule
+          period: 1 day
       outputs:
         - path: results/traction.json
           storage: git
@@ -262,14 +313,16 @@ figures:
 datasets:
   - path: data/calkit-projects/projects.csv
     title: Calkit projects in the wild
+    stage: find-calkit-projects
     description: >-
-      Projects with a calkit.yaml found on GitHub, Zenodo, CaltechDATA, and
-      figshare, as of 2026-10-20; see the README beside it for the queries.
+      Projects with a calkit.yaml found on GitHub, the Calkit hub, and
+      DataCite, i.e., Zenodo, CaltechDATA, and figshare.
   - path: data/calkit-projects/papers.csv
     title: Papers built with Calkit projects
+    stage: find-calkit-papers
     description: >-
-      Papers, theses, and datasets from the projects in the wild, curated by
-      hand, with their status.
+      Papers from the projects in the wild, from their calkit.yaml and
+      DataCite, with whether they're published, preprinted, or archived.
 
 tables:
   - path: docs/one-pager/2027-budget.csv

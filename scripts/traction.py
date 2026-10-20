@@ -12,6 +12,8 @@ import csv
 import datetime
 import json
 import subprocess
+import time
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -26,20 +28,28 @@ args = parser.parse_args()
 
 def get_json(url: str) -> Any:
     req = urllib.request.Request(url, headers={"User-Agent": "calkit"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.load(resp)
+    # pypistats.org rate limits, so back off and retry
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or attempt == 4:
+                raise
+            time.sleep(int(e.headers.get("retry-after") or 2**attempt * 10))
 
 
 repo = get_json("https://api.github.com/repos/calkit/calkit")
 hub = calkit.hub.get("/stats", params={"exclude": args.exclude_hub_account})
 pypi = get_json("https://pypistats.org/api/packages/calkit-python/recent")
-# Papers and theses out the door, i.e., published, submitted, or preprinted
+# Papers out the door, i.e., published, preprinted, or archived, leaving out
+# examples' and tests'
 with open("data/calkit-projects/papers.csv", encoding="utf-8") as f:
     papers = [
         row
         for row in csv.DictReader(f)
-        if row["kind"] in ("paper", "thesis")
-        and row["status"] in ("published", "submitted", "preprint")
+        if row["status"] in ("published", "preprint", "archived")
+        and row["is_example_or_test"] == "False"
     ]
 tags = subprocess.check_output(["git", "tag", "-l", "v*"], text=True).split()
 results = {
@@ -49,11 +59,19 @@ results = {
     "hub_projects_worked_on": hub["projects"]["worked_on"],
     "hub_project_owners": hub["projects"]["owners"],
     "hub_excluded_accounts": hub["excluded_accounts"],
+    # Signed-in users active in the last 30 days, from Mixpanel via the hub,
+    # if it's set up to read it
+    "hub_monthly_active_users": (
+        (hub.get("analytics") or {}).get("active_users") or {}
+    ).get("last_30_days"),
     "github_stars": repo["stargazers_count"],
     "github_forks": repo["forks_count"],
     "pypi_downloads_last_month": pypi["data"]["last_month"],
     "releases": len(tags),
-    "papers_shipped": len(papers),
+    # By title, since a paper can be in more than one repo, e.g., a copy
+    "papers_shipped": len(
+        {" ".join(p["title"].lower().split()) for p in papers}
+    ),
 }
 with open("results/traction.json", "w") as f:
     json.dump(results, f, indent=2)

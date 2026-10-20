@@ -91,11 +91,39 @@ stages:
       - docs/img/2027-budget.png
     desc: Automatically generated from the 'budget-2027-figure' stage in
       calkit.yaml. Changes made here will be overwritten.
+  find-calkit-projects:
+    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
+    deps:
+      - scripts/find-calkit-projects.py
+      - .calkit/local/current-periods/1-day-utc.txt
+      - uv.lock
+      - .python-version
+    outs:
+      - data/calkit-projects/projects.csv:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'find-calkit-projects' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  find-calkit-papers:
+    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
+    deps:
+      - scripts/find-calkit-papers.py
+      - .calkit/local/current-periods/1-day-utc.txt
+      - data/calkit-projects/projects.csv
+      - uv.lock
+      - .python-version
+    outs:
+      - data/calkit-projects/papers.csv:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'find-calkit-papers' stage in
+      calkit.yaml. Changes made here will be overwritten.
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit
     deps:
       - scripts/traction.py
+      - .calkit/local/current-periods/1-day-utc.txt
       - data/calkit-projects/papers.csv
       - uv.lock
       - .python-version

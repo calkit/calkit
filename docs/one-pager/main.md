@@ -14,7 +14,7 @@ that calculated them, for fast iteration and full _observability_.**
   users on calkit.io
 - **<!-- calkit value key=pypi_downloads_last_month format="{:,.0f}" -->3,616<!-- /calkit value -->**
   downloads from PyPI last month
-- **<!-- calkit value key=papers_shipped -->6<!-- /calkit value -->**
+- **<!-- calkit value key=papers_shipped -->5<!-- /calkit value -->**
   reproducible publications shipped
 
 As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.

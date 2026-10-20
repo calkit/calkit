@@ -23,10 +23,10 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 
 AI is making scientific output cheaper than ever to produce,
 shifting the bottleneck to verification and potentially deepening
-the previously unsolved reproducibility crisis,
+the still-unsolved reproducibility crisis,
 as agents will happily generate---and maybe hallucinate---artifacts
 without showing all their work.
-Thus, it's now more important than ever to make it easy and intuitive
+It's now essential to make it easy and intuitive
 to deliver research artifacts with their entire digital paper trail,
 such that evidence for claims can be traced all the way back to its origin.
 
@@ -65,7 +65,7 @@ it becomes much easier to review work done by AI agents or humans.
 
 <!-- calkit values path=results/2027-budget.json -->
 
-## The ask: \$<!-- calkit value key=total_rounded_thousands format="{:.0f}" -->100<!-- /calkit value -->k towards widespread adoption
+## The ask: \$<!-- calkit value key=total_rounded_thousands format="{:.0f}" -->100<!-- /calkit value -->k toward widespread adoption
 
 Thus far we've seen the most traction from Overleaf users
 who appreciate its user friendliness but want to connect it to their analyses
@@ -77,7 +77,9 @@ new
 [browser extension](https://chromewebstore.google.com/detail/calkit/idhdomgapfolnpffanajdckdaojencal),
 hosting <!-- calkit value key=workshops -->8<!-- /calkit value -->
 workshops to serve approximately <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
-researchers.
+researchers and help
+about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
+of them convert active projects.
 Learnings from these will be published openly and fed back
 into improving Calkit.
 

@@ -189,7 +189,10 @@ def link(
         typer.echo(f"Machine '{cfg['name']}' is already registered")
     # Whatever ran it before is replaced, e.g., a service when switching to
     # cron mode, so the two don't both run it
-    hub_link.uninstall_service()
+    try:
+        hub_link.uninstall_service()
+    except RuntimeError as e:
+        raise_error(str(e))
     if no_service:
         typer.echo("Run 'calkit hub link start' to connect it")
         return
@@ -399,7 +402,10 @@ def unlink(hub: HubOption = None) -> None:
 
     _select_hub(hub)
     cfg = _require_config()
-    hub_link.uninstall_service()
+    try:
+        hub_link.uninstall_service()
+    except RuntimeError as e:
+        raise_error(str(e))
     # With its own token, so it works however you're signed in here
     try:
         hub_link.revoke_self(cfg)

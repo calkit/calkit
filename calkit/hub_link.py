@@ -3721,16 +3721,18 @@ def uninstall_service(key: str | None = None) -> None:
             os.remove(agent)
         daemon = _launchd_plist_path(at_boot=True, key=key)
         if os.path.isfile(daemon):
+            target = f"system/{service_label(key)}"
             subprocess.run(
-                [
-                    "sudo",
-                    "launchctl",
-                    "bootout",
-                    f"system/{service_label(key)}",
-                ],
-                capture_output=True,
+                ["sudo", "launchctl", "bootout", target], capture_output=True
             )
-            subprocess.run(["sudo", "rm", daemon])
+            subprocess.run(["sudo", "rm", "-f", daemon])
+            # E.g., sudo had no terminal to ask for a password in
+            if os.path.isfile(daemon):
+                raise RuntimeError(
+                    "Removing the service that starts at boot needs sudo; "
+                    f"run 'sudo launchctl bootout {target}' and "
+                    f"'sudo rm {daemon}'"
+                )
 
 
 def get_service_status() -> str | None:

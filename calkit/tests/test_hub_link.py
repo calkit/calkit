@@ -1107,6 +1107,20 @@ def test_service_files(tmp_path, monkeypatch):
         # Starting at login never asks for sudo
         if login:
             assert not any(c[:1] == ["sudo"] for c in calls)
+    # Removing the boot service says how when sudo fails, e.g., with no
+    # terminal to ask in
+    daemon = tmp_path / "daemon.plist"
+    daemon.write_text("")
+    with monkeypatch.context() as m:
+        m.setattr(
+            hub_link,
+            "_launchd_plist_path",
+            lambda at_boot, key=None: str(
+                daemon if at_boot else tmp_path / "none.plist"
+            ),
+        )
+        with pytest.raises(RuntimeError, match="sudo rm"):
+            hub_link.uninstall_service()
     # On Linux, lingering is enabled with sudo if it can't be without, and
     # left alone when starting at login
     monkeypatch.setattr(hub_link.platform, "system", lambda: "Linux")

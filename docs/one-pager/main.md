@@ -21,29 +21,34 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 
 ## The problem
 
-AI makes scientific results cheap to produce, shifting the bottleneck to
-verification, yet the reproducibility crisis persists:
-[only 12% of articles share code](https://doi.org/10.1371/journal.pone.0311493),
-and most results reach the paper through manual, disconnected steps.
-We've long taken computational methods on trust, and AI makes that
-unworkable.
+AI is making scientific output cheaper than ever to produce,
+shifting the bottleneck to verification and potentially deepening
+the previously unsolved reproducibility crisis,
+as agents will happily generate---and maybe hallucinate---artifacts
+without showing all their work.
+Thus, it's now more important than ever to make it easy and intuitive
+to deliver research artifacts with their entire digital paper trail,
+such that evidence can be traced all the way back to its origin.
 
 ## Our approach
 
-AI review overload and failures to reproduce have the same solution:
-every artifact, from raw data to article, must declare where it came from,
-ideally a deterministic, automated pipeline.
-Existing tools either put everything in one document
-(literate programming) or help researchers share and get credit for
-artifacts after the fact.
-Calkit is vertically integrated instead:
-one stack with version control, environments, a pipeline with hashed I/O,
-and provenance, where each stage, from analysis to writing,
-uses whatever tool or language suits it.
-An optional platform, like GitHub for science, hosts collaboration and
-sharing.
-Every figure and number traces back to what made it,
-and AI agents working in a Calkit project are guided to do the same.
+Whereas most open science or reproducibility
+solutions embed code in documents (literate programming)
+or help researchers share and get credit for
+artifacts after a project is done,
+Calkit takes a more holistic approach,
+bundling
+version control (including large data files),
+computational environment management, a pipeline with hashed I/O,
+and provenance, where different stages like analysis and writing
+are allowed to remain as separate contexts or modules while
+information flows freely between them for fast iteration.
+An optional, self-hostable web app
+facilitates collaboration during the project
+and sharing once it's done, like a GitHub for science.
+Since everything is integrated,
+every figure and number can be traced back to its origin,
+which makes it much easier to review work done by AI agents or humans.
 
 ## A success story {.box}
 
@@ -59,10 +64,6 @@ and AI agents working in a Calkit project are guided to do the same.
 > I also received impressive technical support, including fast and helpful responses to my questions, bug reports, and feature requests.
 
 ---[Rebecca (Becca) McCabe](https://scholar.google.com/citations?user=r3eP1gIAAAAJ&hl=en), PhD, Cornell (2026)
-
-Her dissertation's pipelines ran MATLAB, Python, Julia, and LaTeX with one
-button, and she submitted 3 journal articles with collaborators editing in
-Overleaf instead of Git.
 
 <!-- calkit values path=results/2027-budget.json -->
 

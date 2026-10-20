@@ -69,8 +69,8 @@ it becomes much easier to review work done by AI agents or humans.
 
 ## The ask: \$<!-- calkit value key=total_rounded_thousands format="{:.0f}" -->100<!-- /calkit value -->k to bring Calkit to researchers
 
-So far we've seen the most interest from Overleaf users
-who like its ease of use but want to connect it to their analyses
+So far we've seen the most interest from researchers
+who like Overleaf's ease of use but want to connect it to their analyses
 to eliminate error-prone and tedious manual uploads.
 In 2027 we'll take Calkit on tour, starting at Caltech and several
 universities in Boston.

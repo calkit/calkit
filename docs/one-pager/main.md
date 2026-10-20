@@ -33,13 +33,11 @@ As of <!-- calkit value key=date -->2026-10-20<!-- /calkit value -->.
 
 ## Our approach
 
-- **Silos:** separate tools glued together by hand,
-  e.g., screenshots pasted into Overleaf
-- **Monoliths:** notebooks and literate programming
-  put everything in one context
-- **Calkit:** modular but connected: one context at a time,
-  with every output linked to what made it,
-  so people and AI agents can check each other's work
+Instead of combining computational analysis and writing into a single context
+(literate programming),
+Calkit allows each to exist as separate _modules_ integrated
+into a more comprehensive project context,
+integrated with open, user-friendly (graphical) interfaces.
 
 ## A sample success story {.box}
 

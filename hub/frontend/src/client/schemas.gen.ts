@@ -3419,6 +3419,27 @@ export const HttpRequestAccessSchema = {
   title: "HttpRequestAccess",
 } as const
 
+export const HubStatsSchema = {
+  properties: {
+    users: {
+      $ref: "#/components/schemas/UserStats",
+    },
+    projects: {
+      $ref: "#/components/schemas/ProjectStats",
+    },
+    excluded_accounts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Excluded Accounts",
+    },
+  },
+  type: "object",
+  required: ["users", "projects", "excluded_accounts"],
+  title: "HubStats",
+} as const
+
 export const HubVersionSchema = {
   properties: {
     version: {
@@ -6824,6 +6845,45 @@ export const ProjectPushEventPostSchema = {
   title: "ProjectPushEventPost",
   description:
     "A push that happened somewhere else.\n\nWhat was pushed and where, recorded for reference: the hub works out the\ncurrent state from the repo itself, so none of this is trusted as input,\nbut it is what makes a log line worth reading.",
+} as const
+
+export const ProjectStatsSchema = {
+  properties: {
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    public: {
+      type: "integer",
+      title: "Public",
+    },
+    private: {
+      type: "integer",
+      title: "Private",
+    },
+    owners: {
+      type: "integer",
+      title: "Owners",
+    },
+    worked_on: {
+      type: "integer",
+      title: "Worked On",
+    },
+    updated_last_90_days: {
+      type: "integer",
+      title: "Updated Last 90 Days",
+    },
+  },
+  type: "object",
+  required: [
+    "total",
+    "public",
+    "private",
+    "owners",
+    "worked_on",
+    "updated_last_90_days",
+  ],
+  title: "ProjectStats",
 } as const
 
 export const ProjectStatusSchema = {
@@ -10740,6 +10800,22 @@ export const UserRegisterSchema = {
   type: "object",
   required: ["email", "password"],
   title: "UserRegister",
+} as const
+
+export const UserStatsSchema = {
+  properties: {
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    verified: {
+      type: "integer",
+      title: "Verified",
+    },
+  },
+  type: "object",
+  required: ["total", "verified"],
+  title: "UserStats",
 } as const
 
 export const UserSubscriptionSchema = {

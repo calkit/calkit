@@ -6,16 +6,17 @@ import json
 import logging
 import os
 import uuid
-from typing import Literal
+from datetime import timedelta
+from typing import Annotated, Any, Literal
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pydantic.networks import EmailStr
 from sqlalchemy import func
 from sqlalchemy.exc import DataError
-from sqlmodel import Session, and_, or_, select
+from sqlmodel import Session, and_, col, or_, select
 from starlette.requests import Request
 
 import app.tasks
@@ -209,6 +210,98 @@ def post_discount_code(
     session.commit()
     session.refresh(code)
     return code
+
+
+class UserStats(BaseModel):
+    total: int
+    verified: int
+
+
+class ProjectStats(BaseModel):
+    total: int
+    public: int
+    private: int
+    # Distinct accounts, user or org, owning at least one
+    owners: int
+    # Committed to at least a day after creation, i.e., used rather than
+    # started and left
+    worked_on: int
+    updated_last_90_days: int
+
+
+class HubStats(BaseModel):
+    users: UserStats
+    projects: ProjectStats
+    excluded_accounts: list[str]
+
+
+@router.get("/stats", dependencies=[Depends(get_current_active_superuser)])
+def get_hub_stats(
+    session: SessionDep,
+    exclude: Annotated[list[str], Query()] = [],
+    include_superusers: bool = False,
+) -> HubStats:
+    """Count the hub's users and projects, e.g., to report usage.
+
+    Superusers and what their accounts own are left out by default, since
+    staff and their demos aren't usage. ``exclude`` names more accounts to
+    leave out, e.g., an org holding examples. Subprojects count with their
+    parent rather than on their own. Activity follows ``Project.updated``,
+    which tracks the latest commit the hub has seen.
+    """
+
+    def count_projects(*conditions: Any) -> int:
+        query = select(func.count()).select_from(Project)
+        return session.exec(query.where(*project_filter, *conditions)).one()
+
+    # Accounts to leave out, by name and, unless asked not to, superusers'
+    excluded_conditions = [col(Account.name).in_({n.lower() for n in exclude})]
+    if not include_superusers:
+        superuser_ids = select(User.id).where(col(User.is_superuser))
+        excluded_conditions.append(col(Account.user_id).in_(superuser_ids))
+    excluded = session.exec(select(Account).where(or_(*excluded_conditions)))
+    excluded_accounts = sorted(excluded, key=lambda a: a.name)
+    excluded_account_ids = [a.id for a in excluded_accounts]
+    excluded_user_ids = [a.user_id for a in excluded_accounts if a.user_id]
+    # Users
+    user_filter = col(User.id).not_in(excluded_user_ids)
+    n_users = session.exec(
+        select(func.count()).select_from(User).where(user_filter)
+    ).one()
+    n_verified = session.exec(
+        select(func.count())
+        .select_from(User)
+        .where(user_filter, col(User.email_verified_at).is_not(None))
+    ).one()
+    # Projects
+    project_filter = [
+        col(Project.parent_project_id).is_(None),
+        col(Project.owner_account_id).not_in(excluded_account_ids),
+    ]
+    n_public = count_projects(col(Project.is_public))
+    n_private = count_projects(col(Project.is_public).is_(False))
+    n_owners = session.exec(
+        select(func.count(func.distinct(Project.owner_account_id))).where(
+            *project_filter
+        )
+    ).one()
+    return HubStats(
+        users=UserStats(total=n_users, verified=n_verified),
+        projects=ProjectStats(
+            total=n_public + n_private,
+            public=n_public,
+            private=n_private,
+            owners=n_owners,
+            worked_on=count_projects(
+                col(Project.updated)
+                >= col(Project.created) + timedelta(days=1)
+            ),
+            updated_last_90_days=count_projects(
+                col(Project.updated) >= utcnow() - timedelta(days=90)
+            ),
+        ),
+        excluded_accounts=[a.name for a in excluded_accounts],
+    )
 
 
 @router.post("/events/github", include_in_schema=False)

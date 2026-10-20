@@ -1,11 +1,19 @@
 """Tests for app.api.routes.misc endpoints."""
 
+import uuid
+from datetime import timedelta
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app import users
 from app.config import settings
+from app.core import utcnow
+from app.models import Project, UserCreate
+from app.tests import random_email, random_lower_string
 
 
 def test_get_arxiv_pdf_requires_auth(client: TestClient) -> None:
@@ -177,3 +185,105 @@ def test_github_webhook_only_accepts_signed_pushes(
     assert post("{not json").status_code == 400
     assert post("[1, 2, 3]").status_code == 400
     assert post("{}").json() == {"message": "Ignored"}
+
+
+def test_get_hub_stats(
+    client: TestClient,
+    db: Session,
+    superuser_token_headers: dict[str, str],
+    normal_user_token_headers: dict[str, str],
+) -> None:
+    def add_project(account_id: uuid.UUID, **kwargs: Any) -> Project:
+        project = Project(
+            name=f"proj-{uuid.uuid4().hex[:8]}",
+            title="Project",
+            git_repo_url="https://github.com/someone/proj",
+            owner_account_id=account_id,
+            **kwargs,
+        )
+        db.add(project)
+        db.commit()
+        db.refresh(project)
+        return project
+
+    # Superusers only
+    assert client.get("/stats").status_code == 401
+    r = client.get("/stats", headers=normal_user_token_headers)
+    assert r.status_code == 403
+    # A personal access token works, so a script can fetch these
+    r = client.post(
+        "/user/tokens",
+        headers=superuser_token_headers,
+        json={"expires_days": 1, "scope": None, "description": "stats"},
+    )
+    assert r.status_code == 200
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    before = client.get("/stats", headers=headers).json()
+    # A user with a project worked on, one left after creation, and a
+    # subproject, which counts with its parent rather than on its own
+    now = utcnow()
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=random_email(), password=random_lower_string()
+        ),
+    )
+    user.email_verified_at = now
+    db.add(user)
+    other = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=random_email(), password=random_lower_string()
+        ),
+    )
+    superuser = users.get_user_by_email(
+        session=db, email=settings.FIRST_SUPERUSER
+    )
+    assert superuser is not None
+    worked_on = add_project(
+        user.account.id,
+        is_public=True,
+        created=now - timedelta(days=10),
+        updated=now,
+    )
+    add_project(
+        user.account.id,
+        created=now - timedelta(days=200),
+        updated=now - timedelta(days=200),
+    )
+    add_project(user.account.id, parent_project_id=worked_on.id)
+    add_project(other.account.id)
+    add_project(superuser.account.id)
+    after = client.get("/stats", headers=headers).json()
+    assert superuser.account.name in after["excluded_accounts"]
+    assert after["users"]["total"] - before["users"]["total"] == 2
+    assert after["users"]["verified"] - before["users"]["verified"] == 1
+    diff = {
+        k: after["projects"][k] - before["projects"][k]
+        for k in after["projects"]
+    }
+    assert diff == {
+        "total": 3,
+        "public": 1,
+        "private": 2,
+        "owners": 2,
+        "worked_on": 1,
+        "updated_last_90_days": 2,
+    }
+    # Leaving out another account by name, and putting superusers back in
+    r = client.get(
+        "/stats",
+        headers=headers,
+        params={
+            "exclude": [other.account.name.upper()],
+            "include_superusers": True,
+        },
+    )
+    stats = r.json()
+    assert stats["excluded_accounts"] == [other.account.name]
+    assert stats["users"]["total"] == after["users"]["total"] - 1 + len(
+        after["excluded_accounts"]
+    )
+    # One project fewer for the excluded account, at least one more for
+    # superusers
+    assert stats["projects"]["total"] >= after["projects"]["total"]

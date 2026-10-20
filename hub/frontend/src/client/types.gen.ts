@@ -1989,6 +1989,18 @@ export type HttpRequestAccess = {
 }
 
 /**
+ * HubStats
+ */
+export type HubStats = {
+  users: UserStats
+  projects: ProjectStats
+  /**
+   * Excluded Accounts
+   */
+  excluded_accounts: Array<string>
+}
+
+/**
  * HubVersion
  */
 export type HubVersion = {
@@ -3915,6 +3927,36 @@ export type ProjectPushEventPost = {
    * Targets
    */
   targets?: Array<string> | null
+}
+
+/**
+ * ProjectStats
+ */
+export type ProjectStats = {
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Public
+   */
+  public: number
+  /**
+   * Private
+   */
+  private: number
+  /**
+   * Owners
+   */
+  owners: number
+  /**
+   * Worked On
+   */
+  worked_on: number
+  /**
+   * Updated Last 90 Days
+   */
+  updated_last_90_days: number
 }
 
 /**
@@ -6124,6 +6166,20 @@ export type UserRegister = {
    * Analytics Consent
    */
   analytics_consent?: boolean | null
+}
+
+/**
+ * UserStats
+ */
+export type UserStats = {
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Verified
+   */
+  verified: number
 }
 
 /**
@@ -8565,6 +8621,41 @@ export type PostDiscountCodeResponses = {
 
 export type PostDiscountCodeResponse =
   PostDiscountCodeResponses[keyof PostDiscountCodeResponses]
+
+export type GetHubStatsData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Exclude
+     */
+    exclude?: Array<string>
+    /**
+     * Include Superusers
+     */
+    include_superusers?: boolean
+  }
+  url: "/stats"
+}
+
+export type GetHubStatsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetHubStatsError = GetHubStatsErrors[keyof GetHubStatsErrors]
+
+export type GetHubStatsResponses = {
+  /**
+   * Successful Response
+   */
+  200: HubStats
+}
+
+export type GetHubStatsResponse =
+  GetHubStatsResponses[keyof GetHubStatsResponses]
 
 export type GetSubscriptionPlansData = {
   body?: never

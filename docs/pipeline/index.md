@@ -682,7 +682,7 @@ Every compile writes the current period, e.g., today's date, to a file
 the stage depends on, so the stage reruns once each period and is
 skipped until the next one starts. The stage can read the file to learn
 which period it's running for, e.g.,
-`.calkit/local/current-periods/1-day-UTC.txt` holds `2026-10-20` on
+`.calkit/local/current-periods/1-day-utc.txt` holds `2026-10-20` on
 that day. A period of more than one unit, e.g., '3 days', is counted
 from the start of 1970 (or for weeks, its first Monday), so every machine
 agrees where one starts, and is written as its first unit, e.g., the day

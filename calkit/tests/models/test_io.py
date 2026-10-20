@@ -31,7 +31,7 @@ def test_schedule_input(monkeypatch, tmp_path):
     day = ScheduleInput(kind="schedule", period="1 day")
     assert day.timezone == "UTC"
     assert day.period_file_path == (
-        ".calkit/local/current-periods/1-day-UTC.txt"
+        ".calkit/local/current-periods/1-day-utc.txt"
     )
     # The same period written differently shares a file
     assert ScheduleInput(kind="schedule", period="daily").period_file_path == (
@@ -77,7 +77,7 @@ def test_schedule_input(monkeypatch, tmp_path):
         kind="schedule", period="1 day", timezone="America/Los_Angeles"
     )
     assert la.get_current_period() == "2026-10-19"
-    assert la.period_file_path.endswith("/1-day-America_Los_Angeles.txt")
+    assert la.period_file_path.endswith("/1-day-america_los_angeles.txt")
     # A time without a zone is taken to be in the schedule's
     monkeypatch.setenv("CALKIT_NOW", "2026-10-19T23:00:00")
     assert la.get_current_period() == "2026-10-19"

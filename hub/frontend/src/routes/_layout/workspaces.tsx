@@ -15,10 +15,10 @@ import {
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import {
-  createFileRoute,
-  redirect,
   Link as RouterLink,
+  createFileRoute,
   linkOptions,
+  redirect,
 } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import {
@@ -44,6 +44,7 @@ import type {
 import useMachineConnections from "../../components/Machines/useMachineConnections"
 import WorkspaceBadges from "../../components/Workspace/WorkspaceBadges"
 import WorkspacePanel from "../../components/Workspace/WorkspacePanel"
+import { isLoggedIn } from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 
 const workspacesSearchSchema = z.object({
@@ -80,6 +81,9 @@ export const Route = createFileRoute("/_layout/workspaces")({
   component: Workspaces,
   validateSearch: (search) => workspacesSearchSchema.parse(search),
   beforeLoad: ({ cause, search }) => {
+    if (!isLoggedIn()) {
+      throw redirect({ to: "/login" })
+    }
     if (cause !== "enter" || search.workspace || search.session) return
     let stored: WorkspacesSearch = {}
     try {
@@ -446,7 +450,7 @@ function Workspaces() {
     )
   }
   if (machinesQuery.isPending || workspacesQuery.isPending) {
-    return <LoadingSpinner />
+    return <LoadingSpinner height="60vh" />
   }
   const selectedConn = selectedWorkspace
     ? getConnection(selectedWorkspace.machine_id)

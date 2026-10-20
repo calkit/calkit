@@ -59,7 +59,7 @@ import WorkspaceBadges from "../../../../../components/Workspace/WorkspaceBadges
 import WorkspacePanel, {
   type Modal as WorkspaceModal,
 } from "../../../../../components/Workspace/WorkspacePanel"
-import useAuth from "../../../../../hooks/useAuth"
+import useAuth, { isLoggedIn } from "../../../../../hooks/useAuth"
 import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject from "../../../../../hooks/useProject"
 
@@ -107,6 +107,9 @@ export const Route = createFileRoute(
   component: Workspaces,
   validateSearch: (search) => workspacesSearchSchema.parse(search),
   beforeLoad: ({ cause, params, search, location }) => {
+    if (!isLoggedIn()) {
+      throw redirect({ to: "/login" })
+    }
     // Only on arriving, since closing the last pane leaves none on purpose
     if (cause !== "enter") return
     const stored = readWorkspacesState(

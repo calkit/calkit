@@ -11,6 +11,8 @@
   ],
   "hub_monthly_active_users": null,
   "hub_monthly_active_signed_in_users": null,
+  "hub_human_project_visits_last_30_days": null,
+  "hub_projects_viewed_last_30_days": null,
   "github_stars": 60,
   "github_forks": 17,
   "pypi_downloads_last_month": 3616,

@@ -12,8 +12,8 @@ that calculated them, for fast iteration and full _observability_.**
 
 - **<!-- calkit value key=hub_users -->137<!-- /calkit value -->**
   users on calkit.io
-- **<!-- calkit value key=pypi_downloads_last_month format="{:,.0f}" -->3,616<!-- /calkit value -->**
-  downloads from PyPI last month
+- **<!-- calkit value key=hub_project_owners -->37<!-- /calkit value -->**
+  researchers and groups with projects on calkit.io
 - **<!-- calkit value key=papers_shipped -->5<!-- /calkit value -->**
   reproducible publications shipped
 

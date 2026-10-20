@@ -70,6 +70,14 @@ results = {
     "hub_monthly_active_signed_in_users": analytics.get(
         "active_users", {}
     ).get("last_30_days"),
+    # Days on which a signed-out person, not a bot, visited, summed over
+    # visitors, since their IDs reset daily, and the projects they viewed
+    "hub_human_project_visits_last_30_days": analytics.get(
+        "human_project_visits", {}
+    ).get("last_30_days"),
+    "hub_projects_viewed_last_30_days": analytics.get(
+        "projects_viewed", {}
+    ).get("last_30_days"),
     "github_stars": repo["stargazers_count"],
     "github_forks": repo["forks_count"],
     "pypi_downloads_last_month": pypi["data"]["last_month"],

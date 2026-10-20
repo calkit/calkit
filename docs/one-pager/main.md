@@ -42,7 +42,7 @@ Version control (including large data files),
 environment management, pipelines with hashed I/O,
 and provenance definition are all included,
 so researchers don't need to assemble bespoke workflows,
-while stages like analysis and writing remain separate,
+while stages like analysis and writing remain separate but connected,
 with information flowing freely between them for fast iteration.
 An optional, self-hostable web app
 facilitates collaboration during the project
@@ -78,7 +78,7 @@ In <!-- calkit value key=workshops -->8<!-- /calkit value --> workshops,
 roughly <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
 researchers will connect their own projects to Overleaf with our new
 [browser extension](https://chromewebstore.google.com/detail/calkit/idhdomgapfolnpffanajdckdaojencal),
-with follow-up support
+providing follow-up support
 for about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
 of them.
 What we learn will be published openly and will drive Calkit's development.
@@ -88,6 +88,9 @@ What we learn will be published openly and will drive Calkit's development.
 ::: footer
 Calkit is led by Pete Bachant, a Senior Research Software Engineer
 and instructor at Caltech's
-[Schmidt Academy for Software Engineering](https://sase.caltech.edu).
+[Schmidt Academy for Software Engineering](https://sase.caltech.edu),
+from whom 25% capacity is allocated.
+The main Calkit Hub instance at [calkit.io](https://calkit.io)
+has been hosted with support from Google Cloud.
 To learn more, visit [docs.calkit.org](https://docs.calkit.org) or email [pete@calkit.org](mailto:pete@calkit.org).
 :::

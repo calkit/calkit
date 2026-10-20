@@ -1107,6 +1107,19 @@ def clear_off_hub_auth(
     the token anywhere, which DVC would send it to. This runs before
     anything that talks to remotes.
     """
+    import jwt
+
+    def is_hub_token(secret: object) -> bool:
+        token = str(secret).removeprefix("Bearer ").strip()
+        if token.startswith("ckp_"):
+            return True
+        # Older hub tokens are JWTs naming the token they are
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+        except jwt.PyJWTError:
+            return False
+        return isinstance(payload, dict) and "token_id" in payload
+
     root = os.path.abspath(wdir or ".")
     while not os.path.isdir(os.path.join(root, ".dvc")):
         if os.path.dirname(root) == root:
@@ -1132,11 +1145,10 @@ def clear_off_hub_auth(
         match = re.fullmatch(r'remote "(.+)"', section)
         if match is None or not isinstance(options, dict):
             continue
-        # The header Calkit sets with the token, or the token itself, not
-        # credentials of the user's own for remotes elsewhere
-        secrets = [str(options.get(k, "")) for k in ("password", "token")]
-        if "custom_auth_header" not in options and not any(
-            "ckp_" in secret for secret in secrets
+        # Only the hub's token, not credentials of the user's own for
+        # remotes elsewhere, e.g., with a custom header of their own
+        if not any(
+            is_hub_token(options.get(k, "")) for k in ("password", "token")
         ):
             continue
         url = options.get("url") or (shared.get(section) or {}).get("url")

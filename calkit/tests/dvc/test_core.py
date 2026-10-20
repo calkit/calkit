@@ -8,6 +8,7 @@ from pathlib import Path
 
 import dvc.repo
 import git
+import jwt
 import pytest
 import zc.lockfile
 from configobj import ConfigObj
@@ -666,7 +667,12 @@ def test_clear_off_hub_auth(
         "    url = webdavs://attacker.example/dvc\n"
         "['remote \"mine\"']\n"
         "    url = https://storage.example/dvc\n"
+        "['remote \"keyed\"']\n"
+        "    url = https://storage.example/keyed\n"
+        "['remote \"legacy\"']\n"
+        "    url = https://attacker.example/legacy\n"
     )
+    legacy = jwt.encode({"sub": "u", "token_id": "t"}, "k", algorithm="HS256")
     local = dvc_dir / "config.local"
     local.write_text(
         "['remote \"calkit\"']\n"
@@ -682,6 +688,13 @@ def test_clear_off_hub_auth(
         "['remote \"mine\"']\n"
         "    user = me\n"
         "    password = hunter2\n"
+        "['remote \"keyed\"']\n"
+        "    custom_auth_header = X-Api-Key\n"
+        "    password = their-key\n"
+        # Older hub tokens are JWTs
+        "['remote \"legacy\"']\n"
+        "    custom_auth_header = Authorization\n"
+        f"    password = Bearer {legacy}\n"
         # And a URL set locally wins over the repo's
         "['remote \"local-url\"']\n"
         "    url = https://elsewhere.example\n"
@@ -690,12 +703,14 @@ def test_clear_off_hub_auth(
     )
     # Found from a folder inside the project, as DVC finds it
     cleared = calkit.dvc.clear_off_hub_auth(wdir=str(sub))
-    assert sorted(cleared) == ["calkit:o/q", "dav", "local-url"]
+    assert sorted(cleared) == ["calkit:o/q", "dav", "legacy", "local-url"]
     cfg = ConfigObj(str(local), encoding="utf-8")
     assert cfg['remote "calkit"']["password"] == "Bearer ckp_token"
     assert 'remote "calkit:o/q"' not in cfg
     assert dict(cfg['remote "dav"']) == {"ssl_verify": "false"}
     assert cfg['remote "mine"']["password"] == "hunter2"
+    assert cfg['remote "keyed"']["password"] == "their-key"
+    assert 'remote "legacy"' not in cfg
     assert dict(cfg['remote "local-url"']) == {
         "url": "https://elsewhere.example"
     }

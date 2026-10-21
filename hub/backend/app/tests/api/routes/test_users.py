@@ -246,10 +246,13 @@ def test_update_user_me(
     db.refresh(user_db)
     assert user_db.email == email
     assert user_db.full_name == full_name
-    # Changing only the case keeps the address, so it's applied as is
-    r = client.patch("/user", headers=h, json={"email": email.upper()})
+    # Changing only the case keeps the address, so it's applied as is,
+    # though the domain is always lowercased
+    local, domain = email.split("@")
+    recased = f"{local.upper()}@{domain}"
+    r = client.patch("/user", headers=h, json={"email": recased})
     assert r.status_code == 200, r.text
-    assert r.json()["email"] == email.upper()
+    assert r.json()["email"] == recased
     r = client.patch("/user", headers=h, json={"email": email})
     assert r.json()["email"] == email
     # A code sent to the old address doesn't verify a new one

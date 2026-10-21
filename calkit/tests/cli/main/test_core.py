@@ -1086,6 +1086,12 @@ def test_stash(tmp_dir):
     with open("data.csv") as f:
         assert f.read() == "3,4\n"
     assert subprocess.run(["calkit", "stash", "drop"]).returncode != 0
+    # Deleted data comes back too
+    os.remove("data.csv")
+    subprocess.check_call(["calkit", "stash"])
+    with open("data.csv") as f:
+        assert f.read() == "1,2\n"
+    repo.git.stash("drop")
     # A changed output is stashed without marking its stage up to date, in
     # a project of its own
     os.makedirs("pipeline")

@@ -124,11 +124,13 @@ def normalize_hub_url(hub: str) -> str:
 _project_hub_cache: dict[tuple[str, int, int], str | None] = {}
 
 
-def _get_project_hub() -> str | None:
-    """Read the working directory project's declared ``hub``."""
+def _get_project_hub(wdir: str | None = None) -> str | None:
+    """Read the declared ``hub`` of the project in ``wdir``, or the working
+    directory.
+    """
     import yaml
 
-    fpath = os.path.join(os.getcwd(), "calkit.yaml")
+    fpath = os.path.abspath(os.path.join(wdir or os.getcwd(), "calkit.yaml"))
     try:
         st = os.stat(fpath)
     except OSError:
@@ -190,9 +192,10 @@ def _get_default_hub() -> str | None:
     return None
 
 
-def get_hub() -> str:
+def get_hub(wdir: str | None = None) -> str:
     """Return the active hub key: a built-in environment name or an
-    arbitrary hub URL.
+    arbitrary hub URL, for the project in ``wdir``, or the working
+    directory.
 
     ``CALKIT_HUB`` takes precedence and must be a hub URL (with or
     without scheme), e.g., ``https://staging.calkit.io``. Then the
@@ -215,7 +218,7 @@ def get_hub() -> str:
         # without giving up that isolation.
         return "test"
     if not hub:
-        hub = _get_project_hub()
+        hub = _get_project_hub(wdir)
         source = "the project's hub"
     if not hub:
         hub = _get_default_hub()
@@ -524,7 +527,13 @@ class Settings(BaseSettings):
                 ) and key in cfg:
                     secret_val = cfg.pop(key)
                     if secret_val is not None:
-                        set_secret(key, secret_val)
+                        try:
+                            set_secret(key, secret_val)
+                        except keyring.errors.KeyringError:
+                            # E.g., a service started at boot can't reach
+                            # the login keychain, so it stays in this file,
+                            # as it would with no keyring at all
+                            cfg[key] = secret_val
                     else:
                         try:
                             delete_secret(key)

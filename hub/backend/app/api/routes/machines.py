@@ -126,14 +126,16 @@ class MachineOut(MachinePublic):
     workspace_count: int
 
 
-def _out(machine: Machine) -> MachineOut:
+def _out(machine: Machine, workspace_count: int | None = None) -> MachineOut:
     """Add a machine's current state to its record."""
+    if workspace_count is None:
+        workspace_count = len(machine.workspaces)
     return MachineOut.model_validate(
         machine,
         update=dict(
             is_online=is_online(machine),
             is_asleep=is_asleep(machine),
-            workspace_count=len(machine.workspaces),
+            workspace_count=workspace_count,
         ),
     )
 
@@ -294,7 +296,17 @@ def get_machines(
         .where(Machine.is_active)
         .order_by(Machine.name)  # type: ignore[arg-type]
     ).all()
-    return [_out(o) for o in machines]
+    # Counted in one query rather than loading each machine's
+    counts = dict(
+        session.exec(
+            select(MachineWorkspace.machine_id, func.count())
+            .where(
+                col(MachineWorkspace.machine_id).in_([o.id for o in machines])
+            )
+            .group_by(col(MachineWorkspace.machine_id))
+        ).all()
+    )
+    return [_out(o, counts.get(o.id, 0)) for o in machines]
 
 
 def _get_owned_machine(
@@ -388,8 +400,8 @@ class WorkspaceInfo(BaseModel):
 
     path: str = Field(max_length=4096)
     kind: Literal["personal", "managed"] = "personal"
-    # The project as "owner/name", if known
-    project: str | None = Field(default=None, max_length=256)
+    # The project as "owner/name", if known, up to 128 characters each
+    project: str | None = Field(default=None, max_length=257)
     branch: str | None = Field(default=None, max_length=256)
     commit: str | None = Field(default=None, max_length=64)
     dirty: bool | None = None
@@ -489,6 +501,7 @@ def post_machine_check_in(
                 continue
             seen.add(info.path)
             ws = existing.pop(info.path, None)
+            is_new = ws is None
             if ws is None:
                 ws = MachineWorkspace(machine_id=machine.id, path=info.path)
             owner = name = None
@@ -514,8 +527,10 @@ def post_machine_check_in(
                     "agents",
                 },
             )
-            ws.updated = now
-            session.add(ws)
+            # Most check-ins change nothing, which then writes nothing
+            if is_new or session.is_modified(ws):
+                ws.updated = now
+                session.add(ws)
         for ws in existing.values():
             session.delete(ws)
 

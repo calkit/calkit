@@ -5084,15 +5084,25 @@ def stash(
     if action not in ("push", "pop"):
         raise_error(f"Unknown action '{action}'; use 'push' or 'pop'")
 
-    def changed_data() -> list[str]:
+    def changed_data(deleted: bool = False) -> list[str]:
         # DVC-tracked data that doesn't match what its pointers say
         if not os.path.isdir(".dvc"):
             return []
         status = calkit.dvc.get_dvc_repo().data_status()
-        return list(status.get("uncommitted", {}).get("modified", []))
+        uncommitted = status.get("uncommitted", {})
+        paths = list(uncommitted.get("modified", []))
+        if deleted:
+            # Except what was never pulled, which can't be brought back
+            not_in_cache = status.get("not_in_cache", [])
+            paths += [
+                p
+                for p in uncommitted.get("deleted", [])
+                if p not in not_in_cache
+            ]
+        return paths
 
     def check_out_changed_data() -> None:
-        for path in changed_data():
+        for path in changed_data(deleted=True):
             if calkit.dvc.run_dvc_command(["checkout", path, "--force"]):
                 raise_error(f"Failed to check out {path}")
         calkit.dvc.zip.sync_all(direction="to-workspace")

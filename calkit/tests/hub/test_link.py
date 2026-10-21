@@ -201,6 +201,21 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
         op.get_workspace(managed)
     with pytest.raises(ValueError):
         op.get_workspace(home)
+    # Ones added to the config while it runs, e.g., with 'calkit hub link
+    # add-workspace', show at its next check-in
+    op = hub_link.HubLink({"name": "box", "token": "ckm_x", "workspaces": []})
+    hub_link.save_config(
+        {"name": "box", "token": "ckm_x", "workspaces": [elsewhere]}
+    )
+    reported = []
+    monkeypatch.setattr(
+        hub_link,
+        "check_in",
+        lambda cfg, workspaces, *args: reported.append(workspaces) or {},
+    )
+    asyncio.run(op.check_in())
+    assert os.path.realpath(elsewhere) in [w["path"] for w in reported[0]]
+    assert op.cfg["workspaces"] == [elsewhere]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Agents are POSIX here")
@@ -296,6 +311,19 @@ def test_agents(tmp_path, monkeypatch):
                 claude,
                 codex,
             }
+        # Long names and statuses are cut to what the hub takes, and others
+        # are left out
+        with open(os.path.join(sessions_dir, f"{claude}.json"), "w") as f:
+            json.dump({"name": "n" * 300, "status": "s" * 100}, f)
+        agents = {a["tool"]: a for a in hub_link.find_agents([wdir])[wdir]}
+        assert agents["claude"]["name"] == "n" * 256
+        assert agents["claude"]["status"] == "s" * 64
+        record = {"sessionId": "abc", "cwd": claude_cwd}
+        with open(os.path.join(sessions_dir, f"{claude}.json"), "w") as f:
+            json.dump(record | {"name": {"a": 1}, "status": 3}, f)
+        agents = {a["tool"]: a for a in hub_link.find_agents([wdir])[wdir]}
+        assert agents["claude"]["name"] is None
+        assert agents["claude"]["status"] is None
         # Only ones in tmux can be attached to, and only in their workspace
         op = hub_link.HubLink({"workspaces": []})
         op.workspaces = [{"path": wdir, "kind": "personal"}]
@@ -1410,8 +1438,20 @@ def test_workspace_actions(tmp_path, monkeypatch):
     status = hub_link.get_workspace_status(wdir, fetch=False)
     assert status["status"]["git"]["untracked_files"] == ["notes.txt"]
     assert status["status"]["git"]["changed_files"] == []
-    # Saving commits only what it's given
+    # Saving commits only what it's given, leaving what the user staged
+    with open(os.path.join(wdir, "staged.txt"), "w") as f:
+        f.write("staged")
+    subprocess.run(["git", "add", "staged.txt"], cwd=wdir, check=True)
     hub_link.save_workspace(wdir, ["notes.txt"], message="Add notes", to="git")
+    assert "notes.txt" in committed() and "staged.txt" not in committed()
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=wdir,
+        capture_output=True,
+        text=True,
+    )
+    assert staged.stdout.split() == ["staged.txt"]
+    subprocess.run(["git", "rm", "-qf", "staged.txt"], cwd=wdir, check=True)
     status = hub_link.get_workspace_status(wdir, fetch=False)
     assert status["status"]["git"]["untracked_files"] == []
     log = subprocess.run(
@@ -1499,6 +1539,20 @@ def test_workspace_actions(tmp_path, monkeypatch):
         result = hub_link.run_pipeline(wdir)
     assert result["ok"] and len(result["output"]) == 50_000
     assert result["output"].endswith("END")
+    # Output that isn't text doesn't stop it being read
+    with monkeypatch.context() as m:
+        m.setattr(
+            hub_link,
+            "CALKIT_COMMAND",
+            [
+                sys.executable,
+                "-c",
+                "import sys; "
+                "sys.stdout.buffer.write(b'\\xff' * 100_000 + b'END')",
+            ],
+        )
+        result = hub_link.run_pipeline(wdir)
+    assert result["ok"] and result["output"].endswith("END")
     # Stopping needs a run in progress, and a run the hub started stops
     # with everything it started
     with pytest.raises(ValueError):
@@ -1842,6 +1896,21 @@ def test_machine_setup(tmp_path, monkeypatch):
     assert hub_link.check_machine_setup(missing)["repo"]["error"]
     ssh = hub_link.check_machine_setup("git@example.com:someone/demo.git")
     assert ssh["repo"]["host"] == "example.com" and ssh["repo"]["ssh"]
+    # What the hub runs can't prompt for a password, unless the user chose
+    # how Git runs SSH
+    env = hub_link.no_prompt_env(home)
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert "BatchMode=yes" in env["GIT_SSH_COMMAND"]
+    assert "accept-new" not in env["GIT_SSH_COMMAND"]
+    subprocess.run(
+        ["git", "config", "--global", "core.sshCommand", "ssh -i key"],
+        check=True,
+    )
+    assert "GIT_SSH_COMMAND" not in hub_link.no_prompt_env(home)
+    subprocess.run(
+        ["git", "config", "--global", "--unset", "core.sshCommand"],
+        check=True,
+    )
     # What's missing can be set from the hub, which hands the token to the
     # link over HTTPS when the owner asked for one, never through the
     # relay

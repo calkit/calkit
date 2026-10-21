@@ -651,7 +651,7 @@ def test_clear_off_hub_auth(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        calkit.hub, "get_base_url", lambda: "https://api.calkit.io"
+        calkit.hub, "get_base_url", lambda wdir=None: "https://api.calkit.io"
     )
     dvc_dir = tmp_path / ".dvc"
     dvc_dir.mkdir()
@@ -726,6 +726,25 @@ def test_clear_off_hub_auth(
     other = tmp_path.parent / f"{tmp_path.name}-nodvc"
     other.mkdir()
     assert calkit.dvc.clear_off_hub_auth(wdir=str(other)) == []
+    # The hub is the project's, not the one where this runs from
+    monkeypatch.undo()
+    monkeypatch.delenv("CALKIT_HUB", raising=False)
+    monkeypatch.delenv("CALKIT_ENV", raising=False)
+    monkeypatch.delenv("CALKIT_HUB_API_BASE_URL", raising=False)
+    monkeypatch.delenv("CALKIT_CLOUD_BASE_URL", raising=False)
+    (tmp_path / "calkit.yaml").write_text("hub: https://hub.example\n")
+    (other / "calkit.yaml").write_text("hub: https://calkit.io\n")
+    monkeypatch.chdir(other)
+    (dvc_dir / "config").write_text(
+        "['remote \"calkit\"']\n"
+        "    url = https://api.hub.example/projects/o/p/dvc\n"
+    )
+    local.write_text(
+        "['remote \"calkit\"']\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+    )
+    assert calkit.dvc.clear_off_hub_auth(wdir=str(tmp_path)) == []
 
 
 def test_ck_fs_reads_content_only_for_dirs() -> None:

@@ -332,6 +332,20 @@ def test_write_keeps_secrets_it_never_read(
     reread.github_token = None
     reread.write()
     assert (app, "github_token") not in fake_keyring.store
+    # A keyring that refuses writes, e.g., the login keychain from a service
+    # started at boot, leaves the secret in the user-only file instead
+
+    def refuse(*args):
+        raise keyring.errors.PasswordSetError("(-61, 'Unknown Error')")
+
+    monkeypatch.setattr(fake_keyring, "set_password", refuse)
+    reread.access_token = "access-secret"
+    reread.write()
+    with open(tmp_path / "config.yaml") as f:
+        assert yaml.safe_load(f)["access_token"] == "access-secret"
+    assert oct(os.stat(tmp_path / "config.yaml").st_mode & 0o777) == "0o600"
+    monkeypatch.setattr(config, "_secret_cache", {})
+    assert config.read().access_token == "access-secret"
 
 
 def test_secrets_round_trip_on_linux(fake_keyring, monkeypatch, tmp_path):

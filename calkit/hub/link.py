@@ -27,10 +27,13 @@ import uuid
 import warnings
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import calkit
 from calkit import config
+
+if TYPE_CHECKING:
+    import git
 
 logger = logging.getLogger(__name__)
 
@@ -697,7 +700,7 @@ def discover_workspaces(cfg: dict) -> list[dict]:
                 info["commit"] = None if oid == "(initial)" else oid
             elif line.startswith("# branch.head "):
                 head = line.split()[2]
-                info["branch"] = None if head == "(detached)" else head
+                info["branch"] = None if head == "(detached)" else head[:256]
             elif line.startswith("# branch.ab "):
                 _, _, ahead, behind = line.split()
                 info["ahead"] = int(ahead)
@@ -815,7 +818,8 @@ def discover_workspaces(cfg: dict) -> list[dict]:
                 for k in ["tool", "pid", "started", "where", "app", "name"]
             }
             | {"status": agent["status"]}
-            for agent in agents.get(ws["path"], [])
+            # As many as the hub takes
+            for agent in agents.get(ws["path"], [])[:20]
         ]
     return workspaces
 
@@ -1096,6 +1100,46 @@ def child_env() -> dict[str, str]:
     return env
 
 
+def no_prompt_env(wdir: str, accept_new_hosts: bool = False) -> dict[str, str]:
+    """The environment for what the hub runs here without a session, so Git
+    and SSH fail rather than wait for a password nobody can type, e.g., on
+    the terminal a link started in the foreground runs in.
+    """
+    env = dict(child_env(), GIT_TERMINAL_PROMPT="0")
+    if "GIT_SSH_COMMAND" in env:
+        return env
+    # Unless the user chose how Git runs SSH
+    try:
+        ssh_command = subprocess.run(
+            ["git", "config", "--get", "core.sshCommand"],
+            cwd=wdir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except (subprocess.SubprocessError, OSError):
+        ssh_command = ""
+    if not ssh_command:
+        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=15"
+        if accept_new_hosts:
+            env["GIT_SSH_COMMAND"] += " -o StrictHostKeyChecking=accept-new"
+    return env
+
+
+def get_workspace_repo(wdir: str) -> git.Repo:
+    """A workspace's repo, which runs Git so it can't prompt."""
+    repo = calkit.git.get_repo(wdir)
+    env = no_prompt_env(wdir)
+    repo.git.update_environment(
+        **{
+            k: env[k]
+            for k in ("GIT_TERMINAL_PROMPT", "GIT_SSH_COMMAND")
+            if k in env
+        }
+    )
+    return repo
+
+
 # The link's own Calkit, since "-m calkit" would import modules in the
 # working directory first, e.g., a calkit package in a checkout of Calkit
 # itself, or a pty.py in the home folder a service starts in. On one line
@@ -1115,9 +1159,11 @@ def _calkit(args: list[str], wdir: str) -> None:
     result = subprocess.run(
         [*CALKIT_COMMAND, *args],
         cwd=wdir,
-        env=child_env(),
+        env=no_prompt_env(wdir),
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        errors="replace",
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -1130,7 +1176,7 @@ def get_workspace_git_status(wdir: str, fetch: bool = True) -> dict:
     remote, which is quick, unlike the rest, so the hub shows it first.
     """
     errors = []
-    git_repo = calkit.git.get_repo(wdir)
+    git_repo = get_workspace_repo(wdir)
     if fetch:
         try:
             git_repo.git.fetch()
@@ -1363,9 +1409,11 @@ def get_workspace_status(wdir: str, fetch: bool = True) -> dict:
         # last checks is reported instead
         [*CALKIT_COMMAND, "status", "--json", "--no-env-check"],
         cwd=wdir,
-        env=child_env(),
+        env=no_prompt_env(wdir),
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        errors="replace",
     )
     try:
         status = json.loads(result.stdout)
@@ -1458,7 +1506,7 @@ def find_agents(paths: list[str]) -> dict[str, list[dict]]:
         # furthest ancestor short of the system's own
         apps = [p for p in parents if p.pid > 1]
         try:
-            app = apps[-1].name() if apps else None
+            app = apps[-1].name()[:256] if apps else None
         except (psutil.Error, SystemError):
             app = None
         agent: dict[str, Any] = dict(
@@ -1487,8 +1535,12 @@ def find_agents(paths: list[str]) -> dict[str, list[dict]]:
                     )
                 ) as f:
                     record = json.load(f)
-                agent["name"] = record.get("name")
-                agent["status"] = record.get("status")
+                # Within what the hub takes, which refuses the whole
+                # check-in otherwise
+                for key, limit in (("name", 256), ("status", 64)):
+                    value = record.get(key)
+                    if isinstance(value, str):
+                        agent[key] = value[:limit]
                 agent["conversation"] = record.get("sessionId")
                 agent["cwd"] = record.get("cwd") or cwd
             except (OSError, ValueError, AttributeError):
@@ -1704,7 +1756,7 @@ def pull_workspace(wdir: str, merge: bool = False) -> dict:
     """
     from git.exc import GitCommandError
 
-    git_repo = calkit.git.get_repo(wdir)
+    git_repo = get_workspace_repo(wdir)
     if not merge:
         try:
             git_repo.git.pull("--ff-only")
@@ -1735,7 +1787,7 @@ def pull_workspace(wdir: str, merge: bool = False) -> dict:
 def push_workspace(wdir: str) -> None:
     """Push with DVC, then with Git."""
     _calkit(["dvc", "push"], wdir)
-    git_repo = calkit.git.get_repo(wdir)
+    git_repo = get_workspace_repo(wdir)
     git_repo.git.push("origin", git_repo.active_branch.name)
 
 
@@ -1772,7 +1824,7 @@ def save_workspace(
         raise ValueError("No paths to save")
     for path in paths:
         check_workspace_path(wdir, path)
-    repo = calkit.git.get_repo(wdir)
+    repo = get_workspace_repo(wdir)
     # Credentials a repo's own .gitignore can let through, e.g., the hub's
     # token in .dvc/config.local, never go in a commit, which the hub would
     # then offer to push
@@ -1783,7 +1835,15 @@ def save_workspace(
         parts = os.path.normpath(fpath).replace(os.sep, "/").lower()
         if re.search(r"(^|/)(\.dvc/config\.local|\.calkit/local)(/|$)", parts):
             raise ValueError(f"{fpath} holds this machine's credentials")
-    # Only what was asked for goes in the commit
+    # Only what was asked for goes in the commit, so what the user staged is
+    # set aside and put back after, except for what was committed
+    from git.exc import GitCommandError
+
+    try:
+        staged = repo.git.write_tree()
+    except GitCommandError:
+        raise ValueError("Finish the merge in a session first")
+    before = repo.head.commit.hexsha if repo.head.is_valid() else None
     repo.git.reset()
     args = ["add", *paths, "--commit-message"]
     args.append(message or f"Update {', '.join(paths)}")
@@ -1791,7 +1851,24 @@ def save_workspace(
         args += ["--to", to]
     if push:
         args.append("--push")
-    _calkit(args, wdir)
+    try:
+        _calkit(args, wdir)
+    finally:
+        after = repo.head.commit.hexsha if repo.head.is_valid() else None
+        repo.git.read_tree(staged)
+        if after is not None and after != before:
+            if before is None:
+                committed = repo.git.ls_tree("-r", "--name-only", "-z", after)
+            else:
+                committed = repo.git.diff("--name-only", "-z", before, after)
+            committed_paths = [p for p in committed.split("\0") if p]
+            if committed_paths:
+                repo.git.reset(
+                    "-q",
+                    after,
+                    "--",
+                    *[f":(literal){p}" for p in committed_paths],
+                )
 
 
 def ignore_path(
@@ -1802,7 +1879,7 @@ def ignore_path(
     push: bool = False,
 ) -> None:
     check_workspace_path(wdir, path)
-    git_repo = calkit.git.get_repo(wdir)
+    git_repo = get_workspace_repo(wdir)
     if git_repo.ignored(path):
         return
     txt = ""
@@ -1828,7 +1905,7 @@ def discard_changes(wdir: str) -> dict:
     ``calkit stash pop`` brings back what was discarded, DVC-tracked data
     included. New files are left alone.
     """
-    repo = calkit.git.get_repo(wdir)
+    repo = get_workspace_repo(wdir)
 
     def stash_count() -> int:
         return len(repo.git.stash("list").splitlines())
@@ -1891,7 +1968,7 @@ def add_stage(
     pipeline["stages"] = stages
     with _open_in_workspace(wdir, "dvc.yaml", "w") as f:
         calkit.ryaml.dump(pipeline, f)
-    repo = calkit.git.get_repo(wdir)
+    repo = get_workspace_repo(wdir)
     changed = ["dvc.yaml"]
     if calkit_type is not None:
         assert outs is not None and calkit_object is not None
@@ -1925,10 +2002,14 @@ def run_pipeline(wdir: str, stages: list[str] | None = None) -> dict:
     proc = subprocess.Popen(
         [*CALKIT_COMMAND, "run", *(stages or [])],
         cwd=wdir,
-        env=child_env(),
+        env=no_prompt_env(wdir),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        # Stages can print anything, and a decoding error would leave the
+        # run blocked on a pipe nobody reads
+        errors="replace",
         # Its own process group, so stopping it reaches its stages too
         start_new_session=sys.platform != "win32",
     )
@@ -2077,15 +2158,9 @@ def check_machine_setup(git_repo_url: str) -> dict:
             return None
         return out or None
 
-    env = dict(child_env(), GIT_TERMINAL_PROMPT="0")
-    # So SSH fails rather than asking for a passphrase nobody can answer,
-    # unless the user chose how Git runs it. A new host's key is accepted, as
-    # someone answering yes would, so the clone after this knows it.
-    if "GIT_SSH_COMMAND" not in env and not get_git_config("core.sshCommand"):
-        env["GIT_SSH_COMMAND"] = (
-            "ssh -o BatchMode=yes -o ConnectTimeout=15 "
-            "-o StrictHostKeyChecking=accept-new"
-        )
+    # A new host's key is accepted, as someone answering yes would, so the
+    # clone after this knows it
+    env = no_prompt_env(home, accept_new_hosts=True)
     error = None
     try:
         result = subprocess.run(
@@ -2659,20 +2734,45 @@ class HubLink:
             os.close(session.fd)
         except OSError:
             pass
-        code = None
-        try:
-            _, status = os.waitpid(session.pid, 0)
-            code = os.waitstatus_to_exitcode(status)
-        except ChildProcessError:
-            pass
         self.sessions.pop(session.id, None)
         self._release_if_unused(session.workspace)
-        for ch in list(session.channels):
-            self.send_soon(
-                ch,
-                {"type": "sessions.exit", "session": session.id, "code": code},
-            )
-        logger.info(f"Session {session.id} exited with code {code}")
+        reported = False
+
+        def report(code: int | None) -> None:
+            nonlocal reported
+            reported = True
+            for ch in list(session.channels):
+                self.send_soon(
+                    ch,
+                    {
+                        "type": "sessions.exit",
+                        "session": session.id,
+                        "code": code,
+                    },
+                )
+            logger.info(f"Session {session.id} exited with code {code}")
+
+        def reap(tries: int = 0) -> None:
+            # Never blocking the loop, since what closed the terminal can
+            # keep running, e.g., a daemon the shell was replaced with,
+            # which is reported as ended after a moment and reaped later
+            try:
+                pid, status = os.waitpid(session.pid, os.WNOHANG)
+            except ChildProcessError:
+                pid, status = session.pid, None
+            if pid:
+                if not reported:
+                    report(
+                        None
+                        if status is None
+                        else os.waitstatus_to_exitcode(status)
+                    )
+                return
+            if tries == 20 and not reported:
+                report(None)
+            loop.call_later(0.05 if tries < 20 else 5, reap, tries + 1)
+
+        reap()
 
     def attach(self, session: Session, ch: str) -> None:
         session.channels.add(ch)
@@ -2915,7 +3015,10 @@ class HubLink:
                     os.path.realpath(os.path.join(home, r))
                     for r in WORKSPACE_ROOTS
                 ]
-                workspaces = self.cfg.setdefault("workspaces", [])
+                # From the file, which 'add-workspace' may have added to
+                saved = load_config() or {}
+                workspaces = saved.get("workspaces") or []
+                self.cfg["workspaces"] = workspaces
                 if os.path.dirname(path) not in roots and path not in (
                     workspaces
                 ):
@@ -3002,6 +3105,10 @@ class HubLink:
     async def check_in(self) -> dict:
         import time
 
+        # Including ones added with 'add-workspace' since it started
+        saved = await asyncio.to_thread(load_config)
+        if saved is not None:
+            self.cfg["workspaces"] = saved.get("workspaces") or []
         self.workspaces = await asyncio.to_thread(
             discover_workspaces, self.cfg
         )

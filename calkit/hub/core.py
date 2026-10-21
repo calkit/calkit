@@ -192,8 +192,10 @@ def api_url_from_hub_url(hub_url: str) -> str:
     return f"{parsed.scheme}://{netloc}"
 
 
-def get_base_url() -> str:
-    """Get the API base URL."""
+def get_base_url(wdir: str | None = None) -> str:
+    """Get the API base URL of the active hub, for the project in ``wdir``,
+    or the working directory.
+    """
     # CALKIT_CLOUD_BASE_URL is the old name, still honored so existing
     # setups keep working
     override = os.environ.get("CALKIT_HUB_API_BASE_URL") or os.environ.get(
@@ -207,7 +209,7 @@ def get_base_url() -> str:
         "production": "https://api.calkit.io",
         "test": "http://api.localhost",
     }
-    hub = config.get_hub()
+    hub = config.get_hub(wdir)
     if hub in urls:
         return urls[hub]
     return api_url_from_hub_url(hub)

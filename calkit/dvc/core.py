@@ -1110,9 +1110,10 @@ def clear_off_hub_auth(
     the token anywhere, which DVC would send it to. ``run_dvc_command``
     runs this first.
     """
-    import jwt
 
     def is_hub_token(secret: object) -> bool:
+        import jwt
+
         token = str(secret).removeprefix("Bearer ").strip()
         if token.startswith("ckp_"):
             return True
@@ -1142,7 +1143,8 @@ def clear_off_hub_auth(
     except Exception:
         return []
     if base_url is None:
-        base_url = calkit.hub.get_base_url()
+        # The project's hub, wherever this runs from
+        base_url = calkit.hub.get_base_url(wdir=root)
     cleared = []
     for section, options in list(local.items()):
         match = re.fullmatch(r'remote "(.+)"', section)

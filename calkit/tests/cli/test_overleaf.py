@@ -1270,7 +1270,7 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     # The same line endings on every runner, since status compares bytes
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "input")
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     remote = tempfile.mkdtemp()

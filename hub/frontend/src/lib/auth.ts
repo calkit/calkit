@@ -29,7 +29,9 @@ const shouldBypassRefreshForRequest = (requestUrl?: string): boolean => {
   // The URL may be a bare path or absolute (the generated client passes the
   // full URL, base included, through its axios instance).
   const path = new URL(requestUrl, "http://relative").pathname
-  return path.endsWith("/login/refresh")
+  // Signing out sends its refresh token, so it never waits on a refresh,
+  // which could stall it
+  return path.endsWith("/login/refresh") || path.endsWith("/logout")
 }
 
 const decodeBase64Url = (value: string): string => {

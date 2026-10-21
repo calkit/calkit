@@ -1283,7 +1283,7 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     # in the project deletes the file from Overleaf
     overleaf.files["main.tex"] += b"From Overleaf\n"
     os.makedirs("paper/figs")
-    with open("paper/figs/fig.txt", "w") as f:
+    with open("paper/figs/fig.txt", "w", newline="") as f:
         f.write("A figure")
     repo.git.add("paper/figs/fig.txt")
     repo.git.commit(["-m", "Add figure"])
@@ -1312,7 +1312,7 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     # overwriting the project's
     calkit.overleaf.rmtree(calkit.overleaf.get_project_dir("abc123"))
     overleaf.files["main.tex"] += b"More from Overleaf\n"
-    with open("paper/refs.bib", "a") as f:
+    with open("paper/refs.bib", "a", newline="") as f:
         f.write("@article{b}\n")
     repo.git.commit(["paper/refs.bib", "-m", "Add reference"])
     res = sync()
@@ -1325,14 +1325,14 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     assert overleaf.uploads == ["refs.bib"]
     # Conflicting edits are resolved the same as with Git integration
     overleaf.files["main.tex"] += b"Overleaf's ending\n"
-    with open("paper/main.tex", "a") as f:
+    with open("paper/main.tex", "a", newline="") as f:
         f.write("Project's ending\n")
     repo.git.commit(["paper/main.tex", "-m", "Local edit"])
     res = runner.invoke(overleaf_app, ["sync", "--allow-stale"])
     assert res.exit_code != 0
     with open("paper/main.tex") as f:
         assert ">>>>>>>" in f.read()
-    with open("paper/main.tex", "w") as f:
+    with open("paper/main.tex", "w", newline="") as f:
         f.write("Resolved\n")
     res = runner.invoke(overleaf_app, ["sync", "--allow-stale", "--resolve"])
     assert res.exit_code == 0, res.output
@@ -1341,7 +1341,7 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     # its source at that commit, and a source edited since isn't overwritten
     # with Overleaf's older copy
     os.makedirs("shared")
-    with open("shared/refs.bib", "w") as f:
+    with open("shared/refs.bib", "w", newline="") as f:
         f.write("@article{shared}\n")
     shutil.copy("shared/refs.bib", "paper/shared.bib")
     ck_info = calkit.load_calkit_info()
@@ -1370,7 +1370,7 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     repo.git.commit(["-m", "Share references"])
     sync()
     assert overleaf.files["shared.bib"] == b"@article{shared}\n"
-    with open("shared/refs.bib", "a") as f:
+    with open("shared/refs.bib", "a", newline="") as f:
         f.write("@article{newer}\n")
     shutil.copy("shared/refs.bib", "paper/shared.bib")
     repo.git.commit(["shared/refs.bib", "-m", "Add shared reference"])
@@ -1395,7 +1395,7 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
         return download(project_id)
 
     overleaf.download = racing_download  # type: ignore[method-assign]
-    with open("paper/refs.bib", "a") as f:
+    with open("paper/refs.bib", "a", newline="") as f:
         f.write("@article{c}\n")
     repo.git.commit(["paper/refs.bib", "-m", "Add another reference"])
     res = runner.invoke(overleaf_app, ["sync", "--allow-stale"])

@@ -472,14 +472,17 @@ def push_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
             f"sent: {', '.join(edited)}. Sync again to merge those changes."
         )
     root = client.get_root_folder(project_id)
+    head = repo.head.commit.tree
     for status, path in zip(changes[::2], changes[1::2]):
         if status == "D":
             entity = _find_entity(root, path)
             if entity is not None:
                 client.delete(project_id, *entity)
             continue
-        with open(os.path.join(str(repo.working_dir), path), "rb") as f:
-            client.upload(project_id, root["_id"], path, f.read())
+        # What was committed, as 'git push' would send, so line endings are
+        # normalized the same way
+        content = (head / path).data_stream.read()
+        client.upload(project_id, root["_id"], path, content)
     repo.git.update_ref(MIRROR_REF, "HEAD")
 
 

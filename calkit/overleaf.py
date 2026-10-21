@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
 import warnings
 from contextlib import contextmanager
@@ -55,6 +57,21 @@ def _disable_credential_store(repo: git.Repo) -> None:
     """
     repo.git.config("credential.helper", "")
     repo.git.config("credential.interactive", "false")
+
+
+def rmtree(path: str) -> None:
+    """Remove a directory, including Git's read-only object files, which
+    Windows won't delete otherwise.
+    """
+
+    def make_writable(func: Callable, p: str, _: Any) -> None:
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=make_writable)
+    else:
+        shutil.rmtree(path, onerror=make_writable)
 
 
 def get_project_dir(project_id: str) -> str:
@@ -149,10 +166,10 @@ def get_repo(project_id: str, token: str) -> git.Repo:
     # Re-clone a cache missing its own .git, since opening it would find the
     # main project repo in a parent directory instead
     if os.path.isdir(dest) and not os.path.exists(os.path.join(dest, ".git")):
-        shutil.rmtree(dest)
+        rmtree(dest)
     # A mirror kept by session sync has no remote to pull from
     if os.path.isdir(dest) and not git.Repo(dest).remotes:
-        shutil.rmtree(dest)
+        rmtree(dest)
     if not os.path.isdir(dest):
         return clone(project_id, token)
     repo = git.Repo(dest)
@@ -371,7 +388,7 @@ def get_mirror(project_id: str, dest: str | None = None) -> git.Repo:
     # Opening a directory without its own .git would find the main project
     # repo in a parent directory instead
     if os.path.isdir(dest) and not os.path.exists(os.path.join(dest, ".git")):
-        shutil.rmtree(dest)
+        rmtree(dest)
     if not os.path.isdir(dest):
         return git.Repo.init(dest)
     return git.Repo(dest)

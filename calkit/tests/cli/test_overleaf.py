@@ -1310,7 +1310,7 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     # On another machine there's no mirror, so the last sync is rebuilt from
     # the project history: edits on both sides survive rather than Overleaf
     # overwriting the project's
-    shutil.rmtree(calkit.overleaf.get_project_dir("abc123"))
+    calkit.overleaf.rmtree(calkit.overleaf.get_project_dir("abc123"))
     overleaf.files["main.tex"] += b"More from Overleaf\n"
     with open("paper/refs.bib", "a") as f:
         f.write("@article{b}\n")
@@ -1374,7 +1374,7 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
         f.write("@article{newer}\n")
     shutil.copy("shared/refs.bib", "paper/shared.bib")
     repo.git.commit(["shared/refs.bib", "-m", "Add shared reference"])
-    shutil.rmtree(calkit.overleaf.get_project_dir("abc123"))
+    calkit.overleaf.rmtree(calkit.overleaf.get_project_dir("abc123"))
     sync()
     with open("shared/refs.bib") as f:
         assert f.read() == "@article{shared}\n@article{newer}\n"
@@ -1419,7 +1419,7 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     info["paper"]["last_sync_commit"] = "deadbeef" * 5
     with open(calkit.overleaf.get_sync_info_fpath(), "w") as f:
         json.dump(info, f)
-    shutil.rmtree(calkit.overleaf.get_project_dir("abc123"))
+    calkit.overleaf.rmtree(calkit.overleaf.get_project_dir("abc123"))
     overleaf.files["main.tex"] = b"Overwritten\n"
     res = runner.invoke(overleaf_app, ["sync", "--allow-stale"])
     assert res.exit_code != 0

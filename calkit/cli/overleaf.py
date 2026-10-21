@@ -5,7 +5,6 @@ from __future__ import annotations
 import filecmp
 import json
 import os
-import shutil
 import sys
 from functools import partial
 from pathlib import Path
@@ -347,7 +346,7 @@ def import_publication(
     overleaf_project_dir = calkit.overleaf.get_project_dir(overleaf_project_id)
     if os.path.isdir(overleaf_project_dir):
         warn("This Overleaf project has already been cloned; removing")
-        shutil.rmtree(overleaf_project_dir)
+        calkit.overleaf.rmtree(overleaf_project_dir)
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
     _get_pulled_overleaf_repo(overleaf_project_id, overleaf_auth)

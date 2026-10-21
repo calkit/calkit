@@ -28,6 +28,7 @@ from app.models import (
 )
 from app.security import (
     create_access_token,
+    create_machine_grant,
     create_second_factor_token,
     encrypt_secret,
     generate_email_verification_token,
@@ -568,6 +569,131 @@ def test_machines(
     db.commit()
     r = client.post("/machines/cli-token", headers=op_headers)
     assert r.status_code == 403
+    # Sessions get credentials from the machine, which asks over HTTPS with
+    # its own token and the grant that opened the session, even once that
+    # has expired, so neither the relay, which carries grants, nor the
+    # machine's token alone gets any
+    session_grant = payload["grant"]
+    session_token_url = "/machines/session-token"
+    owner_id = user.id
+
+    def grant_for(
+        sign_in: uuid.UUID = session_id,
+        machine_id: uuid.UUID = uuid.UUID(op["id"]),
+        user_id: uuid.UUID = owner_id,
+        tfa_exp: int | None = None,
+    ) -> str:
+        return create_machine_grant(
+            machine_id,
+            user_id,
+            timedelta(seconds=-120),
+            browser_key=jwk,
+            session_id=sign_in,
+            second_factor_expires=(
+                int(time.time()) + 3600 if tfa_exp is None else tfa_exp
+            ),
+        )[0]
+
+    r = client.post(
+        session_token_url,
+        headers=normal_user_token_headers,
+        json={"grant": session_grant},
+    )
+    assert r.status_code == 403
+    for bad in [
+        "nope",
+        grant_for(machine_id=uuid.uuid4()),
+        grant_for(user_id=uuid.uuid4()),
+        grant_for(sign_in=cli_session_id),
+        grant_for(sign_in=uuid.uuid4()),
+        grant_for(tfa_exp=int(time.time()) - 5),
+    ]:
+        r = client.post(
+            session_token_url, headers=op_headers, json={"grant": bad}
+        )
+        assert r.status_code == 403, r.text
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": grant_for()}
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": session_grant}
+    )
+    assert r.status_code == 200, r.text
+    session_token = r.json()["token"]
+    # It's the owner's, short-lived, and tied to the machine and sign-in
+    claims = jwt.decode(
+        session_token, settings.SECRET_KEY, algorithms=["HS256"]
+    )
+    assert claims["sub"] == str(user.id)
+    assert claims["machine_id"] == op["id"]
+    assert claims["link_sid"] == str(session_id)
+    assert claims["exp"] - time.time() <= 15 * 60 + 5
+    session_headers = {"Authorization": f"Bearer {session_token}"}
+    r = client.get("/user", headers=session_headers)
+    assert r.status_code == 200 and r.json()["id"] == str(user.id)
+    # It can't make tokens that would outlive it, nor open sessions
+    for scope in [None, "dvc"]:
+        r = client.post(
+            "/user/tokens",
+            headers=session_headers,
+            json={"expires_days": 1, "scope": scope},
+        )
+        assert r.status_code == 403, r.text
+    r = relay_token(session_headers, second_factor)
+    assert r.status_code == 403
+    # Nor does one come once the second factor is set up again
+    confirmed = totp.confirmed_at
+    totp.confirmed_at = utcnow() + timedelta(minutes=1)
+    db.add(totp)
+    db.commit()
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": session_grant}
+    )
+    assert r.status_code == 403
+    totp.confirmed_at = confirmed
+    db.add(totp)
+    db.commit()
+    # Tokens stop working once their sign-in ends, and no more are issued
+    ended_sign_in = uuid.uuid4()
+    sign_in = RefreshToken(
+        user_id=user.id,
+        token_hash=uuid.uuid4().hex,
+        expires=utcnow() + timedelta(days=1),
+        session_id=ended_sign_in,
+        interactive=True,
+    )
+    db.add(sign_in)
+    db.commit()
+    ended_grant = grant_for(sign_in=ended_sign_in)
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": ended_grant}
+    )
+    ended_headers = {"Authorization": f"Bearer {r.json()['token']}"}
+    assert client.get("/user", headers=ended_headers).status_code == 200
+    sign_in.is_active = False
+    db.add(sign_in)
+    db.commit()
+    assert client.get("/user", headers=ended_headers).status_code == 403
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": ended_grant}
+    )
+    assert r.status_code == 403
+    # Git in sessions gets the owner's GitHub token on the same terms
+    with patch("app.users.get_github_token", return_value="ghu_x") as gh:
+        for headers, shown, status in [
+            (op_headers, session_grant, 200),
+            (op_headers, ended_grant, 403),
+            (op_headers, "nope", 403),
+            (normal_user_token_headers, session_grant, 403),
+        ]:
+            r = client.post(
+                "/machines/github-token",
+                headers=headers,
+                json={"grant": shown},
+            )
+            assert r.status_code == status, r.text
+    assert gh.call_count == 1
     # A machine that stopped checking in is offline
     machine.last_seen = utcnow() - timedelta(minutes=10)
     db.add(machine)
@@ -691,6 +817,12 @@ def test_machines(
     assert r.status_code == 403
     assert "revoked" in r.json()["detail"]
     r = client.get("/user", headers={"Authorization": f"Bearer {cli_token}"})
+    assert r.status_code == 403
+    # As do its sessions' tokens
+    assert client.get("/user", headers=session_headers).status_code == 403
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": session_grant}
+    )
     assert r.status_code == 403
     r = client.get("/machines", headers=normal_user_token_headers)
     assert op["id"] not in [o["id"] for o in r.json()]

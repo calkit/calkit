@@ -5,8 +5,9 @@ See docs/dev/hub-link-protocol.md for how these fit with the relay.
 
 import re
 import secrets
+import time
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException
@@ -39,8 +40,10 @@ from app.models import (
     UserToken,
 )
 from app.security import (
+    create_access_token,
     create_machine_grant,
     create_relay_token,
+    decode_machine_grant,
     get_machine_grant_public_key,
     hash_token_verifier,
     verify_token_verifier,
@@ -61,6 +64,10 @@ BROWSER_RELAY_TOKEN_SECONDS = 60
 # How long a request for a CLI token for a machine stands
 CLI_TOKEN_REQUEST_SECONDS = 600
 CLI_TOKEN_DAYS = 365
+# How long a token for Calkit in a machine's session lasts, which the
+# machine asks for again as it runs out, so it stops soon after what let
+# the session open does
+SESSION_TOKEN_MINUTES = 15
 MAX_ACTIVE_MACHINES = 50
 NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,63}$"
 # Hub names for an owner and project, as a machine reports them
@@ -749,6 +756,90 @@ def post_machine_cli_token(
     )
     session.commit()
     return CliToken(token=f"ckp_{selector}{verifier}")
+
+
+class SessionCredentialsReq(BaseModel):
+    """What a machine shows to get credentials for one of its sessions: the
+    grant of the channel that opened it, or last attached to it.
+    """
+
+    grant: str = Field(max_length=8192)
+
+
+def _check_session_grant(
+    session: SessionDep, machine: Machine, grant: str
+) -> tuple[uuid.UUID, int]:
+    """The sign-in whose grant opened a session on the machine, and when
+    the second factor it entered expires, if both still count.
+
+    Only the API can sign grants, and only the machine has its token, so
+    neither the relay, which carries grants, nor anyone with the machine's
+    token alone can get credentials.
+    """
+    refused = HTTPException(
+        403,
+        "The sign-in that opened this session has ended or needs its second "
+        "factor again; open the session from the hub again",
+    )
+    payload = decode_machine_grant(grant, machine.id)
+    if payload is None or payload["sub"] != str(machine.user_id):
+        raise refused
+    try:
+        sign_in = uuid.UUID(str(payload["sid"]))
+    except ValueError:
+        raise refused
+    tfa_exp, issued = payload["tfa_exp"], payload["iat"]
+    if (
+        not isinstance(tfa_exp, int)
+        or isinstance(tfa_exp, bool)
+        or tfa_exp <= time.time()
+        or not isinstance(issued, int)
+    ):
+        raise refused
+    # A second factor set up again since, or turned off, doesn't vouch for
+    # what the old one let open
+    totp = machine.user.totp
+    if (
+        totp is None
+        or totp.confirmed_at is None
+        or datetime.fromtimestamp(issued, tz=UTC).replace(tzinfo=None)
+        < totp.confirmed_at.replace(microsecond=0)
+    ):
+        raise refused
+    if _ended_sessions(session, machine, [sign_in]):
+        raise refused
+    return sign_in, tfa_exp
+
+
+@router.post("/machines/session-token")
+def post_machine_session_token(
+    session: SessionDep, machine: CurrentMachine, req: SessionCredentialsReq
+) -> CliToken:
+    """Issue a short-lived token for Calkit in one of the machine's sessions,
+    for as long as the sign-in that opened it and its second factor last.
+
+    It stops working once the machine is unlinked or that sign-in ends, and
+    can't make other tokens.
+    """
+    sign_in, tfa_exp = _check_session_grant(session, machine, req.grant)
+    lifetime = min(SESSION_TOKEN_MINUTES * 60, tfa_exp - time.time())
+    token = create_access_token(
+        machine.user_id,
+        timedelta(seconds=lifetime),
+        add_payload={"machine_id": str(machine.id), "link_sid": str(sign_in)},
+    )
+    return CliToken(token=token)
+
+
+@router.post("/machines/github-token")
+def post_machine_github_token(
+    session: SessionDep, machine: CurrentMachine, req: SessionCredentialsReq
+) -> CliToken:
+    """Get the owner's GitHub token for Git in one of the machine's sessions,
+    on the same terms as a session token.
+    """
+    _check_session_grant(session, machine, req.grant)
+    return CliToken(token=users.get_github_token(session, machine.user))
 
 
 class Workspace(WorkspaceInfo):

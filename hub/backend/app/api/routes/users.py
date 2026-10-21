@@ -6,6 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Sequence
 
+import jwt
 import requests
 import sqlalchemy
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
@@ -794,8 +795,14 @@ def post_user_token(
     """Create a personal access token.
 
     A full one takes a signed-in session, so a token can't mint more of
-    itself, while one scoped to DVC, which the CLI makes, doesn't.
+    itself, while one scoped to DVC, which the CLI makes, doesn't. Neither
+    can be made with a linked machine's session token, which would then
+    outlive it.
     """
+    if not access_token.startswith("ckp_") and "machine_id" in jwt.decode(
+        access_token, options={"verify_signature": False}
+    ):
+        raise HTTPException(403, "A hub session's token can't make tokens")
     if req.scope is None:
         get_current_session(session, access_token)
     # Generate a random token and hash it

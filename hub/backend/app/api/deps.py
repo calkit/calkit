@@ -6,7 +6,7 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
-from typing import Annotated
+from typing import Annotated, Any
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -20,7 +20,7 @@ from app import security
 from app.config import settings
 from app.core import utcnow
 from app.db import engine
-from app.models import RefreshToken, TokenPayload, User, UserToken
+from app.models import Machine, RefreshToken, TokenPayload, User, UserToken
 from app.security import (
     hash_token_verifier,
     verify_token_verifier,
@@ -97,6 +97,33 @@ TokenDep = Annotated[str, Depends(reusable_oauth2)]
 OptionalTokenDep = Annotated[str | None, Depends(reusable_oauth2_optional)]
 
 
+def check_machine_session_token(
+    session: Session, payload: dict[str, Any], user_id: uuid.UUID
+) -> None:
+    """Refuse a token issued to a session on a linked machine once the
+    machine is unlinked or the sign-in that opened the session has ended.
+    """
+    refused = HTTPException(403, "Invalid token")
+    try:
+        machine_id = uuid.UUID(str(payload["machine_id"]))
+        sign_in = uuid.UUID(str(payload["link_sid"]))
+    except (KeyError, ValueError):
+        raise refused
+    machine = session.get(Machine, machine_id)
+    if machine is None or not machine.is_active or machine.user_id != user_id:
+        raise refused
+    live = session.exec(
+        select(RefreshToken)
+        .where(RefreshToken.session_id == sign_in)
+        .where(RefreshToken.user_id == user_id)
+        .where(RefreshToken.interactive)
+        .where(RefreshToken.is_active)
+        .where(RefreshToken.expires > utcnow())
+    ).first()
+    if live is None:
+        raise refused
+
+
 def get_current_user(session: SessionDep, token: TokenDep) -> User:
     # Handle personal access tokens, which start with 'ckp_'
     if token.startswith("ckp_"):
@@ -151,6 +178,8 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
                 user = token_in_db.user
             else:
                 user = session.get(User, token_data.sub)
+                if user is not None and "machine_id" in payload:
+                    check_machine_session_token(session, payload, user.id)
         except (InvalidTokenError, ValidationError):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -275,6 +304,8 @@ def get_current_user_with_token_scope(
                 user = token_in_db.user
             else:
                 user = session.get(User, token_data.sub)
+                if user is not None and "machine_id" in payload:
+                    check_machine_session_token(session, payload, user.id)
         except (InvalidTokenError, ValidationError):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

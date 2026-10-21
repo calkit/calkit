@@ -705,6 +705,9 @@ def build(
         verbose=verbose,
     ):
         raise_error("latexmk failed")
+    pdf_fpath = os.path.join(pdf_dir, stem + ".pdf")
+    if os.path.isfile(pdf_fpath):
+        calkit.latex.set_content_id(pdf_fpath)
     if not no_synctex:
         # A container build records its own paths, which reverse search in
         # a viewer can't open
@@ -1853,6 +1856,7 @@ def _build_diff(
             )
         if not os.path.isfile(built):
             raise_error("latexmk did not produce a PDF")
+        calkit.latex.set_content_id(built)
         os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
         shutil.move(built, output)
         # A checkout is removed afterwards, but the working tree's document

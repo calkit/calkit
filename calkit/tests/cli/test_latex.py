@@ -200,7 +200,7 @@ def test_build(tmp_dir):
     subprocess.check_call(["calkit", "latex", "build", "paper/main.tex"])
     assert os.path.isfile("paper/main.pdf")
     # The same source dated differently, e.g., after a squash merge, builds
-    # the same bytes, with no date or ID in the PDF
+    # the same bytes, with no date and an ID taken from the content
     for engine in ["-pdf", "-lualatex"]:
         built = []
         for epoch in ["1700000000", "1800000000"]:
@@ -220,7 +220,23 @@ def test_build(tmp_dir):
                 built.append(f.read())
         assert built[0] == built[1], engine
         assert b"/CreationDate" not in built[0]
-        assert b"/ID" not in built[0]
+        assert built[0].count(b"/ID [<") == 1
+    # PDF/A requires an ID, and pdfx, which makes one, gets it too
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\begin{filecontents*}{main.xmpdata}\n"
+            "\\Title{Hello}\n"
+            "\\end{filecontents*}\n"
+            "\\documentclass{article}\n"
+            "\\usepackage[a-1b]{pdfx}\n"
+            "\\begin{document}\n"
+            "Hello, world!\n"
+            "\\end{document}\n"
+        )
+    os.remove("paper/main.pdf")
+    subprocess.check_call(["calkit", "latex", "build", "paper/main.tex"])
+    with open("paper/main.pdf", "rb") as f:
+        assert f.read().count(b"/ID [<") == 1
 
 
 @skipif_windows_docker

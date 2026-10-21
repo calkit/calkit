@@ -16,7 +16,7 @@ that produced them, for fast iteration and full transparency.**
 - **<!-- calkit value key=papers_shipped -->5<!-- /calkit value -->**
   reproducible publications shipped
 - **<!-- calkit value key=releases_per_week_last_90_days -->7.3<!-- /calkit value -->**
-  releases per week on average
+  releases per week
 
 as of <!-- calkit value key=date -->2026-10-21<!-- /calkit value -->
 
@@ -24,9 +24,10 @@ as of <!-- calkit value key=date -->2026-10-21<!-- /calkit value -->
 
 AI is making scientific output cheaper than ever to produce,
 shifting the bottleneck to verification and deepening
-the still-unsolved reproducibility crisis,
-as agents will happily generate---and possibly hallucinate---artifacts
-without showing all their work.
+the still-unsolved reproducibility crisis.
+LLMs will happily
+generate---and possibly hallucinate---artifacts to back up conclusions
+without showing all their work (code, data, environments, etc.).
 It's now essential to make it easy and intuitive
 to deliver research artifacts with their entire digital paper trail,
 so evidence for claims can be traced all the way back to its origin.
@@ -43,7 +44,7 @@ with information flowing freely between them for fast iteration.
 Version control (including large data files),
 environment management, pipelines with hashed I/O,
 and provenance definition are all included,
-so researchers don't need to assemble bespoke workflows.
+so researchers don't need to assemble bespoke systems.
 An optional, self-hostable web app
 facilitates collaboration during the project
 and sharing once it's done, like a GitHub for science.

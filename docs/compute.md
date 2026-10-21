@@ -34,14 +34,14 @@ calkit hub link install
 Calkit's [install script](installation.md) can also link the machine
 along with installing Calkit with its `--link` option.
 
-The link runs as a service that starts when the machine boots,
+The hub link runs as a service that starts when the machine boots,
 so it's running even if you're not logged in.
 For example, if you link a cloud VM that you stop when you're not
-using it, the link is back up as soon as you start the VM again.
+using it, the hub link is back up as soon as you start the VM again.
 On macOS, starting at boot asks for your password,
 and on Linux, linking lets your user's services keep running after you
 log out.
-If that isn't possible, the link starts when you log in instead,
+If that isn't possible, the hub link starts when you log in instead,
 and `calkit hub link install` says so.
 To start it at login on purpose, pass `--login`.
 On Windows, it always starts at login.
@@ -70,7 +70,7 @@ calkit hub link install --ssh user@cluster.example.edu
 
 The host can be anything you'd pass to `ssh`,
 including a host from your `~/.ssh/config`.
-This installs Calkit there if needed, then the link,
+This installs Calkit there if needed, then the hub link,
 registering it with the Hub from the machine you're on,
 so you don't need to log in to the Hub on the other one.
 It can be combined with `--cron`,
@@ -93,7 +93,7 @@ the others show it as in use.
 
 ## Keeping it secure
 
-The link gets its own token from the Hub,
+The hub link gets its own token from the Hub,
 which can be revoked without affecting your other tokens.
 Only you can see or use your machines,
 but anyone signed in to the Hub as you could open a shell on the machine
@@ -108,7 +108,7 @@ You'll be asked for a code from the app every 12 hours.
 
 ## Finding your workspaces
 
-The link finds the Calkit projects on that hub in your `~/calkit` and
+The hub link finds the Calkit projects on that hub in your `~/calkit` and
 `~/dev` folders,
 i.e., ones whose `calkit.yaml` names it as their `hub`,
 or, for ones that don't say, if it's your default hub.
@@ -197,7 +197,7 @@ e.g., in your editor's terminal or in tmux,
 and shows what Claude Code and Codex are doing from their own logs.
 You can attach to an agent running in tmux.
 
-On Windows, the link can do everything except open terminal sessions,
+On Windows, the hub link can do everything except open terminal sessions,
 which aren't supported there yet.
 
 ## Managing machines

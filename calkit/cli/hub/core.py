@@ -20,7 +20,7 @@ hub_app.add_typer(
 hub_app.add_typer(
     link_app,
     name="link",
-    help="Manage this machine's link to a hub, to work on it from there.",
+    help="Manage this machine's hub link, to work on it from a hub.",
 )
 
 _HUB_OPTION_HELP = (

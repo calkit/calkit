@@ -466,6 +466,21 @@ def test_ryaml_dump_leaves_no_trailing_whitespace():
             f"trailing whitespace at length {n}: {text!r}"
         )
         assert calkit.ryaml.load(text) == data
+    # A long key, e.g., an answer's condition, stays on one line, since a
+    # key wrapped over two isn't valid YAML
+    key = (
+        "if same and pdf_same and eq_docx == eq_src and inline_docx == "
+        "inline_src and threads_docx == threads_src"
+    )
+    for text in [
+        f"questions:\n  - answer:\n      {key}: >-\n        Yes.\n",
+        f"{key}: x\n",
+    ]:
+        data = calkit.ryaml.load(text)
+        buf = io.StringIO()
+        calkit.ryaml.dump(data, buf)
+        assert f"{key}:" in buf.getvalue()
+        assert calkit.ryaml.load(buf.getvalue()) == data
 
 
 def test_ryaml_dump_keeps_significant_trailing_whitespace():

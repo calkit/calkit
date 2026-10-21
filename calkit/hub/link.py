@@ -808,9 +808,45 @@ def discover_workspaces(cfg: dict) -> list[dict]:
             continue
         found[path] = kind
 
+    def data_project(path: str) -> str | None:
+        """The hub project a checkout's DVC data goes to, from its default
+        remote, which for a fork is the fork, though its calkit.yaml and
+        origin may name the project it was forked from.
+        """
+        from configobj import ConfigObj
+
+        from calkit.hub import get_api_url
+
+        remote = None
+        urls: dict[str, str] = {}
+        # The local config wins, as with DVC
+        for fname in ("config", "config.local"):
+            try:
+                with _open_in_workspace(
+                    path, os.path.join(".dvc", fname)
+                ) as f:
+                    cfg = ConfigObj(f.read().splitlines(), encoding="utf-8")
+            except Exception:
+                continue
+            core = cfg.get("core")
+            if isinstance(core, dict) and core.get("remote"):
+                remote = str(core["remote"])
+            for section, options in cfg.items():
+                match = re.fullmatch(r'remote "(.+)"', section)
+                if match and isinstance(options, dict) and options.get("url"):
+                    urls[match.group(1)] = str(options["url"])
+        url = urls.get(remote or "", "")
+        api_url = re.escape(get_api_url(get_hub_url()).rstrip("/"))
+        match = re.fullmatch(r"ck://([^/]+/[^/]+?)/?", url) or re.fullmatch(
+            api_url + r"/projects/([^/]+/[^/]+)/dvc/?", url
+        )
+        return match.group(1) if match else None
+
     def describe(path: str, kind: str) -> dict:
         try:
-            project = calkit.detect_project_name(wdir=path)
+            project = data_project(path) or calkit.detect_project_name(
+                wdir=path
+            )
         except Exception:
             project = None
         # Only names the hub could have, since it's whatever the repo says

@@ -176,6 +176,17 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     _init_project(this_hub, name="this-hub")
     with open(os.path.join(this_hub, "calkit.yaml"), "a") as f:
         f.write("hub: calkit.io\n")
+    # A fork is named for the hub project its data goes to, though its
+    # calkit.yaml and origin may name the one it was forked from
+    os.makedirs(os.path.join(this_hub, ".dvc"))
+    with open(os.path.join(this_hub, ".dvc", "config"), "w") as f:
+        f.write(
+            "[core]\n    remote = calkit\n"
+            "['remote \"calkit\"']\n    url = ck://bob/upstream\n"
+            "['remote \"mine\"']\n    url = ck://carol/fork\n"
+        )
+    with open(os.path.join(this_hub, ".dvc", "config.local"), "w") as f:
+        f.write("[core]\n    remote = mine\n")
     cfg = {"workspaces": [elsewhere, elsewhere + "/"]}
     workspaces = {
         Path(os.path.relpath(w["path"], os.path.realpath(home))).as_posix(): w
@@ -212,6 +223,16 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     assert [w["path"] for w in found] == [os.path.realpath(local)]
     monkeypatch.setattr(hub_link, "_hub_url", "https://calkit.io")
     assert workspaces["dev/odd"]["project"] is None
+    assert workspaces["dev/this-hub"]["project"] == "carol/fork"
+    with open(os.path.join(this_hub, ".dvc", "config.local"), "w") as f:
+        f.write(
+            "[core]\n    remote = http\n['remote \"http\"']\n"
+            "    url = https://api.calkit.io/projects/dave/http/dvc\n"
+        )
+    found = hub_link.discover_workspaces({"workspaces": []})
+    assert [w["project"] for w in found if w["path"].endswith("this-hub")] == [
+        "dave/http"
+    ]
     assert not os.path.exists(ran)
     demo = workspaces["calkit/demo"]
     assert demo["kind"] == "personal"

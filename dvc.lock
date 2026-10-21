@@ -294,8 +294,8 @@ stages:
       size: 12909
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: 4ae1c083c047a72493b2e547f5fc78f4
-      size: 49453
+      md5: 390ed99658893fbebe4c10968cc0dc2c
+      size: 54710
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
@@ -323,8 +323,8 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 460449d4c98c6eae6aece52ac588cbf2
-      size: 179297
+      md5: 7958d417ff1c2b7ee96ea94c0026416e
+      size: 177797
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:
@@ -347,8 +347,8 @@ stages:
     outs:
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: 4ae1c083c047a72493b2e547f5fc78f4
-      size: 49453
+      md5: 390ed99658893fbebe4c10968cc0dc2c
+      size: 54710
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit

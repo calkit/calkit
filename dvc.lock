@@ -323,8 +323,8 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 36e00bd66997820f2d0275c721bf50b7
-      size: 179221
+      md5: 460449d4c98c6eae6aece52ac588cbf2
+      size: 179297
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:

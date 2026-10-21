@@ -72,7 +72,8 @@ minutes, once the relay token it can no longer refresh expires.
   `tool`, `pid`, when it `started`, `where` it runs (`session`, one of the
   link's, `tmux`, or another `terminal`), the `app` it was started
   from, e.g., `Code`, and the `name` and `status` it gives itself, if any.
-  It also lists the sign-ins its open channels came from
+  It also lists the sign-ins its open channels came from, and those its
+  sessions' and running actions' credentials came from, browser or not
   (`channel_sessions`, the grants' `sid`s), and its `public_key`, which
   the hub keeps the first time it's sent and never replaces.
   A different one gets 409, after which the link doesn't connect and
@@ -323,7 +324,8 @@ So does each action that may reach the hub or a Git host, i.e.,
 `workspace.pull`, `workspace.push`, `workspace.save`,
 `workspace.add_stage`, `workspace.run`, `workspace.new`,
 `workspaces.clone`, `machine.check`, and `workspace.status` and
-`workspace.git_status` unless `fetch` is false, for as long as it runs.
+`workspace.git_status` unless `fetch` is false, and `workspace.ignore`
+when `push` is true, for as long as it runs.
 The environment of a session, or of what an action runs, including Git
 from the link itself, has:
 
@@ -347,6 +349,9 @@ only for `api_url`s that are its own hub's, and keeps what it got, by
 grant, until 2 minutes before a hub token expires, or 5 minutes for
 GitHub's, or until the sign-in it was got with ends, or its second factor
 expires, so a browser polling status doesn't ask the hub each time.
+Once a check-in says a sign-in has ended, sessions and actions whose
+credentials came from it get no more, until a session is attached to from
+another.
 `fresh` gets another, after the hub refused the last, and `forget` drops
 the GitHub token, which Git asks for when GitHub refuses it.
 An action's credentials come from the grant of the channel that sent it.

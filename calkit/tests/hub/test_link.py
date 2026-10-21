@@ -988,7 +988,12 @@ async def test_sessions(tmp_path, monkeypatch):
             "filled": filled,
         }
 
-    for kind in ["workspace.push", "workspace.status", "workspace.stages"]:
+    for kind in [
+        "workspace.push",
+        "workspace.status",
+        "workspace.stages",
+        "workspace.ignore",
+    ]:
         monkeypatch.setitem(hub_link.WORKSPACE_ACTIONS, kind, credentialed)
     asked_before = len(asked)
     message("a", {"type": "workspace.push", "id": 50, "workspace": workspace})
@@ -1003,9 +1008,17 @@ async def test_sessions(tmp_path, monkeypatch):
         (51, {"type": "workspace.stages"}),
         (52, {"type": "workspace.status", "fetch": False}),
         (53, {"type": "workspace.status"}),
+        (54, {"type": "workspace.ignore", "path": "x", "push": False}),
+        (55, {"type": "workspace.ignore", "path": "x", "push": True}),
     ]:
         message("a", msg | {"id": req_id, "workspace": workspace})
-    await wait_for(lambda: reply(51) and reply(52) and reply(53), timeout=60)
+    await wait_for(lambda: all(reply(i) for i in range(51, 56)), timeout=60)
+    assert reply(54)["result"] == {"creds": None}
+    assert "password=ghu_4" in reply(55)["result"]["filled"]
+    # Nor on Windows, whose event loops can't serve Unix sockets
+    monkeypatch.setattr(hub_link.sys, "platform", "win32")
+    assert op.open_credentials(op.channels["a"]) is None
+    monkeypatch.setattr(hub_link.sys, "platform", sys.platform)
     assert reply(51)["result"] == reply(52)["result"] == {"creds": None}
     assert "password=ghu_4" in reply(53)["result"]["filled"]
     # The sign-in they were got with ending forgets them
@@ -1060,6 +1073,25 @@ async def test_sessions(tmp_path, monkeypatch):
     op.on_relay_message({"type": "channel.close", "ch": "b"})
     op.on_relay_message({"type": "channel.close", "ch": "early"})
     assert op.sessions[sid].channels == set()
+    # With no browser attached, check-ins still ask about the sign-in its
+    # credentials came from, and once that ends, e.g., with a logout, it
+    # gets no more, even ones the link kept
+    assert (await ask({"type": "github.token"}))["token"].startswith("ghu_")
+    reported: list[list[str]] = []
+
+    def logged_out(cfg, workspaces, mode, connected, restart, sessions):
+        reported.append(sessions)
+        return {"ended_sessions": ["sign-in-1"]}
+
+    monkeypatch.setattr(hub_link, "check_in", logged_out)
+    monkeypatch.setattr(
+        hub_link, "discover_workspaces", lambda cfg: op.workspaces
+    )
+    await op.check_in()
+    assert reported == [["sign-in-1"]]
+    with pytest.raises(hub.LinkCredentialError, match="has ended"):
+        await ask({"type": "github.token"})
+    assert not any(v[2] == "sign-in-1" for v in op.credentials.values())
     open_channel("c")
     message("c", {"type": "sessions.list", "id": 5})
     await wait_for(lambda: reply(5))

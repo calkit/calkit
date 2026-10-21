@@ -2558,7 +2558,8 @@ READ_ONLY_ACTIONS = {
     "workspace.agent_log",
 }
 # Actions that may reach the hub or a Git host, so what they run gets
-# credentials, as a session's commands do; status ones only when fetching
+# credentials, as a session's commands do; status ones only when fetching,
+# and ignoring a path only when it pushes
 CREDENTIAL_ACTIONS = {
     "workspace.status",
     "workspace.git_status",
@@ -2666,6 +2667,11 @@ class HubLink:
         # what one browser channel allows is asked for once
         self.credentials: dict[tuple[str, str], tuple[str, float, str]] = {}
         self.credential_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        # Sessions' and running actions' credential channels, whose
+        # sign-ins check-ins ask about, browser or not, and the sign-ins
+        # the hub said have ended, which get no more
+        self.credential_channels: list[CredentialChannel] = []
+        self.ended_sign_ins: set[str] = set()
         # Asked for by the hub or 'calkit upgrade', and done once idle
         self.restart_requested = False
         self.stop_requested = False
@@ -3019,6 +3025,9 @@ class HubLink:
         import secrets
         import tempfile
 
+        # Windows event loops can't serve Unix sockets
+        if sys.platform == "win32" or not hasattr(socket, "AF_UNIX"):
+            return None
         runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
         cred_dir = sock = None
         try:
@@ -3050,6 +3059,7 @@ class HubLink:
                 functools.partial(self.serve_credentials, creds), sock=sock
             )
         )
+        self.credential_channels.append(creds)
         return creds
 
     def close_credentials(self, creds: CredentialChannel) -> None:
@@ -3057,6 +3067,9 @@ class HubLink:
         for has ended.
         """
         creds.closed = True
+        self.credential_channels = [
+            c for c in self.credential_channels if c is not creds
+        ]
         task = creds.server
         if task is not None:
             task.cancel()
@@ -3111,6 +3124,11 @@ class HubLink:
 
         if creds.closed:
             raise ValueError("The session or action has ended")
+        if creds.auth.session_id in self.ended_sign_ins:
+            raise ValueError(
+                "The sign-in this was started from has ended; open it from "
+                "the hub again"
+            )
         kind = req.get("type")
         if kind == "hub.token":
             api_url = req.get("api_url")
@@ -3195,7 +3213,10 @@ class HubLink:
             if (
                 auth is not None
                 and session.creds is not None
-                and auth.tfa_exp >= session.creds.auth.tfa_exp
+                and (
+                    auth.tfa_exp >= session.creds.auth.tfa_exp
+                    or session.creds.auth.session_id in self.ended_sign_ins
+                )
             ):
                 session.creds.auth = auth
             if "cols" in msg and "rows" in msg:
@@ -3316,7 +3337,9 @@ class HubLink:
             if auth.session_id in ended:
                 self.close_channel(ch)
                 logger.info(f"Closed channel {ch}, since its sign-in ended")
-        # The hub gives no more credentials for them either
+        # Nor are credentials given for them any more, including to
+        # sessions and actions no browser is attached to
+        self.ended_sign_ins.update(ended)
         for key, (_, _, sign_in) in list(self.credentials.items()):
             if sign_in in ended:
                 self.credentials.pop(key, None)
@@ -3368,11 +3391,12 @@ class HubLink:
         # the grant of the channel that asked, unless it only reads what's
         # here
         auth = self.channels.get(ch)
+        wants_credentials = (
+            kind in CREDENTIAL_ACTIONS and msg.get("fetch") is not False
+        ) or (kind == "workspace.ignore" and msg.get("push") is True)
         creds = (
             self.open_credentials(auth)
-            if auth is not None
-            and kind in CREDENTIAL_ACTIONS
-            and msg.get("fetch") is not False
+            if auth is not None and wants_credentials
             else None
         )
         context = _action_credentials.set(creds)
@@ -3502,10 +3526,12 @@ class HubLink:
             self.ws is not None,
             self.restart_pending(),
             # As many as the hub takes, which is far more than one person
-            # signs in from
-            sorted({auth.session_id for auth in self.channels.values()})[
-                :MAX_CHANNEL_SESSIONS
-            ],
+            # signs in from, including those of sessions and actions no
+            # browser is attached to, whose credentials came from them
+            sorted(
+                {auth.session_id for auth in self.channels.values()}
+                | {c.auth.session_id for c in self.credential_channels}
+            )[:MAX_CHANNEL_SESSIONS],
         )
         self.last_check_in = time.monotonic()
         self.check_in_interval = resp.get("check_in_interval", 60)

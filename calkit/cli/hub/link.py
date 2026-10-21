@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import typer
 from typing_extensions import Annotated
@@ -127,7 +128,8 @@ def install(
                 f"Verify your email in your settings at {get_hub_url()}/settings,"
                 " then run this again"
             )
-        return str(e)
+        # The hub's reason, without its status code
+        return re.sub(r"^\d{3}: ", "", str(e))
 
     # Sessions would be root shells, and it asks for sudo when it needs it
     try:

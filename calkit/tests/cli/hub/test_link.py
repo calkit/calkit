@@ -26,15 +26,17 @@ def test_link(tmp_path, monkeypatch):
     assert result.exit_code == 1
     assert "Verify your email" in result.output
     assert "/settings" in result.output
-    # Other errors are passed along as they are
+    # Other reasons are passed along without their status code, e.g., a hub
+    # that only lets its admins link machines
+    refused = "Linking machines isn't available on this hub yet"
     monkeypatch.setattr(
         hub_link,
         "register",
-        lambda: (_ for _ in ()).throw(HTTPError("500: Boom")),
+        lambda: (_ for _ in ()).throw(HTTPError(f"403: {refused}")),
     )
     result = CliRunner().invoke(hub_app, ["link", "install", "--no-service"])
     assert result.exit_code == 1
-    assert "500: Boom" in result.output
+    assert f"Failed to register this machine: {refused}" in result.output
     # One whose key the hub refused is revoked with its own token, in case
     # someone else holds it, and registered again
     hub_link.save_config(

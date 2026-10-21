@@ -36,6 +36,12 @@ from app.security import (
 from app.users import SECOND_FACTOR_REQUIRED, SECOND_FACTOR_SETUP_REQUIRED
 
 
+@pytest.fixture(autouse=True)
+def _machines_for_everyone(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The tests' users aren't superusers
+    monkeypatch.setattr(settings, "MACHINES_FOR_EVERYONE", True)
+
+
 def test_machines(
     client: TestClient,
     db: Session,
@@ -82,6 +88,15 @@ def test_machines(
             headers=headers,
         )
 
+    # Only superusers can link machines until they're open to everyone
+    with patch.object(settings, "MACHINES_FOR_EVERYONE", False):
+        r = client.post(
+            "/machines",
+            headers=normal_user_token_headers,
+            json={"hostname": hostname},
+        )
+    assert r.status_code == 403
+    assert "isn't available" in r.json()["detail"]
     # Registering takes a verified email, since that's what setting up the
     # second factor for opening sessions proves itself with
     me = client.get("/user", headers=normal_user_token_headers).json()

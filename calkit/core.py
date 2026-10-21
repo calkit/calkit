@@ -94,7 +94,7 @@ _FoldPreservingRepresenter.add_representer(
 class _FoldPreservingEmitter(ruamel.yaml.emitter.Emitter):
     def write_plain(self, text: Any, split: Any = True) -> None:
         fold_pos = getattr(text, "fold_pos", None)
-        if not fold_pos or not split or self.root_context:
+        if self.root_context or not text or (split and not fold_pos):
             return super().write_plain(text, split)
 
         def write(data: str) -> None:
@@ -109,8 +109,10 @@ class _FoldPreservingEmitter(ruamel.yaml.emitter.Emitter):
             write(" ")
         self.whitespace = False
         self.indention = False
+        # A simple key gets no breaks: ruamel still wraps one past the width,
+        # but a key can't span lines
         start = 0
-        for pos in fold_pos:
+        for pos in fold_pos if split and fold_pos else []:
             write(text[start:pos])
             self.write_indent()
             self.whitespace = False

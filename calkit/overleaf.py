@@ -426,6 +426,10 @@ def pull_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
     repo.git.add("-A", "-f")
     if not repo.head.is_valid() or repo.git.diff("--staged"):
         repo.git.commit("--allow-empty", "-m", "Update on Overleaf.")
+    # Rewritten as a checkout would write them, so line endings on disk match
+    # the project's, e.g., with core.autocrlf on Windows
+    repo.git.read_tree("HEAD")
+    repo.git.checkout_index("-a", "-f", "-u")
     repo.git.update_ref(MIRROR_REF, "HEAD")
 
 

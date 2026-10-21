@@ -1267,6 +1267,10 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     monkeypatch.setattr(
         "calkit.cli.overleaf._get_overleaf_auth", lambda: overleaf
     )
+    # The same line endings on every runner, since status compares bytes
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     remote = tempfile.mkdtemp()

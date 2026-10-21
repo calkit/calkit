@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -557,6 +558,9 @@ def test_request_can_skip_retries_and_login(monkeypatch):
     assert prompted["n"] == 0
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Credential channels are POSIX only"
+)
 def test_tokens_from_hub_link(monkeypatch, tmp_path):
     import os
     import shutil

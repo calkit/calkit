@@ -950,11 +950,12 @@ async def test_sessions(tmp_path, monkeypatch):
             "session": sid,
             "data": "for h in gitlab.com github.com; do printf "
             "'protocol=https\\nhost=%s\\n\\n' $h | GIT_TERMINAL_PROMPT=0 "
-            "git credential fill; done; echo FILLED\n",
+            "git credential fill; done; echo FILLED-$((40+2))\n",
         },
     )
-    await wait_for(lambda: "FILLED\r\n" in output("a"), timeout=60)
-    filled = output("a").split("FILLED")[-2]
+    # Expanded, so the terminal echoing the command doesn't count
+    await wait_for(lambda: "FILLED-42" in output("a"), timeout=60)
+    filled = output("a").split("FILLED-42")[0]
     assert "password=ghu_3" in filled and "host=gitlab.com" not in filled
     assert "username=x-access-token" in filled
     assert asked[-1] == ("github-token", op.channels["a"].grant)

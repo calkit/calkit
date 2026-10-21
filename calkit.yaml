@@ -205,6 +205,7 @@ pipeline:
       environment: dev
       inputs:
         - results/2027-budget.json
+        - docs/one-pager/texgyreheros-regular.otf
       outputs:
         - docs/img/2027-budget.png
     find-calkit-projects:

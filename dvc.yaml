@@ -85,6 +85,7 @@ stages:
     deps:
       - scripts/plot-budget.py
       - results/2027-budget.json
+      - docs/one-pager/texgyreheros-regular.otf
       - uv.lock
       - .python-version
     outs:

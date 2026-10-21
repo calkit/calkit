@@ -1,6 +1,6 @@
 {
   "calkit": {
-    "image": "ghcr.io/calkit/latex:0.1.6",
+    "image": "ghcr.io/calkit/latex:0.1.7",
     "unpacked_mb": 900.0,
     "download_mb": 430.0,
     "unpacked_gb": 0.9,

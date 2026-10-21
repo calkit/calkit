@@ -551,7 +551,9 @@ def ensure_sync_base(
     Files the sync sends to Overleaf that Git doesn't hold are added too:
     map-paths copies are rebuilt from their sources at that commit, and
     anything else, e.g., files stored with DVC, is taken as unchanged on
-    Overleaf, so neither looks newly added there.
+    Overleaf, so neither looks newly added there. Files the sync never sends,
+    e.g., dot files, are left out unless Overleaf has them now, so they don't
+    look deleted there.
 
     The rebuilt commit is kept under a ref, so it's only built once.
 
@@ -647,6 +649,16 @@ def ensure_sync_base(
             sync_info_for_path={},
         )
         sources = paths.map_paths_sources
+        # Files the sync never sends, e.g., dot files and the PDF, were only
+        # on Overleaf if they're there now, or they'd look deleted there
+        pushed = set(paths.files_to_copy_to_overleaf)
+        dropped = [
+            rel
+            for rel in main_repo.git.ls_tree(
+                "-r", "-z", "--name-only", tree.hexsha
+            ).split("\0")
+            if rel and rel not in pushed and blob_at(head.tree, rel) is None
+        ]
         extra = {}
         for rel in sorted(paths.dvc_files | paths.mapped_files | set(sources)):
             if blob_at(tree, rel) is not None:
@@ -661,10 +673,14 @@ def ensure_sync_base(
             if blob is not None:
                 extra[rel] = blob
         base_tree = tree.hexsha
-        if extra:
+        if extra or dropped:
             with tempfile.TemporaryDirectory() as tmp:
                 env = {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
                 repo.git.read_tree(base_tree, env=env)
+                if dropped:
+                    repo.git.update_index(
+                        "--force-remove", "--", *dropped, env=env
+                    )
                 for rel, blob in extra.items():
                     repo.git.update_index(
                         "--add",
@@ -1362,12 +1378,16 @@ class OverleafSyncPaths:
 def get_commits_since_last_sync(
     overleaf_repo: git.Repo, last_sync_commit: str | None
 ) -> list[git.Commit]:
-    if last_sync_commit:
-        return list(
-            overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
-        )
-    else:
+    """Commits on Overleaf since the last sync that change files, so a
+    download on top of a rebuilt last sync that matches it isn't counted.
+    """
+    if not last_sync_commit:
         return []
+    return [
+        c
+        for c in overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
+        if not c.parents or c.tree.hexsha != c.parents[0].tree.hexsha
+    ]
 
 
 FIGURE_EXTENSIONS = {

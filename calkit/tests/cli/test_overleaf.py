@@ -1289,7 +1289,10 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     os.makedirs("paper/figs")
     with open("paper/figs/fig.txt", "w", newline="") as f:
         f.write("A figure")
-    repo.git.add("paper/figs/fig.txt")
+    # Dot files stay in the project and off Overleaf
+    with open("paper/.gitignore", "w", newline="") as f:
+        f.write("*.aux\n")
+    repo.git.add(["paper/figs/fig.txt", "paper/.gitignore"])
     repo.git.commit(["-m", "Add figure"])
 
     def sync():
@@ -1327,6 +1330,10 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
         assert f.read() == "@article{a}\n@article{b}\n"
     assert overleaf.files["refs.bib"] == b"@article{a}\n@article{b}\n"
     assert overleaf.uploads == ["refs.bib"]
+    # A dot file in the rebuilt last sync wasn't on Overleaf, so its absence
+    # there isn't a deletion
+    assert os.path.isfile("paper/.gitignore")
+    assert ".gitignore" not in overleaf.files
     # Conflicting edits are resolved the same as with Git integration
     overleaf.files["main.tex"] += b"Overleaf's ending\n"
     with open("paper/main.tex", "a", newline="") as f:
@@ -1431,6 +1438,9 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     res = runner.invoke(overleaf_app, ["status"])
     assert res.exit_code == 0, res.output
     assert "Rebuilding the last sync" in res.output
+    # Overleaf's download on top of it matches, so nothing changed there
+    assert "There have been 0 changes" in res.output
+    assert "Changed files" not in res.output
     with git.Repo(mirror_dir) as mirror:
         n_commits = len(list(mirror.iter_commits()))
     res = runner.invoke(overleaf_app, ["status"])

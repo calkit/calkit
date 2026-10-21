@@ -292,10 +292,6 @@ class Settings(BaseSettings):
     # reaches someone real without being configured first.
     FEEDBACK_EMAIL: str | None = None
 
-    # Whether everyone can link machines, for workspaces, rather than only
-    # superusers while they're tried out, as the frontend's pages show
-    MACHINES_FOR_EVERYONE: bool = False
-
     @computed_field  # type: ignore[prop-decorator]
     @property
     def feedback_email(self) -> str:

@@ -69,6 +69,9 @@ CLI_TOKEN_DAYS = 365
 # the session open does
 SESSION_TOKEN_MINUTES = 15
 MAX_ACTIVE_MACHINES = 50
+# Whether everyone can link machines, for workspaces, rather than only
+# superusers while they're tried out, as the frontend's pages show
+MACHINES_FOR_EVERYONE = False
 NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,63}$"
 # Hub names for an owner and project, as a machine reports them
 PROJECT_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,255}/[A-Za-z0-9._-]{1,255}$")
@@ -235,7 +238,7 @@ def post_machine(
     session: SessionDep, current_user: CurrentUser, req: MachinePost
 ) -> MachineRegistered:
     """Register a machine as one of the user's."""
-    if not (current_user.is_superuser or settings.MACHINES_FOR_EVERYONE):
+    if not (current_user.is_superuser or MACHINES_FOR_EVERYONE):
         raise HTTPException(
             403,
             "Linking machines isn't available on this hub yet; vote for it at "

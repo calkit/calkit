@@ -131,6 +131,25 @@
       "memory_gb": 15.6
     }
   },
+  "one-pager-font": {
+    "start_time": "2026-10-21T23:45:37.615000",
+    "end_time": "2026-10-21T23:45:40.209000",
+    "environment": "tex",
+    "git_rev": "fc87a8eed13bbda2827bc3594e3fbeaca3f8c0a4",
+    "git_dirty": false,
+    "dvc_lock_hash": "sha256:058fdde0c2d38cac8839169442b183a2da27bed59ce920492748ba38429c5f00",
+    "calkit_version": "0.49.3.dev285+gfc87a8ee",
+    "calkit_git_rev": "fc87a8eed13bbda2827bc3594e3fbeaca3f8c0a4",
+    "system": {
+      "machine_id": "6b80cb66c24c4cf8ba62e40236d3cfda",
+      "os": "Linux",
+      "os_version": "7.0.0-1017-azure",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "cpu_count": 4,
+      "memory_gb": 15.6
+    }
+  },
   "one-pager/pdf": {
     "start_time": "2026-10-21T15:21:19.594000",
     "end_time": "2026-10-21T15:21:19.599000",

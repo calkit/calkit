@@ -100,29 +100,6 @@ def _get_overleaf_session_from_hub(stale: str | None = None) -> str | None:
     return str(session)
 
 
-def _get_overleaf_session(
-    rejected: bool = False, stale: str | None = None
-) -> str:
-    """Get a new Overleaf session from the hub, or prompt for one, and store
-    it.
-    """
-    if rejected:
-        warn("Overleaf rejected your session", prefix="")
-    session = _get_overleaf_session_from_hub(stale=stale)
-    if session:
-        return session
-    typer.echo(calkit.overleaf.SESSION_HELP + "\n")
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        raise_error(
-            "Set one with 'calkit overleaf login --session' and try again"
-        )
-    session = typer.prompt("Enter Overleaf session cookie", hide_input=True)
-    calkit_config = calkit.config.read()
-    calkit_config.overleaf_session = session
-    calkit_config.write()
-    return str(session)
-
-
 def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
     """Get a Git token, or, if only a session is available, a web client
     for syncing without Overleaf Premium.
@@ -159,6 +136,30 @@ def _get_pulled_overleaf_repo(
     Returns the repo and the credentials that worked, so later projects use
     them too.
     """
+
+    def get_new_session(stale: str) -> str:
+        """Get a new Overleaf session from the hub, or prompt for one, and
+        store it.
+        """
+        warn("Overleaf rejected your session", prefix="")
+        session = _get_overleaf_session_from_hub(stale=stale)
+        if session:
+            return session
+        typer.echo(calkit.overleaf.SESSION_HELP + "\n")
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise_error(
+                "Set one with 'calkit overleaf login --session' and try again"
+            )
+        session = typer.prompt(
+            "Enter Overleaf session cookie", hide_input=True
+        )
+        calkit_config = calkit.config.read()
+        calkit_config.overleaf_session = calkit.config.KeyringOptionalSecret(
+            session
+        )
+        calkit_config.write()
+        return str(session)
+
     while True:
         try:
             if isinstance(auth, calkit.overleaf.WebClient):
@@ -172,7 +173,7 @@ def _get_pulled_overleaf_repo(
             if isinstance(auth, calkit.overleaf.WebClient):
                 warn(str(e), prefix="")
                 auth = calkit.overleaf.WebClient(
-                    _get_overleaf_session(rejected=True, stale=auth.session)
+                    get_new_session(stale=auth.session)
                 )
             else:
                 # A token stops working when Premium ends, but a browser
@@ -782,29 +783,10 @@ def sync(
                 last_sync_commit = sync_data.get("last_sync_commit")
             push = None
             if isinstance(overleaf_auth, calkit.overleaf.WebClient):
-                try:
-                    last_sync_commit = calkit.overleaf.ensure_sync_base(
-                        overleaf_repo,
-                        main_repo=repo,
-                        path_in_project=synced_folder,
-                        last_sync_commit=last_sync_commit,
-                        print_info=typer.echo,
-                    )
-                except RuntimeError as e:
-                    raise_error(str(e))
                 push = partial(
                     calkit.overleaf.push_mirror,
                     client=overleaf_auth,
                     project_id=overleaf_project_id,
-                )
-            commits_since = calkit.overleaf.get_commits_since_last_sync(
-                overleaf_repo=overleaf_repo,
-                last_sync_commit=last_sync_commit,
-            )
-            if commits_since:
-                typer.echo(
-                    f"There have been {len(commits_since)} changes on "
-                    "Overleaf since last sync"
                 )
             try:
                 results[synced_folder] = calkit.overleaf.sync(
@@ -930,16 +912,14 @@ def get_status(
             sync_data = calkit.overleaf.get_sync_info().get(
                 path_in_project, sync_data
             )
-            last_sync_commit = sync_data.get("last_sync_commit")
-            if isinstance(overleaf_auth, calkit.overleaf.WebClient):
-                last_sync_commit = calkit.overleaf.ensure_sync_base(
-                    overleaf_repo,
-                    main_repo=calkit.git.get_repo(),
-                    path_in_project=path_in_project,
-                    last_sync_commit=last_sync_commit,
-                    print_info=typer.echo,
-                    missing_ok=True,
-                )
+            last_sync_commit = calkit.overleaf.ensure_sync_base(
+                overleaf_repo,
+                main_repo=calkit.git.get_repo(),
+                path_in_project=path_in_project,
+                last_sync_commit=sync_data.get("last_sync_commit"),
+                print_info=typer.echo,
+                missing_ok=True,
+            )
             if last_sync_commit:
                 commits_since = calkit.overleaf.get_commits_since_last_sync(
                     overleaf_repo=overleaf_repo,

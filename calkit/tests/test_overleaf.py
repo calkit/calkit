@@ -369,3 +369,65 @@ def test_web_client():
     assert calkit.overleaf._find_entity(tree, "figs/a.png") == ("file", "f1")
     assert calkit.overleaf._find_entity(tree, "figs/b.png") is None
     assert calkit.overleaf._find_entity(tree, "other/a.png") is None
+
+
+def test_ensure_sync_base(tmp_dir: str) -> None:
+    import io
+    import tempfile
+    import zipfile
+
+    class Overleaf:
+        def download(self, project_id: str) -> bytes:
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                z.writestr("main.tex", "On Overleaf now\n")
+            return buf.getvalue()
+
+    def ensure(last_sync_commit: str, missing_ok: bool = False) -> str | None:
+        return calkit.overleaf.ensure_sync_base(
+            mirror,
+            main_repo=repo,
+            path_in_project=".",
+            last_sync_commit=last_sync_commit,
+            print_info=lambda _: None,
+            missing_ok=missing_ok,
+        )
+
+    def record(path: str, last_sync_commit: str, message: str) -> None:
+        calkit.overleaf.write_sync_info(
+            path, {"project_id": "p1", "last_sync_commit": last_sync_commit}
+        )
+        repo.git.add(".")
+        repo.git.commit(["-m", message])
+
+    repo = git.Repo.init()
+    with open("main.tex", "w") as f:
+        f.write("Synced\n")
+    # A folder synced at the project root
+    record(".", "a" * 40, "Sync . with Overleaf project")
+    # Later commits mentioning the same checkpoint, e.g., for another folder
+    # synced with the same Overleaf project, aren't where it was set
+    with open("main.tex", "w") as f:
+        f.write("Edited in the project\n")
+    record("other", "a" * 40, "Sync other with Overleaf project")
+    mirror = calkit.overleaf.get_mirror(
+        "p1", dest=os.path.join(tempfile.mkdtemp(), "mirror")
+    )
+    calkit.overleaf.pull_mirror(mirror, Overleaf(), "p1")  # type: ignore
+    base = ensure("a" * 40)
+    assert base is not None
+    assert mirror.git.show(f"{base}:main.tex") == "Synced"
+    assert mirror.head.commit.parents[0].hexsha == base
+    assert mirror.head.commit.tree["main.tex"].data_stream.read() == (
+        b"On Overleaf now\n"
+    )
+    # Built once, so checking again doesn't add to the history
+    n_commits = len(list(mirror.iter_commits()))
+    assert ensure("a" * 40) == base
+    assert len(list(mirror.iter_commits())) == n_commits
+    # A checkpoint saved in a commit made by hand may hold edits that were
+    # never on Overleaf
+    record(".", "b" * 40, "Save the sync")
+    with pytest.raises(RuntimeError, match="Calkit didn't make"):
+        ensure("b" * 40)
+    assert ensure("b" * 40, missing_ok=True) is None

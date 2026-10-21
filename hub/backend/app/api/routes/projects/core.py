@@ -103,6 +103,7 @@ from app.dvc import (
     run_dvc_command,
 )
 from app.git import (
+    OVERLEAF_SESSION_REJECTED,
     RepoTree,
     expire_shared_read_clone,
     get_ck_info,
@@ -6914,13 +6915,16 @@ async def post_project_overleaf_publication(
                 expires=None,
             )
         # 401 like the other Overleaf routes, so clients offer to connect
-        users.get_overleaf_auth(session=session, user=current_user)
+        overleaf_auth = users.get_overleaf_auth(
+            session=session, user=current_user
+        )
         try:
             with get_overleaf_repo(
                 project=project,
                 user=current_user,
                 session=session,
                 overleaf_project_id=overleaf_project_id,
+                overleaf_auth=overleaf_auth,
             ) as (overleaf_repo, _):
                 # Snapshot the files and commit while the clone is locked, so
                 # a concurrent pull or sync can't change them mid-import; the
@@ -7203,7 +7207,7 @@ def post_project_overleaf_sync(
     current_user: CurrentUser,
     session: SessionDep,
 ) -> OverleafSyncResponse:
-    users.get_overleaf_auth(session=session, user=current_user)
+    overleaf_auth = users.get_overleaf_auth(session=session, user=current_user)
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7232,6 +7236,7 @@ def post_project_overleaf_sync(
             user=current_user,
             session=session,
             overleaf_project_id=overleaf_project_id,
+            overleaf_auth=overleaf_auth,
         ) as (overleaf_repo, overleaf_push):
             res = calkit.overleaf.sync(
                 main_repo=repo,
@@ -7255,6 +7260,11 @@ def post_project_overleaf_sync(
             event_name="Overleaf sync failed",
             add_event_info={"path": path_in_project, "exception": str(e)},
         )
+        # Only a session's push raises these, since 'git push' doesn't
+        if isinstance(e, calkit.overleaf.AuthError):
+            raise HTTPException(401, OVERLEAF_SESSION_REJECTED)
+        if isinstance(e, calkit.overleaf.ChangedOnOverleafError):
+            raise HTTPException(409, str(e))
         raise HTTPException(
             400, "Overleaf sync failed; try locally with Calkit CLI"
         )
@@ -7325,7 +7335,7 @@ def get_project_overleaf_sync_status(
     folder with ``path`` or to the folders synced with a single Overleaf
     project with ``overleaf_project_id``.
     """
-    users.get_overleaf_auth(session=session, user=current_user)
+    overleaf_auth = users.get_overleaf_auth(session=session, user=current_user)
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7405,6 +7415,7 @@ def get_project_overleaf_sync_status(
             user=current_user,
             session=session,
             overleaf_project_id=this_overleaf_project_id,
+            overleaf_auth=overleaf_auth,
         ) as (overleaf_repo, _):
             status = calkit.overleaf.get_sync_status(
                 main_repo=repo,

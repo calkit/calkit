@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import zipfile
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -1180,7 +1181,11 @@ OVERLEAF_SESSION_REJECTED = (
 
 @contextmanager
 def get_overleaf_repo(
-    project: Project, user: User, session: Session, overleaf_project_id: str
+    project: Project,
+    user: User,
+    session: Session,
+    overleaf_project_id: str,
+    overleaf_auth: str | calkit.overleaf.WebClient | None = None,
 ) -> Iterator[tuple[git.Repo, Callable[[git.Repo], None] | None]]:
     """Get a freshly pulled Overleaf repository for a user/project, and how
     to push to it, which is ``None`` to use ``git push``.
@@ -1191,6 +1196,9 @@ def get_overleaf_repo(
     The repo is locked while in use, since a sync resets it and copies files
     into it, so a concurrent sync or status check could wipe those files or
     record Overleaf edits as synced without pulling them.
+
+    ``overleaf_auth`` is from ``users.get_overleaf_auth``, which is called
+    if it's not given.
     """
 
     def use_session(client: calkit.overleaf.WebClient) -> git.Repo:
@@ -1203,6 +1211,10 @@ def get_overleaf_repo(
             calkit.overleaf.pull_mirror(repo, client, overleaf_project_id)
         except calkit.overleaf.AuthError:
             raise HTTPException(401, OVERLEAF_SESSION_REJECTED)
+        except (RuntimeError, OSError, zipfile.BadZipFile) as e:
+            # Including network errors from requests
+            logger.warning(f"Failed to download Overleaf project: {e}")
+            raise HTTPException(502, "Could not download the Overleaf project")
         return repo
 
     def use_token(token: str) -> git.Repo:
@@ -1247,7 +1259,8 @@ def get_overleaf_repo(
     )
     repo_dir = os.path.join(base_dir, "repo")
     os.makedirs(base_dir, exist_ok=True)
-    overleaf_auth = users.get_overleaf_auth(session=session, user=user)
+    if overleaf_auth is None:
+        overleaf_auth = users.get_overleaf_auth(session=session, user=user)
     try:
         lock = FileLock(
             os.path.join(base_dir, "syncing.lock"),
@@ -1307,7 +1320,6 @@ def read_overleaf_title(
     since a project can still be created without one.
     """
     import io
-    import zipfile
 
     overleaf_auth = users.get_overleaf_auth(session=session, user=user)
     with tempfile.TemporaryDirectory(prefix="overleaf-title-") as tmp:

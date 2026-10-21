@@ -85,6 +85,10 @@ class AuthError(RuntimeError):
     """Overleaf rejected the token, e.g., because it expired or was revoked."""
 
 
+class ChangedOnOverleafError(RuntimeError):
+    """Files changed on Overleaf between downloading and replacing them."""
+
+
 # Added to the error when Overleaf rejects the token
 AUTH_FAILED_ADVICE = (
     "Your Overleaf token may have expired or been revoked. Generate a new one "
@@ -198,6 +202,10 @@ def pull(repo: git.Repo) -> None:
         raise _git_error(e, "pull")
     repo.git.reset("--hard", "@{upstream}")
     repo.git.clean("-fdx")
+    # Left if the clone was synced with a session while its token didn't
+    # work, and would make it look like a mirror
+    if is_mirror(repo):
+        repo.git.update_ref("-d", MIRROR_REF)
 
 
 OVERLEAF_URL = "https://www.overleaf.com"
@@ -205,6 +213,8 @@ SESSION_COOKIE = "overleaf_session2"
 # Where a session-synced mirror records the commit matching Overleaf's files,
 # like a remote-tracking branch does for a Git integration clone
 MIRROR_REF = "refs/calkit/overleaf"
+# What a sync names the project commit recording it, given the synced folder
+SYNC_COMMIT_MESSAGE = "Sync {} with Overleaf project"
 
 SESSION_HELP = (
     "Copy the value of the 'overleaf_session2' cookie from a browser signed "
@@ -464,14 +474,28 @@ def push_mirror(repo: git.Repo, client: WebClient, project_id: str) -> None:
     edited = []
     for path in changes[1::2]:
         try:
-            before: bytes | None = (synced / path).data_stream.read()
+            before: str | None = (synced / path).hexsha
         except KeyError:
             before = None
-        now = archive.read(path) if path in names else None
+        now = None
+        if path in names:
+            # Hashed as 'git add' stored it, so line ending conversion
+            # doesn't look like an edit
+            now = (
+                subprocess.run(
+                    ["git", "hash-object", "--stdin", "--path", path],
+                    input=archive.read(path),
+                    cwd=repo.working_dir,
+                    capture_output=True,
+                    check=True,
+                )
+                .stdout.decode()
+                .strip()
+            )
         if now != before:
             edited.append(path)
     if edited:
-        raise RuntimeError(
+        raise ChangedOnOverleafError(
             "These files changed on Overleaf during the sync, so nothing was "
             f"sent: {', '.join(edited)}. Sync again to merge those changes."
         )
@@ -513,18 +537,23 @@ def ensure_sync_base(
     print_info: Callable[[str], None] = print,
     missing_ok: bool = False,
 ) -> str | None:
-    """Make sure a mirror has the commit a sync is based on, returning the
-    commit to use.
+    """Make sure the Overleaf repo's history has the commit a sync is based
+    on, returning the commit to use.
 
-    Mirror history is local, so a checkpoint recorded on another machine, or
-    with Git integration, may not exist. What Overleaf held then is rebuilt
-    from the project commit that recorded the checkpoint, when the synced
-    folder matched it, and inserted beneath Overleaf's current files.
+    A mirror's history is local, and a clone's comes from Overleaf, so a
+    checkpoint recorded on another machine, or with the other kind of
+    credentials, may be missing. What Overleaf held then is rebuilt from the
+    project commit that recorded the checkpoint, when the synced folder
+    matched it, and inserted beneath Overleaf's current files. A clone's
+    branch then no longer follows Overleaf's, so ``sync`` puts its commit on
+    top of Overleaf's before pushing.
 
     Files the sync sends to Overleaf that Git doesn't hold are added too:
     map-paths copies are rebuilt from their sources at that commit, and
     anything else, e.g., files stored with DVC, is taken as unchanged on
     Overleaf, so neither looks newly added there.
+
+    The rebuilt commit is kept under a ref, so it's only built once.
 
     Without a base, a sync would copy Overleaf's files over the project's,
     so if none can be found this raises, or, with ``missing_ok``, which is
@@ -543,89 +572,149 @@ def ensure_sync_base(
             return None
         return obj if isinstance(obj, git.Blob) else None
 
+    def in_history(rev: str) -> bool:
+        try:
+            repo.git.merge_base("--is-ancestor", rev, head.hexsha)
+            return True
+        except git.GitCommandError:
+            return False
+
+    def info_at(sha: str) -> dict:
+        try:
+            info = json.loads(main_repo.git.show(f"{sha}:{fpath}"))
+        except (git.GitCommandError, ValueError):
+            return {}
+        return info.get(key) or {}
+
+    def build_base() -> str:
+        """Rebuild what Overleaf held at the last sync, raising
+        ``LookupError`` if that can't be known.
+        """
+        # The commit where this folder's checkpoint was set, rather than the
+        # latest one mentioning it, which may have moved on since
+        recorded = None
+        for sha in main_repo.git.log(
+            "--format=%H", f"-S{last_sync_commit}", "--", fpath
+        ).split():
+            commit = main_repo.commit(sha)
+            if info_at(sha).get(
+                "last_sync_commit"
+            ) == last_sync_commit and all(
+                info_at(p.hexsha).get("last_sync_commit") != last_sync_commit
+                for p in commit.parents
+            ):
+                recorded = commit
+                break
+        if recorded is None:
+            raise LookupError(
+                f"Could not find the last sync of {key} with Overleaf in the "
+                "project history, so changes on each side can't be told apart"
+            )
+        # Only a commit Calkit made for the sync or import is known to hold
+        # just what was on Overleaf, e.g., not one made by hand after syncing
+        # with --no-commit
+        subject = str(recorded.message).strip()
+        project_id = info_at(recorded.hexsha).get("project_id")
+        if subject != SYNC_COMMIT_MESSAGE.format(key) and not (
+            subject.startswith(f"Import Overleaf project ID {project_id}")
+        ):
+            raise LookupError(
+                f"The last sync of {key} with Overleaf was saved in commit "
+                f"{recorded.hexsha[:7]}, which Calkit didn't make, so it may "
+                "include changes that were never on Overleaf"
+            )
+        tree: Any = recorded.tree
+        try:
+            if prefix:
+                tree = tree / prefix
+        except KeyError:
+            tree = None
+        if not isinstance(tree, git.Tree):
+            raise LookupError(
+                f"The last sync of {key} with Overleaf was saved in commit "
+                f"{recorded.hexsha[:7]}, which doesn't have that folder"
+            )
+        print_info("Rebuilding the last sync from project history")
+        # Git objects are the same in any repo, so the folder's tree can be
+        # copied over as is
+        for obj in [tree, *tree.traverse()]:
+            if isinstance(obj, (git.Blob, git.Tree)):
+                store(obj)
+        paths = OverleafSyncPaths(
+            main_repo=main_repo,
+            overleaf_repo=repo,
+            path_in_project=path_in_project,
+            sync_info_for_path={},
+        )
+        sources = paths.map_paths_sources
+        extra = {}
+        for rel in sorted(paths.dvc_files | paths.mapped_files | set(sources)):
+            if blob_at(tree, rel) is not None:
+                continue
+            blob = None
+            if rel in sources:
+                blob = blob_at(recorded.tree, sources[rel])
+                if blob is not None:
+                    store(blob)
+            if blob is None:
+                blob = blob_at(head.tree, rel)
+            if blob is not None:
+                extra[rel] = blob
+        base_tree = tree.hexsha
+        if extra:
+            with tempfile.TemporaryDirectory() as tmp:
+                env = {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
+                repo.git.read_tree(base_tree, env=env)
+                for rel, blob in extra.items():
+                    repo.git.update_index(
+                        "--add",
+                        "--cacheinfo",
+                        f"{blob.mode:o},{blob.hexsha},{rel}",
+                        env=env,
+                    )
+                base_tree = repo.git.write_tree(env=env)
+        parents = [p for c in head.parents for p in ("-p", c.hexsha)]
+        built: str = repo.git.commit_tree(
+            base_tree, *parents, "-m", "Overleaf at last sync"
+        )
+        return built
+
     if not last_sync_commit:
         return last_sync_commit
-    try:
-        repo.commit(last_sync_commit)
-        return last_sync_commit
-    except (ValueError, git.BadName):
-        pass
-    fpath = Path(get_sync_info_fpath()).as_posix()
-    found = main_repo.git.log(
-        "-1", "--format=%H", f"-S{last_sync_commit}", "--", fpath
-    )
-    prefix = Path(path_in_project).as_posix().strip("/")
-    recorded = main_repo.commit(found) if found else None
-    tree: Any = recorded.tree if recorded is not None else None
-    try:
-        if tree is not None and prefix:
-            tree = tree / prefix
-    except KeyError:
-        tree = None
-    if recorded is None or not isinstance(tree, git.Tree):
-        msg = (
-            f"Could not find the last sync of {path_in_project or '.'} with "
-            "Overleaf in the project history, so changes on each side can't "
-            "be told apart"
-        )
-        if missing_ok:
-            print_info(f"Warning: {msg}")
-            return None
-        raise RuntimeError(
-            f"{msg}. To start over, commit any changes, remove "
-            f"'last_sync_commit' for this folder from {fpath}, and sync "
-            "again; that copies Overleaf's files over the project's, so "
-            "review the diff before committing."
-        )
-    print_info("Rebuilding the last sync from project history")
-    # Git objects are the same in any repo, so the folder's tree can be
-    # copied over as is
-    for obj in [tree, *tree.traverse()]:
-        if isinstance(obj, (git.Blob, git.Tree)):
-            store(obj)
     head = repo.head.commit
-    paths = OverleafSyncPaths(
-        main_repo=main_repo,
-        overleaf_repo=repo,
-        path_in_project=path_in_project,
-        sync_info_for_path={},
-    )
-    sources = paths.map_paths_sources
-    extra = {}
-    for rel in sorted(paths.dvc_files | paths.mapped_files | set(sources)):
-        if blob_at(tree, rel) is not None:
-            continue
-        blob = None
-        if rel in sources:
-            blob = blob_at(recorded.tree, sources[rel])
-            if blob is not None:
-                store(blob)
-        if blob is None:
-            blob = blob_at(head.tree, rel)
-        if blob is not None:
-            extra[rel] = blob
-    base_tree = tree.hexsha
-    if extra:
-        with tempfile.TemporaryDirectory() as tmp:
-            env = {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
-            repo.git.read_tree(base_tree, env=env)
-            for rel, blob in extra.items():
-                repo.git.update_index(
-                    "--add",
-                    "--cacheinfo",
-                    f"{blob.mode:o},{blob.hexsha},{rel}",
-                    env=env,
-                )
-            base_tree = repo.git.write_tree(env=env)
-    parents = [p for c in head.parents for p in ("-p", c.hexsha)]
-    base: str = repo.git.commit_tree(
-        base_tree, *parents, "-m", "Overleaf at last sync"
-    )
+    if in_history(last_sync_commit):
+        return last_sync_commit
+    base_ref = f"refs/calkit/sync-base/{last_sync_commit}"
+    try:
+        base: str | None = repo.git.rev_parse("--verify", "--quiet", base_ref)
+    except git.GitCommandError:
+        base = None
+    if base is not None and in_history(base):
+        return base
+    fpath = Path(get_sync_info_fpath()).as_posix()
+    key = Path(path_in_project).as_posix()
+    prefix = "" if key == "." else key.strip("/")
+    if base is None:
+        try:
+            base = build_base()
+        except LookupError as e:
+            if missing_ok:
+                print_info(f"Warning: {e}")
+                return None
+            raise RuntimeError(
+                f"{e}. To start over, commit any changes, remove "
+                f"'last_sync_commit' for this folder from {fpath}, and sync "
+                "again; that copies Overleaf's files over the project's, so "
+                "review the diff before committing."
+            )
+        repo.git.update_ref(base_ref, base)
+    assert base is not None
     new_head = repo.git.commit_tree(
         head.tree.hexsha, "-p", base, "-m", head.message
     )
     repo.git.update_ref("HEAD", new_head)
-    repo.git.update_ref(MIRROR_REF, new_head)
+    if is_mirror(repo):
+        repo.git.update_ref(MIRROR_REF, new_head)
     return base
 
 
@@ -1307,8 +1396,10 @@ def get_sync_status(
     """Compute the sync status between a project and an Overleaf project.
 
     This is the read-only counterpart to ``sync``: it reports what a sync
-    would do without touching either repo. Both repos should already be
-    up-to-date (pulled), same as for ``sync``.
+    would do without changing either repo's files, though a missing last
+    sync is rebuilt in the Overleaf repo's history as ``ensure_sync_base``
+    describes. Both repos should already be up-to-date (pulled), same as for
+    ``sync``.
 
     The returned dictionary reports how many commits are waiting on
     Overleaf, which stored files differ from their Overleaf counterparts
@@ -1323,15 +1414,14 @@ def get_sync_status(
         )
     if last_sync_commit is None:
         last_sync_commit = sync_info_for_path.get("last_sync_commit")
-    if is_mirror(overleaf_repo):
-        last_sync_commit = ensure_sync_base(
-            overleaf_repo,
-            main_repo=main_repo,
-            path_in_project=path_in_project,
-            last_sync_commit=last_sync_commit,
-            print_info=lambda _: None,
-            missing_ok=True,
-        )
+    last_sync_commit = ensure_sync_base(
+        overleaf_repo,
+        main_repo=main_repo,
+        path_in_project=path_in_project,
+        last_sync_commit=last_sync_commit,
+        print_info=lambda _: None,
+        missing_ok=True,
+    )
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=main_repo.working_dir)
     # Declared figures are stored relative to the repo root, but sync works
@@ -1488,17 +1578,27 @@ def sync(
     assert isinstance(sync_info_for_path, dict)
     if last_sync_commit is None:
         last_sync_commit = sync_info_for_path.get("last_sync_commit")
-    if is_mirror(overleaf_repo):
-        last_sync_commit = ensure_sync_base(
-            overleaf_repo,
-            main_repo=main_repo,
-            path_in_project=path_in_project,
-            last_sync_commit=last_sync_commit,
-            print_info=print_info,
-        )
+    checkpoint = last_sync_commit
+    last_sync_commit = ensure_sync_base(
+        overleaf_repo,
+        main_repo=main_repo,
+        path_in_project=path_in_project,
+        last_sync_commit=last_sync_commit,
+        print_info=print_info,
+    )
+    # A clone's rebuilt last sync isn't on Overleaf, so what's sent goes on
+    # top of what is
+    onto_upstream = last_sync_commit != checkpoint and not is_mirror(
+        overleaf_repo
+    )
     res["commits_since_last_sync"] = get_commits_since_last_sync(
         overleaf_repo=overleaf_repo, last_sync_commit=last_sync_commit
     )
+    if res["commits_since_last_sync"]:
+        print_info(
+            f"There have been {len(res['commits_since_last_sync'])} changes "
+            "on Overleaf since last sync"
+        )
     res["project_commit_before"] = main_repo.head.commit.hexsha
     res["overleaf_commit_before"] = overleaf_repo.head.commit.hexsha
     path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
@@ -1606,8 +1706,11 @@ def sync(
                 for line in process.stdout.split("\n"):
                     if "merge conflict" in line.lower():
                         msg += line + "\n"
-                # Save a file to track this merge conflict
-                c = overleaf_repo.head.commit.hexsha
+                # Save a file to track this merge conflict, with a commit
+                # the next pull keeps, since a rebuilt one isn't
+                c = overleaf_repo.git.rev_parse(
+                    "@{upstream}" if onto_upstream else "HEAD"
+                )
                 os.makedirs(os.path.dirname(conflict_fpath), exist_ok=True)
                 with open(conflict_fpath, "w") as f:
                     json.dump(
@@ -1749,12 +1852,24 @@ def sync(
         print_info("Committing changes to Overleaf")
         commit_message = "Sync with Calkit project"
         overleaf_repo.git.commit("-m", commit_message)
+        if onto_upstream:
+            commit = overleaf_repo.git.commit_tree(
+                overleaf_repo.head.commit.tree.hexsha,
+                "-p",
+                "@{upstream}",
+                "-m",
+                commit_message,
+            )
+            overleaf_repo.git.reset("--hard", commit)
         print_info("Pushing changes to Overleaf")
         if push is None:
             overleaf_repo.git.push()
         else:
             push(overleaf_repo)
         res["committed_overleaf"] = True
+    elif onto_upstream:
+        # Nothing was sent, so Overleaf already has this sync's files
+        overleaf_repo.git.reset("--hard", "@{upstream}")
     # Update the last sync commit
     last_overleaf_commit = overleaf_repo.head.commit.hexsha
     res["overleaf_commit_after"] = last_overleaf_commit
@@ -1821,7 +1936,7 @@ def sync(
     staged_diff = main_repo.git.diff(["--staged"] + paths_to_commit)
     if staged_diff and not no_commit:
         print_info("Committing changes to project repo")
-        commit_message = f"Sync {path_in_project} with Overleaf project"
+        commit_message = SYNC_COMMIT_MESSAGE.format(path_in_project)
         main_repo.git.commit(*paths_to_commit, "-m", commit_message)
         res["committed_project"] = True
     elif no_commit and (

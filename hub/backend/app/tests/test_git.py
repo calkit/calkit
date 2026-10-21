@@ -7,6 +7,7 @@ import random
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import git
 import pytest
@@ -780,7 +781,7 @@ def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
     Path(repo_dir, "leftover.tex").write_text("untracked")
     head = _commit(remote, "main.tex", "v2")
 
-    def get():
+    def get() -> Any:
         return app.git.get_overleaf_repo(
             project=project,
             user=user,
@@ -864,6 +865,17 @@ def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
         with get():
             pass
     assert e.value.detail == app.git.OVERLEAF_SESSION_REJECTED
+    # Not reaching Overleaf is reported as such rather than a server error
+
+    def unreachable(project_id: str) -> bytes:
+        raise requests.ConnectionError("Network down")
+
+    client.rejected = False
+    monkeypatch.setattr(client, "download", unreachable)
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.status_code == 502
     # Getting a token afterwards replaces the mirror with a clone
     monkeypatch.undo()
     stub_credentials()

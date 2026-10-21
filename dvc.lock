@@ -10,16 +10,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 3826b0bf92fd807b1ca0c03e845a67ef
-      size: 128777
+      md5: 7c84ce0cb60da03b69638a5736078340
+      size: 128954
     - path: calkit/docx.py
       hash: md5
       md5: 3f34445a3e65cf2c10f908b84de55fd2
       size: 55475
     - path: calkit/latex.py
       hash: md5
-      md5: d95b4c18f872250cf95c726a2724b7e0
-      size: 63169
+      md5: ea5d5fdfc7eac855ee29e12f97a67cb8
+      size: 64721
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -55,12 +55,12 @@ stages:
       size: 311
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: 32f10171526ec87fdee7fb43b75ae39b
-      size: 173812
+      md5: 570c437a70ca9bc83a398cc7d69b364c
+      size: 173888
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: 32f10171526ec87fdee7fb43b75ae39b
-      size: 173812
+      md5: 570c437a70ca9bc83a398cc7d69b364c
+      size: 173888
     - path: results/latex-word-round-trip/review.docx
       hash: md5
       md5: 66f2e7c5c7ac323267430f7faf196687
@@ -79,12 +79,12 @@ stages:
       size: 55475
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: 32f10171526ec87fdee7fb43b75ae39b
-      size: 173812
+      md5: 570c437a70ca9bc83a398cc7d69b364c
+      size: 173888
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: 32f10171526ec87fdee7fb43b75ae39b
-      size: 173812
+      md5: 570c437a70ca9bc83a398cc7d69b364c
+      size: 173888
     - path: results/latex-word-round-trip/review.docx
       hash: md5
       md5: 66f2e7c5c7ac323267430f7faf196687
@@ -116,8 +116,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: d95b4c18f872250cf95c726a2724b7e0
-      size: 63169
+      md5: ea5d5fdfc7eac855ee29e12f97a67cb8
+      size: 64721
     - path: uv.lock
       hash: md5
       md5: 78cff1621fa9cb37be1d99412ed26e0f

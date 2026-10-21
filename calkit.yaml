@@ -8,25 +8,28 @@ description: >-
   pipeline so they stay true.
 
 questions:
-  - question: What is the difference in research productivity, in terms of
-      time to valuable knowledge, from working on all stages together in
-      small steps, akin to one piece flow in lean manufacturing,
-      versus a more waterfall, stage gate style?
+  - question: What is the difference in research productivity, in 
+      terms of time to valuable knowledge, from working on all stages 
+      together in small steps, akin to one piece flow in lean 
+      manufacturing, versus a more waterfall, stage gate style?
     hypothesis: An agile, lean approach is ~2x more efficient.
     answer:
       if r_combined >= 2: >-
         Yes, in a simulation of a six-finding paper: working in small steps
         with automated tooling, as in continuous delivery, reached a
         published paper {r_combined:.1f}x sooner than working stage by stage
-        with manual tooling, and fit {s_combined:.1f}x as many papers into a
+        with manual tooling, and fit {s_combined:.1f}x as many papers into
+        a
         PhD with half the time spent waiting on reviews put to other use.
         It takes both: small steps alone gave {r_manual:.1f}x and the
         tooling alone {r_tooling:.1f}x.
       else: >-
         Not in a simulation of a six-finding paper, where working in small
-        steps with automated tooling, as in continuous delivery, reached a
+        steps with automated tooling, as in continuous delivery, reached
+        a
         published paper {r_combined:.1f}x sooner than working stage by stage
-        with manual tooling, and fit {s_combined:.1f}x as many papers into a
+        with manual tooling, and fit {s_combined:.1f}x as many papers into
+        a
         PhD with half the time spent waiting on reviews put to other use.
     evidence:
       - kind: figure
@@ -48,7 +51,8 @@ questions:
       else, and breaking the batches up gives {batch_loops:.1f}x as many
       feedback loops. The batches are big because tool hopping and review
       prep cost something on every iteration: worked in small steps with
-      today's tools, tool hopping is the largest waste, at {hop:.0%} of the
+      today's tools, tool hopping is the largest waste, at {hop:.0%} of
+      the
       time, and taking it away publishes {hop_gain:.2f}x sooner with
       {hop_flaws:.0%} fewer flaws. Agents shrink the hands-on work, so
       waiting on the PI grows to {agents_wait:.0%}.
@@ -68,8 +72,8 @@ questions:
       Can Calkit convert LaTeX to docx and back again without losing
       information, e.g., in math, or comments?
     answer:
-      if same and pdf_same and eq_docx == eq_src and inline_docx == inline_src and threads_docx == threads_src:
-        >-
+      if same and pdf_same and eq_docx == eq_src and inline_docx == 
+        inline_src and threads_docx == threads_src: >-
         Yes, for the LaTeX/Word example: exported to Word and merged back
         with no edits, its source comes back byte for byte and builds the
         same PDF, and all {eq_src} display equation rows, {inline_src}
@@ -119,7 +123,8 @@ environments:
   dev:
     kind: uv
     path: pyproject.toml
-    description: Calkit itself, from this checkout, with its dev tools.
+    description: Calkit itself, from this checkout, with its dev 
+      tools.
   tex:
     kind: docker
     image: ghcr.io/calkit/latex:0.1.6
@@ -280,7 +285,8 @@ figures:
   - path: docs/img/latex-word-round-trip.png
     title: LaTeX to Word and back
     description: >-
-      A page of the LaTeX/Word example as built from LaTeX, as exported to
+      A page of the LaTeX/Word example as built from LaTeX, as exported
+      to
       Word, and as built again after merging the Word copy back.
     stage: latex-word-round-trip-figure
   - path: docs/img/research-flow.png
@@ -299,7 +305,8 @@ figures:
   - path: docs/img/research-flow-waste.png
     title: Waste in the research workflow
     description: >-
-      Where the time to a published paper goes, with and without agents and
+      Where the time to a published paper goes, with and without agents
+      and
       small steps, and how much faster it gets with each kind of waste
       removed on its own.
     stage: research-flow-figure
@@ -338,3 +345,12 @@ subprojects:
   - path: decisions
     description: >-
       Evidence behind decisions made in developing Calkit, frozen once run.
+releases:
+  one-pager-2026-v1:
+    kind: publication
+    path: docs/one-pager/main.pdf
+    git_rev: 327d056144f1976b7df80901e15836a93e2a3f1a
+    date: '2026-10-21'
+    internal: true
+    stored_path: 
+      .calkit/releases/one-pager-2026-v1/calkit-main-one-pager-2026-v1.pdf

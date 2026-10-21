@@ -48,8 +48,83 @@ _session.mount("https://", requests.adapters.HTTPAdapter(pool_maxsize=64))
 _session.mount("http://", requests.adapters.HTTPAdapter(pool_maxsize=64))
 
 
+# Set in the sessions a hub link opens, whose processes may not reach the
+# user's keychain, e.g., when it runs at boot, so they get the link's hub's
+# credentials from it, over a socket only that session can use
+LINK_SOCKET_ENV = "CALKIT_LINK_SOCKET"
+LINK_SECRET_ENV = "CALKIT_LINK_SECRET"
+LINK_API_URL_ENV = "CALKIT_LINK_API_URL"
+
+
 class DeviceLoginError(RuntimeError):
     """Raised when the OAuth device login flow cannot complete."""
+
+
+class LinkCredentialError(ValueError):
+    """The hub link this session runs in couldn't give a credential."""
+
+
+def uses_link(base_url: str) -> bool:
+    """Whether this runs in a hub link's session and the hub is the link's,
+    whose tokens then come from the link rather than the keychain or config.
+    """
+    link_api_url = os.environ.get(LINK_API_URL_ENV)
+    return bool(
+        link_api_url
+        and os.environ.get(LINK_SOCKET_ENV)
+        and base_url.rstrip("/") == link_api_url.rstrip("/")
+    )
+
+
+def ask_link(request: dict) -> dict:
+    """Ask the hub link whose session this runs in for a credential, which
+    it gets from its hub over HTTPS.
+    """
+    path = os.environ.get(LINK_SOCKET_ENV)
+    if not path or not hasattr(socket, "AF_UNIX"):
+        raise LinkCredentialError("Not in a hub link's session")
+    secret = os.environ.get(LINK_SECRET_ENV, "")
+    data = b""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            # The link may wait on the hub, with retries
+            sock.settimeout(90)
+            sock.connect(path)
+            sock.sendall(
+                (json.dumps(request | {"secret": secret}) + "\n").encode()
+            )
+            while not data.endswith(b"\n") and len(data) < 1_000_000:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+    except OSError as e:
+        raise LinkCredentialError(
+            f"Couldn't reach the hub link this session belongs to: {e}"
+        )
+    try:
+        resp = json.loads(data)
+    except ValueError:
+        resp = None
+    if not isinstance(resp, dict):
+        raise LinkCredentialError("The hub link sent an invalid reply")
+    if "error" in resp:
+        raise LinkCredentialError(
+            f"The hub link couldn't help: {resp['error']}"
+        )
+    return resp
+
+
+def _token_from_link(base_url: str, fresh: bool = False) -> str:
+    """A token for the link's hub from the link, a new one if ``fresh``,
+    e.g., after the hub refused the last.
+    """
+    resp = ask_link({"type": "hub.token", "api_url": base_url, "fresh": fresh})
+    token = resp.get("token")
+    if not isinstance(token, str) or not token:
+        raise LinkCredentialError("The hub link sent an invalid token")
+    _tokens[base_url] = token
+    return token
 
 
 def run_device_flow() -> str:
@@ -269,7 +344,8 @@ def _token_is_expiring(token: str) -> bool:
 def get_token() -> str:
     """Return a valid bearer token.
 
-    Priority: in-memory cache (refreshed proactively if expiring), then PAT
+    Priority: in-memory cache (refreshed proactively if expiring), then, in
+    a hub link's session, the link, for its hub, then PAT
     (``token`` / ``CALKIT_TOKEN`` env var), then short-lived ``access_token``
     from device login.
 
@@ -288,6 +364,10 @@ def get_token() -> str:
         cached = _tokens.get(base_url)
         if cached is not None and not _token_is_expiring(cached):
             return cached
+        # Never the keychain's or config's, nor CALKIT_TOKEN, which isn't
+        # for any hub in particular
+        if uses_link(base_url):
+            return _token_from_link(base_url)
         # If we have a refresh token, try to get a new access token now
         if cached is not None and _token_is_expiring(cached):
             new_token = _do_refresh()
@@ -320,10 +400,12 @@ def _do_refresh() -> str | None:
     ``_try_refresh`` which acquires it).  Returns the new access token on
     success or ``None`` on failure.
     """
+    base_url = get_base_url()
+    if uses_link(base_url):
+        return _token_from_link(base_url, fresh=True)
     cfg = config.read()
     if cfg.refresh_token is None:
         return None
-    base_url = get_base_url()
     try:
         resp = requests.post(
             base_url + "/login/refresh",
@@ -397,11 +479,13 @@ def _request(
     device_login_attempted = False
     # We may prompt the user via the device login flow only when stdin and
     # stdout are TTYs (i.e. not in CI, daemons, or piped subprocesses) and
-    # the user hasn't opted out via the env var.
+    # the user hasn't opted out via the env var, nor in a hub link's session
+    # for its hub, whose tokens come from the link.
     can_prompt = (
         auth
         and allow_login
         and not os.environ.get("CALKIT_NO_INTERACTIVE_LOGIN")
+        and not uses_link(base_url)
     )
     if can_prompt:
         try:

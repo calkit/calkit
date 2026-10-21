@@ -387,6 +387,45 @@ def add_workspace(
     typer.echo(f"Added {path}; it will show on the hub at the next check-in")
 
 
+@link_app.command(name="git-credential", hidden=True)
+def git_credential(
+    operation: Annotated[
+        str, typer.Argument(help="What Git asks: get, store, or erase.")
+    ],
+) -> None:
+    """Give Git the hub's GitHub token in a hub link's session.
+
+    Sessions the link opens set this up for https://github.com only.
+    """
+    import sys
+
+    from calkit.hub import core as hub
+
+    attrs = {}
+    for line in sys.stdin:
+        if not line.strip():
+            break
+        key, _, value = line.rstrip("\n").partition("=")
+        attrs[key] = value
+    if (
+        operation not in ("get", "erase")
+        or attrs.get("protocol") != "https"
+        or attrs.get("host") != "github.com"
+    ):
+        return
+    try:
+        # Erasing is Git saying the last was refused
+        resp = hub.ask_link(
+            {"type": "github.token", "forget": operation == "erase"}
+        )
+    except hub.LinkCredentialError as e:
+        # Git carries on without, e.g., asking for a password
+        warn(str(e), err=True)
+        return
+    if operation == "get":
+        typer.echo(f"username=x-access-token\npassword={resp['token']}")
+
+
 @link_app.command(name="uninstall")
 def uninstall(hub: HubOption = None) -> None:
     """Revoke this machine on the hub and remove its link here."""

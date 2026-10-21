@@ -464,6 +464,12 @@ async def test_sessions(tmp_path, monkeypatch):
     # sessions don't inherit, so they use the project's
     monkeypatch.setattr(hub_link, "_inherited_hub", None)
     monkeypatch.setenv("CALKIT_HUB", "http://localhost")
+    # Git in sessions mustn't find the user's own credential helpers
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    for name in ["GIT_ASKPASS", "SSH_ASKPASS"]:
+        monkeypatch.delenv(name, raising=False)
     _init_project(os.path.join(tmp_path, "calkit", "demo"))
     import base64
     import time
@@ -491,6 +497,7 @@ async def test_sessions(tmp_path, monkeypatch):
     cfg = {
         "id": "op1",
         "user_id": "owner",
+        "api_url": "https://api.hub",
         "grant_public_key": public_key,
         "workspaces": [],
     }
@@ -822,6 +829,91 @@ async def test_sessions(tmp_path, monkeypatch):
     paste = ("true " + "x" * 64 + "\n") * 300 + "echo PASTED-$((2*3))\n"
     message("a", {"type": "sessions.input", "session": sid, "data": paste})
     await wait_for(lambda: "PASTED-6" in output("a"), timeout=30)
+    # The session gets credentials from the link, which gets them from the
+    # hub with the grant that opened it, over a socket in a folder only the
+    # user can open, with a secret only the session is told
+    from calkit.hub import core as hub
+
+    asked: list[tuple[str, str]] = []
+
+    def fake_credential(cfg: dict, route: str, shown: str) -> str:
+        asked.append((route, shown))
+        if route == "session-token":
+            return jwt.encode(
+                {"exp": time.time() + 900, "n": len(asked)}, "k" * 32
+            )
+        return f"ghu_{len(asked)}"
+
+    monkeypatch.setattr(
+        hub_link, "request_session_credential", fake_credential
+    )
+    session = op.sessions[sid]
+    assert session.cred_dir is not None
+    cred_dir = session.cred_dir
+    sock_path = os.path.join(cred_dir, "creds.sock")
+    assert stat.S_IMODE(os.stat(cred_dir).st_mode) == 0o700
+    message(
+        "a",
+        {
+            "type": "sessions.input",
+            "session": sid,
+            "data": 'echo "CREDS:$CALKIT_LINK_SOCKET:$CALKIT_LINK_API_URL:'
+            '$GIT_CONFIG_KEY_0:$GIT_CONFIG_COUNT:CREDS"\n',
+        },
+    )
+    await wait_for(
+        lambda: (
+            f"CREDS:{sock_path}:https://api.hub:"
+            "credential.https://github.com.helper:1:CREDS" in output("a")
+        )
+    )
+    monkeypatch.setenv(hub.LINK_SOCKET_ENV, sock_path)
+    monkeypatch.setenv(hub.LINK_SECRET_ENV, session.cred_secret)
+
+    async def ask(req: dict) -> dict:
+        return await asyncio.to_thread(hub.ask_link, req)
+
+    token_req = {"type": "hub.token", "api_url": "https://api.hub/"}
+    first = await ask(token_req)
+    assert await ask(token_req) == first
+    assert asked == [("session-token", op.channels["a"].grant)]
+    # A fresh one when the last was refused
+    assert await ask(token_req | {"fresh": True}) != first
+    assert len(asked) == 2
+    # Only for this link's hub, and only with the secret
+    with pytest.raises(hub.LinkCredentialError, match="only has tokens for"):
+        await ask({"type": "hub.token", "api_url": "https://api.other"})
+    monkeypatch.setenv(hub.LINK_SECRET_ENV, "wrong")
+    with pytest.raises(hub.LinkCredentialError, match="secret"):
+        await ask(token_req)
+    monkeypatch.setenv(hub.LINK_SECRET_ENV, session.cred_secret)
+    # Git asks for GitHub's through the helper sessions are set up with, only
+    # for github.com, and forgets one GitHub refused
+    clear()
+    message(
+        "a",
+        {
+            "type": "sessions.input",
+            "session": sid,
+            "data": "for h in gitlab.com github.com; do printf "
+            "'protocol=https\\nhost=%s\\n\\n' $h | GIT_TERMINAL_PROMPT=0 "
+            "git credential fill; done; echo FILLED\n",
+        },
+    )
+    await wait_for(lambda: "FILLED\r\n" in output("a"), timeout=60)
+    filled = output("a").split("FILLED")[-2]
+    assert "password=ghu_3" in filled and "host=gitlab.com" not in filled
+    assert "username=x-access-token" in filled
+    assert asked[-1] == ("github-token", op.channels["a"].grant)
+    assert await ask({"type": "github.token"}) == {"token": "ghu_3"}
+    assert await ask({"type": "github.token", "forget": True}) == {}
+    assert await ask({"type": "github.token"}) == {"token": "ghu_4"}
+    # The sign-in it got them with ending forgets them
+    session_auth = session.auth
+    session.auth = hub_link.ChannelAuth(key=None, session_id="gone")
+    op.close_ended_channels(["gone"])
+    assert session.credentials == {}
+    session.auth = session_auth
     # A session doesn't get another's terminal, nor anything else the
     # link has open, which a shell that lists what it has shows
     assert not os.get_inheritable(op.sessions[sid].fd)
@@ -841,10 +933,17 @@ async def test_sessions(tmp_path, monkeypatch):
     assert "0" in listed and str(op.sessions[sid].fd) not in listed
     message("a", {"type": "sessions.close", "session": second})
     await wait_for(lambda: second not in op.sessions)
-    # A second channel attaching gets the scrollback replayed
-    open_channel("b")
+    # A second channel attaching gets the scrollback replayed, and the
+    # session's credentials then last as long as its second factor, if
+    # that's longer
+    open_channel("early", tfa_exp=int(time.time()) + 60)
+    message("early", {"type": "sessions.attach", "id": 40, "session": sid})
+    await wait_for(lambda: reply(40))
+    assert op.sessions[sid].auth is op.channels["a"]
+    open_channel("b", tfa_exp=int(time.time()) + 7200)
     message("b", {"type": "sessions.attach", "id": 4, "session": sid})
     await wait_for(lambda: "HI-42" in output("b"))
+    assert op.sessions[sid].auth is op.channels["b"]
     # Marked, so the browser doesn't answer queries in it a second time
     outputs = [(c, m) for c, m in sent() if m["type"] == "sessions.output"]
     assert all(m.get("replay") for c, m in outputs if c == "b")
@@ -854,6 +953,7 @@ async def test_sessions(tmp_path, monkeypatch):
     # Sessions outlive the channels attached to them
     op.on_relay_message({"type": "channel.close", "ch": "a"})
     op.on_relay_message({"type": "channel.close", "ch": "b"})
+    op.on_relay_message({"type": "channel.close", "ch": "early"})
     assert op.sessions[sid].channels == set()
     open_channel("c")
     message("c", {"type": "sessions.list", "id": 5})
@@ -871,6 +971,10 @@ async def test_sessions(tmp_path, monkeypatch):
     exits = [m for c, m in sent() if c == "c" and m["type"] == "sessions.exit"]
     assert exits == [{"type": "sessions.exit", "session": sid, "code": 3}]
     assert op.sessions == {}
+    # Its credentials go with it
+    assert not os.path.exists(cred_dir)
+    with pytest.raises(hub.LinkCredentialError, match="Couldn't reach"):
+        await ask(token_req)
     # A reply too large for the relay is an error instead, and a browser too
     # far behind is closed
     message("c", {"type": "sessions.list", "id": 8})

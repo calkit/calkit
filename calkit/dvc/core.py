@@ -1117,12 +1117,15 @@ def clear_off_hub_auth(
         token = str(secret).removeprefix("Bearer ").strip()
         if token.startswith("ckp_"):
             return True
-        # Older hub tokens are JWTs naming the token they are
+        # Older hub tokens are JWTs naming the token they are, and a hub
+        # link's sessions' name their machine
         try:
             payload = jwt.decode(token, options={"verify_signature": False})
         except jwt.PyJWTError:
             return False
-        return isinstance(payload, dict) and "token_id" in payload
+        return isinstance(payload, dict) and bool(
+            {"token_id", "machine_id"} & payload.keys()
+        )
 
     root = os.path.abspath(wdir or ".")
     while not os.path.isdir(os.path.join(root, ".dvc")):
@@ -1283,6 +1286,24 @@ def set_remote_auth(
             f"Not setting up authentication for DVC remote {remote_name}, "
             f"since its URL ({remote_url}) isn't on the hub ({base_url})"
         )
+        return
+    # A hub link's session can't make a lasting token, and its own are
+    # short-lived, so neither goes in the config; a remote set up before
+    # keeps working, and 'ck://' ones get the session's token as they go
+    if calkit.hub.uses_link(base_url):
+        config_local = os.path.join(wdir or ".", ".dvc", "config.local")
+        local = (
+            ConfigObj(config_local, encoding="utf-8")
+            if os.path.isfile(config_local)
+            else {}
+        )
+        section = local.get(f'remote "{remote_name}"')
+        if not isinstance(section, dict) or not section.get("password"):
+            logger.warning(
+                f"DVC remote {remote_name} can't be authenticated in a hub "
+                "session; 'calkit update hub' switches it to Calkit's ck:// "
+                "scheme, which can"
+            )
         return
     settings = calkit.config.read()
     if settings.dvc_token is None or always_auth:

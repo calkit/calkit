@@ -6,6 +6,7 @@ import base64
 import json
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -554,3 +555,124 @@ def test_request_can_skip_retries_and_login(monkeypatch):
     with pytest.raises(ValueError):
         hub.post("/p", max_retries=0, allow_login=False)
     assert prompted["n"] == 0
+
+
+def test_tokens_from_hub_link(monkeypatch, tmp_path):
+    import os
+    import shutil
+    import socket
+    import tempfile
+
+    # A hub link answering a session's requests, in a short path, since
+    # sockets' are limited
+    sock_dir = tempfile.mkdtemp(dir="/tmp")
+    path = os.path.join(sock_dir, "s")
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    server.listen(8)
+    seen: list[dict] = []
+    refusal: dict[str, str] = {}
+
+    def serve() -> None:
+        while True:
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            with conn:
+                req = json.loads(conn.makefile().readline())
+                seen.append(req)
+                if req.get("secret") != "s3cret":
+                    reply: dict = {"error": "Not this session's secret"}
+                elif refusal:
+                    reply = refusal
+                else:
+                    reply = {"token": _make_jwt(time.time() + 900 + len(seen))}
+                conn.sendall((json.dumps(reply) + "\n").encode())
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        monkeypatch.setenv("CALKIT_HUB_API_BASE_URL", "https://api.hub.test")
+        base_url = hub.get_base_url()
+        monkeypatch.delitem(hub._tokens, base_url, raising=False)
+
+        def no_config():
+            raise AssertionError("The config isn't for the link's hub")
+
+        monkeypatch.setattr(hub.config, "read", no_config)
+        assert not hub.uses_link(base_url)
+        monkeypatch.setenv(hub.LINK_SOCKET_ENV, path)
+        monkeypatch.setenv(hub.LINK_SECRET_ENV, "s3cret")
+        monkeypatch.setenv(hub.LINK_API_URL_ENV, base_url + "/")
+        assert hub.uses_link(base_url)
+        assert not hub.uses_link("https://api.other.test")
+        # In a link's session, the link's hub's tokens come from the link,
+        # once each until they're about to expire
+        first = hub.get_token()
+        assert hub.get_token() == first
+        assert seen == [
+            {
+                "type": "hub.token",
+                "api_url": base_url,
+                "fresh": False,
+                "secret": "s3cret",
+            }
+        ]
+        hub._tokens[base_url] = _make_jwt(time.time() + 10)
+        assert hub.get_token() != first
+        assert len(seen) == 2
+
+        # One the hub refuses is replaced with a fresh one, without a login
+        class Resp:
+            def __init__(self, status: int, body: dict) -> None:
+                self.status_code = status
+                self.body = body
+
+            def raise_for_status(self) -> None:
+                if self.status_code >= 400:
+                    from requests.exceptions import HTTPError
+
+                    raise HTTPError(str(self.status_code))
+
+            def json(self) -> dict:
+                return self.body
+
+        responses = [Resp(403, {"detail": "Invalid token"}), Resp(200, {})]
+        monkeypatch.setattr(
+            hub._session, "get", lambda url, **kw: responses.pop(0)
+        )
+
+        def no_login():
+            raise AssertionError("No device login")
+
+        tty = SimpleNamespace(isatty=lambda: True)
+        monkeypatch.setattr(hub, "run_device_flow", no_login)
+        monkeypatch.setattr(hub, "sys", SimpleNamespace(stdin=tty, stdout=tty))
+        assert hub._request("get", "/user") == {}
+        assert seen[-1]["fresh"] is True
+        # The link's refusal is what's said, rather than starting a login
+        refusal["error"] = "The sign-in ended"
+        hub._tokens.pop(base_url)
+        with pytest.raises(hub.LinkCredentialError, match="sign-in ended"):
+            hub._request("get", "/user")
+        # Nor does it answer without the session's secret
+        refusal.clear()
+        monkeypatch.setenv(hub.LINK_SECRET_ENV, "wrong")
+        with pytest.raises(hub.LinkCredentialError, match="secret"):
+            hub.get_token()
+        # Nor once it's gone
+        monkeypatch.setenv(hub.LINK_SOCKET_ENV, path + "-gone")
+        with pytest.raises(hub.LinkCredentialError, match="Couldn't reach"):
+            hub.get_token()
+
+        # Other hubs' come from the config as usual
+        class DummyCfg:
+            token = "my-pat"
+
+        monkeypatch.setenv("CALKIT_HUB_API_BASE_URL", "https://api.other.test")
+        monkeypatch.delitem(hub._tokens, hub.get_base_url(), raising=False)
+        monkeypatch.setattr(hub.config, "read", lambda: DummyCfg())
+        assert hub.get_token() == "my-pat"
+    finally:
+        server.close()
+        shutil.rmtree(sock_dir, ignore_errors=True)

@@ -4441,16 +4441,17 @@ Usage:
 calkit hub|cloud link COMMAND [ARGS]...
 ```
 
-| Command                                                     | Description                                                                                 |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [`install`](#subcommand-hub-cloud-link-install)             | Link this machine to a hub and run its link as a service.                                   |
-| [`start`](#subcommand-hub-cloud-link-start)                 | Run the link in the foreground, e.g., inside tmux.                                          |
-| [`status`](#subcommand-hub-cloud-link-status)               | Show this machine's links and their workspaces.                                             |
-| [`stop`](#subcommand-hub-cloud-link-stop)                   | Stop the link's service until it's restarted, for every hub unless one is given.            |
-| [`restart`](#subcommand-hub-cloud-link-restart)             | Restart the link's service, e.g., after updating Calkit, for every hub unless one is given. |
-| [`logs`](#subcommand-hub-cloud-link-logs)                   | Show the link service's logs.                                                               |
-| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace) | Add a project outside ~/calkit and ~/dev as a workspace.                                    |
-| [`uninstall`](#subcommand-hub-cloud-link-uninstall)         | Revoke this machine on the hub and remove its link here.                                    |
+| Command                                                       | Description                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [`install`](#subcommand-hub-cloud-link-install)               | Link this machine to a hub and run its link as a service.                                   |
+| [`start`](#subcommand-hub-cloud-link-start)                   | Run the link in the foreground, e.g., inside tmux.                                          |
+| [`status`](#subcommand-hub-cloud-link-status)                 | Show this machine's links and their workspaces.                                             |
+| [`stop`](#subcommand-hub-cloud-link-stop)                     | Stop the link's service until it's restarted, for every hub unless one is given.            |
+| [`restart`](#subcommand-hub-cloud-link-restart)               | Restart the link's service, e.g., after updating Calkit, for every hub unless one is given. |
+| [`logs`](#subcommand-hub-cloud-link-logs)                     | Show the link service's logs.                                                               |
+| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace)   | Add a project outside ~/calkit and ~/dev as a workspace.                                    |
+| [`git-credential`](#subcommand-hub-cloud-link-git-credential) | Give Git the hub's GitHub token in a hub link's session.                                    |
+| [`uninstall`](#subcommand-hub-cloud-link-uninstall)           | Revoke this machine on the hub and remove its link here.                                    |
 
 <a id="subcommand-hub-cloud-link-install"></a>
 
@@ -4589,6 +4590,26 @@ Options:
 | Option  | Type | Required | Default | Description                                                                                                                                                  |
 | ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `--hub` | str  | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-git-credential"></a>
+
+##### `calkit hub|cloud link git-credential`
+
+Give Git the hub's GitHub token in a hub link's session.
+
+Sessions the link opens set this up for https://github.com only.
+
+Usage:
+
+```text
+calkit hub|cloud link git-credential OPERATION
+```
+
+Arguments:
+
+| Argument    | Type | Required | Default | Description                          |
+| ----------- | ---- | -------- | ------- | ------------------------------------ |
+| `operation` | str  | yes      |         | What Git asks: get, store, or erase. |
 
 <a id="subcommand-hub-cloud-link-uninstall"></a>
 

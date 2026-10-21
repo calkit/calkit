@@ -1703,6 +1703,25 @@ def test_overleaf_credentials(monkeypatch):
     assert res.exit_code == 0, res.output
     assert config.overleaf_session == "abc"
     assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    # With --hub, the session is also saved to the hub, and a failure there
+    # is reported after it's stored locally
+    puts = []
+    monkeypatch.setattr(
+        calkit.hub, "put", lambda path, json: puts.append((path, json))
+    )
+    res = runner.invoke(overleaf_app, ["login", "--session", "def", "--hub"])
+    assert res.exit_code == 0, res.output
+    assert puts == [("/user/overleaf-session", {"session": "def"})]
+    assert config.overleaf_session == "def"
+
+    def put_fails(path, json):
+        raise RuntimeError("422: Overleaf didn't accept that session")
+
+    monkeypatch.setattr(calkit.hub, "put", put_fails)
+    res = runner.invoke(overleaf_app, ["login", "--session", "ghi", "--hub"])
+    assert res.exit_code != 0
+    assert "didn't accept" in res.output
+    assert config.overleaf_session == "ghi"
     config.overleaf_token = calkit.config.KeyringOptionalSecret("tok")
     assert _get_overleaf_auth() == "tok"
     config.overleaf_session = None

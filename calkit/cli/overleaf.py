@@ -204,6 +204,13 @@ def login(
             help="Value of the 'overleaf_session2' cookie from your browser.",
         ),
     ] = None,
+    hub: Annotated[
+        bool,
+        typer.Option(
+            "--hub",
+            help="Also save session to Calkit hub, so it can sync there.",
+        ),
+    ] = False,
 ) -> None:
     """Sign in with a browser session to sync without Overleaf Premium."""
     if session is None:
@@ -221,6 +228,12 @@ def login(
     )
     calkit_config.write()
     typer.echo("Stored Overleaf session in Calkit config")
+    if hub:
+        try:
+            calkit.hub.put("/user/overleaf-session", json={"session": session})
+        except Exception as e:
+            raise_error(f"Failed to save Overleaf session to hub: {e}")
+        typer.echo("Saved Overleaf session to hub")
     if calkit_config.overleaf_token:
         warn(
             "An Overleaf Git token is also set and will be used instead; "

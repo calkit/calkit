@@ -3918,9 +3918,10 @@ calkit overleaf|ol login [OPTIONS]
 
 Options:
 
-| Option      | Type | Required | Default | Description                                                |
-| ----------- | ---- | -------- | ------- | ---------------------------------------------------------- |
-| `--session` | str  | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
+| Option      | Type    | Required | Default | Description                                                |
+| ----------- | ------- | -------- | ------- | ---------------------------------------------------------- |
+| `--session` | str     | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
+| `--hub`     | boolean | no       | False   | Also save session to Calkit hub, so it can sync there.     |
 
 <a id="subcommand-overleaf-ol-import"></a>
 

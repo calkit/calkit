@@ -156,7 +156,7 @@ def test_stop_and_restart_every_hub(tmp_path, monkeypatch):
     result = CliRunner().invoke(hub_app, ["link", "restart"])
     assert result.exit_code == 0, result.output
     assert sorted(restarted) == ["http://localhost", "https://calkit.io"]
-    assert "Restarted the link for http://localhost" in result.output
+    assert "Restarted the hub link for http://localhost" in result.output
     # Options go after the subcommand, and on their own only show help
     restarted.clear()
     result = CliRunner().invoke(
@@ -176,7 +176,7 @@ def test_stop_and_restart_every_hub(tmp_path, monkeypatch):
         hub_app, ["link", "restart", "--hub", "https://calkit.io"]
     )
     assert restarted == ["https://calkit.io"]
-    assert result.output.strip() == "Restarted the link"
+    assert result.output.strip() == "Restarted the hub link"
     # One failing doesn't stop the others, but the command fails
     restarted.clear()
     fail = True

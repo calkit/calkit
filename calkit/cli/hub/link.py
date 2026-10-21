@@ -16,7 +16,7 @@ HubOption = Annotated[
     typer.Option(
         "--hub",
         help=(
-            "URL of the hub the link is for, e.g., https://calkit.io; "
+            "URL of the hub the hub link is for, e.g., https://calkit.io; "
             "a machine can have one per hub. Defaults to the only one here, "
             "or for linking, to your default hub."
         ),
@@ -113,7 +113,7 @@ def install(
         ),
     ] = False,
 ) -> None:
-    """Link this machine to a hub and run its link as a service."""
+    """Link this machine to a hub and run the hub link as a service."""
     from calkit.cli import warn
     from calkit.hub import link as hub_link
 
@@ -193,7 +193,7 @@ def install(
         except NotImplementedError as e:
             raise_error(str(e))
         typer.echo(
-            "✅ Installed the link in cron mode. It checks in every "
+            "✅ Installed the hub link in cron mode. It checks in every "
             "5 minutes and connects when you open a workspace from the hub."
         )
         return
@@ -223,7 +223,7 @@ def start(
     # Set for a service whose manager would otherwise open the log as root
     log_file: Annotated[bool, typer.Option("--log-file", hidden=True)] = False,
 ) -> None:
-    """Run the link in the foreground, e.g., inside tmux."""
+    """Run the hub link in the foreground, e.g., inside tmux."""
     import logging
 
     from calkit.hub import link as hub_link
@@ -243,12 +243,16 @@ def start(
     if mode not in ("foreground", "service", "cron"):
         raise_error(f"Unknown mode '{mode}'")
     if mode == "foreground":
-        typer.echo(f"Starting link for '{cfg['name']}' (Ctrl+C to stop)")
+        typer.echo(
+            f"Starting the hub link for '{cfg['name']}' (Ctrl+C to stop)"
+        )
     try:
         if not hub_link.run(cfg, mode=mode):
             # Cron starts one every few minutes, so this is routine there
             if mode != "cron":
-                typer.echo("Another link to this hub is already running here")
+                typer.echo(
+                    "Another hub link to this hub is already running here"
+                )
     except hub_link.LinkKeyRejected:
         # Already logged, and a clean exit, so a service manager doesn't
         # restart it
@@ -262,7 +266,7 @@ def start(
 
 @link_app.command(name="status")
 def status(hub: HubOption = None) -> None:
-    """Show this machine's links and their workspaces."""
+    """Show this machine's hub links and their workspaces."""
     from calkit.hub import link as hub_link
 
     for i, hub_url in enumerate(_each_hub(hub)):
@@ -284,7 +288,7 @@ def status(hub: HubOption = None) -> None:
 
 @link_app.command(name="stop")
 def stop(hub: HubOption = None) -> None:
-    """Stop the link's service until it's restarted, for every hub
+    """Stop the hub link's service until it's restarted, for every hub
     unless one is given.
     """
     from calkit.hub import link as hub_link
@@ -298,17 +302,17 @@ def stop(hub: HubOption = None) -> None:
         try:
             hub_link.set_service_running(False)
         except RuntimeError as e:
-            warn(f"Couldn't stop the link{name}: {e}")
+            warn(f"Couldn't stop the hub link{name}: {e}")
             failed = True
             continue
-        typer.echo(f"Stopped the link{name}")
+        typer.echo(f"Stopped the hub link{name}")
     if failed:
         raise typer.Exit(1)
 
 
 @link_app.command(name="restart")
 def restart(hub: HubOption = None) -> None:
-    """Restart the link's service, e.g., after updating Calkit, for
+    """Restart the hub link's service, e.g., after updating Calkit, for
     every hub unless one is given.
     """
     import subprocess
@@ -324,10 +328,10 @@ def restart(hub: HubOption = None) -> None:
         try:
             hub_link.restart_service()
         except (RuntimeError, subprocess.CalledProcessError) as e:
-            warn(f"Couldn't restart the link{name}: {e}")
+            warn(f"Couldn't restart the hub link{name}: {e}")
             failed = True
             continue
-        typer.echo(f"Restarted the link{name}")
+        typer.echo(f"Restarted the hub link{name}")
     if failed:
         raise typer.Exit(1)
 
@@ -339,7 +343,7 @@ def logs(
     ] = False,
     hub: HubOption = None,
 ) -> None:
-    """Show the link service's logs."""
+    """Show the hub link service's logs."""
     import platform
     import subprocess
 
@@ -370,7 +374,9 @@ def add_workspace(
     ] = ".",
     hub: HubOption = None,
 ) -> None:
-    """Add a project outside ~/calkit and ~/dev as a workspace."""
+    """Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or
+    one on another hub.
+    """
     from calkit.hub import link as hub_link
 
     _select_hub(hub)
@@ -428,7 +434,7 @@ def git_credential(
 
 @link_app.command(name="uninstall")
 def uninstall(hub: HubOption = None) -> None:
-    """Revoke this machine on the hub and remove its link here."""
+    """Revoke this machine on the hub and remove its hub link."""
     from calkit.hub import link as hub_link
 
     _select_hub(hub)

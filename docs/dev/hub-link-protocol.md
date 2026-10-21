@@ -433,8 +433,9 @@ Its `git_repo_url`, like `machine.check`'s, must be
 It goes in `~/calkit/<repo name>` unless `path` says otherwise, which can
 start with `~/` and must be in the user's home folder, outside hidden
 folders, and not exist yet.
-A clone outside `~/calkit` and `~/dev` is added to the config's
-workspaces, as `calkit hub link add-workspace` would.
+A clone outside `~/calkit` and `~/dev`, or of a project that doesn't say
+it's on the hub, is added to the config's workspaces, as
+`calkit hub link add-workspace` would.
 
 Before cloning, the hub asks what the machine still needs.
 `machine.check`, with `id` and `git_repo_url`, returns `git_name` and

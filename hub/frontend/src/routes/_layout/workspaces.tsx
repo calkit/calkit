@@ -14,6 +14,7 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
+import mixpanel from "mixpanel-browser"
 import {
   Link as RouterLink,
   createFileRoute,
@@ -32,6 +33,7 @@ import { z } from "zod"
 
 import { type MachineOut, MachinesService, type Workspace } from "../../client"
 import ClearableInput from "../../components/Common/ClearableInput"
+import FeatureVoteButton from "../../components/Common/FeatureVoteButton"
 import LoadingSpinner from "../../components/Common/LoadingSpinner"
 import Markdown from "../../components/Common/Markdown"
 import Tooltip from "../../components/Common/Tooltip"
@@ -44,7 +46,7 @@ import type {
 import useMachineConnections from "../../components/Machines/useMachineConnections"
 import WorkspaceBadges from "../../components/Workspace/WorkspaceBadges"
 import WorkspacePanel from "../../components/Workspace/WorkspacePanel"
-import { isLoggedIn } from "../../hooks/useAuth"
+import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 
 const workspacesSearchSchema = z.object({
@@ -78,7 +80,7 @@ type WorkspacesSearch = z.infer<typeof workspacesSearchSchema>
 const STATE_KEY = "calkit-workspaces"
 
 export const Route = createFileRoute("/_layout/workspaces")({
-  component: Workspaces,
+  component: WorkspacesGate,
   validateSearch: (search) => workspacesSearchSchema.parse(search),
   beforeLoad: ({ cause, search }) => {
     if (!isLoggedIn()) {
@@ -214,6 +216,31 @@ function AgentLog({
           ))}
         </Box>
       )}
+    </Box>
+  )
+}
+
+// Only admins have workspaces for now, and everyone else can vote for them;
+// views are tracked either way, to see how many look
+function WorkspacesGate() {
+  const { user } = useAuth()
+  const enabled = Boolean(user?.is_superuser)
+  const userId = user?.id
+  useEffect(() => {
+    if (userId) mixpanel.track("Viewed workspaces", { scope: "all", enabled })
+  }, [userId, enabled])
+  if (!user) return <LoadingSpinner height="60vh" />
+  if (enabled) return <Workspaces />
+  return (
+    <Box maxW="xl" mx="auto" py={10} px={4}>
+      <Heading size="md" mb={3}>
+        Workspaces are coming soon
+      </Heading>
+      <Text mb={5}>
+        Work on your projects on your own machines from here, with terminals for
+        coding agents, and see how their pipelines are doing.
+      </Text>
+      <FeatureVoteButton feature="local-workspace-compute" />
     </Box>
   )
 }

@@ -68,9 +68,10 @@ export const Route = createFileRoute("/_layout/settings")({
 function UserSettings() {
   const queryClient = useQueryClient()
   const currentUser = queryClient.getQueryData<UserPublic>(["currentUser"])
+  // Only admins have machines, for workspaces, for now
   const finalTabs = currentUser?.is_superuser
     ? tabsConfig.filter((t) => t.slug !== "delete-account")
-    : tabsConfig
+    : tabsConfig.filter((t) => t.slug !== "machines")
   const { tab } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   // The setup tab used to be called "checklists"; old links still land on it.

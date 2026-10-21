@@ -10,16 +10,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: e4ee0a41f3edd5b13e24459298d94737
-      size: 128660
+      md5: 3826b0bf92fd807b1ca0c03e845a67ef
+      size: 128777
     - path: calkit/docx.py
       hash: md5
       md5: 3f34445a3e65cf2c10f908b84de55fd2
       size: 55475
     - path: calkit/latex.py
       hash: md5
-      md5: 4804078b664b11c447912359f7fbd168
-      size: 62525
+      md5: d95b4c18f872250cf95c726a2724b7e0
+      size: 63169
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -55,12 +55,12 @@ stages:
       size: 311
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: adf9a8da2e08dee394a2de3a2d4e831a
-      size: 173951
+      md5: 32f10171526ec87fdee7fb43b75ae39b
+      size: 173812
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: adf9a8da2e08dee394a2de3a2d4e831a
-      size: 173951
+      md5: 32f10171526ec87fdee7fb43b75ae39b
+      size: 173812
     - path: results/latex-word-round-trip/review.docx
       hash: md5
       md5: 66f2e7c5c7ac323267430f7faf196687
@@ -79,12 +79,12 @@ stages:
       size: 55475
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: adf9a8da2e08dee394a2de3a2d4e831a
-      size: 173951
+      md5: 32f10171526ec87fdee7fb43b75ae39b
+      size: 173812
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: adf9a8da2e08dee394a2de3a2d4e831a
-      size: 173951
+      md5: 32f10171526ec87fdee7fb43b75ae39b
+      size: 173812
     - path: results/latex-word-round-trip/review.docx
       hash: md5
       md5: 66f2e7c5c7ac323267430f7faf196687
@@ -116,8 +116,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: 4804078b664b11c447912359f7fbd168
-      size: 62525
+      md5: d95b4c18f872250cf95c726a2724b7e0
+      size: 63169
     - path: uv.lock
       hash: md5
       md5: 78cff1621fa9cb37be1d99412ed26e0f
@@ -125,7 +125,7 @@ stages:
     outs:
     - path: images/latex/sizes.json
       hash: md5
-      md5: 6e54c19cc380b0e12a97d4d0866f266e
+      md5: ec824389fb888a041ca9ff37a104c01b
       size: 335
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py

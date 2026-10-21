@@ -716,7 +716,7 @@ def test_machines(
     gh_owner = f"me-{uuid.uuid4().hex[:6]}"
     hub_projects: dict[str, Project] = {}
     # However a project's URL writes the repo
-    for name, git_repo_url, owner_id, is_public in [
+    for label, git_repo_url, owner_id, is_public in [
         ("owned", "https://github.com/{}/Owned.git", user.account.id, False),
         (
             "http-form",
@@ -768,21 +768,21 @@ def test_machines(
     ]:
         made = Project(
             name=f"gh-{uuid.uuid4().hex[:8]}",
-            title=name,
+            title=label,
             git_repo_url=git_repo_url.format(
-                gh_owner.upper() if name == "http-form" else gh_owner
+                gh_owner.upper() if label == "http-form" else gh_owner
             ),
             owner_account_id=owner_id,
             is_public=is_public,
         )
         db.add(made)
-        hub_projects[name] = made
+        hub_projects[label] = made
     db.commit()
-    for name, role in [("invited-write", "write"), ("invited-read", "read")]:
+    for label, role in [("invited-write", "write"), ("invited-read", "read")]:
         db.add(
             UserProjectAccess(
                 user_id=user.id,
-                project_id=hub_projects[name].id,
+                project_id=hub_projects[label].id,
                 role_id=ROLE_IDS[role],
             )
         )

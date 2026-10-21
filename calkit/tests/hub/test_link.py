@@ -517,6 +517,11 @@ async def test_sessions(tmp_path, monkeypatch):
     # sessions don't inherit, so they use the project's
     monkeypatch.setattr(hub_link, "_inherited_hub", None)
     monkeypatch.setenv("CALKIT_HUB", "http://localhost")
+    # Sessions are login shells, which mustn't run the machine's own
+    # profile, e.g., a CI runner's, whose 'set -e' ends one at the first
+    # failing command
+    (tmp_path / "home").mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     # Git in sessions mustn't find the user's own credential helpers
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
@@ -1052,9 +1057,10 @@ async def test_sessions(tmp_path, monkeypatch):
     assert reply(54)["result"] == {"creds": None}
     assert "password=ghs_5" in reply(55)["result"]["filled"]
     # Nor on Windows, whose event loops can't serve Unix sockets
-    monkeypatch.setattr(hub_link.sys, "platform", "win32")
-    assert op.open_credentials(op.channels["a"]) is None
-    monkeypatch.setattr(hub_link.sys, "platform", sys.platform)
+    with monkeypatch.context() as m:
+        m.setattr(hub_link.sys, "platform", "win32")
+        assert op.open_credentials(op.channels["a"]) is None
+    assert sys.platform != "win32"
     assert reply(51)["result"] == reply(52)["result"] == {"creds": None}
     assert "password=ghs_5" in reply(53)["result"]["filled"]
     # The sign-in they were got with ending forgets them

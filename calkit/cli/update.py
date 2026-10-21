@@ -589,12 +589,16 @@ def update_agent_skills(
 
 
 def _load_env(env_name: str) -> tuple[dict, dict]:
-    """Load calkit.yaml and return (ck_info, env_dict)."""
+    """Load calkit.yaml and return (ck_info, env_dict), including an
+    environment a switch defines in place, e.g., 'tex.1'.
+    """
+    from calkit.environments import get_env
+
     ck_info = calkit.load_calkit_info()
-    envs = ck_info.get("environments") or {}
-    if env_name not in envs:
+    env = get_env(env_name, ck_info.get("environments") or {})
+    if not isinstance(env, dict):
         raise_error(f"Environment '{env_name}' does not exist")
-    return ck_info, envs[env_name]
+    return ck_info, env
 
 
 @update_app.command(name="uv-env")
@@ -947,11 +951,23 @@ def update_docker_env(
 def update_latex_image() -> None:
     """Point LaTeX environments at Calkit's pinned LaTeX image.
 
-    Updates docker environments that use Calkit's LaTeX image or TeX Live's,
-    then relocks them.
+    Updates Docker environments that use Calkit or TeX Live's LaTeX images,
+    including ones a switch defines in place, then relocks them.
     """
     import calkit.docker
+    from calkit.environments import SWITCH_KIND, get_env
     from calkit.latex import DEFAULT_LATEX_IMAGE
+
+    def is_outdated_latex(env: dict | None) -> bool:
+        # One built from a Dockerfile names the image it builds, not its base
+        return (
+            isinstance(env, dict)
+            and env.get("kind") == "docker"
+            and not env.get("path")
+            and calkit.docker.get_repo_from_ref(str(env.get("image", "")))
+            in repos
+            and env.get("image") != DEFAULT_LATEX_IMAGE
+        )
 
     repos = {
         "ghcr.io/calkit/latex",
@@ -959,25 +975,27 @@ def update_latex_image() -> None:
         "docker.io/texlive/texlive",
     }
     envs = calkit.load_calkit_info().get("environments") or {}
-    # One built from a Dockerfile names the image it builds, not its base
-    names = [
-        name
-        for name, env in envs.items()
-        if isinstance(env, dict)
-        and env.get("kind") == "docker"
-        and not env.get("path")
-        and calkit.docker.get_repo_from_ref(str(env.get("image", ""))) in repos
-        and env.get("image") != DEFAULT_LATEX_IMAGE
-    ]
+    # A switch's option defined in place is named after the switch and its
+    # position, e.g., 'tex.1'
+    candidates = list(envs)
+    for name, env in envs.items():
+        if isinstance(env, dict) and env.get("kind") == SWITCH_KIND:
+            candidates += [
+                f"{name}.{n}"
+                for n, option in enumerate(env.get("switch") or [], start=1)
+                if isinstance(option, dict)
+                and isinstance(option.get("use"), dict)
+            ]
+    names = [n for n in candidates if is_outdated_latex(get_env(n, envs))]
     if not names:
         typer.echo(f"No LaTeX environments to update to {DEFAULT_LATEX_IMAGE}")
         return
     # Relocked too, since a lock left behind would pull the old image back
     # by its digest
     for name in names:
+        old_image = (get_env(name, envs) or {}).get("image")
         typer.echo(
-            f"Updating '{name}' from {envs[name]['image']} to "
-            f"{DEFAULT_LATEX_IMAGE}"
+            f"Updating '{name}' from {old_image} to {DEFAULT_LATEX_IMAGE}"
         )
         update_docker_env(env_name=name, image=DEFAULT_LATEX_IMAGE, lock=True)
 

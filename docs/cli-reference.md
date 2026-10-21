@@ -2983,7 +2983,7 @@ Options:
 
 Point LaTeX environments at Calkit's pinned LaTeX image.
 
-Updates docker environments that use Calkit's LaTeX image or TeX Live's, then relocks them.
+Updates Docker environments that use Calkit or TeX Live's LaTeX images, including ones a switch defines in place, then relocks them.
 
 Usage:
 

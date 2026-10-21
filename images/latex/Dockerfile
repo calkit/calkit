@@ -48,6 +48,9 @@ RUN fmtutil-sys --all
 # sectsty and cite are what Calkit's own paper templates ask for, which
 # is what someone starting a project gets before they have asked for
 # anything.
+# makeindex builds indexes, e.g., the Caltech thesis template's, and is
+# a compiled tool, so like biber it can't be fetched on demand; without
+# it latexmk stops before running biber. About 50 kB.
 # latexdiff is here because `calkit latex diff` needs it; perl above is
 # what makes that possible. tex4ht and make4ht are for `calkit latex
 # to-docx --engine libreoffice`, which converts the source to ODT with
@@ -66,6 +69,7 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
     until [ "$i" -gt 3 ]; do \
         tlmgr update --self && \
         tlmgr install biber \
+            makeindex \
             latexmk \
             latexdiff \
             tex4ht \

@@ -54,13 +54,14 @@ jobs:
       - name: Smoke test image
         run: |
           set -euxo pipefail
-          # Both tools have to be on PATH, not merely installed: tlmgr
+          # The tools have to be on PATH, not merely installed: tlmgr
           # doesn't symlink scripts it installs after setup, which once
           # shipped an image whose latexdiff was invisible
           docker run --rm calkit/latex:pr sh -c '
             set -eux
             latexmk --version
             latexdiff --version
+            command -v makeindex
             pandoc --version
           '
           # As a non-root user, which is how Calkit runs it so output
@@ -70,6 +71,7 @@ jobs:
             set -eux
             latexmk --version
             latexdiff --version
+            command -v makeindex
             pandoc --version
           '
           # A document that needs the curated set and the packages papers

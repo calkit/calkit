@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import col, func, select
 
 import app.projects
-from app import users
+from app import github, users
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
@@ -76,6 +76,8 @@ NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,63}$"
 # Hub names for an owner and project, as a machine reports them
 PROJECT_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,255}/[A-Za-z0-9._-]{1,255}$")
 MAX_INT = 2**31 - 1
+# GitHub owner and repository names
+GITHUB_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
 
 
 def get_current_machine(session: SessionDep, token: TokenDep) -> Machine:
@@ -840,15 +842,76 @@ def post_machine_session_token(
     return CliToken(token=token)
 
 
+class GitHubTokenReq(SessionCredentialsReq):
+    """What a machine shows to get a token for Git, and the GitHub repo Git
+    asked about.
+    """
+
+    owner: str = Field(pattern=GITHUB_NAME_PATTERN)
+    repo: str = Field(pattern=GITHUB_NAME_PATTERN)
+
+
+class GitHubToken(BaseModel):
+    token: str
+    # When to stop using it, in seconds since the epoch
+    expires: int
+
+
 @router.post("/machines/github-token")
 def post_machine_github_token(
-    session: SessionDep, machine: CurrentMachine, req: SessionCredentialsReq
-) -> CliToken:
-    """Get the owner's GitHub token for Git in one of the machine's sessions,
-    on the same terms as a session token.
+    session: SessionDep, machine: CurrentMachine, req: GitHubTokenReq
+) -> GitHubToken:
+    """Get a token for Git in one of the machine's sessions or actions, on
+    the same terms as a session token, for a GitHub repo of a project on the
+    hub its owner can access.
+
+    It's the Calkit GitHub App's installation token for that repo alone,
+    read-only unless the owner can write to the project, never the owner's
+    own GitHub token, which could be traded for a login that outlives the
+    session.
     """
     _check_session_grant(session, machine, req.grant)
-    return CliToken(token=users.get_github_token(session, machine.user))
+    repo = f"{req.owner}/{req.repo}".lower()
+    projects = session.exec(
+        select(Project).where(
+            func.lower(Project.git_repo_url).in_(
+                [
+                    f"https://github.com/{repo}",
+                    f"https://github.com/{repo}.git",
+                ]
+            )
+        )
+    ).all()
+    # The most the owner can do with any project using the repo
+    levels = ["read", "write", "admin", "owner"]
+    access = None
+    for project in projects:
+        try:
+            level = app.projects.get_project(
+                session,
+                owner_name=project.owner_account.name,
+                project_name=project.name,
+                current_user=machine.user,
+            ).current_user_access
+        except HTTPException:
+            continue
+        if level in levels and (
+            access is None or levels.index(level) > levels.index(access)
+        ):
+            access = level
+    if access is None:
+        raise HTTPException(
+            403, "No project on the hub you can access uses this repo"
+        )
+    try:
+        token, expires = github.get_app_installation_token_and_expiry(
+            req.owner, req.repo, read_only=access == "read"
+        )
+    except (github.GitHubAppNotConfigured, HTTPException):
+        raise HTTPException(
+            403, "The Calkit GitHub App isn't installed on this repo"
+        )
+    return GitHubToken(token=token, expires=int(expires))
 
 
 class Workspace(WorkspaceInfo):

@@ -267,6 +267,7 @@ import type {
   GetUserZenodoTokenResponses,
   GetWorkspacesResponses,
   GitHubReleasePost,
+  GitHubTokenReq,
   GlobalSearchErrors,
   GlobalSearchResponses,
   ImportGithubReleasesErrors,
@@ -10063,12 +10064,18 @@ export class MachinesService {
   /**
    * Post Machine Github Token
    *
-   * Get the owner's GitHub token for Git in one of the machine's sessions,
-   * on the same terms as a session token.
+   * Get a token for Git in one of the machine's sessions or actions, on
+   * the same terms as a session token, for a GitHub repo of a project on the
+   * hub its owner can access.
+   *
+   * It's the Calkit GitHub App's installation token for that repo alone,
+   * read-only unless the owner can write to the project, never the owner's
+   * own GitHub token, which could be traded for a login that outlives the
+   * session.
    */
   public static postMachineGithubToken<ThrowOnError extends boolean = true>(
     parameters: {
-      sessionCredentialsReq: SessionCredentialsReq
+      gitHubTokenReq: GitHubTokenReq
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -10078,7 +10085,7 @@ export class MachinesService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "sessionCredentialsReq", map: "body" }] }],
+      [{ args: [{ key: "gitHubTokenReq", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       PostMachineGithubTokenResponses,

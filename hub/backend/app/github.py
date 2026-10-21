@@ -63,6 +63,19 @@ def get_app_installation_token(
 ) -> str:
     """Return a GitHub App installation access token scoped to one repo.
 
+    See ``get_app_installation_token_and_expiry``.
+    """
+    return get_app_installation_token_and_expiry(
+        owner_name, repo_name, read_only=read_only
+    )[0]
+
+
+def get_app_installation_token_and_expiry(
+    owner_name: str, repo_name: str, read_only: bool = False
+) -> tuple[str, float]:
+    """Return a GitHub App installation access token scoped to one repo,
+    and when to stop using it, a little before GitHub's expiry.
+
     Used to perform git operations on behalf of users who have native Calkit
     access to a project but no personal GitHub token (e.g. email/Google
     signups). Tokens are cached in-process and reused until shortly before they
@@ -79,7 +92,7 @@ def get_app_installation_token(
     with _installation_token_cache_lock:
         cached = _installation_token_cache.get(cache_key)
         if cached is not None and cached[1] > now:
-            return cached[0]
+            return cached
     # Miss or expired: mint a fresh token. Done outside the lock so requests
     # for different repos don't serialize; a rare concurrent double-mint just
     # yields two valid tokens.
@@ -96,7 +109,7 @@ def get_app_installation_token(
             pass
     with _installation_token_cache_lock:
         _installation_token_cache[cache_key] = (token, expiry)
-    return token
+    return token, expiry
 
 
 def _mint_app_installation_token(

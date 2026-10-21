@@ -662,6 +662,8 @@ export type {
   GithubPullRequest,
   GitHubRelease,
   GitHubReleasePost,
+  GitHubToken,
+  GitHubTokenReq,
   GitImport,
   GitItem,
   GitItemWithContents,

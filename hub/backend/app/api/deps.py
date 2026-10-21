@@ -124,6 +124,27 @@ def check_machine_session_token(
         raise refused
 
 
+def refuse_machine_session_token(token: TokenDep) -> None:
+    """Refuse a token issued to a session on a linked machine, where a
+    route hands out a credential that would outlive it, e.g., a personal
+    access token or the user's token for another service.
+
+    The route's own authentication verifies the token, so this only reads
+    it.
+    """
+    if token.startswith("ckp_"):
+        return
+    try:
+        payload = jwt.decode(token, options={"verify_signature": False})
+    except InvalidTokenError:
+        return
+    if isinstance(payload, dict) and "machine_id" in payload:
+        raise HTTPException(403, "A hub session's token can't do this")
+
+
+NoMachineSessionToken = Depends(refuse_machine_session_token)
+
+
 def get_current_user(session: SessionDep, token: TokenDep) -> User:
     # Handle personal access tokens, which start with 'ckp_'
     if token.startswith("ckp_"):

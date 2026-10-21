@@ -3286,6 +3286,47 @@ export const GitHubReleasePostSchema = {
   title: "GitHubReleasePost",
 } as const
 
+export const GitHubTokenSchema = {
+  properties: {
+    token: {
+      type: "string",
+      title: "Token",
+    },
+    expires: {
+      type: "integer",
+      title: "Expires",
+    },
+  },
+  type: "object",
+  required: ["token", "expires"],
+  title: "GitHubToken",
+} as const
+
+export const GitHubTokenReqSchema = {
+  properties: {
+    grant: {
+      type: "string",
+      maxLength: 8192,
+      title: "Grant",
+    },
+    owner: {
+      type: "string",
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+      title: "Owner",
+    },
+    repo: {
+      type: "string",
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+      title: "Repo",
+    },
+  },
+  type: "object",
+  required: ["grant", "owner", "repo"],
+  title: "GitHubTokenReq",
+  description:
+    "What a machine shows to get a token for Git, and the GitHub repo Git\nasked about.",
+} as const
+
 export const GitImportSchema = {
   properties: {
     files: {

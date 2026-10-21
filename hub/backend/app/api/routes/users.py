@@ -6,7 +6,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Sequence
 
-import jwt
 import requests
 import sqlalchemy
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
@@ -23,6 +22,7 @@ from app.api.deps import (
     PAT_VERIFIER_LENGTH_BYTES,
     CurrentSession,
     CurrentUser,
+    NoMachineSessionToken,
     SessionDep,
     SignedIn,
     TokenDep,
@@ -785,7 +785,7 @@ class TokenResp(UserTokenPublic, Token):
     pass
 
 
-@router.post("/user/tokens")
+@router.post("/user/tokens", dependencies=[NoMachineSessionToken])
 def post_user_token(
     session: SessionDep,
     current_user: CurrentUser,
@@ -799,10 +799,6 @@ def post_user_token(
     can be made with a linked machine's session token, which would then
     outlive it.
     """
-    if not access_token.startswith("ckp_") and "machine_id" in jwt.decode(
-        access_token, options={"verify_signature": False}
-    ):
-        raise HTTPException(403, "A hub session's token can't make tokens")
     if req.scope is None:
         get_current_session(session, access_token)
     # Generate a random token and hash it
@@ -1016,7 +1012,7 @@ class ExternalTokenResponse(BaseModel):
     access_token: str
 
 
-@router.get("/user/zenodo-token")
+@router.get("/user/zenodo-token", dependencies=[NoMachineSessionToken])
 def get_user_zenodo_token(
     session: SessionDep, current_user: CurrentUser
 ) -> ExternalTokenResponse:
@@ -1024,7 +1020,7 @@ def get_user_zenodo_token(
     return ExternalTokenResponse(access_token=token)
 
 
-@router.get("/user/github-token")
+@router.get("/user/github-token", dependencies=[NoMachineSessionToken])
 def get_user_github_token(
     session: SessionDep, current_user: CurrentUser
 ) -> ExternalTokenResponse:
@@ -1224,7 +1220,7 @@ def post_user_zotero_auth(
     return Message(message="success")
 
 
-@router.get("/user/overleaf-token")
+@router.get("/user/overleaf-token", dependencies=[NoMachineSessionToken])
 def get_user_overleaf_token(
     session: SessionDep, current_user: CurrentUser
 ) -> ExternalTokenResponse:

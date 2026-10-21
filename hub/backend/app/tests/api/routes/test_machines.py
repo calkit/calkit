@@ -10,6 +10,7 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import Response
 from sqlmodel import Session, select
@@ -658,6 +659,15 @@ def test_machines(
         assert r.status_code == 403, r.text
     r = relay_token(session_headers, second_factor)
     assert r.status_code == 403
+    # Nor get the user's tokens for other services, which would too
+    for path in [
+        "/user/github-token",
+        "/user/zenodo-token",
+        "/user/overleaf-token",
+    ]:
+        r = client.get(path, headers=session_headers)
+        assert r.status_code == 403, path
+        assert r.json()["detail"] == "A hub session's token can't do this"
     # Nor does one come once the second factor is set up again
     confirmed = totp.confirmed_at
     totp.confirmed_at = utcnow() + timedelta(minutes=1)
@@ -695,21 +705,74 @@ def test_machines(
         session_token_url, headers=op_headers, json={"grant": ended_grant}
     )
     assert r.status_code == 403
-    # Git in sessions gets the owner's GitHub token on the same terms
-    with patch("app.users.get_github_token", return_value="ghu_x") as gh:
-        for headers, shown, status in [
-            (op_headers, session_grant, 200),
-            (op_headers, ended_grant, 403),
-            (op_headers, "nope", 403),
-            (normal_user_token_headers, session_grant, 403),
-        ]:
-            r = client.post(
-                "/machines/github-token",
-                headers=headers,
-                json={"grant": shown},
+    # Git in sessions and actions gets the Calkit GitHub App's token for the
+    # one repo it asks about, on the same terms, only for a project on the
+    # hub the owner can access, read-only unless they can write to it, and
+    # never the owner's own GitHub token, which could be traded for a login
+    gh_owner = f"me-{uuid.uuid4().hex[:6]}"
+    for repo_name, owner_id, is_public in [
+        ("Owned.git", user.account.id, False),
+        ("read", su.account.id, True),
+        ("theirs", su.account.id, False),
+        ("uninstalled", user.account.id, False),
+    ]:
+        db.add(
+            Project(
+                name=f"gh-{uuid.uuid4().hex[:8]}",
+                title=repo_name,
+                git_repo_url=f"https://github.com/{gh_owner}/{repo_name}",
+                owner_account_id=owner_id,
+                is_public=is_public,
             )
-            assert r.status_code == status, r.text
-    assert gh.call_count == 1
+        )
+    db.commit()
+    minted: list[tuple[str, str, bool]] = []
+
+    def mint(
+        owner: str, repo: str, read_only: bool = False
+    ) -> tuple[str, float]:
+        if repo == "uninstalled":
+            raise HTTPException(502, "GitHub returned 404")
+        minted.append((owner, repo, read_only))
+        return "ghs_x", 2_000_000_000.5
+
+    def github_token(
+        headers: dict[str, str], shown: str, repo: str
+    ) -> Response:
+        return client.post(
+            "/machines/github-token",
+            headers=headers,
+            json={"grant": shown, "owner": gh_owner, "repo": repo},
+        )
+
+    no_github = HTTPException(401, "User needs to authenticate with GitHub")
+    with (
+        patch(
+            "app.github.get_app_installation_token_and_expiry",
+            side_effect=mint,
+        ),
+        patch("app.users.get_github_token", side_effect=no_github),
+    ):
+        for headers, shown, repo, status in [
+            (op_headers, session_grant, "owned", 200),
+            (op_headers, session_grant, "read", 200),
+            (op_headers, session_grant, "theirs", 403),
+            (op_headers, session_grant, "uninstalled", 403),
+            (op_headers, session_grant, "elsewhere", 403),
+            (op_headers, ended_grant, "owned", 403),
+            (op_headers, "nope", "owned", 403),
+            (normal_user_token_headers, session_grant, "owned", 403),
+        ]:
+            r = github_token(headers, shown, repo)
+            assert r.status_code == status, (repo, r.text)
+            if status == 200:
+                assert r.json() == {"token": "ghs_x", "expires": 2_000_000_000}
+        # Only plain names
+        for bad in ["../x", "-x", "a b", "x/y", ""]:
+            assert (
+                github_token(op_headers, session_grant, bad).status_code == 422
+            )
+    assert minted == [(gh_owner, "owned", False), (gh_owner, "read", True)]
     # A machine that stopped checking in is offline
     machine.last_seen = utcnow() - timedelta(minutes=10)
     db.add(machine)

@@ -1892,6 +1892,41 @@ export type GitHubReleasePost = {
 }
 
 /**
+ * GitHubToken
+ */
+export type GitHubToken = {
+  /**
+   * Token
+   */
+  token: string
+  /**
+   * Expires
+   */
+  expires: number
+}
+
+/**
+ * GitHubTokenReq
+ *
+ * What a machine shows to get a token for Git, and the GitHub repo Git
+ * asked about.
+ */
+export type GitHubTokenReq = {
+  /**
+   * Grant
+   */
+  grant: string
+  /**
+   * Owner
+   */
+  owner: string
+  /**
+   * Repo
+   */
+  repo: string
+}
+
+/**
  * GitImport
  */
 export type GitImport = {
@@ -16221,7 +16256,7 @@ export type PostMachineSessionTokenResponse =
   PostMachineSessionTokenResponses[keyof PostMachineSessionTokenResponses]
 
 export type PostMachineGithubTokenData = {
-  body: SessionCredentialsReq
+  body: GitHubTokenReq
   path?: never
   query?: never
   url: "/machines/github-token"
@@ -16241,7 +16276,7 @@ export type PostMachineGithubTokenResponses = {
   /**
    * Successful Response
    */
-  200: CliToken
+  200: GitHubToken
 }
 
 export type PostMachineGithubTokenResponse =

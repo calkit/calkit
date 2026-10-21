@@ -81,7 +81,7 @@ stages:
     desc: Automatically generated from the 'budget-2027' stage in calkit.yaml.
       Changes made here will be overwritten.
   one-pager-font:
-    cmd: calkit xenv -n tex --no-check -- sh --noprofile --norc
+    cmd: calkit xenv -n tex --no-check -- sh
       .calkit/stage-commands/one-pager-font.sh
     deps:
       - .calkit/stage-commands/one-pager-font.sh

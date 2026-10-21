@@ -168,8 +168,11 @@ def get_repo(project_id: str, token: str) -> git.Repo:
     if os.path.isdir(dest) and not os.path.exists(os.path.join(dest, ".git")):
         rmtree(dest)
     # A mirror kept by session sync has no remote to pull from
-    if os.path.isdir(dest) and not git.Repo(dest).remotes:
-        rmtree(dest)
+    if os.path.isdir(dest):
+        with git.Repo(dest) as existing:
+            is_mirror_dir = not existing.remotes
+        if is_mirror_dir:
+            rmtree(dest)
     if not os.path.isdir(dest):
         return clone(project_id, token)
     repo = git.Repo(dest)

@@ -6,6 +6,7 @@ import filecmp
 import json
 import os
 import sys
+from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -349,7 +350,8 @@ def import_publication(
         calkit.overleaf.rmtree(overleaf_project_dir)
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
-    _get_pulled_overleaf_repo(overleaf_project_id, overleaf_auth)
+    # Closed so Git's helper processes don't keep the folder open on Windows
+    _get_pulled_overleaf_repo(overleaf_project_id, overleaf_auth)[0].close()
     # Detect target path if not specified
     if target_path is None:
         ol_contents = os.listdir(
@@ -759,11 +761,17 @@ def sync(
                     "or use --auto-commit/-a to automatically commit them."
                 )
         # Keep other processes from using the clone until we're done
-        with calkit.overleaf.lock(overleaf_project_id, typer.echo):
+        with (
+            calkit.overleaf.lock(overleaf_project_id, typer.echo),
+            ExitStack() as cleanup,
+        ):
             typer.echo("Pulling the latest version from Overleaf")
             overleaf_repo, overleaf_auth = _get_pulled_overleaf_repo(
                 overleaf_project_id, overleaf_auth
             )
+            # Closed so Git's helper processes don't keep the folder open on
+            # Windows
+            cleanup.callback(overleaf_repo.close)
             # Reread the checkpoint in case a sync we waited on just moved it
             sync_data = calkit.overleaf.get_sync_info().get(
                 synced_folder, sync_data
@@ -906,7 +914,10 @@ def get_status(
         )
         wdir = path_in_project
         # Keep other processes from using the clone until we're done
-        with calkit.overleaf.lock(overleaf_project_id, typer.echo):
+        with (
+            calkit.overleaf.lock(overleaf_project_id, typer.echo),
+            ExitStack() as cleanup,
+        ):
             overleaf_project_dir = calkit.overleaf.get_project_dir(
                 overleaf_project_id
             )
@@ -914,6 +925,7 @@ def get_status(
             overleaf_repo, overleaf_auth = _get_pulled_overleaf_repo(
                 overleaf_project_id, overleaf_auth
             )
+            cleanup.callback(overleaf_repo.close)
             # Reread the checkpoint in case a sync we waited on just moved it
             sync_data = calkit.overleaf.get_sync_info().get(
                 path_in_project, sync_data

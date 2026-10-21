@@ -108,9 +108,11 @@ You'll be asked for a code from the app every 12 hours.
 
 ## Finding your workspaces
 
-The link finds the Calkit projects in your `~/calkit` and `~/dev`
-folders.
-To add one from somewhere else, run on that machine:
+The link finds the Calkit projects on that hub in your `~/calkit` and
+`~/dev` folders,
+i.e., ones whose `calkit.yaml` names it as their `hub`,
+or, for ones that don't say, if it's your default hub.
+To add one from somewhere else, or from another hub, run on that machine:
 
 ```sh
 calkit hub link add-workspace path/to/project

@@ -257,8 +257,11 @@ paths, and refusing sessions where they can't be enforced.
 There are two kinds:
 
 - Personal workspaces are ordinary long-lived checkouts.
-  The link discovers Calkit projects under `~/calkit` and `~/dev`, and
-  `calkit hub link add-workspace <path>` registers ones elsewhere.
+  The link discovers Calkit projects on its hub under `~/calkit` and
+  `~/dev`, i.e., ones whose declared `hub`, or else the user's default
+  hub, is the link's, so a hub never learns of projects on others.
+  `calkit hub link add-workspace <path>` registers ones elsewhere, or on
+  another hub.
   These are the only kind edited from the hub.
 - Managed workspaces are the existing hidden ones under
   `~/.calkit/workspaces`, checked out with `--force` and used for running
@@ -272,8 +275,8 @@ e.g., `calkit.io`, which is also how managed workspaces are filed.
 `--hub` picks which one a command acts on, and without it,
 `calkit hub link install` uses the user's default hub and other commands
 the only one linked.
-A workspace can be seen by more than one of them, e.g., one under
-`~/calkit`, but is used by one at a time: a link takes a lock in
+A workspace can be seen by more than one of them, e.g., one added to
+another hub with `add-workspace`, but is used by one at a time: a link takes a lock in
 the workspace itself, `.calkit/local/hub-link.lock`, while a session or
 an action that changes it is running, and the others refuse to change it
 and report it as in use from another hub, without saying which, until

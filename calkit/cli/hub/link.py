@@ -370,7 +370,9 @@ def add_workspace(
     ] = ".",
     hub: HubOption = None,
 ) -> None:
-    """Add a project outside ~/calkit and ~/dev as a workspace."""
+    """Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or
+    one on another hub.
+    """
     from calkit.hub import link as hub_link
 
     _select_hub(hub)

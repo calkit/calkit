@@ -167,6 +167,15 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     _init_project(
         os.path.join(home, ".calkit", "workspaces", "other.hub", "bob", "x")
     )
+    # Projects on other hubs aren't, unless added
+    other_hub = os.path.join(home, "dev", "other-hub")
+    _init_project(other_hub, name="other-hub")
+    with open(os.path.join(other_hub, "calkit.yaml"), "a") as f:
+        f.write("hub: https://hub.example\n")
+    this_hub = os.path.join(home, "dev", "this-hub")
+    _init_project(this_hub, name="this-hub")
+    with open(os.path.join(this_hub, "calkit.yaml"), "a") as f:
+        f.write("hub: calkit.io\n")
     cfg = {"workspaces": [elsewhere, elsewhere + "/"]}
     workspaces = {
         Path(os.path.relpath(w["path"], os.path.realpath(home))).as_posix(): w
@@ -176,9 +185,23 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
         "calkit/demo",
         "dev/tool",
         "dev/odd",
+        "dev/this-hub",
         "src/other",
         ".calkit/workspaces/calkit.io/alice/demo",
     }
+    found = hub_link.discover_workspaces({"workspaces": [other_hub]})
+    assert os.path.realpath(other_hub) in [w["path"] for w in found]
+    # Ones that don't say are on the user's default hub
+    monkeypatch.setattr(config, "_get_default_hub", lambda: "hub.example")
+    found = [
+        os.path.relpath(w["path"], os.path.realpath(home))
+        for w in hub_link.discover_workspaces({"workspaces": []})
+    ]
+    assert sorted(found) == [
+        os.path.join(".calkit", "workspaces", "calkit.io", "alice", "demo"),
+        os.path.join("dev", "this-hub"),
+    ]
+    monkeypatch.setattr(config, "_get_default_hub", lambda: None)
     assert workspaces["dev/odd"]["project"] is None
     assert not os.path.exists(ran)
     demo = workspaces["calkit/demo"]

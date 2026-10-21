@@ -4449,7 +4449,7 @@ calkit hub|cloud link COMMAND [ARGS]...
 | [`stop`](#subcommand-hub-cloud-link-stop)                   | Stop the link's service until it's restarted, for every hub unless one is given.            |
 | [`restart`](#subcommand-hub-cloud-link-restart)             | Restart the link's service, e.g., after updating Calkit, for every hub unless one is given. |
 | [`logs`](#subcommand-hub-cloud-link-logs)                   | Show the link service's logs.                                                               |
-| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace) | Add a project outside ~/calkit and ~/dev as a workspace.                                    |
+| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace) | Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or one on another hub.  |
 | [`uninstall`](#subcommand-hub-cloud-link-uninstall)         | Revoke this machine on the hub and remove its link here.                                    |
 
 <a id="subcommand-hub-cloud-link-install"></a>
@@ -4570,7 +4570,7 @@ Options:
 
 ##### `calkit hub|cloud link add-workspace`
 
-Add a project outside ~/calkit and ~/dev as a workspace.
+Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or one on another hub.
 
 Usage:
 

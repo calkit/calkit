@@ -672,12 +672,26 @@ SAFE_GIT = [
 ]
 
 
+def project_hub_url(wdir: str) -> str:
+    """The hub a project is on: the one it declares, else the user's default
+    hub, else calkit.io, as Calkit decides it there.
+    """
+    from calkit.hub import DEFAULT_HUB_URL
+
+    hub = (
+        config._get_project_hub(wdir)
+        or config._get_default_hub()
+        or DEFAULT_HUB_URL
+    )
+    return config.normalize_hub_url(hub)
+
+
 def discover_workspaces(cfg: dict) -> list[dict]:
     """Find the workspaces this link gives the hub access to.
 
-    These are Calkit projects directly under ``~/calkit`` or ``~/dev``,
-    ones registered in the config, and the managed ones Calkit creates for
-    running stages.
+    These are Calkit projects on this hub directly under ``~/calkit`` or
+    ``~/dev``, ones registered in the config, and the managed ones Calkit
+    creates for running stages.
     """
 
     def _git_status(path: str) -> dict:
@@ -771,13 +785,26 @@ def discover_workspaces(cfg: dict) -> list[dict]:
                 continue
             for name in sorted(os.listdir(owner_path)):
                 candidates.append((os.path.join(owner_path, name), "managed"))
+    added = {
+        os.path.realpath(os.path.expanduser(p))
+        for p in cfg.get("workspaces", [])
+    }
     found: dict[str, str] = {}
     for path, kind in candidates:
         path = os.path.realpath(path)
-        if path not in found and os.path.isfile(
+        if path in found or not os.path.isfile(
             os.path.join(path, "calkit.yaml")
         ):
-            found[path] = kind
+            continue
+        # Only this hub's projects, so other hubs never hear of them, unless
+        # one was added on purpose
+        if (
+            kind == "personal"
+            and path not in added
+            and project_hub_url(path) != get_hub_url()
+        ):
+            continue
+        found[path] = kind
 
     def describe(path: str, kind: str) -> dict:
         try:
@@ -3008,8 +3035,9 @@ class HubLink:
                 path = await asyncio.to_thread(
                     clone_project, msg["git_repo_url"], msg.get("path")
                 )
-                # One outside the folders workspaces are found in has to be
-                # added, as with 'calkit hub link add-workspace'
+                # One outside the folders workspaces are found in, or that
+                # doesn't say it's on this hub, has to be added, as with
+                # 'calkit hub link add-workspace'
                 home = config.get_user_home()
                 roots = [
                     os.path.realpath(os.path.join(home, r))
@@ -3019,9 +3047,10 @@ class HubLink:
                 saved = load_config() or {}
                 workspaces = saved.get("workspaces") or []
                 self.cfg["workspaces"] = workspaces
-                if os.path.dirname(path) not in roots and path not in (
-                    workspaces
-                ):
+                if (
+                    os.path.dirname(path) not in roots
+                    or project_hub_url(path) != get_hub_url()
+                ) and path not in workspaces:
                     workspaces.append(path)
                     save_config(self.cfg)
                 # So the hub lists it right away, though the clone stands

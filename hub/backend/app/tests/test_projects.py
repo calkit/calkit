@@ -1094,3 +1094,15 @@ def test_dvc_dir_out_resolves_after_being_pushed(
         project=project, tree=tree
     )
     assert res.dvc_lock_outs["app/index.html"]["md5"] == file_md5
+    # A calkit.yaml that doesn't parse, e.g., a key wrapped over two lines,
+    # leaves the files readable instead of raising
+    (repo_dir / "calkit.yaml").write_text(
+        "answer:\n  if a and\n    b: >-\n    Yes.\n"
+    )
+    repo.git.add(["calkit.yaml"])
+    repo.git.commit(["-m", "Break calkit.yaml"])
+    res = app.projects.get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=get_repo_tree_for_ref(repo, None)
+    )
+    assert res.ck_info == {}
+    assert res.dvc_lock_outs["app/index.html"]["md5"] == file_md5

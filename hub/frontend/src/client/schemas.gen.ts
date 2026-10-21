@@ -12176,7 +12176,7 @@ export const WorkspaceSchema = {
       anyOf: [
         {
           type: "string",
-          maxLength: 256,
+          maxLength: 257,
         },
         {
           type: "null",
@@ -12384,7 +12384,7 @@ export const WorkspaceInfoSchema = {
       anyOf: [
         {
           type: "string",
-          maxLength: 256,
+          maxLength: 257,
         },
         {
           type: "null",

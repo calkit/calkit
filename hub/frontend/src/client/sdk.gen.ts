@@ -345,11 +345,15 @@ import type {
   PostMachineCliTokenRequestResponses,
   PostMachineCliTokenResponses,
   PostMachineErrors,
+  PostMachineGithubTokenErrors,
+  PostMachineGithubTokenResponses,
   PostMachineRelayTokenErrors,
   PostMachineRelayTokenResponses,
   PostMachineResponses,
   PostMachineRestartErrors,
   PostMachineRestartResponses,
+  PostMachineSessionTokenErrors,
+  PostMachineSessionTokenResponses,
   PostMachineWakeErrors,
   PostMachineWakeResponses,
   PostOrgErrors,
@@ -518,6 +522,7 @@ import type {
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
+  SessionCredentialsReq,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -1809,7 +1814,9 @@ export class UsersService {
    * Create a personal access token.
    *
    * A full one takes a signed-in session, so a token can't mint more of
-   * itself, while one scoped to DVC, which the CLI makes, doesn't.
+   * itself, while one scoped to DVC, which the CLI makes, doesn't. Neither
+   * can be made with a linked machine's session token, which would then
+   * outlive it.
    */
   public static postUserToken<ThrowOnError extends boolean = true>(
     parameters: {
@@ -10009,6 +10016,85 @@ export class MachinesService {
       security: [{ scheme: "bearer", type: "http" }],
       url: "/machines/cli-token",
       ...options,
+    })
+  }
+
+  /**
+   * Post Machine Session Token
+   *
+   * Issue a short-lived token for Calkit in one of the machine's sessions,
+   * for as long as the sign-in that opened it and its second factor last.
+   *
+   * It stops working once the machine is unlinked or that sign-in ends, and
+   * can't make other tokens.
+   */
+  public static postMachineSessionToken<ThrowOnError extends boolean = true>(
+    parameters: {
+      sessionCredentialsReq: SessionCredentialsReq
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostMachineSessionTokenResponses,
+    PostMachineSessionTokenErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "sessionCredentialsReq", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostMachineSessionTokenResponses,
+      PostMachineSessionTokenErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/machines/session-token",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Machine Github Token
+   *
+   * Get the owner's GitHub token for Git in one of the machine's sessions,
+   * on the same terms as a session token.
+   */
+  public static postMachineGithubToken<ThrowOnError extends boolean = true>(
+    parameters: {
+      sessionCredentialsReq: SessionCredentialsReq
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostMachineGithubTokenResponses,
+    PostMachineGithubTokenErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "sessionCredentialsReq", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostMachineGithubTokenResponses,
+      PostMachineGithubTokenErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/machines/github-token",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

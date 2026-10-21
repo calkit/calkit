@@ -10519,6 +10519,21 @@ export const SearchResultsSchema = {
   title: "SearchResults",
 } as const
 
+export const SessionCredentialsReqSchema = {
+  properties: {
+    grant: {
+      type: "string",
+      maxLength: 8192,
+      title: "Grant",
+    },
+  },
+  type: "object",
+  required: ["grant"],
+  title: "SessionCredentialsReq",
+  description:
+    "What a machine shows to get credentials for one of its sessions: the\ngrant of the channel that opened it, or last attached to it.",
+} as const
+
 export const SftpAccessSchema = {
   properties: {
     kind: {

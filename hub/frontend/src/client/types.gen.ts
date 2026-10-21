@@ -5973,6 +5973,19 @@ export type SearchResults = {
 }
 
 /**
+ * SessionCredentialsReq
+ *
+ * What a machine shows to get credentials for one of its sessions: the
+ * grant of the channel that opened it, or last attached to it.
+ */
+export type SessionCredentialsReq = {
+  /**
+   * Grant
+   */
+  grant: string
+}
+
+/**
  * SftpAccess
  */
 export type SftpAccess = {
@@ -16179,6 +16192,60 @@ export type PostMachineCliTokenResponses = {
 
 export type PostMachineCliTokenResponse =
   PostMachineCliTokenResponses[keyof PostMachineCliTokenResponses]
+
+export type PostMachineSessionTokenData = {
+  body: SessionCredentialsReq
+  path?: never
+  query?: never
+  url: "/machines/session-token"
+}
+
+export type PostMachineSessionTokenErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineSessionTokenError =
+  PostMachineSessionTokenErrors[keyof PostMachineSessionTokenErrors]
+
+export type PostMachineSessionTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: CliToken
+}
+
+export type PostMachineSessionTokenResponse =
+  PostMachineSessionTokenResponses[keyof PostMachineSessionTokenResponses]
+
+export type PostMachineGithubTokenData = {
+  body: SessionCredentialsReq
+  path?: never
+  query?: never
+  url: "/machines/github-token"
+}
+
+export type PostMachineGithubTokenErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineGithubTokenError =
+  PostMachineGithubTokenErrors[keyof PostMachineGithubTokenErrors]
+
+export type PostMachineGithubTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: CliToken
+}
+
+export type PostMachineGithubTokenResponse =
+  PostMachineGithubTokenResponses[keyof PostMachineGithubTokenResponses]
 
 export type GetWorkspacesData = {
   body?: never

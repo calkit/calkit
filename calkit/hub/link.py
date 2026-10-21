@@ -82,12 +82,14 @@ LOG_KEEP_BYTES = 1_000_000
 REPEAT_LOG_SECONDS = 3600
 # Coding agents found running in workspaces, by command
 AGENT_TOOLS = ("claude", "codex", "opencode")
-# How long before a session's hub token expires the link gets another,
-# which is longer than Calkit's own margin, so it never gets an old one
-SESSION_TOKEN_MARGIN_SECONDS = 120
-# How long a session's GitHub token is kept, which the hub refreshes well
-# before it expires
-GITHUB_TOKEN_CACHE_SECONDS = 300
+# How long before a credential expires the link gets another, which is
+# longer than Calkit's own margin, so it never gets an old one
+CREDENTIAL_MARGIN_SECONDS = 120
+# A GitHub repo Git asks for credentials for, with the helper's
+# useHttpPath, as "owner/repo" or "owner/repo.git", and nothing else
+GITHUB_REPO_PATH_PATTERN = (
+    r"([A-Za-z0-9][A-Za-z0-9._-]{0,99})/([A-Za-z0-9][A-Za-z0-9._-]{0,99})"
+)
 
 # The hub the link commands in this process act on, by its web URL.
 # Each hub's link has its own config, service, lock, and log, named by
@@ -2359,20 +2361,26 @@ def request_cli_token(cfg: dict) -> str:
     return token
 
 
-def request_session_credential(cfg: dict, route: str, grant: str) -> str:
-    """A credential for one of this link's sessions from the hub, over
-    HTTPS: a token for Calkit (``session-token``) or the owner's GitHub
-    token (``github-token``), for the grant that opened the session.
+def request_session_credential(
+    cfg: dict, route: str, grant: str, repo: str = ""
+) -> tuple[str, float]:
+    """A credential for one of this link's sessions or actions from the hub,
+    over HTTPS, for the grant of the browser channel it came from, and when
+    to get another: a token for Calkit (``session-token``), or a GitHub App
+    token for one repo, ``repo`` as "owner/name" (``github-token``).
     """
     from requests.exceptions import HTTPError
 
     from calkit.hub import core as hub
 
+    body = {"grant": grant}
+    if route == "github-token":
+        body["owner"], body["repo"] = repo.split("/")
     try:
         resp = hub._request(
             "post",
             f"/machines/{route}",
-            json={"grant": grant},
+            json=body,
             headers={"Authorization": f"Bearer {cfg['token']}"},
             auth=False,
             allow_login=False,
@@ -2385,7 +2393,12 @@ def request_session_credential(cfg: dict, route: str, grant: str) -> str:
     token = resp.get("token") if isinstance(resp, dict) else None
     if not isinstance(token, str) or not re.fullmatch(r"[\x21-\x7e]+", token):
         raise ValueError("The hub sent an invalid token")
-    return token
+    expires = hub._jwt_exp(token) if route == "session-token" else None
+    if expires is None:
+        expires = resp.get("expires")
+    if not isinstance(expires, (int, float)) or isinstance(expires, bool):
+        raise ValueError("The hub sent a token without an expiry")
+    return token, float(expires) - CREDENTIAL_MARGIN_SECONDS
 
 
 def configure_machine(
@@ -2496,8 +2509,7 @@ class CredentialChannel:
 
 def add_credential_env(env: dict[str, str], creds: CredentialChannel) -> None:
     """Point Calkit at a credential channel, for the link's hub, and Git at
-    it for GitHub's, after any helper of the user's, which may work, e.g.,
-    one with a token in a file.
+    it for GitHub's, instead of any helper of the user's.
     """
     from calkit.hub import core as hub
 
@@ -2508,11 +2520,26 @@ def add_credential_env(env: dict[str, str], creds: CredentialChannel) -> None:
         n = int(env.get("GIT_CONFIG_COUNT") or 0)
     except ValueError:
         n = 0
-    env[f"GIT_CONFIG_KEY_{n}"] = "credential.https://github.com.helper"
-    env[f"GIT_CONFIG_VALUE_{n}"] = "!" + shlex.join(
-        [*CALKIT_COMMAND, "hub", "link", "git-credential"]
-    )
-    env["GIT_CONFIG_COUNT"] = str(n + 1)
+    # Empty first, which drops every helper GitHub would otherwise get, so
+    # none of the user's stores what the link gives, e.g., osxkeychain, and
+    # with the repo's path, which the hub's tokens are for
+    url = "credential.https://github.com"
+    for i, (key, value) in enumerate(
+        [
+            (f"{url}.helper", ""),
+            (
+                f"{url}.helper",
+                "!"
+                + shlex.join(
+                    [*CALKIT_COMMAND, "hub", "link", "git-credential"]
+                ),
+            ),
+            (f"{url}.useHttpPath", "true"),
+        ]
+    ):
+        env[f"GIT_CONFIG_KEY_{n + i}"] = key
+        env[f"GIT_CONFIG_VALUE_{n + i}"] = value
+    env["GIT_CONFIG_COUNT"] = str(n + 3)
 
 
 # The credential channel of the action running, which the thread it runs in
@@ -2665,8 +2692,10 @@ class HubLink:
         # Credentials got for sessions and actions, by grant and hub route,
         # with when to get them again and the sign-in they came from, so
         # what one browser channel allows is asked for once
-        self.credentials: dict[tuple[str, str], tuple[str, float, str]] = {}
-        self.credential_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self.credentials: dict[
+            tuple[str, str, str], tuple[str, float, str]
+        ] = {}
+        self.credential_locks: dict[tuple[str, str, str], asyncio.Lock] = {}
         # Sessions' and running actions' credential channels, whose
         # sign-ins check-ins ask about, browser or not, and the sign-ins
         # the hub said have ended, which get no more
@@ -3120,8 +3149,6 @@ class HubLink:
         """
         import time
 
-        from calkit.hub import core as hub
-
         if creds.closed:
             raise ValueError("The session or action has ended")
         if creds.auth.session_id in self.ended_sign_ins:
@@ -3138,13 +3165,23 @@ class HubLink:
                 raise ValueError(
                     f"This session only has tokens for {self.cfg['api_url']}"
                 )
-            route = "session-token"
+            route, repo = "session-token", ""
         elif kind == "github.token":
             route = "github-token"
+            path = req.get("path")
+            match = (
+                re.fullmatch(GITHUB_REPO_PATH_PATTERN, path)
+                if isinstance(path, str)
+                else None
+            )
+            repo_name = match.group(2).removesuffix(".git") if match else ""
+            if match is None or not repo_name:
+                raise ValueError("Not a GitHub repository's path")
+            repo = f"{match.group(1)}/{repo_name}"
         else:
             raise ValueError("Unknown request")
         auth = creds.auth
-        key = (auth.grant_id, route)
+        key = (auth.grant_id, route, repo)
         if req.get("fresh") or req.get("forget"):
             self.credentials.pop(key, None)
         if req.get("forget"):
@@ -3155,15 +3192,9 @@ class HubLink:
             # Nothing past the second factor the grant came with
             if cached is not None and now < cached[1] and now < auth.tfa_exp:
                 return {"token": cached[0]}
-            token = await asyncio.to_thread(
-                request_session_credential, self.cfg, route, auth.grant
+            token, expires = await asyncio.to_thread(
+                request_session_credential, self.cfg, route, auth.grant, repo
             )
-            if route == "session-token":
-                expires = (
-                    hub._jwt_exp(token) or 0
-                ) - SESSION_TOKEN_MARGIN_SECONDS
-            else:
-                expires = time.time() + GITHUB_TOKEN_CACHE_SECONDS
             # Ones that ran out go, so the cache doesn't grow
             for k, (_, exp, _) in list(self.credentials.items()):
                 if exp < now:

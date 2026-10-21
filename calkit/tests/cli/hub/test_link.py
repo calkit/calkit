@@ -213,6 +213,8 @@ def test_git_credential(monkeypatch):
         ("get", "protocol=http\nhost=github.com\n\n"),
         ("get", "protocol=https\nhost=github.com.evil.test\n\n"),
         ("store", "protocol=https\nhost=github.com\npassword=p\n\n"),
+        # Only for a repo, which the hub's tokens are for
+        ("get", "protocol=https\nhost=github.com\n\n"),
     ]:
         result = git(operation, attrs)
         assert result.exit_code == 0 and result.stdout == ""
@@ -220,12 +222,14 @@ def test_git_credential(monkeypatch):
     result = git("get", "protocol=https\nhost=github.com\npath=o/r.git\n\n")
     assert result.exit_code == 0
     assert result.stdout == "username=x-access-token\npassword=ghu_x\n"
-    assert asked == [{"type": "github.token", "forget": False}]
+    assert asked == [
+        {"type": "github.token", "path": "o/r.git", "forget": False}
+    ]
     # One GitHub refused is forgotten
-    result = git("erase", "protocol=https\nhost=github.com\n\n")
+    result = git("erase", "protocol=https\nhost=github.com\npath=o/r\n\n")
     assert result.stdout == "" and asked[-1]["forget"]
     # Without the link, Git carries on as it would without this
     refusal.append("Couldn't reach the hub link")
-    result = git("get", "protocol=https\nhost=github.com\n\n")
+    result = git("get", "protocol=https\nhost=github.com\npath=o/r\n\n")
     assert result.exit_code == 0 and result.stdout == ""
     assert "Couldn't reach" in result.stderr

@@ -887,15 +887,17 @@ async def test_sessions(tmp_path, monkeypatch):
     # user can open, with a secret only the session is told
     from calkit.hub import core as hub
 
-    asked: list[tuple[str, str]] = []
+    asked: list[tuple[str, str, str]] = []
 
-    def fake_credential(cfg: dict, route: str, shown: str) -> str:
-        asked.append((route, shown))
+    def fake_credential(
+        cfg: dict, route: str, shown: str, repo: str = ""
+    ) -> tuple[str, float]:
+        asked.append((route, shown, repo))
         if route == "session-token":
             return jwt.encode(
                 {"exp": time.time() + 900, "n": len(asked)}, "k" * 32
-            )
-        return f"ghu_{len(asked)}"
+            ), time.time() + 900
+        return f"ghs_{len(asked)}", time.time() + 900
 
     monkeypatch.setattr(
         hub_link, "request_session_credential", fake_credential
@@ -911,13 +913,18 @@ async def test_sessions(tmp_path, monkeypatch):
             "type": "sessions.input",
             "session": sid,
             "data": 'echo "CREDS:$CALKIT_LINK_SOCKET:$CALKIT_LINK_API_URL:'
-            '$GIT_CONFIG_KEY_0:$GIT_CONFIG_COUNT:CREDS"\n',
+            "$GIT_CONFIG_KEY_0=$GIT_CONFIG_VALUE_0:$GIT_CONFIG_KEY_2="
+            '$GIT_CONFIG_VALUE_2:$GIT_CONFIG_COUNT:CREDS"\n',
         },
     )
+    # Every helper GitHub would get is reset before the link's, which is
+    # given the repo's path
     await wait_for(
         lambda: (
             f"CREDS:{sock_path}:https://api.hub:"
-            "credential.https://github.com.helper:1:CREDS" in output("a")
+            "credential.https://github.com.helper=:"
+            "credential.https://github.com.useHttpPath=true:3:CREDS"
+            in output("a")
         )
     )
     monkeypatch.setenv(hub.LINK_SOCKET_ENV, sock_path)
@@ -929,7 +936,7 @@ async def test_sessions(tmp_path, monkeypatch):
     token_req = {"type": "hub.token", "api_url": "https://api.hub/"}
     first = await ask(token_req)
     assert await ask(token_req) == first
-    assert asked == [("session-token", op.channels["a"].grant)]
+    assert asked == [("session-token", op.channels["a"].grant, "")]
     # A fresh one when the last was refused
     assert await ask(token_req | {"fresh": True}) != first
     assert len(asked) == 2
@@ -949,19 +956,30 @@ async def test_sessions(tmp_path, monkeypatch):
             "type": "sessions.input",
             "session": sid,
             "data": "for h in gitlab.com github.com; do printf "
-            "'protocol=https\\nhost=%s\\n\\n' $h | GIT_TERMINAL_PROMPT=0 "
+            "'protocol=https\\nhost=%s\\npath=o/r.git\\n\\n' $h | "
+            "GIT_TERMINAL_PROMPT=0 "
             "git credential fill; done; echo FILLED-$((40+2))\n",
         },
     )
     # Expanded, so the terminal echoing the command doesn't count
     await wait_for(lambda: "FILLED-42" in output("a"), timeout=60)
     filled = output("a").split("FILLED-42")[0]
-    assert "password=ghu_3" in filled and "host=gitlab.com" not in filled
+    assert "password=ghs_3" in filled and "host=gitlab.com" not in filled
     assert "username=x-access-token" in filled
-    assert asked[-1] == ("github-token", op.channels["a"].grant)
-    assert await ask({"type": "github.token"}) == {"token": "ghu_3"}
-    assert await ask({"type": "github.token", "forget": True}) == {}
-    assert await ask({"type": "github.token"}) == {"token": "ghu_4"}
+    assert asked[-1] == ("github-token", op.channels["a"].grant, "o/r")
+    # Each repo's is its own, kept until it expires, and forgetting one
+    # leaves the others
+    github_req = {"type": "github.token", "path": "o/r.git"}
+    assert await ask(github_req) == {"token": "ghs_3"}
+    assert await ask(github_req | {"path": "o/other"}) == {"token": "ghs_4"}
+    assert asked[-1][2] == "o/other"
+    assert await ask(github_req | {"forget": True}) == {}
+    assert await ask(github_req) == {"token": "ghs_5"}
+    assert await ask(github_req | {"path": "o/other"}) == {"token": "ghs_4"}
+    # Only for a plain "owner/repo"
+    for bad in [None, 7, "", "o", "o/r/x", "../r", "-o/r", "o/.git", "o/r?x"]:
+        with pytest.raises(hub.LinkCredentialError, match="GitHub"):
+            await ask(github_req | {"path": bad})
 
     # Actions the hub starts get them the same way, with the grant of the
     # channel that asked, over a channel of their own that closes with
@@ -972,20 +990,37 @@ async def test_sessions(tmp_path, monkeypatch):
         if creds is None:
             return {"creds": None}
         repo = hub_link.get_workspace_repo(wdir)
-        filled = subprocess.run(
-            ["git", "credential", "fill"],
-            input="protocol=https\nhost=github.com\n\n",
-            env=hub_link.no_prompt_env(wdir),
-            cwd=wdir,
-            capture_output=True,
-            text=True,
-        ).stdout
+        # With the user's own helper storing what it's given, which Git
+        # doesn't then ask for GitHub's
+        home = tmp_path / "action-home"
+        home.mkdir(exist_ok=True)
+        (home / ".gitconfig").write_text("[credential]\n\thelper = store\n")
+        env = hub_link.no_prompt_env(wdir) | {
+            "HOME": str(home),
+            "GIT_CONFIG_GLOBAL": str(home / ".gitconfig"),
+        }
+
+        def git_credential(operation: str, attrs: str) -> str:
+            return subprocess.run(
+                ["git", "credential", operation],
+                input=attrs,
+                env=env,
+                cwd=wdir,
+                capture_output=True,
+                text=True,
+            ).stdout
+
+        filled = git_credential(
+            "fill", "protocol=https\nhost=github.com\npath=o/r.git\n\n"
+        )
+        git_credential("approve", filled + "\n")
         return {
             "creds": creds.dir,
             "helper": repo.git.config(
                 "--get-urlmatch", "credential.helper", "https://github.com"
             ),
             "filled": filled,
+            "stored": os.listdir(home),
         }
 
     for kind in [
@@ -1000,7 +1035,8 @@ async def test_sessions(tmp_path, monkeypatch):
     await wait_for(lambda: reply(50), timeout=60)
     pushed = reply(50)["result"]
     assert "git-credential" in pushed["helper"]
-    assert "password=ghu_4" in pushed["filled"]
+    assert "password=ghs_5" in pushed["filled"]
+    assert pushed["stored"] == [".gitconfig"]
     assert len(asked) == asked_before
     assert not os.path.exists(pushed["creds"])
     # Only actions that may reach the network get any
@@ -1014,24 +1050,24 @@ async def test_sessions(tmp_path, monkeypatch):
         message("a", msg | {"id": req_id, "workspace": workspace})
     await wait_for(lambda: all(reply(i) for i in range(51, 56)), timeout=60)
     assert reply(54)["result"] == {"creds": None}
-    assert "password=ghu_4" in reply(55)["result"]["filled"]
+    assert "password=ghs_5" in reply(55)["result"]["filled"]
     # Nor on Windows, whose event loops can't serve Unix sockets
     monkeypatch.setattr(hub_link.sys, "platform", "win32")
     assert op.open_credentials(op.channels["a"]) is None
     monkeypatch.setattr(hub_link.sys, "platform", sys.platform)
     assert reply(51)["result"] == reply(52)["result"] == {"creds": None}
-    assert "password=ghu_4" in reply(53)["result"]["filled"]
+    assert "password=ghs_5" in reply(53)["result"]["filled"]
     # The sign-in they were got with ending forgets them
     assert op.credentials
-    op.credentials[("other", "github-token")] = (
-        "ghu_x",
+    op.credentials[("other", "github-token", "o/r")] = (
+        "ghs_x",
         time.time() + 60,
         "x",
     )
     op.close_ended_channels(["sign-in-gone"])
-    assert ("other", "github-token") in op.credentials
+    assert ("other", "github-token", "o/r") in op.credentials
     op.close_ended_channels(["x"])
-    assert ("other", "github-token") not in op.credentials
+    assert ("other", "github-token", "o/r") not in op.credentials
     # A session doesn't get another's terminal, nor anything else the
     # link has open, which a shell that lists what it has shows
     assert not os.get_inheritable(op.sessions[sid].fd)
@@ -1076,7 +1112,7 @@ async def test_sessions(tmp_path, monkeypatch):
     # With no browser attached, check-ins still ask about the sign-in its
     # credentials came from, and once that ends, e.g., with a logout, it
     # gets no more, even ones the link kept
-    assert (await ask({"type": "github.token"}))["token"].startswith("ghu_")
+    assert (await ask(github_req))["token"].startswith("ghs_")
     reported: list[list[str]] = []
 
     def logged_out(cfg, workspaces, mode, connected, restart, sessions):
@@ -1090,7 +1126,7 @@ async def test_sessions(tmp_path, monkeypatch):
     await op.check_in()
     assert reported == [["sign-in-1"]]
     with pytest.raises(hub.LinkCredentialError, match="has ended"):
-        await ask({"type": "github.token"})
+        await ask(github_req)
     assert not any(v[2] == "sign-in-1" for v in op.credentials.values())
     open_channel("c")
     message("c", {"type": "sessions.list", "id": 5})

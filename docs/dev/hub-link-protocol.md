@@ -135,11 +135,21 @@ minutes, once the relay token it can no longer refresh expires.
   The grant has to be one the API signed for this machine and its owner,
   though it may have expired, its sign-in still live, its second factor
   unexpired, and issued since two-factor authentication was last set up.
-  Session tokens can't make personal access tokens, of any scope, nor
-  anything a signed-in session is needed for.
-- `POST /machines/github-token` takes the same, on the same terms, and
-  returns the owner's GitHub token as `{"token": ...}`, refreshed by the hub
-  when it's due.
+  Session tokens can't make personal access tokens, of any scope, get the
+  user's tokens for other services, e.g., GitHub's, Zenodo's, or
+  Overleaf's, nor do anything a signed-in session is needed for.
+- `POST /machines/github-token` takes the same, on the same terms, plus
+  the GitHub repo Git asks about, as `owner` and `repo`, and returns
+  `{"token": ..., "expires": ...}`, the Calkit GitHub App's installation
+  token for that repo alone, which lasts at most an hour, and when to stop
+  using it, in seconds since the epoch.
+  It's read-only unless the owner can write to a project on the hub using
+  that repo, and it's refused (403) if the owner can't access any, or the
+  app isn't installed on the repo.
+  The owner's own GitHub token never goes to a machine, since it could be
+  traded at `POST /login/github-token` for a login that outlives the
+  session, and an installation token can't be, since it can't read
+  GitHub's `/user`.
 - `GET /projects/{owner}/{name}/workspaces` lists the project's workspaces
   across the user's machines, from their latest check-ins.
 
@@ -332,28 +342,32 @@ from the link itself, has:
 - `CALKIT_LINK_SOCKET`, the socket's path.
 - `CALKIT_LINK_SECRET`, a random secret every request must carry.
 - `CALKIT_LINK_API_URL`, the link's hub's API URL.
-- `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, adding
-  `credential.https://github.com.helper`, which runs
-  `calkit hub link git-credential` with the link's own Python.
+- `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`,
+  setting, for `https://github.com`, `credential.helper` empty, which
+  drops every helper it would otherwise use, then to
+  `calkit hub link git-credential`, run with the link's own Python, and
+  `credential.useHttpPath` true, so it's told the repo's path.
 
 Each connection carries one request and one reply, each a line of JSON:
 
-| Request                                               | Reply                              |
-| ----------------------------------------------------- | ---------------------------------- |
-| `{"type": "hub.token", "api_url": ..., "fresh": ...}` | `{"token": ...}`                   |
-| `{"type": "github.token", "forget": ...}`             | `{"token": ...}`, `{}` if `forget` |
+| Request                                                | Reply                              |
+| ------------------------------------------------------ | ---------------------------------- |
+| `{"type": "hub.token", "api_url": ..., "fresh": ...}`  | `{"token": ...}`                   |
+| `{"type": "github.token", "path": ..., "forget": ...}` | `{"token": ...}`, `{}` if `forget` |
 
 Each also has `secret`, and a failure is `{"error": ...}`.
+A GitHub `path` is Git's, a plain `owner/repo`, with or without `.git`,
+and anything else is refused.
 The link answers only while the session or action runs, gives hub tokens
-only for `api_url`s that are its own hub's, and keeps what it got, by
-grant, until 2 minutes before a hub token expires, or 5 minutes for
-GitHub's, or until the sign-in it was got with ends, or its second factor
-expires, so a browser polling status doesn't ask the hub each time.
+only for `api_url`s that are its own hub's, and keeps what it got, by grant
+and, for GitHub, repo, until 2 minutes before it expires, or until the
+sign-in it was got with ends, or its second factor expires, so a browser
+polling status doesn't ask the hub each time.
 Once a check-in says a sign-in has ended, sessions and actions whose
 credentials came from it get no more, until a session is attached to from
 another.
 `fresh` gets another, after the hub refused the last, and `forget` drops
-the GitHub token, which Git asks for when GitHub refuses it.
+a repo's GitHub token, which Git asks for when GitHub refuses it.
 An action's credentials come from the grant of the channel that sent it.
 A session's come from that of the channel that opened it, until one
 attaches whose second factor lasts longer.
@@ -369,11 +383,17 @@ lasting ones, so only ones set up beforehand work.
 The hub's tokens are still removed from remotes that aren't on the hub,
 session tokens included.
 
-Git asks the user's own helpers first, e.g., one with a token in a file,
-and the link's only if they give nothing.
-Remotes using SSH, e.g., `git@github.com:`, aren't rewritten to HTTPS,
-since a key without a passphrase works there already, as does typing one,
-and the hub's GitHub token can only reach repositories its GitHub App can.
+For `https://github.com`, Git in sessions and actions uses only the
+link's helper, bypassing the user's own, e.g., `gh`'s, so none of theirs
+is handed a token to store when Git approves it, e.g., `store` or
+osxkeychain.
+The link's tokens only reach repos of projects on the hub with the Calkit
+GitHub App installed, read-only for those the owner can only read, and
+pushes with them show the app as the pusher, though commits keep their
+author.
+Remotes using SSH, e.g., `git@github.com:`, are untouched and aren't
+rewritten to HTTPS, since a key without a passphrase works there already,
+as does typing one, and reaches repos the app can't.
 
 ## Workspace actions
 

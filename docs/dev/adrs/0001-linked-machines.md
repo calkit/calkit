@@ -292,12 +292,22 @@ if it only reads what's on the machine.
   A raw token in the environment, e.g., `CALKIT_TOKEN`, would be sent to
   whichever hub a command uses, which is why the link checks the hub asked
   for is its own.
-- Git gets the owner's GitHub token, which the hub already keeps and
-  refreshes, through a credential helper the session's environment
-  configures for `https://github.com` only, after any of the user's own.
-  SSH remotes aren't rewritten to HTTPS, since keys without a passphrase
-  work at boot and keys with one can be typed for in a session, while the
-  hub's GitHub token only reaches repositories its GitHub App can.
+- Git gets the Calkit GitHub App's installation token for the one repo
+  it asks about, lasting at most an hour, through a credential helper
+  configured for `https://github.com` only, which tells it the repo.
+  The hub issues one only for a repo of a project on the hub the owner can
+  access, with the app installed, read-only unless they can write to the
+  project.
+  It never sends the owner's own GitHub token, which anything in the
+  session could trade for a hub login that outlives it, and session tokens
+  can't fetch it, nor the user's other services' tokens.
+  Pushes show the app as the pusher, though commits keep their author.
+- Git there uses only that helper for `https://github.com`, so the user's
+  own, e.g., `gh` or osxkeychain, are bypassed, and none can store a token
+  the link gave.
+  SSH remotes are untouched, since keys without a passphrase work at boot
+  and keys with one can be typed for in a session, and they reach repos the
+  app can't.
 - HTTP DVC remotes keep a token in `.dvc/config.local`, which sessions
   neither make nor write, so only ones set up beforehand work there;
   `ck://` remotes, the default, get the session's token as they go.

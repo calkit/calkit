@@ -401,9 +401,10 @@ def git_credential(
         str, typer.Argument(help="What Git asks: get, store, or erase.")
     ],
 ) -> None:
-    """Give Git the hub's GitHub token in a hub link's session.
+    """Give Git a GitHub token for one repo in a hub link's session.
 
-    Sessions the link opens set this up for https://github.com only.
+    Sessions and actions the link runs set this up for https://github.com
+    only, with the repo's path.
     """
     import sys
 
@@ -419,12 +420,17 @@ def git_credential(
         operation not in ("get", "erase")
         or attrs.get("protocol") != "https"
         or attrs.get("host") != "github.com"
+        or not attrs.get("path")
     ):
         return
     try:
         # Erasing is Git saying the last was refused
         resp = hub.ask_link(
-            {"type": "github.token", "forget": operation == "erase"}
+            {
+                "type": "github.token",
+                "path": attrs["path"],
+                "forget": operation == "erase",
+            }
         )
     except hub.LinkCredentialError as e:
         # Git carries on without, e.g., asking for a password

@@ -267,6 +267,19 @@ def test_build_output_and_aux_dirs(tmp_dir):
     assert os.path.isfile("paper/build/main.pdf")
     assert not os.path.isfile("paper/main.pdf")
     assert os.path.isfile("paper/aux/main.aux")
+    # Wherever a latexmkrc, as a pipeline stage passes one, or a
+    # pass-through -outdir puts the PDF, it gets an ID
+    with open("paper/latexmkrc", "w") as f:
+        f.write("$out_dir = 'rc-out';\n")
+    for args, pdf in [
+        (["--latexmk-rc", "paper/latexmkrc"], "paper/rc-out/main.pdf"),
+        (["--latexmk-arg=-outdir=arg-out"], "paper/arg-out/main.pdf"),
+    ]:
+        subprocess.check_call(
+            ["calkit", "latex", "build", *args, "paper/main.tex"]
+        )
+        with open(pdf, "rb") as f:
+            assert f.read().count(b"/ID [<") == 1, pdf
 
 
 def test_build_localizes_synctex(tmp_dir, monkeypatch):

@@ -647,6 +647,8 @@ def build(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
+    import time
+
     # latexmk records a failed run in its file database and then refuses
     # to try again, reporting "Nothing to do" and exiting non-zero with no
     # PDF. Running it again is the first thing anyone does after a
@@ -696,6 +698,8 @@ def build(
         env_vars=tex_env_vars,
     )
     log_dir = aux_dir or output_dir or tex_dir
+    # A little early, for file systems that keep times coarsely
+    started = time.time() - 2
     if _run_latexmk(
         cmd,
         env=(os.environ | tex_env_vars) if tex_env_vars else None,
@@ -705,9 +709,17 @@ def build(
         verbose=verbose,
     ):
         raise_error("latexmk failed")
-    pdf_fpath = os.path.join(pdf_dir, stem + ".pdf")
-    if os.path.isfile(pdf_fpath):
-        calkit.latex.set_content_id(pdf_fpath)
+    # A latexmkrc or a pass-through -outdir can put the PDF elsewhere, so
+    # whichever this build wrote gets its ID
+    pdf_fpaths = [os.path.join(pdf_dir, stem + ".pdf")] + glob.glob(
+        os.path.join(tex_dir, "**", stem + ".pdf"), recursive=True
+    )
+    for pdf_fpath in dict.fromkeys(map(os.path.normpath, pdf_fpaths)):
+        if (
+            os.path.isfile(pdf_fpath)
+            and os.path.getmtime(pdf_fpath) >= started
+        ):
+            calkit.latex.set_content_id(pdf_fpath)
     if not no_synctex:
         # A container build records its own paths, which reverse search in
         # a viewer can't open

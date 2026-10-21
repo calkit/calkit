@@ -290,12 +290,12 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: bdc3a804143e43fac5cc9776b59a2018
-      size: 12909
+      md5: 17229a0f042cbd3bac7f257fabe9a4e4
+      size: 12959
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: 390ed99658893fbebe4c10968cc0dc2c
-      size: 54710
+      md5: 1078d8d6187e0e072d20f488176ff71e
+      size: 50208
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
@@ -323,8 +323,8 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 7958d417ff1c2b7ee96ea94c0026416e
-      size: 177797
+      md5: 5274e82c187a229793077b14d889249b
+      size: 179770
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:
@@ -332,14 +332,18 @@ stages:
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
       size: 5
+    - path: docs/one-pager/texgyreheros-regular.otf
+      hash: md5
+      md5: 46896831ad260afebc87cd85a7ea159a
+      size: 133600
     - path: results/2027-budget.json
       hash: md5
       md5: 35eeb271dbd0ac856631b17035062793
       size: 2007
     - path: scripts/plot-budget.py
       hash: md5
-      md5: 2e2e4ac613d605a86f321d6d15081241
-      size: 1404
+      md5: f82dd0e200f11901b388e17208a80fce
+      size: 1639
     - path: uv.lock
       hash: md5
       md5: 2f62f424413d77d2f5ff0274223128a7
@@ -347,8 +351,8 @@ stages:
     outs:
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: 390ed99658893fbebe4c10968cc0dc2c
-      size: 54710
+      md5: 1078d8d6187e0e072d20f488176ff71e
+      size: 50208
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit

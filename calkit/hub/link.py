@@ -814,9 +814,45 @@ def discover_workspaces(cfg: dict) -> list[dict]:
             continue
         found[path] = kind
 
+    def data_project(path: str) -> str | None:
+        """The hub project a checkout's DVC data goes to, from its default
+        remote, which for a fork is the fork, though its calkit.yaml and
+        origin may name the project it was forked from.
+        """
+        from configobj import ConfigObj
+
+        from calkit.hub import get_api_url
+
+        remote = None
+        urls: dict[str, str] = {}
+        # The local config wins, as with DVC
+        for fname in ("config", "config.local"):
+            try:
+                with _open_in_workspace(
+                    path, os.path.join(".dvc", fname)
+                ) as f:
+                    cfg = ConfigObj(f.read().splitlines(), encoding="utf-8")
+            except Exception:
+                continue
+            core = cfg.get("core")
+            if isinstance(core, dict) and core.get("remote"):
+                remote = str(core["remote"])
+            for section, options in cfg.items():
+                match = re.fullmatch(r'remote "(.+)"', section)
+                if match and isinstance(options, dict) and options.get("url"):
+                    urls[match.group(1)] = str(options["url"])
+        url = urls.get(remote or "", "")
+        api_url = re.escape(get_api_url(get_hub_url()).rstrip("/"))
+        match = re.fullmatch(r"ck://([^/]+/[^/]+?)/?", url) or re.fullmatch(
+            api_url + r"/projects/([^/]+/[^/]+)/dvc/?", url
+        )
+        return match.group(1) if match else None
+
     def describe(path: str, kind: str) -> dict:
         try:
-            project = calkit.detect_project_name(wdir=path)
+            project = data_project(path) or calkit.detect_project_name(
+                wdir=path
+            )
         except Exception:
             project = None
         # Only names the hub could have, since it's whatever the repo says
@@ -3669,6 +3705,30 @@ def get_running_pid(key: str | None = None) -> int | None:
     return pid if "hub link start" in cmdline else None
 
 
+def login_shell_path() -> str | None:
+    """The PATH the user's login shell sets up, or None if it can't say."""
+    marker = "CALKIT_LOGIN_PATH="
+    try:
+        out = subprocess.run(
+            # After anything the profile prints
+            [get_shell(), "-l", "-c", f'printf "\\n{marker}%s" "$PATH"'],
+            cwd=config.get_user_home(),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=30,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.warning(f"Couldn't get the login shell's PATH: {e}")
+        return None
+    last = out.stdout.rsplit("\n", 1)[-1]
+    if out.returncode != 0 or not last.startswith(marker):
+        logger.warning("Couldn't get the login shell's PATH")
+        return None
+    return last.removeprefix(marker) or None
+
+
 def run(cfg: dict, mode: str = "foreground") -> bool:
     """Run the link until it's revoked, interrupted, or, in cron mode,
     idle or not asked to connect.
@@ -3686,6 +3746,13 @@ def run(cfg: dict, mode: str = "foreground") -> bool:
         _private_log()
     if not any(isinstance(f, RepeatFilter) for f in logger.filters):
         logger.addFilter(RepeatFilter())
+    # A service starts with the system's bare PATH, e.g., without
+    # /usr/local/bin on macOS, so what it runs gets a login shell's, as
+    # sessions do
+    if mode != "foreground" and sys.platform != "win32":
+        path = login_shell_path()
+        if path:
+            os.environ["PATH"] = path
 
     # Service managers stop it with SIGTERM, which should shut down as
     # cleanly as Ctrl+C

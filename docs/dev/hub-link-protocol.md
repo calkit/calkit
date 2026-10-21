@@ -64,6 +64,9 @@ minutes, once the relay token it can no longer refresh expires.
   (`last_activity`), whether `in_use_by` a link to another hub,
   which is always just `another hub`, and the coding agents running there
   (`agents`), and whether a restart is pending (`restart_pending`).
+  A workspace's `project` is the hub project its DVC data goes to, from
+  its default `ck://` or hub remote, so a fork is named for the fork,
+  and otherwise what its `calkit.yaml` and Git remote say.
   Each agent, e.g., Claude Code, Codex, or opencode, is found by its
   command and working directory, however it was started, and has its
   `tool`, `pid`, when it `started`, `where` it runs (`session`, one of the

@@ -32,6 +32,7 @@ import {
   useClipboard,
 } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import mixpanel from "mixpanel-browser"
 import {
   createFileRoute,
   redirect,
@@ -46,6 +47,7 @@ import {
   MachinesService,
   type Workspace,
 } from "../../../../../client"
+import FeatureVoteButton from "../../../../../components/Common/FeatureVoteButton"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Tooltip from "../../../../../components/Common/Tooltip"
 import SecondFactorPrompt from "../../../../../components/Machines/SecondFactorPrompt"
@@ -104,7 +106,7 @@ function readWorkspacesState(key: string): WorkspacesState {
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/workspaces",
 )({
-  component: Workspaces,
+  component: WorkspacesGate,
   validateSearch: (search) => workspacesSearchSchema.parse(search),
   beforeLoad: ({ cause, params, search, location }) => {
     if (!isLoggedIn()) {
@@ -134,6 +136,38 @@ export const Route = createFileRoute(
     })
   },
 })
+
+// Only admins have workspaces for now, and everyone else can vote for them;
+// views are tracked either way, to see how many look
+function WorkspacesGate() {
+  const { accountName, projectName } = Route.useParams()
+  const { user } = useAuth()
+  const enabled = Boolean(user?.is_superuser)
+  const userId = user?.id
+  useEffect(() => {
+    if (!userId) return
+    mixpanel.track("Viewed workspaces", {
+      scope: "project",
+      enabled,
+      owner_name: accountName,
+      project_name: projectName,
+    })
+  }, [userId, enabled, accountName, projectName])
+  if (!user) return <LoadingSpinner height="60vh" />
+  if (enabled) return <Workspaces />
+  return (
+    <Box maxW="xl" py={6}>
+      <Heading size="md" mb={3}>
+        Workspaces are coming soon
+      </Heading>
+      <Text mb={5}>
+        Work on this project on your own machines from here, with terminals for
+        coding agents, and see how its pipeline is doing.
+      </Text>
+      <FeatureVoteButton feature="local-workspace-compute" />
+    </Box>
+  )
+}
 
 function Workspaces() {
   const { accountName, projectName } = Route.useParams()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from types import SimpleNamespace
 from typing import get_args
 
@@ -343,7 +344,10 @@ def test_write_keeps_secrets_it_never_read(
     reread.write()
     with open(tmp_path / "config.yaml") as f:
         assert yaml.safe_load(f)["access_token"] == "access-secret"
-    assert oct(os.stat(tmp_path / "config.yaml").st_mode & 0o777) == "0o600"
+    # Only the user can read it, where permissions say so
+    if sys.platform != "win32":
+        mode = os.stat(tmp_path / "config.yaml").st_mode & 0o777
+        assert oct(mode) == "0o600"
     monkeypatch.setattr(config, "_secret_cache", {})
     assert config.read().access_token == "access-secret"
 

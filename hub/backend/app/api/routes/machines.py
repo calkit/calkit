@@ -235,6 +235,12 @@ def post_machine(
     session: SessionDep, current_user: CurrentUser, req: MachinePost
 ) -> MachineRegistered:
     """Register a machine as one of the user's."""
+    if not (current_user.is_superuser or settings.MACHINES_FOR_EVERYONE):
+        raise HTTPException(
+            403,
+            "Linking machines isn't available on this hub yet; vote for it at "
+            f"{settings.frontend_host}/workspaces",
+        )
     # Setting up the second factor that opening sessions takes proves
     # itself by email, so that address has to be the user's
     if not current_user.email_verified:

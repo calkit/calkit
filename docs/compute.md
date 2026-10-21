@@ -28,7 +28,7 @@ with their status, terminal sessions, coding agents, and pipeline runs.
 First [install Calkit](installation.md), then run:
 
 ```sh
-calkit hub link
+calkit hub link install
 ```
 
 Calkit's [install script](installation.md) can also link the machine
@@ -42,7 +42,7 @@ On macOS, starting at boot asks for your password,
 and on Linux, linking lets your user's services keep running after you
 log out.
 If that isn't possible, the link starts when you log in instead,
-and `calkit hub link` says so.
+and `calkit hub link install` says so.
 To start it at login on purpose, pass `--login`.
 On Windows, it always starts at login.
 
@@ -65,7 +65,7 @@ calkit hub link start
 You can also link another machine over SSH:
 
 ```sh
-calkit hub link --ssh user@cluster.example.edu
+calkit hub link install --ssh user@cluster.example.edu
 ```
 
 The host can be anything you'd pass to `ssh`,
@@ -82,7 +82,7 @@ To link to a hub other than your default one,
 e.g., one run by your institution, pass its URL with `--hub`:
 
 ```sh
-calkit hub link --hub https://hub.example.edu
+calkit hub link install --hub https://hub.example.edu
 ```
 
 A machine can have a link to each hub you use,
@@ -227,7 +227,7 @@ revokes its token and shuts its link down at its next check-in.
 To unlink a machine, run this on that machine:
 
 ```sh
-calkit hub unlink
+calkit hub link uninstall
 ```
 
 ## Features coming soon

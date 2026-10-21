@@ -303,7 +303,7 @@ function Machines() {
       <TwoFactor />
       <Text mb={4}>
         To connect a machine, install the Calkit CLI on it and run{" "}
-        <Code>calkit hub link</Code>.
+        <Code>calkit hub link install</Code>.
       </Text>
       <TableContainer>
         <Table size="sm">

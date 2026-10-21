@@ -36,6 +36,6 @@ $Bin = (uv tool dir --bin).Trim()
 # Install shell completion, per command name, so the `ck` alias gets it too
 if ($InstallCompletion) { Write-Host "Installing shell completion"; foreach ($cmd in @("calkit", "ck")) { & "$Bin\$cmd.exe" --install-completion; if ($LASTEXITCODE -ne 0) { Write-Warning "Failed to install shell completion for '$cmd'; run '$cmd --install-completion' manually" } } }
 
-if ($InstallLink) { Write-Host "Linking this machine to the hub"; & "$Bin\calkit.exe" hub link; if ($LASTEXITCODE -ne 0) { throw "Failed to link this machine; run 'calkit hub link' to try again" } }
+if ($InstallLink) { Write-Host "Linking this machine to the hub"; & "$Bin\calkit.exe" hub link install; if ($LASTEXITCODE -ne 0) { throw "Failed to link this machine; run 'calkit hub link install' to try again" } }
 
 Write-Host "Success! Restart your shell to pick up Calkit on your PATH."

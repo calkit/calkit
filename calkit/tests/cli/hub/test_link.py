@@ -22,7 +22,7 @@ def test_link(tmp_path, monkeypatch):
 
     monkeypatch.setattr(hub_link, "register", register)
     # A hub that needs the email verified first says where to do it
-    result = CliRunner().invoke(hub_app, ["link", "--no-service"])
+    result = CliRunner().invoke(hub_app, ["link", "install", "--no-service"])
     assert result.exit_code == 1
     assert "Verify your email" in result.output
     assert "/settings" in result.output
@@ -32,7 +32,7 @@ def test_link(tmp_path, monkeypatch):
         "register",
         lambda: (_ for _ in ()).throw(HTTPError("500: Boom")),
     )
-    result = CliRunner().invoke(hub_app, ["link", "--no-service"])
+    result = CliRunner().invoke(hub_app, ["link", "install", "--no-service"])
     assert result.exit_code == 1
     assert "500: Boom" in result.output
     # One whose key the hub refused is revoked with its own token, in case
@@ -53,7 +53,7 @@ def test_link(tmp_path, monkeypatch):
         lambda: {"name": "box-2", "token": "ckm_new"},
     )
     monkeypatch.setattr(hub_link, "uninstall_service", lambda key=None: None)
-    result = CliRunner().invoke(hub_app, ["link", "--no-service"])
+    result = CliRunner().invoke(hub_app, ["link", "install", "--no-service"])
     assert result.exit_code == 0, result.output
     assert [cfg["token"] for cfg in revoked] == ["ckm_old"]
     assert "Registered machine 'box-2'" in result.output
@@ -77,7 +77,7 @@ def test_link(tmp_path, monkeypatch):
         return {"id": "m1"}
 
     monkeypatch.setattr(hub, "_request", request)
-    result = CliRunner().invoke(hub_app, ["link", "--no-service"])
+    result = CliRunner().invoke(hub_app, ["link", "install", "--no-service"])
     assert result.exit_code == 0, result.output
     assert "Machine 'box' is already registered" in result.output
     assert asked[0]["auth"] is False
@@ -85,13 +85,13 @@ def test_link(tmp_path, monkeypatch):
     # Sessions would be root shells, so it never runs as root, sudo or not
     if hasattr(os, "geteuid"):
         monkeypatch.setattr(hub_link.os, "geteuid", lambda: 0)
-        for args in [["link", "--no-service"], ["link", "start"]]:
+        for args in [["link", "install", "--no-service"], ["link", "start"]]:
             result = CliRunner().invoke(hub_app, args)
             assert result.exit_code == 1
             assert "root" in result.output
 
 
-def test_unlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_uninstall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from calkit.hub import core as hub
 
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path))
@@ -119,7 +119,7 @@ def test_unlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "api_url": "https://api.hub",
             }
         )
-        result = CliRunner().invoke(hub_app, ["unlink"])
+        result = CliRunner().invoke(hub_app, ["link", "uninstall"])
         assert result.exit_code == 0, result.output
         assert "Could not revoke" not in result.output
         assert not os.path.exists(hub_link.get_config_path())
@@ -157,13 +157,15 @@ def test_stop_and_restart_every_hub(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert sorted(restarted) == ["http://localhost", "https://calkit.io"]
     assert "Restarted the link for http://localhost" in result.output
-    # Options before a subcommand would be ignored, so they're refused
+    # Options go after the subcommand, and on their own only show help
     restarted.clear()
     result = CliRunner().invoke(
         hub_app, ["link", "--hub", "https://calkit.io", "restart"]
     )
-    assert result.exit_code == 1
-    assert "after the subcommand" in result.output
+    assert result.exit_code != 0
+    assert not restarted
+    result = CliRunner().invoke(hub_app, ["link"])
+    assert "install" in result.output and "uninstall" in result.output
     assert not restarted
     result = CliRunner().invoke(hub_app, ["link", "stop"])
     assert result.exit_code == 0

@@ -2105,7 +2105,7 @@ def test_install_remote(monkeypatch):
             return SimpleNamespace(
                 stdout=f"Welcome\ncalkit-uid={uid[0]}\n{remote_config['text']}"
             )
-        if fail_install and "calkit hub link --hub" in argv[-1]:
+        if fail_install and "calkit hub link install --hub" in argv[-1]:
             raise subprocess.CalledProcessError(1, argv)
         return SimpleNamespace(stdout="")
 
@@ -2126,7 +2126,10 @@ def test_install_remote(monkeypatch):
     assert "umask 077" in write_argv[-1]
     assert yaml.safe_load(config_text) == cfg
     assert cfg["token"] == "ckm_secret" and cfg["api_url"] == "https://api.hub"
-    assert "calkit hub link --hub https://calkit.io --cron" in install_argv[-1]
+    assert (
+        "calkit hub link install --hub https://calkit.io --cron"
+        in install_argv[-1]
+    )
     # It goes where the other machine keeps its link to this hub
     assert "~/.calkit/hubs/calkit.io/link.yaml" in write_argv[-1]
     # Reinstalling keeps the machine already there

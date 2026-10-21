@@ -124,7 +124,7 @@ made.
 
 ### Authentication and permissions
 
-`calkit hub link` registers the machine with the hub using the
+`calkit hub link install` registers the machine with the hub using the
 user's existing token and receives a dedicated machine token, stored
 locally.
 That token can only connect as that machine, so revoking it does not
@@ -269,8 +269,9 @@ A machine can have a link for each hub it's connected to, e.g., the
 public hub, an institution's, and one running locally for development,
 each with its own config, service, lock, and log, named by the hub's key,
 e.g., `calkit.io`, which is also how managed workspaces are filed.
-`--hub` picks which one a command acts on, and without it, `calkit hub link`
-uses the user's default hub and other commands the only one linked.
+`--hub` picks which one a command acts on, and without it,
+`calkit hub link install` uses the user's default hub and other commands
+the only one linked.
 A workspace can be seen by more than one of them, e.g., one under
 `~/calkit`, but is used by one at a time: a link takes a lock in
 the workspace itself, `.calkit/local/hub-link.lock`, while a session or
@@ -419,7 +420,7 @@ project, which the hub opens into when working hub first.
 
 ### Running as a service
 
-`calkit hub link` installs a service that runs as the user and,
+`calkit hub link install` installs a service that runs as the user and,
 where allowed, starts at boot rather than at login.
 This covers machines nobody logs in to, e.g., a cloud VM that is stopped
 when not in use: when it starts again, so does the link.
@@ -451,7 +452,7 @@ On HPC, where login nodes kill long-lived processes, two modes are
 supported:
 
 - `calkit hub link start` in the foreground, e.g., inside tmux.
-- `calkit hub link --cron`, which checks in with the hub on a
+- `calkit hub link install --cron`, which checks in with the hub on a
   schedule, reporting scheduler job states, and opens the websocket only
   when there is work to do, e.g., the user has opened a shell.
   Its crontab includes an `@reboot` entry so it checks in at boot.
@@ -477,15 +478,15 @@ It can rerun a failed stage through the link.
 
 ### CLI
 
-- `calkit hub link [--ssh HOST] [--cron]` installs Calkit on the
+- `calkit hub link install [--ssh HOST] [--cron]` installs Calkit on the
   target if needed, then the link, then registers it.
-- `calkit hub link start|stop|restart|status|logs|add-workspace` and
-  `calkit hub unlink` manage the local link.
+- `calkit hub link start|stop|restart|status|logs|add-workspace` manage
+  the local link, and `calkit hub link uninstall` removes it.
 - `calkit hub get machines` lists a user's machines from the hub.
 
 ### Removal
 
-`calkit hub unlink` revokes the machine on the hub with its own
+`calkit hub link uninstall` revokes the machine on the hub with its own
 token and removes the service and local state.
 Deleting a machine on the hub revokes its token and the CLI token
 issued to it.

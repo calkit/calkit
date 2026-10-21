@@ -9,7 +9,7 @@ from typing_extensions import Annotated
 
 from calkit.cli import AliasGroup, raise_error, warn
 
-link_app = typer.Typer(cls=AliasGroup, invoke_without_command=True)
+link_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 HubOption = Annotated[
     str | None,
@@ -61,16 +61,15 @@ def _require_config() -> dict:
     cfg = hub_link.load_config()
     if cfg is None:
         raise_error(
-            "This machine isn't linked to this hub; run 'calkit hub link' "
-            "first"
+            "This machine isn't linked to this hub; run 'calkit hub link "
+            "install' first"
         )
     assert cfg is not None
     return cfg
 
 
-@link_app.callback()
-def link(
-    ctx: typer.Context,
+@link_app.command(name="install")
+def install(
     hub: HubOption = None,
     login: Annotated[
         bool,
@@ -114,7 +113,7 @@ def link(
         ),
     ] = False,
 ) -> None:
-    """Link this machine to a hub and run the link as a service."""
+    """Link this machine to a hub and run its link as a service."""
     from calkit.cli import warn
     from calkit.hub import link as hub_link
 
@@ -130,14 +129,6 @@ def link(
             )
         return str(e)
 
-    if ctx.invoked_subcommand is not None:
-        # Otherwise they'd be ignored, e.g., --hub before 'stop'
-        if hub is not None or login or cron or ssh is not None or no_service:
-            raise_error(
-                "Put options after the subcommand, e.g., "
-                "'calkit hub link status --hub URL'"
-            )
-        return
     # Sessions would be root shells, and it asks for sudo when it needs it
     try:
         hub_link.refuse_root()
@@ -396,7 +387,8 @@ def add_workspace(
     typer.echo(f"Added {path}; it will show on the hub at the next check-in")
 
 
-def unlink(hub: HubOption = None) -> None:
+@link_app.command(name="uninstall")
+def uninstall(hub: HubOption = None) -> None:
     """Revoke this machine on the hub and remove its link here."""
     from calkit.hub import link as hub_link
 

@@ -50,7 +50,7 @@ minutes, once the relay token it can no longer refresh expires.
 - `DELETE /machines/{machine_id}` revokes one, which takes a web sign-in,
   as relay tokens do, not just the user's token.
   `DELETE /machines/self`, with the machine token, revokes the machine
-  making the request, which is how `calkit hub unlink` does it.
+  making the request, which is how `calkit hub link uninstall` does it.
 - `POST /machines/check-in`, with the machine token, records that the
   link is alive, how it runs (`mode`: `service`, `foreground`, or
   `cron`), whether it's `connected` to the relay, and what workspaces it
@@ -69,7 +69,7 @@ minutes, once the relay token it can no longer refresh expires.
   (`channel_sessions`, the grants' `sid`s), and its `public_key`, which
   the hub keeps the first time it's sent and never replaces.
   A different one gets 409, after which the link doesn't connect and
-  `calkit hub link` registers it again.
+  `calkit hub link install` registers it again.
   It returns the relay URL, a machine relay token, `grant_public_key`,
   which grants are checked with, `connect`, which tells a link in
   cron mode whether to connect, `restart`, which

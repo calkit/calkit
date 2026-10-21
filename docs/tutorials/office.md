@@ -125,7 +125,7 @@ Or on macOS or Linux:
 curl -LsSf install.calkit.org | sh -s -- --link
 ```
 
-If Calkit is already installed, run `calkit hub link` instead.
+If Calkit is already installed, run `calkit hub link install` instead.
 
 The link starts on its own from now on,
 so we won't need to do this again.

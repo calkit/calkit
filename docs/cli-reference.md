@@ -4273,13 +4273,12 @@ Options:
 
 Interact with a Calkit hub.
 
-| Command                                  | Description                                               |
-| ---------------------------------------- | --------------------------------------------------------- |
-| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.                          |
-| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                                   |
-| [`unlink`](#subcommand-hub-cloud-unlink) | Revoke this machine on the hub and remove its link here.  |
-| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens).                   |
-| [`link`](#subcommand-hub-cloud-link)     | Link this machine to a hub and run the link as a service. |
+| Command                                  | Description                                                    |
+| ---------------------------------------- | -------------------------------------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.                               |
+| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                                        |
+| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens).                        |
+| [`link`](#subcommand-hub-cloud-link)     | Manage this machine's link to a hub, to work on it from there. |
 
 <a id="subcommand-hub-cloud-get"></a>
 
@@ -4325,24 +4324,6 @@ Options:
 | --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `--hub`         | str     | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
 | `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                       |
-
-<a id="subcommand-hub-cloud-unlink"></a>
-
-#### `calkit hub|cloud unlink`
-
-Revoke this machine on the hub and remove its link here.
-
-Usage:
-
-```text
-calkit hub|cloud unlink [OPTIONS]
-```
-
-Options:
-
-| Option  | Type | Required | Default | Description                                                                                                                                                  |
-| ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--hub` | str  | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
 
 <a id="subcommand-hub-cloud-config"></a>
 
@@ -4452,12 +4433,35 @@ Options:
 
 #### `calkit hub|cloud link`
 
-Link this machine to a hub and run the link as a service.
+Manage this machine's link to a hub, to work on it from there.
 
 Usage:
 
 ```text
-calkit hub|cloud link [OPTIONS] COMMAND [ARGS]...
+calkit hub|cloud link COMMAND [ARGS]...
+```
+
+| Command                                                     | Description                                                                                 |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [`install`](#subcommand-hub-cloud-link-install)             | Link this machine to a hub and run its link as a service.                                   |
+| [`start`](#subcommand-hub-cloud-link-start)                 | Run the link in the foreground, e.g., inside tmux.                                          |
+| [`status`](#subcommand-hub-cloud-link-status)               | Show this machine's links and their workspaces.                                             |
+| [`stop`](#subcommand-hub-cloud-link-stop)                   | Stop the link's service until it's restarted, for every hub unless one is given.            |
+| [`restart`](#subcommand-hub-cloud-link-restart)             | Restart the link's service, e.g., after updating Calkit, for every hub unless one is given. |
+| [`logs`](#subcommand-hub-cloud-link-logs)                   | Show the link service's logs.                                                               |
+| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace) | Add a project outside ~/calkit and ~/dev as a workspace.                                    |
+| [`uninstall`](#subcommand-hub-cloud-link-uninstall)         | Revoke this machine on the hub and remove its link here.                                    |
+
+<a id="subcommand-hub-cloud-link-install"></a>
+
+##### `calkit hub|cloud link install`
+
+Link this machine to a hub and run its link as a service.
+
+Usage:
+
+```text
+calkit hub|cloud link install [OPTIONS]
 ```
 
 Options:
@@ -4469,15 +4473,6 @@ Options:
 | `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                                   |
 | `--ssh`        | str     | no       |         | Link another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed.                             |
 | `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit hub link start' inside tmux on a cluster.                                                                     |
-
-| Command                                                     | Description                                                                                 |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [`start`](#subcommand-hub-cloud-link-start)                 | Run the link in the foreground, e.g., inside tmux.                                          |
-| [`status`](#subcommand-hub-cloud-link-status)               | Show this machine's links and their workspaces.                                             |
-| [`stop`](#subcommand-hub-cloud-link-stop)                   | Stop the link's service until it's restarted, for every hub unless one is given.            |
-| [`restart`](#subcommand-hub-cloud-link-restart)             | Restart the link's service, e.g., after updating Calkit, for every hub unless one is given. |
-| [`logs`](#subcommand-hub-cloud-link-logs)                   | Show the link service's logs.                                                               |
-| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace) | Add a project outside ~/calkit and ~/dev as a workspace.                                    |
 
 <a id="subcommand-hub-cloud-link-start"></a>
 
@@ -4588,6 +4583,24 @@ Arguments:
 | Argument | Type | Required | Default | Description               |
 | -------- | ---- | -------- | ------- | ------------------------- |
 | `path`   | str  | no       | .       | Path to a Calkit project. |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                  |
+| ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--hub` | str  | no       |         | URL of the hub the link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-uninstall"></a>
+
+##### `calkit hub|cloud link uninstall`
+
+Revoke this machine on the hub and remove its link here.
+
+Usage:
+
+```text
+calkit hub|cloud link uninstall [OPTIONS]
+```
 
 Options:
 

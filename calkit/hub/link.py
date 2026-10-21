@@ -517,7 +517,7 @@ def install_remote(
                 text=True,
                 check=True,
             )
-        args = ["calkit", "hub", "link", "--hub", get_hub_url()]
+        args = ["calkit", "hub", "link", "install", "--hub", get_hub_url()]
         if cron:
             args.append("--cron")
         if no_service:
@@ -862,12 +862,12 @@ def check_in(
         if status == 403:
             raise LinkRevoked(str(e))
         if status == 409:
-            # So 'calkit hub link' registers it again
+            # So 'calkit hub link install' registers it again
             cfg["key_rejected"] = True
             save_config(cfg)
             logger.error(
                 "The hub has a different key for this machine, so it won't "
-                "connect; run 'calkit hub link' again"
+                "connect; run 'calkit hub link install' again"
             )
             raise LinkKeyRejected(str(e))
         raise
@@ -3725,7 +3725,7 @@ def install_service(login: bool = False) -> list[str]:
     def can_sudo() -> bool:
         # Without asking, e.g., while sudo remembers the password, then by
         # asking, if there's a terminal to ask in, which there isn't when
-        # 'calkit hub link --ssh' runs this over SSH
+        # 'calkit hub link install --ssh' runs this over SSH
         if not shutil.which("sudo"):
             return False
         cached = subprocess.run(["sudo", "-n", "true"], capture_output=True)
@@ -3833,8 +3833,8 @@ def install_service(login: bool = False) -> list[str]:
         if not at_boot and not login:
             notes.append(
                 "Starting at boot needs sudo, so the link will start "
-                "when you log in. To start it at boot, run 'calkit hub link' "
-                "again in a terminal."
+                "when you log in. To start it at boot, run 'calkit hub link "
+                "install' again in a terminal."
             )
     elif system == "Windows":
         fpath = _windows_startup_path()

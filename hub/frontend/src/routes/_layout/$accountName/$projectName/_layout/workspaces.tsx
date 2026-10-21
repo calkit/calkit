@@ -295,8 +295,8 @@ function Workspaces() {
       {machines.length === 0 ? (
         <Text mb={4}>
           No machines yet. Install the Calkit CLI and run{" "}
-          <Code>calkit hub link</Code> to link a machine and connect to a
-          workspace.
+          <Code>calkit hub link install</Code> to link a machine and connect to
+          a workspace.
         </Text>
       ) : workspaces.length === 0 ? (
         <Text mb={4}>

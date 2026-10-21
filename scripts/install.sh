@@ -58,12 +58,12 @@ if [ "$LINK" = 1 ]; then
     # When piped into sh, this script is sh's input, so logging in to the hub
     # needs the terminal's
     if (exec </dev/tty) 2>/dev/null; then
-        "$BIN/calkit" hub link </dev/tty
+        "$BIN/calkit" hub link install </dev/tty
     else
-        "$BIN/calkit" hub link
+        "$BIN/calkit" hub link install
     fi
     if [ $? -ne 0 ]; then
-        echo "❌ Failed to link this machine; run 'calkit hub link' to try again"
+        echo "❌ Failed to link this machine; run 'calkit hub link install' to try again"
         exit 1
     fi
 fi

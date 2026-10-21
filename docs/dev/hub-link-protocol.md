@@ -305,20 +305,27 @@ The link sends `{"type": "sessions.output", "session": ..., "data":
 `{"type": "sessions.exit", "session": ..., "code": ...}` when a session's
 shell exits.
 
-## Session credentials
+## Session and action credentials
 
 A link started at boot, e.g., macOS's LaunchDaemon, runs outside the
-user's login session, so its sessions can't reach the keychain Calkit keeps
-hub tokens in, nor, usually, an SSH agent.
-So sessions get credentials from their link, which gets them from the hub
-over HTTPS, as above, never through the relay, and keeps them only in
-memory.
-Sessions aren't offered on Windows, so this is POSIX only.
+user's login session, so neither its sessions nor the workspace actions it
+runs can reach the keychain Calkit keeps hub tokens in, nor, usually, an
+SSH agent.
+So both get credentials from the link, which gets them from the hub over
+HTTPS, as above, never through the relay, and keeps them only in memory.
+This is POSIX only, though Windows links run actions too.
 
-Each session gets a Unix socket in a folder of its own that only the user
-can open, made with `mkdtemp` in `XDG_RUNTIME_DIR` where there is one, else
-the temporary folder, and removed when the session ends.
-Its environment has:
+Each session gets a credential channel: a Unix socket in a folder of its
+own that only the user can open, made with `mkdtemp` in `XDG_RUNTIME_DIR`
+where there is one, else the temporary folder, and removed when the
+session ends.
+So does each action that may reach the hub or a Git host, i.e.,
+`workspace.pull`, `workspace.push`, `workspace.save`,
+`workspace.add_stage`, `workspace.run`, `workspace.new`,
+`workspaces.clone`, `machine.check`, and `workspace.status` and
+`workspace.git_status` unless `fetch` is false, for as long as it runs.
+The environment of a session, or of what an action runs, including Git
+from the link itself, has:
 
 - `CALKIT_LINK_SOCKET`, the socket's path.
 - `CALKIT_LINK_SECRET`, a random secret every request must carry.
@@ -335,14 +342,16 @@ Each connection carries one request and one reply, each a line of JSON:
 | `{"type": "github.token", "forget": ...}`             | `{"token": ...}`, `{}` if `forget` |
 
 Each also has `secret`, and a failure is `{"error": ...}`.
-The link answers only while the session runs, gives hub tokens only for
-`api_url`s that are its own hub's, and keeps what it got until 2 minutes
-before a hub token expires, or 5 minutes for GitHub's, or until the sign-in
-it was got with ends, or its second factor expires.
+The link answers only while the session or action runs, gives hub tokens
+only for `api_url`s that are its own hub's, and keeps what it got, by
+grant, until 2 minutes before a hub token expires, or 5 minutes for
+GitHub's, or until the sign-in it was got with ends, or its second factor
+expires, so a browser polling status doesn't ask the hub each time.
 `fresh` gets another, after the hub refused the last, and `forget` drops
 the GitHub token, which Git asks for when GitHub refuses it.
-Which grant a session's credentials come from is that of the channel that
-opened it, until one attaches whose second factor lasts longer.
+An action's credentials come from the grant of the channel that sent it.
+A session's come from that of the channel that opened it, until one
+attaches whose second factor lasts longer.
 
 When Calkit in a session needs a token and its active hub is the link's,
 it asks the link, never the keychain, config, or `CALKIT_TOKEN`, which
@@ -445,7 +454,8 @@ Before cloning, the hub asks what the machine still needs.
 `git_email`, Git's identity there or null, `repo`, with the URL's `host`,
 whether it's `ssh`, and an `error` if `git ls-remote` couldn't reach it
 without prompting, and `token`, whether Calkit has a token for this
-link's hub, which pulling and pushing data use.
+link's hub, which pulling and pushing data use, always true where actions
+get credentials from the link.
 `machine.configure`, with `id` and any of `git_name`, `git_email`, and
 `token`, sets Git's global identity and, with `token` true, gets a CLI
 token for the machine and stores it in Calkit's config, as

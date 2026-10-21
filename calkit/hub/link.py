@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import contextvars
 import json
 import logging
 import os
@@ -1181,6 +1182,10 @@ def no_prompt_env(wdir: str, accept_new_hosts: bool = False) -> dict[str, str]:
     the terminal a link started in the foreground runs in.
     """
     env = dict(child_env(), GIT_TERMINAL_PROMPT="0")
+    # With credentials from the link, if the action has them
+    creds = _action_credentials.get()
+    if creds is not None:
+        add_credential_env(env, creds)
     if "GIT_SSH_COMMAND" in env:
         return env
     # Unless the user chose how Git runs SSH
@@ -1202,14 +1207,17 @@ def no_prompt_env(wdir: str, accept_new_hosts: bool = False) -> dict[str, str]:
 
 
 def get_workspace_repo(wdir: str) -> git.Repo:
-    """A workspace's repo, which runs Git so it can't prompt."""
+    """A workspace's repo, which runs Git so it can't prompt, and with the
+    action's credentials, if it has them.
+    """
     repo = calkit.git.get_repo(wdir)
     env = no_prompt_env(wdir)
     repo.git.update_environment(
         **{
-            k: env[k]
-            for k in ("GIT_TERMINAL_PROMPT", "GIT_SSH_COMMAND")
-            if k in env
+            k: v
+            for k, v in env.items()
+            if k in ("GIT_TERMINAL_PROMPT", "GIT_SSH_COMMAND")
+            or k.startswith(("GIT_CONFIG_", "CALKIT_LINK_"))
         }
     )
     return repo
@@ -2267,8 +2275,10 @@ def check_machine_setup(git_repo_url: str) -> dict:
             "ssh": git_repo_url.startswith("git@"),
             "error": error,
         },
-        # This link's hub's, which the project is on
-        "token": bool(config.read().token),
+        # This link's hub's, which the project is on, and which actions get
+        # from the link when they need one
+        "token": _action_credentials.get() is not None
+        or bool(config.read().token),
     }
 
 
@@ -2463,6 +2473,55 @@ def new_workspace(wdir: str, branch: str) -> dict:
     return {"path": path}
 
 
+@dataclass
+class CredentialChannel:
+    """Where what the link runs for a session or an action asks it for
+    credentials: a socket in a folder only the user can open, with a secret
+    only that is told, answered with what the grant of the browser channel
+    it came from allows, until it's closed.
+    """
+
+    auth: ChannelAuth
+    dir: str
+    sock: Any
+    secret: str
+    api_url: str
+    server: asyncio.Task | None = None
+    closed: bool = False
+
+    @property
+    def path(self) -> str:
+        return os.path.join(self.dir, "creds.sock")
+
+
+def add_credential_env(env: dict[str, str], creds: CredentialChannel) -> None:
+    """Point Calkit at a credential channel, for the link's hub, and Git at
+    it for GitHub's, after any helper of the user's, which may work, e.g.,
+    one with a token in a file.
+    """
+    from calkit.hub import core as hub
+
+    env[hub.LINK_SOCKET_ENV] = creds.path
+    env[hub.LINK_SECRET_ENV] = creds.secret
+    env[hub.LINK_API_URL_ENV] = creds.api_url
+    try:
+        n = int(env.get("GIT_CONFIG_COUNT") or 0)
+    except ValueError:
+        n = 0
+    env[f"GIT_CONFIG_KEY_{n}"] = "credential.https://github.com.helper"
+    env[f"GIT_CONFIG_VALUE_{n}"] = "!" + shlex.join(
+        [*CALKIT_COMMAND, "hub", "link", "git-credential"]
+    )
+    env["GIT_CONFIG_COUNT"] = str(n + 1)
+
+
+# The credential channel of the action running, which the thread it runs in
+# gets a copy of, so what it runs gets credentials too
+_action_credentials: contextvars.ContextVar[CredentialChannel | None] = (
+    contextvars.ContextVar("action_credentials", default=None)
+)
+
+
 # Browser requests that act on a workspace, run off the event loop since
 # they wait on Git, DVC, and the network
 WORKSPACE_ACTIONS: dict[str, Any] = {
@@ -2498,6 +2557,20 @@ READ_ONLY_ACTIONS = {
     "workspace.run_log",
     "workspace.agent_log",
 }
+# Actions that may reach the hub or a Git host, so what they run gets
+# credentials, as a session's commands do; status ones only when fetching
+CREDENTIAL_ACTIONS = {
+    "workspace.status",
+    "workspace.git_status",
+    "workspace.pull",
+    "workspace.push",
+    "workspace.save",
+    "workspace.add_stage",
+    "workspace.run",
+    "workspace.new",
+    "workspaces.clone",
+    "machine.check",
+}
 # Ones quick and harmless enough to not wait on what else is going on there,
 # e.g., the rest of the status, which can take a while for a large pipeline
 LOCK_FREE_ACTIONS = {
@@ -2525,17 +2598,8 @@ class Session:
             errors="replace"
         )
     )
-    # The channel whose grant it gets credentials with, and where it asks
-    # for them: a socket in a folder only the user can open, with a secret
-    # only the session is told, and what's been got, by hub route, with
-    # when to get it again
-    auth: ChannelAuth | None = None
-    cred_dir: str | None = None
-    cred_sock: Any = None
-    cred_server: asyncio.Task | None = None
-    cred_secret: str = ""
-    credentials: dict[str, tuple[str, float]] = field(default_factory=dict)
-    cred_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Where it asks for credentials
+    creds: CredentialChannel | None = None
 
     @property
     def label(self) -> str:
@@ -2597,6 +2661,11 @@ class HubLink:
         # Workspaces this link holds the lock for, against other hubs'
         self.claimed: set[str] = set()
         self.connected_check_in: asyncio.Task | None = None
+        # Credentials got for sessions and actions, by grant and hub route,
+        # with when to get them again and the sign-in they came from, so
+        # what one browser channel allows is asked for once
+        self.credentials: dict[tuple[str, str], tuple[str, float, str]] = {}
+        self.credential_locks: dict[tuple[str, str], asyncio.Lock] = {}
         # Asked for by the hub or 'calkit upgrade', and done once idle
         self.restart_requested = False
         self.stop_requested = False
@@ -2734,50 +2803,9 @@ class HubLink:
         # by a thread that no longer exists in it
         shell = shutil.which(get_shell()) or "/bin/sh"
         env = dict(child_env(), TERM="xterm-256color")
-        import functools
-        import secrets
-        import tempfile
-
-        from calkit.hub import core as hub
-
-        # Where it asks for credentials, which the user's runtime folder
-        # keeps from temporary file cleanup, where there is one
-        cred_dir = cred_sock = None
-        cred_secret = secrets.token_urlsafe(32)
-        if auth is not None:
-            runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-            try:
-                cred_dir = tempfile.mkdtemp(
-                    prefix="calkit-link-",
-                    dir=runtime_dir
-                    if runtime_dir and os.path.isdir(runtime_dir)
-                    else None,
-                )
-                cred_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                cred_sock.bind(os.path.join(cred_dir, "creds.sock"))
-                cred_sock.listen(16)
-            except OSError as e:
-                logger.warning(f"The session won't have credentials: {e}")
-                if cred_sock is not None:
-                    cred_sock.close()
-                if cred_dir is not None:
-                    shutil.rmtree(cred_dir, ignore_errors=True)
-                cred_dir = cred_sock = None
-        if cred_dir is not None:
-            env[hub.LINK_SOCKET_ENV] = os.path.join(cred_dir, "creds.sock")
-            env[hub.LINK_SECRET_ENV] = cred_secret
-            env[hub.LINK_API_URL_ENV] = self.cfg["api_url"]
-            # Git asks this link for GitHub's, after any helper of the
-            # user's, which may work, e.g., one with a token in a file
-            try:
-                n = int(env.get("GIT_CONFIG_COUNT") or 0)
-            except ValueError:
-                n = 0
-            env[f"GIT_CONFIG_KEY_{n}"] = "credential.https://github.com.helper"
-            env[f"GIT_CONFIG_VALUE_{n}"] = "!" + shlex.join(
-                [*CALKIT_COMMAND, "hub", "link", "git-credential"]
-            )
-            env["GIT_CONFIG_COUNT"] = str(n + 1)
+        creds = self.open_credentials(auth) if auth is not None else None
+        if creds is not None:
+            add_credential_env(env, creds)
         argv = [os.fsencode(shell), b"-l"]
         envb = {os.fsencode(k): os.fsencode(v) for k, v in env.items()}
         cwd = os.fsencode(workspace)
@@ -2785,9 +2813,14 @@ class HubLink:
             max_fd = min(os.sysconf("SC_OPEN_MAX"), 65536)
         except (OSError, ValueError):
             max_fd = 4096
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            pid, fd = pty.fork()
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                pid, fd = pty.fork()
+        except OSError:
+            if creds is not None:
+                self.close_credentials(creds)
+            raise
         if pid == 0:
             # Child: a login shell in the workspace, as over SSH, without
             # anything of the link's, e.g., other sessions' terminals
@@ -2804,17 +2837,7 @@ class HubLink:
             id=uuid.uuid4().hex[:12], workspace=workspace, pid=pid, fd=fd
         )
         self.sessions[session.id] = session
-        if cred_dir is not None:
-            session.auth = auth
-            session.cred_dir = cred_dir
-            session.cred_sock = cred_sock
-            session.cred_secret = cred_secret
-            session.cred_server = asyncio.get_running_loop().create_task(
-                asyncio.start_unix_server(
-                    functools.partial(self.serve_credentials, session),
-                    sock=cred_sock,
-                )
-            )
+        session.creds = creds
         self.resize(session, cols, rows)
         asyncio.get_running_loop().add_reader(fd, self._on_output, session)
         # Typed ahead, so the shell runs it once it has started, and the
@@ -2911,7 +2934,8 @@ class HubLink:
         except OSError:
             pass
         self.sessions.pop(session.id, None)
-        self.stop_credentials(session)
+        if session.creds is not None:
+            self.close_credentials(session.creds)
         self._release_if_unused(session.workspace)
         reported = False
 
@@ -2979,17 +3003,77 @@ class HubLink:
     def close_all(self) -> None:
         for session in list(self.sessions.values()):
             self.close_session(session)
-            self.stop_credentials(session)
+            if session.creds is not None:
+                self.close_credentials(session.creds)
         # Stopping, so nothing here is being used any more
         for wdir in list(self.claimed):
             release_workspace(wdir)
         self.claimed.clear()
 
+    def open_credentials(self, auth: ChannelAuth) -> CredentialChannel | None:
+        """Start answering requests for credentials with what a browser
+        channel's grant allows, in the user's runtime folder, which keeps it
+        from temporary file cleanup, where there is one.
+        """
+        import functools
+        import secrets
+        import tempfile
+
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        cred_dir = sock = None
+        try:
+            cred_dir = tempfile.mkdtemp(
+                prefix="calkit-link-",
+                dir=runtime_dir
+                if runtime_dir and os.path.isdir(runtime_dir)
+                else None,
+            )
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.bind(os.path.join(cred_dir, "creds.sock"))
+            sock.listen(16)
+        except OSError as e:
+            logger.warning(f"Credentials aren't available: {e}")
+            if sock is not None:
+                sock.close()
+            if cred_dir is not None:
+                shutil.rmtree(cred_dir, ignore_errors=True)
+            return None
+        creds = CredentialChannel(
+            auth=auth,
+            dir=cred_dir,
+            sock=sock,
+            secret=secrets.token_urlsafe(32),
+            api_url=self.cfg["api_url"],
+        )
+        creds.server = asyncio.get_running_loop().create_task(
+            asyncio.start_unix_server(
+                functools.partial(self.serve_credentials, creds), sock=sock
+            )
+        )
+        return creds
+
+    def close_credentials(self, creds: CredentialChannel) -> None:
+        """Stop answering a credential channel's requests, once what it was
+        for has ended.
+        """
+        creds.closed = True
+        task = creds.server
+        if task is not None:
+            task.cancel()
+            if (
+                task.done()
+                and not task.cancelled()
+                and task.exception() is None
+            ):
+                task.result().close()
+        creds.sock.close()
+        shutil.rmtree(creds.dir, ignore_errors=True)
+
     async def serve_credentials(
-        self, session: Session, reader: Any, writer: Any
+        self, creds: CredentialChannel, reader: Any, writer: Any
     ) -> None:
-        """Answer a request from a session for a credential, one per
-        connection, as a line of JSON each way.
+        """Answer a request for a credential, one per connection, as a line
+        of JSON each way.
         """
         import hmac
 
@@ -2997,10 +3081,10 @@ class HubLink:
             line = await asyncio.wait_for(reader.readline(), 10)
             req = json.loads(line)
             if not isinstance(req, dict) or not hmac.compare_digest(
-                str(req.get("secret", "")), session.cred_secret
+                str(req.get("secret", "")), creds.secret
             ):
                 raise ValueError("Not this session's secret")
-            reply = await self.get_session_credential(session, req)
+            reply = await self.get_credential(creds, req)
         except Exception as e:
             reply = {"error": str(e) or type(e).__name__}
         try:
@@ -3011,10 +3095,10 @@ class HubLink:
         finally:
             writer.close()
 
-    async def get_session_credential(
-        self, session: Session, req: dict
+    async def get_credential(
+        self, creds: CredentialChannel, req: dict
     ) -> dict:
-        """A credential a session asked for, while it lasts: a token for
+        """A credential asked for on a channel while it's open: a token for
         this link's hub, and no other, or GitHub's for Git, from the hub,
         kept until shortly before it expires.
 
@@ -3025,8 +3109,8 @@ class HubLink:
 
         from calkit.hub import core as hub
 
-        if session.id not in self.sessions or session.auth is None:
-            raise ValueError("The session has ended")
+        if creds.closed:
+            raise ValueError("The session or action has ended")
         kind = req.get("type")
         if kind == "hub.token":
             api_url = req.get("api_url")
@@ -3041,24 +3125,20 @@ class HubLink:
             route = "github-token"
         else:
             raise ValueError("Unknown request")
+        auth = creds.auth
+        key = (auth.grant_id, route)
         if req.get("fresh") or req.get("forget"):
-            session.credentials.pop(route, None)
+            self.credentials.pop(key, None)
         if req.get("forget"):
             return {}
-        async with session.cred_lock:
-            cached = session.credentials.get(route)
-            # Nothing past the second factor the session opened with
-            if (
-                cached is not None
-                and time.time() < cached[1]
-                and time.time() < session.auth.tfa_exp
-            ):
+        async with self.credential_locks.setdefault(key, asyncio.Lock()):
+            cached = self.credentials.get(key)
+            now = time.time()
+            # Nothing past the second factor the grant came with
+            if cached is not None and now < cached[1] and now < auth.tfa_exp:
                 return {"token": cached[0]}
             token = await asyncio.to_thread(
-                request_session_credential,
-                self.cfg,
-                route,
-                session.auth.grant,
+                request_session_credential, self.cfg, route, auth.grant
             )
             if route == "session-token":
                 expires = (
@@ -3066,29 +3146,13 @@ class HubLink:
                 ) - SESSION_TOKEN_MARGIN_SECONDS
             else:
                 expires = time.time() + GITHUB_TOKEN_CACHE_SECONDS
-            # Unless it ended while this waited on the hub
-            if session.id in self.sessions:
-                session.credentials[route] = (token, expires)
+            # Ones that ran out go, so the cache doesn't grow
+            for k, (_, exp, _) in list(self.credentials.items()):
+                if exp < now:
+                    self.credentials.pop(k, None)
+                    self.credential_locks.pop(k, None)
+            self.credentials[key] = (token, expires, auth.session_id)
         return {"token": token}
-
-    def stop_credentials(self, session: Session) -> None:
-        """Stop answering a session's requests for credentials, and forget
-        the ones it got.
-        """
-        task = session.cred_server
-        if task is not None:
-            task.cancel()
-            if (
-                task.done()
-                and not task.cancelled()
-                and task.exception() is None
-            ):
-                task.result().close()
-        if session.cred_sock is not None:
-            session.cred_sock.close()
-        if session.cred_dir is not None:
-            shutil.rmtree(session.cred_dir, ignore_errors=True)
-        session.credentials.clear()
 
     def _release_if_unused(self, wdir: str) -> None:
         """Release a workspace once no session or action is using it."""
@@ -3130,10 +3194,10 @@ class HubLink:
             auth = self.channels.get(ch)
             if (
                 auth is not None
-                and session.auth is not None
-                and auth.tfa_exp >= session.auth.tfa_exp
+                and session.creds is not None
+                and auth.tfa_exp >= session.creds.auth.tfa_exp
             ):
-                session.auth = auth
+                session.creds.auth = auth
             if "cols" in msg and "rows" in msg:
                 self.resize(session, msg["cols"], msg["rows"])
             self.attach(session, ch)
@@ -3252,10 +3316,10 @@ class HubLink:
             if auth.session_id in ended:
                 self.close_channel(ch)
                 logger.info(f"Closed channel {ch}, since its sign-in ended")
-        # The hub gives sessions opened from them no more credentials
-        for session in self.sessions.values():
-            if session.auth is not None and session.auth.session_id in ended:
-                session.credentials.clear()
+        # The hub gives no more credentials for them either
+        for key, (_, _, sign_in) in list(self.credentials.items()):
+            if sign_in in ended:
+                self.credentials.pop(key, None)
 
     def hub_reachable(self) -> bool:
         """Whether the hub was heard from lately enough for this link to
@@ -3300,6 +3364,18 @@ class HubLink:
         """
         kind = msg["type"]
         req_id = msg.get("id")
+        # What it runs gets credentials as a session's commands do, with
+        # the grant of the channel that asked, unless it only reads what's
+        # here
+        auth = self.channels.get(ch)
+        creds = (
+            self.open_credentials(auth)
+            if auth is not None
+            and kind in CREDENTIAL_ACTIONS
+            and msg.get("fetch") is not False
+            else None
+        )
+        context = _action_credentials.set(creds)
         try:
             if kind == "workspaces.clone":
                 path = await asyncio.to_thread(
@@ -3393,6 +3469,10 @@ class HubLink:
                     ch, {"type": "error", "id": req_id, "error": str(e)}
                 )
             return
+        finally:
+            _action_credentials.reset(context)
+            if creds is not None:
+                self.close_credentials(creds)
         # So the hub lists a new workspace right away
         if kind == "workspace.new":
             await self.check_in_quietly()

@@ -901,8 +901,8 @@ async def test_sessions(tmp_path, monkeypatch):
         hub_link, "request_session_credential", fake_credential
     )
     session = op.sessions[sid]
-    assert session.cred_dir is not None
-    cred_dir = session.cred_dir
+    assert session.creds is not None
+    cred_dir = session.creds.dir
     sock_path = os.path.join(cred_dir, "creds.sock")
     assert stat.S_IMODE(os.stat(cred_dir).st_mode) == 0o700
     message(
@@ -921,7 +921,7 @@ async def test_sessions(tmp_path, monkeypatch):
         )
     )
     monkeypatch.setenv(hub.LINK_SOCKET_ENV, sock_path)
-    monkeypatch.setenv(hub.LINK_SECRET_ENV, session.cred_secret)
+    monkeypatch.setenv(hub.LINK_SECRET_ENV, session.creds.secret)
 
     async def ask(req: dict) -> dict:
         return await asyncio.to_thread(hub.ask_link, req)
@@ -939,7 +939,7 @@ async def test_sessions(tmp_path, monkeypatch):
     monkeypatch.setenv(hub.LINK_SECRET_ENV, "wrong")
     with pytest.raises(hub.LinkCredentialError, match="secret"):
         await ask(token_req)
-    monkeypatch.setenv(hub.LINK_SECRET_ENV, session.cred_secret)
+    monkeypatch.setenv(hub.LINK_SECRET_ENV, session.creds.secret)
     # Git asks for GitHub's through the helper sessions are set up with, only
     # for github.com, and forgets one GitHub refused
     clear()
@@ -961,12 +961,63 @@ async def test_sessions(tmp_path, monkeypatch):
     assert await ask({"type": "github.token"}) == {"token": "ghu_3"}
     assert await ask({"type": "github.token", "forget": True}) == {}
     assert await ask({"type": "github.token"}) == {"token": "ghu_4"}
-    # The sign-in it got them with ending forgets them
-    session_auth = session.auth
-    session.auth = hub_link.ChannelAuth(key=None, session_id="gone")
-    op.close_ended_channels(["gone"])
-    assert session.credentials == {}
-    session.auth = session_auth
+
+    # Actions the hub starts get them the same way, with the grant of the
+    # channel that asked, over a channel of their own that closes with
+    # them, for what they run and for Git run from the link itself, and
+    # share what that grant already got
+    def credentialed(wdir: str, **kwargs: Any) -> dict:
+        creds = hub_link._action_credentials.get()
+        if creds is None:
+            return {"creds": None}
+        repo = hub_link.get_workspace_repo(wdir)
+        filled = subprocess.run(
+            ["git", "credential", "fill"],
+            input="protocol=https\nhost=github.com\n\n",
+            env=hub_link.no_prompt_env(wdir),
+            cwd=wdir,
+            capture_output=True,
+            text=True,
+        ).stdout
+        return {
+            "creds": creds.dir,
+            "helper": repo.git.config(
+                "--get-urlmatch", "credential.helper", "https://github.com"
+            ),
+            "filled": filled,
+        }
+
+    for kind in ["workspace.push", "workspace.status", "workspace.stages"]:
+        monkeypatch.setitem(hub_link.WORKSPACE_ACTIONS, kind, credentialed)
+    asked_before = len(asked)
+    message("a", {"type": "workspace.push", "id": 50, "workspace": workspace})
+    await wait_for(lambda: reply(50), timeout=60)
+    pushed = reply(50)["result"]
+    assert "git-credential" in pushed["helper"]
+    assert "password=ghu_4" in pushed["filled"]
+    assert len(asked) == asked_before
+    assert not os.path.exists(pushed["creds"])
+    # Only actions that may reach the network get any
+    for req_id, msg in [
+        (51, {"type": "workspace.stages"}),
+        (52, {"type": "workspace.status", "fetch": False}),
+        (53, {"type": "workspace.status"}),
+    ]:
+        message("a", msg | {"id": req_id, "workspace": workspace})
+    await wait_for(lambda: reply(51) and reply(52) and reply(53), timeout=60)
+    assert reply(51)["result"] == reply(52)["result"] == {"creds": None}
+    assert "password=ghu_4" in reply(53)["result"]["filled"]
+    # The sign-in they were got with ending forgets them
+    assert op.credentials
+    op.credentials[("other", "github-token")] = (
+        "ghu_x",
+        time.time() + 60,
+        "x",
+    )
+    op.close_ended_channels(["sign-in-gone"])
+    assert ("other", "github-token") in op.credentials
+    op.close_ended_channels(["x"])
+    assert ("other", "github-token") not in op.credentials
     # A session doesn't get another's terminal, nor anything else the
     # link has open, which a shell that lists what it has shows
     assert not os.get_inheritable(op.sessions[sid].fd)
@@ -992,11 +1043,11 @@ async def test_sessions(tmp_path, monkeypatch):
     open_channel("early", tfa_exp=int(time.time()) + 60)
     message("early", {"type": "sessions.attach", "id": 40, "session": sid})
     await wait_for(lambda: reply(40))
-    assert op.sessions[sid].auth is op.channels["a"]
+    assert op.sessions[sid].creds.auth is op.channels["a"]
     open_channel("b", tfa_exp=int(time.time()) + 7200)
     message("b", {"type": "sessions.attach", "id": 4, "session": sid})
     await wait_for(lambda: "HI-42" in output("b"))
-    assert op.sessions[sid].auth is op.channels["b"]
+    assert op.sessions[sid].creds.auth is op.channels["b"]
     # Marked, so the browser doesn't answer queries in it a second time
     outputs = [(c, m) for c, m in sent() if m["type"] == "sessions.output"]
     assert all(m.get("replay") for c, m in outputs if c == "b")

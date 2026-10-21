@@ -252,15 +252,21 @@ restrictions on top, i.e., Landlock on Linux and `sandbox-exec` on macOS,
 allowing system paths, the workspace, and a configurable list of home
 paths, and refusing sessions where they can't be enforced.
 
-#### Credentials in sessions
+#### Credentials in sessions and actions
 
 On macOS the link is a LaunchDaemon by default, so what runs in its
 sessions is outside the user's login session and can't reach their login
 keychain, where Calkit keeps hub tokens, nor, usually, an SSH agent.
 Pulling and pushing there would otherwise start a device login, or fail.
-Sessions instead get credentials from their link, which gets them from the
-hub over HTTPS when they're asked for, so they never pass through the relay,
-aren't in the session's environment, and aren't written to disk.
+The same goes for workspace actions the hub starts, e.g., pulls, pushes,
+runs, clones, and builds.
+Sessions and those actions instead get credentials from their link, which
+gets them from the hub over HTTPS when they're asked for, so they never
+pass through the relay, aren't in the environment, and aren't written to
+disk.
+An action is authorized like a session, by the grant of the channel that
+sent it, gets a channel of its own for as long as it runs, and gets none
+if it only reads what's on the machine.
 
 - Each session asks its link over a Unix socket in a folder only the
   user can open, with a secret only that session is told, which the link

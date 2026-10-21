@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
+import requests
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import col, func, select
@@ -37,8 +38,10 @@ from app.models import (
     Project,
     RefreshToken,
     User,
+    UserProjectAccess,
     UserToken,
 )
+from app.models.core import ROLE_NAMES
 from app.security import (
     create_access_token,
     create_machine_grant,
@@ -866,11 +869,15 @@ def post_machine_github_token(
     hub its owner can access.
 
     It's the Calkit GitHub App's installation token for that repo alone,
-    read-only unless the owner can write to the project, never the owner's
-    own GitHub token, which could be traded for a login that outlives the
-    session.
+    never the owner's own GitHub token, which could be traded for a login
+    that outlives the session. A hub project for a repo can be made without
+    any right to push to it, so, as the hub's own Git does, it's never more
+    than GitHub lets the owner do, asked with their own token, or, for an
+    owner without GitHub, than an invite to the project gives, nor more
+    than the hub does.
     """
     _check_session_grant(session, machine, req.grant)
+    user = machine.user
     # Narrowed in SQL, then compared however the URL is written
     repo = f"{req.owner}/{req.repo}".lower()
     projects = [
@@ -882,34 +889,79 @@ def post_machine_github_token(
         ).all()
         if github.parse_github_repo(project.git_repo_url) == repo
     ]
-    # The most the owner can do with any project using the repo
+    # The most the owner can do with any project using the repo on the hub,
+    # and by invite, which is all an owner without GitHub acts with
     levels = ["read", "write", "admin", "owner"]
-    access = None
+
+    def most(a: str | None, b: str | None) -> str | None:
+        if a is None or (b is not None and levels.index(b) > levels.index(a)):
+            return b
+        return a
+
+    hub_access = invited = None
     for project in projects:
         try:
             level = app.projects.get_project(
                 session,
                 owner_name=project.owner_account.name,
                 project_name=project.name,
-                current_user=machine.user,
+                current_user=user,
             ).current_user_access
         except HTTPException:
             continue
-        if level in levels and (
-            access is None or levels.index(level) > levels.index(access)
-        ):
-            access = level
-    if access is None:
+        if level in levels:
+            hub_access = most(hub_access, level)
+        role_id = session.exec(
+            select(UserProjectAccess.role_id)
+            .where(UserProjectAccess.project_id == project.id)
+            .where(UserProjectAccess.user_id == user.id)
+            .where(col(UserProjectAccess.role_id).is_not(None))
+        ).first()
+        if role_id is not None:
+            invited = most(invited, ROLE_NAMES[role_id])
+    if hub_access is None:
         raise HTTPException(
             403, "No project on the hub you can access uses this repo"
         )
+    refused = HTTPException(403, "You can't use this repo on GitHub")
+    if user.account.github_name is not None:
+        # What GitHub says, asked with the owner's token, which stays here,
+        # failing closed
+        try:
+            resp = requests.get(
+                f"https://api.github.com/repos/{req.owner}/{req.repo}",
+                headers={
+                    "Authorization": (
+                        f"Bearer {users.get_github_token(session, user)}"
+                    ),
+                    "Accept": "application/vnd.github+json",
+                },
+                timeout=10,
+            )
+            body = resp.json() if resp.ok else None
+            perms = body.get("permissions") if isinstance(body, dict) else None
+        except (HTTPException, requests.RequestException, ValueError):
+            perms = None
+        if not isinstance(perms, dict):
+            raise refused
+        if perms.get("push") is True:
+            allowed: str | None = "write"
+        elif perms.get("pull") is True:
+            allowed = "read"
+        else:
+            allowed = None
+    else:
+        allowed = invited
+    if allowed is None:
+        raise refused
+    write = levels.index(allowed) >= 1 and levels.index(hub_access) >= 1
     # Only what Git needs, even if the app may do more, e.g., change
     # workflows
     try:
         token, expires = github.get_app_installation_token_and_expiry(
             req.owner,
             req.repo,
-            permissions={"contents": "read" if access == "read" else "write"},
+            permissions={"contents": "write" if write else "read"},
         )
     except (github.GitHubAppNotConfigured, HTTPException):
         raise HTTPException(

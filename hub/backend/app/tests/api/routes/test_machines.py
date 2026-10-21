@@ -4,7 +4,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import timedelta
 from typing import Any, Literal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import jwt
 import pytest
@@ -25,9 +25,11 @@ from app.models import (
     Project,
     RefreshToken,
     User,
+    UserProjectAccess,
     UserToken,
     UserTOTP,
 )
+from app.models.core import ROLE_IDS
 from app.security import (
     create_access_token,
     create_machine_grant,
@@ -707,45 +709,85 @@ def test_machines(
     assert r.status_code == 403
     # Git in sessions and actions gets the Calkit GitHub App's token for the
     # one repo it asks about, on the same terms, only for a project on the
-    # hub the owner can access, read-only unless they can write to it, and
-    # never the owner's own GitHub token, which could be traded for a login
+    # hub the owner can access, and never the owner's own GitHub token,
+    # which could be traded for a login. A hub project for a repo can be
+    # made without any right to push to it, so the token is never more than
+    # GitHub, or for an owner without GitHub, an invite, allows either
     gh_owner = f"me-{uuid.uuid4().hex[:6]}"
+    hub_projects: dict[str, Project] = {}
     # However a project's URL writes the repo
-    for git_repo_url, owner_id, is_public in [
-        (f"https://github.com/{gh_owner}/Owned.git", user.account.id, False),
+    for name, git_repo_url, owner_id, is_public in [
+        ("owned", "https://github.com/{}/Owned.git", user.account.id, False),
         (
-            f"http://github.com/{gh_owner.upper()}/http-form/",
+            "http-form",
+            "http://github.com/{}/http-form/",
             user.account.id,
             False,
         ),
-        (f"git@github.com:{gh_owner}/ssh-form.git", user.account.id, False),
+        ("ssh-form", "git@github.com:{}/ssh-form.git", user.account.id, False),
         (
-            f"ssh://git@github.com/{gh_owner}/ssh-url-form",
+            "ssh-url-form",
+            "ssh://git@github.com/{}/ssh-url-form",
             user.account.id,
             False,
         ),
-        (f"https://github.com/{gh_owner}/read", su.account.id, True),
-        (f"https://github.com/{gh_owner}/theirs", su.account.id, False),
-        (f"https://github.com/{gh_owner}/uninstalled", user.account.id, False),
+        ("read", "https://github.com/{}/read", su.account.id, True),
+        ("theirs", "https://github.com/{}/theirs", su.account.id, False),
+        (
+            "uninstalled",
+            "https://github.com/{}/uninstalled",
+            user.account.id,
+            False,
+        ),
+        ("gone", "https://github.com/{}/gone", user.account.id, False),
+        (
+            "invited-write",
+            "https://github.com/{}/invited-write",
+            su.account.id,
+            False,
+        ),
+        (
+            "invited-read",
+            "https://github.com/{}/invited-read",
+            su.account.id,
+            False,
+        ),
         # Ones that only look like another's in SQL
-        (f"https://github.com/{gh_owner}/decoy-fork", user.account.id, False),
         (
-            f"https://gitlab.com/github.com/{gh_owner}/decoy",
+            "decoy-fork",
+            "https://github.com/{}/decoy-fork",
+            user.account.id,
+            False,
+        ),
+        (
+            "decoy-gitlab",
+            "https://gitlab.com/github.com/{}/decoy",
             user.account.id,
             False,
         ),
     ]:
+        made = Project(
+            name=f"gh-{uuid.uuid4().hex[:8]}",
+            title=name,
+            git_repo_url=git_repo_url.format(
+                gh_owner.upper() if name == "http-form" else gh_owner
+            ),
+            owner_account_id=owner_id,
+            is_public=is_public,
+        )
+        db.add(made)
+        hub_projects[name] = made
+    db.commit()
+    for name, role in [("invited-write", "write"), ("invited-read", "read")]:
         db.add(
-            Project(
-                name=f"gh-{uuid.uuid4().hex[:8]}",
-                title="GitHub",
-                git_repo_url=git_repo_url,
-                owner_account_id=owner_id,
-                is_public=is_public,
+            UserProjectAccess(
+                user_id=user.id,
+                project_id=hub_projects[name].id,
+                role_id=ROLE_IDS[role],
             )
         )
     db.commit()
-    minted: list[tuple[str, str, dict[str, str] | None]] = []
+    minted: list[tuple[str, dict[str, str] | None]] = []
 
     def mint(
         owner: str,
@@ -753,60 +795,130 @@ def test_machines(
         read_only: bool = False,
         permissions: dict[str, str] | None = None,
     ) -> tuple[str, float]:
+        assert owner == gh_owner
         if repo == "uninstalled":
             raise HTTPException(502, "GitHub returned 404")
-        minted.append((owner, repo, permissions))
+        minted.append((repo, permissions))
         return "ghs_x", 2_000_000_000.5
 
+    # What GitHub says the owner can do with each, asked with their token
+    github_says: dict[str, Any] = {
+        "owned": {"push": True, "pull": True},
+        # A hub owner GitHub won't let push, which is the escalation this
+        # guards against
+        "http-form": {"push": False, "pull": True},
+        "ssh-form": {"push": False, "pull": False},
+        "ssh-url-form": TimeoutError,
+        "read": {"push": False, "pull": True},
+        "uninstalled": {"push": True, "pull": True},
+        "gone": 404,
+        "decoy-fork": None,
+        "invited-write": {"push": True, "pull": True},
+        "invited-read": {"push": True, "pull": True},
+    }
+    asked_github: list[str] = []
+
+    def github_api(url: str, headers: dict[str, str], timeout: float) -> Any:
+        import requests
+
+        assert headers["Authorization"] == "Bearer gho_owner"
+        repo = url.removeprefix(f"https://api.github.com/repos/{gh_owner}/")
+        asked_github.append(repo)
+        said = github_says.get(repo, 404)
+        if said is TimeoutError:
+            raise requests.Timeout("Timed out")
+        resp = Mock(ok=said != 404)
+        resp.json.return_value = {} if said is None else {"permissions": said}
+        return resp
+
     def github_token(
-        headers: dict[str, str], shown: str, repo: str
+        repo: str,
+        shown: str = session_grant,
+        headers: dict[str, str] | None = None,
     ) -> Response:
         return client.post(
             "/machines/github-token",
-            headers=headers,
+            headers=headers or op_headers,
             json={"grant": shown, "owner": gh_owner, "repo": repo},
         )
 
-    no_github = HTTPException(401, "User needs to authenticate with GitHub")
+    write, read = {"contents": "write"}, {"contents": "read"}
+    Expected = list[tuple[str, dict[str, str] | None]]
     with (
         patch(
             "app.github.get_app_installation_token_and_expiry",
             side_effect=mint,
         ),
-        patch("app.users.get_github_token", side_effect=no_github),
+        patch("app.users.get_github_token", return_value="gho_owner"),
+        patch("app.projects._resolve_github_collaborator_access"),
+        patch("app.api.routes.machines.requests.get", side_effect=github_api),
     ):
-        for headers, shown, repo, status in [
-            (op_headers, session_grant, "owned", 200),
-            (op_headers, session_grant, "http-form", 200),
-            (op_headers, session_grant, "ssh-form", 200),
-            (op_headers, session_grant, "ssh-url-form", 200),
-            (op_headers, session_grant, "read", 200),
-            (op_headers, session_grant, "decoy", 403),
-            (op_headers, session_grant, "theirs", 403),
-            (op_headers, session_grant, "uninstalled", 403),
-            (op_headers, session_grant, "elsewhere", 403),
-            (op_headers, ended_grant, "owned", 403),
-            (op_headers, "nope", "owned", 403),
-            (normal_user_token_headers, session_grant, "owned", 403),
+        # Refused before anything's asked of GitHub
+        for repo, shown, other_headers in [
+            ("owned", ended_grant, None),
+            ("owned", "nope", None),
+            ("owned", session_grant, normal_user_token_headers),
+            ("theirs", session_grant, None),
+            ("elsewhere", session_grant, None),
+            ("decoy", session_grant, None),
         ]:
-            r = github_token(headers, shown, repo)
-            assert r.status_code == status, (repo, r.text)
-            if status == 200:
-                assert r.json() == {"token": "ghs_x", "expires": 2_000_000_000}
-        # Only plain names
+            r = github_token(repo, shown, other_headers)
+            assert r.status_code == 403, (repo, r.text)
         for bad in ["../x", "-x", "a b", "x/y", ""]:
-            assert (
-                github_token(op_headers, session_grant, bad).status_code == 422
-            )
-    # Narrowed to what Git needs, however much more the app may do
-    write = {"contents": "write"}
-    assert minted == [
-        (gh_owner, "owned", write),
-        (gh_owner, "http-form", write),
-        (gh_owner, "ssh-form", write),
-        (gh_owner, "ssh-url-form", write),
-        (gh_owner, "read", {"contents": "read"}),
-    ]
+            assert github_token(bad).status_code == 422
+        assert asked_github == [] and minted == []
+        # An owner with GitHub gets what it says, whatever the hub does
+        github_name = user.account.github_name
+        user.account.github_name = f"gh-{uuid.uuid4().hex[:6]}"
+        db.add(user.account)
+        db.commit()
+        with_github: Expected = [
+            ("owned", write),
+            ("http-form", read),
+            ("ssh-form", None),
+            ("ssh-url-form", None),
+            ("read", read),
+            ("uninstalled", None),
+            ("gone", None),
+            ("decoy-fork", None),
+            # GitHub's word, but no more than the hub's, which is "read"
+            ("invited-read", read),
+        ]
+        for repo, expected in with_github:
+            minted.clear()
+            r = github_token(repo)
+            if expected is None:
+                assert r.status_code == 403, (repo, r.text)
+                assert minted == []
+            else:
+                assert r.status_code == 200, (repo, r.text)
+                assert r.json() == {"token": "ghs_x", "expires": 2_000_000_000}
+                assert minted == [(repo, expected)]
+                assert "gho_owner" not in r.text
+        # One without GitHub gets what an invite gives, and nothing without
+        user.account.github_name = None
+        db.add(user.account)
+        db.commit()
+        asked_github.clear()
+        without_github: Expected = [
+            ("invited-write", write),
+            ("invited-read", read),
+            ("owned", None),
+            ("read", None),
+        ]
+        for repo, expected in without_github:
+            minted.clear()
+            r = github_token(repo)
+            if expected is None:
+                assert r.status_code == 403, (repo, r.text)
+                assert minted == []
+            else:
+                assert r.status_code == 200, (repo, r.text)
+                assert minted == [(repo, expected)]
+        assert asked_github == []
+        user.account.github_name = github_name
+        db.add(user.account)
+        db.commit()
     # A machine that stopped checking in is offline
     machine.last_seen = utcnow() - timedelta(minutes=10)
     db.add(machine)

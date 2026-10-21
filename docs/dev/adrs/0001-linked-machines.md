@@ -297,8 +297,11 @@ if it only reads what's on the machine.
   configured for `https://github.com` only, which tells it the repo.
   The hub issues one only for a repo of a project on the hub the owner can
   access, with the app installed, limited to the repo's contents, since the
-  app's other permissions, e.g., over workflows, can exceed the owner's,
-  and read-only unless they can write to the project.
+  app's other permissions, e.g., over workflows, can exceed the owner's.
+  Anyone can make a hub project for a repo they can't push to, so, as the
+  hub's own Git does, it's never more than GitHub lets the owner do, asked
+  with their GitHub token on the hub, or, for an owner without GitHub,
+  than their invite to the project gives, nor more than the hub allows.
   It never sends the owner's own GitHub token, which anything in the
   session could trade for a hub login that outlives it, and session tokens
   can't fetch it, nor the user's other services' tokens.

@@ -144,11 +144,18 @@ minutes, once the relay token it can no longer refresh expires.
   token for that repo alone, which lasts at most an hour, and when to stop
   using it, in seconds since the epoch.
   It can only read or write the repo's contents, whatever else the app
-  may do, and only read unless the owner can write to a project on the hub
+  may do, and never more than the owner may do with a project on the hub
   using that repo, whose URL may be written over HTTPS, HTTP, or SSH, with
   or without `.git`.
-  It's refused (403) if the owner can't access any such project, or the
-  app isn't installed on the repo.
+  Since a hub project for a repo can be made without any right to push to
+  it, it's never more than GitHub allows either, as with the hub's own Git:
+  for an owner with GitHub linked, the hub asks GitHub with their token,
+  which stays on the hub, and writes only if GitHub says they can push,
+  reads only if they can pull, and otherwise, or if GitHub can't say,
+  refuses; an owner without GitHub needs an invite to such a project, and
+  gets no more than its role.
+  It's refused (403) if none of that allows anything, or the app isn't
+  installed on the repo.
   The owner's own GitHub token never goes to a machine, since it could be
   traded at `POST /login/github-token` for a login that outlives the
   session, and an installation token can't be, since it can't read

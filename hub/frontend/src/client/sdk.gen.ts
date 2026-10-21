@@ -10069,9 +10069,12 @@ export class MachinesService {
    * hub its owner can access.
    *
    * It's the Calkit GitHub App's installation token for that repo alone,
-   * read-only unless the owner can write to the project, never the owner's
-   * own GitHub token, which could be traded for a login that outlives the
-   * session.
+   * never the owner's own GitHub token, which could be traded for a login
+   * that outlives the session. A hub project for a repo can be made without
+   * any right to push to it, so, as the hub's own Git does, it's never more
+   * than GitHub lets the owner do, asked with their own token, or, for an
+   * owner without GitHub, than an invite to the project gives, nor more
+   * than the hub does.
    */
   public static postMachineGithubToken<ThrowOnError extends boolean = true>(
     parameters: {

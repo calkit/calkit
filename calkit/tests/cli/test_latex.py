@@ -199,6 +199,28 @@ def test_build(tmp_dir):
         )
     subprocess.check_call(["calkit", "latex", "build", "paper/main.tex"])
     assert os.path.isfile("paper/main.pdf")
+    # The same source dated differently, e.g., after a squash merge, builds
+    # the same bytes, with no date or ID in the PDF
+    for engine in ["-pdf", "-lualatex"]:
+        built = []
+        for epoch in ["1700000000", "1800000000"]:
+            os.remove("paper/main.pdf")
+            subprocess.check_call(
+                [
+                    "calkit",
+                    "latex",
+                    "build",
+                    "--force",
+                    f"--latexmk-arg={engine}",
+                    "paper/main.tex",
+                ],
+                env=os.environ | {"SOURCE_DATE_EPOCH": epoch},
+            )
+            with open("paper/main.pdf", "rb") as f:
+                built.append(f.read())
+        assert built[0] == built[1], engine
+        assert b"/CreationDate" not in built[0]
+        assert b"/ID" not in built[0]
 
 
 @skipif_windows_docker

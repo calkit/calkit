@@ -682,6 +682,7 @@ def build(
         rel = Path(os.path.relpath(aux_dir, tex_dir)).as_posix()
         latexmk_cmd.append(f"-auxdir={rel}")
     latexmk_cmd.append("-interaction=nonstopmode")
+    latexmk_cmd.append(f"-usepretex={calkit.latex.PDF_PRETEX}")
     # User pass-through args come last so they can override Calkit's defaults.
     latexmk_cmd += latexmk_args
     latexmk_cmd.append(tex_file)
@@ -1783,6 +1784,7 @@ def _build_diff(
             "-interaction=nonstopmode",
             f"-auxdir={rel_aux}",
             f"-outdir={rel_aux}",
+            f"-usepretex={calkit.latex.PDF_PRETEX}",
         ]
         if not verbose:
             latexmk_cmd.append("-silent")

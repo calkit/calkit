@@ -69,6 +69,18 @@ DEFAULT_LATEX_ENVIRONMENT = {
 }
 
 
+# TeX run before the document, leaving the dates and trailer ID out of the
+# PDF. Even taken from a commit, the date changes when history is rewritten,
+# e.g., by a squash merge, which changes the bytes of an identical document.
+# XeTeX's driver can't leave them out, so its PDF keeps the source date.
+PDF_PRETEX = (
+    r"\ifdefined\pdfinfoomitdate\pdfinfoomitdate=1 \pdftrailerid{}"
+    # LuaTeX's flags for CreationDate (32), ModDate (64), and ID (512)
+    r"\else\ifdefined\pdfvariable\pdfvariable suppressoptionalinfo 608 "
+    r"\pdfvariable trailerid{}\fi\fi"
+)
+
+
 def get_source_date_epoch(tex_file: str) -> str | None:
     """When to say the PDF was built, in seconds since the epoch.
 
@@ -76,7 +88,8 @@ def get_source_date_epoch(tex_file: str) -> str | None:
     ID, so two builds of identical source differ byte for byte, and every
     rebuild rewrites the output's hash in ``dvc.lock``. Taking the date
     from the last commit that touched the document keeps it meaningful
-    while the bytes stay put until the document itself changes.
+    while the bytes stay put until the document itself changes. Where
+    ``PDF_PRETEX`` leaves the date out, it still sets ``\\today``.
     """
     import subprocess
 

@@ -199,6 +199,17 @@ pipeline:
       outputs:
         - path: results/2027-budget.json
           storage: git
+    one-pager-font:
+      kind: shell-command
+      environment: tex
+      shell: sh
+      description: >-
+        Copy the one-pager's font out of the TeX image, so its figures are set
+        in it too, wherever the pipeline runs.
+      command: cp "$(kpsewhich texgyreheros-regular.otf)" docs/one-pager/
+      outputs:
+        - path: docs/one-pager/texgyreheros-regular.otf
+          storage: null
     budget-2027-figure:
       kind: python-script
       script_path: scripts/plot-budget.py

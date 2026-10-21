@@ -27,3 +27,4 @@
 *.xdv
 # <<< calkit latex aux files <<<
 /main.pdf
+/texgyreheros-regular.otf

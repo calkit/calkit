@@ -13,8 +13,8 @@ LABELS = {
     "hosting": "Cloud hosting",
 }
 TEAL, INK, MUTED = "#3F8F80", "#1E2A2E", "#66737A"
-# The one-pager's own font (TeX Gyre Heros, under the GUST Font License),
-# kept with it so the figure looks the same wherever the pipeline runs
+# The one-pager's own font, from the TeX image it's built with, so the figure
+# looks the same wherever the pipeline runs
 font_manager.fontManager.addfont("docs/one-pager/texgyreheros-regular.otf")
 plt.rcParams.update(
     {

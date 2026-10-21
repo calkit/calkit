@@ -290,8 +290,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 17229a0f042cbd3bac7f257fabe9a4e4
-      size: 12959
+      md5: 778e8ed3b5caefcb3e506b53629b8a5b
+      size: 13361
     - path: docs/img/2027-budget.png
       hash: md5
       md5: 1078d8d6187e0e072d20f488176ff71e
@@ -342,8 +342,8 @@ stages:
       size: 2007
     - path: scripts/plot-budget.py
       hash: md5
-      md5: f82dd0e200f11901b388e17208a80fce
-      size: 1639
+      md5: 797538b799271ea0db0ec1bf5eda6703
+      size: 1616
     - path: uv.lock
       hash: md5
       md5: 2f62f424413d77d2f5ff0274223128a7
@@ -434,3 +434,21 @@ stages:
       hash: md5
       md5: ec7c70dfae96c28c255e114ca3337865
       size: 5125
+  one-pager-font:
+    cmd: calkit xenv -n tex --no-check -- sh 
+      .calkit/stage-commands/one-pager-font.sh
+    deps:
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: b2d28555a90965646645402d6964aa46.dir
+      size: 2832
+      nfiles: 2
+    - path: .calkit/stage-commands/one-pager-font.sh
+      hash: md5
+      md5: ec8d7395661d6af8e24623c6b1840985
+      size: 59
+    outs:
+    - path: docs/one-pager/texgyreheros-regular.otf
+      hash: md5
+      md5: 46896831ad260afebc87cd85a7ea159a
+      size: 133600

@@ -168,6 +168,13 @@ HUB_URLS = {
 
 DEFAULT_HUB_URL = HUB_URLS["production"]
 
+API_URLS = {
+    "local": "http://api.localhost",
+    "staging": "https://api.staging.calkit.io",
+    "production": "https://api.calkit.io",
+    "test": "http://api.localhost",
+}
+
 
 def api_url_from_hub_url(hub_url: str) -> str:
     """Derive a hub's API base URL from its web URL.
@@ -203,16 +210,20 @@ def get_base_url(wdir: str | None = None) -> str:
     )
     if override:
         return override
-    urls = {
-        "local": "http://api.localhost",
-        "staging": "https://api.staging.calkit.io",
-        "production": "https://api.calkit.io",
-        "test": "http://api.localhost",
-    }
     hub = config.get_hub(wdir)
-    if hub in urls:
-        return urls[hub]
+    if hub in API_URLS:
+        return API_URLS[hub]
     return api_url_from_hub_url(hub)
+
+
+def get_api_url(hub_url: str) -> str:
+    """The API URL of the hub at a web URL, which is what identifies a hub,
+    since one can be reached at more than one web URL, e.g., locally.
+    """
+    env = env_for_hub(hub_url)
+    if env is not None:
+        return API_URLS[env]
+    return api_url_from_hub_url(hub_url)
 
 
 def get_hub_url() -> str:

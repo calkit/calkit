@@ -202,6 +202,15 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
         os.path.join("dev", "this-hub"),
     ]
     monkeypatch.setattr(config, "_get_default_hub", lambda: None)
+    # A hub is known by its API, which some hubs serve at more than one URL
+    local = os.path.join(home, "dev", "local")
+    _init_project(local, name="local")
+    with open(os.path.join(local, "calkit.yaml"), "a") as f:
+        f.write("hub: localhost:5173\n")
+    monkeypatch.setattr(hub_link, "_hub_url", "http://localhost")
+    found = hub_link.discover_workspaces({"workspaces": []})
+    assert [w["path"] for w in found] == [os.path.realpath(local)]
+    monkeypatch.setattr(hub_link, "_hub_url", "https://calkit.io")
     assert workspaces["dev/odd"]["project"] is None
     assert not os.path.exists(ran)
     demo = workspaces["calkit/demo"]

@@ -418,7 +418,9 @@ def revoke_self(cfg: dict) -> None:
 def refuse_root() -> None:
     """Refuse to run as root, since sessions would be root shells."""
     if hasattr(os, "geteuid") and os.geteuid() == 0:
-        raise ValueError("The link can't run as root; run it as your own user")
+        raise ValueError(
+            "The hub link can't run as root; run it as your own user"
+        )
 
 
 def install_remote(
@@ -466,7 +468,7 @@ def install_remote(
     uid, _, existing = out.partition("calkit-uid=")[2].partition("\n")
     if uid.strip() == "0":
         raise ValueError(
-            "The link can't run as root; install it as another user"
+            "The hub link can't run as root; install it as another user"
         )
     cfg = yaml.safe_load(existing) if existing.strip() else None
     registered = False
@@ -647,7 +649,7 @@ def claim_workspace(wdir: str) -> None:
     # case only one of the writes stands
     holder = workspace_lock_holder(wdir)
     if holder is None or holder.get("pid") != os.getpid():
-        raise ValueError("This workspace is in use by another link")
+        raise ValueError("This workspace is in use by another hub link")
 
 
 def release_workspace(wdir: str) -> None:
@@ -672,18 +674,18 @@ SAFE_GIT = [
 ]
 
 
-def project_hub_url(wdir: str) -> str:
-    """The hub a project is on: the one it declares, else the user's default
-    hub, else calkit.io, as Calkit decides it there.
+def is_on_this_hub(wdir: str) -> bool:
+    """Whether a project is on this link's hub: the one it declares, else the
+    user's default hub, else calkit.io, as Calkit decides it there.
     """
-    from calkit.hub import DEFAULT_HUB_URL
+    from calkit.hub import DEFAULT_HUB_URL, get_api_url
 
     hub = (
         config._get_project_hub(wdir)
         or config._get_default_hub()
         or DEFAULT_HUB_URL
     )
-    return config.normalize_hub_url(hub)
+    return get_api_url(hub) == get_api_url(get_hub_url())
 
 
 def discover_workspaces(cfg: dict) -> list[dict]:
@@ -801,7 +803,7 @@ def discover_workspaces(cfg: dict) -> list[dict]:
         if (
             kind == "personal"
             and path not in added
-            and project_hub_url(path) != get_hub_url()
+            and not is_on_this_hub(path)
         ):
             continue
         found[path] = kind
@@ -2595,7 +2597,7 @@ class HubLink:
                 if personal and ws["kind"] != "personal":
                     raise ValueError("Managed workspaces can't be changed")
                 return path
-        raise ValueError("Not a workspace this link allows")
+        raise ValueError("Not a workspace this hub link allows")
 
     def open_session(
         self,
@@ -3049,7 +3051,7 @@ class HubLink:
                 self.cfg["workspaces"] = workspaces
                 if (
                     os.path.dirname(path) not in roots
-                    or project_hub_url(path) != get_hub_url()
+                    or not is_on_this_hub(path)
                 ) and path not in workspaces:
                     workspaces.append(path)
                     save_config(self.cfg)
@@ -3763,7 +3765,7 @@ def install_service(login: bool = False) -> list[str]:
         if not _has_terminal():
             return False
         print(
-            "Starting the link at boot needs sudo. Press Ctrl+C to start "
+            "Starting the hub link at boot needs sudo. Press Ctrl+C to start "
             "it at login instead.",
             file=sys.stderr,
         )
@@ -3787,7 +3789,7 @@ def install_service(login: bool = False) -> list[str]:
         )
         if probe is None or probe.returncode != 0:
             raise NotImplementedError(
-                "This machine has no user systemd to run the link as a "
+                "This machine has no user systemd to run the hub link as a "
                 "service. Link again with --cron to have cron start it when "
                 "the hub asks, or with --no-service and run "
                 "'calkit hub link start' yourself, e.g., inside tmux"
@@ -3820,7 +3822,7 @@ def install_service(login: bool = False) -> list[str]:
                 )
             if enabled.returncode != 0:
                 notes.append(
-                    "The link will only run while you're logged in. "
+                    "The hub link will only run while you're logged in. "
                     "To start it at boot, run: "
                     f"sudo loginctl enable-linger {user}"
                 )
@@ -3861,7 +3863,7 @@ def install_service(login: bool = False) -> list[str]:
         )
         if not at_boot and not login:
             notes.append(
-                "Starting at boot needs sudo, so the link will start "
+                "Starting at boot needs sudo, so the hub link will start "
                 "when you log in. To start it at boot, run 'calkit hub link "
                 "install' again in a terminal."
             )
@@ -3872,7 +3874,7 @@ def install_service(login: bool = False) -> list[str]:
             script.write(_windows_startup_script())
         subprocess.Popen(["wscript", fpath])
         notes.append(
-            "The link will start when you log in. Shell sessions aren't "
+            "The hub link will start when you log in. Shell sessions aren't "
             "supported on Windows yet."
         )
     else:

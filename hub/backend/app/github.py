@@ -1,6 +1,7 @@
 """GitHub related functionality."""
 
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -30,6 +31,27 @@ def _load_app_signing_key() -> bytes:
     return settings.GH_APP_PRIVATE_KEY.replace("\\n", "\n").encode()
 
 
+# A GitHub repo's URL, as a project's git_repo_url may give it: over HTTPS
+# or HTTP, or SSH in either form, with or without ".git" and a trailing slash
+_GITHUB_REPO_URL = re.compile(
+    r"(?:https?://github\.com/|ssh://git@github\.com(?::22)?/"
+    r"|git@github\.com:)"
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*?)"
+    r"(?:\.git)?/?",
+    re.IGNORECASE,
+)
+
+
+def parse_github_repo(url: str) -> str | None:
+    """The "owner/repo" a GitHub URL is for, lowercased, so two forms of
+    one repo's URL compare equal, or None if it isn't one.
+    """
+    match = _GITHUB_REPO_URL.fullmatch(url.strip())
+    if match is None:
+        return None
+    return f"{match.group(1)}/{match.group(2)}".lower()
+
+
 def create_app_token() -> str:
     client_id = os.environ["GH_CLIENT_ID"]
     signing_key = _load_app_signing_key()
@@ -51,7 +73,9 @@ def create_app_token() -> str:
 # before expiry means a GitHub-less user's request doesn't mint a fresh token
 # (two GitHub API calls) on every repo operation. This is a per-worker
 # in-process cache, so each worker mints at most once per repo per ~hour.
-_installation_token_cache: dict[tuple[str, str, bool], tuple[str, float]] = {}
+_installation_token_cache: dict[
+    tuple[str, str, tuple[tuple[str, str], ...]], tuple[str, float]
+] = {}
 _installation_token_cache_lock = threading.Lock()
 # Refresh this long before GitHub's stated expiry so a cached token can't lapse
 # mid-request.
@@ -71,10 +95,17 @@ def get_app_installation_token(
 
 
 def get_app_installation_token_and_expiry(
-    owner_name: str, repo_name: str, read_only: bool = False
+    owner_name: str,
+    repo_name: str,
+    read_only: bool = False,
+    permissions: dict[str, str] | None = None,
 ) -> tuple[str, float]:
     """Return a GitHub App installation access token scoped to one repo,
     and when to stop using it, a little before GitHub's expiry.
+
+    ``permissions`` narrows a token that isn't read-only below the
+    installation's own, e.g., ``{"contents": "write"}`` for one that only
+    pushes, since the installation's can exceed what its holder needs.
 
     Used to perform git operations on behalf of users who have native Calkit
     access to a project but no personal GitHub token (e.g. email/Google
@@ -87,7 +118,13 @@ def get_app_installation_token_and_expiry(
     that cannot write is a better guarantee than one that merely shouldn't.
     Cached separately, so a reader never picks up a writable token.
     """
-    cache_key = (owner_name.lower(), repo_name.lower(), read_only)
+    if read_only:
+        permissions = {"contents": "read"}
+    cache_key = (
+        owner_name.lower(),
+        repo_name.lower(),
+        tuple(sorted((permissions or {}).items())),
+    )
     now = time.time()
     with _installation_token_cache_lock:
         cached = _installation_token_cache.get(cache_key)
@@ -97,7 +134,7 @@ def get_app_installation_token_and_expiry(
     # for different repos don't serialize; a rare concurrent double-mint just
     # yields two valid tokens.
     token, expires_at = _mint_app_installation_token(
-        owner_name, repo_name, read_only=read_only
+        owner_name, repo_name, permissions=permissions
     )
     # ~50 min fallback if GitHub omits expires_at for some reason.
     expiry = now + 3000.0
@@ -113,9 +150,11 @@ def get_app_installation_token_and_expiry(
 
 
 def _mint_app_installation_token(
-    owner_name: str, repo_name: str, read_only: bool = False
+    owner_name: str, repo_name: str, permissions: dict[str, str] | None = None
 ) -> tuple[str, str | None]:
-    """Mint a fresh installation token, returning (token, expires_at)."""
+    """Mint a fresh installation token, narrowed to ``permissions`` if
+    given, returning (token, expires_at).
+    """
     app_jwt = create_app_token()
     headers = {
         "Authorization": f"Bearer {app_jwt}",
@@ -143,10 +182,10 @@ def _mint_app_installation_token(
         "/access_tokens",
         headers=headers,
         json=(
-            {"repositories": [repo_name], "permissions": {"contents": "read"}}
-            if read_only
-            # Otherwise the installation's own permissions, which is what a
-            # push needs. Narrowing is allowed; widening is not.
+            {"repositories": [repo_name], "permissions": permissions}
+            if permissions
+            # Otherwise the installation's own permissions. Narrowing is
+            # allowed; widening is not.
             else {"repositories": [repo_name]}
         ),
         timeout=15,

@@ -710,30 +710,52 @@ def test_machines(
     # hub the owner can access, read-only unless they can write to it, and
     # never the owner's own GitHub token, which could be traded for a login
     gh_owner = f"me-{uuid.uuid4().hex[:6]}"
-    for repo_name, owner_id, is_public in [
-        ("Owned.git", user.account.id, False),
-        ("read", su.account.id, True),
-        ("theirs", su.account.id, False),
-        ("uninstalled", user.account.id, False),
+    # However a project's URL writes the repo
+    for git_repo_url, owner_id, is_public in [
+        (f"https://github.com/{gh_owner}/Owned.git", user.account.id, False),
+        (
+            f"http://github.com/{gh_owner.upper()}/http-form/",
+            user.account.id,
+            False,
+        ),
+        (f"git@github.com:{gh_owner}/ssh-form.git", user.account.id, False),
+        (
+            f"ssh://git@github.com/{gh_owner}/ssh-url-form",
+            user.account.id,
+            False,
+        ),
+        (f"https://github.com/{gh_owner}/read", su.account.id, True),
+        (f"https://github.com/{gh_owner}/theirs", su.account.id, False),
+        (f"https://github.com/{gh_owner}/uninstalled", user.account.id, False),
+        # Ones that only look like another's in SQL
+        (f"https://github.com/{gh_owner}/decoy-fork", user.account.id, False),
+        (
+            f"https://gitlab.com/github.com/{gh_owner}/decoy",
+            user.account.id,
+            False,
+        ),
     ]:
         db.add(
             Project(
                 name=f"gh-{uuid.uuid4().hex[:8]}",
-                title=repo_name,
-                git_repo_url=f"https://github.com/{gh_owner}/{repo_name}",
+                title="GitHub",
+                git_repo_url=git_repo_url,
                 owner_account_id=owner_id,
                 is_public=is_public,
             )
         )
     db.commit()
-    minted: list[tuple[str, str, bool]] = []
+    minted: list[tuple[str, str, dict[str, str] | None]] = []
 
     def mint(
-        owner: str, repo: str, read_only: bool = False
+        owner: str,
+        repo: str,
+        read_only: bool = False,
+        permissions: dict[str, str] | None = None,
     ) -> tuple[str, float]:
         if repo == "uninstalled":
             raise HTTPException(502, "GitHub returned 404")
-        minted.append((owner, repo, read_only))
+        minted.append((owner, repo, permissions))
         return "ghs_x", 2_000_000_000.5
 
     def github_token(
@@ -755,7 +777,11 @@ def test_machines(
     ):
         for headers, shown, repo, status in [
             (op_headers, session_grant, "owned", 200),
+            (op_headers, session_grant, "http-form", 200),
+            (op_headers, session_grant, "ssh-form", 200),
+            (op_headers, session_grant, "ssh-url-form", 200),
             (op_headers, session_grant, "read", 200),
+            (op_headers, session_grant, "decoy", 403),
             (op_headers, session_grant, "theirs", 403),
             (op_headers, session_grant, "uninstalled", 403),
             (op_headers, session_grant, "elsewhere", 403),
@@ -772,7 +798,15 @@ def test_machines(
             assert (
                 github_token(op_headers, session_grant, bad).status_code == 422
             )
-    assert minted == [(gh_owner, "owned", False), (gh_owner, "read", True)]
+    # Narrowed to what Git needs, however much more the app may do
+    write = {"contents": "write"}
+    assert minted == [
+        (gh_owner, "owned", write),
+        (gh_owner, "http-form", write),
+        (gh_owner, "ssh-form", write),
+        (gh_owner, "ssh-url-form", write),
+        (gh_owner, "read", {"contents": "read"}),
+    ]
     # A machine that stopped checking in is offline
     machine.last_seen = utcnow() - timedelta(minutes=10)
     db.add(machine)

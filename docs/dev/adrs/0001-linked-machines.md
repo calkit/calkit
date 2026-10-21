@@ -296,8 +296,9 @@ if it only reads what's on the machine.
   it asks about, lasting at most an hour, through a credential helper
   configured for `https://github.com` only, which tells it the repo.
   The hub issues one only for a repo of a project on the hub the owner can
-  access, with the app installed, read-only unless they can write to the
-  project.
+  access, with the app installed, limited to the repo's contents, since the
+  app's other permissions, e.g., over workflows, can exceed the owner's,
+  and read-only unless they can write to the project.
   It never sends the owner's own GitHub token, which anything in the
   session could trade for a hub login that outlives it, and session tokens
   can't fetch it, nor the user's other services' tokens.

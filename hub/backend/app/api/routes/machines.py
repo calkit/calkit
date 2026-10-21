@@ -871,17 +871,17 @@ def post_machine_github_token(
     session.
     """
     _check_session_grant(session, machine, req.grant)
+    # Narrowed in SQL, then compared however the URL is written
     repo = f"{req.owner}/{req.repo}".lower()
-    projects = session.exec(
-        select(Project).where(
-            func.lower(Project.git_repo_url).in_(
-                [
-                    f"https://github.com/{repo}",
-                    f"https://github.com/{repo}.git",
-                ]
+    projects = [
+        project
+        for project in session.exec(
+            select(Project).where(
+                col(Project.git_repo_url).ilike(f"%github.com%{repo}%")
             )
-        )
-    ).all()
+        ).all()
+        if github.parse_github_repo(project.git_repo_url) == repo
+    ]
     # The most the owner can do with any project using the repo
     levels = ["read", "write", "admin", "owner"]
     access = None
@@ -903,9 +903,13 @@ def post_machine_github_token(
         raise HTTPException(
             403, "No project on the hub you can access uses this repo"
         )
+    # Only what Git needs, even if the app may do more, e.g., change
+    # workflows
     try:
         token, expires = github.get_app_installation_token_and_expiry(
-            req.owner, req.repo, read_only=access == "read"
+            req.owner,
+            req.repo,
+            permissions={"contents": "read" if access == "read" else "write"},
         )
     except (github.GitHubAppNotConfigured, HTTPException):
         raise HTTPException(

@@ -143,8 +143,11 @@ minutes, once the relay token it can no longer refresh expires.
   `{"token": ..., "expires": ...}`, the Calkit GitHub App's installation
   token for that repo alone, which lasts at most an hour, and when to stop
   using it, in seconds since the epoch.
-  It's read-only unless the owner can write to a project on the hub using
-  that repo, and it's refused (403) if the owner can't access any, or the
+  It can only read or write the repo's contents, whatever else the app
+  may do, and only read unless the owner can write to a project on the hub
+  using that repo, whose URL may be written over HTTPS, HTTP, or SSH, with
+  or without `.git`.
+  It's refused (403) if the owner can't access any such project, or the
   app isn't installed on the repo.
   The owner's own GitHub token never goes to a machine, since it could be
   traded at `POST /login/github-token` for a login that outlives the

@@ -1230,6 +1230,18 @@ def test_service_files(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Cron and flock are POSIX")
 def test_cron_and_lock(tmp_path, monkeypatch):
+    # A service gets the PATH a login shell sets up, after whatever its
+    # profile prints, or keeps its own if the shell fails
+    shell = tmp_path / "fake-shell"
+    shell.write_text(
+        "#!/bin/sh\necho Welcome\nPATH=/custom/bin:/usr/bin:/bin\n"
+        'export PATH\nshift 2\nexec /bin/sh -c "$1"\n'
+    )
+    shell.chmod(0o755)
+    monkeypatch.setenv("SHELL", str(shell))
+    assert hub_link.login_shell_path() == "/custom/bin:/usr/bin:/bin"
+    shell.write_text("#!/bin/sh\nexit 1\n")
+    assert hub_link.login_shell_path() is None
     # A % in a path would be a newline to cron
     monkeypatch.setenv("CALKIT_USER_HOME", str(tmp_path / "home%1"))
     # A fake crontab that keeps its table in a file

@@ -3473,6 +3473,30 @@ def get_running_pid(key: str | None = None) -> int | None:
     return pid if "hub link start" in cmdline else None
 
 
+def login_shell_path() -> str | None:
+    """The PATH the user's login shell sets up, or None if it can't say."""
+    marker = "CALKIT_LOGIN_PATH="
+    try:
+        out = subprocess.run(
+            # After anything the profile prints
+            [get_shell(), "-l", "-c", f'printf "\\n{marker}%s" "$PATH"'],
+            cwd=config.get_user_home(),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=30,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.warning(f"Couldn't get the login shell's PATH: {e}")
+        return None
+    last = out.stdout.rsplit("\n", 1)[-1]
+    if out.returncode != 0 or not last.startswith(marker):
+        logger.warning("Couldn't get the login shell's PATH")
+        return None
+    return last.removeprefix(marker) or None
+
+
 def run(cfg: dict, mode: str = "foreground") -> bool:
     """Run the link until it's revoked, interrupted, or, in cron mode,
     idle or not asked to connect.
@@ -3490,6 +3514,13 @@ def run(cfg: dict, mode: str = "foreground") -> bool:
         _private_log()
     if not any(isinstance(f, RepeatFilter) for f in logger.filters):
         logger.addFilter(RepeatFilter())
+    # A service starts with the system's bare PATH, e.g., without
+    # /usr/local/bin on macOS, so what it runs gets a login shell's, as
+    # sessions do
+    if mode != "foreground" and sys.platform != "win32":
+        path = login_shell_path()
+        if path:
+            os.environ["PATH"] = path
 
     # Service managers stop it with SIGTERM, which should shut down as
     # cleanly as Ctrl+C

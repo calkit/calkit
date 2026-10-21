@@ -2011,11 +2011,19 @@ def _ensure_latex_aux_gitignore(
         return posixpath.normpath(path.replace("\\", "/"))
 
     aux_globs = [
+        # Acronym lists from glossaries
+        "*.acn",
+        "*.acr",
+        "*.alg",
         "*.aux",
         "*.bbl",
         "*.bcf",
         "*.blg",
+        # Back references from backref
+        "*.brf",
         "*.dvi",
+        # Endnotes from endnotes
+        "*.ent",
         "*.fdb_latexmk",
         "*.fls",
         "*.glg",
@@ -2025,16 +2033,27 @@ def _ensure_latex_aux_gitignore(
         "*.ilg",
         "*.ind",
         "*.ist",
+        # Lists of algorithms and listings
+        "*.loa",
         "*.lof",
         "*.log",
+        "*.lol",
         "*.lot",
         "*.nav",
+        # Nomenclature from nomencl
+        "*.nlg",
+        "*.nlo",
+        "*.nls",
         "*.out",
         "*.run.xml",
         "*.snm",
         # Written by elsarticle, among other classes
         "*.spl",
         "*.synctex.gz",
+        # The list of todos from todonotes
+        "*.tdo",
+        # Theorem lists from ntheorem
+        "*.thm",
         "*.toc",
         "*.vrb",
         "*.xdv",

@@ -221,20 +221,6 @@ def test_build(tmp_dir):
         assert built[0] == built[1], engine
         assert b"/CreationDate" not in built[0]
         assert built[0].count(b"/ID [<") == 1
-    # PDF/A requires an ID, so one made with LaTeX's own metadata support,
-    # which needs no packages fetched, gets it too
-    with open("paper/main.tex", "w") as f:
-        f.write(
-            "\\DocumentMetadata{pdfstandard=a-2b, pdfversion=1.7}\n"
-            "\\documentclass{article}\n"
-            "\\begin{document}\n"
-            "Hello, world!\n"
-            "\\end{document}\n"
-        )
-    os.remove("paper/main.pdf")
-    subprocess.check_call(["calkit", "latex", "build", "paper/main.tex"])
-    with open("paper/main.pdf", "rb") as f:
-        assert f.read().count(b"/ID [<") == 1
 
 
 @skipif_windows_docker

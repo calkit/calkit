@@ -868,7 +868,15 @@ def get_ck_info_and_dvc_outs_from_tree(
         f"(read {t_read * 1000:.0f}ms)"
     )
     t1 = time.perf_counter()
-    ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
+    try:
+        ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
+    except yaml.YAMLError as e:
+        # Bad data in the user's repo, so show its files without metadata
+        # rather than failing the whole page
+        logger.warning(
+            f"Failed to parse calkit.yaml for {owner_name}/{project_name}: {e}"
+        )
+        ck_info = {}
     # calkit.yaml can hold any YAML value, and only a mapping is usable
     if not isinstance(ck_info, dict):
         ck_info = {}

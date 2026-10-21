@@ -2710,6 +2710,7 @@ Update objects.
 | [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                          |
 | [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                                |
 | [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                         |
+| [`latex-image`](#subcommand-update-latex-image)       | Point LaTeX environments at Calkit's pinned LaTeX image.                             |
 | [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                          |
 | [`env`](#subcommand-update-env)                       | Update an environment.                                                               |
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
@@ -2975,6 +2976,20 @@ Options:
 | `--image`      | str     | no       |         | Docker image name/tag.                                                                                                                                               |
 | `--registry`   | str     | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
 | `--lock`       | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
+
+<a id="subcommand-update-latex-image"></a>
+
+#### `calkit update latex-image`
+
+Point LaTeX environments at Calkit's pinned LaTeX image.
+
+Updates docker environments that use Calkit's LaTeX image or TeX Live's, then relocks them.
+
+Usage:
+
+```text
+calkit update latex-image
+```
 
 <a id="subcommand-update-slurm-env"></a>
 

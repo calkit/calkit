@@ -943,6 +943,45 @@ def update_docker_env(
     check_environment(env_name=env_name, verbose=True)
 
 
+@update_app.command(name="latex-image")
+def update_latex_image() -> None:
+    """Point LaTeX environments at Calkit's pinned LaTeX image.
+
+    Updates docker environments that use Calkit's LaTeX image or TeX Live's,
+    then relocks them.
+    """
+    import calkit.docker
+    from calkit.latex import DEFAULT_LATEX_IMAGE
+
+    repos = {
+        "ghcr.io/calkit/latex",
+        "texlive/texlive",
+        "docker.io/texlive/texlive",
+    }
+    envs = calkit.load_calkit_info().get("environments") or {}
+    # One built from a Dockerfile names the image it builds, not its base
+    names = [
+        name
+        for name, env in envs.items()
+        if isinstance(env, dict)
+        and env.get("kind") == "docker"
+        and not env.get("path")
+        and calkit.docker.get_repo_from_ref(str(env.get("image", ""))) in repos
+        and env.get("image") != DEFAULT_LATEX_IMAGE
+    ]
+    if not names:
+        typer.echo(f"No LaTeX environments to update to {DEFAULT_LATEX_IMAGE}")
+        return
+    # Relocked too, since a lock left behind would pull the old image back
+    # by its digest
+    for name in names:
+        typer.echo(
+            f"Updating '{name}' from {envs[name]['image']} to "
+            f"{DEFAULT_LATEX_IMAGE}"
+        )
+        update_docker_env(env_name=name, image=DEFAULT_LATEX_IMAGE, lock=True)
+
+
 @update_app.command(name="slurm-env")
 def update_slurm_env(
     env_name: Annotated[

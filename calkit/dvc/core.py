@@ -1019,8 +1019,17 @@ def run_dvc_command(
     :func:`dvc_lock_timeout`.
     """
     # DVC would send the hub's token wherever the repo points a remote,
-    # e.g., after a Git pull changed it
-    clear_off_hub_auth(wdir=cwd)
+    # e.g., after a Git pull changed it, in the repo DVC's own --cd names,
+    # if given, as with 'calkit dvc --cd path pull'
+    wdir = cwd
+    for i, arg in enumerate(argv):
+        if arg == "--":
+            break
+        if arg == "--cd" and i + 1 < len(argv):
+            wdir = os.path.join(cwd or "", argv[i + 1])
+        elif arg.startswith("--cd="):
+            wdir = os.path.join(cwd or "", arg.removeprefix("--cd="))
+    clear_off_hub_auth(wdir=wdir)
     if cwd:
         argv = ["--cd", cwd] + argv
     if lock_timeout is not None:
@@ -1100,15 +1109,15 @@ REMOTE_AUTH_OPTIONS = (
 )
 
 
-def clear_off_hub_auth(
-    wdir: str | None = None, base_url: str | None = None
-) -> list[str]:
-    """Remove the hub's token from the local config of DVC remotes that
-    aren't on the hub, returning their names.
+def clear_off_hub_auth(wdir: str | None = None) -> list[str]:
+    """Remove the hub's token from the local config of DVC remotes it wasn't
+    stored for, returning their names.
 
     The repo says where its remotes are, so a pull can point one that has
-    the token anywhere, which DVC would send it to. ``run_dvc_command``
-    runs this first.
+    the token anywhere, which DVC would send it to. So the token is stored
+    along with the remote's URL, in the local config, which a pull can't
+    change, and it's removed if the repo's URL for that remote differs, or
+    if it was stored without one. ``run_dvc_command`` runs this first.
     """
 
     def is_hub_token(secret: object) -> bool:
@@ -1142,9 +1151,6 @@ def clear_off_hub_auth(
         )
     except Exception:
         return []
-    if base_url is None:
-        # The project's hub, wherever this runs from
-        base_url = calkit.hub.get_base_url(wdir=root)
     cleared = []
     for section, options in list(local.items()):
         match = re.fullmatch(r'remote "(.+)"', section)
@@ -1156,10 +1162,12 @@ def clear_off_hub_auth(
             is_hub_token(options.get(k, "")) for k in ("password", "token")
         ):
             continue
-        url = options.get("url") or (shared.get(section) or {}).get("url")
-        if isinstance(url, str) and is_on_hub(url, base_url):
+        pinned = options.get("url")
+        repo_url = (shared.get(section) or {}).get("url")
+        if pinned and (repo_url is None or repo_url == pinned):
             continue
-        for option in REMOTE_AUTH_OPTIONS:
+        # The repo's URL wins again, without the token
+        for option in (*REMOTE_AUTH_OPTIONS, "url"):
             options.pop(option, None)
         if not options:
             local.pop(section)
@@ -1168,8 +1176,9 @@ def clear_off_hub_auth(
         local.write()
         for name in cleared:
             logger.warning(
-                f"Removed the hub's token from DVC remote {name}, "
-                "since it isn't on the hub"
+                f"Removed the hub's token from DVC remote {name}, since its "
+                "URL changed or wasn't stored with it; run 'calkit config "
+                "remote-auth' to set it up again"
             )
     return cleared
 
@@ -1264,6 +1273,9 @@ def set_remote_auth(
     """
     if remote_name is None:
         remote_name = make_remote_name()
+    # So a token stored for a URL the repo has since changed isn't kept
+    # with it
+    clear_off_hub_auth(wdir=wdir)
     # Check if this is a ck:// remote (doesn't need HTTP auth)
     remotes = get_remotes(wdir=wdir)
     remote_url = remotes.get(remote_name, "")
@@ -1292,6 +1304,13 @@ def set_remote_auth(
         )["access_token"]
         settings.dvc_token = token
         settings.write()
+    # The URL it's for goes first, in the local config, which the repo can't
+    # change, so the token only goes where it was meant to, and isn't
+    # cleared by the next command as a token without one
+    r3 = run_dvc_command(
+        ["remote", "modify", "--local", remote_name, "url", remote_url],
+        cwd=wdir,
+    )
     r1 = run_dvc_command(
         [
             "remote",
@@ -1314,7 +1333,7 @@ def set_remote_auth(
         ],
         cwd=wdir,
     )
-    if r1 != 0 or r2 != 0:
+    if r1 != 0 or r2 != 0 or r3 != 0:
         raise RuntimeError(
             f"Failed to set DVC remote authentication for {remote_name}"
         )

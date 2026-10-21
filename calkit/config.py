@@ -192,10 +192,9 @@ def _get_default_hub() -> str | None:
     return None
 
 
-def get_hub(wdir: str | None = None) -> str:
+def get_hub() -> str:
     """Return the active hub key: a built-in environment name or an
-    arbitrary hub URL, for the project in ``wdir``, or the working
-    directory.
+    arbitrary hub URL.
 
     ``CALKIT_HUB`` takes precedence and must be a hub URL (with or
     without scheme), e.g., ``https://staging.calkit.io``. Then the
@@ -218,7 +217,7 @@ def get_hub(wdir: str | None = None) -> str:
         # without giving up that isolation.
         return "test"
     if not hub:
-        hub = _get_project_hub(wdir)
+        hub = _get_project_hub()
         source = "the project's hub"
     if not hub:
         hub = _get_default_hub()

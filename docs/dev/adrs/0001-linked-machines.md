@@ -232,9 +232,10 @@ A third review closed what was left to the relay and to stolen sessions:
   by the hub to the link, which fetches it over HTTPS once its owner
   asks, rather than made in the browser and sent through the relay.
   It's tied to the machine and revoked with it.
-  The hub's token is removed from DVC remotes that aren't on the hub
-  before pulls and pushes, and files holding it are never saved to a
-  commit.
+  The hub's token for a DVC remote is stored with the remote's URL in
+  the local config, which a pull can't change, and removed before pulls
+  and pushes if the repo now points that remote elsewhere, and files
+  holding it are never saved to a commit.
 - Signing out ends the session, and other sessions can be ended from
   user settings.
   Revoking a machine takes a signed-in session, and the owner is

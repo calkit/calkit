@@ -333,8 +333,8 @@ browser asks for both and shows Git's first.
 unless `merge` is true, in which case it merges, undoing a merge that
 conflicts.
 `workspace.pull` and `workspace.push` first remove the hub's token from
-the local config of DVC remotes that aren't on the hub, since a pull can
-point one anywhere.
+the local config of DVC remotes whose URL in the repo no longer matches
+the one it was stored with, since a pull can point one anywhere.
 `workspace.save` refuses `.dvc/config.local` and anything in
 `.calkit/local`, which hold the machine's credentials.
 Files the link reads or writes in a workspace itself, e.g., its lock

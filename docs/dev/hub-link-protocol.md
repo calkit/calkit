@@ -24,9 +24,13 @@ The decisions behind it are in [ADR 0001](adrs/0001-linked-machines.md).
 | Machine relay JWT | JWT with scope `relay:machine` | 10 minutes    | Opening the link's relay connection         |
 | Browser relay JWT | JWT with scope `relay:browser` | 60 seconds    | Opening one browser connection to the relay |
 | Machine CLI token | `ckp_` personal access token   | 365 days      | Calkit's CLI on the linked machine          |
+| Session token     | JWT naming machine and sign-in | 15 minutes    | Calkit in one of the link's sessions        |
 
 Machine tokens are stored like personal access tokens: a selector to look
 the record up and a hashed verifier.
+Session tokens last at most until the second factor of the sign-in that
+opened their session expires, and are refused once the machine is revoked
+or that sign-in ends.
 The machine's CLI token is a personal access token the hub issues to the
 machine, tied to it, and revoked with it.
 Relay tokens are checked when a connection opens, and the link's again
@@ -120,6 +124,18 @@ minutes, once the relay token it can no longer refresh expires.
   `{"token": ...}`, a personal access token for the owner with full scope
   that lasts 365 days, replacing any the machine was issued before, or 403
   if none was requested.
+- `POST /machines/session-token`, with the machine token and
+  `{"grant": ...}`, the grant of the channel that opened one of its
+  sessions, or last attached to it, returns `{"token": ...}`, a session
+  token for the owner, or 403.
+  The grant has to be one the API signed for this machine and its owner,
+  though it may have expired, its sign-in still live, its second factor
+  unexpired, and issued since two-factor authentication was last set up.
+  Session tokens can't make personal access tokens, of any scope, nor
+  anything a signed-in session is needed for.
+- `POST /machines/github-token` takes the same, on the same terms, and
+  returns the owner's GitHub token as `{"token": ...}`, refreshed by the hub
+  when it's due.
 - `GET /projects/{owner}/{name}/workspaces` lists the project's workspaces
   across the user's machines, from their latest check-ins.
 
@@ -285,6 +301,62 @@ The link sends `{"type": "sessions.output", "session": ..., "data":
 ...}` to attached channels, coalescing output over 20 milliseconds, and
 `{"type": "sessions.exit", "session": ..., "code": ...}` when a session's
 shell exits.
+
+## Session credentials
+
+A link started at boot, e.g., macOS's LaunchDaemon, runs outside the
+user's login session, so its sessions can't reach the keychain Calkit keeps
+hub tokens in, nor, usually, an SSH agent.
+So sessions get credentials from their link, which gets them from the hub
+over HTTPS, as above, never through the relay, and keeps them only in
+memory.
+Sessions aren't offered on Windows, so this is POSIX only.
+
+Each session gets a Unix socket in a folder of its own that only the user
+can open, made with `mkdtemp` in `XDG_RUNTIME_DIR` where there is one, else
+the temporary folder, and removed when the session ends.
+Its environment has:
+
+- `CALKIT_LINK_SOCKET`, the socket's path.
+- `CALKIT_LINK_SECRET`, a random secret every request must carry.
+- `CALKIT_LINK_API_URL`, the link's hub's API URL.
+- `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, adding
+  `credential.https://github.com.helper`, which runs
+  `calkit hub link git-credential` with the link's own Python.
+
+Each connection carries one request and one reply, each a line of JSON:
+
+| Request                                               | Reply                              |
+| ----------------------------------------------------- | ---------------------------------- |
+| `{"type": "hub.token", "api_url": ..., "fresh": ...}` | `{"token": ...}`                   |
+| `{"type": "github.token", "forget": ...}`             | `{"token": ...}`, `{}` if `forget` |
+
+Each also has `secret`, and a failure is `{"error": ...}`.
+The link answers only while the session runs, gives hub tokens only for
+`api_url`s that are its own hub's, and keeps what it got until 2 minutes
+before a hub token expires, or 5 minutes for GitHub's, or until the sign-in
+it was got with ends, or its second factor expires.
+`fresh` gets another, after the hub refused the last, and `forget` drops
+the GitHub token, which Git asks for when GitHub refuses it.
+Which grant a session's credentials come from is that of the channel that
+opened it, until one attaches whose second factor lasts longer.
+
+When Calkit in a session needs a token and its active hub is the link's,
+it asks the link, never the keychain, config, or `CALKIT_TOKEN`, which
+isn't tied to a hub, and doesn't start a device login.
+For other hubs it works as usual.
+`ck://` DVC remotes get the session's token as they go.
+HTTP DVC remotes need a token in `.dvc/config.local`, which sessions
+neither make nor write, since theirs are short-lived and can't make
+lasting ones, so only ones set up beforehand work.
+The hub's tokens are still removed from remotes that aren't on the hub,
+session tokens included.
+
+Git asks the user's own helpers first, e.g., one with a token in a file,
+and the link's only if they give nothing.
+Remotes using SSH, e.g., `git@github.com:`, aren't rewritten to HTTPS,
+since a key without a passphrase works there already, as does typing one,
+and the hub's GitHub token can only reach repositories its GitHub App can.
 
 ## Workspace actions
 

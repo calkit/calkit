@@ -774,9 +774,12 @@ def sync(
             res[path] = (stamp, entry.startswith("??"))
         return res
 
-    # Read all synced folders, fixing legacy schema if applicable
+    repo = calkit.git.get_repo()
+    # Uncommitted edits to calkit.yaml aren't the sync's to touch or commit,
+    # so fixing the legacy schema waits until there are none
+    calkit_yaml_dirty = bool(repo.git.diff("HEAD", "--", "calkit.yaml"))
     overleaf_info = calkit.overleaf.get_sync_info(
-        fix_legacy=True, print_info=typer.echo
+        fix_legacy=not calkit_yaml_dirty, print_info=typer.echo
     )
     if not overleaf_info:
         raise_error("No Overleaf sync info found")
@@ -818,7 +821,6 @@ def sync(
             "anyway."
         )
     overleaf_auth = _get_overleaf_auth()
-    repo = calkit.git.get_repo()
     conflict_fpath = calkit.overleaf.get_conflict_fpath()
     in_am_session = "in the middle of an am session" in repo.git.status()
     # Check if we're in the middle of resolving a merge conflict
@@ -865,7 +867,8 @@ def sync(
                     [wdir, "-m", f"Resolve Overleaf merge conflict in {wdir}"]
                 )
             if in_am_session:
-                repo.git.am("--skip")
+                with calkit.overleaf.staged_changes_set_aside(repo):
+                    repo.git.am("--skip")
         elif resolve:
             continue
         # Local edits are saved first so they're what's synced and rebuilt
@@ -923,6 +926,7 @@ def sync(
                     push_only=push_only,
                     force=force,
                     push=push,
+                    commit_calkit_yaml=not calkit_yaml_dirty,
                 )
             except Exception as e:
                 raise_error(str(e))
@@ -972,6 +976,7 @@ def sync(
                 path
                 for path, state in get_dirty_files().items()
                 if dirty_before.get(path) != state
+                and not (path == "dvc.yaml" and calkit_yaml_dirty)
                 and not (
                     state[1]
                     and any(

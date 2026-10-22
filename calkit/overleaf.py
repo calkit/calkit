@@ -1519,6 +1519,31 @@ def get_sync_status(
     )
 
 
+@contextmanager
+def staged_changes_set_aside(repo: git.Repo) -> Iterator[None]:
+    """Unstage what's staged for the duration, restoring it after.
+
+    ``git am`` refuses to run with anything staged, even outside the paths
+    it patches, and skipping a patch resets the index.
+    """
+    staged = [
+        p
+        for p in repo.git.diff(
+            "--staged", "--name-only", "--no-renames", "-z"
+        ).split("\0")
+        if p
+    ]
+    if not staged:
+        yield
+        return
+    tree = repo.git.write_tree()
+    repo.git.reset("-q")
+    try:
+        yield
+    finally:
+        repo.git.restore("--staged", f"--source={tree}", "--", *staged)
+
+
 def sync(
     main_repo: git.Repo,
     overleaf_repo: git.Repo,
@@ -1532,14 +1557,17 @@ def sync(
     push_only: bool = False,
     force: bool = False,
     push: Callable[[git.Repo], None] | None = None,
+    commit_calkit_yaml: bool = True,
 ) -> dict:
     """Sync between the main project repo and Overleaf repo.
 
     Both must be up-to-date (pulled). The synced path in the main repo must
     also have no uncommitted changes, since incoming Overleaf edits are
     applied with ``git am``, which refuses to run against a dirty working
-    tree (the calling CLI enforces this, optionally committing first with
-    ``--auto-commit``).
+    tree (the calling CLI enforces this by committing local edits first).
+    Anything staged elsewhere is set aside while it runs, and
+    ``commit_calkit_yaml`` can leave ``calkit.yaml`` out of the commit, so
+    changes elsewhere in the project aren't committed with the sync.
 
     Only "stored" files in the main project -- those tracked by Git or cached
     by DVC -- are synced. They are synced bidirectionally, except for files
@@ -1702,21 +1730,22 @@ def sync(
         res["patch"] = patch
         if patch:
             print_info("Applying to project repo")
-            process = subprocess.run(
-                [
-                    "git",
-                    "am",
-                    "--3way",
-                    "--directory",
-                    path_in_project,
-                    "-",
-                ],
-                input=patch,
-                text=True,
-                encoding="utf-8",
-                capture_output=True,
-                cwd=main_repo.working_dir,
-            )
+            with staged_changes_set_aside(main_repo):
+                process = subprocess.run(
+                    [
+                        "git",
+                        "am",
+                        "--3way",
+                        "--directory",
+                        path_in_project,
+                        "-",
+                    ],
+                    input=patch,
+                    text=True,
+                    encoding="utf-8",
+                    capture_output=True,
+                    cwd=main_repo.working_dir,
+                )
             # Handle merge conflicts
             if process.returncode != 0 and (
                 "merge conflict" in process.stdout.lower()
@@ -1745,7 +1774,8 @@ def sync(
                     "    calkit overleaf sync --resolve"
                 )
             elif process.returncode != 0:
-                main_repo.git.am("--abort")
+                with staged_changes_set_aside(main_repo):
+                    main_repo.git.am("--abort")
                 raise RuntimeError(
                     "Could not apply Git patch:\n"
                     f"{process.stdout}\n{process.stderr}"
@@ -1902,7 +1932,8 @@ def sync(
         info=overleaf_sync_data,
         wdir=str(main_repo.working_dir),
     )
-    main_repo.git.add("calkit.yaml")
+    if commit_calkit_yaml:
+        main_repo.git.add("calkit.yaml")
     main_repo.git.add(overleaf_sync_data_fpath)
     if resolving_conflict and os.path.isfile(conflict_fpath):
         os.remove(conflict_fpath)
@@ -1933,11 +1964,9 @@ def sync(
     # Stage the changes in the project repo
     res["committed_project"] = False
     main_repo.git.add(path_in_project)
-    paths_to_commit = [
-        path_in_project,
-        "calkit.yaml",
-        overleaf_sync_data_fpath,
-    ]
+    paths_to_commit = [path_in_project, overleaf_sync_data_fpath]
+    if commit_calkit_yaml:
+        paths_to_commit.append("calkit.yaml")
     # Map-paths sources typically live outside the synced folder, so they
     # need staging by name. One stored with DVC rather than Git can't be
     # staged at all, so it's left for the user to save.

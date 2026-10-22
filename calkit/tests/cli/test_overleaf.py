@@ -1490,6 +1490,36 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     assert "Update paper before Overleaf sync" in repo.git.log("--format=%s")
     assert runs[n_runs:] == [(["build-paper"], True)]
     assert not repo.git.status("--porcelain", "paper")
+    # Changes elsewhere, whether edited, staged, or new, aren't committed and
+    # don't stop a sync
+    for name in ["edited.md", "staged.md"]:
+        with open(name, "w") as f:
+            f.write("Committed\n")
+    repo.git.add(["edited.md", "staged.md", "dvc.yaml"])
+    repo.git.commit(["-m", "Add notes"])
+    for name in ["edited.md", "staged.md", "new.md"]:
+        with open(name, "a") as f:
+            f.write("Uncommitted\n")
+    repo.git.add("staged.md")
+    ck_info = calkit.load_calkit_info()
+    ck_info["description"] = "Uncommitted"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    elsewhere = repo.git.status("--porcelain")
+    overleaf.files["main.tex"] += b"From Overleaf again\n"
+    with open("paper/main.tex") as f:
+        text = f.read()
+    with open("paper/main.tex", "w", newline="") as f:
+        f.write("Another local edit\n" + text)
+    res = runner.invoke(overleaf_app, ["sync"])
+    assert res.exit_code == 0, res.output
+    assert overleaf.files["main.tex"].startswith(b"Another local edit\n")
+    with open("paper/main.tex") as f:
+        assert "From Overleaf again" in f.read()
+    assert repo.git.status("--porcelain") == elsewhere
+    repo.git.reset("-q", "staged.md")
+    repo.git.checkout(["--", "edited.md", "staged.md", "calkit.yaml"])
+    os.remove("new.md")
     repo.git.rm("paper/figs/fig.txt")
     repo.git.commit(["-m", "Remove figure"])
     sync()
@@ -1518,11 +1548,15 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     # there isn't a deletion
     assert os.path.isfile("paper/.gitignore")
     assert ".gitignore" not in overleaf.files
-    # Conflicting edits are resolved the same as with Git integration
+    # Conflicting edits are resolved the same as with Git integration, with
+    # what's staged elsewhere kept staged throughout
     overleaf.files["main.tex"] += b"Overleaf's ending\n"
     with open("paper/main.tex", "a", newline="") as f:
         f.write("Project's ending\n")
     repo.git.commit(["paper/main.tex", "-m", "Local edit"])
+    with open("staged.md", "a") as f:
+        f.write("Staged during a conflict\n")
+    repo.git.add("staged.md")
     res = runner.invoke(overleaf_app, ["sync", "--allow-stale"])
     assert res.exit_code != 0
     with open("paper/main.tex") as f:
@@ -1532,6 +1566,9 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     res = runner.invoke(overleaf_app, ["sync", "--allow-stale", "--resolve"])
     assert res.exit_code == 0, res.output
     assert overleaf.files["main.tex"] == b"Resolved\n"
+    assert repo.git.status("--porcelain", "staged.md") == "M  staged.md"
+    repo.git.reset("-q", "staged.md")
+    repo.git.checkout(["--", "staged.md"])
     # A map-paths copy isn't in Git, so the rebuilt last sync takes it from
     # its source at that commit, and a source edited since isn't overwritten
     # with Overleaf's older copy

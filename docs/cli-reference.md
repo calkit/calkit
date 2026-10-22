@@ -4507,7 +4507,7 @@ Options:
 | Option         | Type    | Required | Default | Description                                                                                                                                                      |
 | -------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--hub`        | str     | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
-| `--login`      | boolean | no       | False   | Start at login instead of at boot (requires sudo on macOS and Linux).                                                                                            |
+| `--login`      | boolean | no       | False   | Start at login, not at boot (boot requires sudo on macOS and Linux).                                                                                             |
 | `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                                       |
 | `--ssh`        | str     | no       |         | Link another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed.                                 |
 | `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit hub link start' inside tmux on a cluster.                                                                         |

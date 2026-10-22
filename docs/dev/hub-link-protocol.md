@@ -507,6 +507,8 @@ answering yes would.
 
 ## Editor builds
 
+Planned for phase 2 of the ADR, and not implemented yet.
+
 The figure and LaTeX editors send `build.start` with `id`, `project`
 (`owner/name`), `stages`, `commit`, and `files`, a list of
 `{"path": ..., "contents": ...}` for the editor's unsaved files only.

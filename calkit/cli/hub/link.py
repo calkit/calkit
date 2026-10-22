@@ -77,7 +77,7 @@ def install(
         typer.Option(
             "--login",
             help=(
-                "Start at login instead of at boot (requires sudo on macOS "
+                "Start at login, not at boot (boot requires sudo on macOS "
                 "and Linux)."
             ),
         ),

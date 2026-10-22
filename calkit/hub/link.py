@@ -86,9 +86,10 @@ AGENT_TOOLS = ("claude", "codex", "opencode")
 # longer than Calkit's own margin, so it never gets an old one
 CREDENTIAL_MARGIN_SECONDS = 120
 # A GitHub repo Git asks for credentials for, with the helper's
-# useHttpPath, as "owner/repo" or "owner/repo.git", and nothing else
+# useHttpPath, as "owner/repo" or "owner/repo.git", and nothing else;
+# repos can start with "." or "_", e.g., ".github", but aren't all dots
 GITHUB_REPO_PATH_PATTERN = (
-    r"([A-Za-z0-9][A-Za-z0-9._-]{0,99})/([A-Za-z0-9][A-Za-z0-9._-]{0,99})"
+    r"([A-Za-z0-9][A-Za-z0-9._-]{0,99})/([A-Za-z0-9._][A-Za-z0-9._-]{0,99})"
 )
 
 # The hub the link commands in this process act on, by its web URL.
@@ -3197,7 +3198,7 @@ class HubLink:
                 else None
             )
             repo_name = match.group(2).removesuffix(".git") if match else ""
-            if match is None or not repo_name:
+            if match is None or not repo_name.strip("."):
                 raise ValueError("Not a GitHub repository's path")
             repo = f"{match.group(1)}/{repo_name}"
         else:

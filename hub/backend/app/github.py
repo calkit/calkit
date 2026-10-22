@@ -36,7 +36,7 @@ def _load_app_signing_key() -> bytes:
 _GITHUB_REPO_URL = re.compile(
     r"(?:https?://github\.com/|ssh://git@github\.com(?::22)?/"
     r"|git@github\.com:)"
-    r"([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*?)"
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9._][A-Za-z0-9._-]*?)"
     r"(?:\.git)?/?",
     re.IGNORECASE,
 )
@@ -47,7 +47,8 @@ def parse_github_repo(url: str) -> str | None:
     one repo's URL compare equal, or None if it isn't one.
     """
     match = _GITHUB_REPO_URL.fullmatch(url.strip())
-    if match is None:
+    # Repos can start with ".", e.g., ".github", but aren't all dots
+    if match is None or not match.group(2).strip("."):
         return None
     return f"{match.group(1)}/{match.group(2)}".lower()
 

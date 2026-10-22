@@ -78,6 +78,8 @@ PROJECT_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,255}/[A-Za-z0-9._-]{1,255}$")
 MAX_INT = 2**31 - 1
 # GitHub owner and repository names
 GITHUB_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+# Repos can start with "." or "_", e.g., ".github", but aren't all dots
+GITHUB_REPO_PATTERN = r"^[A-Za-z0-9._]*[A-Za-z0-9_][A-Za-z0-9._-]*$"
 
 
 def get_current_machine(session: SessionDep, token: TokenDep) -> Machine:
@@ -848,7 +850,7 @@ class GitHubTokenReq(SessionCredentialsReq):
     """
 
     owner: str = Field(pattern=GITHUB_NAME_PATTERN)
-    repo: str = Field(pattern=GITHUB_NAME_PATTERN)
+    repo: str = Field(max_length=100, pattern=GITHUB_REPO_PATTERN)
 
 
 class GitHubToken(BaseModel):

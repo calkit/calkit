@@ -739,6 +739,7 @@ def test_machines(
             False,
         ),
         ("gone", "https://github.com/{}/gone", user.account.id, False),
+        (".github", "https://github.com/{}/.github", user.account.id, False),
         (
             "invited-write",
             "https://github.com/{}/invited-write",
@@ -811,6 +812,7 @@ def test_machines(
         "read": {"push": False, "pull": True},
         "uninstalled": {"push": True, "pull": True},
         "gone": 404,
+        ".github": {"push": True, "pull": True},
         "decoy-fork": None,
         "invited-write": {"push": True, "pull": True},
         "invited-read": {"push": True, "pull": True},
@@ -863,7 +865,7 @@ def test_machines(
         ]:
             r = github_token(repo, shown, other_headers)
             assert r.status_code == 403, (repo, r.text)
-        for bad in ["../x", "-x", "a b", "x/y", ""]:
+        for bad in ["../x", "-x", "a b", "x/y", "", ".", "..", "x" * 101]:
             assert github_token(bad).status_code == 422
         assert asked_github == [] and minted == []
         # An owner with GitHub gets what it says, whatever the hub does
@@ -873,6 +875,7 @@ def test_machines(
         db.commit()
         with_github: Expected = [
             ("owned", write),
+            (".github", write),
             ("http-form", read),
             ("ssh-form", None),
             ("ssh-url-form", None),

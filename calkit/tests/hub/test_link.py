@@ -1005,8 +1005,26 @@ async def test_sessions(tmp_path, monkeypatch):
     assert await ask(github_req | {"forget": True}) == {}
     assert await ask(github_req) == {"token": "ghs_5"}
     assert await ask(github_req | {"path": "o/other"}) == {"token": "ghs_4"}
+    # Repos can start with "." or "_"
+    assert await ask(github_req | {"path": "o/.github.git"}) == {
+        "token": "ghs_6"
+    }
+    assert asked[-1][2] == "o/.github"
     # Only for a plain "owner/repo"
-    for bad in [None, 7, "", "o", "o/r/x", "../r", "-o/r", "o/.git", "o/r?x"]:
+    for bad in [
+        None,
+        7,
+        "",
+        "o",
+        "o/r/x",
+        "../r",
+        "-o/r",
+        "o/-r",
+        "o/.git",
+        "o/..",
+        "o/.",
+        "o/r?x",
+    ]:
         with pytest.raises(hub.LinkCredentialError, match="GitHub"):
             await ask(github_req | {"path": bad})
 

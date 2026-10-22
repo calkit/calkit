@@ -70,9 +70,26 @@ config.
     but a session can do anything you can do while signed in to Overleaf.
     Treat it like a password and don't share it.
 
+To sync from [calkit.io](https://calkit.io) or the
+[browser extension](browser-ext/index.md) as well,
+your Calkit account needs the session too.
+Either click **Connect Overleaf sign-in** in the extension's panel on an
+Overleaf project page, which sends it without copying anything,
+or run:
+
+```sh
+calkit overleaf login --hub
+```
+
+Once your account has one,
+`calkit overleaf sync` uses it on any machine signed in to Calkit,
+so there's no cookie to copy there.
+
 A session keeps working until you sign out of Overleaf in that browser or it
 expires.
-When Overleaf rejects it, Calkit asks for a new one,
+When Overleaf rejects it, Calkit first checks your Calkit account for a
+newer one, e.g., after you've connected again from the extension,
+and otherwise asks for a new one,
 so copy the cookie again after signing back in.
 If a Git token stops working, e.g., because Premium has ended,
 Calkit uses the session instead, if one is set.

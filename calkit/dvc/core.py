@@ -1117,7 +1117,8 @@ def clear_off_hub_auth(wdir: str | None = None) -> list[str]:
     the token anywhere, which DVC would send it to. So the token is stored
     along with the remote's URL, in the local config, which a pull can't
     change, and it's removed if the repo's URL for that remote differs, or
-    if it was stored without one. ``run_dvc_command`` runs this first.
+    if it was stored without one for a URL off the hub. ``run_dvc_command``
+    runs this first.
     """
 
     def is_hub_token(secret: object) -> bool:
@@ -1155,6 +1156,7 @@ def clear_off_hub_auth(wdir: str | None = None) -> list[str]:
     except Exception:
         return []
     cleared = []
+    changed = False
     for section, options in list(local.items()):
         match = re.fullmatch(r'remote "(.+)"', section)
         if match is None or not isinstance(options, dict):
@@ -1169,13 +1171,23 @@ def clear_off_hub_auth(wdir: str | None = None) -> list[str]:
         repo_url = (shared.get(section) or {}).get("url")
         if pinned and (repo_url is None or repo_url == pinned):
             continue
+        # Stored before URLs were, for one still on the hub, so it's pinned
+        # there rather than set up again
+        if (
+            not pinned
+            and repo_url
+            and is_on_hub(repo_url, calkit.hub.get_base_url())
+        ):
+            options["url"] = repo_url
+            changed = True
+            continue
         # The repo's URL wins again, without the token
         for option in (*REMOTE_AUTH_OPTIONS, "url"):
             options.pop(option, None)
         if not options:
             local.pop(section)
         cleared.append(match.group(1))
-    if cleared:
+    if cleared or changed:
         local.write()
         for name in cleared:
             logger.warning(
@@ -1252,12 +1264,14 @@ def clear_remote_local_http_auth(
     if not isinstance(remote, dict):
         return
     changed = False
-    for option in ("custom_auth_header", "password", "auth"):
+    for option in REMOTE_AUTH_OPTIONS:
         if option in remote:
             remote.pop(option)
             changed = True
     if not changed:
         return
+    # Along with the URL it was stored for, so the repo's is used again
+    remote.pop("url", None)
     if not remote:
         cfg.pop(section_name, None)
     cfg.write()

@@ -405,11 +405,9 @@ def test_set_remote_auth_ck_remote_clears_local_http_auth(
             "    url = https://example.com\n"
         )
     calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+    # Along with the URL it was stored for, so the repo's ck:// one is used
     cfg = ConfigObj(str(fpath), encoding="utf-8")
-    section = cfg[f'remote "{remote_name}"']
-    assert "custom_auth_header" not in section
-    assert "password" not in section
-    assert section["url"] == "https://example.com"  # type: ignore
+    assert f'remote "{remote_name}"' not in cfg
 
 
 def test_data_status_as_posix():
@@ -700,6 +698,8 @@ def test_clear_off_hub_auth(
         "['remote \"keyed\"']\n"
         "    url = https://storage.example/keyed\n"
         "['remote \"legacy\"']\n"
+        "    url = https://attacker.example/legacy\n"
+        "['remote \"older\"']\n"
         f"    url = {hub_url}\n"
         "['remote \"session\"']\n"
         "    url = https://attacker.example/session\n"
@@ -735,6 +735,11 @@ def test_clear_off_hub_auth(
         "['remote \"legacy\"']\n"
         "    custom_auth_header = Authorization\n"
         f"    password = Bearer {legacy}\n"
+        # Stored without one by an older version, for a URL on the hub,
+        # which it's pinned to
+        "['remote \"older\"']\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
         # As are a hub link's sessions', stored without one too
         "['remote \"session\"']\n"
         "    custom_auth_header = Authorization\n"
@@ -744,6 +749,9 @@ def test_clear_off_hub_auth(
         f"    url = {hub_url}\n"
         "    custom_auth_header = Authorization\n"
         "    password = Bearer ckp_token\n"
+    )
+    monkeypatch.setattr(
+        calkit.hub, "get_base_url", lambda: "https://api.calkit.io"
     )
     # Found from a folder inside the project, as DVC finds it
     cleared = calkit.dvc.clear_off_hub_auth(wdir=str(sub))
@@ -756,6 +764,8 @@ def test_clear_off_hub_auth(
     assert cfg['remote "mine"']["password"] == "hunter2"
     assert cfg['remote "keyed"']["password"] == "their-key"
     assert 'remote "legacy"' not in cfg
+    assert cfg['remote "older"']["url"] == hub_url
+    assert cfg['remote "older"']["password"] == "Bearer ckp_token"
     assert cfg['remote "local-only"']["password"] == "Bearer ckp_token"
     # Every DVC command Calkit runs clears it first, in the repo DVC's own
     # --cd names, if given

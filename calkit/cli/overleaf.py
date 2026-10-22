@@ -60,8 +60,7 @@ def _get_overleaf_token(rejected: bool = False) -> str:
             "A new one can be generated at:\n\n"
             "    https://www.overleaf.com/user/settings\n\n"
             "under the 'Git Integration' section.\n"
-            "Without Overleaf Premium, run 'calkit overleaf login' instead, "
-            "or connect from the Calkit browser extension on overleaf.com.\n"
+            "Without Overleaf Premium, run 'calkit overleaf login' instead.\n"
         )
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise_error(

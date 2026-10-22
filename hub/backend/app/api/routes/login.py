@@ -534,6 +534,12 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
     if not user.is_active:
         logger.info("User is not active")
         raise HTTPException(401, "User is not active")
+    # GitHub vouches for addresses it verified, e.g., for accounts made
+    # through it before emails were checked
+    if not user.email_verified and github.has_verified_email(
+        out["access_token"], user.email
+    ):
+        users.mark_email_verified(session=session, user=user)
     users.apply_analytics_consent(
         session=session, user=user, consent=req.analytics_consent
     )
@@ -626,6 +632,16 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
             )
     else:
         logger.info(f"Found existing user with email: {user.email}")
+        # GitHub vouches for addresses it verified, e.g., for accounts made
+        # through it before emails were checked, but not one a squatter
+        # linked, which can't have the owner's address verified
+        if not user.email_verified and user.github_username is not None:
+            try:
+                gh_token = users.get_github_token(session=session, user=user)
+                if github.has_verified_email(gh_token, user.email):
+                    users.mark_email_verified(session=session, user=user)
+            except Exception as e:
+                logger.warning(f"Couldn't ask GitHub about {user.email}: {e}")
         # Anyone could have signed up with this address without proving
         # it, so whatever they set up to get back in stops working
         if not user.email_verified:

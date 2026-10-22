@@ -210,6 +210,24 @@ def token_resp_text_to_dict(resp_text: str) -> dict:
     return out
 
 
+def has_verified_email(access_token: str, email: str) -> bool:
+    """Whether GitHub verified this email for the token's user."""
+    resp = requests.get(
+        "https://api.github.com/user/emails",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    emails = resp.json() if resp.status_code == 200 else None
+    if not isinstance(emails, list):
+        return False
+    return any(
+        isinstance(e, dict)
+        and e.get("verified") is True
+        and str(e.get("email", "")).lower() == email.lower()
+        for e in emails
+    )
+
+
 def resolve_email(access_token: str) -> tuple[str, bool]:
     """Pick the email to identify a GitHub user by, and say if it's verified.
 

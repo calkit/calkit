@@ -599,6 +599,64 @@ def test_login_with_google_recovers_unverified_account(
         is None
     )
     assert not verify_password("squatter-password", user.hashed_password)
+    # An account made through GitHub before emails were checked keeps all
+    # of it, since its GitHub account verified the address
+    email = f"gh-old-{uuid.uuid4().hex[:8]}@example.com"
+    github_name = f"gh-old-{uuid.uuid4().hex[:8]}"
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password="owner-password"),
+    )
+    users.link_github_account(
+        session=db, user=user, github_username=github_name
+    )
+    users.save_github_token(
+        session=db,
+        user=user,
+        github_resp={
+            "access_token": "gho_owner",
+            "refresh_token": "ghr_owner",
+            "expires_in": 3600,
+            "refresh_token_expires_in": 3600,
+        },
+    )
+    assert user.email_verified is False
+
+    def api_get(url, *args, **kwargs):
+        if url.endswith("/user/emails"):
+            assert kwargs["headers"]["Authorization"] == "Bearer gho_owner"
+            return _FakeGoogleResp(
+                200, [{"email": email.upper(), "verified": True}]
+            )
+        return _FakeGoogleResp(
+            200, {"email": email, "email_verified": True, "name": "Owner"}
+        )
+
+    with (
+        patch(
+            "app.api.routes.login.requests.post",
+            return_value=_FakeGoogleResp(
+                200, {"access_token": "ya29.fake", "refresh_token": "r"}
+            ),
+        ),
+        patch("app.api.routes.login.requests.get", side_effect=api_get),
+        patch("app.api.routes.login.users.save_google_token"),
+    ):
+        r = client.post(
+            "/login/google",
+            json={
+                "code": "auth-code",
+                "redirect_uri": "http://localhost:5173/auth/google",
+            },
+        )
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.email_verified_at is not None
+    assert user.account.github_name == github_name
+    assert [c for c in user.external_credentials if c.provider == "github"]
+    assert verify_password("owner-password", user.hashed_password)
 
 
 def test_login_with_google_requires_verified_email(client: TestClient) -> None:
@@ -885,6 +943,21 @@ def test_login_with_github_creates_user_for_a_new_email(
     # in as the first user rather than making another.
     assert r.status_code == 200, r.text
     assert users.get_user_by_email(session=db, email=other_email) is None
+    # An account whose address GitHub hadn't verified yet is verified once
+    # GitHub has
+    email = f"later-{uuid.uuid4().hex[:8]}@example.com"
+    username = f"ghlater{uuid.uuid4().hex[:6]}"
+    for verified in [False, True]:
+        r = _github_login(
+            client,
+            username,
+            [{"email": email, "primary": True, "verified": verified}],
+        )
+        assert r.status_code == 200, r.text
+        user = users.get_user_by_email(session=db, email=email)
+        assert user is not None
+        db.refresh(user)
+        assert user.email_verified is verified
 
 
 def test_login_with_github_keeps_account_name_when_projects_exist(

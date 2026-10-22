@@ -31,7 +31,7 @@ https://github.com/petebachant/calkit-test-4,petebachant,calkit-test-4,Calkit te
 https://github.com/petebachant/calkit-xr-demo,petebachant,calkit-xr-demo,Calkit xr demo,github-search+hub,main,True,False,2026-02-21,2026-02-25,True,True
 https://github.com/petebachant/citation-impact-open-science,petebachant,citation-impact-open-science,Reproducing 'A study on the citation impact of Open Science Indicators in the French Open Science Monitor',github-search+hub,main,True,False,2025-09-16,2025-09-16,True,False
 https://github.com/petebachant/clima-coupled-land-slowdown,petebachant,clima-coupled-land-slowdown,CliMA coupled land slowdown,github-search+hub,main,True,False,2025-11-11,2025-12-02,True,False
-https://github.com/petebachant/clima-gpu-profiling,petebachant,clima-gpu-profiling,CliMA GPU profiling,hub,main,True,False,2025-09-09,2026-10-21,True,False
+https://github.com/petebachant/clima-gpu-profiling,petebachant,clima-gpu-profiling,CliMA GPU profiling,github-search+hub,main,True,False,2025-09-09,2026-10-21,True,False
 https://github.com/petebachant/clima-horizontal-diffusion,petebachant,clima-horizontal-diffusion,CliMA horizontal diffusion,github-search+hub,main,True,False,2025-12-16,2026-02-05,True,False
 https://github.com/petebachant/clima-local-geometry,petebachant,clima-local-geometry,CliMA LocalGeometry,github-search+hub,main,True,False,2026-02-10,2026-03-16,True,False
 https://github.com/petebachant/clima-perf,petebachant,clima-perf,CliMA performance,github-search+hub,main,True,False,2026-01-13,2026-10-21,True,False
@@ -51,7 +51,7 @@ https://github.com/petebachant/reuse-rvat-re-dep,petebachant,reuse-rvat-re-dep,R
 https://github.com/petebachant/rl4fisheries,petebachant,rl4fisheries,Using machine learning to inform harvest control rule design in complex fishery settings,hub,main,True,True,2025-08-02,2025-08-28,True,False
 https://github.com/petebachant/snakemake-tutorial,petebachant,snakemake-tutorial,Snakemake tutorial,github-search+hub,main,True,False,2025-01-30,2025-02-03,True,True
 https://github.com/petebachant/Software_Example,petebachant,Software_Example,Research software example,hub,calkit,True,True,2025-07-14,2026-02-13,True,True
-https://github.com/petebachant/strava-analysis,petebachant,strava-analysis,Strava analysis,github-search+hub,main,True,False,2025-01-17,2026-10-21,True,False
+https://github.com/petebachant/strava-analysis,petebachant,strava-analysis,Strava analysis,github-search+hub,main,True,False,2025-01-17,2026-10-22,True,False
 https://github.com/petebachant/test-1,petebachant,test-1,Test 1,github-search,main,False,False,2025-12-05,2026-10-22,True,True
 https://github.com/petebachant/test-2,petebachant,test-2,,github-search,main,False,False,2024-10-21,2026-03-07,True,True
 https://github.com/petebachant/test-matlab,petebachant,test-matlab,Test MATLAB,github-search,main,False,False,2025-01-02,2025-01-20,True,True

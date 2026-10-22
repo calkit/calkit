@@ -3277,6 +3277,7 @@ def run(
                     no_push=True,
                     verbose=verbose,
                     allow_stale=True,
+                    no_build=True,
                 )
         # Compile the DVC pipeline (and subproject pipelines)
         dvc_stages = None
@@ -3914,6 +3915,7 @@ def run(
             verbose=verbose,
             no_commit=False,
             no_push=not save_after_run,
+            no_build=True,
         )
     return {"dvc_stages": dvc_stages, "stage_run_info": stage_run_info}
 

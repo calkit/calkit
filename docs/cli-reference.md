@@ -4127,13 +4127,32 @@ Options:
 
 Interact with Overleaf.
 
-| Command                                           | Description                                                    |
-| ------------------------------------------------- | -------------------------------------------------------------- |
-| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                 |
-| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                    |
-| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project. |
-| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.       |
-| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.   |
+| Command                                           | Description                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| [`login`](#subcommand-overleaf-ol-login)          | Sign in with a browser session to sync without Overleaf Premium. |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                   |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                      |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project.   |
+| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.         |
+| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.     |
+
+<a id="subcommand-overleaf-ol-login"></a>
+
+#### `calkit overleaf|ol login`
+
+Sign in with a browser session to sync without Overleaf Premium.
+
+Usage:
+
+```text
+calkit overleaf|ol login [OPTIONS]
+```
+
+Options:
+
+| Option      | Type | Required | Default | Description                                                |
+| ----------- | ---- | -------- | ------- | ---------------------------------------------------------- |
+| `--session` | str  | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
 
 <a id="subcommand-overleaf-ol-import"></a>
 
@@ -4173,6 +4192,8 @@ Options:
 
 Sync folders with Overleaf.
 
+Local edits are committed first, and documents changed on either side are rebuilt and saved with the sync.
+
 Usage:
 
 ```text
@@ -4187,17 +4208,18 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
-| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
-| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
-| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
-| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
-| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
-| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
-| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
-| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
-| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`       | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--no-push`         | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`         | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`     | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`      | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
+| `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
 
 <a id="subcommand-overleaf-ol-status-st"></a>
 
@@ -4911,6 +4933,8 @@ Options:
 
 Sync folders with Overleaf.
 
+Local edits are committed first, and documents changed on either side are rebuilt and saved with the sync.
+
 Usage:
 
 ```text
@@ -4925,14 +4949,15 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
-| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
-| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
-| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
-| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
-| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
-| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
-| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
-| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
-| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`       | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--no-push`         | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`         | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`     | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`      | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
+| `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |

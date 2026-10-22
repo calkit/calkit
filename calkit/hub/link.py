@@ -877,11 +877,23 @@ def discover_workspaces(cfg: dict) -> list[dict]:
         ws["last_activity"] = _last_activity(path, ws["last_run"])
         return ws
 
+    def try_describe(path: str, kind: str) -> dict | None:
+        # So one odd repo doesn't keep the rest from the hub
+        try:
+            return describe(path, kind)
+        except Exception as e:
+            logger.warning(f"Skipping workspace {path}: {e}")
+            return None
+
     from concurrent.futures import ThreadPoolExecutor
 
     # Mostly waiting on Git, so they're looked at together
     with ThreadPoolExecutor(max_workers=8) as pool:
-        workspaces = list(pool.map(describe, found, found.values()))
+        workspaces = [
+            ws
+            for ws in pool.map(try_describe, found, found.values())
+            if ws is not None
+        ]
     # What the hub is told of each, leaving out what's only for attaching
     # or reading its log
     agents = find_agents([ws["path"] for ws in workspaces])
@@ -1818,10 +1830,19 @@ def get_run_state(wdir: str) -> dict:
         try:
             with _open_in_workspace(wdir, os.path.relpath(record, wdir)) as f:
                 run = json.load(f)
+            # Cut to what the hub takes, since it's whatever the file says
             state["last_run"] = dict(
-                status=run["status"],
-                started=run["start_time"],
-                ended=run["end_time"],
+                status=str(run["status"])[:16],
+                started=(
+                    None
+                    if run["start_time"] is None
+                    else str(run["start_time"])[:64]
+                ),
+                ended=(
+                    None
+                    if run["end_time"] is None
+                    else str(run["end_time"])[:64]
+                ),
                 failed_stages=[
                     name[:256]
                     for name, i in (run.get("stages") or {}).items()

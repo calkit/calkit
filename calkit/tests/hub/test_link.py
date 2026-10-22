@@ -233,6 +233,28 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     assert [w["project"] for w in found if w["path"].endswith("this-hub")] == [
         "dave/http"
     ]
+    # One odd repo doesn't keep the rest from the hub, and a run record is
+    # cut to what the hub takes
+    broken = os.path.join(home, "dev", "broken")
+    _init_project(broken, name="broken")
+    os.makedirs(os.path.join(broken, ".dvc", "tmp"))
+    with open(os.path.join(broken, ".dvc", "tmp", "rwlock"), "w") as f:
+        f.write("[]")
+    runs = os.path.join(this_hub, ".calkit", "local", "runs")
+    os.makedirs(runs)
+    with open(os.path.join(runs, "1.json"), "w") as f:
+        json.dump({"status": "x" * 100, "start_time": None, "end_time": 5}, f)
+    found = hub_link.discover_workspaces({"workspaces": []})
+    by_path = {w["path"]: w for w in found}
+    assert os.path.realpath(broken) not in by_path
+    assert by_path[os.path.realpath(this_hub)]["last_run"] == {
+        "status": "x" * 16,
+        "started": None,
+        "ended": "5",
+        "failed_stages": [],
+    }
+    shutil.rmtree(broken)
+    shutil.rmtree(runs)
     assert not os.path.exists(ran)
     demo = workspaces["calkit/demo"]
     assert demo["kind"] == "personal"

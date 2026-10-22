@@ -1759,6 +1759,7 @@ def get_status(
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
             environment_checks=result["environment_checks"],
+            environment_states=result.get("environment_states", {}),
             cleaned_notebooks=result["cleaned_notebooks"],
             stale_stages=result["stale_stages"],
             errors=result["errors"],

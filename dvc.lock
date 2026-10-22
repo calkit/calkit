@@ -18,7 +18,7 @@ stages:
       size: 55987
     - path: calkit/latex.py
       hash: md5
-      md5: ea5d5fdfc7eac855ee29e12f97a67cb8
+      md5: 5c4ecf4b2073302edad13fbd9ad52533
       size: 64721
     - path: examples/latex-word/calkit.yaml
       hash: md5
@@ -116,7 +116,7 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: ea5d5fdfc7eac855ee29e12f97a67cb8
+      md5: 5c4ecf4b2073302edad13fbd9ad52533
       size: 64721
     - path: uv.lock
       hash: md5
@@ -125,7 +125,7 @@ stages:
     outs:
     - path: images/latex/sizes.json
       hash: md5
-      md5: 6f77c9bc29cd7b3932e5d2f2eb624ff5
+      md5: ec9ac7c3ade85e066f0568af2a892eeb
       size: 335
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py

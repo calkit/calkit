@@ -1741,6 +1741,9 @@ def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     assert "# >>> calkit latex aux files (managed by calkit) >>>" in lines
     assert "*.aux" in lines
     assert "*.pdf" not in lines
+    # Including what packages like endnotes and nomencl write
+    assert repo.ignored("paper/main.ent")
+    assert repo.ignored("paper/main.nlo")
 
 
 def test_get_status(tmp_dir):

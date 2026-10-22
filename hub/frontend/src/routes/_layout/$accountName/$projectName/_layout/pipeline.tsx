@@ -396,8 +396,7 @@ function ProjectPipeline() {
         owner_name: accountName,
         project_name: projectName,
       }).then((r) => r.data),
-    // Only admins have workspaces for now
-    enabled: Boolean(user?.is_superuser),
+    enabled: Boolean(user?.can_link_machines),
     retry: false,
     refetchInterval: 30000,
   })

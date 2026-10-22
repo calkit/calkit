@@ -100,8 +100,7 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
         owner_name: accountName,
         project_name: projectName,
       }).then((response) => response.data),
-    // Only admins have workspaces for now
-    enabled: Boolean(user?.is_superuser),
+    enabled: Boolean(user?.can_link_machines),
     retry: false,
     refetchOnWindowFocus: false,
     // As often as machines check in

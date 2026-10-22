@@ -192,6 +192,11 @@ class UserExternalCredential(SQLModel, table=True):
     user: "User" = Relationship(back_populates="external_credentials")
 
 
+# Whether everyone can link machines, for workspaces, rather than only
+# superusers
+MACHINES_FOR_EVERYONE = True
+
+
 # Database model, database table inferred from class name
 class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -284,6 +289,12 @@ class User(UserBase, table=True):
             and cred.provider_account_id.lower() == self.email.lower()
         )
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def can_link_machines(self) -> bool:
+        """Whether the user can link machines, for workspaces."""
+        return self.is_superuser or MACHINES_FOR_EVERYONE
+
     @computed_field
     @property
     def created(self) -> datetime:
@@ -319,6 +330,7 @@ class UserPublic(UserBase):
     created: datetime
     github_username: str | None
     email_verified: bool
+    can_link_machines: bool
     subscription: Union["UserSubscription", None]
     analytics_consent: bool | None = None
 

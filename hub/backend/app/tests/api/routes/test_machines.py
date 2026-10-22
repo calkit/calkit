@@ -17,7 +17,6 @@ from sqlmodel import Session, select
 from starlette.websockets import WebSocketDisconnect
 
 from app import users
-from app.api.routes import machines
 from app.config import settings
 from app.core import utcnow
 from app.models import (
@@ -29,6 +28,7 @@ from app.models import (
     UserToken,
     UserTOTP,
 )
+from app.models import core as models_core
 from app.models.core import ROLE_IDS
 from app.security import (
     create_access_token,
@@ -39,12 +39,6 @@ from app.security import (
     generate_totp_secret,
 )
 from app.users import SECOND_FACTOR_REQUIRED, SECOND_FACTOR_SETUP_REQUIRED
-
-
-@pytest.fixture(autouse=True)
-def _machines_for_everyone(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The tests' users aren't superusers
-    monkeypatch.setattr(machines, "MACHINES_FOR_EVERYONE", True)
 
 
 def test_machines(
@@ -93,8 +87,13 @@ def test_machines(
             headers=headers,
         )
 
-    # Only superusers can link machines until they're open to everyone
-    with patch.object(machines, "MACHINES_FOR_EVERYONE", False):
+    # Only superusers can link machines when they aren't open to everyone,
+    # which the frontend reads off the user
+    r = client.get("/user", headers=normal_user_token_headers)
+    assert r.json()["can_link_machines"] is True
+    with patch.object(models_core, "MACHINES_FOR_EVERYONE", False):
+        r = client.get("/user", headers=normal_user_token_headers)
+        assert r.json()["can_link_machines"] is False
         r = client.post(
             "/machines",
             headers=normal_user_token_headers,

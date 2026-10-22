@@ -11543,6 +11543,10 @@ export const UserAdminPublicSchema = {
       type: "boolean",
       title: "Email Verified",
     },
+    can_link_machines: {
+      type: "boolean",
+      title: "Can Link Machines",
+    },
     subscription: {
       anyOf: [
         {
@@ -11582,6 +11586,7 @@ export const UserAdminPublicSchema = {
     "created",
     "github_username",
     "email_verified",
+    "can_link_machines",
     "subscription",
   ],
   title: "UserAdminPublic",
@@ -11709,6 +11714,10 @@ export const UserPublicSchema = {
       type: "boolean",
       title: "Email Verified",
     },
+    can_link_machines: {
+      type: "boolean",
+      title: "Can Link Machines",
+    },
     subscription: {
       anyOf: [
         {
@@ -11738,6 +11747,7 @@ export const UserPublicSchema = {
     "created",
     "github_username",
     "email_verified",
+    "can_link_machines",
     "subscription",
   ],
   title: "UserPublic",
@@ -13517,6 +13527,10 @@ export const UserAdminPublicWritableSchema = {
       type: "boolean",
       title: "Email Verified",
     },
+    can_link_machines: {
+      type: "boolean",
+      title: "Can Link Machines",
+    },
     subscription: {
       anyOf: [
         {
@@ -13556,6 +13570,7 @@ export const UserAdminPublicWritableSchema = {
     "created",
     "github_username",
     "email_verified",
+    "can_link_machines",
     "subscription",
   ],
   title: "UserAdminPublic",
@@ -13617,6 +13632,10 @@ export const UserPublicWritableSchema = {
       type: "boolean",
       title: "Email Verified",
     },
+    can_link_machines: {
+      type: "boolean",
+      title: "Can Link Machines",
+    },
     subscription: {
       anyOf: [
         {
@@ -13646,6 +13665,7 @@ export const UserPublicWritableSchema = {
     "created",
     "github_username",
     "email_verified",
+    "can_link_machines",
     "subscription",
   ],
   title: "UserPublic",

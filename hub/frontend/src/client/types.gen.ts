@@ -6647,6 +6647,10 @@ export type UserAdminPublic = {
    * Email Verified
    */
   email_verified: boolean
+  /**
+   * Can Link Machines
+   */
+  can_link_machines: boolean
   subscription: UserSubscription | null
   /**
    * Analytics Consent
@@ -6732,6 +6736,10 @@ export type UserPublic = {
    * Email Verified
    */
   email_verified: boolean
+  /**
+   * Can Link Machines
+   */
+  can_link_machines: boolean
   subscription: UserSubscription | null
   /**
    * Analytics Consent
@@ -7728,6 +7736,10 @@ export type UserAdminPublicWritable = {
    * Email Verified
    */
   email_verified: boolean
+  /**
+   * Can Link Machines
+   */
+  can_link_machines: boolean
   subscription: UserSubscriptionWritable | null
   /**
    * Analytics Consent
@@ -7779,6 +7791,10 @@ export type UserPublicWritable = {
    * Email Verified
    */
   email_verified: boolean
+  /**
+   * Can Link Machines
+   */
+  can_link_machines: boolean
   subscription: UserSubscriptionWritable | null
   /**
    * Analytics Consent

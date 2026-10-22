@@ -137,12 +137,12 @@ export const Route = createFileRoute(
   },
 })
 
-// Only admins have workspaces for now, and everyone else can vote for them;
-// views are tracked either way, to see how many look
+// Those who can't link machines yet can vote for workspaces; views are
+// tracked either way, to see how many look
 function WorkspacesGate() {
   const { accountName, projectName } = Route.useParams()
   const { user } = useAuth()
-  const enabled = Boolean(user?.is_superuser)
+  const enabled = Boolean(user?.can_link_machines)
   const userId = user?.id
   useEffect(() => {
     if (!userId) return

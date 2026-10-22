@@ -6,6 +6,7 @@ import platform
 import shutil
 import socket
 import subprocess
+import sys
 from datetime import timedelta
 from unittest import mock
 
@@ -16,7 +17,7 @@ import calkit.environments
 import calkit.latex
 
 
-def test_check_all_in_pipeline(tmp_dir):
+def test_check_all_in_pipeline(tmp_dir, capfd):
     ck_info: dict = {
         "environments": {
             "py1": {
@@ -209,6 +210,28 @@ def test_check_all_in_pipeline(tmp_dir):
     assert set(res) == {"py1", "far", "nope", "py3"}
     assert not res["nope"]["success"]
     assert not os.path.isdir(".venv2")
+
+    # Quiet discards what the checks and their tools print, and leaves the
+    # terminal's handles intact, since on Windows Click keeps its own
+    def noisy_check(*args: object, **kwargs: object) -> None:
+        print("from python")
+        subprocess.run(["git", "--version"])
+
+    capfd.readouterr()
+    if sys.platform == "win32":
+        import msvcrt
+
+        stderr_handle = msvcrt.get_osfhandle(2)
+    with mock.patch(
+        "calkit.cli.check.check_environment", side_effect=noisy_check
+    ):
+        res = calkit.environments.check_all_in_pipeline(
+            skip_stages=["skipped"], force=True, quiet=True
+        )
+    assert res["py1"]["success"]
+    assert capfd.readouterr() == ("", "")
+    if sys.platform == "win32":
+        assert msvcrt.get_osfhandle(2) == stderr_handle
     assert calkit.environments.check_inner_env_there(
         ["calkit", "xenv", "-n", "py2", "--no-check", "--", "a", "--no-check"]
     ) == ["calkit", "xenv", "-n", "py2", "--", "a", "--no-check"]

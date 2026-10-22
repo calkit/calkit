@@ -2243,6 +2243,36 @@ def check_all_in_pipeline(
             return
         sys.stdout.flush()
         sys.stderr.flush()
+        if sys.platform == "win32":
+            # Replacing descriptors 1 and 2 here would close the console
+            # handles Click writes to, so only the standard handles that
+            # subprocesses inherit are swapped
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+            kernel32.GetStdHandle.restype = wintypes.HANDLE
+            kernel32.SetStdHandle.argtypes = [wintypes.DWORD, wintypes.HANDLE]
+            kernel32.SetStdHandle.restype = wintypes.BOOL
+            # STD_OUTPUT_HANDLE and STD_ERROR_HANDLE
+            std_ids = [-11, -12]
+            with (
+                open(os.devnull, "w") as null,
+                redirect_stdout(null),
+                redirect_stderr(null),
+            ):
+                null_handle = msvcrt.get_osfhandle(null.fileno())
+                saved_handles = [kernel32.GetStdHandle(i) for i in std_ids]
+                try:
+                    for i in std_ids:
+                        kernel32.SetStdHandle(i, null_handle)
+                    yield
+                finally:
+                    for i, h in zip(std_ids, saved_handles):
+                        kernel32.SetStdHandle(i, h)
+            return
         saved = [os.dup(1), os.dup(2)]
         devnull = os.open(os.devnull, os.O_WRONLY)
         try:

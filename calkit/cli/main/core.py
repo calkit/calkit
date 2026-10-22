@@ -4781,7 +4781,7 @@ def install_app(
         ok = _install.prompt_and_install(name, interactive=is_tty())
     if not ok:
         raise_error(f"Failed to install '{name}'")
-    typer.echo(f"✅ Installed '{name}'")
+    calkit.echo(f"✅ Installed '{name}'")
 
 
 @app.command(name="xproc|runproc", help="Execute a procedure.")

@@ -1012,14 +1012,43 @@ def test_overleaf_sync_readiness_guards(tmp_dir):
     )
     default_branch = repo.active_branch.name
     repo.git.push(["--set-upstream", "origin", default_branch])
-    # Importing creates a build stage that has never run, so the pipeline is
-    # out-of-date and a plain sync is refused
+    # Only out-of-date stages that feed what's sent count, not the
+    # document's own build, whose PDF isn't sent, or stages that don't feed
+    # the document
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"]["stages"]["unrelated"] = {
+        "kind": "shell-command",
+        "command": "echo other > other.txt",
+        "environment": "_system",
+        "outputs": ["other.txt"],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo.git.commit(["calkit.yaml", "-m", "Add a stage"])
     res = subprocess.run(
-        ["calkit", "overleaf", "sync"], capture_output=True, text=True
+        ["calkit", "overleaf", "sync", "--no-build"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    # A stage writing into the synced folder that hasn't run is refused
+    ck_info["pipeline"]["stages"]["figure"] = {
+        "kind": "shell-command",
+        "command": "echo figure > paper/figure.txt",
+        "environment": "_system",
+        "outputs": ["paper/figure.txt"],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo.git.commit(["calkit.yaml", "-m", "Add a figure stage"])
+    res = subprocess.run(
+        ["calkit", "overleaf", "sync", "--no-build"],
+        capture_output=True,
+        text=True,
     )
     assert res.returncode == 1
     output = res.stdout + res.stderr
-    assert "Pipeline is not up-to-date" in output
+    assert "out-of-date stages: figure." in output
     assert "--allow-stale" in output
     res = subprocess.run(
         ["calkit", "overleaf", "sync", "--allow-stale"],
@@ -1447,6 +1476,20 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     assert pushed.endswith("Broken")
     assert not repo.git.status("--porcelain")
     build_writes.clear()
+    # Local edits are committed before syncing, and the document is rebuilt
+    # from them, since its own build being out-of-date doesn't stop a sync
+    with open("paper/main.tex", "a", newline="") as f:
+        f.write("Local edit\n")
+    res = runner.invoke(overleaf_app, ["sync", "--no-commit"])
+    assert res.exit_code != 0
+    assert "Uncommitted changes found in paper" in res.output
+    n_runs = len(runs)
+    res = runner.invoke(overleaf_app, ["sync"])
+    assert res.exit_code == 0, res.output
+    assert overleaf.files["main.tex"].endswith(b"Local edit\n")
+    assert "Update paper before Overleaf sync" in repo.git.log("--format=%s")
+    assert runs[n_runs:] == [(["build-paper"], True)]
+    assert not repo.git.status("--porcelain", "paper")
     repo.git.rm("paper/figs/fig.txt")
     repo.git.commit(["-m", "Remove figure"])
     sync()

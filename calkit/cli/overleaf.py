@@ -512,8 +512,26 @@ def import_publication(
     )
 
 
+def _get_document_stages(folders: list[str]) -> dict[str, str]:
+    """LaTeX stages that build a document in these folders, keyed to the
+    folder.
+    """
+    stages = (calkit.load_calkit_info().get("pipeline") or {}).get(
+        "stages"
+    ) or {}
+    return {
+        name: folder
+        for name, stage in stages.items()
+        if isinstance(stage, dict) and stage.get("kind") == "latex"
+        for folder in folders
+        if Path(str(stage.get("target_path", ""))).is_relative_to(folder)
+    }
+
+
 def check_sync_readiness(
-    check_branch: bool = True, check_pipeline: bool = True
+    check_branch: bool = True,
+    check_pipeline: bool = True,
+    synced_folders: list[str] | None = None,
 ) -> dict:
     """Look for reasons this is a risky moment to sync with Overleaf.
 
@@ -524,11 +542,23 @@ def check_sync_readiness(
     pipeline, which can send figures or results that don't match the code
     that supposedly made them.
 
+    With ``synced_folders``, only out-of-date stages that feed what's sent
+    count: those the folders' document builds depend on, and those that
+    write into the folders. The builds themselves don't, since their PDFs
+    aren't sent, and are returned as ``stale_documents`` to rebuild after.
+
     Returns a dict with a ``branch`` message, a ``pipeline`` message, and
     the ``stale_stages`` behind the latter. Each message is None when that
     check passes or can't be run.
     """
-    res: dict = {"branch": None, "pipeline": None, "stale_stages": []}
+    import calkit.dvc
+
+    res: dict = {
+        "branch": None,
+        "pipeline": None,
+        "stale_stages": [],
+        "stale_documents": [],
+    }
     if check_branch:
         try:
             res["branch"] = calkit.git.check_branch_is_current(
@@ -556,11 +586,36 @@ def check_sync_readiness(
                 + ", ".join(status.failed_environment_checks)
             )
         elif status.is_stale:
-            res["stale_stages"] = status.stale_stage_names
-            res["pipeline"] = (
-                "Pipeline is not up-to-date; out-of-date stages: "
-                + ", ".join(status.stale_stage_names)
-            )
+            stale = status.stale_stage_names
+            if synced_folders is not None:
+                docs = _get_document_stages(synced_folders)
+                try:
+                    feeding: set[str] = set()
+                    for name in docs:
+                        feeding |= calkit.pipeline.get_upstream_stages(name)
+                    dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
+                    for name, stage in dvc_stages.items():
+                        outs = calkit.dvc.out_paths_from_stage(stage)
+                        if any(
+                            Path(out).is_relative_to(folder)
+                            for out in outs
+                            for folder in synced_folders
+                        ):
+                            feeding.add(name)
+                except Exception as e:
+                    # Then every out-of-date stage counts
+                    warn(f"Could not check which stages feed Overleaf: {e}")
+                else:
+                    res["stale_documents"] = [s for s in stale if s in docs]
+                    stale = [
+                        s for s in stale if s in feeding and s not in docs
+                    ]
+            res["stale_stages"] = stale
+            if stale:
+                res["pipeline"] = (
+                    "Pipeline is not up-to-date; out-of-date stages: "
+                    + ", ".join(stale)
+                )
     return res
 
 
@@ -594,10 +649,8 @@ def sync(
         typer.Option(
             "--auto-commit",
             "-a",
-            help=(
-                "Automatically commit changes to the project repo if a synced "
-                "folder has changes."
-            ),
+            help="Deprecated; local edits are now committed automatically.",
+            hidden=True,
         ),
     ] = False,
     no_push: Annotated[
@@ -689,7 +742,8 @@ def sync(
 ):
     """Sync folders with Overleaf.
 
-    Documents changed on Overleaf are rebuilt and saved with the sync.
+    Local edits are committed first, and documents changed on either side
+    are rebuilt and saved with the sync.
     """
     import calkit.dvc
     from calkit.cli.main.core import push as calkit_push
@@ -737,12 +791,16 @@ def sync(
         for path in paths:
             if path not in overleaf_sync_dirs:
                 raise_error(f"Path '{path}' is not synced with Overleaf")
+    synced_folders = [
+        f for f in overleaf_sync_dirs if paths is None or f in paths
+    ]
     # Check this is a sane state to sync from before touching either side.
     # Resolving a conflict is the middle of a sync that already passed these,
     # and the pipeline can't be current until it finishes.
     readiness = check_sync_readiness(
         check_branch=not any_branch and not resolve,
         check_pipeline=not allow_stale and not resolve,
+        synced_folders=synced_folders,
     )
     if readiness["branch"]:
         raise_error(
@@ -778,6 +836,7 @@ def sync(
     # Keyed by synced folder, so a sync of multiple folders can be summarized
     # after the loop even if some are skipped
     results: dict[str, dict] = {}
+    committed_local = False
     first = True
     for synced_folder, sync_data in overleaf_info.items():
         if not sync_data:
@@ -809,20 +868,20 @@ def sync(
                 repo.git.am("--skip")
         elif resolve:
             continue
-        # If there are any uncommitted changes in the publication working
-        # directory, raise an error unless auto-commit is specified
+        # Local edits are saved first so they're what's synced and rebuilt
+        # from. Untracked files aren't sent to Overleaf, so they're left out.
         if repo.git.diff(wdir) or repo.index.diff("HEAD", wdir):
-            if auto_commit:
-                repo.git.add(wdir)
-                repo.git.commit(
-                    [wdir, "-m", f"Save {wdir} before syncing with Overleaf"]
-                )
-            else:
+            if no_commit:
                 raise_error(
                     f"Uncommitted changes found in {wdir}. "
-                    "Commit or stash them before syncing with Overleaf, "
-                    "or use --auto-commit/-a to automatically commit them."
+                    "Commit or stash them before syncing with --no-commit."
                 )
+            typer.echo(f"Committing local edits in {wdir}")
+            repo.git.add("-u", "--", wdir)
+            repo.git.commit(
+                [wdir, "-m", f"Update {wdir} before Overleaf sync"]
+            )
+            committed_local = True
         # Keep other processes from using the clone until we're done
         with (
             calkit.overleaf.lock(overleaf_project_id, typer.echo),
@@ -867,34 +926,26 @@ def sync(
                 )
             except Exception as e:
                 raise_error(str(e))
-    # Rebuild documents changed on Overleaf so their outputs match the source
-    # just pulled, without running the stages they depend on unless asked
-    pulled = [
+    # Rebuild documents changed on Overleaf or locally so their outputs match
+    # the source, without running the stages they depend on unless asked
+    doc_stages = _get_document_stages(list(results))
+    to_build = {
         folder
         for folder, res in results.items()
-        if res.get("commits_since_last_sync")
-    ]
-    build_stages = []
-    if pulled and not no_build and not push_only:
-        stages = (calkit.load_calkit_info().get("pipeline") or {}).get(
-            "stages"
-        ) or {}
-        build_stages = [
-            name
-            for name, stage in stages.items()
-            if isinstance(stage, dict)
-            and stage.get("kind") == "latex"
-            and any(
-                Path(str(stage.get("target_path", ""))).is_relative_to(f)
-                for f in pulled
-            )
-        ]
+        if res.get("commits_since_last_sync") and not push_only
+    } | {
+        doc_stages[s] for s in readiness["stale_documents"] if s in doc_stages
+    }
+    build_stages = (
+        []
+        if no_build
+        else [name for name, f in doc_stages.items() if f in to_build]
+    )
+    built_folders = sorted({doc_stages[name] for name in build_stages})
     built = False
     push_dvc = False
     if build_stages:
-        typer.echo(
-            "Rebuilding from what came back: " + ", ".join(build_stages)
-        )
+        typer.echo("Rebuilding " + ", ".join(build_stages))
         dirty_before = get_dirty_files()
         try:
             calkit_run(targets=build_stages, single_item=not upstream)
@@ -923,7 +974,9 @@ def sync(
                 if dirty_before.get(path) != state
                 and not (
                     state[1]
-                    and any(Path(path).is_relative_to(f) for f in pulled)
+                    and any(
+                        Path(path).is_relative_to(f) for f in built_folders
+                    )
                     and path not in outs
                     and os.path.basename(path) != ".gitignore"
                 )
@@ -937,7 +990,8 @@ def sync(
                 if not no_commit:
                     repo.git.commit(
                         "-m",
-                        f"Rebuild {', '.join(pulled)} after Overleaf sync",
+                        f"Rebuild {', '.join(built_folders)} after Overleaf "
+                        "sync",
                         "--",
                         *to_save,
                     )
@@ -945,8 +999,12 @@ def sync(
     if results and not no_push and not no_commit:
         if not repo.remotes:
             raise_error("Project has no Git remotes defined")
-        if built or any(
-            res.get("committed_project", True) for res in results.values()
+        if (
+            built
+            or committed_local
+            or any(
+                res.get("committed_project", True) for res in results.values()
+            )
         ):
             # Push to the project remote
             typer.echo("Pushing changes to project Git remote")

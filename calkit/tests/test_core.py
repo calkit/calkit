@@ -126,6 +126,40 @@ def test_encode_safe() -> None:
     )
 
 
+def test_is_mintty() -> None:
+    import sys
+
+    with open(os.devnull, "w") as f:
+        assert not calkit.core.is_mintty(f)
+    assert not calkit.core.is_mintty(object())
+    if sys.platform != "win32":
+        return
+    import _winapi
+
+    # mintty's terminal is a pipe named for its pty; any other pipe isn't one
+    for name, expected in [
+        ("msys-1888ae32e00d56aa-pty0-to-master", True),
+        ("cygwin-1888ae32e00d56aa-pty3-from-master", True),
+        ("calkit-test-not-a-pty", False),
+    ]:
+        path = rf"\\.\pipe\{name}"
+        server = _winapi.CreateNamedPipe(
+            path,
+            _winapi.PIPE_ACCESS_DUPLEX,
+            _winapi.PIPE_WAIT,
+            1,
+            4096,
+            4096,
+            0,
+            _winapi.NULL,
+        )
+        try:
+            with open(path, "wb", buffering=0) as client:
+                assert calkit.core.is_mintty(client) is expected, name
+        finally:
+            _winapi.CloseHandle(server)
+
+
 def test_save_calkit_info_preserves_unicode(tmp_dir):
     # Regression: on Windows, opening calkit.yaml without encoding="utf-8"
     # writes as cp1252, which either errors or corrupts non-ASCII content

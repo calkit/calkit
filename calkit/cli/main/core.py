@@ -625,14 +625,20 @@ def get_status(
     # until then. It writes to its own copy of the terminal, since what the
     # environment checks' tools print is discarded.
     spinner: AbstractContextManager = nullcontext()
-    if not as_json and sys.stderr.isatty():
+    mintty = calkit.core.is_mintty(sys.stderr)
+    if not as_json and (sys.stderr.isatty() or mintty):
         import logging
 
         from rich.console import Console
 
-        spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
-            "Checking status"
-        )
+        # mintty takes ANSI and UTF-8, though it isn't a console
+        spinner = Console(
+            file=os.fdopen(
+                os.dup(2), "w", encoding="utf-8" if mintty else None
+            ),
+            force_terminal=mintty or None,
+            legacy_windows=False if mintty else None,
+        ).status("Checking status")
         # DVC's progress bars would each be printed above the spinner, and
         # they're shown only if this is at or below their level
         logging.getLogger("dvc.progress").setLevel(logging.CRITICAL + 1)
@@ -3128,12 +3134,18 @@ def run(
     # someone to ask is worked out first
     can_ask = is_tty()
     spinner: Any = None
-    if not (quiet or verbose) and sys.stderr.isatty():
+    mintty = calkit.core.is_mintty(sys.stderr)
+    if not (quiet or verbose) and (sys.stderr.isatty() or mintty):
         from rich.console import Console
 
-        spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
-            "Getting ready to run"
-        )
+        # mintty takes ANSI and UTF-8, though it isn't a console
+        spinner = Console(
+            file=os.fdopen(
+                os.dup(2), "w", encoding="utf-8" if mintty else None
+            ),
+            force_terminal=mintty or None,
+            legacy_windows=False if mintty else None,
+        ).status("Getting ready to run")
     with spinner or contextlib.nullcontext():
         step("Getting system information", "💻")
         # Only the stages this run can reach are checked, so nothing else

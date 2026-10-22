@@ -3316,7 +3316,8 @@ export const GitHubTokenReqSchema = {
     },
     repo: {
       type: "string",
-      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+      maxLength: 100,
+      pattern: "^[A-Za-z0-9._]*[A-Za-z0-9_][A-Za-z0-9._-]*$",
       title: "Repo",
     },
   },

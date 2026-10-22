@@ -3976,6 +3976,8 @@ Options:
 
 Sync folders with Overleaf.
 
+Documents changed on Overleaf are rebuilt and saved with the sync.
+
 Usage:
 
 ```text
@@ -4001,6 +4003,8 @@ Options:
 | `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
 | `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
 | `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| `--no-build`          | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
+| `--upstream`          | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
 
 <a id="subcommand-overleaf-ol-status-st"></a>
 
@@ -4421,6 +4425,8 @@ Options:
 
 Sync folders with Overleaf.
 
+Documents changed on Overleaf are rebuilt and saved with the sync.
+
 Usage:
 
 ```text
@@ -4446,3 +4452,5 @@ Options:
 | `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
 | `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
 | `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| `--no-build`          | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
+| `--upstream`          | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |

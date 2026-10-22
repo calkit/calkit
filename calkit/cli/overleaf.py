@@ -669,8 +669,57 @@ def sync(
             ),
         ),
     ] = False,
+    no_build: Annotated[
+        bool,
+        typer.Option(
+            "--no-build",
+            help=(
+                "Only sync source files, without rebuilding documents "
+                "changed on Overleaf."
+            ),
+        ),
+    ] = False,
+    upstream: Annotated[
+        bool,
+        typer.Option(
+            "--upstream",
+            help="When rebuilding, also run stages the build depends on.",
+        ),
+    ] = False,
 ):
-    """Sync folders with Overleaf."""
+    """Sync folders with Overleaf.
+
+    Documents changed on Overleaf are rebuilt and saved with the sync.
+    """
+    import calkit.dvc
+    from calkit.cli.main.core import push as calkit_push
+    from calkit.cli.main.core import run as calkit_run
+
+    def get_dirty_files() -> dict[str, tuple]:
+        """Changed and untracked files, with when they were last written and
+        whether they're untracked.
+        """
+        res: dict[str, tuple] = {}
+        entries = iter(
+            repo.git.status(
+                "--porcelain", "-z", "--untracked-files=all"
+            ).split("\0")
+        )
+        for entry in entries:
+            if not entry:
+                continue
+            # A rename or copy is followed by the path it came from
+            if entry[0] in "RC":
+                next(entries, None)
+            path = entry[3:]
+            try:
+                st = os.stat(os.path.join(repo.working_dir, path))
+                stamp: tuple | None = (st.st_mtime_ns, st.st_size)
+            except FileNotFoundError:
+                stamp = None
+            res[path] = (stamp, entry.startswith("??"))
+        return res
+
     # Read all synced folders, fixing legacy schema if applicable
     overleaf_info = calkit.overleaf.get_sync_info(
         fix_legacy=True, print_info=typer.echo
@@ -818,14 +867,96 @@ def sync(
                 )
             except Exception as e:
                 raise_error(str(e))
+    # Rebuild documents changed on Overleaf so their outputs match the source
+    # just pulled, without running the stages they depend on unless asked
+    pulled = [
+        folder
+        for folder, res in results.items()
+        if res.get("commits_since_last_sync")
+    ]
+    build_stages = []
+    if pulled and not no_build and not push_only:
+        stages = (calkit.load_calkit_info().get("pipeline") or {}).get(
+            "stages"
+        ) or {}
+        build_stages = [
+            name
+            for name, stage in stages.items()
+            if isinstance(stage, dict)
+            and stage.get("kind") == "latex"
+            and any(
+                Path(str(stage.get("target_path", ""))).is_relative_to(f)
+                for f in pulled
+            )
+        ]
+    built = False
+    push_dvc = False
+    if build_stages:
+        typer.echo(
+            "Rebuilding from what came back: " + ", ".join(build_stages)
+        )
+        dirty_before = get_dirty_files()
+        try:
+            calkit_run(targets=build_stages, single_item=not upstream)
+        except Exception:
+            warn(
+                "Rebuilding failed, so only the synced source was saved; "
+                "fix the build and run 'calkit run' to rebuild"
+            )
+        else:
+            # Only what the build wrote is saved, leaving other work alone, and
+            # stray files next to the document, e.g., aux files no ignore rule
+            # covers
+            dvc_stages = calkit.dvc.read_pipeline(
+                wdir=str(repo.working_dir)
+            ).get("stages", {})
+            outs = {
+                Path(p).as_posix()
+                for name in build_stages
+                for p in calkit.dvc.out_paths_from_stage(
+                    dvc_stages.get(name) or {}
+                )
+            }
+            to_save = [
+                path
+                for path, state in get_dirty_files().items()
+                if dirty_before.get(path) != state
+                and not (
+                    state[1]
+                    and any(Path(path).is_relative_to(f) for f in pulled)
+                    and path not in outs
+                    and os.path.basename(path) != ".gitignore"
+                )
+            ]
+            if to_save:
+                repo.git.add("-A", "--", *to_save)
+            if to_save and repo.git.diff("--staged", "--", *to_save):
+                push_dvc = any(
+                    os.path.basename(p) == "dvc.lock" for p in to_save
+                )
+                if not no_commit:
+                    repo.git.commit(
+                        "-m",
+                        f"Rebuild {', '.join(pulled)} after Overleaf sync",
+                        "--",
+                        *to_save,
+                    )
+                    built = True
     if results and not no_push and not no_commit:
         if not repo.remotes:
             raise_error("Project has no Git remotes defined")
-        if any(res.get("committed_project", True) for res in results.values()):
+        if built or any(
+            res.get("committed_project", True) for res in results.values()
+        ):
             # Push to the project remote
             typer.echo("Pushing changes to project Git remote")
             repo.git.push()
-    if any(res.get("map_paths_propagated") for res in results.values()):
+        # Built outputs DVC tracks are only recorded in Git by their hash
+        if built and push_dvc:
+            calkit_push(targets=["dvc"])
+    if any(res.get("map_paths_propagated") for res in results.values()) and (
+        not (built and upstream)
+    ):
         typer.echo(
             "Run 'calkit run' to rebuild from the updated source file(s)"
         )
@@ -1248,6 +1379,7 @@ def pull_from_overleaf(
         allow_stale=True,
         any_branch=True,
         force=force,
+        no_build=no_run,
     )
     # An Overleaf edit to a map-paths copy lands in the file it's copied
     # from, so the document is only rebuilt from it after a run

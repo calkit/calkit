@@ -99,7 +99,10 @@ def test_overleaf(tmp_dir):
     assert stage["environment"] == "tex"
     assert stage["target_path"] == "ol-project/main.tex"
     # Test that we can sync
-    subprocess.run(["calkit", "overleaf", "sync", "--allow-stale"], check=True)
+    subprocess.run(
+        ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"],
+        check=True,
+    )
     # Test that we can properly resolve a merge conflict
     with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:
         f.write("\nHere's another line from Overleaf")
@@ -108,7 +111,8 @@ def test_overleaf(tmp_dir):
         f.write("\nHere's another line from main project")
     repo.git.commit(["ol-project/main.tex", "-m", "Local edit"])
     res = subprocess.run(
-        ["calkit", "overleaf", "sync", "--allow-stale"], capture_output=True
+        ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"],
+        capture_output=True,
     )
     assert res.returncode != 0
     with open("ol-project/main.tex") as f:
@@ -116,14 +120,24 @@ def test_overleaf(tmp_dir):
     assert ">>>>>>>" in txt
     # Now let's resolve the commit without actually editing the file
     subprocess.run(
-        ["calkit", "overleaf", "sync", "--allow-stale", "--resolve"],
+        [
+            "calkit",
+            "overleaf",
+            "sync",
+            "--allow-stale",
+            "--no-build",
+            "--resolve",
+        ],
         check=True,
     )
     # Now make another change on Overleaf but allow the sync to succeed
     with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:
         f.write("\nHere's another line from Overleaf")
     ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
-    subprocess.run(["calkit", "overleaf", "sync", "--allow-stale"], check=True)
+    subprocess.run(
+        ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"],
+        check=True,
+    )
     # Test that --no-commit pulls changes from Overleaf but does not create a
     # commit in the main repo, leaving the pulled changes staged instead
     with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:
@@ -131,7 +145,14 @@ def test_overleaf(tmp_dir):
     ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
     head_before = repo.head.commit.hexsha
     subprocess.run(
-        ["calkit", "overleaf", "sync", "--allow-stale", "--no-commit"],
+        [
+            "calkit",
+            "overleaf",
+            "sync",
+            "--allow-stale",
+            "--no-build",
+            "--no-commit",
+        ],
         check=True,
     )
     # No new commit should have been created
@@ -148,7 +169,10 @@ def test_overleaf(tmp_dir):
         f.write("Created on Overleaf")
     ol_repo.git.add("ol-new.txt")
     ol_repo.git.commit(["-m", "Update on Overleaf"])
-    subprocess.run(["calkit", "overleaf", "sync", "--allow-stale"], check=True)
+    subprocess.run(
+        ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"],
+        check=True,
+    )
     assert "ol-project/ol-new.txt" in ls_files(repo)
     # Test that if we add a file locally, it makes it to Overleaf
     os.makedirs(os.path.join(repo.working_dir, "ol-project", "figs"))
@@ -160,7 +184,14 @@ def test_overleaf(tmp_dir):
     repo.git.commit(["-m", "Add figure"])
     assert "ol-project/figs/fig1.txt" in ls_files(repo)
     subprocess.run(
-        ["calkit", "overleaf", "sync", "--allow-stale", "--verbose"],
+        [
+            "calkit",
+            "overleaf",
+            "sync",
+            "--allow-stale",
+            "--no-build",
+            "--verbose",
+        ],
         check=True,
     )
     # Note: We have to look at the git show in the Overleaf repo to verify the
@@ -185,7 +216,10 @@ def test_overleaf(tmp_dir):
     ) as f:
         f.write("This is ignored in main")
     assert repo.ignored("ol-project/figs/ignored-in-main.txt")
-    subprocess.run(["calkit", "overleaf", "sync", "--allow-stale"], check=True)
+    subprocess.run(
+        ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"],
+        check=True,
+    )
     ol_repo_git_show = ol_repo.git.show()
     print("Git show in OL repo:\n", ol_repo_git_show)
     assert "figs/ignored-in-main.txt" not in get_overleaf_tree(ol_repo)
@@ -195,7 +229,10 @@ def test_overleaf(tmp_dir):
             os.path.join(repo.working_dir, "ol-project", fname), "w"
         ) as f:
             f.write("Ignored locally and shouldn't make it to Overleaf")
-    subprocess.run(["calkit", "overleaf", "sync", "--allow-stale"], check=True)
+    subprocess.run(
+        ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"],
+        check=True,
+    )
     ol_repo_git_show = ol_repo.git.show()
     print("Git show in OL repo:\n", ol_repo_git_show)
     assert "main.pdf" not in ol_repo_git_show
@@ -208,7 +245,10 @@ def test_overleaf(tmp_dir):
     os.makedirs(os.path.join(repo.working_dir, "ol-project", "out"))
     with open(os.path.join(repo.working_dir, auxlock_rel), "w") as f:
         f.write("\\def \\tikzexternallocked {0}")
-    subprocess.run(["calkit", "overleaf", "sync", "--allow-stale"], check=True)
+    subprocess.run(
+        ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"],
+        check=True,
+    )
     assert auxlock_rel not in ls_files(repo)
     with open(os.path.join(repo.working_dir, ".gitignore")) as f:
         assert auxlock_rel in f.read()
@@ -224,7 +264,14 @@ def test_overleaf(tmp_dir):
     repo.git.commit(["-m", "Add figure 2"])
     assert "ol-project/figs/fig2.txt" in ls_files(repo)
     subprocess.run(
-        ["calkit", "overleaf", "sync", "--allow-stale", "--verbose"],
+        [
+            "calkit",
+            "overleaf",
+            "sync",
+            "--allow-stale",
+            "--no-build",
+            "--verbose",
+        ],
         check=True,
     )
     ol_repo_git_show = ol_repo.git.show()
@@ -235,7 +282,14 @@ def test_overleaf(tmp_dir):
     repo.git.rm("ol-project/figs/fig2.txt")
     repo.git.commit(["-m", "Delete figure 2"])
     subprocess.run(
-        ["calkit", "overleaf", "sync", "--allow-stale", "--verbose"],
+        [
+            "calkit",
+            "overleaf",
+            "sync",
+            "--allow-stale",
+            "--no-build",
+            "--verbose",
+        ],
         check=True,
     )
     assert "ol-project/figs/fig2.txt" not in ls_files(repo)
@@ -254,7 +308,14 @@ def test_overleaf(tmp_dir):
     ol_repo.git.add("figs/fig2.txt")
     ol_repo.git.commit(["-m", "Add figure 2 again on Overleaf"])
     subprocess.run(
-        ["calkit", "overleaf", "sync", "--allow-stale", "--verbose"],
+        [
+            "calkit",
+            "overleaf",
+            "sync",
+            "--allow-stale",
+            "--no-build",
+            "--verbose",
+        ],
         check=True,
     )
     print("Overleaf Git show after adding fig2 back:", ol_repo.git.show())
@@ -269,7 +330,14 @@ def test_overleaf(tmp_dir):
     repo.git.commit(["-m", "Add figure 3"])
     assert "ol-project/figs/fig3.txt" in ls_files(repo)
     subprocess.run(
-        ["calkit", "overleaf", "sync", "--allow-stale", "--verbose"],
+        [
+            "calkit",
+            "overleaf",
+            "sync",
+            "--allow-stale",
+            "--no-build",
+            "--verbose",
+        ],
         check=True,
     )
     ol_repo_git_show = ol_repo.git.show()
@@ -295,7 +363,14 @@ def test_overleaf(tmp_dir):
         os.remove(fig3_path)
     assert not os.path.exists(fig3_path)
     subprocess.run(
-        ["calkit", "overleaf", "sync", "--allow-stale", "--verbose"],
+        [
+            "calkit",
+            "overleaf",
+            "sync",
+            "--allow-stale",
+            "--no-build",
+            "--verbose",
+        ],
         check=True,
     )
     ol_repo_git_show = ol_repo.git.show()
@@ -1267,6 +1342,24 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     monkeypatch.setattr(
         "calkit.cli.overleaf._get_overleaf_auth", lambda: overleaf
     )
+    # A build that writes what it's told to, or fails
+    runs: list = []
+    build_writes: dict[str, str] = {}
+
+    def run(targets=None, single_item=False, **kwargs):
+        runs.append((targets, single_item))
+        if "fail" in build_writes:
+            raise typer.Exit(1)
+        for path, text in build_writes.items():
+            with open(path, "a", newline="") as f:
+                f.write(text)
+        return {}
+
+    pushes: list = []
+    monkeypatch.setattr("calkit.cli.main.core.run", run)
+    monkeypatch.setattr(
+        "calkit.cli.main.core.push", lambda **kwargs: pushes.append(kwargs)
+    )
     # The same line endings on every runner, since status compares bytes
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
@@ -1306,6 +1399,54 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     assert overleaf.files["figs/fig.txt"] == b"A figure"
     assert overleaf.uploads == ["figs/fig.txt"]
     assert not repo.git.status("--porcelain")
+    # What came back is rebuilt by the document's own stage alone
+    assert runs == [(["build-paper"], True)]
+    # Only what the build wrote is saved, not other work or stray files next
+    # to the document, and the outputs DVC tracks are pushed
+    with open("scratch.txt", "w") as f:
+        f.write("Other work\n")
+    build_writes.update(
+        {
+            "dvc.lock": "schema: '2.0'\n",
+            "paper/.gitignore": "/main.pdf\n",
+            "paper/main.xyz": "Stray\n",
+        }
+    )
+    overleaf.files["main.tex"] += b"Rebuilt\n"
+    sync()
+    assert runs[-1] == (["build-paper"], True)
+    assert repo.head.commit.message.startswith("Rebuild paper")
+    assert set(repo.head.commit.stats.files) == {
+        "dvc.lock",
+        "paper/.gitignore",
+    }
+    assert pushes == [{"targets": ["dvc"]}]
+    assert set(repo.untracked_files) == {"scratch.txt", "paper/main.xyz"}
+    os.remove("scratch.txt")
+    os.remove("paper/main.xyz")
+    build_writes.clear()
+    # Stages the build depends on run too when asked for, and there's no
+    # rebuild when asked not to or when nothing came back
+    overleaf.files["main.tex"] += b"Upstream\n"
+    res = runner.invoke(overleaf_app, ["sync", "--allow-stale", "--upstream"])
+    assert res.exit_code == 0, res.output
+    assert runs[-1] == (["build-paper"], False)
+    n_runs = len(runs)
+    overleaf.files["main.tex"] += b"Source only\n"
+    res = runner.invoke(overleaf_app, ["sync", "--allow-stale", "--no-build"])
+    assert res.exit_code == 0, res.output
+    sync()
+    assert len(runs) == n_runs
+    # A failed build still saves and pushes what was synced
+    build_writes["fail"] = ""
+    overleaf.files["main.tex"] += b"Broken\n"
+    res = sync()
+    assert "Rebuilding failed" in res.output
+    with git.Repo(remote) as remote_repo:
+        pushed = remote_repo.git.show(f"{repo.active_branch}:paper/main.tex")
+    assert pushed.endswith("Broken")
+    assert not repo.git.status("--porcelain")
+    build_writes.clear()
     repo.git.rm("paper/figs/fig.txt")
     repo.git.commit(["-m", "Remove figure"])
     sync()
@@ -1533,6 +1674,8 @@ def test_overleaf_sync_token_and_session(
     monkeypatch.setattr(
         "calkit.cli.overleaf._get_overleaf_auth", lambda: auth[0]
     )
+    # Rebuilding after a sync is tested elsewhere
+    monkeypatch.setattr("calkit.cli.main.core.run", lambda **kwargs: {})
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     remote = tempfile.mkdtemp()

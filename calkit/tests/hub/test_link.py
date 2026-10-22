@@ -235,9 +235,11 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     ]
     # One odd repo doesn't keep the rest from the hub, and a run record is
     # cut to what the hub takes
+    # Without Git, so it can be removed on Windows
     broken = os.path.join(home, "dev", "broken")
-    _init_project(broken, name="broken")
     os.makedirs(os.path.join(broken, ".dvc", "tmp"))
+    with open(os.path.join(broken, "calkit.yaml"), "w") as f:
+        f.write("owner: alice\nname: broken\n")
     with open(os.path.join(broken, ".dvc", "tmp", "rwlock"), "w") as f:
         f.write("[]")
     runs = os.path.join(this_hub, ".calkit", "local", "runs")

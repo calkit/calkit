@@ -1307,6 +1307,10 @@ def get_status(
                     skip_stages=list(result["gated_stages"]),
                     quiet=quiet_environment_checks,
                     progress=progress,
+                    # Docker not running doesn't make anything stale, so
+                    # only an environment that needs it and isn't cached
+                    # fails
+                    docker_required=False,
                 )
                 result["environment_checks"] = env_checks
             except Exception as e:

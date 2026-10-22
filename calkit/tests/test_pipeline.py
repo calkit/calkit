@@ -7,11 +7,13 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from unittest import mock
 
 import git
 import pytest
 
 import calkit
+import calkit.docker
 import calkit.git
 import calkit.notebooks
 import calkit.pipeline
@@ -1817,6 +1819,27 @@ def test_get_status(tmp_dir):
     assert status.storage_problems is not None
     assert [p["path"] for p in status.storage_problems] == ["my-output.out"]
     assert "storage_problems" not in status.model_dump()
+    # Docker not running doesn't stop the status from being worked out; only
+    # a Docker environment that has to be checked again fails
+    ck_info["environments"]["d"] = {"kind": "docker", "image": "alpine"}
+    ck_info["pipeline"]["stages"]["in-docker"] = {
+        "kind": "command",
+        "command": "echo hi",
+        "environment": "d",
+    }
+    with (
+        mock.patch(
+            "calkit.docker.ensure_ready",
+            side_effect=calkit.docker.DockerNotReadyError("not running"),
+        ),
+        mock.patch(
+            "calkit.cli.check.check_environment",
+            side_effect=calkit.docker.DockerNotReadyError("not running"),
+        ),
+    ):
+        status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.errors
+    assert status.failed_environment_checks == ["d"]
 
 
 def test_get_status_excludes_frozen_stage(tmp_dir):

@@ -212,6 +212,7 @@ module = [
     "psutil",
     "simpy",
     "pypandoc",
+    "configobj",
 ]
 ignore_missing_imports = true
 

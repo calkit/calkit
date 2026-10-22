@@ -1472,7 +1472,8 @@ def trim_status(
                 for kind in list(dvc[key]):
                     shorten(dvc[key], kind, MAX_CHANGED_PATHS)
     if (
-        isinstance(stale, dict)
+        isinstance(pipeline, dict)
+        and isinstance(stale, dict)
         and len(json.dumps(status).encode()) > max_bytes
     ):
         pipeline["stale_stages"] = {}

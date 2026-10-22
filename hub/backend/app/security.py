@@ -132,6 +132,29 @@ def create_machine_grant(
     return token, grant_id
 
 
+def decode_machine_grant(
+    token: str, machine_id: uuid.UUID
+) -> dict[str, Any] | None:
+    """A grant this API signed for a machine, even once it has expired,
+    since the machine shows the one that opened a session whenever the
+    session asks for credentials, or None if it isn't one.
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            _machine_grant_key().public_key(),
+            algorithms=["EdDSA"],
+            audience=str(machine_id),
+            options={
+                "verify_exp": False,
+                "require": ["iat", "aud", "sub", "sid", "tfa_exp"],
+            },
+        )
+    except InvalidTokenError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def create_relay_token(
     kind: Literal["machine", "browser"],
     machine_id: uuid.UUID,

@@ -4,12 +4,13 @@ import uuid
 from contextlib import contextmanager
 from datetime import timedelta
 from typing import Any, Literal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import Response
 from sqlmodel import Session, select
@@ -24,11 +25,14 @@ from app.models import (
     Project,
     RefreshToken,
     User,
+    UserProjectAccess,
     UserToken,
     UserTOTP,
 )
+from app.models.core import ROLE_IDS
 from app.security import (
     create_access_token,
+    create_machine_grant,
     create_second_factor_token,
     encrypt_secret,
     generate_email_verification_token,
@@ -584,6 +588,337 @@ def test_machines(
     db.commit()
     r = client.post("/machines/cli-token", headers=op_headers)
     assert r.status_code == 403
+    # Sessions get credentials from the machine, which asks over HTTPS with
+    # its own token and the grant that opened the session, even once that
+    # has expired, so neither the relay, which carries grants, nor the
+    # machine's token alone gets any
+    session_grant = payload["grant"]
+    session_token_url = "/machines/session-token"
+    owner_id = user.id
+
+    def grant_for(
+        sign_in: uuid.UUID = session_id,
+        machine_id: uuid.UUID = uuid.UUID(op["id"]),
+        user_id: uuid.UUID = owner_id,
+        tfa_exp: int | None = None,
+    ) -> str:
+        return create_machine_grant(
+            machine_id,
+            user_id,
+            timedelta(seconds=-120),
+            browser_key=jwk,
+            session_id=sign_in,
+            second_factor_expires=(
+                int(time.time()) + 3600 if tfa_exp is None else tfa_exp
+            ),
+        )[0]
+
+    r = client.post(
+        session_token_url,
+        headers=normal_user_token_headers,
+        json={"grant": session_grant},
+    )
+    assert r.status_code == 403
+    for bad in [
+        "nope",
+        grant_for(machine_id=uuid.uuid4()),
+        grant_for(user_id=uuid.uuid4()),
+        grant_for(sign_in=cli_session_id),
+        grant_for(sign_in=uuid.uuid4()),
+        grant_for(tfa_exp=int(time.time()) - 5),
+    ]:
+        r = client.post(
+            session_token_url, headers=op_headers, json={"grant": bad}
+        )
+        assert r.status_code == 403, r.text
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": grant_for()}
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": session_grant}
+    )
+    assert r.status_code == 200, r.text
+    session_token = r.json()["token"]
+    # It's the owner's, short-lived, and tied to the machine and sign-in
+    claims = jwt.decode(
+        session_token, settings.SECRET_KEY, algorithms=["HS256"]
+    )
+    assert claims["sub"] == str(user.id)
+    assert claims["machine_id"] == op["id"]
+    assert claims["link_sid"] == str(session_id)
+    assert claims["exp"] - time.time() <= 15 * 60 + 5
+    session_headers = {"Authorization": f"Bearer {session_token}"}
+    r = client.get("/user", headers=session_headers)
+    assert r.status_code == 200 and r.json()["id"] == str(user.id)
+    # It can't make tokens that would outlive it, nor open sessions
+    for scope in [None, "dvc"]:
+        r = client.post(
+            "/user/tokens",
+            headers=session_headers,
+            json={"expires_days": 1, "scope": scope},
+        )
+        assert r.status_code == 403, r.text
+    r = relay_token(session_headers, second_factor)
+    assert r.status_code == 403
+    # Nor get the user's tokens for other services, which would too
+    for path in [
+        "/user/github-token",
+        "/user/zenodo-token",
+        "/user/overleaf-token",
+    ]:
+        r = client.get(path, headers=session_headers)
+        assert r.status_code == 403, path
+        assert r.json()["detail"] == "A hub session's token can't do this"
+    # Nor does one come once the second factor is set up again
+    confirmed = totp.confirmed_at
+    totp.confirmed_at = utcnow() + timedelta(minutes=1)
+    db.add(totp)
+    db.commit()
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": session_grant}
+    )
+    assert r.status_code == 403
+    totp.confirmed_at = confirmed
+    db.add(totp)
+    db.commit()
+    # Tokens stop working once their sign-in ends, and no more are issued
+    ended_sign_in = uuid.uuid4()
+    sign_in = RefreshToken(
+        user_id=user.id,
+        token_hash=uuid.uuid4().hex,
+        expires=utcnow() + timedelta(days=1),
+        session_id=ended_sign_in,
+        interactive=True,
+    )
+    db.add(sign_in)
+    db.commit()
+    ended_grant = grant_for(sign_in=ended_sign_in)
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": ended_grant}
+    )
+    ended_headers = {"Authorization": f"Bearer {r.json()['token']}"}
+    assert client.get("/user", headers=ended_headers).status_code == 200
+    sign_in.is_active = False
+    db.add(sign_in)
+    db.commit()
+    assert client.get("/user", headers=ended_headers).status_code == 403
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": ended_grant}
+    )
+    assert r.status_code == 403
+    # Git in sessions and actions gets the Calkit GitHub App's token for the
+    # one repo it asks about, on the same terms, only for a project on the
+    # hub the owner can access, and never the owner's own GitHub token,
+    # which could be traded for a login. A hub project for a repo can be
+    # made without any right to push to it, so the token is never more than
+    # GitHub, or for an owner without GitHub, an invite, allows either
+    gh_owner = f"me-{uuid.uuid4().hex[:6]}"
+    hub_projects: dict[str, Project] = {}
+    # However a project's URL writes the repo
+    for label, git_repo_url, owner_id, is_public in [
+        ("owned", "https://github.com/{}/Owned.git", user.account.id, False),
+        (
+            "http-form",
+            "http://github.com/{}/http-form/",
+            user.account.id,
+            False,
+        ),
+        ("ssh-form", "git@github.com:{}/ssh-form.git", user.account.id, False),
+        (
+            "ssh-url-form",
+            "ssh://git@github.com/{}/ssh-url-form",
+            user.account.id,
+            False,
+        ),
+        ("read", "https://github.com/{}/read", su.account.id, True),
+        ("theirs", "https://github.com/{}/theirs", su.account.id, False),
+        (
+            "uninstalled",
+            "https://github.com/{}/uninstalled",
+            user.account.id,
+            False,
+        ),
+        ("gone", "https://github.com/{}/gone", user.account.id, False),
+        (
+            "invited-write",
+            "https://github.com/{}/invited-write",
+            su.account.id,
+            False,
+        ),
+        (
+            "invited-read",
+            "https://github.com/{}/invited-read",
+            su.account.id,
+            False,
+        ),
+        # Ones that only look like another's in SQL
+        (
+            "decoy-fork",
+            "https://github.com/{}/decoy-fork",
+            user.account.id,
+            False,
+        ),
+        (
+            "decoy-gitlab",
+            "https://gitlab.com/github.com/{}/decoy",
+            user.account.id,
+            False,
+        ),
+    ]:
+        made = Project(
+            name=f"gh-{uuid.uuid4().hex[:8]}",
+            title=label,
+            git_repo_url=git_repo_url.format(
+                gh_owner.upper() if label == "http-form" else gh_owner
+            ),
+            owner_account_id=owner_id,
+            is_public=is_public,
+        )
+        db.add(made)
+        hub_projects[label] = made
+    db.commit()
+    for label, role in [("invited-write", "write"), ("invited-read", "read")]:
+        db.add(
+            UserProjectAccess(
+                user_id=user.id,
+                project_id=hub_projects[label].id,
+                role_id=ROLE_IDS[role],
+            )
+        )
+    db.commit()
+    minted: list[tuple[str, dict[str, str] | None]] = []
+
+    def mint(
+        owner: str,
+        repo: str,
+        read_only: bool = False,
+        permissions: dict[str, str] | None = None,
+    ) -> tuple[str, float]:
+        assert owner == gh_owner
+        if repo == "uninstalled":
+            raise HTTPException(502, "GitHub returned 404")
+        minted.append((repo, permissions))
+        return "ghs_x", 2_000_000_000.5
+
+    # What GitHub says the owner can do with each, asked with their token
+    github_says: dict[str, Any] = {
+        "owned": {"push": True, "pull": True},
+        # A hub owner GitHub won't let push, which is the escalation this
+        # guards against
+        "http-form": {"push": False, "pull": True},
+        "ssh-form": {"push": False, "pull": False},
+        "ssh-url-form": TimeoutError,
+        "read": {"push": False, "pull": True},
+        "uninstalled": {"push": True, "pull": True},
+        "gone": 404,
+        "decoy-fork": None,
+        "invited-write": {"push": True, "pull": True},
+        "invited-read": {"push": True, "pull": True},
+    }
+    asked_github: list[str] = []
+
+    def github_api(url: str, headers: dict[str, str], timeout: float) -> Any:
+        import requests
+
+        assert headers["Authorization"] == "Bearer gho_owner"
+        repo = url.removeprefix(f"https://api.github.com/repos/{gh_owner}/")
+        asked_github.append(repo)
+        said = github_says.get(repo, 404)
+        if said is TimeoutError:
+            raise requests.Timeout("Timed out")
+        resp = Mock(ok=said != 404)
+        resp.json.return_value = {} if said is None else {"permissions": said}
+        return resp
+
+    def github_token(
+        repo: str,
+        shown: str = session_grant,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        return client.post(
+            "/machines/github-token",
+            headers=headers or op_headers,
+            json={"grant": shown, "owner": gh_owner, "repo": repo},
+        )
+
+    write, read = {"contents": "write"}, {"contents": "read"}
+    Expected = list[tuple[str, dict[str, str] | None]]
+    with (
+        patch(
+            "app.github.get_app_installation_token_and_expiry",
+            side_effect=mint,
+        ),
+        patch("app.users.get_github_token", return_value="gho_owner"),
+        patch("app.projects._resolve_github_collaborator_access"),
+        patch("app.api.routes.machines.requests.get", side_effect=github_api),
+    ):
+        # Refused before anything's asked of GitHub
+        for repo, shown, other_headers in [
+            ("owned", ended_grant, None),
+            ("owned", "nope", None),
+            ("owned", session_grant, normal_user_token_headers),
+            ("theirs", session_grant, None),
+            ("elsewhere", session_grant, None),
+            ("decoy", session_grant, None),
+        ]:
+            r = github_token(repo, shown, other_headers)
+            assert r.status_code == 403, (repo, r.text)
+        for bad in ["../x", "-x", "a b", "x/y", ""]:
+            assert github_token(bad).status_code == 422
+        assert asked_github == [] and minted == []
+        # An owner with GitHub gets what it says, whatever the hub does
+        github_name = user.account.github_name
+        user.account.github_name = f"gh-{uuid.uuid4().hex[:6]}"
+        db.add(user.account)
+        db.commit()
+        with_github: Expected = [
+            ("owned", write),
+            ("http-form", read),
+            ("ssh-form", None),
+            ("ssh-url-form", None),
+            ("read", read),
+            ("uninstalled", None),
+            ("gone", None),
+            ("decoy-fork", None),
+            # GitHub's word, but no more than the hub's, which is "read"
+            ("invited-read", read),
+        ]
+        for repo, expected in with_github:
+            minted.clear()
+            r = github_token(repo)
+            if expected is None:
+                assert r.status_code == 403, (repo, r.text)
+                assert minted == []
+            else:
+                assert r.status_code == 200, (repo, r.text)
+                assert r.json() == {"token": "ghs_x", "expires": 2_000_000_000}
+                assert minted == [(repo, expected)]
+                assert "gho_owner" not in r.text
+        # One without GitHub gets what an invite gives, and nothing without
+        user.account.github_name = None
+        db.add(user.account)
+        db.commit()
+        asked_github.clear()
+        without_github: Expected = [
+            ("invited-write", write),
+            ("invited-read", read),
+            ("owned", None),
+            ("read", None),
+        ]
+        for repo, expected in without_github:
+            minted.clear()
+            r = github_token(repo)
+            if expected is None:
+                assert r.status_code == 403, (repo, r.text)
+                assert minted == []
+            else:
+                assert r.status_code == 200, (repo, r.text)
+                assert minted == [(repo, expected)]
+        assert asked_github == []
+        user.account.github_name = github_name
+        db.add(user.account)
+        db.commit()
     # A machine that stopped checking in is offline
     machine.last_seen = utcnow() - timedelta(minutes=10)
     db.add(machine)
@@ -707,6 +1042,12 @@ def test_machines(
     assert r.status_code == 403
     assert "revoked" in r.json()["detail"]
     r = client.get("/user", headers={"Authorization": f"Bearer {cli_token}"})
+    assert r.status_code == 403
+    # As do its sessions' tokens
+    assert client.get("/user", headers=session_headers).status_code == 403
+    r = client.post(
+        session_token_url, headers=op_headers, json={"grant": session_grant}
+    )
     assert r.status_code == 403
     r = client.get("/machines", headers=normal_user_token_headers)
     assert op["id"] not in [o["id"] for o in r.json()]

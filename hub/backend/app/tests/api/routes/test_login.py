@@ -928,3 +928,24 @@ def test_login_with_github_keeps_account_name_when_projects_exist(
     # Linked, but the name the project's URL uses is left alone.
     assert existing.account.github_name == username
     assert existing.account.name == original_name
+
+
+def test_login_with_github_token_refuses_app_installation_tokens(
+    client: TestClient,
+) -> None:
+    # A repo-scoped installation token, which a linked machine's sessions
+    # get, can't read GitHub's /user, so it can't be traded for a login
+    class Forbidden:
+        status_code = 403
+
+        def json(self) -> dict[str, str]:
+            return {"message": "Resource not accessible by integration"}
+
+    with patch(
+        "app.api.routes.login.requests.get", return_value=Forbidden()
+    ) as get:
+        r = client.post(
+            "/login/github-token", headers={"Authorization": "Bearer ghs_x"}
+        )
+    assert r.status_code == 401
+    assert get.call_args.args[0] == "https://api.github.com/user"

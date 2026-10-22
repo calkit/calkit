@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import contextvars
 import json
 import logging
 import os
@@ -81,6 +82,14 @@ LOG_KEEP_BYTES = 1_000_000
 REPEAT_LOG_SECONDS = 3600
 # Coding agents found running in workspaces, by command
 AGENT_TOOLS = ("claude", "codex", "opencode")
+# How long before a credential expires the link gets another, which is
+# longer than Calkit's own margin, so it never gets an old one
+CREDENTIAL_MARGIN_SECONDS = 120
+# A GitHub repo Git asks for credentials for, with the helper's
+# useHttpPath, as "owner/repo" or "owner/repo.git", and nothing else
+GITHUB_REPO_PATH_PATTERN = (
+    r"([A-Za-z0-9][A-Za-z0-9._-]{0,99})/([A-Za-z0-9][A-Za-z0-9._-]{0,99})"
+)
 
 # The hub the link commands in this process act on, by its web URL.
 # Each hub's link has its own config, service, lock, and log, named by
@@ -958,6 +967,9 @@ class ChannelAuth:
     # The grant's ID, which replies are signed with, so they only count on
     # this channel
     grant_id: str = ""
+    # The grant itself, which sessions opened on the channel show the hub
+    # to get credentials
+    grant: str = ""
     # When the second factor that let the grant be issued expires
     tfa_exp: float = float("inf")
     # The last message's sequence number, which the next one must follow
@@ -1061,6 +1073,7 @@ def check_grant(
         session_id=str(payload["sid"]),
         grant_id=jti,
         tfa_exp=float(tfa_exp),
+        grant=grant,
     )
 
 
@@ -1171,6 +1184,10 @@ def no_prompt_env(wdir: str, accept_new_hosts: bool = False) -> dict[str, str]:
     the terminal a link started in the foreground runs in.
     """
     env = dict(child_env(), GIT_TERMINAL_PROMPT="0")
+    # With credentials from the link, if the action has them
+    creds = _action_credentials.get()
+    if creds is not None:
+        add_credential_env(env, creds)
     if "GIT_SSH_COMMAND" in env:
         return env
     # Unless the user chose how Git runs SSH
@@ -1192,14 +1209,17 @@ def no_prompt_env(wdir: str, accept_new_hosts: bool = False) -> dict[str, str]:
 
 
 def get_workspace_repo(wdir: str) -> git.Repo:
-    """A workspace's repo, which runs Git so it can't prompt."""
+    """A workspace's repo, which runs Git so it can't prompt, and with the
+    action's credentials, if it has them.
+    """
     repo = calkit.git.get_repo(wdir)
     env = no_prompt_env(wdir)
     repo.git.update_environment(
         **{
-            k: env[k]
-            for k in ("GIT_TERMINAL_PROMPT", "GIT_SSH_COMMAND")
-            if k in env
+            k: v
+            for k, v in env.items()
+            if k in ("GIT_TERMINAL_PROMPT", "GIT_SSH_COMMAND")
+            or k.startswith(("GIT_CONFIG_", "CALKIT_LINK_"))
         }
     )
     return repo
@@ -2257,8 +2277,10 @@ def check_machine_setup(git_repo_url: str) -> dict:
             "ssh": git_repo_url.startswith("git@"),
             "error": error,
         },
-        # This link's hub's, which the project is on
-        "token": bool(config.read().token),
+        # This link's hub's, which the project is on, and which actions get
+        # from the link when they need one
+        "token": _action_credentials.get() is not None
+        or bool(config.read().token),
     }
 
 
@@ -2337,6 +2359,46 @@ def request_cli_token(cfg: dict) -> str:
     ):
         raise ValueError("The hub sent an invalid token")
     return token
+
+
+def request_session_credential(
+    cfg: dict, route: str, grant: str, repo: str = ""
+) -> tuple[str, float]:
+    """A credential for one of this link's sessions or actions from the hub,
+    over HTTPS, for the grant of the browser channel it came from, and when
+    to get another: a token for Calkit (``session-token``), or a GitHub App
+    token for one repo, ``repo`` as "owner/name" (``github-token``).
+    """
+    from requests.exceptions import HTTPError
+
+    from calkit.hub import core as hub
+
+    body = {"grant": grant}
+    if route == "github-token":
+        body["owner"], body["repo"] = repo.split("/")
+    try:
+        resp = hub._request(
+            "post",
+            f"/machines/{route}",
+            json=body,
+            headers={"Authorization": f"Bearer {cfg['token']}"},
+            auth=False,
+            allow_login=False,
+            base_url=cfg["api_url"],
+            max_retries=2,
+        )
+    except HTTPError as e:
+        # With the hub's reason, e.g., that the sign-in ended
+        raise ValueError(str(e))
+    token = resp.get("token") if isinstance(resp, dict) else None
+    if not isinstance(token, str) or not re.fullmatch(r"[\x21-\x7e]+", token):
+        raise ValueError("The hub sent an invalid token")
+    expires = hub._jwt_exp(token) if route == "session-token" else None
+    if expires is None:
+        expires = resp.get("expires")
+    if not isinstance(expires, (int, float)) or isinstance(expires, bool):
+        raise ValueError("The hub sent a token without an expiry")
+    return token, float(expires) - CREDENTIAL_MARGIN_SECONDS
 
 
 def configure_machine(
@@ -2424,6 +2486,69 @@ def new_workspace(wdir: str, branch: str) -> dict:
     return {"path": path}
 
 
+@dataclass
+class CredentialChannel:
+    """Where what the link runs for a session or an action asks it for
+    credentials: a socket in a folder only the user can open, with a secret
+    only that is told, answered with what the grant of the browser channel
+    it came from allows, until it's closed.
+    """
+
+    auth: ChannelAuth
+    dir: str
+    sock: Any
+    secret: str
+    api_url: str
+    server: asyncio.Task | None = None
+    closed: bool = False
+
+    @property
+    def path(self) -> str:
+        return os.path.join(self.dir, "creds.sock")
+
+
+def add_credential_env(env: dict[str, str], creds: CredentialChannel) -> None:
+    """Point Calkit at a credential channel, for the link's hub, and Git at
+    it for GitHub's, instead of any helper of the user's.
+    """
+    from calkit.hub import core as hub
+
+    env[hub.LINK_SOCKET_ENV] = creds.path
+    env[hub.LINK_SECRET_ENV] = creds.secret
+    env[hub.LINK_API_URL_ENV] = creds.api_url
+    try:
+        n = int(env.get("GIT_CONFIG_COUNT") or 0)
+    except ValueError:
+        n = 0
+    # Empty first, which drops every helper GitHub would otherwise get, so
+    # none of the user's stores what the link gives, e.g., osxkeychain, and
+    # with the repo's path, which the hub's tokens are for
+    url = "credential.https://github.com"
+    for i, (key, value) in enumerate(
+        [
+            (f"{url}.helper", ""),
+            (
+                f"{url}.helper",
+                "!"
+                + shlex.join(
+                    [*CALKIT_COMMAND, "hub", "link", "git-credential"]
+                ),
+            ),
+            (f"{url}.useHttpPath", "true"),
+        ]
+    ):
+        env[f"GIT_CONFIG_KEY_{n + i}"] = key
+        env[f"GIT_CONFIG_VALUE_{n + i}"] = value
+    env["GIT_CONFIG_COUNT"] = str(n + 3)
+
+
+# The credential channel of the action running, which the thread it runs in
+# gets a copy of, so what it runs gets credentials too
+_action_credentials: contextvars.ContextVar[CredentialChannel | None] = (
+    contextvars.ContextVar("action_credentials", default=None)
+)
+
+
 # Browser requests that act on a workspace, run off the event loop since
 # they wait on Git, DVC, and the network
 WORKSPACE_ACTIONS: dict[str, Any] = {
@@ -2459,6 +2584,21 @@ READ_ONLY_ACTIONS = {
     "workspace.run_log",
     "workspace.agent_log",
 }
+# Actions that may reach the hub or a Git host, so what they run gets
+# credentials, as a session's commands do; status ones only when fetching,
+# and ignoring a path only when it pushes
+CREDENTIAL_ACTIONS = {
+    "workspace.status",
+    "workspace.git_status",
+    "workspace.pull",
+    "workspace.push",
+    "workspace.save",
+    "workspace.add_stage",
+    "workspace.run",
+    "workspace.new",
+    "workspaces.clone",
+    "machine.check",
+}
 # Ones quick and harmless enough to not wait on what else is going on there,
 # e.g., the rest of the status, which can take a while for a large pipeline
 LOCK_FREE_ACTIONS = {
@@ -2486,6 +2626,8 @@ class Session:
             errors="replace"
         )
     )
+    # Where it asks for credentials
+    creds: CredentialChannel | None = None
 
     @property
     def label(self) -> str:
@@ -2547,6 +2689,18 @@ class HubLink:
         # Workspaces this link holds the lock for, against other hubs'
         self.claimed: set[str] = set()
         self.connected_check_in: asyncio.Task | None = None
+        # Credentials got for sessions and actions, by grant and hub route,
+        # with when to get them again and the sign-in they came from, so
+        # what one browser channel allows is asked for once
+        self.credentials: dict[
+            tuple[str, str, str], tuple[str, float, str]
+        ] = {}
+        self.credential_locks: dict[tuple[str, str, str], asyncio.Lock] = {}
+        # Sessions' and running actions' credential channels, whose
+        # sign-ins check-ins ask about, browser or not, and the sign-ins
+        # the hub said have ended, which get no more
+        self.credential_channels: list[CredentialChannel] = []
+        self.ended_sign_ins: set[str] = set()
         # Asked for by the hub or 'calkit upgrade', and done once idle
         self.restart_requested = False
         self.stop_requested = False
@@ -2642,9 +2796,15 @@ class HubLink:
         rows: int,
         command: str | None = None,
         attach: int | None = None,
+        auth: ChannelAuth | None = None,
     ) -> Session:
         """Start a shell in a workspace, running a command first if given,
         or attaching to the tmux pane of an agent running there.
+
+        Calkit and Git there get credentials from this link, which gets
+        them from the hub with the grant of the channel that opened it,
+        ``auth``, since a link started at boot can't reach the user's
+        keychain.
         """
         if platform.system() == "Windows":
             raise ValueError("Sessions aren't supported on Windows yet")
@@ -2678,6 +2838,9 @@ class HubLink:
         # by a thread that no longer exists in it
         shell = shutil.which(get_shell()) or "/bin/sh"
         env = dict(child_env(), TERM="xterm-256color")
+        creds = self.open_credentials(auth) if auth is not None else None
+        if creds is not None:
+            add_credential_env(env, creds)
         argv = [os.fsencode(shell), b"-l"]
         envb = {os.fsencode(k): os.fsencode(v) for k, v in env.items()}
         cwd = os.fsencode(workspace)
@@ -2685,9 +2848,14 @@ class HubLink:
             max_fd = min(os.sysconf("SC_OPEN_MAX"), 65536)
         except (OSError, ValueError):
             max_fd = 4096
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            pid, fd = pty.fork()
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                pid, fd = pty.fork()
+        except OSError:
+            if creds is not None:
+                self.close_credentials(creds)
+            raise
         if pid == 0:
             # Child: a login shell in the workspace, as over SSH, without
             # anything of the link's, e.g., other sessions' terminals
@@ -2704,6 +2872,7 @@ class HubLink:
             id=uuid.uuid4().hex[:12], workspace=workspace, pid=pid, fd=fd
         )
         self.sessions[session.id] = session
+        session.creds = creds
         self.resize(session, cols, rows)
         asyncio.get_running_loop().add_reader(fd, self._on_output, session)
         # Typed ahead, so the shell runs it once it has started, and the
@@ -2800,6 +2969,8 @@ class HubLink:
         except OSError:
             pass
         self.sessions.pop(session.id, None)
+        if session.creds is not None:
+            self.close_credentials(session.creds)
         self._release_if_unused(session.workspace)
         reported = False
 
@@ -2867,10 +3038,170 @@ class HubLink:
     def close_all(self) -> None:
         for session in list(self.sessions.values()):
             self.close_session(session)
+            if session.creds is not None:
+                self.close_credentials(session.creds)
         # Stopping, so nothing here is being used any more
         for wdir in list(self.claimed):
             release_workspace(wdir)
         self.claimed.clear()
+
+    def open_credentials(self, auth: ChannelAuth) -> CredentialChannel | None:
+        """Start answering requests for credentials with what a browser
+        channel's grant allows, in the user's runtime folder, which keeps it
+        from temporary file cleanup, where there is one.
+        """
+        import functools
+        import secrets
+        import tempfile
+
+        # Windows event loops can't serve Unix sockets
+        if sys.platform == "win32" or not hasattr(socket, "AF_UNIX"):
+            return None
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        cred_dir = sock = None
+        try:
+            cred_dir = tempfile.mkdtemp(
+                prefix="calkit-link-",
+                dir=runtime_dir
+                if runtime_dir and os.path.isdir(runtime_dir)
+                else None,
+            )
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.bind(os.path.join(cred_dir, "creds.sock"))
+            sock.listen(16)
+        except OSError as e:
+            logger.warning(f"Credentials aren't available: {e}")
+            if sock is not None:
+                sock.close()
+            if cred_dir is not None:
+                shutil.rmtree(cred_dir, ignore_errors=True)
+            return None
+        creds = CredentialChannel(
+            auth=auth,
+            dir=cred_dir,
+            sock=sock,
+            secret=secrets.token_urlsafe(32),
+            api_url=self.cfg["api_url"],
+        )
+        creds.server = asyncio.get_running_loop().create_task(
+            asyncio.start_unix_server(
+                functools.partial(self.serve_credentials, creds), sock=sock
+            )
+        )
+        self.credential_channels.append(creds)
+        return creds
+
+    def close_credentials(self, creds: CredentialChannel) -> None:
+        """Stop answering a credential channel's requests, once what it was
+        for has ended.
+        """
+        creds.closed = True
+        self.credential_channels = [
+            c for c in self.credential_channels if c is not creds
+        ]
+        task = creds.server
+        if task is not None:
+            task.cancel()
+            if (
+                task.done()
+                and not task.cancelled()
+                and task.exception() is None
+            ):
+                task.result().close()
+        creds.sock.close()
+        shutil.rmtree(creds.dir, ignore_errors=True)
+
+    async def serve_credentials(
+        self, creds: CredentialChannel, reader: Any, writer: Any
+    ) -> None:
+        """Answer a request for a credential, one per connection, as a line
+        of JSON each way.
+        """
+        import hmac
+
+        try:
+            line = await asyncio.wait_for(reader.readline(), 10)
+            req = json.loads(line)
+            if not isinstance(req, dict) or not hmac.compare_digest(
+                str(req.get("secret", "")), creds.secret
+            ):
+                raise ValueError("Not this session's secret")
+            reply = await self.get_credential(creds, req)
+        except Exception as e:
+            reply = {"error": str(e) or type(e).__name__}
+        try:
+            writer.write((json.dumps(reply) + "\n").encode())
+            await writer.drain()
+        except OSError:
+            pass
+        finally:
+            writer.close()
+
+    async def get_credential(
+        self, creds: CredentialChannel, req: dict
+    ) -> dict:
+        """A credential asked for on a channel while it's open: a token for
+        this link's hub, and no other, or GitHub's for Git, from the hub,
+        kept until shortly before it expires.
+
+        ``fresh`` gets another, e.g., after the last was refused, and
+        ``forget`` only drops the one kept.
+        """
+        import time
+
+        if creds.closed:
+            raise ValueError("The session or action has ended")
+        if creds.auth.session_id in self.ended_sign_ins:
+            raise ValueError(
+                "The sign-in this was started from has ended; open it from "
+                "the hub again"
+            )
+        kind = req.get("type")
+        if kind == "hub.token":
+            api_url = req.get("api_url")
+            if not isinstance(api_url, str) or (
+                api_url.rstrip("/") != self.cfg["api_url"].rstrip("/")
+            ):
+                raise ValueError(
+                    f"This session only has tokens for {self.cfg['api_url']}"
+                )
+            route, repo = "session-token", ""
+        elif kind == "github.token":
+            route = "github-token"
+            path = req.get("path")
+            match = (
+                re.fullmatch(GITHUB_REPO_PATH_PATTERN, path)
+                if isinstance(path, str)
+                else None
+            )
+            repo_name = match.group(2).removesuffix(".git") if match else ""
+            if match is None or not repo_name:
+                raise ValueError("Not a GitHub repository's path")
+            repo = f"{match.group(1)}/{repo_name}"
+        else:
+            raise ValueError("Unknown request")
+        auth = creds.auth
+        key = (auth.grant_id, route, repo)
+        if req.get("fresh") or req.get("forget"):
+            self.credentials.pop(key, None)
+        if req.get("forget"):
+            return {}
+        async with self.credential_locks.setdefault(key, asyncio.Lock()):
+            cached = self.credentials.get(key)
+            now = time.time()
+            # Nothing past the second factor the grant came with
+            if cached is not None and now < cached[1] and now < auth.tfa_exp:
+                return {"token": cached[0]}
+            token, expires = await asyncio.to_thread(
+                request_session_credential, self.cfg, route, auth.grant, repo
+            )
+            # Ones that ran out go, so the cache doesn't grow
+            for k, (_, exp, _) in list(self.credentials.items()):
+                if exp < now:
+                    self.credentials.pop(k, None)
+                    self.credential_locks.pop(k, None)
+            self.credentials[key] = (token, expires, auth.session_id)
+        return {"token": token}
 
     def _release_if_unused(self, wdir: str) -> None:
         """Release a workspace once no session or action is using it."""
@@ -2901,11 +3232,24 @@ class HubLink:
                 msg.get("rows", 24),
                 msg.get("command"),
                 msg.get("attach"),
+                auth=self.channels.get(ch),
             )
             self.attach(session, ch)
             return {"session": session.id}
         if kind == "sessions.attach":
             session = self._get_session(msg)
+            # Credentials then last as long as this channel's second
+            # factor, if that's longer
+            auth = self.channels.get(ch)
+            if (
+                auth is not None
+                and session.creds is not None
+                and (
+                    auth.tfa_exp >= session.creds.auth.tfa_exp
+                    or session.creds.auth.session_id in self.ended_sign_ins
+                )
+            ):
+                session.creds.auth = auth
             if "cols" in msg and "rows" in msg:
                 self.resize(session, msg["cols"], msg["rows"])
             self.attach(session, ch)
@@ -3024,6 +3368,12 @@ class HubLink:
             if auth.session_id in ended:
                 self.close_channel(ch)
                 logger.info(f"Closed channel {ch}, since its sign-in ended")
+        # Nor are credentials given for them any more, including to
+        # sessions and actions no browser is attached to
+        self.ended_sign_ins.update(ended)
+        for key, (_, _, sign_in) in list(self.credentials.items()):
+            if sign_in in ended:
+                self.credentials.pop(key, None)
 
     def hub_reachable(self) -> bool:
         """Whether the hub was heard from lately enough for this link to
@@ -3068,6 +3418,19 @@ class HubLink:
         """
         kind = msg["type"]
         req_id = msg.get("id")
+        # What it runs gets credentials as a session's commands do, with
+        # the grant of the channel that asked, unless it only reads what's
+        # here
+        auth = self.channels.get(ch)
+        wants_credentials = (
+            kind in CREDENTIAL_ACTIONS and msg.get("fetch") is not False
+        ) or (kind == "workspace.ignore" and msg.get("push") is True)
+        creds = (
+            self.open_credentials(auth)
+            if auth is not None and wants_credentials
+            else None
+        )
+        context = _action_credentials.set(creds)
         try:
             if kind == "workspaces.clone":
                 path = await asyncio.to_thread(
@@ -3161,6 +3524,10 @@ class HubLink:
                     ch, {"type": "error", "id": req_id, "error": str(e)}
                 )
             return
+        finally:
+            _action_credentials.reset(context)
+            if creds is not None:
+                self.close_credentials(creds)
         # So the hub lists a new workspace right away
         if kind == "workspace.new":
             await self.check_in_quietly()
@@ -3190,10 +3557,12 @@ class HubLink:
             self.ws is not None,
             self.restart_pending(),
             # As many as the hub takes, which is far more than one person
-            # signs in from
-            sorted({auth.session_id for auth in self.channels.values()})[
-                :MAX_CHANNEL_SESSIONS
-            ],
+            # signs in from, including those of sessions and actions no
+            # browser is attached to, whose credentials came from them
+            sorted(
+                {auth.session_id for auth in self.channels.values()}
+                | {c.auth.session_id for c in self.credential_channels}
+            )[:MAX_CHANNEL_SESSIONS],
         )
         self.last_check_in = time.monotonic()
         self.check_in_interval = resp.get("check_in_interval", 60)

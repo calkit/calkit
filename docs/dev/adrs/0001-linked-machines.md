@@ -253,6 +253,69 @@ restrictions on top, i.e., Landlock on Linux and `sandbox-exec` on macOS,
 allowing system paths, the workspace, and a configurable list of home
 paths, and refusing sessions where they can't be enforced.
 
+#### Credentials in sessions and actions
+
+On macOS the link is a LaunchDaemon by default, so what runs in its
+sessions is outside the user's login session and can't reach their login
+keychain, where Calkit keeps hub tokens, nor, usually, an SSH agent.
+Pulling and pushing there would otherwise start a device login, or fail.
+The same goes for workspace actions the hub starts, e.g., pulls, pushes,
+runs, clones, and builds.
+Sessions and those actions instead get credentials from their link, which
+gets them from the hub over HTTPS when they're asked for, so they never
+pass through the relay, aren't in the environment, and aren't written to
+disk.
+An action is authorized like a session, by the grant of the channel that
+sent it, gets a channel of its own for as long as it runs, and gets none
+if it only reads what's on the machine.
+
+- Each session asks its link over a Unix socket in a folder only the
+  user can open, with a secret only that session is told, which the link
+  answers only while the session runs.
+  Other users can't reach it, and the user's own processes can already
+  reach everything a session can.
+- The link shows the hub the grant of the channel that opened the
+  session, along with its machine token.
+  The hub issues credentials only for a grant it signed for that machine
+  and its owner, whose sign-in is still live and whose second factor hasn't
+  expired, and not if two-factor authentication was set up again since.
+  The relay, which carries grants, has no machine token, and a machine token
+  alone has no grant, so neither can get credentials, and what lets a
+  session open is what keeps its credentials coming.
+  A channel attaching later with a longer-lasting second factor takes over,
+  so a long-running agent keeps working while its owner keeps visiting.
+- Calkit gets a token for the link's hub only, lasting 15 minutes, and at
+  most until that second factor expires, which the link gets again as it
+  runs out.
+  It stops working once the machine is revoked or the sign-in ends, and
+  can't make personal access tokens, which would outlive it.
+  A raw token in the environment, e.g., `CALKIT_TOKEN`, would be sent to
+  whichever hub a command uses, which is why the link checks the hub asked
+  for is its own.
+- Git gets the Calkit GitHub App's installation token for the one repo
+  it asks about, lasting at most an hour, through a credential helper
+  configured for `https://github.com` only, which tells it the repo.
+  The hub issues one only for a repo of a project on the hub the owner can
+  access, with the app installed, limited to the repo's contents, since the
+  app's other permissions, e.g., over workflows, can exceed the owner's.
+  Anyone can make a hub project for a repo they can't push to, so, as the
+  hub's own Git does, it's never more than GitHub lets the owner do, asked
+  with their GitHub token on the hub, or, for an owner without GitHub,
+  than their invite to the project gives, nor more than the hub allows.
+  It never sends the owner's own GitHub token, which anything in the
+  session could trade for a hub login that outlives it, and session tokens
+  can't fetch it, nor the user's other services' tokens.
+  Pushes show the app as the pusher, though commits keep their author.
+- Git there uses only that helper for `https://github.com`, so the user's
+  own, e.g., `gh` or osxkeychain, are bypassed, and none can store a token
+  the link gave.
+  SSH remotes are untouched, since keys without a passphrase work at boot
+  and keys with one can be typed for in a session, and they reach repos the
+  app can't.
+- HTTP DVC remotes keep a token in `.dvc/config.local`, which sessions
+  neither make nor write, so only ones set up beforehand work there;
+  `ck://` remotes, the default, get the session's token as they go.
+
 ### Workspaces
 
 There are two kinds:
@@ -493,7 +556,7 @@ It can rerun a failed stage through the link.
 `calkit hub link uninstall` revokes the machine on the hub with its own
 token and removes the service and local state.
 Deleting a machine on the hub revokes its token and the CLI token
-issued to it.
+issued to it, and its sessions' tokens stop working.
 The link stops at its next check-in, when the hub refuses its token,
 and the relay drops its connection within 10 minutes, once it can no
 longer refresh its relay token.

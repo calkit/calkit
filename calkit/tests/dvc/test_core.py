@@ -647,6 +647,36 @@ def test_set_remote_auth_only_for_hub_remotes(monkeypatch, tmp_path):
             assert calls[0][-2:] == ["url", url]
         else:
             assert "ckp_token" not in fpath.read_text(), url
+    # In a hub link's session, nothing's made or written, since its tokens
+    # are short-lived and can't make lasting ones, but a remote set up
+    # before keeps its token
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "get_remotes",
+        lambda wdir=None: {remote_name: "https://api.calkit.io/p/dvc"},
+    )
+    monkeypatch.setenv(calkit.hub.LINK_SOCKET_ENV, "/nowhere")
+    monkeypatch.setenv(calkit.hub.LINK_API_URL_ENV, "https://api.calkit.io")
+    monkeypatch.setattr(calkit.config, "read", lambda: 1 / 0)
+    warnings = []
+    monkeypatch.setattr(
+        calkit.dvc.core.logger, "warning", lambda msg: warnings.append(msg)
+    )
+    for kept in [True, False]:
+        calls.clear()
+        # Stored with the URL it's for, as set up before
+        fpath.write_text(
+            f'[remote "{remote_name}"]\n'
+            "    url = https://api.calkit.io/p/dvc\n"
+            "    password = Bearer ckp_token\n"
+            if kept
+            else ""
+        )
+        calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+        assert calls == []
+        assert ("ckp_token" in fpath.read_text()) == kept
+        assert bool(warnings) != kept
+        assert all("ck://" in w for w in warnings)
 
 
 def test_clear_off_hub_auth(
@@ -671,8 +701,13 @@ def test_clear_off_hub_auth(
         "    url = https://storage.example/keyed\n"
         "['remote \"legacy\"']\n"
         f"    url = {hub_url}\n"
+        "['remote \"session\"']\n"
+        "    url = https://attacker.example/session\n"
     )
     legacy = jwt.encode({"sub": "u", "token_id": "t"}, "k", algorithm="HS256")
+    session = jwt.encode(
+        {"sub": "u", "machine_id": "m"}, "k", algorithm="HS256"
+    )
     local = dvc_dir / "config.local"
     local.write_text(
         # Stored with the URL it's for, which the repo still says
@@ -700,6 +735,10 @@ def test_clear_off_hub_auth(
         "['remote \"legacy\"']\n"
         "    custom_auth_header = Authorization\n"
         f"    password = Bearer {legacy}\n"
+        # As are a hub link's sessions', stored without one too
+        "['remote \"session\"']\n"
+        "    custom_auth_header = Authorization\n"
+        f"    password = Bearer {session}\n"
         # A remote only this machine has, stored with its URL
         "['remote \"local-only\"']\n"
         f"    url = {hub_url}\n"
@@ -708,7 +747,7 @@ def test_clear_off_hub_auth(
     )
     # Found from a folder inside the project, as DVC finds it
     cleared = calkit.dvc.clear_off_hub_auth(wdir=str(sub))
-    assert sorted(cleared) == ["calkit:o/q", "dav", "legacy"]
+    assert sorted(cleared) == ["calkit:o/q", "dav", "legacy", "session"]
     cfg = ConfigObj(str(local), encoding="utf-8")
     assert cfg['remote "calkit"']["password"] == "Bearer ckp_token"
     # The repo's URL wins again, without the token

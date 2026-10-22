@@ -22,6 +22,7 @@ from app.api.deps import (
     PAT_VERIFIER_LENGTH_BYTES,
     CurrentSession,
     CurrentUser,
+    NoMachineSessionToken,
     SessionDep,
     SignedIn,
     TokenDep,
@@ -784,7 +785,7 @@ class TokenResp(UserTokenPublic, Token):
     pass
 
 
-@router.post("/user/tokens")
+@router.post("/user/tokens", dependencies=[NoMachineSessionToken])
 def post_user_token(
     session: SessionDep,
     current_user: CurrentUser,
@@ -794,7 +795,9 @@ def post_user_token(
     """Create a personal access token.
 
     A full one takes a signed-in session, so a token can't mint more of
-    itself, while one scoped to DVC, which the CLI makes, doesn't.
+    itself, while one scoped to DVC, which the CLI makes, doesn't. Neither
+    can be made with a linked machine's session token, which would then
+    outlive it.
     """
     if req.scope is None:
         get_current_session(session, access_token)
@@ -1009,7 +1012,7 @@ class ExternalTokenResponse(BaseModel):
     access_token: str
 
 
-@router.get("/user/zenodo-token")
+@router.get("/user/zenodo-token", dependencies=[NoMachineSessionToken])
 def get_user_zenodo_token(
     session: SessionDep, current_user: CurrentUser
 ) -> ExternalTokenResponse:
@@ -1017,7 +1020,7 @@ def get_user_zenodo_token(
     return ExternalTokenResponse(access_token=token)
 
 
-@router.get("/user/github-token")
+@router.get("/user/github-token", dependencies=[NoMachineSessionToken])
 def get_user_github_token(
     session: SessionDep, current_user: CurrentUser
 ) -> ExternalTokenResponse:
@@ -1217,7 +1220,7 @@ def post_user_zotero_auth(
     return Message(message="success")
 
 
-@router.get("/user/overleaf-token")
+@router.get("/user/overleaf-token", dependencies=[NoMachineSessionToken])
 def get_user_overleaf_token(
     session: SessionDep, current_user: CurrentUser
 ) -> ExternalTokenResponse:

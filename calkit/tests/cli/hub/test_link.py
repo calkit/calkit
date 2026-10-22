@@ -186,3 +186,50 @@ def test_stop_and_restart_every_hub(tmp_path, monkeypatch):
     assert result.exit_code == 1
     assert restarted == ["https://calkit.io"]
     assert "Boom" in result.output
+
+
+def test_git_credential(monkeypatch):
+    from calkit.hub import core as hub
+
+    asked: list[dict] = []
+    refusal: list[str] = []
+
+    def ask_link(req: dict) -> dict:
+        asked.append(req)
+        if refusal:
+            raise hub.LinkCredentialError(refusal[0])
+        return {} if req.get("forget") else {"token": "ghu_x"}
+
+    monkeypatch.setattr(hub, "ask_link", ask_link)
+
+    def git(operation: str, attrs: str) -> Any:
+        return CliRunner().invoke(
+            hub_app, ["link", "git-credential", operation], input=attrs
+        )
+
+    # Only GitHub's, over HTTPS, and only when Git asks for one
+    for operation, attrs in [
+        ("get", "protocol=https\nhost=gitlab.com\n\n"),
+        ("get", "protocol=http\nhost=github.com\n\n"),
+        ("get", "protocol=https\nhost=github.com.evil.test\n\n"),
+        ("store", "protocol=https\nhost=github.com\npassword=p\n\n"),
+        # Only for a repo, which the hub's tokens are for
+        ("get", "protocol=https\nhost=github.com\n\n"),
+    ]:
+        result = git(operation, attrs)
+        assert result.exit_code == 0 and result.stdout == ""
+    assert asked == []
+    result = git("get", "protocol=https\nhost=github.com\npath=o/r.git\n\n")
+    assert result.exit_code == 0
+    assert result.stdout == "username=x-access-token\npassword=ghu_x\n"
+    assert asked == [
+        {"type": "github.token", "path": "o/r.git", "forget": False}
+    ]
+    # One GitHub refused is forgotten
+    result = git("erase", "protocol=https\nhost=github.com\npath=o/r\n\n")
+    assert result.stdout == "" and asked[-1]["forget"]
+    # Without the link, Git carries on as it would without this
+    refusal.append("Couldn't reach the hub link")
+    result = git("get", "protocol=https\nhost=github.com\npath=o/r\n\n")
+    assert result.exit_code == 0 and result.stdout == ""
+    assert "Couldn't reach" in result.stderr

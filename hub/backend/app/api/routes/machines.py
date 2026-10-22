@@ -5,16 +5,18 @@ See docs/dev/hub-link-protocol.md for how these fit with the relay.
 
 import re
 import secrets
+import time
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
+import requests
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import col, func, select
 
 import app.projects
-from app import users
+from app import github, users
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
@@ -36,11 +38,15 @@ from app.models import (
     Project,
     RefreshToken,
     User,
+    UserProjectAccess,
     UserToken,
 )
+from app.models.core import ROLE_NAMES
 from app.security import (
+    create_access_token,
     create_machine_grant,
     create_relay_token,
+    decode_machine_grant,
     get_machine_grant_public_key,
     hash_token_verifier,
     verify_token_verifier,
@@ -61,6 +67,10 @@ BROWSER_RELAY_TOKEN_SECONDS = 60
 # How long a request for a CLI token for a machine stands
 CLI_TOKEN_REQUEST_SECONDS = 600
 CLI_TOKEN_DAYS = 365
+# How long a token for Calkit in a machine's session lasts, which the
+# machine asks for again as it runs out, so it stops soon after what let
+# the session open does
+SESSION_TOKEN_MINUTES = 15
 MAX_ACTIVE_MACHINES = 50
 # Whether everyone can link machines, for workspaces, rather than only
 # superusers while they're tried out, as the frontend's pages show
@@ -69,6 +79,8 @@ NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,63}$"
 # Hub names for an owner and project, as a machine reports them
 PROJECT_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,255}/[A-Za-z0-9._-]{1,255}$")
 MAX_INT = 2**31 - 1
+# GitHub owner and repository names
+GITHUB_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
 
 
 def get_current_machine(session: SessionDep, token: TokenDep) -> Machine:
@@ -758,6 +770,204 @@ def post_machine_cli_token(
     )
     session.commit()
     return CliToken(token=f"ckp_{selector}{verifier}")
+
+
+class SessionCredentialsReq(BaseModel):
+    """What a machine shows to get credentials for one of its sessions: the
+    grant of the channel that opened it, or last attached to it.
+    """
+
+    grant: str = Field(max_length=8192)
+
+
+def _check_session_grant(
+    session: SessionDep, machine: Machine, grant: str
+) -> tuple[uuid.UUID, int]:
+    """The sign-in whose grant opened a session on the machine, and when
+    the second factor it entered expires, if both still count.
+
+    Only the API can sign grants, and only the machine has its token, so
+    neither the relay, which carries grants, nor anyone with the machine's
+    token alone can get credentials.
+    """
+    refused = HTTPException(
+        403,
+        "The sign-in that opened this session has ended or needs its second "
+        "factor again; open the session from the hub again",
+    )
+    payload = decode_machine_grant(grant, machine.id)
+    if payload is None or payload["sub"] != str(machine.user_id):
+        raise refused
+    try:
+        sign_in = uuid.UUID(str(payload["sid"]))
+    except ValueError:
+        raise refused
+    tfa_exp, issued = payload["tfa_exp"], payload["iat"]
+    if (
+        not isinstance(tfa_exp, int)
+        or isinstance(tfa_exp, bool)
+        or tfa_exp <= time.time()
+        or not isinstance(issued, int)
+    ):
+        raise refused
+    # A second factor set up again since, or turned off, doesn't vouch for
+    # what the old one let open
+    totp = machine.user.totp
+    if (
+        totp is None
+        or totp.confirmed_at is None
+        or datetime.fromtimestamp(issued, tz=UTC).replace(tzinfo=None)
+        < totp.confirmed_at.replace(microsecond=0)
+    ):
+        raise refused
+    if _ended_sessions(session, machine, [sign_in]):
+        raise refused
+    return sign_in, tfa_exp
+
+
+@router.post("/machines/session-token")
+def post_machine_session_token(
+    session: SessionDep, machine: CurrentMachine, req: SessionCredentialsReq
+) -> CliToken:
+    """Issue a short-lived token for Calkit in one of the machine's sessions,
+    for as long as the sign-in that opened it and its second factor last.
+
+    It stops working once the machine is unlinked or that sign-in ends, and
+    can't make other tokens.
+    """
+    sign_in, tfa_exp = _check_session_grant(session, machine, req.grant)
+    lifetime = min(SESSION_TOKEN_MINUTES * 60, tfa_exp - time.time())
+    token = create_access_token(
+        machine.user_id,
+        timedelta(seconds=lifetime),
+        add_payload={"machine_id": str(machine.id), "link_sid": str(sign_in)},
+    )
+    return CliToken(token=token)
+
+
+class GitHubTokenReq(SessionCredentialsReq):
+    """What a machine shows to get a token for Git, and the GitHub repo Git
+    asked about.
+    """
+
+    owner: str = Field(pattern=GITHUB_NAME_PATTERN)
+    repo: str = Field(pattern=GITHUB_NAME_PATTERN)
+
+
+class GitHubToken(BaseModel):
+    token: str
+    # When to stop using it, in seconds since the epoch
+    expires: int
+
+
+@router.post("/machines/github-token")
+def post_machine_github_token(
+    session: SessionDep, machine: CurrentMachine, req: GitHubTokenReq
+) -> GitHubToken:
+    """Get a token for Git in one of the machine's sessions or actions, on
+    the same terms as a session token, for a GitHub repo of a project on the
+    hub its owner can access.
+
+    It's the Calkit GitHub App's installation token for that repo alone,
+    never the owner's own GitHub token, which could be traded for a login
+    that outlives the session. A hub project for a repo can be made without
+    any right to push to it, so, as the hub's own Git does, it's never more
+    than GitHub lets the owner do, asked with their own token, or, for an
+    owner without GitHub, than an invite to the project gives, nor more
+    than the hub does.
+    """
+    _check_session_grant(session, machine, req.grant)
+    user = machine.user
+    # Narrowed in SQL, then compared however the URL is written
+    repo = f"{req.owner}/{req.repo}".lower()
+    projects = [
+        project
+        for project in session.exec(
+            select(Project).where(
+                col(Project.git_repo_url).ilike(f"%github.com%{repo}%")
+            )
+        ).all()
+        if github.parse_github_repo(project.git_repo_url) == repo
+    ]
+    # The most the owner can do with any project using the repo on the hub,
+    # and by invite, which is all an owner without GitHub acts with
+    levels = ["read", "write", "admin", "owner"]
+
+    def most(a: str | None, b: str | None) -> str | None:
+        if a is None or (b is not None and levels.index(b) > levels.index(a)):
+            return b
+        return a
+
+    hub_access = invited = None
+    for project in projects:
+        try:
+            level = app.projects.get_project(
+                session,
+                owner_name=project.owner_account.name,
+                project_name=project.name,
+                current_user=user,
+            ).current_user_access
+        except HTTPException:
+            continue
+        if level in levels:
+            hub_access = most(hub_access, level)
+        role_id = session.exec(
+            select(UserProjectAccess.role_id)
+            .where(UserProjectAccess.project_id == project.id)
+            .where(UserProjectAccess.user_id == user.id)
+            .where(col(UserProjectAccess.role_id).is_not(None))
+        ).first()
+        if role_id is not None:
+            invited = most(invited, ROLE_NAMES[role_id])
+    if hub_access is None:
+        raise HTTPException(
+            403, "No project on the hub you can access uses this repo"
+        )
+    refused = HTTPException(403, "You can't use this repo on GitHub")
+    if user.account.github_name is not None:
+        # What GitHub says, asked with the owner's token, which stays here,
+        # failing closed
+        try:
+            resp = requests.get(
+                f"https://api.github.com/repos/{req.owner}/{req.repo}",
+                headers={
+                    "Authorization": (
+                        f"Bearer {users.get_github_token(session, user)}"
+                    ),
+                    "Accept": "application/vnd.github+json",
+                },
+                timeout=10,
+            )
+            body = resp.json() if resp.ok else None
+            perms = body.get("permissions") if isinstance(body, dict) else None
+        except (HTTPException, requests.RequestException, ValueError):
+            perms = None
+        if not isinstance(perms, dict):
+            raise refused
+        if perms.get("push") is True:
+            allowed: str | None = "write"
+        elif perms.get("pull") is True:
+            allowed = "read"
+        else:
+            allowed = None
+    else:
+        allowed = invited
+    if allowed is None:
+        raise refused
+    write = levels.index(allowed) >= 1 and levels.index(hub_access) >= 1
+    # Only what Git needs, even if the app may do more, e.g., change
+    # workflows
+    try:
+        token, expires = github.get_app_installation_token_and_expiry(
+            req.owner,
+            req.repo,
+            permissions={"contents": "write" if write else "read"},
+        )
+    except (github.GitHubAppNotConfigured, HTTPException):
+        raise HTTPException(
+            403, "The Calkit GitHub App isn't installed on this repo"
+        )
+    return GitHubToken(token=token, expires=int(expires))
 
 
 class Workspace(WorkspaceInfo):

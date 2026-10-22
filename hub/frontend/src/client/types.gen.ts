@@ -1892,6 +1892,41 @@ export type GitHubReleasePost = {
 }
 
 /**
+ * GitHubToken
+ */
+export type GitHubToken = {
+  /**
+   * Token
+   */
+  token: string
+  /**
+   * Expires
+   */
+  expires: number
+}
+
+/**
+ * GitHubTokenReq
+ *
+ * What a machine shows to get a token for Git, and the GitHub repo Git
+ * asked about.
+ */
+export type GitHubTokenReq = {
+  /**
+   * Grant
+   */
+  grant: string
+  /**
+   * Owner
+   */
+  owner: string
+  /**
+   * Repo
+   */
+  repo: string
+}
+
+/**
  * GitImport
  */
 export type GitImport = {
@@ -5970,6 +6005,19 @@ export type SearchResults = {
    * Results
    */
   results: Array<SearchResultItem>
+}
+
+/**
+ * SessionCredentialsReq
+ *
+ * What a machine shows to get credentials for one of its sessions: the
+ * grant of the channel that opened it, or last attached to it.
+ */
+export type SessionCredentialsReq = {
+  /**
+   * Grant
+   */
+  grant: string
 }
 
 /**
@@ -16179,6 +16227,60 @@ export type PostMachineCliTokenResponses = {
 
 export type PostMachineCliTokenResponse =
   PostMachineCliTokenResponses[keyof PostMachineCliTokenResponses]
+
+export type PostMachineSessionTokenData = {
+  body: SessionCredentialsReq
+  path?: never
+  query?: never
+  url: "/machines/session-token"
+}
+
+export type PostMachineSessionTokenErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineSessionTokenError =
+  PostMachineSessionTokenErrors[keyof PostMachineSessionTokenErrors]
+
+export type PostMachineSessionTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: CliToken
+}
+
+export type PostMachineSessionTokenResponse =
+  PostMachineSessionTokenResponses[keyof PostMachineSessionTokenResponses]
+
+export type PostMachineGithubTokenData = {
+  body: GitHubTokenReq
+  path?: never
+  query?: never
+  url: "/machines/github-token"
+}
+
+export type PostMachineGithubTokenErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineGithubTokenError =
+  PostMachineGithubTokenErrors[keyof PostMachineGithubTokenErrors]
+
+export type PostMachineGithubTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: GitHubToken
+}
+
+export type PostMachineGithubTokenResponse =
+  PostMachineGithubTokenResponses[keyof PostMachineGithubTokenResponses]
 
 export type GetWorkspacesData = {
   body?: never

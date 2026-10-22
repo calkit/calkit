@@ -542,6 +542,18 @@ def get_status(
         if isinstance(spinner, Status):
             spinner.update(text)
 
+    def start_docker() -> None:
+        # Asked with the spinner out of the way, as in 'calkit run'
+        import calkit.docker
+
+        if isinstance(spinner, Status):
+            spinner.stop()
+        try:
+            calkit.docker.ensure_ready(interactive=True)
+        finally:
+            if isinstance(spinner, Status):
+                spinner.start()
+
     def get_dvc_data_status() -> dict:
         # Reuse what the pipeline status computed under the same DVC lock
         if (
@@ -624,6 +636,8 @@ def get_status(
     # while, e.g., when environments are checked again, so a spinner shows
     # until then. It writes to its own copy of the terminal, since what the
     # environment checks' tools print is discarded.
+    # Whether there's someone to ask is worked out before the spinner starts
+    can_ask = not as_json and calkit.core.is_tty()
     spinner: AbstractContextManager = nullcontext()
     mintty = calkit.core.is_mintty(sys.stderr)
     if not as_json and (sys.stderr.isatty() or mintty):
@@ -671,6 +685,7 @@ def get_status(
                 with_storage_problems="dvc" in categories,
                 quiet_environment_checks=True,
                 progress=step,
+                start_docker=start_docker if can_ask else None,
             )
             if pipeline_status.failed_environment_checks:
                 warn(

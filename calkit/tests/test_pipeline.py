@@ -1827,19 +1827,37 @@ def test_get_status(tmp_dir):
         "command": "echo hi",
         "environment": "d",
     }
+    not_running = calkit.docker.DockerNotReadyError("not running")
     with (
+        mock.patch("calkit.docker.ensure_ready", side_effect=not_running),
         mock.patch(
-            "calkit.docker.ensure_ready",
-            side_effect=calkit.docker.DockerNotReadyError("not running"),
-        ),
-        mock.patch(
-            "calkit.cli.check.check_environment",
-            side_effect=calkit.docker.DockerNotReadyError("not running"),
+            "calkit.cli.check.check_environment", side_effect=not_running
         ),
     ):
         status = calkit.pipeline.get_status(ck_info=ck_info)
+        assert not status.errors
+        assert status.failed_environment_checks == ["d"]
+        # Nor when it can't be started
+        start_docker = mock.Mock(side_effect=not_running)
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, start_docker=start_docker
+        )
+        start_docker.assert_called_once()
+        assert status.failed_environment_checks == ["d"]
+    # Once it's started, its environment is checked as usual
+    with (
+        mock.patch(
+            "calkit.docker.ensure_ready", side_effect=[not_running, None]
+        ),
+        mock.patch("calkit.cli.check.check_environment"),
+    ):
+        start_docker = mock.Mock()
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, start_docker=start_docker
+        )
+    start_docker.assert_called_once()
     assert not status.errors
-    assert status.failed_environment_checks == ["d"]
+    assert not status.failed_environment_checks
 
 
 def test_get_status_excludes_frozen_stage(tmp_dir):

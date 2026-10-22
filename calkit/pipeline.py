@@ -1223,6 +1223,7 @@ def get_status(
     with_storage_problems: bool = False,
     quiet_environment_checks: bool = False,
     progress: Callable[[str], None] | None = None,
+    start_docker: Callable[[], None] | None = None,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
@@ -1231,12 +1232,27 @@ def get_status(
     With ``with_data_status``, DVC's data status is attached as well, left
     None if it fails so the caller can ask again and report why.
     ``progress`` is told what's being done as each step starts.
+    ``start_docker`` is called when a stage needs Docker and it isn't
+    ready, e.g., to offer to start it, and raises ``DockerNotReadyError``
+    if it still isn't.
     """
 
     def step(text: str) -> None:
         if progress is not None:
             progress(text)
 
+    def check_envs(docker_required: bool) -> dict:
+        return calkit.environments.check_all_in_pipeline(
+            ck_info=ck_info,
+            targets=targets,
+            force=force_env_check,
+            skip_stages=list(result["gated_stages"]),
+            quiet=quiet_environment_checks,
+            progress=progress,
+            docker_required=docker_required,
+        )
+
+    import calkit.docker
     import calkit.environments
     import calkit.markdown
 
@@ -1300,18 +1316,20 @@ def get_status(
                     remote=False,
                 )
                 result["gated_stages"] = gated | gate_errors
-                env_checks = calkit.environments.check_all_in_pipeline(
-                    ck_info=ck_info,
-                    targets=targets,
-                    force=force_env_check,
-                    skip_stages=list(result["gated_stages"]),
-                    quiet=quiet_environment_checks,
-                    progress=progress,
+
+                try:
+                    env_checks = check_envs(docker_required=True)
+                except calkit.docker.DockerNotReadyError:
                     # Docker not running doesn't make anything stale, so
-                    # only an environment that needs it and isn't cached
-                    # fails
-                    docker_required=False,
-                )
+                    # without it only the environments that need it fail
+                    ready = False
+                    if start_docker is not None:
+                        try:
+                            start_docker()
+                            ready = True
+                        except calkit.docker.DockerNotReadyError:
+                            pass
+                    env_checks = check_envs(docker_required=ready)
                 result["environment_checks"] = env_checks
             except Exception as e:
                 result["errors"].append(

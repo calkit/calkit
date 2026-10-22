@@ -212,10 +212,14 @@ def test_check_all_in_pipeline(tmp_dir, capfd):
     assert not os.path.isdir(".venv2")
 
     # Quiet discards what the checks and their tools print, and leaves the
-    # terminal's handles intact, since on Windows Click keeps its own
+    # terminal's handles intact, since on Windows Click keeps its own. Nobody
+    # can answer a prompt there either, so they get no input.
     def noisy_check(*args: object, **kwargs: object) -> None:
         print("from python")
         subprocess.run(["git", "--version"])
+        with pytest.raises(EOFError):
+            input("Continue? ")
+        assert subprocess.run([sys.executable, "-c", "input()"]).returncode
 
     capfd.readouterr()
     if sys.platform == "win32":

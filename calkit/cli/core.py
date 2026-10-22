@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from enum import Enum
 from typing import Any, NoReturn
 
@@ -152,8 +153,24 @@ def echo_json(obj: Any) -> None:
     typer.echo(json.dumps(obj, default=str))
 
 
+def _echo_above_spinner(text: str, err: bool) -> bool:
+    """Print through a spinner's stand-in for the stream, if there is one.
+
+    Click writes to a Windows console's handle directly, which would put the
+    text on the spinner's line rather than above it.
+    """
+    file_proxy = sys.modules.get("rich.file_proxy")
+    stream = sys.stderr if err else sys.stdout
+    if file_proxy is None or not isinstance(stream, file_proxy.FileProxy):
+        return False
+    print(text, file=stream, flush=True)
+    return True
+
+
 def raise_error(txt: str) -> NoReturn:
-    typer.echo(typer.style("Error: " + str(txt), fg="red"), err=True)
+    text = typer.style("Error: " + str(txt), fg="red")
+    if not _echo_above_spinner(text, err=True):
+        typer.echo(text, err=True)
     raise typer.Exit(1)
 
 
@@ -164,7 +181,6 @@ def warn(txt: str, prefix: str = "Warning: ", err: bool = False):
     # defined.
     from calkit.core import encode_safe
 
-    typer.echo(
-        typer.style(prefix + encode_safe(str(txt), err=err), fg="yellow"),
-        err=err,
-    )
+    text = typer.style(prefix + encode_safe(str(txt), err=err), fg="yellow")
+    if not _echo_above_spinner(text, err=err):
+        typer.echo(text, err=err)

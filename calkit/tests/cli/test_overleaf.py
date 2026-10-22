@@ -1014,8 +1014,11 @@ def test_overleaf_sync_readiness_guards(tmp_dir):
     repo.git.push(["--set-upstream", "origin", default_branch])
     # Only out-of-date stages that feed what's sent count, not the
     # document's own build, whose PDF isn't sent, or stages that don't feed
-    # the document
+    # the document, with stage paths taken from their working directory
     ck_info = calkit.load_calkit_info()
+    build_stage = ck_info["pipeline"]["stages"]["build-paper"]
+    build_stage["wdir"] = "paper"
+    build_stage["target_path"] = "main.tex"
     ck_info["pipeline"]["stages"]["unrelated"] = {
         "kind": "shell-command",
         "command": "echo other > other.txt",
@@ -1034,9 +1037,10 @@ def test_overleaf_sync_readiness_guards(tmp_dir):
     # A stage writing into the synced folder that hasn't run is refused
     ck_info["pipeline"]["stages"]["figure"] = {
         "kind": "shell-command",
-        "command": "echo figure > paper/figure.txt",
+        "command": "echo figure > figure.txt",
         "environment": "_system",
-        "outputs": ["paper/figure.txt"],
+        "wdir": "paper",
+        "outputs": ["figure.txt"],
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -1466,6 +1470,13 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     assert res.exit_code == 0, res.output
     sync()
     assert len(runs) == n_runs
+    # Local changes sent to Overleaf are rebuilt from too, even when the
+    # pipeline isn't checked
+    with open("paper/main.tex", "a", newline="") as f:
+        f.write("Committed by hand\n")
+    repo.git.commit(["paper/main.tex", "-m", "Edit by hand"])
+    sync()
+    assert runs[n_runs:] == [(["build-paper"], True)]
     # A failed build still saves and pushes what was synced
     build_writes["fail"] = ""
     overleaf.files["main.tex"] += b"Broken\n"
@@ -1501,6 +1512,11 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
         with open(name, "a") as f:
             f.write("Uncommitted\n")
     repo.git.add("staged.md")
+    # A file the build writes to that already had changes is left out, since
+    # they may not be the build's
+    with open("dvc.lock", "a") as f:
+        f.write("# Another stage\n")
+    build_writes["dvc.lock"] = "# The build\n"
     ck_info = calkit.load_calkit_info()
     ck_info["description"] = "Uncommitted"
     with open("calkit.yaml", "w") as f:
@@ -1517,8 +1533,12 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     with open("paper/main.tex") as f:
         assert "From Overleaf again" in f.read()
     assert repo.git.status("--porcelain") == elsewhere
+    assert "uncommitted changes before it: dvc.lock" in res.output
+    build_writes.clear()
     repo.git.reset("-q", "staged.md")
-    repo.git.checkout(["--", "edited.md", "staged.md", "calkit.yaml"])
+    repo.git.checkout(
+        ["--", "edited.md", "staged.md", "calkit.yaml", "dvc.lock"]
+    )
     os.remove("new.md")
     repo.git.rm("paper/figs/fig.txt")
     repo.git.commit(["-m", "Remove figure"])
@@ -1563,8 +1583,10 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
         assert ">>>>>>>" in f.read()
     with open("paper/main.tex", "w", newline="") as f:
         f.write("Resolved\n")
+    n_runs = len(runs)
     res = runner.invoke(overleaf_app, ["sync", "--allow-stale", "--resolve"])
     assert res.exit_code == 0, res.output
+    assert runs[n_runs:] == [(["build-paper"], True)]
     assert overleaf.files["main.tex"] == b"Resolved\n"
     assert repo.git.status("--porcelain", "staged.md") == "M  staged.md"
     repo.git.reset("-q", "staged.md")

@@ -5,6 +5,8 @@ from __future__ import annotations
 import filecmp
 import json
 import os
+import posixpath
+import subprocess
 import sys
 from contextlib import ExitStack
 from functools import partial
@@ -522,9 +524,17 @@ def _get_document_stages(folders: list[str]) -> dict[str, str]:
     return {
         name: folder
         for name, stage in stages.items()
-        if isinstance(stage, dict) and stage.get("kind") == "latex"
+        if isinstance(stage, dict)
+        and stage.get("kind") == "latex"
+        and stage.get("target_path")
         for folder in folders
-        if Path(str(stage.get("target_path", ""))).is_relative_to(folder)
+        if Path(
+            posixpath.normpath(
+                posixpath.join(
+                    stage.get("wdir") or ".", str(stage["target_path"])
+                )
+            )
+        ).is_relative_to(folder)
     }
 
 
@@ -595,9 +605,14 @@ def check_sync_readiness(
                         feeding |= calkit.pipeline.get_upstream_stages(name)
                     dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
                     for name, stage in dvc_stages.items():
+                        stage_wdir = stage.get("wdir") or "."
                         outs = calkit.dvc.out_paths_from_stage(stage)
                         if any(
-                            Path(out).is_relative_to(folder)
+                            Path(
+                                posixpath.normpath(
+                                    posixpath.join(stage_wdir, out)
+                                )
+                            ).is_relative_to(folder)
                             for out in outs
                             for folder in synced_folders
                         ):
@@ -749,11 +764,11 @@ def sync(
     from calkit.cli.main.core import push as calkit_push
     from calkit.cli.main.core import run as calkit_run
 
-    def get_dirty_files() -> dict[str, tuple]:
-        """Changed and untracked files, with when they were last written and
+    def get_dirty_files() -> dict[str, tuple[str | None, bool]]:
+        """Changed and untracked files, with a hash of their content and
         whether they're untracked.
         """
-        res: dict[str, tuple] = {}
+        untracked: dict[str, bool] = {}
         entries = iter(
             repo.git.status(
                 "--porcelain", "-z", "--untracked-files=all"
@@ -765,14 +780,22 @@ def sync(
             # A rename or copy is followed by the path it came from
             if entry[0] in "RC":
                 next(entries, None)
-            path = entry[3:]
-            try:
-                st = os.stat(os.path.join(repo.working_dir, path))
-                stamp: tuple | None = (st.st_mtime_ns, st.st_size)
-            except FileNotFoundError:
-                stamp = None
-            res[path] = (stamp, entry.startswith("??"))
-        return res
+            untracked[entry[3:]] = entry.startswith("??")
+        existing = [
+            path
+            for path in untracked
+            if os.path.isfile(os.path.join(repo.working_dir, path))
+        ]
+        hashes = subprocess.run(
+            ["git", "hash-object", "--stdin-paths"],
+            input="\n".join(existing),
+            cwd=repo.working_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        content = dict(zip(existing, hashes))
+        return {path: (content.get(path), u) for path, u in untracked.items()}
 
     repo = calkit.git.get_repo()
     # Uncommitted edits to calkit.yaml aren't the sync's to touch or commit,
@@ -838,7 +861,7 @@ def sync(
     # Keyed by synced folder, so a sync of multiple folders can be summarized
     # after the loop even if some are skipped
     results: dict[str, dict] = {}
-    committed_local = False
+    edited_folders: set[str] = set()
     first = True
     for synced_folder, sync_data in overleaf_info.items():
         if not sync_data:
@@ -884,7 +907,7 @@ def sync(
             repo.git.commit(
                 [wdir, "-m", f"Update {wdir} before Overleaf sync"]
             )
-            committed_local = True
+            edited_folders.add(wdir)
         # Keep other processes from using the clone until we're done
         with (
             calkit.overleaf.lock(overleaf_project_id, typer.echo),
@@ -936,7 +959,10 @@ def sync(
     to_build = {
         folder
         for folder, res in results.items()
-        if res.get("commits_since_last_sync") and not push_only
+        if not push_only
+        and (
+            res.get("commits_since_last_sync") or res.get("committed_overleaf")
+        )
     } | {
         doc_stages[s] for s in readiness["stale_documents"] if s in doc_stages
     }
@@ -966,17 +992,21 @@ def sync(
                 wdir=str(repo.working_dir)
             ).get("stages", {})
             outs = {
-                Path(p).as_posix()
+                posixpath.normpath(
+                    posixpath.join(
+                        (dvc_stages.get(name) or {}).get("wdir") or ".", p
+                    )
+                )
                 for name in build_stages
                 for p in calkit.dvc.out_paths_from_stage(
                     dvc_stages.get(name) or {}
                 )
             }
-            to_save = [
+            dirty_after = get_dirty_files()
+            changed = [
                 path
-                for path, state in get_dirty_files().items()
+                for path, state in dirty_after.items()
                 if dirty_before.get(path) != state
-                and not (path == "dvc.yaml" and calkit_yaml_dirty)
                 and not (
                     state[1]
                     and any(
@@ -986,6 +1016,27 @@ def sync(
                     and os.path.basename(path) != ".gitignore"
                 )
             ]
+            # A file with changes from before the build may hold work that
+            # isn't the build's, e.g., another stage's entry in dvc.lock.
+            # dvc.yaml is generated from calkit.yaml, so it's the build's
+            # whenever calkit.yaml is committed.
+            kept_out = sorted(
+                path
+                for path in changed
+                if path in dirty_before and path != "dvc.yaml"
+            )
+            to_save = [
+                path
+                for path in changed
+                if path not in kept_out and path != "dvc.yaml"
+            ]
+            if "dvc.yaml" in dirty_after and not calkit_yaml_dirty:
+                to_save.append("dvc.yaml")
+            if kept_out:
+                warn(
+                    "Left out of the rebuild commit, since they had "
+                    "uncommitted changes before it: " + ", ".join(kept_out)
+                )
             if to_save:
                 repo.git.add("-A", "--", *to_save)
             if to_save and repo.git.diff("--staged", "--", *to_save):
@@ -1006,7 +1057,7 @@ def sync(
             raise_error("Project has no Git remotes defined")
         if (
             built
-            or committed_local
+            or edited_folders
             or any(
                 res.get("committed_project", True) for res in results.values()
             )

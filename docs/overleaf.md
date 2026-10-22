@@ -235,7 +235,10 @@ the pipeline is what's about to make it current.
 
 Edits you've made to files in the synced folder are committed before
 syncing, with a message like "Update paper before Overleaf sync",
-so they're sent up to Overleaf.
+and pushed along with the sync.
+That way the project and Overleaf end up with the same edits,
+rather than Overleaf having edits the project doesn't,
+which could conflict with different changes you make locally later.
 New files in the folder are only synced once they're
 [stored](#what-gets-synced) in the project,
 e.g., with `calkit save`.

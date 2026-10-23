@@ -513,7 +513,8 @@ was last seen.
   yet; they do everything else, and run the pipeline without a terminal,
   returning its output.
 
-Starting cloud VMs from the hub is out of scope.
+Starting cloud VMs from the hub isn't in phase 1; see
+[Provisioned machines](#provisioned-machines).
 
 On HPC, where login nodes kill long-lived processes, two modes are
 supported:
@@ -592,6 +593,60 @@ The hub calls these pages Workspaces.
 "Compute" is saved for brokered compute,
 and pipeline runs from elsewhere, e.g., GitHub Actions,
 go on the pipeline page, since they aren't interactive like workspaces.
+
+### Provisioned machines
+
+Creating a workspace means choosing the machine it's on.
+Besides the user's linked machines, that can be a machine the hub creates
+for it through a provider: a GitHub Codespace, a VM in the user's own cloud
+account, e.g., AWS, or later other services, e.g., Coder or a JupyterHub
+(#1744).
+Connecting a cloud account is plugging compute into the hub (#1749), and
+a machine made from it is where a workspace runs.
+
+A provider only manages a machine's lifecycle: create, start, stop,
+delete, and what it costs.
+Access always goes through the link.
+A new machine starts with Calkit installed and a one-time registration
+token from the hub, e.g., in a VM's user data or a Codespace's dev
+container, and registers the way a machine linked by hand does: it makes
+its own key, which the hub pins, and the hub never holds it.
+From then on it's a linked machine, with the same protocol, sessions,
+workspace panel, and two-factor checks, so each provider is a small
+adapter rather than another way in.
+
+- Records: a machine notes its provider and the provider's ID for it,
+  e.g., an instance ID or a Codespace's name, so the hub can start, stop,
+  and clean it up, and provisioned machines don't count toward the cap on
+  linked ones.
+- Waking: a stopped machine can't check in, so the hub starts it through
+  the provider, where cron mode waits for the machine's next check-in.
+- Cloud credentials: the hub stores no long-lived keys.
+  On AWS, the user creates a role the hub assumes with an external ID,
+  limited to instances Calkit tags and an allowlist of instance types,
+  so a compromised hub can't do more with it.
+  Codespaces needs the Calkit GitHub App to ask for a Codespaces
+  permission.
+- Cost: the link already tracks idle time for cron mode, so it stops or
+  shuts down its own machine when idle, and the user can set a budget
+  cap.
+  The Workspaces page shows what's running and roughly what it costs,
+  since a surprise bill would cost more trust than anything else here.
+- Disposable workspaces: Git and DVC are the only sync between
+  workspaces, so a provisioned machine can be deleted once its work is
+  pushed, with a persistent disk as an option for large caches.
+- Codespaces: the repo is checked out under `/workspaces`, which the
+  link has to add as a workspace, and GitHub may count only its own
+  editor and terminal as activity, so a session through the hub may not
+  keep a Codespace awake.
+  Its GitHub token is already scoped to its repo, so it needs less of the
+  link's on-demand credentials.
+
+Codespaces comes first, since there are no cloud credentials to hold and
+the user's GitHub account pays, and it gives the editors somewhere to
+build for users without a machine of their own.
+Cloud accounts come once a vote on the New workspace picker shows
+demand for them.
 
 ### Editor builds
 
@@ -717,6 +772,9 @@ so it follows the pipeline integration phase.
    pipeline is running shown on the pipeline view, and rerunning stages
    on a chosen machine; then the file tree and editor, and scheduler
    jobs.
+   A New workspace picker lists linked machines and GitHub Codespaces,
+   with a vote for cloud accounts, and then Codespaces become a provider,
+   so users without a machine have one to build on.
 3. Pipeline integration: stages on hosts served by a linked machine run through
    the relay, and shared DVC caches and stage locks per machine.
 4. Detached remote stages.
@@ -745,6 +803,7 @@ so it follows the pipeline integration phase.
    long run isn't lost to sleep, and forwarding a workspace's ports
    through the relay, e.g., to open its Jupyter server from the hub,
    within the relay's traffic budget.
+   Cloud accounts as providers, e.g., AWS, once there's demand.
    Upgrading Calkit from the hub,
    loops and fleet rollouts (#90), parallel `group` stages (#185),
    a startup command for sessions, agent notifications, and an ACP chat

@@ -35,6 +35,19 @@ const OVERLEAF_TOKEN_RE = /\bolp_[A-Za-z0-9]{20,}\b/;
 let panel: Panel | null = null;
 let currentProjectId: string | null = null;
 let hubWebUrl = "https://calkit.io";
+// The last status found for this page, so opening the panel shows it at
+// once instead of waiting for the hub to check Overleaf all over again
+let lastCheck: {
+  overleafProjectId: string;
+  hubWebUrl: string;
+  link: OverleafLinkPublic;
+  status: OverleafSyncStatus;
+  // What the last sync did, kept through the check that follows it
+  notice?: string;
+} | null = null;
+// Bumped by each load and each sync, so a check that finishes after
+// either doesn't draw over it
+let loadGeneration = 0;
 let tokenWatcher: MutationObserver | null = null;
 
 /**
@@ -366,6 +379,7 @@ function renderStatus(
   });
   const message = el("div", { class: "small" });
   syncButton.addEventListener("click", async () => {
+    loadGeneration++;
     syncButton.disabled = true;
     clear(message).append(loading("Syncing"));
     try {
@@ -375,16 +389,25 @@ function renderStatus(
         project: link.project_name,
         path: status.path,
       });
-      clear(message).append(
-        el("span", {
-          class: "dim",
-          text:
-            `Synced. ${result.commits_from_overleaf} change` +
-            `${
-              result.commits_from_overleaf === 1 ? "" : "s"
-            } came from Overleaf.`,
-        }),
-      );
+      // Shown as in sync straight away, since that's what a sync leaves,
+      // while the hub confirms it
+      lastSyncNeeded = false;
+      lastCheck = {
+        overleafProjectId: link.overleaf_project_id,
+        hubWebUrl,
+        link,
+        status: {
+          ...status,
+          in_sync: true,
+          files_to_push: [],
+          files_to_delete: [],
+          commits_from_overleaf: 0,
+        },
+        notice:
+          `Synced. ${result.commits_from_overleaf} change` +
+          `${result.commits_from_overleaf === 1 ? "" : "s"} came from ` +
+          "Overleaf.",
+      };
       reload();
     } catch (e) {
       syncButton.disabled = false;
@@ -755,6 +778,8 @@ async function load(overleafProjectId: string): Promise<void> {
     return;
   }
   const body = panel.body;
+  const generation = ++loadGeneration;
+  const current = () => generation === loadGeneration;
   clear(body).append(loading());
   const reload = () => void load(overleafProjectId);
   try {
@@ -771,7 +796,31 @@ async function load(overleafProjectId: string): Promise<void> {
         }),
       ],
     );
-    clear(body).append(pickers, loading("Looking for the linked project"));
+    const cached =
+      lastCheck?.overleafProjectId === overleafProjectId &&
+      lastCheck.hubWebUrl === hubWebUrl
+        ? lastCheck
+        : null;
+    const content = el("div");
+    clear(body).append(pickers, content);
+    const showNotice = () => {
+      if (cached?.notice) {
+        content.append(
+          el("div", {
+            class: "dim small",
+            style: { marginTop: "6px" },
+            text: cached.notice,
+          }),
+        );
+      }
+    };
+    if (cached) {
+      renderStatus(content, cached.link, cached.status, reload);
+      showNotice();
+      content.append(loading("Checking for changes"));
+    } else {
+      content.append(loading("Looking for the linked project"));
+    }
     // The index answers at once when this Overleaf project has been seen
     // before; otherwise the hub reads through the user's projects, active
     // one first, and remembers what it finds
@@ -780,6 +829,9 @@ async function load(overleafProjectId: string): Promise<void> {
       overleafProjectId,
       activeProject: settings.activeProject ?? undefined,
     });
+    if (!current()) {
+      return;
+    }
     const links = lookup.links;
     if (!links.length) {
       clear(body).append(pickers);
@@ -805,15 +857,14 @@ async function load(overleafProjectId: string): Promise<void> {
       await renderPicker(chooser, overleafProjectId, reload);
       return;
     }
-    clear(body).append(pickers);
-    const content = el("div");
-    body.append(content);
     // A folder in more than one project is rare, so the first link is the
     // one shown, with the rest offered as alternatives underneath
     const link = links[0];
-    clear(content).append(
-      loading(`Checking ${link.project_owner_name}/${link.project_name}`),
-    );
+    if (!cached) {
+      clear(content).append(
+        loading(`Checking ${link.project_owner_name}/${link.project_name}`),
+      );
+    }
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
@@ -821,6 +872,9 @@ async function load(overleafProjectId: string): Promise<void> {
       overleafProjectId,
       path: link.path,
     });
+    if (!current()) {
+      return;
+    }
     if (!statuses.length) {
       clear(content).append(
         el("div", {
@@ -834,7 +888,9 @@ async function load(overleafProjectId: string): Promise<void> {
     }
     lastTokenProblem = false;
     lastSyncNeeded = !statuses[0].in_sync;
+    lastCheck = { overleafProjectId, hubWebUrl, link, status: statuses[0] };
     renderStatus(content, link, statuses[0], reload);
+    showNotice();
     if (links.length > 1) {
       content.append(
         el("div", {
@@ -845,6 +901,9 @@ async function load(overleafProjectId: string): Promise<void> {
       );
     }
   } catch (e) {
+    if (!current()) {
+      return;
+    }
     clear(body);
     if (e instanceof RequestFailed && e.notSignedIn) {
       // With a hub picker alongside, since credentials are per hub and a
@@ -1020,6 +1079,14 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     });
     lastTokenProblem = false;
     lastSyncNeeded = Boolean(statuses.length) && !statuses[0].in_sync;
+    lastCheck = statuses.length
+      ? {
+          overleafProjectId,
+          hubWebUrl: await getHubWebUrl(),
+          link,
+          status: statuses[0],
+        }
+      : null;
     // Nothing to say if the panel was opened in the meantime, or if the
     // page moved on to another project
     if (panel || currentProjectId !== overleafProjectId) {
@@ -1088,6 +1155,7 @@ runContentScript({
     // What the last session found says nothing about this one
     lastSyncNeeded = false;
     lastTokenProblem = false;
+    lastCheck = null;
     if (panel) {
       void load(overleafProjectId);
     } else {

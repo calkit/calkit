@@ -706,6 +706,16 @@ export const ConnectedAccountsSchema = {
       type: "boolean",
       title: "Overleaf",
     },
+    overleaf_token: {
+      type: "boolean",
+      title: "Overleaf Token",
+      default: false,
+    },
+    overleaf_session: {
+      type: "boolean",
+      title: "Overleaf Session",
+      default: false,
+    },
     google: {
       type: "boolean",
       title: "Google",

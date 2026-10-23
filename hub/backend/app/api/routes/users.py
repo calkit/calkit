@@ -818,7 +818,11 @@ def get_user_github_app_installations(
 class ConnectedAccounts(BaseModel):
     github: bool
     zenodo: bool
+    # Either Overleaf credential, and which ones, since a Git token and a
+    # browser session are saved and replaced separately
     overleaf: bool
+    overleaf_token: bool = False
+    overleaf_session: bool = False
     google: bool
     zotero: bool
     # Whether a Calkit CLI has ever authenticated as this user, which is the
@@ -852,13 +856,15 @@ def get_user_connected_accounts(
     except HTTPException:
         pass
     # Overleaf doesn't have refresh logic, just check if credential exists
-    overleaf_cred = current_user.get_external_credential(
-        provider="overleaf"
-    ) or current_user.get_external_credential(
-        provider="overleaf", label=users.OVERLEAF_SESSION_LABEL
+    overleaf_token = (
+        current_user.get_external_credential(provider="overleaf") is not None
+        or current_user.overleaf_token is not None
     )
-    overleaf_connected = (
-        overleaf_cred is not None or current_user.overleaf_token is not None
+    overleaf_session = (
+        current_user.get_external_credential(
+            provider="overleaf", label=users.OVERLEAF_SESSION_LABEL
+        )
+        is not None
     )
     # Zotero API keys don't expire, so there's nothing to refresh
     zotero_cred = current_user.get_external_credential(provider="zotero")
@@ -890,7 +896,9 @@ def get_user_connected_accounts(
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
-        overleaf=overleaf_connected,
+        overleaf=overleaf_token or overleaf_session,
+        overleaf_token=overleaf_token,
+        overleaf_session=overleaf_session,
         google=google_connected,
         zotero=zotero_cred is not None,
         cli=cli_connected,

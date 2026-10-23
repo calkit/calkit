@@ -410,6 +410,14 @@ export type ConnectedAccounts = {
    */
   overleaf: boolean
   /**
+   * Overleaf Token
+   */
+  overleaf_token?: boolean
+  /**
+   * Overleaf Session
+   */
+  overleaf_session?: boolean
+  /**
    * Google
    */
   google: boolean

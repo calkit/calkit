@@ -897,6 +897,8 @@ def test_put_user_overleaf_session(
         "/user/connected-accounts", headers=normal_user_token_headers
     )
     assert r.json()["overleaf"]
+    assert r.json()["overleaf_session"]
+    assert not r.json()["overleaf_token"]
     # Without a Git token, syncs use the session, and stored encrypted
     db.refresh(user)
     auth = users.get_overleaf_auth(session=db, user=user)
@@ -912,6 +914,11 @@ def test_put_user_overleaf_session(
         session=db, user=user, token="olp_token", expires=None
     )
     assert users.get_overleaf_auth(session=db, user=user) == "olp_token"
+    r = client.get(
+        "/user/connected-accounts", headers=normal_user_token_headers
+    )
+    assert r.json()["overleaf_token"]
+    assert r.json()["overleaf_session"]
     # Disconnecting Overleaf removes both
     r = client.delete(
         "/user/external-credentials/overleaf",
@@ -924,6 +931,12 @@ def test_put_user_overleaf_session(
     with pytest.raises(HTTPException) as e:
         users.get_overleaf_auth(session=db, user=user)
     assert e.value.status_code == 401
+    r = client.get(
+        "/user/connected-accounts", headers=normal_user_token_headers
+    )
+    assert not r.json()["overleaf"]
+    assert not r.json()["overleaf_token"]
+    assert not r.json()["overleaf_session"]
 
 
 def _github_auth(client: TestClient, headers: dict[str, str], username: str):

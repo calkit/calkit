@@ -3,10 +3,8 @@ help: ## Show this help.
 	@uv run python -c "import re; \
 	[[print(f'\033[36m{m[0]:<20}\033[0m {m[1]}') for m in re.findall(r'^([a-zA-Z_-]+):.*?## (.*)$$', open(makefile).read(), re.M)] for makefile in ('$(MAKEFILE_LIST)').strip().split()]"
 
-# --profile objects runs the bundled MinIO; profiles can only be
-# activated from the command line or COMPOSE_PROFILES, never from a
-# compose file, and keeping it out of .env keeps it out of containers
-DOCKER_COMPOSE_DEV=docker compose --profile objects -f docker-compose.yml -f docker-compose.override.yml
+# This worktree's own stack, so branches don't share a database or DVC data
+DOCKER_COMPOSE_DEV=bash scripts/dev-stack.sh
 
 # The backend reports this at /version. The image can't derive it: .git is
 # excluded from its build context, so it's resolved here, where the

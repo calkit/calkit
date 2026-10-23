@@ -48,6 +48,13 @@ Key points:
 - **Frontend**: React + Vite in `frontend/` directory
 - **Docker**: Services orchestrated with Docker Compose; see `docker-compose.yml`
 - **Development**: Use `make dev` to start all services
+- **Stacks per worktree**: each worktree has its own stack, with its own
+  database and DVC data, named by `COMPOSE_PROJECT_NAME` in `hub/.env`, so
+  plain `docker compose` commands from `hub/` reach this worktree's stack.
+  `make dev` sets the name the first time, from the worktree's directory
+  (the checkout named `calkit` keeps `calkit`), and copies `.env` from the
+  main checkout if there isn't one. Stacks share ports, so stop another
+  worktree's stack before starting this one; `make dev` says which.
 
 ## Testing
 

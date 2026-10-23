@@ -1,7 +1,8 @@
 # Name the dev stack for the product rather than the directory it lives
 # in, since Compose project names are global on the machine and 'hub'
 # is ambiguous. Production and staging pass --project-name explicitly,
-# so this only affects dev.
+# and scripts/dev-stack.sh names each worktree's stack, so this only
+# affects running docker compose directly, e.g., in CI.
 name: calkit
 
 services:

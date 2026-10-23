@@ -2212,7 +2212,7 @@ def update_hub(
             typer.echo("Committing changes")
             repo.git.commit(to_commit + ["-m", f"Connect to {hub_url}"])
         _adopt_hub_history(repo)
-    typer.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")
+    calkit.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")
 
 
 @update_app.command(name="comment")

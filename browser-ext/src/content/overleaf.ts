@@ -873,11 +873,20 @@ async function load(overleafProjectId: string): Promise<void> {
       );
       return;
     }
+    // The picker stays, since the problem may be with this hub, e.g., an
+    // Overleaf token only another hub has, and switching is the way out
+    const hubPicker = el("div", { style: { marginBottom: "8px" } }, [
+      await renderHubPicker(reload),
+    ]);
     if (isOverleafTokenProblem(e)) {
+      body.append(hubPicker);
       renderTokenForm(body, e instanceof Error ? e.message : String(e), reload);
       return;
     }
-    body.append(errorMessage(e instanceof Error ? e.message : String(e)));
+    body.append(
+      hubPicker,
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
   }
 }
 

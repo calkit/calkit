@@ -4,9 +4,11 @@ import logging
 import os
 import stat
 import subprocess
+from pathlib import Path
 
 import dvc.repo
 import git
+import jwt
 import pytest
 import zc.lockfile
 from configobj import ConfigObj
@@ -282,6 +284,16 @@ def test_detect_calkit_remote_type():
         calkit.dvc.detect_calkit_remote_type(http_name, "ssh://git@host/repo")
         is None
     )
+    # Schemes in any case, since DVC takes them so, but not others that
+    # merely start like HTTP
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "HTTPS://evil.example")
+        == "http"
+    )
+    assert calkit.dvc.detect_calkit_remote_type(ck_name, "CK://o/p") == "ck"
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "httpx://evil") is None
+    )
 
 
 def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
@@ -393,11 +405,9 @@ def test_set_remote_auth_ck_remote_clears_local_http_auth(
             "    url = https://example.com\n"
         )
     calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+    # Along with the URL it was stored for, so the repo's ck:// one is used
     cfg = ConfigObj(str(fpath), encoding="utf-8")
-    section = cfg[f'remote "{remote_name}"']
-    assert "custom_auth_header" not in section
-    assert "password" not in section
-    assert section["url"] == "https://example.com"  # type: ignore
+    assert f'remote "{remote_name}"' not in cfg
 
 
 def test_data_status_as_posix():
@@ -586,6 +596,200 @@ def test_commit_path_with_missing_dep(tmp_dir):
     # The output's hash should be kept, since there's nothing new to hash
     assert lock["stages"]["my-stage"]["outs"][0]["path"] == "output.txt"
     assert "md5" in lock["stages"]["my-stage"]["outs"][0]
+
+
+def test_set_remote_auth_only_for_hub_remotes(monkeypatch, tmp_path):
+    remote_name = calkit.dvc.make_remote_name()
+    monkeypatch.setattr(
+        calkit.hub, "get_base_url", lambda: "https://api.calkit.io"
+    )
+    calls = []
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "run_dvc_command",
+        lambda args, cwd=None: calls.append(args) or 0,
+    )
+    settings = calkit.config.read()
+    monkeypatch.setattr(settings, "dvc_token", "ckp_token", raising=False)
+    monkeypatch.setattr(calkit.config, "read", lambda: settings)
+    for url, sent in [
+        ("https://api.calkit.io/projects/o/p/dvc", True),
+        ("HTTPS://API.calkit.io:443/projects/o/p/dvc", True),
+        # A repo can name a remote like the hub's and point it anywhere
+        ("https://attacker.example/dvc", False),
+        ("https://api.calkit.io.attacker.example/dvc", False),
+        ("HTTPS://attacker.example/dvc", False),
+        ("https://api.calkit.io@attacker.example/dvc", False),
+        ("https://api.calkit.io:8443/dvc", False),
+        ("http://api.calkit.io/dvc", False),
+    ]:
+        calls.clear()
+        monkeypatch.setattr(
+            calkit.dvc.core,
+            "get_remotes",
+            lambda wdir=None, url=url: {remote_name: url},
+        )
+        # Set while it pointed at the hub, which a pull can change
+        (tmp_path / ".dvc").mkdir(exist_ok=True)
+        fpath = tmp_path / ".dvc" / "config.local"
+        fpath.write_text(
+            f'[remote "{remote_name}"]\n'
+            "    custom_auth_header = Authorization\n"
+            "    password = Bearer ckp_token\n"
+        )
+        calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+        assert bool(calls) == sent, url
+        if sent:
+            assert calls[-1][-1] == "Bearer ckp_token"
+            # With the URL it's for, first, which the repo can't change
+            assert calls[0][-2:] == ["url", url]
+        else:
+            assert "ckp_token" not in fpath.read_text(), url
+    # In a hub link's session, nothing's made or written, since its tokens
+    # are short-lived and can't make lasting ones, but a remote set up
+    # before keeps its token
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "get_remotes",
+        lambda wdir=None: {remote_name: "https://api.calkit.io/p/dvc"},
+    )
+    monkeypatch.setenv(calkit.hub.LINK_SOCKET_ENV, "/nowhere")
+    monkeypatch.setenv(calkit.hub.LINK_API_URL_ENV, "https://api.calkit.io")
+    monkeypatch.setattr(calkit.config, "read", lambda: 1 / 0)
+    warnings = []
+    monkeypatch.setattr(
+        calkit.dvc.core.logger, "warning", lambda msg: warnings.append(msg)
+    )
+    for kept in [True, False]:
+        calls.clear()
+        # Stored with the URL it's for, as set up before
+        fpath.write_text(
+            f'[remote "{remote_name}"]\n'
+            "    url = https://api.calkit.io/p/dvc\n"
+            "    password = Bearer ckp_token\n"
+            if kept
+            else ""
+        )
+        calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+        assert calls == []
+        assert ("ckp_token" in fpath.read_text()) == kept
+        assert bool(warnings) != kept
+        assert all("ck://" in w for w in warnings)
+
+
+def test_clear_off_hub_auth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dvc_dir = tmp_path / ".dvc"
+    dvc_dir.mkdir()
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    hub_url = "https://api.calkit.io/projects/o/p/dvc"
+    # The repo says where remotes are, which a pull can change
+    (dvc_dir / "config").write_text(
+        "['remote \"calkit\"']\n"
+        f"    url = {hub_url}\n"
+        "['remote \"calkit:o/q\"']\n"
+        "    url = https://attacker.example/dvc\n"
+        "['remote \"dav\"']\n"
+        "    url = webdavs://attacker.example/dvc\n"
+        "['remote \"mine\"']\n"
+        "    url = https://storage.example/dvc\n"
+        "['remote \"keyed\"']\n"
+        "    url = https://storage.example/keyed\n"
+        "['remote \"legacy\"']\n"
+        "    url = https://attacker.example/legacy\n"
+        "['remote \"older\"']\n"
+        f"    url = {hub_url}\n"
+        "['remote \"session\"']\n"
+        "    url = https://attacker.example/session\n"
+    )
+    legacy = jwt.encode({"sub": "u", "token_id": "t"}, "k", algorithm="HS256")
+    session = jwt.encode(
+        {"sub": "u", "machine_id": "m"}, "k", algorithm="HS256"
+    )
+    local = dvc_dir / "config.local"
+    local.write_text(
+        # Stored with the URL it's for, which the repo still says
+        "['remote \"calkit\"']\n"
+        f"    url = {hub_url}\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+        # Stored for the hub, but the repo now points it elsewhere
+        "['remote \"calkit:o/q\"']\n"
+        "    url = https://api.calkit.io/projects/o/q/dvc\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+        # Stored without a URL, as before they were, so its origin is unknown
+        "['remote \"dav\"']\n"
+        "    token = ckp_token\n"
+        "    ssl_verify = false\n"
+        # The user's own credentials for a remote of their own stay
+        "['remote \"mine\"']\n"
+        "    user = me\n"
+        "    password = hunter2\n"
+        "['remote \"keyed\"']\n"
+        "    custom_auth_header = X-Api-Key\n"
+        "    password = their-key\n"
+        # Older hub tokens are JWTs
+        "['remote \"legacy\"']\n"
+        "    custom_auth_header = Authorization\n"
+        f"    password = Bearer {legacy}\n"
+        # Stored without one by an older version, for a URL on the hub,
+        # which it's pinned to
+        "['remote \"older\"']\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+        # As are a hub link's sessions', stored without one too
+        "['remote \"session\"']\n"
+        "    custom_auth_header = Authorization\n"
+        f"    password = Bearer {session}\n"
+        # A remote only this machine has, stored with its URL
+        "['remote \"local-only\"']\n"
+        f"    url = {hub_url}\n"
+        "    custom_auth_header = Authorization\n"
+        "    password = Bearer ckp_token\n"
+    )
+    monkeypatch.setattr(
+        calkit.hub, "get_base_url", lambda: "https://api.calkit.io"
+    )
+    # Found from a folder inside the project, as DVC finds it
+    cleared = calkit.dvc.clear_off_hub_auth(wdir=str(sub))
+    assert sorted(cleared) == ["calkit:o/q", "dav", "legacy", "session"]
+    cfg = ConfigObj(str(local), encoding="utf-8")
+    assert cfg['remote "calkit"']["password"] == "Bearer ckp_token"
+    # The repo's URL wins again, without the token
+    assert 'remote "calkit:o/q"' not in cfg
+    assert dict(cfg['remote "dav"']) == {"ssl_verify": "false"}
+    assert cfg['remote "mine"']["password"] == "hunter2"
+    assert cfg['remote "keyed"']["password"] == "their-key"
+    assert 'remote "legacy"' not in cfg
+    assert cfg['remote "older"']["url"] == hub_url
+    assert cfg['remote "older"']["password"] == "Bearer ckp_token"
+    assert cfg['remote "local-only"']["password"] == "Bearer ckp_token"
+    # Every DVC command Calkit runs clears it first, in the repo DVC's own
+    # --cd names, if given
+    cfg['remote "dav"']["token"] = "ckp_token"
+    cfg.write()
+    monkeypatch.setattr(calkit.dvc.core, "run_dvc_cli", lambda argv: 0)
+    assert calkit.dvc.run_dvc_command(["pull"], cwd=str(sub)) == 0
+    cfg = ConfigObj(str(local), encoding="utf-8")
+    assert dict(cfg['remote "dav"']) == {"ssl_verify": "false"}
+    other = tmp_path.parent / f"{tmp_path.name}-nodvc"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    for argv in [
+        ["--cd", str(tmp_path), "pull"],
+        [f"--cd={tmp_path}", "pull"],
+    ]:
+        cfg['remote "dav"']["token"] = "ckp_token"
+        cfg.write()
+        assert calkit.dvc.run_dvc_command(argv) == 0
+        cfg = ConfigObj(str(local), encoding="utf-8")
+        assert dict(cfg['remote "dav"']) == {"ssl_verify": "false"}, argv
+    # Nothing to clear, or no DVC at all, changes nothing
+    assert calkit.dvc.clear_off_hub_auth(wdir=str(tmp_path)) == []
+    assert calkit.dvc.clear_off_hub_auth(wdir=str(other)) == []
 
 
 def test_ck_fs_reads_content_only_for_dirs() -> None:

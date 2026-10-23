@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import axios from "axios"
 
 import { type OnboardingFlags, UsersService } from "../client"
 import { applyFlagLocally } from "../lib/onboarding"
@@ -82,36 +81,6 @@ const useOnboardingFlags = (projectId?: string | null) => {
     setFlagAsync,
     resetAllMutation,
     flagCount,
-  }
-}
-
-/**
- * Whether the local Calkit server is up, and whether it knows a project.
- *
- * The server usually isn't running, so both queries fail fast rather than
- * leaving a dropped connection to hang: a checklist that waits on localhost
- * would leave the whole card spinning for the majority of users who don't
- * have it up.
- */
-export const useLocalServer = (accountName?: string, projectName?: string) => {
-  const healthQuery = useQuery({
-    queryKey: ["local-server-main"],
-    queryFn: () => axios.get("http://localhost:8866/health", { timeout: 2000 }),
-    retry: false,
-  })
-  const projectQuery = useQuery({
-    queryKey: ["local-server-sidebar", accountName, projectName],
-    queryFn: () =>
-      axios.get(
-        `http://localhost:8866/projects/${accountName}/${projectName}`,
-        { timeout: 2000 },
-      ),
-    retry: false,
-    enabled: Boolean(accountName && projectName),
-  })
-  return {
-    cliRunning: healthQuery.data?.data === "All good!",
-    projectConnected: Boolean(projectQuery.data?.data),
   }
 }
 

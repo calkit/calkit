@@ -2,6 +2,7 @@
 
 import logging
 import secrets
+import uuid
 from datetime import timedelta
 from typing import Annotated, Any
 
@@ -19,7 +20,9 @@ from sqlmodel import Session, select
 from app import github, mixpanel, security, users
 from app.api.deps import (
     CurrentUser,
+    OptionalTokenDep,
     SessionDep,
+    SessionUser,
     get_current_active_superuser,
 )
 from app.config import settings
@@ -36,11 +39,13 @@ from app.models import (
     User,
     UserCreate,
     UserPublic,
+    UserToken,
 )
 from app.security import (
     generate_password_reset_token,
     generate_refresh_token,
     get_password_hash,
+    hash_password_hash,
     hash_refresh_token,
     verify_password_reset_token,
 )
@@ -61,12 +66,21 @@ REFRESH_ROTATION_GRACE_SECONDS = 60
 
 
 def _make_tokens(
-    user_id, description: str | None = None
+    user_id,
+    description: str | None = None,
+    interactive: bool = False,
+    session_id: uuid.UUID | None = None,
 ) -> tuple[str, str, RefreshToken]:
-    """Create a paired short-lived access token and long-lived refresh token."""
+    """Create a paired short-lived access token and long-lived refresh token.
+
+    Both name the sign-in session they belong to, which a rotation carries
+    over, so it can be checked, and ended, as one.
+    """
+    session_id = session_id or uuid.uuid4()
     access_token = security.create_access_token(
         subject=user_id,
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        add_payload={"sid": str(session_id)},
     )
     raw_refresh = generate_refresh_token()
     token_hash = hash_refresh_token(raw_refresh)
@@ -75,6 +89,8 @@ def _make_tokens(
         token_hash=token_hash,
         expires=utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         description=description,
+        session_id=session_id,
+        interactive=interactive,
     )
     return access_token, raw_refresh, refresh_db
 
@@ -113,7 +129,7 @@ def login_access_token(
         user, provider="email", first=_is_first_login(session, user)
     )
     access_token, raw_refresh, refresh_db = _make_tokens(
-        user.id, description="password login"
+        user.id, description="password login", interactive=True
     )
     session.add(refresh_db)
     session.commit()
@@ -140,7 +156,8 @@ def refresh_access_token(
 
     The old token is rotated out but still honored for a short grace window
     (REFRESH_ROTATION_GRACE_SECONDS) so an interrupted rotation, e.g. the client
-    reloaded before storing the new token, doesn't strand the session.
+    reloaded before storing the new token, doesn't strand the session. Using
+    it after that ends the session, since someone else may have a copy.
     """
     token_hash = hash_refresh_token(body.refresh_token)
     refresh_db = session.exec(
@@ -149,6 +166,22 @@ def refresh_access_token(
         .with_for_update()
     ).first()
     if refresh_db is None or not refresh_db.is_active:
+        raise HTTPException(401, "Invalid refresh token")
+    now = utcnow()
+    if (
+        refresh_db.rotated_at is not None
+        and (now - refresh_db.rotated_at).total_seconds()
+        > REFRESH_ROTATION_GRACE_SECONDS
+    ):
+        refresh_db.is_active = False
+        session.add(refresh_db)
+        if refresh_db.session_id is not None:
+            users.end_sign_in_session(
+                session=session,
+                user_id=refresh_db.user_id,
+                session_id=refresh_db.session_id,
+            )
+        session.commit()
         raise HTTPException(401, "Invalid refresh token")
     if refresh_db.expired:
         raise HTTPException(401, "Refresh token has expired")
@@ -166,15 +199,18 @@ def refresh_access_token(
     # can't be kept alive forever by repeated use). A retry with it during the
     # window still succeeds and mints a fresh pair, so an interrupted rotation
     # doesn't strand the client with a dead token.
-    grace_deadline = utcnow() + timedelta(
-        seconds=REFRESH_ROTATION_GRACE_SECONDS
-    )
+    if refresh_db.rotated_at is None:
+        refresh_db.rotated_at = now
+    grace_deadline = now + timedelta(seconds=REFRESH_ROTATION_GRACE_SECONDS)
     if refresh_db.expires > grace_deadline:
         refresh_db.expires = grace_deadline
     session.add(refresh_db)
     # Issue new pair
     access_token, raw_refresh, new_refresh_db = _make_tokens(
-        user.id, description=refresh_db.description
+        user.id,
+        description=refresh_db.description,
+        interactive=refresh_db.interactive,
+        session_id=refresh_db.session_id,
     )
     session.add(new_refresh_db)
     session.commit()
@@ -185,6 +221,60 @@ def refresh_access_token(
     )
 
 
+class LogoutRequest(BaseModel):
+    # For when the access token has expired
+    refresh_token: str | None = None
+
+
+@router.post("/logout")
+def post_logout(
+    session: SessionDep,
+    response: Response,
+    token: OptionalTokenDep,
+    req: LogoutRequest | None = None,
+) -> Message:
+    """Sign out: end this sign-in's session, which the access token or
+    refresh token names, and forget its second factor.
+    """
+    ends: set[tuple[uuid.UUID, uuid.UUID]] = set()
+    if token is not None and not token.startswith("ckp_"):
+        try:
+            payload = jwt.decode(
+                token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
+            )
+            if not {"scope", "purpose", "token_id"} & payload.keys():
+                ends.add(
+                    (uuid.UUID(payload["sub"]), uuid.UUID(payload["sid"]))
+                )
+        except (InvalidTokenError, KeyError, TypeError, ValueError):
+            pass
+    if req is not None and req.refresh_token:
+        refresh_db = session.exec(
+            select(RefreshToken).where(
+                RefreshToken.token_hash
+                == hash_refresh_token(req.refresh_token)
+            )
+        ).first()
+        if refresh_db is not None:
+            refresh_db.is_active = False
+            session.add(refresh_db)
+            if refresh_db.session_id is not None:
+                ends.add((refresh_db.user_id, refresh_db.session_id))
+    for user_id, session_id in ends:
+        users.end_sign_in_session(
+            session=session, user_id=user_id, session_id=session_id
+        )
+    session.commit()
+    response.delete_cookie(
+        users.SECOND_FACTOR_COOKIE,
+        path="/",
+        secure=settings.ENVIRONMENT != "local",
+        httponly=True,
+        samesite="strict",
+    )
+    return Message(message="Signed out")
+
+
 @router.post("/password-recovery/{email}")
 def recover_password(email: str, session: SessionDep) -> Message:
     user = users.get_user_by_email(session=session, email=email)
@@ -193,7 +283,9 @@ def recover_password(email: str, session: SessionDep) -> Message:
             status_code=404,
             detail="The user with this email does not exist in the system.",
         )
-    password_reset_token = generate_password_reset_token(email=email)
+    password_reset_token = generate_password_reset_token(
+        email=user.email, hashed_password=user.hashed_password
+    )
     email_data = generate_reset_password_email(
         email_to=user.email, email=email, token=password_reset_token
     )
@@ -207,10 +299,13 @@ def recover_password(email: str, session: SessionDep) -> Message:
 
 @router.post("/reset-password/")
 def reset_password(session: SessionDep, body: NewPassword) -> Message:
-    """Reset password."""
-    email = verify_password_reset_token(token=body.token)
-    if not email:
+    """Reset password, which a link can do only once, since it stops
+    working when the password changes.
+    """
+    claims = verify_password_reset_token(token=body.token)
+    if not claims:
         raise HTTPException(status_code=400, detail="Invalid token")
+    email, password_digest = claims
     user = users.get_user_by_email(session=session, email=email)
     if not user:
         raise HTTPException(
@@ -219,9 +314,14 @@ def reset_password(session: SessionDep, body: NewPassword) -> Message:
         )
     elif not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+    if not secrets.compare_digest(
+        password_digest, hash_password_hash(user.hashed_password)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid token")
     hashed_password = get_password_hash(password=body.new_password)
     user.hashed_password = hashed_password
     session.add(user)
+    users.end_sign_in_sessions(session=session, user=user)
     session.commit()
     return Message(message="Password updated successfully")
 
@@ -239,7 +339,9 @@ def recover_password_html_content(email: str, session: SessionDep) -> Any:
             status_code=404,
             detail="A user with this username does not exist in the system.",
         )
-    password_reset_token = generate_password_reset_token(email=email)
+    password_reset_token = generate_password_reset_token(
+        email=user.email, hashed_password=user.hashed_password
+    )
     email_data = generate_reset_password_email(
         email_to=user.email, email=email, token=password_reset_token
     )
@@ -432,6 +534,12 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
     if not user.is_active:
         logger.info("User is not active")
         raise HTTPException(401, "User is not active")
+    # GitHub vouches for addresses it verified, e.g., for accounts made
+    # through it before emails were checked
+    if not user.email_verified and github.has_verified_email(
+        out["access_token"], user.email
+    ):
+        users.mark_email_verified(session=session, user=user)
     users.apply_analytics_consent(
         session=session, user=user, consent=req.analytics_consent
     )
@@ -443,7 +551,7 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
     # Lastly, generate an access token for this user
     mixpanel.user_logged_in(user, provider="github", first=first_login)
     access_token, raw_refresh, refresh_db = _make_tokens(
-        user.id, description="GitHub login"
+        user.id, description="GitHub login", interactive=True
     )
     session.add(refresh_db)
     session.commit()
@@ -524,6 +632,41 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
             )
     else:
         logger.info(f"Found existing user with email: {user.email}")
+        # GitHub vouches for addresses it verified, e.g., for accounts made
+        # through it before emails were checked, but not one a squatter
+        # linked, which can't have the owner's address verified
+        if not user.email_verified and user.github_username is not None:
+            try:
+                gh_token = users.get_github_token(session=session, user=user)
+                if github.has_verified_email(gh_token, user.email):
+                    users.mark_email_verified(session=session, user=user)
+            except Exception as e:
+                logger.warning(f"Couldn't ask GitHub about {user.email}: {e}")
+        # Anyone could have signed up with this address without proving
+        # it, so whatever they set up to get back in stops working
+        if not user.email_verified:
+            user.hashed_password = get_password_hash(secrets.token_urlsafe(16))
+            session.add(user)
+            users.end_sign_in_sessions(session=session, user=user)
+            if user.totp is not None:
+                session.delete(user.totp)
+            # As is a GitHub account they linked, which signs in by itself
+            if user.account.github_name is not None:
+                user.account.github_name = None
+                session.add(user.account)
+            for external in user.external_credentials:
+                if external.provider == "github":
+                    session.delete(external)
+            if user.github_token is not None:
+                session.delete(user.github_token)
+            tokens = session.exec(
+                select(UserToken).where(UserToken.user_id == user.id)
+            ).all()
+            for credential in [*tokens, *user.machines]:
+                credential.is_active = False
+                session.add(credential)
+            session.commit()
+            session.refresh(user)
     if not user.is_active:
         raise HTTPException(401, "User is not active")
     users.apply_analytics_consent(
@@ -544,7 +687,7 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
     users.mark_email_verified(session=session, user=user)
     mixpanel.user_logged_in(user, provider="google", first=first_login)
     access_token, raw_refresh, refresh_db = _make_tokens(
-        user.id, description="Google login"
+        user.id, description="Google login", interactive=True
     )
     session.add(refresh_db)
     session.commit()
@@ -849,13 +992,14 @@ def post_login_device(
 @router.post("/login/device/authorize")
 def post_login_device_authorize(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: SessionUser,
     req: DeviceAuthorizeRequest,
 ) -> Message:
     """Authorize a pending CLI device auth request.
 
-    The user must be authenticated. This endpoint is called by the frontend
-    after the user has logged in and clicked "Authorize".
+    The user must be signed in, not using a token, which could otherwise be
+    traded for a login. This endpoint is called by the frontend after the
+    user has logged in and clicked "Authorize".
     """
     auth_request = session.exec(
         select(DeviceAuth).where(DeviceAuth.device_code == req.device_code)

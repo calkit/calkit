@@ -34,7 +34,6 @@ dependencies = [
   "docx2pdf",
   "dulwich>=1.2.5",
   "dvc[all]==3.67.1",
-  "fastapi",
   "filelock",
   "gitpython",
   "keyring",
@@ -47,7 +46,7 @@ dependencies = [
   # DVC) still reads Trie._NONE_STEP in longest_prefix, so every DVC index
   # diff raises AttributeError; see treeverse/sqltrie#97
   "pygtrie<2.6.0",
-  "pyjwt",
+  "pyjwt[crypto]",
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
@@ -60,7 +59,7 @@ dependencies = [
   "ruamel.yaml.clib>=0.2.15; platform_python_implementation == 'CPython' and python_version < '3.15' and (sys_platform == 'darwin' or (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64' or platform_machine == 'i686')) or (sys_platform == 'win32' and (platform_machine == 'AMD64' or platform_machine == 'x86')))",
   "rich",
   "typer==0.27.3",
-  "uvicorn",
+  "websockets",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
   "papermill>=2.6.0",
@@ -213,6 +212,7 @@ module = [
     "psutil",
     "simpy",
     "pypandoc",
+    "configobj",
 ]
 ignore_missing_imports = true
 

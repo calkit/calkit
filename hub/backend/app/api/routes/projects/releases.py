@@ -36,7 +36,7 @@ import app.projects
 from app import arxiv, messaging, mixpanel, users
 from app.api.deps import CurrentUser, CurrentUserOptional, SessionDep
 from app.config import settings
-from app.core import ryaml, utcnow
+from app.core import ryaml, utcnow, web_url_or_none
 from app.git import (
     get_repo,
     get_repo_tree_for_ref,
@@ -1281,7 +1281,7 @@ def get_project_releases(
                 # A missing ``public`` key means public. Visibility is separate
                 # from where it was released (internal vs an external venue).
                 public=rel.get("public", True),
-                url=rel.get("url"),
+                url=web_url_or_none(rel.get("url")),
                 doi=rel.get("doi"),
                 publisher=rel.get("publisher"),
                 date=release_date,

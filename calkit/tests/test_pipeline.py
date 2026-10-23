@@ -862,6 +862,26 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
                 "command": "make plain",
                 "environment": "gpu",
             },
+            # Each shell skips the user's startup files its own way, and a
+            # POSIX sh, which reads none here, takes no options for it
+            "posix": {
+                "kind": "shell-command",
+                "command": "make posix",
+                "environment": "gpu",
+                "shell": "sh",
+            },
+            "z": {
+                "kind": "shell-command",
+                "command": "make z",
+                "environment": "gpu",
+                "shell": "zsh",
+            },
+            "script": {
+                "kind": "shell-script",
+                "script_path": "run.sh",
+                "environment": "gpu",
+                "shell": "sh",
+            },
             # Written the old way, under the scheduler block
             "legacy": {
                 "kind": "shell-command",
@@ -879,6 +899,9 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
         prefix = stages[name]["cmd"].split(" -- ")[0]
         assert "'" not in prefix and '"' not in prefix, name
         assert "--env-default-setup" not in stages[name]["cmd"], name
+    assert stages["posix"]["cmd"].endswith(' -- sh -c "make posix"')
+    assert stages["z"]["cmd"].endswith(' -- zsh -f -c "make z"')
+    assert stages["script"]["cmd"].endswith(" -- sh run.sh")
     assert stages["build"]["cmd"].startswith(
         "calkit xenv -n gpu --no-check "
         "--setup-file .calkit/stage-setup/build.json --"
@@ -1771,6 +1794,13 @@ def test_get_status(tmp_dir):
     assert "get-data" in status.stale_stage_names
     assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
     assert status.stale_stages["get-data"].modified_outputs == []
+    # Without checking environments, it says what their last checks did
+    status = calkit.pipeline.get_status(
+        ck_info=ck_info, check_environments=False
+    )
+    assert status.environment_checks == {}
+    assert status.environment_states["py"]["success"]
+    assert "get-data" in status.stale_stage_names
     # Run the pipeline and check that status updates to up-to-date
     subprocess.check_call(["calkit", "run"])
     status = calkit.pipeline.get_status(ck_info=ck_info)

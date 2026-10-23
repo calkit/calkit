@@ -926,7 +926,9 @@ def color_mermaid_by_status(
         m = _MERMAID_NODE_RE.match(line)
         if not m:
             continue
-        node_id, label = m.group(1), m.group(2)
+        node_id = m.group(1)
+        # Labels are escaped as entity codes; see make_mermaid_diagram
+        label = re.sub(r"#(\d+);", lambda e: chr(int(e.group(1))), m.group(2))
         status = base_status.get(label.split("@")[0])
         if status in buckets:
             buckets[status].append(node_id)

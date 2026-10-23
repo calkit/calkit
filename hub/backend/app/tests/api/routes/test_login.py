@@ -7,10 +7,12 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app import mixpanel, users
+from app.api.routes import login
 from app.config import settings
 from app.core import utcnow
 from app.models import DeviceAuth, RefreshToken, User, UserCreate
 from app.security import (
+    generate_email_verification_token,
     generate_password_reset_token,
     hash_refresh_token,
     verify_password,
@@ -104,6 +106,7 @@ def test_refresh_access_token_rotates(
     )
     assert r.status_code == 200
     assert r.json()["refresh_token"] != initial_refresh
+    retried = r.json()
     old_hash = hash_refresh_token(initial_refresh)
     old_token = db.exec(
         select(RefreshToken).where(RefreshToken.token_hash == old_hash)
@@ -123,6 +126,75 @@ def test_refresh_access_token_rotates(
     )
     assert r.status_code == 401
     assert r.json()["detail"] == "Refresh token has expired"
+    # Using it after the grace window, which a copy someone else holds would
+    # be, ends the whole sign-in, including the tokens it was rotated into
+    assert old_token.rotated_at is not None
+    old_token.rotated_at = utcnow() - timedelta(
+        seconds=login.REFRESH_ROTATION_GRACE_SECONDS + 1
+    )
+    db.add(old_token)
+    db.commit()
+    r = client.post("/login/refresh", json={"refresh_token": initial_refresh})
+    assert r.status_code == 401
+    for tokens in [rotated, retried]:
+        r = client.post(
+            "/login/refresh", json={"refresh_token": tokens["refresh_token"]}
+        )
+        assert r.status_code == 401
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+        assert client.get("/user/totp", headers=headers).status_code == 403
+
+
+def test_sign_out(client: TestClient, db: Session) -> None:
+    password = "sign-out-password"
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"out-{uuid.uuid4().hex[:8]}@example.com", password=password
+        ),
+    )
+
+    def sign_in() -> tuple[dict[str, str], str]:
+        r = client.post(
+            "/login/access-token",
+            data={"username": user.email, "password": password},
+        )
+        assert r.status_code == 200, r.text
+        tokens = r.json()
+        return (
+            {"Authorization": f"Bearer {tokens['access_token']}"},
+            tokens["refresh_token"],
+        )
+
+    def is_live(headers: dict[str, str], refresh: str | None = None) -> bool:
+        live = client.get("/user/totp", headers=headers).status_code == 200
+        if refresh is not None:
+            r = client.post("/login/refresh", json={"refresh_token": refresh})
+            assert (r.status_code == 200) == live
+        return live
+
+    # Signing out ends only that sign-in, and clears its second factor
+    first, first_refresh = sign_in()
+    second, second_refresh = sign_in()
+    r = client.post("/logout", headers=first)
+    assert r.status_code == 200, r.text
+    cookie = r.headers["set-cookie"]
+    assert cookie.startswith(f"{users.SECOND_FACTOR_COOKIE}=")
+    assert "Max-Age=0" in cookie and "Path=/" in cookie
+    assert not is_live(first, first_refresh)
+    assert is_live(second)
+    # So does signing out with just the refresh token, e.g., once the access
+    # token has expired
+    r = client.post("/logout", json={"refresh_token": second_refresh})
+    assert r.status_code == 200, r.text
+    assert not is_live(second)
+    # Signing out with anything else, or nothing, does nothing but clear the
+    # cookie
+    third, third_refresh = sign_in()
+    for headers in [{}, {"Authorization": "Bearer nonsense"}]:
+        r = client.post("/logout", headers=headers)
+        assert r.status_code == 200, r.text
+    assert is_live(third, third_refresh)
 
 
 def test_refresh_access_token_invalid(client: TestClient) -> None:
@@ -361,23 +433,45 @@ def test_recovery_password_user_not_exits(
     assert r.status_code == 404
 
 
-@pytest.mark.skip(reason="Password reset not supported with GitHub-only auth")
-def test_reset_password(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    token = generate_password_reset_token(email=settings.FIRST_SUPERUSER)
-    data = {"new_password": "changethis", "token": token}
-    r = client.post(
-        "/reset-password/",
-        headers=superuser_token_headers,
-        json=data,
+def test_reset_password(client: TestClient, db: Session) -> None:
+    import jwt
+
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"reset-{uuid.uuid4().hex[:8]}@example.com",
+            password="old-password",
+        ),
     )
-    assert r.status_code == 200
-    assert r.json() == {"message": "Password updated successfully"}
-    user_query = select(User).where(User.email == settings.FIRST_SUPERUSER)
-    user = db.exec(user_query).first()
-    assert user
-    assert verify_password(data["new_password"], user.hashed_password)
+    token = generate_password_reset_token(user.email, user.hashed_password)
+    # Tokens for other purposes, or without one, are refused
+    unbound = jwt.encode(
+        {"sub": user.email, "exp": utcnow() + timedelta(hours=1)},
+        settings.SECRET_KEY,
+        algorithm="HS256",
+    )
+    for other in [
+        unbound,
+        generate_email_verification_token(user.id, user.email),
+    ]:
+        r = client.post(
+            "/reset-password/",
+            json={"new_password": "other-password", "token": other},
+        )
+        assert r.status_code == 400
+    # A reset link works once, since the password it was issued against
+    # changes, and the email is matched ignoring case
+    token = generate_password_reset_token(
+        user.email.upper(), user.hashed_password
+    )
+    for status, new_password in [(200, "new-password"), (400, "again-pw")]:
+        r = client.post(
+            "/reset-password/",
+            json={"new_password": new_password, "token": token},
+        )
+        assert r.status_code == status, r.text
+    db.refresh(user)
+    assert verify_password("new-password", user.hashed_password)
 
 
 @pytest.mark.skip(reason="Password reset not supported with GitHub-only auth")
@@ -442,6 +536,127 @@ def test_login_with_google_creates_github_less_user(
     assert user.account.github_name is None
     # Google only reports verified addresses, so the email is verified
     assert user.email_verified is True
+
+
+def test_login_with_google_recovers_unverified_account(
+    client: TestClient, db: Session
+) -> None:
+    # Someone registers another person's address, which isn't checked, and
+    # links their own GitHub account to get back in later
+    email = f"squat-{uuid.uuid4().hex[:8]}@example.com"
+    github_name = f"squatter-{uuid.uuid4().hex[:8]}"
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password="squatter-password"),
+    )
+    users.link_github_account(
+        session=db, user=user, github_username=github_name
+    )
+    users.save_github_token(
+        session=db,
+        user=user,
+        github_resp={
+            "access_token": "gho_squatter",
+            "refresh_token": "ghr_squatter",
+            "expires_in": 3600,
+            "refresh_token_expires_in": 3600,
+        },
+    )
+    assert user.email_verified is False
+    # Its owner signing in with Google takes it back, GitHub link included
+    with (
+        patch(
+            "app.api.routes.login.requests.post",
+            return_value=_FakeGoogleResp(
+                200, {"access_token": "ya29.fake", "refresh_token": "r"}
+            ),
+        ),
+        patch(
+            "app.api.routes.login.requests.get",
+            return_value=_FakeGoogleResp(
+                200, {"email": email, "email_verified": True, "name": "Owner"}
+            ),
+        ),
+        patch("app.api.routes.login.users.save_google_token"),
+    ):
+        r = client.post(
+            "/login/google",
+            json={
+                "code": "auth-code",
+                "redirect_uri": "http://localhost:5173/auth/google",
+            },
+        )
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.account.github_name is None
+    assert not [c for c in user.external_credentials if c.provider == "github"]
+    assert (
+        users.get_user_by_github_username(
+            session=db, github_username=github_name
+        )
+        is None
+    )
+    assert not verify_password("squatter-password", user.hashed_password)
+    # An account made through GitHub before emails were checked keeps all
+    # of it, since its GitHub account verified the address
+    email = f"gh-old-{uuid.uuid4().hex[:8]}@example.com"
+    github_name = f"gh-old-{uuid.uuid4().hex[:8]}"
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password="owner-password"),
+    )
+    users.link_github_account(
+        session=db, user=user, github_username=github_name
+    )
+    users.save_github_token(
+        session=db,
+        user=user,
+        github_resp={
+            "access_token": "gho_owner",
+            "refresh_token": "ghr_owner",
+            "expires_in": 3600,
+            "refresh_token_expires_in": 3600,
+        },
+    )
+    assert user.email_verified is False
+
+    def api_get(url, *args, **kwargs):
+        if url.endswith("/user/emails"):
+            assert kwargs["headers"]["Authorization"] == "Bearer gho_owner"
+            return _FakeGoogleResp(
+                200, [{"email": email.upper(), "verified": True}]
+            )
+        return _FakeGoogleResp(
+            200, {"email": email, "email_verified": True, "name": "Owner"}
+        )
+
+    with (
+        patch(
+            "app.api.routes.login.requests.post",
+            return_value=_FakeGoogleResp(
+                200, {"access_token": "ya29.fake", "refresh_token": "r"}
+            ),
+        ),
+        patch("app.api.routes.login.requests.get", side_effect=api_get),
+        patch("app.api.routes.login.users.save_google_token"),
+    ):
+        r = client.post(
+            "/login/google",
+            json={
+                "code": "auth-code",
+                "redirect_uri": "http://localhost:5173/auth/google",
+            },
+        )
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.email_verified_at is not None
+    assert user.account.github_name == github_name
+    assert [c for c in user.external_credentials if c.provider == "github"]
+    assert verify_password("owner-password", user.hashed_password)
 
 
 def test_login_with_google_requires_verified_email(client: TestClient) -> None:
@@ -728,6 +943,21 @@ def test_login_with_github_creates_user_for_a_new_email(
     # in as the first user rather than making another.
     assert r.status_code == 200, r.text
     assert users.get_user_by_email(session=db, email=other_email) is None
+    # An account whose address GitHub hadn't verified yet is verified once
+    # GitHub has
+    email = f"later-{uuid.uuid4().hex[:8]}@example.com"
+    username = f"ghlater{uuid.uuid4().hex[:6]}"
+    for verified in [False, True]:
+        r = _github_login(
+            client,
+            username,
+            [{"email": email, "primary": True, "verified": verified}],
+        )
+        assert r.status_code == 200, r.text
+        user = users.get_user_by_email(session=db, email=email)
+        assert user is not None
+        db.refresh(user)
+        assert user.email_verified is verified
 
 
 def test_login_with_github_keeps_account_name_when_projects_exist(
@@ -771,3 +1001,24 @@ def test_login_with_github_keeps_account_name_when_projects_exist(
     # Linked, but the name the project's URL uses is left alone.
     assert existing.account.github_name == username
     assert existing.account.name == original_name
+
+
+def test_login_with_github_token_refuses_app_installation_tokens(
+    client: TestClient,
+) -> None:
+    # A repo-scoped installation token, which a linked machine's sessions
+    # get, can't read GitHub's /user, so it can't be traded for a login
+    class Forbidden:
+        status_code = 403
+
+        def json(self) -> dict[str, str]:
+            return {"message": "Resource not accessible by integration"}
+
+    with patch(
+        "app.api.routes.login.requests.get", return_value=Forbidden()
+    ) as get:
+        r = client.post(
+            "/login/github-token", headers={"Authorization": "Bearer ghs_x"}
+        )
+    assert r.status_code == 401
+    assert get.call_args.args[0] == "https://api.github.com/user"

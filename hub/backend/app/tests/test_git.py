@@ -179,6 +179,22 @@ def test_get_app_installation_token(monkeypatch) -> None:
     assert calls["get_auth"] == "Bearer fake-jwt"
     assert "/app/installations/12345/access_tokens" in calls["post_url"]
     assert calls["post_json"] == {"repositories": ["my-repo"]}
+    # Narrowed when asked, e.g., to only push for a linked machine, and
+    # cached apart from the installation's full one, so each is minted
+    for permissions in [{"contents": "write"}, {"contents": "read"}]:
+        calls.clear()
+        if permissions["contents"] == "read":
+            app.github.get_app_installation_token(
+                "owner-acct", "my-repo", read_only=True
+            )
+        else:
+            app.github.get_app_installation_token_and_expiry(
+                "owner-acct", "my-repo", permissions=permissions
+            )
+        assert calls["post_json"] == {
+            "repositories": ["my-repo"],
+            "permissions": permissions,
+        }
 
 
 def test_get_app_installation_token_caches(monkeypatch) -> None:

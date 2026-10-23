@@ -2178,38 +2178,17 @@ def runs_elsewhere(env: dict) -> bool:
     return False
 
 
-def check_all_in_pipeline(
+def get_pipeline_env_names(
     ck_info: dict | None = None,
     wdir: str | None = None,
     targets: list[str] | None = None,
-    force: bool = False,
     skip_stages: list[str] | None = None,
-    quiet: bool = False,
-    progress: Callable[[str], None] | None = None,
-    interactive: bool = False,
-    docker_required: bool = True,
-) -> dict:
-    """Check all environments in the pipeline, caching for efficiency.
-
-    The cache file is a simple JSON file keyed by project path.
-    Each object inside tracks the last check timestamp, pass/fail,
-    and some sort of hash(es) for the important file content involved.
-
-    With ``quiet``, what the checks' tools print, e.g., uv or Julia, is
-    discarded, and ``progress`` is told which environment is being checked.
-
-    Raises ``calkit.docker.DockerNotReadyError`` if a Docker environment
-    runs on this machine but Docker isn't installed or running, after
-    offering to fix that if ``interactive``. Without ``docker_required``,
-    e.g., when which stages will run isn't known yet, that only fails the
-    checks of the environments that use Docker.
+) -> tuple[list[str], dict, dict[str, dict]]:
+    """Names of the environments the pipeline's stages use, the project info
+    with markdown stages expanded, which they're defined in, and the stages.
     """
-    import sys
-    from collections.abc import Iterator
-    from contextlib import contextmanager, redirect_stderr, redirect_stdout
-
     import calkit
-    from calkit.cli.check import check_environment
+    import calkit.markdown
 
     @functools.cache
     def outer_runs_elsewhere(env_name: str) -> bool:
@@ -2222,59 +2201,10 @@ def check_all_in_pipeline(
             env = (get_env(picked, envs) or {}) if picked else {}
         return runs_elsewhere(env)
 
-    def runs_docker_here(env_name: str) -> bool:
-        # A Docker environment inside one that dispatches to another machine
-        # or a scheduler runs there, so needs no Docker here
-        outer_name, _, inner_name = env_name.partition(COMPOSITE_ENV_SEP)
-        docker_name = inner_name or outer_name
-        if (envs.get(docker_name) or {}).get("kind") != "docker":
-            return False
-        if not inner_name:
-            return True
-        outer = envs.get(outer_name) or {}
-        return outer.get("kind") == "system" and env_is_local(outer)
-
-    @contextmanager
-    def silenced() -> Iterator[None]:
-        # Tools write to the terminal directly, so this is done at the file
-        # descriptor level as well as Python's
-        if not quiet:
-            yield
-            return
-        sys.stdout.flush()
-        sys.stderr.flush()
-        saved = [os.dup(1), os.dup(2)]
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        try:
-            os.dup2(devnull, 1)
-            os.dup2(devnull, 2)
-            with (
-                open(os.devnull, "w") as null,
-                redirect_stdout(null),
-                redirect_stderr(null),
-            ):
-                yield
-        finally:
-            sys.stdout.flush()
-            sys.stderr.flush()
-            os.dup2(saved[0], 1)
-            os.dup2(saved[1], 2)
-            for fd in [*saved, devnull]:
-                os.close(fd)
-
-    # TODO: ``check_environment`` should be able to take a wdir argument
-    if wdir is not None:
-        raise ValueError(
-            "Can currently only run from current working directory"
-        )
-    res = {}
-    # First get a list of environments used in the pipeline
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     # Markdown stages carry no environment of their own; the stages their
     # blocks declare do, so expand before looking for environments to check.
-    import calkit.markdown
-
     md_stages = calkit.markdown.get_markdown_stages(ck_info)
     ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
     stages = ck_info.get("pipeline", {}).get("stages", {})
@@ -2331,7 +2261,134 @@ def check_all_in_pipeline(
                 split_envs.append(sub_env_name)
         else:
             split_envs.append(env_name)
-    envs_in_pipeline = list(dict.fromkeys(split_envs))
+    return list(dict.fromkeys(split_envs)), ck_info, stages
+
+
+def get_cached_env_states(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    targets: list[str] | None = None,
+) -> dict[str, dict]:
+    """What's known about the pipeline's environments without checking them.
+
+    Checking an environment can build it, which runs whatever its spec says,
+    so this only reads the record of the last check: when it was, whether it
+    passed, and whether the spec, lock file, or prefix has changed since.
+    """
+    names, ck_info, _ = get_pipeline_env_names(
+        ck_info=ck_info, wdir=wdir, targets=targets
+    )
+    envs = ck_info.get("environments", {})
+    states: dict[str, dict] = {}
+    for env_name in sorted(names):
+        env = envs.get(env_name)
+        if env is None or env.get("kind") in KINDS_NO_CHECK:
+            continue
+        with get_cache_db() as db:
+            cached = db.get(make_cache_key(env_name=env_name, wdir=wdir))
+        if cached is None:
+            states[env_name] = {
+                "checked_at": None,
+                "success": None,
+                "changed": None,
+            }
+            continue
+        checked_at = cached.get("checked_at")
+        up_to_date = cacheable(env) and check_cache(
+            env_name=env_name, env=env, wdir=wdir, respect_ttl=False
+        )
+        states[env_name] = {
+            "checked_at": checked_at.isoformat() if checked_at else None,
+            "success": cached.get("success", False),
+            # Whether anything it was checked against has changed since,
+            # e.g., its spec or lock file
+            "changed": not up_to_date if cached.get("success") else None,
+        }
+    return states
+
+
+def check_all_in_pipeline(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    targets: list[str] | None = None,
+    force: bool = False,
+    skip_stages: list[str] | None = None,
+    quiet: bool = False,
+    progress: Callable[[str], None] | None = None,
+    interactive: bool = False,
+    docker_required: bool = True,
+) -> dict:
+    """Check all environments in the pipeline, caching for efficiency.
+
+    The cache file is a simple JSON file keyed by project path.
+    Each object inside tracks the last check timestamp, pass/fail,
+    and some sort of hash(es) for the important file content involved.
+
+    With ``quiet``, what the checks' tools print, e.g., uv or Julia, is
+    discarded, and ``progress`` is told which environment is being checked.
+
+    Raises ``calkit.docker.DockerNotReadyError`` if a Docker environment
+    runs on this machine but Docker isn't installed or running, after
+    offering to fix that if ``interactive``. Without ``docker_required``,
+    e.g., when which stages will run isn't known yet, that only fails the
+    checks of the environments that use Docker.
+    """
+    import sys
+    from collections.abc import Iterator
+    from contextlib import contextmanager, redirect_stderr, redirect_stdout
+
+    from calkit.cli.check import check_environment
+
+    def runs_docker_here(env_name: str) -> bool:
+        # A Docker environment inside one that dispatches to another machine
+        # or a scheduler runs there, so needs no Docker here
+        outer_name, _, inner_name = env_name.partition(COMPOSITE_ENV_SEP)
+        docker_name = inner_name or outer_name
+        if (envs.get(docker_name) or {}).get("kind") != "docker":
+            return False
+        if not inner_name:
+            return True
+        outer = envs.get(outer_name) or {}
+        return outer.get("kind") == "system" and env_is_local(outer)
+
+    @contextmanager
+    def silenced() -> Iterator[None]:
+        # Tools write to the terminal directly, so this is done at the file
+        # descriptor level as well as Python's
+        if not quiet:
+            yield
+            return
+        sys.stdout.flush()
+        sys.stderr.flush()
+        saved = [os.dup(1), os.dup(2)]
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+            with (
+                open(os.devnull, "w") as null,
+                redirect_stdout(null),
+                redirect_stderr(null),
+            ):
+                yield
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.dup2(saved[0], 1)
+            os.dup2(saved[1], 2)
+            for fd in [*saved, devnull]:
+                os.close(fd)
+
+    # TODO: ``check_environment`` should be able to take a wdir argument
+    if wdir is not None:
+        raise ValueError(
+            "Can currently only run from current working directory"
+        )
+    res = {}
+    envs_in_pipeline, ck_info, stages = get_pipeline_env_names(
+        ck_info=ck_info, wdir=wdir, targets=targets, skip_stages=skip_stages
+    )
+    envs = ck_info.get("environments", {})
     # Checked regardless of the cache, since Docker can be stopped or
     # removed without anything in the project changing
     stage_envs = [

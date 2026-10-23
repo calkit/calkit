@@ -331,6 +331,7 @@ def test_docx_round_trip(
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(calkit.docx, "find_soffice", lambda: "soffice")
+        mp.setattr(calkit.docx, "libreoffice_has_math", lambda soffice: True)
         mp.setattr(calkit, "check_dep_exists", lambda dep: True)
         mp.setattr(calkit.cli.latex.subprocess, "Popen", Make4ht)
         with pytest.raises(typer.Exit):
@@ -353,6 +354,7 @@ def test_docx_round_trip(
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(calkit.docx, "find_soffice", lambda: "soffice")
+        mp.setattr(calkit.docx, "libreoffice_has_math", lambda soffice: True)
         mp.setattr(calkit.cli.latex.subprocess, "run", run_recorded)
         with pytest.raises(typer.Exit):
             calkit.cli.latex.to_docx(
@@ -765,3 +767,22 @@ def test_equation_links() -> None:
         for tr in tbl.iter(calkit.docx._tag(w, "tr"))
     ]
     assert names == [["ck_a"], ["ck_a_r2", "x13-3004r5"]]
+
+
+def test_libreoffice_has_math(tmp_path, monkeypatch):
+    program = tmp_path / "lib" / "libreoffice" / "program"
+    program.mkdir(parents=True)
+    (program / "soffice").write_text("")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # Found through the symlink distributions put on PATH
+    soffice = bin_dir / "soffice"
+    soffice.symlink_to(program / "soffice")
+    monkeypatch.setattr(calkit.docx.sys, "platform", "linux")
+    assert not calkit.docx.libreoffice_has_math(str(soffice))
+    (program / "libsmlo.so").write_text("")
+    assert calkit.docx.libreoffice_has_math(str(soffice))
+    # Elsewhere it always comes with LibreOffice
+    (program / "libsmlo.so").unlink()
+    monkeypatch.setattr(calkit.docx.sys, "platform", "darwin")
+    assert calkit.docx.libreoffice_has_math(str(soffice))

@@ -2172,20 +2172,6 @@ def ignore(
             repo.git.commit(["-m", f"Ignore {path}"])
 
 
-@app.command(name="local-server")
-def run_local_server() -> None:
-    """Run the local server to interact over HTTP."""
-    import uvicorn
-
-    uvicorn.run(
-        "calkit.server:app",
-        port=8866,
-        host="localhost",
-        reload=True,
-        reload_dirs=[os.path.dirname(os.path.dirname(__file__))],
-    )
-
-
 # Stage output is teed into the run log and can look exactly like a DVC log
 # record (the "%(asctime)s - %(levelname)s - %(message)s" format is a common
 # one in user scripts), so it's bracketed by these and skipped when parsing.
@@ -2510,30 +2496,50 @@ def _prune_run_logs(
             pass
 
 
-def _get_latest_run_log_content() -> str | None:
-    """Return the contents of the most recent run log, or ``None``.
+def _get_latest_run_log_content(wdir: str = ".") -> str | None:
+    """Return the contents of the most recent run log, or ``None``."""
+    latest = _get_latest_run_log_path(wdir)
+    if latest is None:
+        return None
+    # Only the end of a large one, which is read while a run goes, e.g., by
+    # a hub link at every check-in
+    try:
+        with open(latest, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 10_000_000))
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _get_latest_run_log_path(wdir: str = ".") -> str | None:
+    """Return the path of the most recent run log, or ``None``.
 
     Looks in the private ``.calkit/local/logs`` directory (always written)
     and the tracked ``.calkit/logs`` directory, choosing the latest ``.log``
     file across both by name (logs are named by start timestamp).
     """
     candidates = []
+    root = os.path.realpath(wdir)
     for d in [
-        os.path.join(".calkit", "local", "logs"),
-        os.path.join(".calkit", "logs"),
+        os.path.join(wdir, ".calkit", "local", "logs"),
+        os.path.join(wdir, ".calkit", "logs"),
     ]:
         if os.path.isdir(d):
             candidates += [
                 os.path.join(d, f) for f in os.listdir(d) if f.endswith(".log")
             ]
+    # A repo can commit a link named like a log to any file, e.g., an SSH
+    # key, which a hub link would send the hub
+    candidates = [
+        c
+        for c in candidates
+        if not os.path.islink(c)
+        and os.path.realpath(c).startswith(root + os.sep)
+    ]
     if not candidates:
         return None
-    latest = max(candidates, key=os.path.basename)
-    try:
-        with open(latest) as f:
-            return f.read()
-    except OSError:
-        return None
+    return max(candidates, key=os.path.basename)
 
 
 def _format_run_elapsed(start_iso: str) -> str:
@@ -2571,7 +2577,7 @@ def _stage_target_from_cmd(cmd: str) -> str | None:
     return targets[-1] if targets else None
 
 
-def _get_running_pipeline_status() -> dict | None:
+def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
     """Return live pipeline run progress, or ``None`` if no run is running.
 
     A run is in progress when a live process holds DVC's rwlock. The most
@@ -2580,7 +2586,7 @@ def _get_running_pipeline_status() -> dict | None:
     their own processes before the run log exists, so their stage names are
     also recovered from the lock's command strings.
     """
-    processes = calkit.dvc.get_running_pipeline_processes()
+    processes = calkit.dvc.get_running_pipeline_processes(wdir)
     if not processes:
         return None
     # Stage targets in the lock commands identify concurrently-run scheduler
@@ -2600,7 +2606,7 @@ def _get_running_pipeline_status() -> dict | None:
             "stages": {},
             "running_stages": concurrent_stages,
         }
-    content = _get_latest_run_log_content()
+    content = _get_latest_run_log_content(wdir)
     stages = (
         _stage_run_info_from_log_content(content)
         if content is not None
@@ -5048,38 +5054,78 @@ def switch_branch(
 
 @app.command(name="stash")
 def stash(
+    action: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "'push' to stash changes, which is the default, or 'pop' to "
+                "bring back the most recent stash."
+            )
+        ),
+    ] = "push",
+    message: Annotated[
+        str | None,
+        typer.Option(
+            "--message", "-m", help="A message to stash the changes with."
+        ),
+    ] = None,
     pop: Annotated[
-        bool, typer.Option("--pop", help="Pop the most recent stash.")
+        bool, typer.Option("--pop", help="Same as 'calkit stash pop'.")
     ] = False,
 ) -> None:
-    """Stash or restore workspace changes including dvc-zip tracked dirs.
+    """Stash workspace changes, including DVC-tracked data, or bring them
+    back.
 
-    Without --pop: zips any modified workspace dirs and commits any other
-    modified DVC-tracked paths into the DVC cache, then git-stashes (saving
-    the updated .dvc files and dvc.lock), checks out the committed DVC state,
-    and unzips it to the workspace.
-
-    With --pop: pops the git stash (restoring the saved .dvc files), checks
-    out the stashed DVC state, and unzips it to the workspace.
+    Stashing commits changed DVC-tracked data to the DVC cache, including
+    zipped folders, so the Git stash holds pointers to it, then checks out
+    the committed data. Popping restores the stash and checks out the data
+    it points to.
     """
     if pop:
+        action = "pop"
+    if action not in ("push", "pop"):
+        raise_error(f"Unknown action '{action}'; use 'push' or 'pop'")
+
+    def changed_data(deleted: bool = False) -> list[str]:
+        # DVC-tracked data that doesn't match what its pointers say
+        if not os.path.isdir(".dvc"):
+            return []
+        status = calkit.dvc.get_dvc_repo().data_status()
+        uncommitted = status.get("uncommitted", {})
+        paths = list(uncommitted.get("modified", []))
+        if deleted:
+            # Except what was never pulled, which can't be brought back
+            not_in_cache = status.get("not_in_cache", [])
+            paths += [
+                p
+                for p in uncommitted.get("deleted", [])
+                if p not in not_in_cache
+            ]
+        return paths
+
+    def check_out_changed_data() -> None:
+        for path in changed_data(deleted=True):
+            if calkit.dvc.run_dvc_command(["checkout", path, "--force"]):
+                raise_error(f"Failed to check out {path}")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+
+    if action == "pop":
         subprocess.check_call(["git", "stash", "pop"])
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
-    else:
-        # Zip any modified workspace dirs so their current state is in the DVC
-        # cache (the updated .dvc file will be captured by git stash)
-        calkit.dvc.zip.sync_all(direction="to-zip")
-        # Same for other modified DVC-tracked paths, which DVC would otherwise
-        # refuse to check out over since their data isn't in the cache
+        check_out_changed_data()
+        return
+    # Zipped folders go into their zips, and changed data into the cache, so
+    # the stash can point at both
+    calkit.dvc.zip.sync_all(direction="to-zip")
+    # Only outputs are committed, so a stage that was out of date stays so
+    modified = changed_data()
+    if modified:
         dvc_repo = calkit.dvc.get_dvc_repo()
-        uncommitted = dvc_repo.data_status()["uncommitted"]
-        for path in uncommitted.get("modified", []):
+        for path in modified:
             calkit.dvc.commit_path(dvc_repo, path, outs_only=True)
-        subprocess.check_call(["git", "stash"])
-        # Restore the committed zip versions and unzip them
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
+    subprocess.check_call(
+        ["git", "stash", "push"] + (["-m", message] if message else [])
+    )
+    check_out_changed_data()
 
 
 @app.command(

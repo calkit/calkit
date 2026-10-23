@@ -14,15 +14,15 @@ import {
   ModalHeader,
   ModalOverlay,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
-import axios from "axios"
+import { useMutation } from "@tanstack/react-query"
 import { useEffect } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import useCustomToast from "../../hooks/useCustomToast"
 
 interface SaveFilesProps {
+  request: (type: string, fields?: object) => Promise<any>
+  onDone: () => void
   isOpen: boolean
   onClose: () => void
   changedFiles: string[]
@@ -40,12 +40,11 @@ const SaveFiles = ({
   onClose,
   changedFiles,
   stagedFiles,
+  request,
+  onDone,
 }: SaveFilesProps) => {
   const allPaths = changedFiles.concat(stagedFiles)
-  const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  const routeApi = getRouteApi("/_layout/$accountName/$projectName")
-  const { accountName, projectName } = routeApi.useParams()
   const {
     register,
     handleSubmit,
@@ -64,25 +63,21 @@ const SaveFiles = ({
   })
   const mutation = useMutation({
     mutationFn: (data: CommitPost) => {
-      const url = `http://localhost:8866/projects/${accountName}/${projectName}/calkit/add-and-commit`
-      return axios.post(url, data)
+      return request("workspace.save", {
+        paths: data.paths,
+        message: data.commit_message,
+        push: data.push,
+      })
     },
     onSuccess: () => {
       showToast("Success!", "Committed.", "success")
       reset()
       onClose()
     },
-    onError: (err: any) => {
-      showToast("Error", String(err.response.data.detail), "error")
+    onError: (err: Error) => {
+      showToast("Error", err.message, "error")
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "status"],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "pipeline"],
-      })
-    },
+    onSettled: onDone,
   })
   const onSubmit: SubmitHandler<CommitPost> = (data) => {
     mutation.mutate(data)

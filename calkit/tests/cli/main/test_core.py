@@ -1048,6 +1048,103 @@ def test_save_to_git_with_all(tmp_dir):
     assert "figure.png" not in calkit.dvc.list_paths()
 
 
+def test_stash(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("data.csv", "w") as f:
+        f.write("1,2\n")
+    with open("notes.txt", "w") as f:
+        f.write("hi")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "data.csv"])
+    repo = git.Repo()
+    repo.git.add(["data.csv.dvc", ".gitignore", "notes.txt"])
+    repo.git.commit(["-m", "Add data"])
+    # Stashing puts back the last commit, DVC-tracked data included, with
+    # the changed data kept in the cache for the stash to point at
+    with open("data.csv", "w") as f:
+        f.write("3,4\n")
+    with open("notes.txt", "w") as f:
+        f.write("changed")
+    subprocess.check_call(["calkit", "stash", "-m", "Work in progress"])
+    with open("data.csv") as f:
+        assert f.read() == "1,2\n"
+    with open("notes.txt") as f:
+        assert f.read() == "hi"
+    assert "Work in progress" in repo.git.stash("list")
+    # Popping brings it all back
+    subprocess.check_call(["calkit", "stash", "pop"])
+    with open("data.csv") as f:
+        assert f.read() == "3,4\n"
+    with open("notes.txt") as f:
+        assert f.read() == "changed"
+    assert repo.git.stash("list") == ""
+    # Including data committed to DVC but not to Git, and with the older
+    # --pop spelling
+    subprocess.check_call(["calkit", "stash", "push"])
+    with open("data.csv") as f:
+        assert f.read() == "1,2\n"
+    subprocess.check_call(["calkit", "stash", "--pop"])
+    with open("data.csv") as f:
+        assert f.read() == "3,4\n"
+    assert subprocess.run(["calkit", "stash", "drop"]).returncode != 0
+    # Deleted data comes back too
+    os.remove("data.csv")
+    subprocess.check_call(["calkit", "stash"])
+    with open("data.csv") as f:
+        assert f.read() == "1,2\n"
+    repo.git.stash("drop")
+    # A changed output is stashed without marking its stage up to date, in
+    # a project of its own
+    os.makedirs("pipeline")
+    os.chdir("pipeline")
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["calkit", "init"])
+    with open("input.txt", "w") as f:
+        f.write("in")
+    with open("dvc.yaml", "w") as f:
+        yaml.dump(
+            {
+                "stages": {
+                    "my-stage": {
+                        "cmd": (
+                            'python -c "import shutil; '
+                            "shutil.copy('input.txt', 'output.txt')\""
+                        ),
+                        "deps": ["input.txt"],
+                        "outs": ["output.txt"],
+                    }
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["dvc", "repro", "-q"])
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-qm", "Run"])
+    # A modified DVC-tracked output used to make DVC refuse to check out
+    # after the Git stash had already happened
+    os.chmod("output.txt", stat.S_IWRITE | stat.S_IREAD)
+    with open("output.txt", "w") as f:
+        f.write("edited")
+    with open("input.txt", "w") as f:
+        f.write("new in")
+    subprocess.check_call(["calkit", "stash"])
+    with open("output.txt") as f:
+        assert f.read() == "in"
+    with open("input.txt") as f:
+        assert f.read() == "in"
+    assert not git.Repo().is_dirty()
+    # Popping brings back both, and the stage is still out of date since
+    # its dependency changed
+    subprocess.check_call(["calkit", "stash", "--pop"])
+    with open("output.txt") as f:
+        assert f.read() == "edited"
+    with open("input.txt") as f:
+        assert f.read() == "new in"
+    status = json.loads(
+        subprocess.check_output(["dvc", "status", "--json"], text=True)
+    )
+    assert "my-stage" in status
+
+
 def test_large_folder_many_small_files(tmp_dir, tmp_path):
     subprocess.check_call(["calkit", "init"])
     # Set up a bare git remote and a local DVC remote as siblings of the
@@ -3717,52 +3814,3 @@ def test_run_reruns_once_per_schedule_period(tmp_dir):
     subprocess.check_call(["calkit", "run"], env=env)
     with open("out.txt") as f:
         assert f.read().split() == ["2026-10-20", "2026-10-21"]
-
-
-def test_stash(tmp_dir):
-    subprocess.check_call(["calkit", "init"])
-    with open("input.txt", "w") as f:
-        f.write("in")
-    with open("dvc.yaml", "w") as f:
-        yaml.dump(
-            {
-                "stages": {
-                    "my-stage": {
-                        "cmd": (
-                            'python -c "import shutil; '
-                            "shutil.copy('input.txt', 'output.txt')\""
-                        ),
-                        "deps": ["input.txt"],
-                        "outs": ["output.txt"],
-                    }
-                }
-            },
-            f,
-        )
-    subprocess.check_call(["dvc", "repro", "-q"])
-    subprocess.check_call(["git", "add", "-A"])
-    subprocess.check_call(["git", "commit", "-qm", "Run"])
-    # A modified DVC-tracked output used to make DVC refuse to check out
-    # after the Git stash had already happened
-    os.chmod("output.txt", stat.S_IWRITE | stat.S_IREAD)
-    with open("output.txt", "w") as f:
-        f.write("edited")
-    with open("input.txt", "w") as f:
-        f.write("new in")
-    subprocess.check_call(["calkit", "stash"])
-    with open("output.txt") as f:
-        assert f.read() == "in"
-    with open("input.txt") as f:
-        assert f.read() == "in"
-    assert not git.Repo().is_dirty()
-    # Popping brings back both, and the stage is still out of date since
-    # its dependency changed
-    subprocess.check_call(["calkit", "stash", "--pop"])
-    with open("output.txt") as f:
-        assert f.read() == "edited"
-    with open("input.txt") as f:
-        assert f.read() == "new in"
-    status = json.loads(
-        subprocess.check_output(["dvc", "status", "--json"], text=True)
-    )
-    assert "my-stage" in status

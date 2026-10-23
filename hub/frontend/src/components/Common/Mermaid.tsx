@@ -34,6 +34,8 @@ interface MermaidProps {
    */
   onStageClick?: (stageName: string) => void
   stageNames?: Set<string>
+  // Stages running on one of the user's machines, outlined in the diagram
+  runningStages?: string[]
 }
 
 // The stage a node represents, or null if it isn't a stage node. Matrix
@@ -57,6 +59,7 @@ const Mermaid = ({
   zoomToStage,
   onStageClick,
   stageNames,
+  runningStages,
 }: MermaidProps) => {
   const isOversized =
     stageCount !== undefined && stageCount > MAX_READABLE_STAGES
@@ -92,13 +95,15 @@ const Mermaid = ({
         mermaid.initialize({
           startOnLoad: false,
           theme: "dark",
-          securityLevel: "loose",
+          // The source comes from the repo's dvc.yaml, so labels are
+          // sanitized and `click` directives ignored; our own node click
+          // handlers are attached below, after rendering
+          securityLevel: "strict",
           fontFamily: "monospace",
           // Mermaid's own default is 500, past which it throws instead of
           // drawing anything. A real pipeline crosses that easily -- a
           // hundred-odd stages wired to their inputs and outputs is a few
-          // hundred edges -- and the graph is the project's own, not
-          // untrusted input, so the guard only costs us the diagram.
+          // hundred edges -- and the edge count only costs layout time.
           maxEdges: 5000,
         })
         setRenderError(null)
@@ -240,6 +245,21 @@ const Mermaid = ({
     )
   }, [zoomToStage, renderTick])
 
+  // Outline running stages, matching sweep items drawn as `name@item` too
+  const runningKey = (runningStages ?? []).join("\n")
+  useEffect(() => {
+    const svgEl = select<SVGSVGElement, unknown>(".mermaid svg").node()
+    if (!svgEl) return
+    const running = new Set(runningKey ? runningKey.split("\n") : [])
+    for (const n of Array.from(svgEl.querySelectorAll(".node"))) {
+      const label = (n.textContent ?? "").trim()
+      n.classList.toggle(
+        "ck-stage-running",
+        running.has(label) || running.has(label.split("@")[0]),
+      )
+    }
+  }, [runningKey, renderTick])
+
   return (
     <Box
       borderRadius="lg"
@@ -303,6 +323,13 @@ const Mermaid = ({
             {
               stroke: "#ff8c00 !important",
               strokeWidth: "3.5px !important",
+            },
+          // Running stages: a dashed blue outline, also leaving the fill
+          "& .node.ck-stage-running rect, & .node.ck-stage-running polygon, & .node.ck-stage-running circle, & .node.ck-stage-running path":
+            {
+              stroke: "#3182ce !important",
+              strokeWidth: "3px !important",
+              strokeDasharray: "6 3",
             },
         }}
       >

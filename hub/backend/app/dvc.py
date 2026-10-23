@@ -15,6 +15,7 @@ from typing import Any
 import ruamel.yaml
 from dvc.commands import dag
 from dvc.repo import Repo
+from dvc.repo.graph import get_pipelines
 
 import calkit.dvc
 from app.storage import get_object_fs, make_data_fpath
@@ -93,10 +94,36 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
                 subdir=False,
             ) as repo:
                 d = dag._build(repo)
-            mm = dag._show_mermaid(d, markdown=False)
+            # As DVC's own _show_mermaid draws it, but with labels escaped,
+            # since stage names come from the repo and could otherwise add
+            # Mermaid of their own, e.g., a click with a javascript: link.
+            # Names are relative to here, so this is done before leaving.
+            lines = ["flowchart TD"]
+            n = 0
+            for pipeline_graph in get_pipelines(d):
+                node_ids = {}
+                for node in sorted(str(x) for x in pipeline_graph.nodes):
+                    n += 1
+                    node_ids[node] = f"node{n}"
+                    label = escape_mermaid_label(node)
+                    lines.append(f'\tnode{n}["{label}"]')
+                edges = sorted(
+                    (str(a), str(b)) for b, a in pipeline_graph.edges
+                )
+                for a, b in edges:
+                    lines.append(f"\t{node_ids[a]}-->{node_ids[b]}")
     finally:
         os.chdir(wd_orig)
-    return mm
+    return "\n".join(lines)
+
+
+def escape_mermaid_label(label: str) -> str:
+    """Write everything but plain name characters as Mermaid entity codes,
+    which it shows as the characters themselves.
+    """
+    return re.sub(
+        r"[^A-Za-z0-9 _.@/:+-]", lambda m: f"#{ord(m.group())};", label
+    )
 
 
 def output_from_pipeline(

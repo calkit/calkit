@@ -542,6 +542,18 @@ def get_status(
         if isinstance(spinner, Status):
             spinner.update(text)
 
+    def start_docker() -> None:
+        # Asked with the spinner out of the way, as in 'calkit run'
+        import calkit.docker
+
+        if isinstance(spinner, Status):
+            spinner.stop()
+        try:
+            calkit.docker.ensure_ready(interactive=True)
+        finally:
+            if isinstance(spinner, Status):
+                spinner.start()
+
     def get_dvc_data_status() -> dict:
         # Reuse what the pipeline status computed under the same DVC lock
         if (
@@ -624,15 +636,23 @@ def get_status(
     # while, e.g., when environments are checked again, so a spinner shows
     # until then. It writes to its own copy of the terminal, since what the
     # environment checks' tools print is discarded.
+    # Whether there's someone to ask is worked out before the spinner starts
+    can_ask = not as_json and calkit.core.is_tty()
     spinner: AbstractContextManager = nullcontext()
-    if not as_json and sys.stderr.isatty():
+    mintty = calkit.core.is_mintty(sys.stderr)
+    if not as_json and (sys.stderr.isatty() or mintty):
         import logging
 
         from rich.console import Console
 
-        spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
-            "Checking status"
-        )
+        # mintty takes ANSI and UTF-8, though it isn't a console
+        spinner = Console(
+            file=os.fdopen(
+                os.dup(2), "w", encoding="utf-8" if mintty else None
+            ),
+            force_terminal=mintty or None,
+            legacy_windows=False if mintty else None,
+        ).status("Checking status")
         # DVC's progress bars would each be printed above the spinner, and
         # they're shown only if this is at or below their level
         logging.getLogger("dvc.progress").setLevel(logging.CRITICAL + 1)
@@ -665,6 +685,7 @@ def get_status(
                 with_storage_problems="dvc" in categories,
                 quiet_environment_checks=True,
                 progress=step,
+                start_docker=start_docker if can_ask else None,
             )
             if pipeline_status.failed_environment_checks:
                 warn(
@@ -3128,12 +3149,18 @@ def run(
     # someone to ask is worked out first
     can_ask = is_tty()
     spinner: Any = None
-    if not (quiet or verbose) and sys.stderr.isatty():
+    mintty = calkit.core.is_mintty(sys.stderr)
+    if not (quiet or verbose) and (sys.stderr.isatty() or mintty):
         from rich.console import Console
 
-        spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
-            "Getting ready to run"
-        )
+        # mintty takes ANSI and UTF-8, though it isn't a console
+        spinner = Console(
+            file=os.fdopen(
+                os.dup(2), "w", encoding="utf-8" if mintty else None
+            ),
+            force_terminal=mintty or None,
+            legacy_windows=False if mintty else None,
+        ).status("Getting ready to run")
     with spinner or contextlib.nullcontext():
         step("Getting system information", "💻")
         # Only the stages this run can reach are checked, so nothing else
@@ -4781,7 +4808,7 @@ def install_app(
         ok = _install.prompt_and_install(name, interactive=is_tty())
     if not ok:
         raise_error(f"Failed to install '{name}'")
-    typer.echo(f"✅ Installed '{name}'")
+    calkit.echo(f"✅ Installed '{name}'")
 
 
 @app.command(name="xproc|runproc", help="Execute a procedure.")

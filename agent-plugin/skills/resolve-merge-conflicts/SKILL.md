@@ -26,7 +26,7 @@ Done by Calkit, never by hand:
   `calkit status`, which rewrites it.
 
 Done by you, with judgment: everything else, e.g., source code,
-`calkit.yaml`, and the manuscript. When the two sides disagree about intent,
+`calkit.yaml`, and manuscripts. When the two sides disagree about intent,
 not just text, ask the user.
 
 ## Starting a merge

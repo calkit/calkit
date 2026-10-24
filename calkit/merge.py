@@ -348,6 +348,14 @@ def get_operation(repo: git.Repo) -> tuple[str, str] | None:
     for operation, head in OPERATION_HEADS.items():
         if os.path.isfile(os.path.join(repo.git_dir, head)):
             return operation, head
+    # A squash merge leaves no ref, only a message naming what it squashed,
+    # newest first
+    squash_msg = os.path.join(repo.git_dir, "SQUASH_MSG")
+    if os.path.isfile(squash_msg):
+        with open(squash_msg, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("commit "):
+                    return "squash", line.split()[1]
     return None
 
 
@@ -390,7 +398,7 @@ def resolve_conflicts(
         raise MergeError("No merge, rebase, or cherry-pick is in progress")
     name, head = operation
     refs = {OURS: "HEAD", THEIRS: head}
-    if name == "merge":
+    if name in ("merge", "squash"):
         bases = repo.git.merge_base("--all", "HEAD", head).split()
         base_ref = bases[0] if bases else None
     else:

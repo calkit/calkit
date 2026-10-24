@@ -3810,6 +3810,18 @@ def test_merge(tmp_dir):
     write("a1.in", "1 ours")
     commit("Ours")
     head = git.Repo().head.commit.hexsha
+    # A squash merge is resolved the same way, then committed once
+    assert merge("other", "--squash").returncode != 0
+    assert merge("--abort").returncode == 0
+    assert not os.path.exists(os.path.join(".git", "SQUASH_MSG"))
+    res = merge("other", "--squash", "--prefer", "theirs", "-m", "Squash")
+    assert res.returncode == 0, res.stdout + res.stderr
+    squashed = git.Repo().head.commit
+    assert len(squashed.parents) == 1
+    assert str(squashed.message).strip() == "Squash"
+    with open("a.txt") as f:
+        assert f.read() == "1\n2 theirs\n"
+    subprocess.check_call(["git", "reset", "-q", "--hard", head])
     # The inputs merge, but the stage ran on both sides, so it needs a choice
     assert merge().returncode != 0
     res = merge("other")

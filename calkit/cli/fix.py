@@ -159,6 +159,7 @@ def fix_merge_conflicts(
     calkit.dvc.zip.sync_all(direction="to-workspace")
     finish = {
         "merge": "git commit",
+        "squash": "git commit",
         "rebase": "git rebase --continue",
         "cherry-pick": "git cherry-pick --continue",
     }[result["operation"]]
@@ -167,7 +168,7 @@ def fix_merge_conflicts(
 
 @fix_app.command(name="storage")
 def fix_storage() -> None:
-    """Move each path to where it's declared to be stored.
+    """Move paths to where they're declared to be stored (Git or DVC).
 
     Same as 'calkit check storage --fix'.
     """

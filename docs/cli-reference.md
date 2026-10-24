@@ -30,7 +30,6 @@
 | [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
 | [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
 | [`merge`](#top-command-merge)                    | Merge a branch, resolving dvc.lock and stage run records per stage.                                          |
-| [`merge-driver`](#top-command-merge-driver)      | Merge a file Calkit keeps per stage, as Git's merge driver.                                                  |
 | [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                           |
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
@@ -52,7 +51,6 @@
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
-| [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
 
 ## Top-level command details
@@ -586,42 +584,23 @@ calkit merge [OPTIONS] [BRANCH]
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                   |
-| -------- | ---- | -------- | ------- | ----------------------------- |
-| `branch` | str  | no       |         | Branch or commit to merge in. |
+| Argument | Type | Required | Default | Description                                     |
+| -------- | ---- | -------- | ------- | ----------------------------------------------- |
+| `branch` | str  | no       |         | Branch or commit to merge into the current one. |
 
 Options:
 
-| Option           | Type    | Required | Default | Description                                                                  |
-| ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
-| `--continue`     | boolean | no       | False   | Finish a merge stopped by conflicts.                                         |
-| `--abort`        | boolean | no       | False   | Abort the merge in progress.                                                 |
-| `--ours`, `-o`   | str     | no       |         | Keep our side of this stage (repeatable).                                    |
-| `--theirs`, `-t` | str     | no       |         | Keep their side of this stage (repeatable).                                  |
-| `--rerun`, `-r`  | str     | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
-| `--prefer`       | str     | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
-| `--git-arg`      | str     | no       |         | Additional Git merge args.                                                   |
-
-<a id="top-command-merge-driver"></a>
-
-### `calkit merge-driver`
-
-Merge a file Calkit keeps per stage, as Git's merge driver.
-
-Usage:
-
-```text
-calkit merge-driver BASE OURS THEIRS PATH
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description |
-| -------- | ---- | -------- | ------- | ----------- |
-| `base`   | str  | yes      |         |             |
-| `ours`   | str  | yes      |         |             |
-| `theirs` | str  | yes      |         |             |
-| `path`   | str  | yes      |         |             |
+| Option            | Type    | Required | Default | Description                                                                  |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--continue`      | boolean | no       | False   | Finish a merge stopped by conflicts.                                         |
+| `--abort`         | boolean | no       | False   | Abort the merge in progress.                                                 |
+| `--squash`        | boolean | no       | False   | Combine the branch's changes into one commit.                                |
+| `--message`, `-m` | str     | no       |         | Commit message (default: Git's for the merge or squash).                     |
+| `--ours`, `-o`    | str     | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t`  | str     | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`   | str     | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`        | str     | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+| `--git-arg`       | str     | no       |         | Additional Git merge args.                                                   |
 
 <a id="top-command-stash"></a>
 
@@ -3716,10 +3695,10 @@ Options:
 
 Fix things.
 
-| Command                                              | Description                                                |
-| ---------------------------------------------------- | ---------------------------------------------------------- |
-| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records. |
-| [`storage`](#subcommand-fix-storage)                 | Move each path to where it's declared to be stored.        |
+| Command                                              | Description                                                     |
+| ---------------------------------------------------- | --------------------------------------------------------------- |
+| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.      |
+| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC). |
 
 <a id="subcommand-fix-merge-conflicts"></a>
 
@@ -3748,7 +3727,7 @@ Options:
 
 #### `calkit fix storage`
 
-Move each path to where it's declared to be stored.
+Move paths to where they're declared to be stored (Git or DVC).
 
 Same as 'calkit check storage --fix'.
 
@@ -3773,7 +3752,6 @@ Work with LaTeX.
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
 | [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
 | [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
-| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX or Markdown source.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3995,18 +3973,6 @@ Options:
 | --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
-
-<a id="subcommand-latex-tex-comments"></a>
-
-#### `calkit latex|tex comments`
-
-Work with review comments in LaTeX or Markdown source.
-
-Usage:
-
-```text
-calkit latex|tex comments COMMAND [ARGS]...
-```
 
 <a id="command-group-overleaf-ol"></a>
 
@@ -4369,60 +4335,6 @@ Options:
 | Option           | Type    | Required | Default | Description                         |
 | ---------------- | ------- | -------- | ------- | ----------------------------------- |
 | `--follow`, `-f` | boolean | no       | False   | Follow the log output like tail -f. |
-
-<a id="command-group-dev"></a>
-
-### `calkit dev`
-
-Developer tools.
-
-| Command                              | Description                                                     |
-| ------------------------------------ | --------------------------------------------------------------- |
-| [`python`](#subcommand-dev-python)   | Start an Python shell in Calkit's environment.                  |
-| [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment.                 |
-| [`upgrade`](#subcommand-dev-upgrade) | Update a dev (editable) install: pull the branch and reinstall. |
-
-<a id="subcommand-dev-python"></a>
-
-#### `calkit dev python`
-
-Start an Python shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev python [OPTIONS]
-```
-
-<a id="subcommand-dev-ipython"></a>
-
-#### `calkit dev ipython`
-
-Start an IPython shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev ipython [OPTIONS]
-```
-
-<a id="subcommand-dev-upgrade"></a>
-
-#### `calkit dev upgrade`
-
-Update a dev (editable) install: pull the branch and reinstall.
-
-Usage:
-
-```text
-calkit dev upgrade [BRANCH]
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description                                                                                                                                    |
-| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `branch` | str  | no       |         | Branch to install from: the worktree that has it checked out, or else the install's own, if it has no changes. Defaults to the current branch. |
 
 <a id="command-group-sync"></a>
 

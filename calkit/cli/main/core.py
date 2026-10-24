@@ -5107,7 +5107,8 @@ def switch_branch(
 @app.command(name="merge")
 def merge(
     branch: Annotated[
-        str | None, typer.Argument(help="Branch or commit to merge in.")
+        str | None,
+        typer.Argument(help="Branch or commit to merge into the current one."),
     ] = None,
     cont: Annotated[
         bool,
@@ -5118,6 +5119,20 @@ def merge(
     abort: Annotated[
         bool, typer.Option("--abort", help="Abort the merge in progress.")
     ] = False,
+    squash: Annotated[
+        bool,
+        typer.Option(
+            "--squash", help="Combine the branch's changes into one commit."
+        ),
+    ] = False,
+    message: Annotated[
+        str | None,
+        typer.Option(
+            "--message",
+            "-m",
+            help="Commit message (default: Git's for the merge or squash).",
+        ),
+    ] = None,
     ours: OursOpt = [],
     theirs: TheirsOpt = [],
     rerun: RerunOpt = [],
@@ -5138,27 +5153,50 @@ def merge(
 
     if sum([branch is not None, cont, abort]) != 1:
         raise_error("Give a branch, --continue, or --abort")
+    if squash and branch is None:
+        raise_error("--squash needs a branch")
     repo = calkit.git.get_repo()
 
     def checkout_dvc() -> None:
         calkit.dvc.run_dvc_command(["checkout"])
         calkit.dvc.zip.sync_all(direction="to-workspace")
 
+    def commit() -> None:
+        cmd = ["git", "commit"] + (
+            ["-m", message] if message else ["--no-edit"]
+        )
+        if subprocess.call(cmd) != 0:
+            raise_error("Git commit failed")
+        checkout_dvc()
+
     if abort:
-        if subprocess.call(["git", "merge", "--abort"]) != 0:
+        op = calkit.merge.get_operation(repo)
+        # A squash merge has no merge to abort, only changes to reset
+        if op is not None and op[0] == "squash":
+            cmd = ["git", "reset", "--merge"]
+        else:
+            cmd = ["git", "merge", "--abort"]
+        if subprocess.call(cmd) != 0:
             raise_error("Git merge abort failed")
         checkout_dvc()
         return
     if branch is not None:
         calkit.merge.configure_driver()
-        res = subprocess.call(
-            ["git", "merge", "--no-edit"] + git_args + [branch]
-        )
-        if res == 0:
-            checkout_dvc()
+        cmd = ["git", "merge", "--no-edit"]
+        if squash:
+            cmd.append("--squash")
+        elif message:
+            cmd += ["-m", message]
+        if subprocess.call(cmd + git_args + [branch]) == 0:
+            # A squash merge stops short of committing
+            staged = subprocess.call(["git", "diff", "--cached", "--quiet"])
+            if squash and staged:
+                commit()
+            else:
+                checkout_dvc()
             return
     op = calkit.merge.get_operation(repo)
-    if op is None or op[0] != "merge":
+    if op is None or op[0] not in ("merge", "squash"):
         raise_error("No merge is in progress")
     if any(
         calkit.merge.is_merged_file(p)
@@ -5179,9 +5217,7 @@ def merge(
             "Resolve the conflicts, 'git add' them, then run "
             "'calkit merge --continue'"
         )
-    if subprocess.call(["git", "commit", "--no-edit"]) != 0:
-        raise_error("Git commit failed")
-    checkout_dvc()
+    commit()
 
 
 @app.command(name="merge-driver", hidden=True)
@@ -5191,7 +5227,7 @@ def merge_driver(
     theirs: Annotated[str, typer.Argument()],
     path: Annotated[str, typer.Argument()],
 ) -> None:
-    """Merge a file Calkit keeps per stage, as Git's merge driver."""
+    """Merge a file whose content is grouped by stage, as Git's merge driver."""
     raise typer.Exit(calkit.merge.run_driver(base, ours, theirs, path))
 
 

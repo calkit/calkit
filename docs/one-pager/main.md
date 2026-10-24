@@ -32,7 +32,7 @@ It's now essential to make it easy and intuitive
 to deliver research artifacts with their entire digital paper trail,
 so evidence for claims can be traced all the way back to its origin.
 
-## Our approach
+## Our solution
 
 Many open science or reproducibility
 solutions focus on embedding code in documents (literate programming)
@@ -50,6 +50,19 @@ facilitates collaboration during the project
 and sharing once it's done, like a GitHub for science.
 With the whole project "single-button reproducible,"
 it becomes much easier to review work done by AI agents or humans.
+
+::: prompts
+Set up Git and DVC repos, virtual environments, a pipeline with hashed I/O,
+and be sure to define provenance of all imported objects...
+
+Use Calkit.
+
+Your AI agent
+![Claude](../img/agents/claude.pdf)
+![OpenAI](../img/agents/openai.pdf)
+![GitHub Copilot](../img/agents/githubcopilot.pdf)
+![Gemini](../img/agents/googlegemini.pdf)
+:::
 
 ## A success story {.box}
 

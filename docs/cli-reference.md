@@ -4004,6 +4004,7 @@ Options:
 | `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
 | `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
 | `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |
 
 <a id="subcommand-overleaf-ol-status-st"></a>
 
@@ -4452,3 +4453,4 @@ Options:
 | `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
 | `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
 | `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |

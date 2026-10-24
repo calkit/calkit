@@ -764,6 +764,16 @@ def sync(
             help="When rebuilding, also run stages the build depends on.",
         ),
     ] = False,
+    no_pull: Annotated[
+        bool,
+        typer.Option(
+            "--no-pull",
+            help=(
+                "Don't pull new commits from the project remote first, "
+                "e.g., from a sync on the hub."
+            ),
+        ),
+    ] = False,
 ):
     """Sync folders with Overleaf.
 
@@ -830,6 +840,47 @@ def sync(
     synced_folders = [
         f for f in overleaf_sync_dirs if paths is None or f in paths
     ]
+    in_am_session = "in the middle of an am session" in repo.git.status()
+    # A sync on the hub or another machine pushes commits here, and syncing
+    # without them would apply the same Overleaf edits again
+    if not no_pull and not resolve and not in_am_session:
+        import git
+
+        try:
+            tracking = repo.active_branch.tracking_branch()
+        except TypeError:
+            # Detached HEAD
+            tracking = None
+        fetched = False
+        if tracking is not None:
+            try:
+                repo.git.fetch(tracking.remote_name, tracking.remote_head)
+                fetched = True
+            except git.GitCommandError:
+                warn(
+                    f"Could not fetch {tracking.name}; "
+                    "syncing without any new commits there"
+                )
+        if tracking is not None and fetched:
+            behind = int(
+                repo.git.rev_list("--count", f"HEAD..{tracking.name}")
+            )
+            if behind:
+                typer.echo(
+                    f"Pulling {behind} new commit(s) from {tracking.name}"
+                )
+                try:
+                    repo.git.merge("--no-edit", tracking.name)
+                except git.GitCommandError as e:
+                    if os.path.exists(
+                        os.path.join(repo.git_dir, "MERGE_HEAD")
+                    ):
+                        repo.git.merge("--abort")
+                    raise_error(
+                        f"Could not pull new commits from {tracking.name}:\n"
+                        + str(e.stderr).strip()
+                        + "\nPull them yourself, then sync again"
+                    )
     # Check this is a sane state to sync from before touching either side.
     # Resolving a conflict is the middle of a sync that already passed these,
     # and the pipeline can't be current until it finishes.
@@ -855,7 +906,6 @@ def sync(
         )
     overleaf_auth = _get_overleaf_auth()
     conflict_fpath = calkit.overleaf.get_conflict_fpath()
-    in_am_session = "in the middle of an am session" in repo.git.status()
     # Check if we're in the middle of resolving a merge conflict
     if in_am_session and not resolve:
         raise_error(

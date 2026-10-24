@@ -1093,6 +1093,64 @@ def test_overleaf_sync_readiness_guards(tmp_dir):
         text=True,
     )
     assert res.returncode == 0, res.stderr
+    # A sync elsewhere, e.g., on the hub, is pulled before syncing here,
+    # rather than applying the same Overleaf edits again
+    repo.git.checkout(default_branch)
+    other = git.Repo.clone_from(
+        tmp_remote, os.path.join(tempfile.mkdtemp(), "other")
+    )
+    with open(os.path.join(ol_repo.working_dir, "main.tex"), "w") as f:
+        f.write("Written on Overleaf, synced elsewhere")
+    ol_repo.git.commit(["-a", "-m", "Edit on Overleaf"])
+    sync_cmd = ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"]
+    res = subprocess.run(
+        sync_cmd, cwd=other.working_dir, capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    synced_elsewhere = other.head.commit.hexsha
+    res = subprocess.run(sync_cmd, capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "new commit(s)" in res.stdout
+    assert repo.head.commit.hexsha == synced_elsewhere
+    with open(os.path.join("paper", "main.tex")) as f:
+        assert f.read() == "Written on Overleaf, synced elsewhere"
+    # Local commits are merged with ones synced elsewhere
+    with open(os.path.join(other.working_dir, "paper", "main.tex"), "w") as f:
+        f.write("Edited elsewhere")
+    other.git.commit(["-a", "-m", "Edit elsewhere"])
+    res = subprocess.run(
+        sync_cmd, cwd=other.working_dir, capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("notes.md", "w") as f:
+        f.write("Local notes")
+    repo.git.commit(["-a", "-m", "Edit notes"])
+    res = subprocess.run(sync_cmd, capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert repo.is_ancestor(other.head.commit, repo.head.commit)
+    with open(os.path.join("paper", "main.tex")) as f:
+        assert f.read() == "Edited elsewhere"
+    # Uncommitted edits the new commits would overwrite stop the sync, and
+    # --no-pull skips pulling
+    other.git.pull()
+    with open(os.path.join(other.working_dir, "notes.md"), "w") as f:
+        f.write("Notes edited elsewhere")
+    other.git.commit(["-a", "-m", "Edit notes elsewhere"])
+    other.git.push()
+    with open("notes.md", "w") as f:
+        f.write("Uncommitted notes")
+    head = repo.head.commit.hexsha
+    res = subprocess.run(sync_cmd, capture_output=True, text=True)
+    assert res.returncode == 1
+    assert "Pull them yourself" in res.stdout + res.stderr
+    assert repo.head.commit.hexsha == head
+    res = subprocess.run(
+        sync_cmd + ["--no-pull", "--any-branch"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "new commit(s)" not in res.stdout
 
 
 def test_overleaf_push_and_pull(tmp_dir):

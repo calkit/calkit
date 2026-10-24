@@ -296,22 +296,38 @@ stages:
       hash: md5
       md5: 4ae1c083c047a72493b2e547f5fc78f4
       size: 49453
+    - path: docs/img/agents/claude.pdf
+      hash: md5
+      md5: e702e063567cd639cee1abd7b090be76
+      size: 2000
+    - path: docs/img/agents/githubcopilot.pdf
+      hash: md5
+      md5: 826a43596f8a68d80bdc84b8c24f8b67
+      size: 1982
+    - path: docs/img/agents/googlegemini.pdf
+      hash: md5
+      md5: 7199c9996c4ee419306ebb3b84732e08
+      size: 1287
+    - path: docs/img/agents/openai.pdf
+      hash: md5
+      md5: d8127d12eb094aa5bc29e3a622a7341b
+      size: 1892
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 9e233e1644788f81fe4cfd947abe3e06
-      size: 4784
+      md5: 36918b3f0f2f1b8dfbede4a3c63e4ac6
+      size: 5130
     - path: docs/one-pager/one-pager.lua
       hash: md5
-      md5: 1102b36541da50fb365f4eb12351f882
-      size: 3327
+      md5: f9b474f6b16986b05c5d88c78176ec0e
+      size: 5236
     - path: docs/one-pager/template.tex
       hash: md5
-      md5: 5d31f5987fcef529f4b4b6348abc7ab8
-      size: 4553
+      md5: 2b043f047c1294ff3e30522cc9d4959f
+      size: 5504
     - path: results/2027-budget.json
       hash: md5
       md5: 35eeb271dbd0ac856631b17035062793
@@ -323,8 +339,8 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: ce4084cd8770e218d710af997eb84aa8
-      size: 179256
+      md5: 93c87bc0b0896c2c264756cdff10aad8
+      size: 201202
   budget-2027-figure:
     cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
     deps:

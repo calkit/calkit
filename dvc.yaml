@@ -144,6 +144,10 @@ stages:
       - results/traction.json
       - results/2027-budget.json
       - docs/img/pipeline.png
+      - docs/img/agents/claude.pdf
+      - docs/img/agents/openai.pdf
+      - docs/img/agents/githubcopilot.pdf
+      - docs/img/agents/googlegemini.pdf
       - docs/img/2027-budget.png
       - calkit.yaml
       - .calkit/env-locks/tex

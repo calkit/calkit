@@ -1,7 +1,8 @@
 -- Lay out the one-pager's Markdown for the page, so the Markdown itself can
 -- read naturally anywhere: the lead image moves up beside the numbers, the
 -- "By the numbers" section becomes the box they're shown in, and a section
--- marked {.box} becomes a full-width box between the columns, and a
+-- marked {.box} becomes a full-width box between the columns, a "prompts"
+-- div becomes a ribbon of agent prompts across them, and a
 -- footer div goes in the page's footer
 
 local function latex(inlines)
@@ -66,14 +67,57 @@ function Pandoc(doc)
           pandoc.RawBlock("latex", table.concat(notes, "\n")),
         })
       end
+    elseif b.t == "Div" and b.classes:includes("prompts") then
+      -- A long prompt, then the shorthand for it, as typed into an agent,
+      -- and a line with logos saying which agents
+      local ps, agents = {}, nil
+      for _, p in ipairs(b.content) do
+        local has_image = false
+        p:walk({ Image = function() has_image = true end })
+        if has_image then
+          agents = p.content:walk({
+            Image = function(img)
+              return pandoc.RawInline("latex",
+                "\\raisebox{-0.22em}{\\includegraphics[height=1.15em]{"
+                .. img.src .. "}}")
+            end,
+          })
+        else
+          table.insert(ps, latex(p.content))
+        end
+      end
+      local function box(text, last)
+        local frame = last and "ckagent" or "ckrule"
+        local ink = last and "cktermtext" or "cktermdim"
+        return "\\begin{ckprompt}{" .. frame .. "}\\ckprompttext{" .. ink
+          .. "}{" .. text .. "}\\end{ckprompt}"
+      end
+      local short = box(ps[#ps], true)
+      if agents then
+        short = short .. "\\ckagents{" .. latex(agents) .. "}"
+      end
+      local tex = "\\end{multicols}\n\\noindent\\begin{minipage}[c]{0.67\\linewidth}"
+        .. box(ps[1], false) .. "\\end{minipage}\\hfill\\ckarrow\\hfill"
+        .. "\\begin{minipage}[c]{0.25\\linewidth}" .. short
+        .. "\\end{minipage}\\par\\vspace{2pt}\n\\begin{multicols}{2}\\ckbody"
+      table.insert(blocks, pandoc.RawBlock("latex", tex))
+      i = i + 1
     elseif b.t == "Div" and b.classes:includes("footer") then
       doc.meta.footer = pandoc.MetaInlines(pandoc.utils.blocks_to_inlines(b.content))
       i = i + 1
     elseif b.t == "Header" and b.classes:includes("box") then
       -- Its own columns, balanced, so a long quote can flow from one to the
       -- other rather than set the box's height
+      -- Right after a ribbon, the columns are already closed
+      local prev = blocks[#blocks]
+      local reopen = "\n\\begin{multicols}{2}\\ckbody"
+      local close = "\\end{multicols}\n"
+      if prev and prev.t == "RawBlock" and prev.text:sub(-#reopen) == reopen then
+        prev.text = prev.text:sub(1, -#reopen - 1)
+        close = ""
+      end
       table.insert(blocks, pandoc.RawBlock("latex",
-        "\\end{multicols}\n\\begin{ckbox}{" .. latex(b.content) .. "}\n"
+        close .. "\\begin{ckbox}{" .. latex(b.content) .. "}\n"
         .. "\\begin{multicols}{2}\\ckbody"))
       i = i + 1
       while i <= #doc.blocks

@@ -12,11 +12,30 @@
 \definecolor{ckmuted}{HTML}{66737A}
 \definecolor{ckquote}{HTML}{48555B}
 \definecolor{ckhighlight}{HTML}{FFCB8E}
+\definecolor{ckagent}{HTML}{D97757}
+\definecolor{ckrule}{HTML}{6B6B66}
+\definecolor{ckterm}{HTML}{262624}
+\definecolor{cktermdim}{HTML}{BDBAB0}
+\definecolor{cktermtext}{HTML}{F5F4EE}
+\usepackage[zerostyle=b,scaled=.95]{newtxtt}
 \usepackage{graphicx}
 \usepackage{multicol}
 \usepackage{tikz}
 \usepackage[most]{tcolorbox}
 \usepackage{fancyhdr}
+% A prompt to an AI agent, drawn like a coding agent's input box
+\newtcolorbox{ckprompt}[1]{enhanced,colback=ckterm,colframe=#1,boxrule=0.7pt,
+  arc=4pt,left=5pt,right=5pt,top=2pt,bottom=2pt,before skip=0pt,
+  after skip=1pt}
+\newcommand{\ckprompttext}[2]{\ttfamily\fontsize{8.6}{11}\selectfont
+  \raggedright\hangindent=1.3em\hangafter=1\noindent
+  \makebox[1.3em][l]{\color{ckagent}\bfseries>}{\color{#1}#2}\par}
+\usetikzlibrary{arrows.meta}
+\newcommand{\ckarrow}{\tikz[baseline=-0.6ex]\draw[ckagent,line width=1.6pt,
+  -{Latex[length=6pt,width=7pt]}] (0,0) -- (0.42,0);}
+% The agents a prompt works with, as a row of their logos
+\newcommand{\ckagents}[1]{{\centering\fontsize{8}{10}\selectfont
+  \color{ckmuted}#1\par}}
 \usepackage{titlesec}
 \usepackage{enumitem}
 \usepackage{hyperref}
@@ -44,7 +63,7 @@
 % The body text: justified, breaking words only now and then, and never
 % names, e.g., MATLAB. A minipage resets the paragraph spacing, so it's set
 % here too
-\newcommand{\ckbody}{\fontsize{10.6}{13.6}\selectfont
+\newcommand{\ckbody}{\fontsize{10.3}{13.1}\selectfont
   \uchyph=0\hyphenpenalty=500\tolerance=1000\emergencystretch=0.8em
   \setlength{\parskip}{5pt}}
 % A full-width section, shaded like the numbers box and labeled the same way

@@ -51,6 +51,19 @@ and sharing once it's done, like a GitHub for science.
 With the whole project "single-button reproducible,"
 it becomes much easier to review work done by AI agents or humans.
 
+::: prompts
+Set up Git and DVC repos, virtual environments, a pipeline with hashed I/O,
+and be sure to define provenance of all imported objects...
+
+Use Calkit.
+
+Your AI agent
+![Claude](../img/agents/claude.pdf)
+![OpenAI](../img/agents/openai.pdf)
+![GitHub Copilot](../img/agents/githubcopilot.pdf)
+![Gemini](../img/agents/googlegemini.pdf)
+:::
+
 ## A success story {.box}
 
 > In the first conference paper I wrote back in 2022,

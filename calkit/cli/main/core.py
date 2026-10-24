@@ -26,6 +26,7 @@ import typer
 from typing_extensions import Annotated, Optional
 
 import calkit
+import calkit.merge
 from calkit import (
     AUTO_IGNORE_PATHS,
     AUTO_IGNORE_PREFIXES,
@@ -54,6 +55,13 @@ from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.fix import (
+    OursOpt,
+    PreferOpt,
+    RerunOpt,
+    TheirsOpt,
+    fix_app,
+)
 from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
@@ -89,6 +97,7 @@ app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
+app.add_typer(fix_app, name="fix", help="Fix things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
@@ -413,6 +422,8 @@ def clone(
         location = url.split("/")[-1].removesuffix(".git")
     typer.echo(f"Moving into repo dir: {location}")
     os.chdir(location)
+    # So Git merges dvc.lock and stage run records stage by stage
+    calkit.merge.configure_driver()
     # Setup auth for any Calkit remotes
     if not no_config_remote:
         remotes = calkit.dvc.get_remotes()
@@ -855,6 +866,15 @@ def get_status(
         if targets:
             git_cmd += ["--"] + targets
         run_cmd(git_cmd)
+        try:
+            unmerged = calkit.merge.get_unmerged_paths(calkit.git.get_repo())
+        except Exception:
+            unmerged = []
+        if any(calkit.merge.is_merged_file(p) for p in unmerged):
+            typer.echo(
+                "Run 'calkit fix merge-conflicts' to resolve the conflicts "
+                "in dvc.lock and stage run records"
+            )
         typer.echo()
     if "dvc" in categories:
         print_sep("DVC")
@@ -1819,12 +1839,23 @@ def pull(
             dvc_args.append("-f")
     if not no_git:
         typer.echo("Git pulling")
+        # So Git merges dvc.lock and stage run records stage by stage
+        calkit.merge.configure_driver()
         try:
             git_cmd = ["git", "pull"]
             if not no_recursive and "--recurse-submodules" not in git_args:
                 git_cmd.append("--recurse-submodules")
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
+            repo = calkit.git.get_repo()
+            if any(
+                calkit.merge.is_merged_file(p)
+                for p in calkit.merge.get_unmerged_paths(repo)
+            ):
+                typer.echo(
+                    "Run 'calkit fix merge-conflicts' to resolve the "
+                    "conflicts in dvc.lock and stage run records"
+                )
             raise_error("Git pull failed")
     if not no_dvc:
         typer.echo("DVC pulling")
@@ -5071,6 +5102,97 @@ def switch_branch(
     # the new branch's DVC data and unzip to the workspace
     calkit.dvc.run_dvc_command(["checkout"])
     calkit.dvc.zip.sync_all(direction="to-workspace")
+
+
+@app.command(name="merge")
+def merge(
+    branch: Annotated[
+        str | None, typer.Argument(help="Branch or commit to merge in.")
+    ] = None,
+    cont: Annotated[
+        bool,
+        typer.Option(
+            "--continue", help="Finish a merge stopped by conflicts."
+        ),
+    ] = False,
+    abort: Annotated[
+        bool, typer.Option("--abort", help="Abort the merge in progress.")
+    ] = False,
+    ours: OursOpt = [],
+    theirs: TheirsOpt = [],
+    rerun: RerunOpt = [],
+    prefer: PreferOpt = None,
+    git_args: Annotated[
+        list[str],
+        typer.Option("--git-arg", help="Additional Git merge args."),
+    ] = [],
+) -> None:
+    """Merge a branch, resolving dvc.lock and stage run records per stage.
+
+    A stage changed on both sides needs a choice: ours, theirs, or rerun,
+    which also decides its run record and Git-tracked outputs. DVC-tracked
+    outputs are checked out to match afterwards. Other conflicts are left
+    to resolve before 'calkit merge --continue'.
+    """
+    from calkit.cli.fix import resolve_merge_conflicts
+
+    if sum([branch is not None, cont, abort]) != 1:
+        raise_error("Give a branch, --continue, or --abort")
+    repo = calkit.git.get_repo()
+
+    def checkout_dvc() -> None:
+        calkit.dvc.run_dvc_command(["checkout"])
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+
+    if abort:
+        if subprocess.call(["git", "merge", "--abort"]) != 0:
+            raise_error("Git merge abort failed")
+        checkout_dvc()
+        return
+    if branch is not None:
+        calkit.merge.configure_driver()
+        res = subprocess.call(
+            ["git", "merge", "--no-edit"] + git_args + [branch]
+        )
+        if res == 0:
+            checkout_dvc()
+            return
+    op = calkit.merge.get_operation(repo)
+    if op is None or op[0] != "merge":
+        raise_error("No merge is in progress")
+    if any(
+        calkit.merge.is_merged_file(p)
+        for p in calkit.merge.get_unmerged_paths(repo)
+    ):
+        result = resolve_merge_conflicts(
+            ours=ours, theirs=theirs, rerun=rerun, prefer=prefer
+        )
+        unmerged = result["unmerged"]
+    else:
+        unmerged = calkit.merge.get_unmerged_paths(repo)
+        if unmerged:
+            typer.echo("Still in conflict:")
+            for path in unmerged:
+                typer.echo(f"  {path}")
+    if unmerged:
+        raise_error(
+            "Resolve the conflicts, 'git add' them, then run "
+            "'calkit merge --continue'"
+        )
+    if subprocess.call(["git", "commit", "--no-edit"]) != 0:
+        raise_error("Git commit failed")
+    checkout_dvc()
+
+
+@app.command(name="merge-driver", hidden=True)
+def merge_driver(
+    base: Annotated[str, typer.Argument()],
+    ours: Annotated[str, typer.Argument()],
+    theirs: Annotated[str, typer.Argument()],
+    path: Annotated[str, typer.Argument()],
+) -> None:
+    """Merge a file Calkit keeps per stage, as Git's merge driver."""
+    raise typer.Exit(calkit.merge.run_driver(base, ours, theirs, path))
 
 
 @app.command(name="stash")

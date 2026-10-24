@@ -29,6 +29,8 @@
 | [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                            |
 | [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
 | [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
+| [`merge`](#top-command-merge)                    | Merge a branch, resolving dvc.lock and stage run records per stage.                                          |
+| [`merge-driver`](#top-command-merge-driver)      | Merge a file Calkit keeps per stage, as Git's merge driver.                                                  |
 | [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                           |
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
@@ -45,6 +47,7 @@
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
+| [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
@@ -566,6 +569,59 @@ Arguments:
 | Argument | Type | Required | Default | Description  |
 | -------- | ---- | -------- | ------- | ------------ |
 | `name`   | str  | yes      |         | Branch name. |
+
+<a id="top-command-merge"></a>
+
+### `calkit merge`
+
+Merge a branch, resolving dvc.lock and stage run records per stage.
+
+A stage changed on both sides needs a choice: ours, theirs, or rerun, which also decides its run record and Git-tracked outputs. DVC-tracked outputs are checked out to match afterwards. Other conflicts are left to resolve before 'calkit merge --continue'.
+
+Usage:
+
+```text
+calkit merge [OPTIONS] [BRANCH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                   |
+| -------- | ---- | -------- | ------- | ----------------------------- |
+| `branch` | str  | no       |         | Branch or commit to merge in. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                  |
+| ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--continue`     | boolean | no       | False   | Finish a merge stopped by conflicts.                                         |
+| `--abort`        | boolean | no       | False   | Abort the merge in progress.                                                 |
+| `--ours`, `-o`   | str     | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t` | str     | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`  | str     | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`       | str     | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+| `--git-arg`      | str     | no       |         | Additional Git merge args.                                                   |
+
+<a id="top-command-merge-driver"></a>
+
+### `calkit merge-driver`
+
+Merge a file Calkit keeps per stage, as Git's merge driver.
+
+Usage:
+
+```text
+calkit merge-driver BASE OURS THEIRS PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `base`   | str  | yes      |         |             |
+| `ours`   | str  | yes      |         |             |
+| `theirs` | str  | yes      |         |             |
+| `path`   | str  | yes      |         |             |
 
 <a id="top-command-stash"></a>
 
@@ -3653,6 +3709,54 @@ Options:
 | `--verbose`, `-v` | boolean | no       | False   | List every answered question and its evidence, not only the ones needing attention.   |
 | `--json`          | boolean | no       | False   | Output the report as JSON.                                                            |
 | `--no-pipeline`   | boolean | no       | False   | Skip asking DVC which stages are out of date, which is the slowest part of the check. |
+
+<a id="command-group-fix"></a>
+
+### `calkit fix`
+
+Fix things.
+
+| Command                                              | Description                                                |
+| ---------------------------------------------------- | ---------------------------------------------------------- |
+| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records. |
+| [`storage`](#subcommand-fix-storage)                 | Move each path to where it's declared to be stored.        |
+
+<a id="subcommand-fix-merge-conflicts"></a>
+
+#### `calkit fix merge-conflicts`
+
+Resolve merge conflicts in dvc.lock and stage run records.
+
+Each stage is merged whole. A stage changed on one side takes that side, and one changed on both needs a choice, which also decides its run record and Git-tracked outputs. Stages are named as in 'calkit check stage-runs', e.g., 'sub/dvc.yaml:stage' for a subproject's.
+
+Usage:
+
+```text
+calkit fix merge-conflicts [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                  |
+| ---------------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--ours`, `-o`   | str  | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t` | str  | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`  | str  | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`       | str  | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+
+<a id="subcommand-fix-storage"></a>
+
+#### `calkit fix storage`
+
+Move each path to where it's declared to be stored.
+
+Same as 'calkit check storage --fix'.
+
+Usage:
+
+```text
+calkit fix storage
+```
 
 <a id="command-group-latex-tex"></a>
 

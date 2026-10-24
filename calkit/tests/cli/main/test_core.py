@@ -3766,3 +3766,69 @@ def test_stash(tmp_dir):
         subprocess.check_output(["dvc", "status", "--json"], text=True)
     )
     assert "my-stage" in status
+
+
+def test_merge(tmp_dir):
+    def write(path: str, text: str) -> None:
+        with open(path, "w") as f:
+            f.write(text + "\n")
+
+    def commit(message: str) -> None:
+        subprocess.check_call(["calkit", "run"])
+        subprocess.check_call(["git", "add", "-A"])
+        subprocess.check_call(["git", "commit", "-qm", message])
+
+    def merge(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "merge", *args],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "a": {
+                "kind": "shell-command",
+                "command": "cat a1.in a2.in > a.txt",
+                "environment": "_system",
+                "inputs": ["a1.in", "a2.in"],
+                "outputs": [{"path": "a.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    write("a1.in", "1")
+    write("a2.in", "2")
+    commit("Base")
+    subprocess.check_call(["git", "checkout", "-qb", "other"])
+    write("a2.in", "2 theirs")
+    commit("Theirs")
+    subprocess.check_call(["git", "checkout", "-q", "-"])
+    write("a1.in", "1 ours")
+    commit("Ours")
+    head = git.Repo().head.commit.hexsha
+    # The inputs merge, but the stage ran on both sides, so it needs a choice
+    assert merge().returncode != 0
+    res = merge("other")
+    assert res.returncode != 0
+    assert "Stage 'a' changed on both sides" in res.stdout + res.stderr
+    # Which can be made after aborting and starting over
+    assert merge("--abort").returncode == 0
+    assert git.Repo().head.commit.hexsha == head
+    assert not os.path.exists(os.path.join(".git", "MERGE_HEAD"))
+    assert merge("other").returncode != 0
+    res = merge("--continue", "--theirs", "a")
+    assert res.returncode == 0, res.stdout + res.stderr
+    commit_ = git.Repo().head.commit
+    assert len(commit_.parents) == 2
+    with open("a.txt") as f:
+        assert f.read() == "1\n2 theirs\n"
+    subprocess.check_call(["calkit", "check", "stage-runs"])
+    # It ran with neither side's inputs, so it reruns
+    status = calkit.pipeline.get_status(
+        check_environments=False, clean_notebooks=False
+    )
+    assert [n.split("@")[0] for n in status.stale_stage_names] == ["a"]

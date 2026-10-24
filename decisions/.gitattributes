@@ -1,3 +1,8 @@
 # >>> calkit generated files (managed by calkit) >>>
 /.calkit/** text eol=lf
 # <<< calkit generated files <<<
+
+# >>> calkit merge driver (managed by calkit) >>>
+/dvc.lock merge=calkit
+/.calkit/stage-runs.json merge=calkit
+# <<< calkit merge driver <<<

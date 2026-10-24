@@ -2689,6 +2689,11 @@ def to_dvc(
             )
         ):
             _ensure_calkit_gitattributes(wdir=wdir)
+        # So Git merges dvc.lock and stage run records stage by stage
+        if manage_gitignore and pipeline.stages:
+            import calkit.merge
+
+            calkit.merge.ensure_driver(wdir=wdir)
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages

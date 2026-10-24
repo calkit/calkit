@@ -2537,6 +2537,11 @@ class MarkdownStage(Stage):
     def markdown_path(self) -> str:
         return Path(self.target_path).as_posix()
 
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        # The outputs belong to the stages the file expands into
+        return []
+
 
 class Pipeline(Model):
     """The project's reproducible pipeline."""

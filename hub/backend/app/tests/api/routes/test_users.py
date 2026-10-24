@@ -904,9 +904,7 @@ def test_put_user_overleaf_session(
     auth = users.get_overleaf_auth(session=db, user=user)
     assert isinstance(auth, WebClient)
     assert auth.session == "s3cret"
-    credential = users.get_external_credential(
-        session=db, user=user, provider="overleaf", label="session"
-    )
+    credential = users.get_overleaf_session_credential(session=db, user=user)
     assert credential is not None
     assert "s3cret" not in credential.secret_payload
     # A Git token takes precedence

@@ -726,17 +726,24 @@ def save_overleaf_token(
 
 # Label of an Overleaf browser session, kept apart from the Git token so
 # either can be replaced without the other
-OVERLEAF_SESSION_LABEL = "session"
+_OVERLEAF_SESSION_LABEL = "session"
+
+
+def get_overleaf_session_credential(
+    session: Session, user: User
+) -> UserExternalCredential | None:
+    """Get a user's saved Overleaf browser session, still encrypted."""
+    return get_external_credential(
+        session=session,
+        user=user,
+        provider="overleaf",
+        label=_OVERLEAF_SESSION_LABEL,
+    )
 
 
 def get_overleaf_session(session: Session, user: User) -> str:
     """Get a user's decrypted Overleaf browser session cookie."""
-    credential = get_external_credential(
-        session=session,
-        user=user,
-        provider="overleaf",
-        label=OVERLEAF_SESSION_LABEL,
-    )
+    credential = get_overleaf_session_credential(session=session, user=user)
     if credential is None:
         raise HTTPException(404, "User has no Overleaf session saved")
     payload = json.loads(decrypt_secret(credential.secret_payload))
@@ -754,7 +761,7 @@ def save_overleaf_session(session: Session, user: User, cookie: str) -> None:
         provider="overleaf",
         secret_payload=json.dumps({"session": cookie}),
         credential_type="session",
-        label=OVERLEAF_SESSION_LABEL,
+        label=_OVERLEAF_SESSION_LABEL,
     )
 
 

@@ -31,7 +31,7 @@ so the PDF output looks the same in either system.
 
 Calkit can connect to Overleaf in one of two ways:
 with a Git token, which requires Overleaf Premium,
-or with your browser's sign-in session, which works with any Overleaf account.
+or with your browser's login session, which works with any Overleaf account.
 If both are set, Calkit uses the token.
 
 ### With Overleaf Premium
@@ -71,9 +71,9 @@ config.
     Treat it like a password and don't share it.
 
 To sync from [calkit.io](https://calkit.io) or the
-[browser extension](browser-ext/index.md) as well,
+[browser extension](browser-ext/index.md),
 your Calkit account needs the session too.
-Either click **Connect Overleaf sign-in** in the extension's panel on an
+Either click **Connect with Overleaf login** in the extension's panel on an
 Overleaf project page, which sends it without copying anything,
 or run:
 
@@ -152,9 +152,10 @@ A sync:
 1. Pulls new commits to the project, e.g., from a sync on Calkit or another
    computer, so the same Overleaf edits aren't brought in twice.
    Pass `--no-pull` to skip this.
-2. Commits [edits you've made](#uncommitted-changes) to the synced folder.
+2. Commits local [edits you've made](#uncommitted-changes) to the synced
+   folder.
 3. Brings in edits made on Overleaf and sends yours up.
-4. Rebuilds each document that changed on either side,
+4. Rebuilds each document that changed in either location,
    saves the new PDF to the project, and pushes the project.
 
 Only the document's own build stage is run,

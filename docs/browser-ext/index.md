@@ -29,11 +29,11 @@ and select "Sign in."
     needs your Calkit account to have access to Overleaf.
     If it doesn't, the panel asks for an Overleaf Git token,
     which requires Overleaf Premium,
-    and offers **Connect Overleaf sign-in**, which works without it.
+    and offers **Connect with Overleaf login**, which works without it.
     See [Overleaf integration](../overleaf.md#connecting-to-overleaf)
     for more.
 
-**Connect Overleaf sign-in** sends the session your browser is signed in to
+**Connect with Overleaf login** sends the session your browser is signed in to
 Overleaf with to your Calkit account, so the hub can sync for you.
 If you later sign out of Overleaf, that session stops working,
 and the panel offers to connect again.

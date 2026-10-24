@@ -95,9 +95,9 @@ def _get_overleaf_session_from_hub(stale: str | None = None) -> str | None:
         )["session"]
     except Exception:
         return None
-    if not session or session == stale:
+    # Compared as the client sends it, without a cookie name or whitespace
+    if not session or calkit.overleaf.WebClient(session).session == stale:
         return None
-    typer.echo("Using the Overleaf session saved to the hub")
     calkit_config = calkit.config.read()
     calkit_config.overleaf_session = session
     calkit_config.write()
@@ -129,6 +129,7 @@ def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
         return str(token)
     session = _get_overleaf_session_from_hub()
     if session:
+        typer.echo("Using the Overleaf session saved to the hub")
         return calkit.overleaf.WebClient(session)
     return _get_overleaf_token()
 
@@ -143,14 +144,16 @@ def _get_pulled_overleaf_repo(
     them too.
     """
 
-    def get_new_session(stale: str) -> str:
+    def get_new_session(stale: str, error: Exception) -> str:
         """Get a new Overleaf session from the hub, or prompt for one, and
         store it.
         """
-        warn("Overleaf rejected your session", prefix="")
+        # A newer session on the hub, e.g., from the browser extension,
+        # means nothing failed as far as the user is concerned
         session = _get_overleaf_session_from_hub(stale=stale)
         if session:
             return session
+        warn(str(error), prefix="")
         typer.echo(calkit.overleaf.SESSION_HELP + "\n")
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise_error(
@@ -177,9 +180,8 @@ def _get_pulled_overleaf_repo(
             return repo, auth
         except calkit.overleaf.AuthError as e:
             if isinstance(auth, calkit.overleaf.WebClient):
-                warn(str(e), prefix="")
                 auth = calkit.overleaf.WebClient(
-                    get_new_session(stale=auth.session)
+                    get_new_session(stale=auth.session, error=e)
                 )
             else:
                 # A token stops working when Premium ends, but a browser
@@ -818,31 +820,10 @@ def sync(
         return {path: (content.get(path), u) for path, u in untracked.items()}
 
     repo = calkit.git.get_repo()
-    # Uncommitted edits to calkit.yaml aren't the sync's to touch or commit,
-    # so fixing the legacy schema waits until there are none
-    calkit_yaml_dirty = bool(repo.git.diff("HEAD", "--", "calkit.yaml"))
-    overleaf_info = calkit.overleaf.get_sync_info(
-        fix_legacy=not calkit_yaml_dirty, print_info=typer.echo
-    )
-    if not overleaf_info:
-        raise_error("No Overleaf sync info found")
-    overleaf_sync_dirs = list(overleaf_info.keys())
-    if paths is not None:
-        paths = [
-            (os.path.dirname(p) if os.path.isfile(p) else p)
-            .strip()
-            .rstrip("/\\")
-            for p in paths
-        ]
-        for path in paths:
-            if path not in overleaf_sync_dirs:
-                raise_error(f"Path '{path}' is not synced with Overleaf")
-    synced_folders = [
-        f for f in overleaf_sync_dirs if paths is None or f in paths
-    ]
     in_am_session = "in the middle of an am session" in repo.git.status()
     # A sync on the hub or another machine pushes commits here, and syncing
-    # without them would apply the same Overleaf edits again
+    # without them would apply the same Overleaf edits again. Pulled before
+    # reading the sync settings, since the new commits can change them.
     if not no_pull and not resolve and not in_am_session:
         import git
 
@@ -865,6 +846,12 @@ def sync(
             behind = int(
                 repo.git.rev_list("--count", f"HEAD..{tracking.name}")
             )
+            merge_head = os.path.join(repo.git_dir, "MERGE_HEAD")
+            if behind and os.path.exists(merge_head):
+                raise_error(
+                    f"There are new commits on {tracking.name}, but a merge "
+                    "is in progress; finish it, then sync again"
+                )
             if behind:
                 typer.echo(
                     f"Pulling {behind} new commit(s) from {tracking.name}"
@@ -872,15 +859,35 @@ def sync(
                 try:
                     repo.git.merge("--no-edit", tracking.name)
                 except git.GitCommandError as e:
-                    if os.path.exists(
-                        os.path.join(repo.git_dir, "MERGE_HEAD")
-                    ):
+                    if os.path.exists(merge_head):
                         repo.git.merge("--abort")
                     raise_error(
                         f"Could not pull new commits from {tracking.name}:\n"
                         + str(e.stderr).strip()
                         + "\nPull them yourself, then sync again"
                     )
+    # Uncommitted edits to calkit.yaml aren't the sync's to touch or commit,
+    # so fixing the legacy schema waits until there are none
+    calkit_yaml_dirty = bool(repo.git.diff("HEAD", "--", "calkit.yaml"))
+    overleaf_info = calkit.overleaf.get_sync_info(
+        fix_legacy=not calkit_yaml_dirty, print_info=typer.echo
+    )
+    if not overleaf_info:
+        raise_error("No Overleaf sync info found")
+    overleaf_sync_dirs = list(overleaf_info.keys())
+    if paths is not None:
+        paths = [
+            (os.path.dirname(p) if os.path.isfile(p) else p)
+            .strip()
+            .rstrip("/\\")
+            for p in paths
+        ]
+        for path in paths:
+            if path not in overleaf_sync_dirs:
+                raise_error(f"Path '{path}' is not synced with Overleaf")
+    synced_folders = [
+        f for f in overleaf_sync_dirs if paths is None or f in paths
+    ]
     # Check this is a sane state to sync from before touching either side.
     # Resolving a conflict is the middle of a sync that already passed these,
     # and the pipeline can't be current until it finishes.
@@ -1443,6 +1450,8 @@ def push_to_overleaf(
         allow_stale=True,
         any_branch=True,
         force=force,
+        # Pulling is part of preparing, or was skipped with --no-pull
+        no_pull=True,
     )
     calkit.echo("Overleaf is up-to-date with this project ✅")
 
@@ -1554,6 +1563,8 @@ def pull_from_overleaf(
         any_branch=True,
         force=force,
         no_build=no_run,
+        # Pulling is part of preparing, or was skipped with --no-pull
+        no_pull=True,
     )
     # An Overleaf edit to a map-paths copy lands in the file it's copied
     # from, so the document is only rebuilt from it after a run

@@ -861,8 +861,8 @@ def get_user_connected_accounts(
         or current_user.overleaf_token is not None
     )
     overleaf_session = (
-        current_user.get_external_credential(
-            provider="overleaf", label=users.OVERLEAF_SESSION_LABEL
+        users.get_overleaf_session_credential(
+            session=session, user=current_user
         )
         is not None
     )
@@ -1228,11 +1228,8 @@ def delete_user_external_credential(
     elif provider == "overleaf":
         if current_user.overleaf_token:
             session.delete(current_user.overleaf_token)
-        overleaf_session = users.get_external_credential(
-            session=session,
-            user=current_user,
-            provider="overleaf",
-            label=users.OVERLEAF_SESSION_LABEL,
+        overleaf_session = users.get_overleaf_session_credential(
+            session=session, user=current_user
         )
         if overleaf_session:
             session.delete(overleaf_session)

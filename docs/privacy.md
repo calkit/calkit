@@ -38,8 +38,8 @@ watch what any one person is doing.
 - **Connected accounts**: access tokens for services you connect, such as
   GitHub, Zenodo, Zotero, Google Drive, and Overleaf, so the hub can act on
   your behalf when you ask it to.
-  If you connect Overleaf with your browser's sign-in instead of a Git
-  token, the hub stores that sign-in session, encrypted.
+  If you connect Overleaf with your browser's Overleaf login instead of a
+  Git token, the hub stores that login session, encrypted.
   Unlike a token, which only reaches your Overleaf projects,
   a session gives full access to your Overleaf account.
   Disconnecting Overleaf under Settings → Connected accounts deletes it.
@@ -179,7 +179,7 @@ the one you configured, which may be run by you or your institution.
   whether it is one of your projects.
 - **On an Overleaf project page**: the Overleaf project ID from the URL,
   to find which Calkit project it syncs with.
-- **When you click Connect Overleaf sign-in**: your Overleaf sign-in
+- **When you click Connect with Overleaf login**: your Overleaf login
   session, read from overleaf.com's `overleaf_session2` cookie,
   so the hub can sync with Overleaf for you without Overleaf Premium.
   The cookie is read only when you click, and the extension doesn't keep it.
@@ -199,7 +199,7 @@ Two other requests do not involve your data:
 
 ### What is never collected
 
-Browsing history, cookies (other than Overleaf's sign-in cookie, when you
+Browsing history, cookies (other than Overleaf's login cookie, when you
 ask to connect it), page contents beyond the citation metadata described
 above, form input, keystrokes, location, and anything at all on sites
 outside the extension's site list. The extension has no access to other

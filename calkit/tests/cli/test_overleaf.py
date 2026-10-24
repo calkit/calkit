@@ -1151,6 +1151,16 @@ def test_overleaf_sync_readiness_guards(tmp_dir):
     )
     assert res.returncode == 0, res.stdout + res.stderr
     assert "new commit(s)" not in res.stdout
+    # A merge already in progress is left alone
+    repo.git.checkout("notes.md")
+    merge_head = os.path.join(repo.git_dir, "MERGE_HEAD")
+    with open(merge_head, "w") as f:
+        f.write(repo.head.commit.hexsha + "\n")
+    res = subprocess.run(sync_cmd, capture_output=True, text=True)
+    assert res.returncode == 1
+    assert "merge is in progress" in res.stdout + res.stderr
+    assert os.path.isfile(merge_head)
+    os.remove(merge_head)
 
 
 def test_overleaf_push_and_pull(tmp_dir):
@@ -2077,18 +2087,25 @@ def test_overleaf_credentials(monkeypatch):
     hub["/user/overleaf-token"] = {"access_token": "olp_hub"}
     assert _get_overleaf_auth() == config.overleaf_token == "olp_hub"
     # A rejected session is replaced by a newer one on the hub without
-    # prompting, but the same one again isn't retried
+    # prompting or warning, but the same one again isn't retried, however
+    # it's written
     config.overleaf_token = None
     sessions_tried.clear()
     hub["/user/overleaf-session"] = {"session": "fresh"}
     monkeypatch.setattr("sys.stdin", io.StringIO())
+    warnings = []
+    monkeypatch.setattr(
+        "calkit.cli.overleaf.warn", lambda txt, **kw: warnings.append(txt)
+    )
     _, client = _get_pulled_overleaf_repo(
         "abc", calkit.overleaf.WebClient("expired")
     )
     assert sessions_tried == ["expired", "fresh"]
-    hub["/user/overleaf-session"] = {"session": "expired"}
+    assert warnings == []
+    hub["/user/overleaf-session"] = {"session": " overleaf_session2=expired\n"}
     with pytest.raises(typer.Exit):
         _get_pulled_overleaf_repo("abc", calkit.overleaf.WebClient("expired"))
+    assert warnings == ["Session expired"]
     # A rejected Git token falls back to a browser session if there is one,
     # since tokens stop working when Premium ends, and is forgotten
     config.overleaf_token = calkit.config.KeyringOptionalSecret("expired")

@@ -45,8 +45,8 @@ let lastCheck: {
   // What the last sync did, kept through the check that follows it
   notice?: string;
 } | null = null;
-// Bumped by each load and each sync, so a check that finishes after
-// either doesn't draw over it
+// Bumped by each load, each sync, and each sign-in change, so a check
+// that finishes after any of them doesn't draw over it
 let loadGeneration = 0;
 let tokenWatcher: MutationObserver | null = null;
 
@@ -65,7 +65,7 @@ function isOverleafTokenProblem(e: unknown): boolean {
 
 /**
  * Ask for an Overleaf Git token, and save it to the hub, or, without
- * Overleaf Premium, connect the browser's Overleaf sign-in instead.
+ * Overleaf Premium, connect the browser's Overleaf login instead.
  */
 function renderTokenForm(
   container: HTMLElement,
@@ -77,7 +77,7 @@ function renderTokenForm(
   const connectMessage = el("div", { class: "small" });
   const connect = el("button", {
     class: sessionRejected ? "action" : "action secondary",
-    text: "Connect Overleaf sign-in",
+    text: "Connect with Overleaf login",
   });
   connect.addEventListener("click", async () => {
     connect.disabled = true;
@@ -96,10 +96,10 @@ function renderTokenForm(
     el("div", {
       class: "small",
       text: sessionRejected
-        ? "Overleaf no longer accepts the sign-in Calkit saved. Connect " +
-          "it again to keep syncing."
+        ? "Overleaf no longer accepts the Overleaf login Calkit saved. " +
+          "Connect it again to keep syncing."
         : "No Overleaf Premium? Calkit can sync using your Overleaf " +
-          "sign-in instead of a token.",
+          "login instead of a token.",
     }),
     el("div", { class: "actions" }, [connect]),
     connectMessage,
@@ -1059,6 +1059,12 @@ function sync(): void {
  * shows: an amber button when a sync would do something.
  */
 async function checkSyncStatus(overleafProjectId: string): Promise<void> {
+  // An answer from a hub or sign-in that has since changed describes
+  // something else, so it's dropped rather than cached
+  const generation = loadGeneration;
+  const hub = await getHubWebUrl();
+  const current = async () =>
+    generation === loadGeneration && (await getHubWebUrl()) === hub;
   try {
     const settings = await send({ type: "settings.get" });
     const lookup = await send({
@@ -1077,15 +1083,13 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       overleafProjectId,
       path: link.path,
     });
+    if (!(await current())) {
+      return;
+    }
     lastTokenProblem = false;
     lastSyncNeeded = Boolean(statuses.length) && !statuses[0].in_sync;
     lastCheck = statuses.length
-      ? {
-          overleafProjectId,
-          hubWebUrl: await getHubWebUrl(),
-          link,
-          status: statuses[0],
-        }
+      ? { overleafProjectId, hubWebUrl: hub, link, status: statuses[0] }
       : null;
     // Nothing to say if the panel was opened in the meantime, or if the
     // page moved on to another project
@@ -1097,6 +1101,9 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       lastSyncNeeded ? "attention" : "idle",
     );
   } catch (e) {
+    if (!(await current())) {
+      return;
+    }
     // A token problem is worth a nudge, since nothing works until it's
     // fixed; anything else the panel explains when opened
     lastTokenProblem = isOverleafTokenProblem(e);
@@ -1153,6 +1160,7 @@ runContentScript({
     }
     const overleafProjectId = currentProjectId;
     // What the last session found says nothing about this one
+    loadGeneration++;
     lastSyncNeeded = false;
     lastTokenProblem = false;
     lastCheck = null;

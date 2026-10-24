@@ -1992,17 +1992,26 @@ def test_overleaf_credentials(monkeypatch):
     assert "rejected" in res.output
     assert config.overleaf_session is None
     # With nothing in config, a token saved to the hub comes first, then a
-    # session saved there, e.g., by the browser extension
+    # session saved there, e.g., by the browser extension, however the user
+    # signed in to the hub
     hub = {"/user/overleaf-session": {"session": "from-hub"}}
+    signed_in = [False]
 
     def hub_get(path, **kwargs):
+        assert kwargs["allow_login"] is False
+        if not signed_in[0]:
+            raise ValueError("No token found")
         if path not in hub:
             raise RuntimeError("404")
         return hub[path]
 
     monkeypatch.setattr(calkit.hub, "get", hub_get)
     config.overleaf_token = None
-    config.token = calkit.config.KeyringOptionalSecret("hub-token")
+    config.token = None
+    with pytest.raises(typer.Exit):
+        _get_overleaf_auth()
+    assert config.overleaf_session is None
+    signed_in[0] = True
     auth = _get_overleaf_auth()
     assert isinstance(auth, calkit.overleaf.WebClient)
     assert auth.session == config.overleaf_session == "from-hub"
@@ -2023,7 +2032,8 @@ def test_overleaf_credentials(monkeypatch):
     with pytest.raises(typer.Exit):
         _get_pulled_overleaf_repo("abc", calkit.overleaf.WebClient("expired"))
     # A rejected Git token falls back to a browser session if there is one,
-    # since tokens stop working when Premium ends
+    # since tokens stop working when Premium ends, and is forgotten
+    config.overleaf_token = calkit.config.KeyringOptionalSecret("expired")
     config.overleaf_session = calkit.config.KeyringOptionalSecret("fresh")
     tokens_tried.clear()
     sessions_tried.clear()
@@ -2031,3 +2041,5 @@ def test_overleaf_credentials(monkeypatch):
     assert tokens_tried == ["expired"]
     assert isinstance(client, calkit.overleaf.WebClient)
     assert sessions_tried == ["fresh"]
+    assert config.overleaf_token is None
+    assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)

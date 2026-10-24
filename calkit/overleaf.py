@@ -225,7 +225,8 @@ SESSION_HELP = (
 SESSION_REJECTED_ADVICE = (
     "Your Overleaf session may have expired, e.g., by signing out of "
     "overleaf.com, or you may not have edit access to this project. "
-    "Sign in again with 'calkit overleaf login'."
+    "Sign in again with 'calkit overleaf login', or reconnect from the "
+    "Calkit browser extension on overleaf.com."
 )
 
 

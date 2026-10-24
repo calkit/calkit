@@ -1093,6 +1093,74 @@ def test_overleaf_sync_readiness_guards(tmp_dir):
         text=True,
     )
     assert res.returncode == 0, res.stderr
+    # A sync elsewhere, e.g., on the hub, is pulled before syncing here,
+    # rather than applying the same Overleaf edits again
+    repo.git.checkout(default_branch)
+    other = git.Repo.clone_from(
+        tmp_remote, os.path.join(tempfile.mkdtemp(), "other")
+    )
+    with open(os.path.join(ol_repo.working_dir, "main.tex"), "w") as f:
+        f.write("Written on Overleaf, synced elsewhere")
+    ol_repo.git.commit(["-a", "-m", "Edit on Overleaf"])
+    sync_cmd = ["calkit", "overleaf", "sync", "--allow-stale", "--no-build"]
+    res = subprocess.run(
+        sync_cmd, cwd=other.working_dir, capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    synced_elsewhere = other.head.commit.hexsha
+    res = subprocess.run(sync_cmd, capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "new commit(s)" in res.stdout
+    assert repo.head.commit.hexsha == synced_elsewhere
+    with open(os.path.join("paper", "main.tex")) as f:
+        assert f.read() == "Written on Overleaf, synced elsewhere"
+    # Local commits are merged with ones synced elsewhere
+    with open(os.path.join(other.working_dir, "paper", "main.tex"), "w") as f:
+        f.write("Edited elsewhere")
+    other.git.commit(["-a", "-m", "Edit elsewhere"])
+    res = subprocess.run(
+        sync_cmd, cwd=other.working_dir, capture_output=True, text=True
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("notes.md", "w") as f:
+        f.write("Local notes")
+    repo.git.commit(["-a", "-m", "Edit notes"])
+    res = subprocess.run(sync_cmd, capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert repo.is_ancestor(other.head.commit, repo.head.commit)
+    with open(os.path.join("paper", "main.tex")) as f:
+        assert f.read() == "Edited elsewhere"
+    # Uncommitted edits the new commits would overwrite stop the sync, and
+    # --no-pull skips pulling
+    other.git.pull()
+    with open(os.path.join(other.working_dir, "notes.md"), "w") as f:
+        f.write("Notes edited elsewhere")
+    other.git.commit(["-a", "-m", "Edit notes elsewhere"])
+    other.git.push()
+    with open("notes.md", "w") as f:
+        f.write("Uncommitted notes")
+    head = repo.head.commit.hexsha
+    res = subprocess.run(sync_cmd, capture_output=True, text=True)
+    assert res.returncode == 1
+    assert "Pull them yourself" in res.stdout + res.stderr
+    assert repo.head.commit.hexsha == head
+    res = subprocess.run(
+        sync_cmd + ["--no-pull", "--any-branch"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "new commit(s)" not in res.stdout
+    # A merge already in progress is left alone
+    repo.git.checkout("notes.md")
+    merge_head = os.path.join(repo.git_dir, "MERGE_HEAD")
+    with open(merge_head, "w") as f:
+        f.write(repo.head.commit.hexsha + "\n")
+    res = subprocess.run(sync_cmd, capture_output=True, text=True)
+    assert res.returncode == 1
+    assert "merge is in progress" in res.stdout + res.stderr
+    assert os.path.isfile(merge_head)
+    os.remove(merge_head)
 
 
 def test_overleaf_push_and_pull(tmp_dir):
@@ -1958,6 +2026,25 @@ def test_overleaf_credentials(monkeypatch):
     assert res.exit_code == 0, res.output
     assert config.overleaf_session == "abc"
     assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)
+    # With --hub, the session is also saved to the hub, and a failure there
+    # is reported after it's stored locally
+    puts = []
+    monkeypatch.setattr(
+        calkit.hub, "put", lambda path, json: puts.append((path, json))
+    )
+    res = runner.invoke(overleaf_app, ["login", "--session", "def", "--hub"])
+    assert res.exit_code == 0, res.output
+    assert puts == [("/user/overleaf-session", {"session": "def"})]
+    assert config.overleaf_session == "def"
+
+    def put_fails(path, json):
+        raise RuntimeError("422: Overleaf didn't accept that session")
+
+    monkeypatch.setattr(calkit.hub, "put", put_fails)
+    res = runner.invoke(overleaf_app, ["login", "--session", "ghi", "--hub"])
+    assert res.exit_code != 0
+    assert "didn't accept" in res.output
+    assert config.overleaf_session == "ghi"
     config.overleaf_token = calkit.config.KeyringOptionalSecret("tok")
     assert _get_overleaf_auth() == "tok"
     config.overleaf_session = None
@@ -1972,16 +2059,56 @@ def test_overleaf_credentials(monkeypatch):
     assert res.exit_code != 0
     assert "rejected" in res.output
     assert config.overleaf_session is None
-    # With nothing in config, a token saved to the hub is used
-    monkeypatch.setattr(
-        calkit.hub, "get", lambda path, **kw: {"access_token": "olp_hub"}
-    )
+    # With nothing in config, a token saved to the hub comes first, then a
+    # session saved there, e.g., by the browser extension, however the user
+    # signed in to the hub
+    hub = {"/user/overleaf-session": {"session": "from-hub"}}
+    signed_in = [False]
+
+    def hub_get(path, **kwargs):
+        assert kwargs["allow_login"] is False
+        if not signed_in[0]:
+            raise ValueError("No token found")
+        if path not in hub:
+            raise RuntimeError("404")
+        return hub[path]
+
+    monkeypatch.setattr(calkit.hub, "get", hub_get)
     config.overleaf_token = None
-    config.token = calkit.config.KeyringOptionalSecret("hub-token")
+    config.token = None
+    with pytest.raises(typer.Exit):
+        _get_overleaf_auth()
+    assert config.overleaf_session is None
+    signed_in[0] = True
+    auth = _get_overleaf_auth()
+    assert isinstance(auth, calkit.overleaf.WebClient)
+    assert auth.session == config.overleaf_session == "from-hub"
+    config.overleaf_session = None
+    hub["/user/overleaf-token"] = {"access_token": "olp_hub"}
     assert _get_overleaf_auth() == config.overleaf_token == "olp_hub"
+    # A rejected session is replaced by a newer one on the hub without
+    # prompting or warning, but the same one again isn't retried, however
+    # it's written
     config.overleaf_token = None
+    sessions_tried.clear()
+    hub["/user/overleaf-session"] = {"session": "fresh"}
+    monkeypatch.setattr("sys.stdin", io.StringIO())
+    warnings = []
+    monkeypatch.setattr(
+        "calkit.cli.overleaf.warn", lambda txt, **kw: warnings.append(txt)
+    )
+    _, client = _get_pulled_overleaf_repo(
+        "abc", calkit.overleaf.WebClient("expired")
+    )
+    assert sessions_tried == ["expired", "fresh"]
+    assert warnings == []
+    hub["/user/overleaf-session"] = {"session": " overleaf_session2=expired\n"}
+    with pytest.raises(typer.Exit):
+        _get_pulled_overleaf_repo("abc", calkit.overleaf.WebClient("expired"))
+    assert warnings == ["Session expired"]
     # A rejected Git token falls back to a browser session if there is one,
-    # since tokens stop working when Premium ends
+    # since tokens stop working when Premium ends, and is forgotten
+    config.overleaf_token = calkit.config.KeyringOptionalSecret("expired")
     config.overleaf_session = calkit.config.KeyringOptionalSecret("fresh")
     tokens_tried.clear()
     sessions_tried.clear()
@@ -1989,3 +2116,5 @@ def test_overleaf_credentials(monkeypatch):
     assert tokens_tried == ["expired"]
     assert isinstance(client, calkit.overleaf.WebClient)
     assert sessions_tried == ["fresh"]
+    assert config.overleaf_token is None
+    assert isinstance(_get_overleaf_auth(), calkit.overleaf.WebClient)

@@ -31,7 +31,7 @@ so the PDF output looks the same in either system.
 
 Calkit can connect to Overleaf in one of two ways:
 with a Git token, which requires Overleaf Premium,
-or with your browser's sign-in session, which works with any Overleaf account.
+or with your browser's login session, which works with any Overleaf account.
 If both are set, Calkit uses the token.
 
 ### With Overleaf Premium
@@ -70,9 +70,26 @@ config.
     but a session can do anything you can do while signed in to Overleaf.
     Treat it like a password and don't share it.
 
+To sync from [calkit.io](https://calkit.io) or the
+[browser extension](browser-ext/index.md),
+your Calkit account needs the session too.
+Either click **Connect with Overleaf login** in the extension's panel on an
+Overleaf project page, which sends it without copying anything,
+or run:
+
+```sh
+calkit overleaf login --hub
+```
+
+Once your account has one,
+`calkit overleaf sync` uses it on any machine signed in to Calkit,
+so there's no cookie to copy there.
+
 A session keeps working until you sign out of Overleaf in that browser or it
 expires.
-When Overleaf rejects it, Calkit asks for a new one,
+When Overleaf rejects it, Calkit first checks your Calkit account for a
+newer one, e.g., after you've connected again from the extension,
+and otherwise asks for a new one,
 so copy the cookie again after signing back in.
 If a Git token stops working, e.g., because Premium has ended,
 Calkit uses the session instead, if one is set.
@@ -132,9 +149,13 @@ calkit overleaf sync paper
 
 A sync:
 
-1. Commits [edits you've made](#uncommitted-changes) to the synced folder.
-2. Brings in edits made on Overleaf and sends yours up.
-3. Rebuilds each document that changed on either side,
+1. Pulls new commits to the project, e.g., from a sync on Calkit or another
+   computer, so the same Overleaf edits aren't brought in twice.
+   Pass `--no-pull` to skip this.
+2. Commits local [edits you've made](#uncommitted-changes) to the synced
+   folder.
+3. Brings in edits made on Overleaf and sends yours up.
+4. Rebuilds each document that changed in either location,
    saves the new PDF to the project, and pushes the project.
 
 Only the document's own build stage is run,
@@ -184,7 +205,7 @@ Two situations make that misleading, and Calkit refuses to sync in both:
 Note that the second check is about content, not branch names.
 Working on a branch is fine as long as it contains everything already on the
 default branch, so a branch cut from the tip of `main` syncs happily,
-while a local `main` that's behind the remote does not.
+and a local `main` that's behind the remote is pulled first.
 This matters when `main` is protected: pulling from Overleaf creates commits,
 so it can't happen on a branch you can't commit to.
 Create a branch from the tip of `main` and sync from there.

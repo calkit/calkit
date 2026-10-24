@@ -3933,9 +3933,10 @@ calkit overleaf|ol login [OPTIONS]
 
 Options:
 
-| Option      | Type | Required | Default | Description                                                |
-| ----------- | ---- | -------- | ------- | ---------------------------------------------------------- |
-| `--session` | str  | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
+| Option      | Type    | Required | Default | Description                                                |
+| ----------- | ------- | -------- | ------- | ---------------------------------------------------------- |
+| `--session` | str     | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
+| `--hub`     | boolean | no       | False   | Also save session to Calkit hub, so it can sync there.     |
 
 <a id="subcommand-overleaf-ol-import"></a>
 
@@ -4003,6 +4004,7 @@ Options:
 | `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
 | `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
 | `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |
 
 <a id="subcommand-overleaf-ol-status-st"></a>
 
@@ -4451,3 +4453,4 @@ Options:
 | `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
 | `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
 | `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |

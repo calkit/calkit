@@ -92,6 +92,9 @@ export async function renderProjectPicker(options: {
     class: "stack",
     style: { display: "none", marginTop: "4px" },
   });
+  // Focusable, so clicking a row's text doesn't count as leaving the list
+  results.tabIndex = -1;
+  results.style.outline = "none";
   const message = el("div", { class: "small" });
   const container = el("div", {}, [
     el("label", { text: "Active project" }),
@@ -99,6 +102,20 @@ export async function renderProjectPicker(options: {
     results,
     message,
   ]);
+  // Leaving the list without picking keeps the active project as it was
+  const close = () => {
+    clearTimeout(timer);
+    results.style.display = "none";
+    input.value = options.activeProject ?? "";
+  };
+  const cancelRow = () =>
+    el("div", { class: "actions" }, [
+      el("button", {
+        class: "action secondary",
+        text: "Cancel",
+        onClick: close,
+      }),
+    ]);
   const choose = async (spec: string) => {
     input.value = spec;
     results.style.display = "none";
@@ -128,6 +145,7 @@ export async function renderProjectPicker(options: {
       if (!projects.data.length) {
         results.append(
           el("div", { class: "dim small", text: "No matching projects" }),
+          cancelRow(),
         );
         return;
       }
@@ -148,8 +166,12 @@ export async function renderProjectPicker(options: {
           ]),
         );
       }
+      results.append(cancelRow());
     } catch (e) {
-      clear(results).append(renderFailure(e, { onSignedIn: options.onChange }));
+      clear(results).append(
+        renderFailure(e, { onSignedIn: options.onChange }),
+        cancelRow(),
+      );
     }
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -160,6 +182,22 @@ export async function renderProjectPicker(options: {
   input.addEventListener("focus", () => {
     if (results.style.display === "none") {
       void search();
+    }
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      close();
+      input.blur();
+    }
+  });
+  // Clicking anywhere outside the picker closes it too
+  container.addEventListener("focusout", (e) => {
+    const next = e.relatedTarget;
+    if (
+      results.style.display !== "none" &&
+      !(next instanceof Node && container.contains(next))
+    ) {
+      close();
     }
   });
   return container;

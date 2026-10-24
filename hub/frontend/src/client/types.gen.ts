@@ -410,6 +410,14 @@ export type ConnectedAccounts = {
    */
   overleaf: boolean
   /**
+   * Overleaf Token
+   */
+  overleaf_token?: boolean
+  /**
+   * Overleaf Session
+   */
+  overleaf_session?: boolean
+  /**
    * Google
    */
   google: boolean
@@ -2935,6 +2943,26 @@ export type OverleafLookup = {
    * Projects Remaining
    */
   projects_remaining: number
+}
+
+/**
+ * OverleafSessionPut
+ */
+export type OverleafSessionPut = {
+  /**
+   * Session
+   */
+  session: string
+}
+
+/**
+ * OverleafSessionResponse
+ */
+export type OverleafSessionResponse = {
+  /**
+   * Session
+   */
+  session: string
 }
 
 /**
@@ -8304,6 +8332,50 @@ export type PutUserOverleafTokenResponses = {
 
 export type PutUserOverleafTokenResponse =
   PutUserOverleafTokenResponses[keyof PutUserOverleafTokenResponses]
+
+export type GetUserOverleafSessionData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/overleaf-session"
+}
+
+export type GetUserOverleafSessionResponses = {
+  /**
+   * Successful Response
+   */
+  200: OverleafSessionResponse
+}
+
+export type GetUserOverleafSessionResponse =
+  GetUserOverleafSessionResponses[keyof GetUserOverleafSessionResponses]
+
+export type PutUserOverleafSessionData = {
+  body: OverleafSessionPut
+  path?: never
+  query?: never
+  url: "/user/overleaf-session"
+}
+
+export type PutUserOverleafSessionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutUserOverleafSessionError =
+  PutUserOverleafSessionErrors[keyof PutUserOverleafSessionErrors]
+
+export type PutUserOverleafSessionResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PutUserOverleafSessionResponse =
+  PutUserOverleafSessionResponses[keyof PutUserOverleafSessionResponses]
 
 export type PostUserGoogleAuthData = {
   body: AppApiRoutesUsersOAuthCodeExchange

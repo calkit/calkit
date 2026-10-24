@@ -1,8 +1,7 @@
 schema: '2.0'
 stages:
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/latex-word-round-trip.py
+    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py
     deps:
     - path: .python-version
       hash: md5
@@ -253,7 +252,7 @@ stages:
       md5: 4960953114330139033d7281122861de
       size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8 
       --attendees=25 --supported=60 --indirect-rate=0
     deps:
     - path: .python-version
@@ -277,6 +276,30 @@ stages:
       hash: md5
       md5: 35eeb271dbd0ac856631b17035062793
       size: 2007
+  budget-2027-figure:
+    cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: results/2027-budget.json
+      hash: md5
+      md5: 35eeb271dbd0ac856631b17035062793
+      size: 2007
+    - path: scripts/plot-budget.py
+      hash: md5
+      md5: 2e2e4ac613d605a86f321d6d15081241
+      size: 1404
+    - path: uv.lock
+      hash: md5
+      md5: 78cff1621fa9cb37be1d99412ed26e0f
+      size: 1727624
+    outs:
+    - path: docs/img/2027-budget.png
+      hash: md5
+      md5: 4ae1c083c047a72493b2e547f5fc78f4
+      size: 49453
   one-pager/pdf:
     cmd: calkit latex from-markdown docs/one-pager/main.md -o 
       docs/one-pager/main.pdf -e tex --no-check --template 
@@ -325,30 +348,6 @@ stages:
       hash: md5
       md5: ce4084cd8770e218d710af997eb84aa8
       size: 179256
-  budget-2027-figure:
-    cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
-    deps:
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: results/2027-budget.json
-      hash: md5
-      md5: 35eeb271dbd0ac856631b17035062793
-      size: 2007
-    - path: scripts/plot-budget.py
-      hash: md5
-      md5: 2e2e4ac613d605a86f321d6d15081241
-      size: 1404
-    - path: uv.lock
-      hash: md5
-      md5: 78cff1621fa9cb37be1d99412ed26e0f
-      size: 1727624
-    outs:
-    - path: docs/img/2027-budget.png
-      hash: md5
-      md5: 4ae1c083c047a72493b2e547f5fc78f4
-      size: 49453
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit

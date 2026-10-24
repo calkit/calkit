@@ -270,14 +270,15 @@ To resolve them, run:
 calkit fix merge-conflicts
 ```
 
-It takes the same choices as `calkit merge`.
-Then finish the merge as you normally would, e.g., with `git commit`.
+It takes the same choices as `calkit merge`,
+and says how to finish, e.g., with `calkit merge --continue`.
 
 <!-- prettier-ignore -->
 !!! tip
 
-    Running the pipeline sets Git up to merge these files one stage at a
-    time on its own, so most merges won't conflict in them at all.
+    Running the pipeline, or cloning or pulling with Calkit, sets Git up
+    to merge these files one stage at a time on its own,
+    so most merges won't conflict in them at all.
     Only stages that ran on both sides need a choice.
 
 ## Line endings across platforms

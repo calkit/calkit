@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 import sys
 
 import click
@@ -132,6 +133,19 @@ def resolve_merge_conflicts(
     return result
 
 
+def checkout_dvc_outputs() -> None:
+    """Check out DVC-tracked outputs to match dvc.lock."""
+    import calkit.dvc
+    import calkit.dvc.zip
+
+    if calkit.dvc.run_dvc_command(["checkout"]) != 0:
+        warn(
+            "Some DVC-tracked outputs couldn't be checked out; run "
+            "'calkit dvc pull' to fetch them"
+        )
+    calkit.dvc.zip.sync_all(direction="to-workspace")
+
+
 @fix_app.command(name="merge-conflicts")
 def fix_merge_conflicts(
     ours: OursOpt = [],
@@ -146,24 +160,29 @@ def fix_merge_conflicts(
     and Git-tracked outputs. Stages are named as in 'calkit check
     stage-runs', e.g., 'sub/dvc.yaml:stage' for a subproject's.
     """
-    import calkit.dvc
-    import calkit.dvc.zip
-
     result = resolve_merge_conflicts(
         ours=ours, theirs=theirs, rerun=rerun, prefer=prefer
     )
-    if result["unmerged"]:
-        raise typer.Exit(1)
-    # Outputs in DVC to match the merged dvc.lock
-    calkit.dvc.run_dvc_command(["checkout"])
-    calkit.dvc.zip.sync_all(direction="to-workspace")
+    operation = result["operation"]
+    unmerged = result["unmerged"]
     finish = {
-        "merge": "git commit",
-        "squash": "git commit",
+        "merge": "calkit merge --continue",
+        "squash": "calkit merge --continue",
         "rebase": "git rebase --continue",
         "cherry-pick": "git cherry-pick --continue",
-    }[result["operation"]]
-    typer.echo(f"Run '{finish}' to finish")
+    }[operation]
+    # DVC can't read the pipeline while a dvc.yaml is in conflict, and
+    # 'calkit merge --continue' checks outputs out after committing anyway
+    steps = [finish]
+    if any(posixpath.basename(p) == "dvc.yaml" for p in unmerged):
+        if operation not in ("merge", "squash"):
+            steps.insert(0, "calkit dvc checkout")
+    else:
+        checkout_dvc_outputs()
+    then = " and ".join(f"'{step}'" for step in steps)
+    if unmerged:
+        raise_error(f"Resolve the rest and 'git add' them, then run {then}")
+    typer.echo(f"Run {then} to finish")
 
 
 @fix_app.command(name="storage")

@@ -16,6 +16,7 @@ import os
 import posixpath
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -28,12 +29,20 @@ CHOICES = (OURS, THEIRS, RERUN)
 # Where a merged entry came from when both sides agree
 BOTH = "both"
 DRIVER_NAME = "calkit"
-DRIVER_CMD = "calkit merge-driver %O %A %B %P"
+# Git's own line-based merge wherever Calkit isn't on PATH, e.g., an editor
+# started outside the environment it's installed in, rather than a failed
+# driver, which leaves the file as ours with nothing marked
+DRIVER_CMD = (
+    "if command -v calkit >/dev/null 2>&1; "
+    "then calkit merge-driver %O %A %B %P; "
+    "else git merge-file -L ours -L base -L theirs %A %O %B; fi"
+)
 LOCK_FNAME = "dvc.lock"
 STAGE_RUNS_FNAME = posixpath.join(".calkit", "stage-runs.json")
+# Matching at any depth, for subprojects too
 ATTRIBUTES_LINES = [
-    f"/{LOCK_FNAME} merge={DRIVER_NAME}",
-    f"/{STAGE_RUNS_FNAME} merge={DRIVER_NAME}",
+    f"{LOCK_FNAME} merge={DRIVER_NAME}",
+    f"**/{STAGE_RUNS_FNAME} merge={DRIVER_NAME}",
 ]
 # The ref naming the other side of each operation that can conflict
 OPERATION_HEADS = {
@@ -119,6 +128,7 @@ def merge_runs(
         if side == RERUN:
             continue
         record = None
+        decided = False
         if lock is not None and name in lock:
             # The run that made the entry, preferring the side it came from
             target = _lock_hash(lock[name])
@@ -134,8 +144,10 @@ def merge_runs(
             elif matching:
                 record = next(iter(matching.values()))
             elif side in (OURS, THEIRS):
+                # Even none, rather than a run that made some other entry
                 record = {OURS: o, THEIRS: t}[side]
-        if record is None:
+                decided = True
+        if record is None and not decided:
             if o == t:
                 record = o
             elif b == o:
@@ -157,15 +169,6 @@ def merge_runs(
     return merged, conflicts
 
 
-def _dump_lock_stage(name: str, entry: dict) -> str:
-    import yaml
-
-    text = yaml.safe_dump(
-        {name: entry}, sort_keys=False, width=float("inf")
-    ).rstrip("\n")
-    return "\n".join("  " + line for line in text.splitlines())
-
-
 def dump_lock(
     meta: dict,
     stages: dict,
@@ -173,26 +176,38 @@ def dump_lock(
 ) -> str:
     """Write ``dvc.lock`` text, with Git conflict markers for ``conflicts``.
 
-    Each conflict is a stage's entries on our side and theirs.
+    Each conflict is a stage's entries on our side and theirs. Written as
+    DVC writes it, in YAML 1.2, which is how it's read.
     """
-    import yaml
+    import io
+
+    from ruamel.yaml import YAML
+
+    def dump(data: dict, indent: str = "") -> str:
+        yaml = YAML()
+        yaml.default_flow_style = False
+        buf = io.StringIO()
+        yaml.dump(data, buf)
+        return "".join(
+            indent + line + "\n" for line in buf.getvalue().splitlines()
+        )
 
     conflicts = conflicts or {}
-    text = yaml.safe_dump(meta, sort_keys=False) if meta else ""
+    text = dump(meta) if meta else ""
     if not stages and not conflicts:
         return text + "stages: {}\n"
-    lines = ["stages:"]
+    text += "stages:\n"
     for name, entry in stages.items():
-        lines.append(_dump_lock_stage(name, entry))
+        text += dump({name: entry}, "  ")
     for name, (o, t) in conflicts.items():
-        lines.append("<<<<<<< ours")
+        text += "<<<<<<< ours\n"
         if o is not None:
-            lines.append(_dump_lock_stage(name, o))
-        lines.append("=======")
+            text += dump({name: o}, "  ")
+        text += "=======\n"
         if t is not None:
-            lines.append(_dump_lock_stage(name, t))
-        lines.append(">>>>>>> theirs")
-    return text + "\n".join(lines) + "\n"
+            text += dump({name: t}, "  ")
+        text += ">>>>>>> theirs\n"
+    return text
 
 
 def dump_runs(
@@ -288,7 +303,9 @@ def run_driver(
         print(f"Merging {path} line by line: {e}")
         return min(
             subprocess.call(
-                ["git", "merge-file", ours_fpath, base_fpath, theirs_fpath]
+                ["git", "merge-file"]
+                + ["-L", "ours", "-L", "base", "-L", "theirs"]
+                + [ours_fpath, base_fpath, theirs_fpath]
             ),
             1,
         )
@@ -302,45 +319,42 @@ def run_driver(
     return 0
 
 
-def ensure_driver(wdir: str | None = None) -> None:
-    """Have Git merge these files with Calkit's driver here.
-
-    ``.gitattributes`` says which files use it, and is committed. Which
-    command it runs has to be set per clone, since Git won't run a command
-    a repository names.
-    """
-    import calkit.pipeline
-
-    calkit.pipeline._write_managed_gitignore_block(
-        os.path.join(wdir, ".gitattributes") if wdir else ".gitattributes",
-        marker="calkit merge driver",
-        lines=ATTRIBUTES_LINES,
-    )
-    configure_driver(wdir=wdir)
-
-
 def configure_driver(wdir: str | None = None) -> None:
-    """Set the command for Calkit's merge driver in this clone's Git config.
+    """Have Git merge these files with Calkit's driver in this clone.
 
+    Both halves are kept per clone, the command in its Git config and which
+    files use it in ``info/attributes``, since a driver one has without the
+    other does nothing, and Git won't run a command a repository names.
     Does nothing outside a Git repo.
     """
-    for key, value in [
-        (f"merge.{DRIVER_NAME}.name", "Calkit per-stage merge"),
-        (f"merge.{DRIVER_NAME}.driver", DRIVER_CMD),
-    ]:
-        current = subprocess.run(
-            ["git", "config", "--local", "--get", key],
-            cwd=wdir,
-            capture_output=True,
-            text=True,
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *args], cwd=wdir, capture_output=True, text=True
         )
-        if current.returncode == 0 and current.stdout.strip() == value:
-            continue
-        subprocess.run(
-            ["git", "config", "--local", key, value],
-            cwd=wdir,
-            capture_output=True,
+
+    res = git("rev-parse", "--git-path", "info/attributes")
+    if res.returncode != 0:
+        return
+    attributes_path = os.path.join(wdir or "", res.stdout.strip())
+    lines = []
+    if os.path.isfile(attributes_path):
+        with open(attributes_path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    missing = [line for line in ATTRIBUTES_LINES if line not in lines]
+    if missing:
+        os.makedirs(os.path.dirname(attributes_path), exist_ok=True)
+        with open(attributes_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines + missing) + "\n")
+    current = git("config", "--local", "--get", f"merge.{DRIVER_NAME}.driver")
+    if current.stdout.strip() != DRIVER_CMD:
+        git(
+            "config",
+            "--local",
+            f"merge.{DRIVER_NAME}.name",
+            "Calkit per-stage",
         )
+        git("config", "--local", f"merge.{DRIVER_NAME}.driver", DRIVER_CMD)
 
 
 def get_operation(repo: git.Repo) -> tuple[str, str] | None:
@@ -383,49 +397,41 @@ def resolve_conflicts(
     Each lock directory with either file in conflict is merged again from
     the three commits, so how Git or the driver left its files doesn't
     matter. A stage changed on both sides takes its choice from
-    ``choices``, by its name as 'calkit check stage-runs' gives it, then
-    ``prefer``, then ``choose``, which is passed the stage's name and a
-    description of each side. The stages' Git-tracked outputs are checked
-    out from the side each was chosen from, and everything resolved is
-    staged.
+    ``choices``, by its name as 'calkit check stage-runs' gives it from
+    here, then ``prefer``, then ``choose``, which is passed the stage's name
+    and a description of each side. The stages' Git-tracked outputs are
+    checked out from the side each was chosen from, and everything resolved
+    is staged.
 
-    Returns the choices made, the files resolved, and the paths still in
-    conflict.
+    Returns the operation, the choices made, the files resolved, and the
+    paths still in conflict.
     """
-    choices = choices or {}
-    operation = get_operation(repo)
-    if operation is None:
-        raise MergeError("No merge, rebase, or cherry-pick is in progress")
-    name, head = operation
-    refs = {OURS: "HEAD", THEIRS: head}
-    if name in ("merge", "squash"):
-        bases = repo.git.merge_base("--all", "HEAD", head).split()
-        base_ref = bases[0] if bases else None
-    else:
-        parents = repo.commit(head).parents
-        base_ref = parents[0].hexsha if parents else None
-    unmerged = get_unmerged_paths(repo)
-    lock_dirs = set()
-    for path in unmerged:
-        if posixpath.basename(path) == LOCK_FNAME:
-            lock_dirs.add(posixpath.dirname(path))
-        elif is_merged_file(path):
-            lock_dirs.add(path[: -len(STAGE_RUNS_FNAME)].rstrip("/"))
+    root = repo.working_dir
 
     def show(ref: str | None, path: str) -> str | None:
         if ref is None:
             return None
         res = subprocess.run(
             ["git", "show", f"{ref}:{path}"],
-            cwd=repo.working_dir,
+            cwd=root,
             capture_output=True,
             text=True,
             encoding="utf-8",
         )
         return res.stdout if res.returncode == 0 else None
 
+    def load(
+        load_fn: Callable[[str], dict], ref: str | None, path: str
+    ) -> dict:
+        try:
+            return load_fn(show(ref, path) or "")
+        except Exception as e:
+            raise MergeError(f"Can't read {path} at {ref}: {e}")
+
     def qualified(lock_dir: str, stage: str) -> str:
-        return f"{lock_dir}/dvc.yaml:{stage}" if lock_dir else stage
+        # Relative to here, like 'calkit check stage-runs' names them
+        rel = posixpath.relpath(lock_dir or ".", here)
+        return stage if rel == "." else f"{rel}/dvc.yaml:{stage}"
 
     def describe(
         stage: str, ours: dict | None, theirs: dict | None, runs: dict
@@ -451,29 +457,68 @@ def resolve_conflicts(
             }
             for e in (ours, theirs)
         ]
-        changed = sorted(
+        info["changed_deps"] = sorted(
             p
             for p in set(deps[0]) | set(deps[1])
             if deps[0].get(p) != deps[1].get(p)
         )
-        info["changed_deps"] = changed
         return info
 
+    choices = choices or {}
+    operation = get_operation(repo)
+    if operation is None:
+        raise MergeError("No merge, rebase, or cherry-pick is in progress")
+    name, head = operation
+    refs = {OURS: "HEAD", THEIRS: head}
+    base_refs: list[str | None]
+    if name in ("merge", "squash"):
+        base_refs = list(repo.git.merge_base("--all", "HEAD", head).split())
+    else:
+        parents = repo.commit(head).parents
+        base_refs = [parents[0].hexsha] if parents else []
+    if not base_refs:
+        base_refs = [None]
+    try:
+        cwd = Path(os.getcwd()).resolve()
+        here = cwd.relative_to(Path(root).resolve()).as_posix()
+    except ValueError:
+        here = "."
+    unmerged = get_unmerged_paths(repo)
+    lock_dirs = set()
+    for path in unmerged:
+        if posixpath.basename(path) == LOCK_FNAME:
+            lock_dirs.add(posixpath.dirname(path))
+        elif is_merged_file(path):
+            lock_dirs.add(path[: -len(STAGE_RUNS_FNAME)].rstrip("/"))
     made: dict[str, str] = {}
     resolved_files = []
     outputs: dict[str, list[str]] = {OURS: [], THEIRS: []}
     for lock_dir in sorted(lock_dirs):
         lock_path = posixpath.join(lock_dir, LOCK_FNAME)
         runs_path = posixpath.join(lock_dir, STAGE_RUNS_FNAME)
-        locks = {}
-        runs = {}
-        for side, ref in [("base", base_ref)] + list(refs.items()):
-            locks[side] = _load_lock(show(ref, lock_path) or "")
-            runs[side] = _load_runs(show(ref, runs_path) or "")
+        locks = {
+            s: load(_load_lock, ref, lock_path) for s, ref in refs.items()
+        }
+        runs = {s: load(_load_runs, ref, runs_path) for s, ref in refs.items()}
+        bases = [load(_load_lock, ref, lock_path) for ref in base_refs]
+        runs["base"] = load(_load_runs, base_refs[0], runs_path)
         stages = {s: locks[s].get("stages") or {} for s in locks}
-        merged, sides, conflicts = merge_stages(
-            stages["base"], stages[OURS], stages[THEIRS], choices={}
-        )
+        base_stages = [b.get("stages") or {} for b in bases]
+        # With more than one merge base, e.g., after merging each branch
+        # into the other, a stage is only merged on its own if every base
+        # agrees how
+        results = [
+            merge_stages(b, stages[OURS], stages[THEIRS], choices={})
+            for b in base_stages
+        ]
+        merged, sides, conflicts = results[0]
+        conflicts = list(conflicts)
+        for _, other_sides, other_conflicts in results[1:]:
+            for stage in list(other_conflicts) + [
+                s for s in sides if other_sides.get(s) != sides[s]
+            ]:
+                if stage not in conflicts:
+                    conflicts.append(stage)
         local = {}
         for stage in conflicts:
             q = qualified(lock_dir, stage)
@@ -494,10 +539,14 @@ def resolve_conflicts(
                     "theirs, or rerun"
                 )
             made[q] = local[stage] = choice
-        if conflicts:
-            merged, sides, _ = merge_stages(
-                stages["base"], stages[OURS], stages[THEIRS], choices=local
-            )
+            sides[stage] = choice
+            entry = {OURS: stages[OURS], THEIRS: stages[THEIRS]}.get(
+                choice, {}
+            ).get(stage)
+            if entry is None:
+                merged.pop(stage, None)
+            else:
+                merged[stage] = entry
         meta = {
             k: v
             for k, v in (locks[THEIRS] | locks[OURS]).items()
@@ -506,7 +555,6 @@ def resolve_conflicts(
         merged_runs, _ = merge_runs(
             runs["base"], runs[OURS], runs[THEIRS], merged, sides
         )
-        root = repo.working_dir
         files = []
         if (
             stages[OURS]
@@ -526,8 +574,8 @@ def resolve_conflicts(
         # Each stage's Git-tracked outputs from the side its entry came
         # from, so they're what the entry says they are
         for side, ref in refs.items():
-            dvc_yaml = _load_lock(
-                show(ref, posixpath.join(lock_dir, "dvc.yaml")) or ""
+            dvc_yaml = load(
+                _load_lock, ref, posixpath.join(lock_dir, "dvc.yaml")
             )
             for stage, entry in stages[side].items():
                 # A stage to rerun keeps ours until it's rerun
@@ -554,19 +602,32 @@ def resolve_conflicts(
             repo.git.add("--", *files)
         resolved_files += files
     for side, paths in outputs.items():
-        # Only those in Git there, since DVC-tracked outputs aren't
-        tracked = [
+        if not paths:
+            continue
+        # Only what Git has that isn't already that side's, so DVC-tracked
+        # outputs and ones the merge already took from it, with any edits
+        # since, are left alone. Files only the other side made are removed.
+        differing = [
             p
-            for p in sorted(set(paths))
-            if repo.git.ls_tree("-r", "--name-only", refs[side], "--", p)
+            for p in repo.git.diff(
+                "--cached",
+                "--name-only",
+                "-z",
+                refs[side],
+                "--",
+                *sorted(set(paths)),
+            ).split("\0")
+            if p
         ]
-        if tracked:
-            repo.git.checkout(refs[side], "--", *tracked)
-            resolved_files += [
-                p
-                for p in tracked
-                if any(u == p or u.startswith(p + "/") for u in unmerged)
-            ]
+        if differing:
+            repo.git.restore(
+                f"--source={refs[side]}",
+                "--staged",
+                "--worktree",
+                "--",
+                *differing,
+            )
+            resolved_files += [p for p in differing if p in unmerged]
     return {
         "operation": name,
         "choices": made,

@@ -867,10 +867,14 @@ def get_status(
             git_cmd += ["--"] + targets
         run_cmd(git_cmd)
         try:
-            unmerged = calkit.merge.get_unmerged_paths(calkit.git.get_repo())
+            repo = calkit.git.get_repo()
+            unmerged = calkit.merge.get_unmerged_paths(repo)
+            operation = calkit.merge.get_operation(repo)
         except Exception:
-            unmerged = []
-        if any(calkit.merge.is_merged_file(p) for p in unmerged):
+            unmerged, operation = [], None
+        if operation is not None and any(
+            calkit.merge.is_merged_file(p) for p in unmerged
+        ):
             typer.echo(
                 "Run 'calkit fix merge-conflicts' to resolve the conflicts "
                 "in dvc.lock and stage run records"
@@ -1848,7 +1852,7 @@ def pull(
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
             repo = calkit.git.get_repo()
-            if any(
+            if calkit.merge.get_operation(repo) is not None and any(
                 calkit.merge.is_merged_file(p)
                 for p in calkit.merge.get_unmerged_paths(repo)
             ):
@@ -3164,6 +3168,8 @@ def run(
             subprocess.check_call(["git", "init"])
         except subprocess.CalledProcessError:
             raise_error("Failed to initialize Git repo")
+    # So Git merges dvc.lock and stage run records stage by stage
+    calkit.merge.configure_driver()
     # Set env vars
     calkit.set_env_vars(ck_info=ck_info)
     # Stages that can't run here are skipped, keeping their outputs, and
@@ -5149,7 +5155,7 @@ def merge(
     outputs are checked out to match afterwards. Other conflicts are left
     to resolve before 'calkit merge --continue'.
     """
-    from calkit.cli.fix import resolve_merge_conflicts
+    from calkit.cli.fix import checkout_dvc_outputs, resolve_merge_conflicts
 
     if sum([branch is not None, cont, abort]) != 1:
         raise_error("Give a branch, --continue, or --abort")
@@ -5157,17 +5163,13 @@ def merge(
         raise_error("--squash needs a branch")
     repo = calkit.git.get_repo()
 
-    def checkout_dvc() -> None:
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
-
     def commit() -> None:
         cmd = ["git", "commit"] + (
             ["-m", message] if message else ["--no-edit"]
         )
         if subprocess.call(cmd) != 0:
             raise_error("Git commit failed")
-        checkout_dvc()
+        checkout_dvc_outputs()
 
     if abort:
         op = calkit.merge.get_operation(repo)
@@ -5178,7 +5180,7 @@ def merge(
             cmd = ["git", "merge", "--abort"]
         if subprocess.call(cmd) != 0:
             raise_error("Git merge abort failed")
-        checkout_dvc()
+        checkout_dvc_outputs()
         return
     if branch is not None:
         calkit.merge.configure_driver()
@@ -5193,11 +5195,15 @@ def merge(
             if squash and staged:
                 commit()
             else:
-                checkout_dvc()
+                checkout_dvc_outputs()
             return
     op = calkit.merge.get_operation(repo)
     if op is None or op[0] not in ("merge", "squash"):
-        raise_error("No merge is in progress")
+        raise_error(
+            "Git merge failed"
+            if branch is not None
+            else "No merge is in progress"
+        )
     if any(
         calkit.merge.is_merged_file(p)
         for p in calkit.merge.get_unmerged_paths(repo)

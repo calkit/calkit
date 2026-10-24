@@ -87,6 +87,12 @@ def test_merge_runs():
         base, ours, theirs, {"b": e1}, {"a": RERUN, "b": BOTH}
     )
     assert "a" not in merged
+    # A stage kept from a side with no record of its run gets none, rather
+    # than the other side's run of something else
+    merged, _ = calkit.merge.merge_runs(
+        base, ours, {}, {"a": e2}, {"a": THEIRS}
+    )
+    assert "a" not in merged
 
 
 def test_run_driver(tmp_path):
@@ -113,6 +119,10 @@ def test_run_driver(tmp_path):
         merged = yaml.safe_load(f)
     assert merged["schema"] == "2.0"
     assert merged["stages"] == {"a": ours["a"], "b": theirs["b"]}
+    # Strings YAML 1.2 would read as numbers stay strings
+    entry = _entry("1234e5678") | {"params": {"p.yaml": {"x": "1e-5"}}}
+    text = calkit.merge.dump_lock({"schema": "2.0"}, {"a": entry})
+    assert calkit.merge._load_lock(text)["stages"]["a"] == entry
     # A stage changed on both sides is marked whole, with the rest merged
     theirs["a"] = _entry("2")
     paths[1] = write("ours", lock(ours))

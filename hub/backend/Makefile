@@ -1,6 +1,7 @@
 .PHONY: test
 test:
-	bash ../scripts/dev-stack.sh exec backend bash ./tests-start.sh
+	@$(MAKE) -s -C .. env
+	docker compose exec backend bash ./tests-start.sh
 
 .PHONY: format
 format:

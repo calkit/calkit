@@ -29,6 +29,7 @@
 | [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                            |
 | [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
 | [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
+| [`merge`](#top-command-merge)                    | Merge a branch, resolving dvc.lock and stage run records per stage.                                          |
 | [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                           |
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
@@ -45,11 +46,11 @@
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
+| [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
-| [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
 
 ## Top-level command details
@@ -566,6 +567,40 @@ Arguments:
 | Argument | Type | Required | Default | Description  |
 | -------- | ---- | -------- | ------- | ------------ |
 | `name`   | str  | yes      |         | Branch name. |
+
+<a id="top-command-merge"></a>
+
+### `calkit merge`
+
+Merge a branch, resolving dvc.lock and stage run records per stage.
+
+A stage changed on both sides needs a choice: ours, theirs, or rerun, which also decides its run record and Git-tracked outputs. DVC-tracked outputs are checked out to match afterwards. Other conflicts are left to resolve before 'calkit merge --continue'.
+
+Usage:
+
+```text
+calkit merge [OPTIONS] [BRANCH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                     |
+| -------- | ---- | -------- | ------- | ----------------------------------------------- |
+| `branch` | str  | no       |         | Branch or commit to merge into the current one. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                  |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--continue`      | boolean | no       | False   | Finish a merge stopped by conflicts.                                         |
+| `--abort`         | boolean | no       | False   | Abort the merge in progress.                                                 |
+| `--squash`        | boolean | no       | False   | Combine the branch's changes into one commit.                                |
+| `--message`, `-m` | str     | no       |         | Commit message (default: Git's for the merge or squash).                     |
+| `--ours`, `-o`    | str     | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t`  | str     | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`   | str     | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`        | str     | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+| `--git-arg`       | str     | no       |         | Additional Git merge args.                                                   |
 
 <a id="top-command-stash"></a>
 
@@ -3654,6 +3689,54 @@ Options:
 | `--json`          | boolean | no       | False   | Output the report as JSON.                                                            |
 | `--no-pipeline`   | boolean | no       | False   | Skip asking DVC which stages are out of date, which is the slowest part of the check. |
 
+<a id="command-group-fix"></a>
+
+### `calkit fix`
+
+Fix things.
+
+| Command                                              | Description                                                     |
+| ---------------------------------------------------- | --------------------------------------------------------------- |
+| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.      |
+| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC). |
+
+<a id="subcommand-fix-merge-conflicts"></a>
+
+#### `calkit fix merge-conflicts`
+
+Resolve merge conflicts in dvc.lock and stage run records.
+
+Each stage is merged whole. A stage changed on one side takes that side, and one changed on both needs a choice, which also decides its run record and Git-tracked outputs. Stages are named as in 'calkit check stage-runs', e.g., 'sub/dvc.yaml:stage' for a subproject's.
+
+Usage:
+
+```text
+calkit fix merge-conflicts [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                  |
+| ---------------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--ours`, `-o`   | str  | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t` | str  | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`  | str  | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`       | str  | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+
+<a id="subcommand-fix-storage"></a>
+
+#### `calkit fix storage`
+
+Move paths to where they're declared to be stored (Git or DVC).
+
+Same as 'calkit check storage --fix'.
+
+Usage:
+
+```text
+calkit fix storage
+```
+
 <a id="command-group-latex-tex"></a>
 
 ### `calkit latex|tex`
@@ -3669,7 +3752,6 @@ Work with LaTeX.
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
 | [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
 | [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
-| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX or Markdown source.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3891,18 +3973,6 @@ Options:
 | --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
-
-<a id="subcommand-latex-tex-comments"></a>
-
-#### `calkit latex|tex comments`
-
-Work with review comments in LaTeX or Markdown source.
-
-Usage:
-
-```text
-calkit latex|tex comments COMMAND [ARGS]...
-```
 
 <a id="command-group-overleaf-ol"></a>
 
@@ -4265,60 +4335,6 @@ Options:
 | Option           | Type    | Required | Default | Description                         |
 | ---------------- | ------- | -------- | ------- | ----------------------------------- |
 | `--follow`, `-f` | boolean | no       | False   | Follow the log output like tail -f. |
-
-<a id="command-group-dev"></a>
-
-### `calkit dev`
-
-Developer tools.
-
-| Command                              | Description                                                     |
-| ------------------------------------ | --------------------------------------------------------------- |
-| [`python`](#subcommand-dev-python)   | Start an Python shell in Calkit's environment.                  |
-| [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment.                 |
-| [`upgrade`](#subcommand-dev-upgrade) | Update a dev (editable) install: pull the branch and reinstall. |
-
-<a id="subcommand-dev-python"></a>
-
-#### `calkit dev python`
-
-Start an Python shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev python [OPTIONS]
-```
-
-<a id="subcommand-dev-ipython"></a>
-
-#### `calkit dev ipython`
-
-Start an IPython shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev ipython [OPTIONS]
-```
-
-<a id="subcommand-dev-upgrade"></a>
-
-#### `calkit dev upgrade`
-
-Update a dev (editable) install: pull the branch and reinstall.
-
-Usage:
-
-```text
-calkit dev upgrade [BRANCH]
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description                                                                                                                                    |
-| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `branch` | str  | no       |         | Branch to install from: the worktree that has it checked out, or else the install's own, if it has no changes. Defaults to the current branch. |
 
 <a id="command-group-sync"></a>
 

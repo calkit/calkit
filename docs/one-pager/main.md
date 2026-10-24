@@ -32,7 +32,7 @@ It's now essential to make it easy and intuitive
 to deliver research artifacts with their entire digital paper trail,
 so evidence for claims can be traced all the way back to its origin.
 
-## Our approach
+## Our solution
 
 Many open science or reproducibility
 solutions focus on embedding code in documents (literate programming)

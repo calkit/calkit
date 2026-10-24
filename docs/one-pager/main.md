@@ -15,10 +15,10 @@ that produced them, for fast iteration and full transparency.**
   researchers and groups with projects on [calkit.io](https://calkit.io)
 - **<!-- calkit value key=papers_shipped -->5<!-- /calkit value -->**
   reproducible publications shipped
-- **<!-- calkit value key=releases_per_week_last_90_days -->7.4<!-- /calkit value -->**
+- **<!-- calkit value key=releases_per_week_last_90_days -->7.8<!-- /calkit value -->**
   releases per week
 
-as of <!-- calkit value key=date -->2026-10-22<!-- /calkit value -->
+as of <!-- calkit value key=date -->2026-10-24<!-- /calkit value -->
 
 ## The problem
 

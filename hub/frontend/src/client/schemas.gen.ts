@@ -706,6 +706,16 @@ export const ConnectedAccountsSchema = {
       type: "boolean",
       title: "Overleaf",
     },
+    overleaf_token: {
+      type: "boolean",
+      title: "Overleaf Token",
+      default: false,
+    },
+    overleaf_session: {
+      type: "boolean",
+      title: "Overleaf Session",
+      default: false,
+    },
     google: {
       type: "boolean",
       title: "Google",
@@ -4966,6 +4976,30 @@ export const OverleafLookupSchema = {
   type: "object",
   required: ["links", "projects_scanned", "projects_remaining"],
   title: "OverleafLookup",
+} as const
+
+export const OverleafSessionPutSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionPut",
+} as const
+
+export const OverleafSessionResponseSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionResponse",
 } as const
 
 export const OverleafSyncPostSchema = {

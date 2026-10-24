@@ -62,7 +62,8 @@ def _get_overleaf_token(rejected: bool = False) -> str:
             "A new one can be generated at:\n\n"
             "    https://www.overleaf.com/user/settings\n\n"
             "under the 'Git Integration' section.\n"
-            "Without Overleaf Premium, run 'calkit overleaf login' instead.\n"
+            "Without Overleaf Premium, run 'calkit overleaf login' instead, "
+            "or connect from the Calkit browser extension on overleaf.com.\n"
         )
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise_error(
@@ -82,27 +83,54 @@ def _get_overleaf_token(rejected: bool = False) -> str:
     return overleaf_token
 
 
+def _get_overleaf_session_from_hub(stale: str | None = None) -> str | None:
+    """Get an Overleaf session saved to the hub, e.g., by the browser
+    extension, other than a ``stale`` one, and store it in config.
+    """
+    try:
+        # Not signed in to the hub fails before any request, and
+        # allow_login=False keeps that from starting a sign-in
+        session = calkit.hub.get(
+            "/user/overleaf-session", allow_login=False, max_retries=2
+        )["session"]
+    except Exception:
+        return None
+    # Compared as the client sends it, without a cookie name or whitespace
+    if not session or calkit.overleaf.WebClient(session).session == stale:
+        return None
+    calkit_config = calkit.config.read()
+    calkit_config.overleaf_session = session
+    calkit_config.write()
+    return str(session)
+
+
 def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
     """Get a Git token, or, if only a session is available, a web client
     for syncing without Overleaf Premium.
 
-    Credentials in config come first, then a token saved to the hub, before
-    prompting for a token.
+    Credentials in config come first, then a token saved to the hub, then a
+    session saved to the hub, before prompting for a token.
     """
     calkit_config = calkit.config.read()
     if calkit_config.overleaf_token:
         return calkit_config.overleaf_token
     if calkit_config.overleaf_session:
         return calkit.overleaf.WebClient(calkit_config.overleaf_session)
-    if calkit_config.token is not None:
-        try:
-            typer.echo("Getting Overleaf token from the hub")
-            token = calkit.hub.get("/user/overleaf-token")["access_token"]
-            calkit_config.overleaf_token = token
-            calkit_config.write()
-            return str(token)
-        except Exception:
-            typer.echo("No Overleaf token on the hub")
+    try:
+        token = calkit.hub.get(
+            "/user/overleaf-token", allow_login=False, max_retries=2
+        )["access_token"]
+    except Exception:
+        token = None
+    if token:
+        typer.echo("Using the Overleaf token saved to the hub")
+        calkit_config.overleaf_token = token
+        calkit_config.write()
+        return str(token)
+    session = _get_overleaf_session_from_hub()
+    if session:
+        typer.echo("Using the Overleaf session saved to the hub")
+        return calkit.overleaf.WebClient(session)
     return _get_overleaf_token()
 
 
@@ -116,9 +144,16 @@ def _get_pulled_overleaf_repo(
     them too.
     """
 
-    def get_new_session() -> str:
-        """Prompt for a new Overleaf session and store it."""
-        warn("Overleaf rejected your session", prefix="")
+    def get_new_session(stale: str, error: Exception) -> str:
+        """Get a new Overleaf session from the hub, or prompt for one, and
+        store it.
+        """
+        # A newer session on the hub, e.g., from the browser extension,
+        # means nothing failed as far as the user is concerned
+        session = _get_overleaf_session_from_hub(stale=stale)
+        if session:
+            return session
+        warn(str(error), prefix="")
         typer.echo(calkit.overleaf.SESSION_HELP + "\n")
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise_error(
@@ -145,18 +180,28 @@ def _get_pulled_overleaf_repo(
             return repo, auth
         except calkit.overleaf.AuthError as e:
             if isinstance(auth, calkit.overleaf.WebClient):
-                warn(str(e), prefix="")
-                auth = calkit.overleaf.WebClient(get_new_session())
+                auth = calkit.overleaf.WebClient(
+                    get_new_session(stale=auth.session, error=e)
+                )
             else:
                 # A token stops working when Premium ends, but a browser
                 # session still does
-                session = calkit.config.read().overleaf_session
+                session = (
+                    calkit.config.read().overleaf_session
+                    or _get_overleaf_session_from_hub()
+                )
                 if session:
                     warn(
                         "Overleaf rejected your Git token; "
                         "using your browser session instead",
                         prefix="",
                     )
+                    # Forget the token, so later syncs go straight to the
+                    # session
+                    calkit_config = calkit.config.read()
+                    if calkit_config.overleaf_token == auth:
+                        calkit_config.overleaf_token = None
+                        calkit_config.write()
                     auth = calkit.overleaf.WebClient(str(session))
                 else:
                     auth = _get_overleaf_token(rejected=True)
@@ -173,6 +218,13 @@ def login(
             help="Value of the 'overleaf_session2' cookie from your browser.",
         ),
     ] = None,
+    hub: Annotated[
+        bool,
+        typer.Option(
+            "--hub",
+            help="Also save session to Calkit hub, so it can sync there.",
+        ),
+    ] = False,
 ) -> None:
     """Sign in with a browser session to sync without Overleaf Premium."""
     if session is None:
@@ -190,6 +242,12 @@ def login(
     )
     calkit_config.write()
     typer.echo("Stored Overleaf session in Calkit config")
+    if hub:
+        try:
+            calkit.hub.put("/user/overleaf-session", json={"session": session})
+        except Exception as e:
+            raise_error(f"Failed to save Overleaf session to hub: {e}")
+        typer.echo("Saved Overleaf session to hub")
     if calkit_config.overleaf_token:
         warn(
             "An Overleaf Git token is also set and will be used instead; "
@@ -708,6 +766,16 @@ def sync(
             help="When rebuilding, also run stages the build depends on.",
         ),
     ] = False,
+    no_pull: Annotated[
+        bool,
+        typer.Option(
+            "--no-pull",
+            help=(
+                "Don't pull new commits from the project remote first, "
+                "e.g., from a sync on the hub."
+            ),
+        ),
+    ] = False,
 ):
     """Sync folders with Overleaf.
 
@@ -752,6 +820,52 @@ def sync(
         return {path: (content.get(path), u) for path, u in untracked.items()}
 
     repo = calkit.git.get_repo()
+    in_am_session = "in the middle of an am session" in repo.git.status()
+    # A sync on the hub or another machine pushes commits here, and syncing
+    # without them would apply the same Overleaf edits again. Pulled before
+    # reading the sync settings, since the new commits can change them.
+    if not no_pull and not resolve and not in_am_session:
+        import git
+
+        try:
+            tracking = repo.active_branch.tracking_branch()
+        except TypeError:
+            # Detached HEAD
+            tracking = None
+        fetched = False
+        if tracking is not None:
+            try:
+                repo.git.fetch(tracking.remote_name, tracking.remote_head)
+                fetched = True
+            except git.GitCommandError:
+                warn(
+                    f"Could not fetch {tracking.name}; "
+                    "syncing without any new commits there"
+                )
+        if tracking is not None and fetched:
+            behind = int(
+                repo.git.rev_list("--count", f"HEAD..{tracking.name}")
+            )
+            merge_head = os.path.join(repo.git_dir, "MERGE_HEAD")
+            if behind and os.path.exists(merge_head):
+                raise_error(
+                    f"There are new commits on {tracking.name}, but a merge "
+                    "is in progress; finish it, then sync again"
+                )
+            if behind:
+                typer.echo(
+                    f"Pulling {behind} new commit(s) from {tracking.name}"
+                )
+                try:
+                    repo.git.merge("--no-edit", tracking.name)
+                except git.GitCommandError as e:
+                    if os.path.exists(merge_head):
+                        repo.git.merge("--abort")
+                    raise_error(
+                        f"Could not pull new commits from {tracking.name}:\n"
+                        + str(e.stderr).strip()
+                        + "\nPull them yourself, then sync again"
+                    )
     # Uncommitted edits to calkit.yaml aren't the sync's to touch or commit,
     # so fixing the legacy schema waits until there are none
     calkit_yaml_dirty = bool(repo.git.diff("HEAD", "--", "calkit.yaml"))
@@ -799,7 +913,6 @@ def sync(
         )
     overleaf_auth = _get_overleaf_auth()
     conflict_fpath = calkit.overleaf.get_conflict_fpath()
-    in_am_session = "in the middle of an am session" in repo.git.status()
     # Check if we're in the middle of resolving a merge conflict
     if in_am_session and not resolve:
         raise_error(
@@ -1337,6 +1450,8 @@ def push_to_overleaf(
         allow_stale=True,
         any_branch=True,
         force=force,
+        # Pulling is part of preparing, or was skipped with --no-pull
+        no_pull=True,
     )
     calkit.echo("Overleaf is up-to-date with this project ✅")
 
@@ -1448,6 +1563,8 @@ def pull_from_overleaf(
         any_branch=True,
         force=force,
         no_build=no_run,
+        # Pulling is part of preparing, or was skipped with --no-pull
+        no_pull=True,
     )
     # An Overleaf edit to a map-paths copy lands in the file it's copied
     # from, so the document is only rebuilt from it after a run

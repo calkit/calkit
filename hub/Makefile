@@ -26,8 +26,8 @@ STACK_NAME=$(shell basename "$(abspath ..)" | tr A-Z a-z | \
 MAIN_ENV=$(shell dirname "$$(git rev-parse --path-format=absolute \
 	--git-common-dir)")/hub/.env
 
-.PHONY: env
-env: ## Create .env if needed and name this worktree's stack in it.
+.PHONY: dotenv
+dotenv: ## Create .env if needed and name this worktree's stack in it.
 	@if [ ! -f .env ]; then \
 		test -f "$(MAIN_ENV)" || \
 			{ echo "No .env; create one from the template"; exit 1; }; \
@@ -59,7 +59,7 @@ tex-engine: ## Download the TeX Live bundles for the LaTeX editor (idempotent).
 # containers running but attached to no network, which every log reports as
 # a healthy start and every client as a dead service.
 .PHONY: fix-unattached
-fix-unattached: env ## Recreate containers left with no network by a failed up.
+fix-unattached: dotenv ## Recreate containers left with no network by a failed up.
 	@broken=""; \
 	for s in $$(${DOCKER_COMPOSE_DEV} ps --services --status running); do \
 		cid=$$(${DOCKER_COMPOSE_DEV} ps -q $$s); \
@@ -75,11 +75,11 @@ fix-unattached: env ## Recreate containers left with no network by a failed up.
 	fi
 
 .PHONY: dev
-dev: tex-engine env ports-free fix-unattached ## Start up all containers for development.
+dev: tex-engine dotenv ports-free fix-unattached ## Start up all containers for development.
 	${DOCKER_COMPOSE_DEV} up
 
 .PHONY: api-dev
-api-dev: env ports-free ## Start the backend alone using Docker Compose.
+api-dev: dotenv ports-free ## Start the backend alone using Docker Compose.
 	${DOCKER_COMPOSE_DEV} up backend
 
 .PHONY: local-api
@@ -87,7 +87,7 @@ local-api: ## Run the FastAPI backend directly.
 	cd backend && make local-api
 
 .PHONY: build-dev
-build-dev: env ## Build containers for development.
+build-dev: dotenv ## Build containers for development.
 	${DOCKER_COMPOSE_DEV} build
 
 # The regular (non-superuser) account to wipe, so the next sign-in with it
@@ -95,7 +95,7 @@ build-dev: env ## Build containers for development.
 DEV_USER_EMAIL ?= $(shell grep -E '^DEV_USER_EMAIL=' .env 2>/dev/null | cut -d= -f2-)
 
 .PHONY: dev-reset-user
-dev-reset-user: env ## Delete the dev user and their projects (DEV_USER_EMAIL in .env, or EMAIL=...).
+dev-reset-user: dotenv ## Delete the dev user and their projects (DEV_USER_EMAIL in .env, or EMAIL=...).
 	@test -n "$(or $(EMAIL),$(DEV_USER_EMAIL))" || (echo "Set DEV_USER_EMAIL in .env or pass EMAIL=you@example.com"; exit 1)
 	${DOCKER_COMPOSE_DEV} run --rm --no-deps -T backend python scripts/delete-user.py $(or $(EMAIL),$(DEV_USER_EMAIL))
 

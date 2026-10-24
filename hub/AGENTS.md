@@ -53,7 +53,7 @@ Key points:
   plain `docker compose` commands from `hub/` reach this worktree's stack.
   `make dev` sets the name the first time, from the worktree's directory
   (the checkout named `calkit` keeps `calkit`), and copies `.env` from the
-  main checkout if there isn't one; `make env` does both without starting
+  main checkout if there isn't one; `make dotenv` does both without starting
   the stack. Stacks share ports, so stop another worktree's stack before
   starting this one; `make dev` says which.
 

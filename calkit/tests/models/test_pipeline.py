@@ -12,6 +12,7 @@ from calkit.models.pipeline import (
     LatexStage,
     MapPathsStage,
     MarimoHtmlWasmStage,
+    MarkdownStage,
     MatlabCommandStage,
     MatlabScriptStage,
     Pipeline,
@@ -1109,3 +1110,16 @@ def test_to_dvc_deps_have_no_duplicates():
     ]:
         deps = stage.to_dvc()["deps"]
         assert len(deps) == len(set(deps)), f"duplicates in {deps}"
+
+
+def test_markdownstage():
+    # The file's blocks become their own stages with their own outputs, so
+    # the stage standing in for them has none, e.g., when the hub lists
+    # what each stage produces without expanding Markdown first
+    s = MarkdownStage(
+        target_path="docs/main.md",
+        pdf={"output_path": "docs/main.pdf", "environment": "tex"},
+    )
+    assert s.outputs is None
+    assert s.dvc_outs == []
+    assert s.dvc_out_paths == []

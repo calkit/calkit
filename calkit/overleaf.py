@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import shutil
 import stat
 import subprocess
@@ -1364,19 +1365,32 @@ class OverleafSyncPaths:
         (tracked by Git or cached by DVC), is copied in by a map-paths stage
         or Calkit, was newly added on Overleaf since the last sync, or is
         treated as ignored (gitignored or a
-        ``storage: null`` pipeline output). Only files that were genuinely
-        removed from the project are deleted from Overleaf.
+        ``storage: null`` pipeline output). A copy Calkit made is also kept
+        while the documents still include it, even if it couldn't be copied
+        this time. Only files that were genuinely removed from the project
+        are deleted from Overleaf.
         """
         import calkit.latex
 
+        # What the documents still include, by path without its extension,
+        # since a figure can be named without one
+        folder = os.path.join(self.main_repo.working_dir, self.path_in_project)
+        included = {
+            posixpath.splitext(posixpath.normpath(c.path))[0]
+            for doc in calkit.latex.root_documents(folder)
+            for c in calkit.latex.find_ck_components(doc)
+            if c.kind != "value"
+        }
         keep = set()
+        prefix = calkit.latex.COMPONENTS_DIR + "/"
         for f in self.files_in_overleaf_last_sync:
-            # No longer included, so no longer copied, and nothing else writes
-            # there
-            if (
-                f.startswith(calkit.latex.COMPONENTS_DIR + "/")
-                and f not in self.mapped_files
-            ):
+            if f.startswith(prefix) and f not in self.mapped_files:
+                # Still included but not copied this time, e.g., a figure DVC
+                # stores that isn't pulled here, as on the hub, so Overleaf
+                # keeps the copy it has rather than losing the figure
+                if posixpath.splitext(f[len(prefix) :])[0] in included:
+                    keep.add(f)
+                # Otherwise no longer included, and nothing else writes there
                 continue
             if (
                 f in self.stored_files

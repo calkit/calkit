@@ -241,6 +241,11 @@ def test_sync_ck_components(tmp_dir):
         f.write('{"x": 2.5}')
     pushes = {f["path"] for f in status()["files_to_push"]}
     assert pushes == {"_calkit/values.tex"}
+    # One still included but not here, e.g., stored with DVC and not pulled,
+    # as on the hub, stays on Overleaf rather than being deleted
+    os.rename(os.path.join("figures", "plot.png"), "plot.png.bak")
+    assert status()["files_to_delete"] == []
+    os.rename("plot.png.bak", os.path.join("figures", "plot.png"))
     # A figure no longer included is deleted from Overleaf
     with open(os.path.join("paper", "main.tex"), "w") as f:
         f.write(main_tex.replace("\\ckfigure{figures/plot.png}\n", ""))

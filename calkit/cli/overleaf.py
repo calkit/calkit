@@ -1005,6 +1005,9 @@ def sync(
             continue
         if paths is not None and synced_folder not in paths:
             continue
+        # Resolving a conflict only finishes the sync that hit it
+        if resolve and synced_folder != resolving_info["wdir"]:
+            continue
         overleaf_project_id = sync_data.get("project_id")
         if not overleaf_project_id:
             raise_error(
@@ -1020,7 +1023,7 @@ def sync(
             f"Syncing {folder} with Overleaf project ID {overleaf_project_id}"
         )
         wdir = synced_folder
-        if resolve and wdir == resolving_info["wdir"]:
+        if resolve:
             repo.git.add(wdir)
             if repo.git.diff(["--staged", wdir]):
                 repo.git.commit(
@@ -1029,8 +1032,6 @@ def sync(
             if in_am_session:
                 with calkit.overleaf.staged_changes_set_aside(repo):
                     repo.git.am("--skip")
-        elif resolve:
-            continue
         # Local edits are saved first so they're what's synced and rebuilt
         # from. Untracked files aren't sent to Overleaf, so they're left out.
         if repo.git.diff(wdir) or repo.index.diff("HEAD", wdir):

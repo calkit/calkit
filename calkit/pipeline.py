@@ -1217,6 +1217,7 @@ def get_status(
     wdir: str | None = None,
     check_environments: bool = True,
     clean_notebooks: bool = True,
+    map_components: bool = True,
     compile_to_dvc: bool = True,
     force_env_check: bool = False,
     with_data_status: bool = False,
@@ -1228,6 +1229,7 @@ def get_status(
     """Get pipeline status after optional prep checks.
 
     This can compile the Calkit pipeline to DVC, clean notebook outputs,
+    map in the components LaTeX documents include with calkit.sty's commands,
     check pipeline environments, then query DVC for out-of-date stages.
     With ``with_data_status``, DVC's data status is attached as well, left
     None if it fails so the caller can ask again and report why.
@@ -1254,6 +1256,7 @@ def get_status(
 
     import calkit.docker
     import calkit.environments
+    import calkit.latex
     import calkit.markdown
 
     prev_cwd = os.getcwd()
@@ -1366,6 +1369,16 @@ def get_status(
             except Exception as e:
                 result["errors"].append(
                     "Failed to clean notebooks in pipeline: "
+                    f"{e.__class__.__name__}: {e}"
+                )
+                return PipelineStatus.model_validate(result)
+        if map_components and ck_info.get("pipeline", {}).get("stages", {}):
+            step("Mapping LaTeX components")
+            try:
+                calkit.latex.map_all_in_pipeline(ck_info=ck_info)
+            except Exception as e:
+                result["errors"].append(
+                    "Failed to map LaTeX components: "
                     f"{e.__class__.__name__}: {e}"
                 )
                 return PipelineStatus.model_validate(result)
@@ -1728,6 +1741,12 @@ def get_status(
                     continue
                 if dvc_repo.dvcignore.is_ignored_file(
                     os.path.abspath(ignored_path)
+                ):
+                    continue
+                # Mapped in before every check, so there on every machine
+                if (
+                    calkit.latex.COMPONENTS_DIR
+                    in Path(ignored_path).parts[:-1]
                 ):
                     continue
                 for d in dirs:

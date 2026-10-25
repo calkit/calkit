@@ -3019,6 +3019,7 @@ def run(
     import calkit.docker
     import calkit.dvc.zip
     import calkit.environments
+    import calkit.latex
     import calkit.markdown
     import calkit.pipeline
     from calkit.cli.overleaf import sync as overleaf_sync
@@ -3284,6 +3285,13 @@ def run(
             raise_error(
                 f"Failed to clean notebooks: {e.__class__.__name__}: {e}"
             )
+        try:
+            step("Mapping LaTeX components", "🧩")
+            calkit.latex.map_all_in_pipeline(ck_info=ck_info)
+        except Exception as e:
+            raise_error(
+                f"Failed to map LaTeX components: {e.__class__.__name__}: {e}"
+            )
         # Check environments and clean notebooks for each subproject, nested
         # ones included
         subprojects = ck_info.get("subprojects", [])
@@ -3312,6 +3320,7 @@ def run(
                     check_envs(sp_ck_info, targets=sp_targets, sp=sp)
                     step(f"Cleaning notebooks for subproject: {sp}", "📓")
                     calkit.notebooks.clean_all_in_pipeline(ck_info=sp_ck_info)
+                    calkit.latex.map_all_in_pipeline(ck_info=sp_ck_info)
                 except calkit.docker.DockerNotReadyError as e:
                     os.chdir(prev_cwd)
                     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)

@@ -1759,31 +1759,26 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         },
     }
     stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
-    # A stage of its own copies the components beside the document, from
-    # what they're copied from, including what an input includes
-    components = stages["build-paper-components"]
-    assert components["cmd"] == "calkit latex map-components paper"
-    assert components["deps"] == [
-        "paper/main.tex",
+    # The document depends on what its components are copied from, including
+    # what an input includes, so it builds after the stages making them, and
+    # on the copies Calkit maps in beside it
+    deps = stages["build-paper"]["deps"]
+    assert deps[0] == "paper/main.tex"
+    assert {
         "results/metrics.json",
         "figures/plot.png",
-    ]
-    assert components["outs"] == [
-        {"paper/_calkit": {"cache": False, "persist": True}},
-        {"paper/calkit.sty": {"cache": False, "persist": True}},
-    ]
-    # The document depends on the copies, so it builds after them
-    deps = stages["build-paper"]["deps"]
-    assert "paper/_calkit" in deps
-    assert "paper/calkit.sty" in deps
-    assert "figures/plot.png" not in deps
-    components = stages["build-paper-wdir-components"]
-    assert components["wdir"] == "paper"
-    assert components["cmd"] == "calkit latex map-components ."
-    assert "../figures/plot.png" in components["deps"]
-    assert "../results/metrics.json" in components["deps"]
-    assert {"_calkit", "calkit.sty"} <= set(stages["build-paper-wdir"]["deps"])
-    # A document that includes nothing gets no such stage
+        "paper/_calkit",
+        "paper/calkit.sty",
+    } <= set(deps)
+    assert not any(name.endswith("-components") for name in stages)
+    deps = stages["build-paper-wdir"]["deps"]
+    assert {
+        "../figures/plot.png",
+        "../results/metrics.json",
+        "_calkit",
+        "calkit.sty",
+    } <= set(deps)
+    # A document that includes nothing depends on no copies
     os.makedirs("plain")
     with open("plain/main.tex", "w") as f:
         f.write("\\documentclass{article}\n")
@@ -1793,12 +1788,11 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         "target_path": "plain/main.tex",
     }
     stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
-    assert "build-plain-components" not in stages
-    assert stages["build-plain"]["deps"][0] == "plain/main.tex"
     assert not any("_calkit" in d for d in stages["build-plain"]["deps"])
-    # Deleting the copies makes the stage stale, with one stage building
-    # each PDF, as DVC requires
+    # Represent a built paper, with one stage building each PDF, as DVC
+    # requires
     del ck_info["pipeline"]["stages"]["build-paper-wdir"]
+    del ck_info["pipeline"]["stages"]["build-plain"]
     os.makedirs("figures")
     with open("figures/plot.png", "wb") as fb:
         fb.write(b"png")
@@ -1808,19 +1802,35 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     calkit.pipeline.to_dvc(write=True)
-    subprocess.check_call(["dvc", "repro", "build-paper-components"])
+    assert calkit.latex.map_all_in_pipeline() == []
     with open("paper/_calkit/values.tex") as f:
         assert "{rmse}{n}{0.123}" in f.read()
+    os.makedirs(".calkit/env-locks", exist_ok=True)
+    with open(".calkit/env-locks/tex", "w") as f:
+        f.write("lock")
+    with open("paper/main.pdf", "wb") as fb:
+        fb.write(b"pdf")
+    subprocess.check_call(["dvc", "commit", "-f", "build-paper"])
 
-    def stale() -> bool:
-        out = subprocess.check_output(
-            ["dvc", "status", "build-paper-components", "--json"], text=True
-        )
-        return bool(json.loads(out))
+    def stale() -> list[str]:
+        status = calkit.pipeline.get_status(check_environments=False)
+        assert not status.errors, status.errors
+        # The copies are Git-ignored, but mapped in on every machine
+        assert not status.ignored_files_in_inputs
+        return status.stale_stage_names
 
-    assert not stale()
+    assert stale() == []
+    # Checking maps the copies in again, rather than reporting them missing,
+    # so a fresh clone isn't stale
     shutil.rmtree("paper/_calkit")
-    assert stale()
+    os.remove("paper/calkit.sty")
+    assert stale() == []
+    assert os.path.isfile("paper/_calkit/values.tex")
+    assert os.path.isfile("paper/calkit.sty")
+    # A new value makes the document stale
+    with open("results/metrics.json", "w") as f:
+        f.write('{"rmse": 0.456}')
+    assert stale() == ["build-paper"]
 
 
 def test_get_status(tmp_dir):
@@ -1864,6 +1874,7 @@ def test_get_status(tmp_dir):
         "Checking environment 'py'",
         "Compiling pipeline",
         "Cleaning notebooks",
+        "Mapping LaTeX components",
         "Finding stale stages",
     ]
     assert not status.failed_environment_checks

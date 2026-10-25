@@ -7,6 +7,7 @@ import hashlib
 import os
 import posixpath
 import re
+import shutil
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -679,8 +680,16 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
         elif not os.path.isfile(src):
             problems.append(f"{c.path} is not in the project yet")
         else:
-            with open(src, "rb") as f:
-                _write_if_changed(os.path.join(out, rel), f.read())
+            # Copied with its timestamp and skipped while size and timestamp
+            # match, since this runs before every status check
+            dest = os.path.join(out, rel)
+            src_stat = os.stat(src)
+            if not os.path.isfile(dest) or (
+                os.stat(dest).st_size,
+                os.stat(dest).st_mtime_ns,
+            ) != (src_stat.st_size, src_stat.st_mtime_ns):
+                os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+                shutil.copy2(src, dest)
             kept.add(rel)
     lines = ["%% Written by Calkit from the values the documents here use.\n"]
     loaded: dict[str, Any] = {}
@@ -716,6 +725,36 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
         os.path.join(folder, STYLE_FNAME),
         calkit.resources.read_text("latex", STYLE_FNAME),
     )
+    return problems
+
+
+def map_all_in_pipeline(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> list[str]:
+    """Map in the components of every LaTeX stage's document that includes
+    any, before the pipeline is run or checked, the way notebooks are
+    cleaned, so the copies the stages depend on are there and current.
+
+    Returns what couldn't be brought in, e.g., a file not pulled yet.
+    """
+    import calkit
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    folders = []
+    for stage in stages.values():
+        if not isinstance(stage, dict) or stage.get("kind") != "latex":
+            continue
+        target = stage.get("target_path")
+        if not isinstance(target, str):
+            continue
+        document = os.path.join(wdir or "", stage.get("wdir") or "", target)
+        if os.path.isfile(document) and find_ck_components(document):
+            folders.append(os.path.dirname(document))
+    problems = []
+    for folder in dict.fromkeys(folders):
+        problems += map_ck_components(folder)
     return problems
 
 

@@ -1259,13 +1259,7 @@ class LatexStage(Stage):
         revision_key: Callable[[str], str] | None = None,
         extra_inputs: list[str] | None = None,
     ) -> dict[str, dict]:
-        """One stage per diff, separate from building the document, and one
-        that copies the components the document includes with calkit.sty's
-        commands beside it.
-
-        The copies are the stage's own outputs, so deleting them, or a
-        change to what they're copied from, makes it stale, and the document
-        depends on the copies, so it builds after them.
+        """One stage per diff, separate from building the document.
 
         A diff has different inputs from the document it describes, and
         some of those inputs aren't files at all, so folding them together
@@ -1282,36 +1276,6 @@ class LatexStage(Stage):
             "in calkit.yaml. Changes made here will be overwritten."
         )
         stages: dict[str, dict] = {}
-        if self._component_paths:
-            folder = posixpath.dirname(self.target_path) or "."
-            components: dict = {
-                "cmd": f"calkit latex map-components {shlex.quote(folder)}",
-                # The document too, since it says how values are formatted
-                "deps": list(
-                    dict.fromkeys(
-                        [
-                            p
-                            for p in self.dvc_deps
-                            if p not in self.component_copies
-                            and not p.startswith(".calkit/")
-                        ]
-                        + [
-                            self.path_from_wdir(p)
-                            for p in self._component_paths
-                        ]
-                    )
-                ),
-                # Persisted, so DVC doesn't delete them before each run and
-                # an unchanged copy keeps the timestamp latexmk goes by
-                "outs": [
-                    {p: {"cache": False, "persist": True}}
-                    for p in self.component_copies
-                ],
-                "desc": desc,
-            }
-            if self.wdir is not None:
-                components["wdir"] = self.wdir
-            stages[f"{self.name}-components"] = components
         deps = self.dvc_deps + (extra_inputs or [])
         inputs = [
             path
@@ -1535,9 +1499,16 @@ class LatexStage(Stage):
 
     @property
     def dvc_deps(self) -> list[str]:
-        # The copies rather than what they're copied from, so a missing copy
-        # makes the document stale and it builds after the stage making them
-        deps = [self.target_path] + super().dvc_deps + self.component_copies
+        # What the components are copied from, so the document builds after
+        # the stages making them, and the copies, which Calkit maps in before
+        # running or checking the pipeline, so a new value or calkit.sty
+        # makes it stale
+        deps = (
+            [self.target_path]
+            + super().dvc_deps
+            + [self.path_from_wdir(p) for p in self._component_paths]
+            + self.component_copies
+        )
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
         return _unique_paths(deps)

@@ -365,6 +365,8 @@ def import_publication(
     os.makedirs(dest_dir, exist_ok=True)
     ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
+    if dest_dir in (ck_info.get("overleaf_sync") or {}):
+        raise_error(f"'{dest_dir}' is already synced with Overleaf")
     # TODO: Don't allow the same Overleaf project ID in multiple publications
     repo = calkit.git.get_repo()
     # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
@@ -400,34 +402,36 @@ def import_publication(
             "please specify with --target"
         )
         return
-    # Try to extract title from the target LaTeX file if not provided
-    if not title:
-        target_tex_path = os.path.join(
-            dest_dir if push_only else overleaf_project_dir, target_path
-        )
-        extracted_title = _extract_title_from_tex(target_tex_path)
-        if extracted_title:
-            typer.echo(f"Detected title: {extracted_title}")
-            title = extracted_title
-    if not title:
-        raise_error(
-            "Title could not be detected from the LaTeX file; "
-            "please specify with --title"
-        )
     # Determine the PDF output path
-    pdf_path = target_path.removesuffix(".tex") + ".pdf"  # type: ignore
+    pdf_path = target_path.removesuffix(".tex") + ".pdf"
     typer.echo(f"Using PDF path: {pdf_path}")
     tex_path = pdf_path.removesuffix(".pdf") + ".tex"
     target_tex_path = Path(dest_dir, tex_path).as_posix()
     pub_path = Path(dest_dir, pdf_path).as_posix()
-    pub_paths = [pub.get("path") for pub in pubs]
-    if not overwrite and pub_path in pub_paths:
-        raise_error(
-            f"A publication already exists in this project at {pub_path}"
-        )
-    elif overwrite and pub_path in pub_paths:
+    # A publication already in the project is linked as it is, unless asked
+    # to replace it
+    existing_pub = next((p for p in pubs if p.get("path") == pub_path), None)
+    if existing_pub is not None and overwrite:
         # Note: This publication will go to the end of the list
         pubs = [p for p in pubs if p.get("path") != pub_path]
+        existing_pub = None
+    if existing_pub is not None:
+        typer.echo(f"Using the publication already at {pub_path}")
+    # Try to extract title from the target LaTeX file if not provided
+    if existing_pub is None and not title:
+        extracted_title = _extract_title_from_tex(
+            os.path.join(
+                dest_dir if push_only else overleaf_project_dir, target_path
+            )
+        )
+        if extracted_title:
+            typer.echo(f"Detected title: {extracted_title}")
+            title = extracted_title
+    if existing_pub is None and not title:
+        raise_error(
+            "Title could not be detected from the LaTeX file; "
+            "please specify with --title"
+        )
     # Check that we have a LaTeX environment
     typer.echo("Checking that this project has a LaTeX environment")
     envs = ck_info.get("environments", {})
@@ -457,14 +461,18 @@ def import_publication(
     pipeline = ck_info.get("pipeline", {})
     stages = pipeline.get("stages", {})
     stage_name = None
-    for stage_name_i, stage in stages.items():
-        if (
-            stage.get("kind") == "latex"
-            and stage.get("target_path") == target_tex_path
-        ):
-            stage_name = stage_name_i
-            typer.echo(f"Found build stage '{stage_name}' in pipeline")
-            break
+    if existing_pub is not None and existing_pub.get("stage") in stages:
+        stage_name = existing_pub["stage"]
+        typer.echo(f"Using the publication's build stage '{stage_name}'")
+    else:
+        for stage_name_i, stage in stages.items():
+            if (
+                stage.get("kind") == "latex"
+                and stage.get("target_path") == target_tex_path
+            ):
+                stage_name = stage_name_i
+                typer.echo(f"Found build stage '{stage_name}' in pipeline")
+                break
     if stage_name is None:
         # Create a new stage
         stage_name = calkit.to_kebab_case("build-" + dest_dir)
@@ -482,21 +490,24 @@ def import_publication(
             no_commit=True,
         )
         repo.git.add("calkit.yaml")
-    # Add to publications in calkit.yaml
-    typer.echo("Adding publication to calkit.yaml")
     ck_info = calkit.load_calkit_info()
-    new_pub = dict(
-        path=pub_path,
-        title=title,
-        description=description,
-        kind=kind,
-        stage=stage_name,
-    )
-    pubs.append(new_pub)
-    ck_info["publications"] = pubs
+    if existing_pub is None:
+        typer.echo("Adding publication to calkit.yaml")
+        pubs.append(
+            dict(
+                path=pub_path,
+                title=title,
+                description=description,
+                kind=kind,
+                stage=stage_name,
+            )
+        )
+        ck_info["publications"] = pubs
+    else:
+        for pub in ck_info.get("publications") or []:
+            if pub.get("path") == pub_path and not pub.get("stage"):
+                pub["stage"] = stage_name
     ol_sync = ck_info.get("overleaf_sync", {})
-    if dest_dir in ol_sync:
-        raise_error(f"'{dest_dir}' is already synced with Overleaf")
     ol_sync[dest_dir] = dict(url=src_url)
     if push_paths:
         ol_sync[dest_dir]["push_paths"] = push_paths
@@ -523,6 +534,65 @@ def import_publication(
         push_only=push_only,
         allow_stale=True,
         any_branch=True,
+    )
+
+
+@overleaf_app.command(name="link")
+def link_publication(
+    folder: Annotated[
+        str,
+        typer.Argument(help="Folder in the project, e.g., 'paper'."),
+    ],
+    project_url: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Overleaf project URL, e.g., "
+                "https://www.overleaf.com/project/6800005973cb2e35."
+            )
+        ),
+    ],
+    title: Annotated[
+        str | None,
+        typer.Option(
+            "--title",
+            "-t",
+            help="Title, if the publication isn't in calkit.yaml yet.",
+        ),
+    ] = None,
+    target_path: Annotated[
+        str | None,
+        typer.Option("--target", "-T", help="Target TeX file in the folder."),
+    ] = None,
+    push_paths: Annotated[
+        list[str],
+        typer.Option(
+            "--push-path",
+            "-p",
+            help="Paths in the folder to only push to Overleaf, e.g., 'figures'.",
+        ),
+    ] = [],
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit changes to repo."),
+    ] = False,
+) -> None:
+    """Link a folder in the project to an Overleaf project, pushing its files
+    there.
+
+    Like 'import --push-only', for a document that starts in the project.
+    """
+    import_publication(
+        src_url=project_url,
+        dest_dir=folder,
+        title=title,
+        target_path=target_path,
+        description=None,
+        kind=None,
+        push_paths=push_paths,
+        no_commit=no_commit,
+        overwrite=False,
+        push_only=True,
     )
 
 

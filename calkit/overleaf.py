@@ -1452,7 +1452,7 @@ def get_sync_status(
     would be deleted from Overleaf. Each file is flagged as a figure or
     not, so callers can surface out-of-date figures specifically.
     """
-    from calkit.latex import write_ck_components
+    from calkit.latex import map_ck_components
 
     path_in_project = Path(path_in_project).as_posix()
     if sync_info_for_path is None:
@@ -1486,7 +1486,7 @@ def get_sync_status(
         declared_figures.add(fig_posix[len(prefix_slash) :])
     # The documents' components are copied in first, as a sync would, to see
     # what it would push
-    write_ck_components(
+    map_ck_components(
         os.path.join(str(main_repo.working_dir), path_in_project), always=True
     )
     paths = OverleafSyncPaths(
@@ -1646,7 +1646,7 @@ def sync(
     changes staged). See the ``--no-commit`` handling near the end of this
     function.
     """
-    from calkit.latex import write_ck_components
+    from calkit.latex import map_ck_components
 
     # Holds a mix of commits, paths, patches, and flags, so it's annotated
     # rather than inferred from whatever lands in it first.
@@ -1896,7 +1896,7 @@ def sync(
     # Bring in the documents' components only now that Overleaf's edits are
     # in, since those may include something new, and look again at what to
     # push
-    res["component_problems"] = write_ck_components(
+    res["component_problems"] = map_ck_components(
         path_in_project_abs, always=True
     )
     for problem in res["component_problems"]:

@@ -622,7 +622,7 @@ def _write_if_changed(path: str, content: str | bytes) -> None:
         f.write(data)
 
 
-def write_ck_components(folder: str, always: bool = False) -> list[str]:
+def map_ck_components(folder: str, always: bool = False) -> list[str]:
     """Bring the components the documents in a folder include with
     calkit.sty's commands into its ``_calkit`` folder, so they build without
     the rest of the project, e.g., on Overleaf.
@@ -690,6 +690,9 @@ def write_ck_components(folder: str, always: bool = False) -> list[str]:
                     resolve_key(loaded[c.path], c.key or ""), c.format
                 )
             )
+        except KeyError:
+            problems.append(f"{c.path} has no {c.key}")
+            continue
         except Exception as e:
             problems.append(f"{c.key} from {c.path}: {e}")
             continue

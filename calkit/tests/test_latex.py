@@ -132,9 +132,9 @@ def test_ck_components(tmp_dir):
     # An input isn't a document of its own
     docs = calkit.latex.root_documents("paper")
     assert [Path(d).as_posix() for d in docs] == ["paper/main.tex"]
-    problems = calkit.latex.write_ck_components("paper")
+    problems = calkit.latex.map_ck_components("paper")
     assert len(problems) == 2
-    assert any("nope" in p for p in problems)
+    assert "results/metrics.json has no nope" in problems
     assert any("figures/not-yet.png" in p for p in problems)
     with open("paper/_calkit/figures/plot.png", "rb") as f:
         assert f.read() == b"png"
@@ -150,29 +150,29 @@ def test_ck_components(tmp_dir):
     assert os.path.isfile("paper/calkit.sty")
     # Unchanged content isn't rewritten, so latexmk has nothing to redo
     mtime = os.stat("paper/_calkit/values.tex").st_mtime_ns
-    calkit.latex.write_ck_components("paper")
+    calkit.latex.map_ck_components("paper")
     assert os.stat("paper/_calkit/values.tex").st_mtime_ns == mtime
     # What's no longer included is removed, along with its emptied folder
     with open("paper/main.tex") as f:
         main = f.read()
     with open("paper/main.tex", "w") as f:
         f.write(main.replace("\\cktable{tables/summary.tex}\n", ""))
-    calkit.latex.write_ck_components("paper")
+    calkit.latex.map_ck_components("paper")
     assert not os.path.exists("paper/_calkit/tables")
     assert os.path.isfile("paper/_calkit/figures/plot.png")
     # A folder whose documents cite nothing gets nothing
     os.makedirs("other")
     with open("other/main.tex", "w") as f:
         f.write("\\documentclass{article}\n")
-    assert calkit.latex.write_ck_components("other") == []
+    assert calkit.latex.map_ck_components("other") == []
     assert not os.path.exists("other/_calkit")
     assert not os.path.exists("other/calkit.sty")
     # Unless it's synced with Overleaf, where citing should compile before
     # the next sync brings anything in
-    assert calkit.latex.write_ck_components("other", always=True) == []
+    assert calkit.latex.map_ck_components("other", always=True) == []
     assert os.path.isfile("other/calkit.sty")
     assert os.path.isfile("other/_calkit/values.tex")
     # A folder with no documents gets nothing either way
     os.makedirs("figures-only")
-    assert calkit.latex.write_ck_components("figures-only", always=True) == []
+    assert calkit.latex.map_ck_components("figures-only", always=True) == []
     assert os.listdir("figures-only") == []

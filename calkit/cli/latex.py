@@ -561,6 +561,17 @@ def _run_latexmk(
             os.remove(fdb_path)
 
 
+@latex_app.command(name="map-components")
+def map_components(
+    folder: Annotated[
+        str, typer.Argument(help="Folder holding the documents.")
+    ] = ".",
+) -> None:
+    """Map in components the documents include with calkit.sty."""
+    for problem in calkit.latex.map_ck_components(folder):
+        warn(f"{problem}; it will print as ??")
+
+
 @latex_app.command(name="build")
 def build(
     tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
@@ -659,7 +670,7 @@ def build(
     pdf_dir = output_dir if output_dir is not None else tex_dir
     # Components the document includes with calkit.sty's commands, e.g.,
     # \ckfigure, have to be beside it before TeX can read them
-    for problem in calkit.latex.write_ck_components(tex_dir):
+    for problem in calkit.latex.map_ck_components(tex_dir):
         warn(f"{problem}; it will print as ??")
     if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
         fdb_dir = aux_dir if aux_dir is not None else tex_dir

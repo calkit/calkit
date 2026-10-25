@@ -530,6 +530,9 @@ _CK_COMMAND_RE = re.compile(
     r"\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
     r"(?(value)\s*\{(?P<second>[^}]*)\})"
 )
+_PACKAGE_RE = re.compile(
+    r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}"
+)
 _TEX_SPECIALS = {
     "\\": r"\textbackslash{}",
     "&": r"\&",
@@ -572,15 +575,24 @@ def _read_leniently(path: str) -> str | None:
     return p.read_text(encoding="utf-8", errors="replace")
 
 
-def find_ck_components(document: str) -> list[CkComponent]:
-    """The components a document includes with calkit.sty's commands,
-    including in the files it inputs, in order and without repeats.
+def read_ck_usage(document: str) -> tuple[bool, list[CkComponent]]:
+    """Whether a document loads calkit.sty, and the components it includes
+    with its commands, including in the files it inputs, in order and
+    without repeats.
 
-    Commands in a macro's definition, whose arguments are its parameters,
-    e.g., ``#1``, aren't components until used, and can't be followed.
+    Commands in a document that doesn't load calkit.sty can't compile, so
+    they aren't components. Nor are commands in a macro's definition, whose
+    arguments are its parameters, e.g., ``#1``, until used, which can't be
+    followed.
     """
     lines = flatten(document, read=_read_leniently)
     text = "\n".join(_strip_comments(line.text) for line in lines)
+    loads = any(
+        "calkit" in (name.strip() for name in m.group(1).split(","))
+        for m in _PACKAGE_RE.finditer(text)
+    )
+    if not loads:
+        return False, []
     found: list[CkComponent] = []
     for match in _CK_COMMAND_RE.finditer(text):
         kind, option, first = match.group("kind", "option", "first")
@@ -595,7 +607,7 @@ def find_ck_components(document: str) -> list[CkComponent]:
             )
         else:
             found.append(CkComponent(kind, first.strip()))
-    return list(dict.fromkeys(found))
+    return True, list(dict.fromkeys(found))
 
 
 def component_path(
@@ -693,7 +705,6 @@ def _make_writable(path: str) -> None:
 def map_ck_components(
     folder: str,
     documents: list[str] | None = None,
-    always: bool = False,
     is_tracked: Callable[[str], bool] | None = None,
     previous_values: str | None = None,
 ) -> list[str]:
@@ -701,17 +712,18 @@ def map_ck_components(
     calkit.sty's commands into its ``_calkit`` folder, so they build without
     the rest of the project, e.g., on Overleaf.
 
+    Only documents that load calkit.sty are mapped, so Calkit writes nothing
+    beside one that doesn't. One that does gets ``calkit.sty`` and
+    ``_calkit`` even before it includes anything, so it compiles.
+
     Every document directly in the folder is included, plus ``documents``,
     e.g., one whose ``\\documentclass`` is in a file it inputs, since they
     share the ``_calkit`` folder, and mapping one alone would remove the
     others' copies. Files are copied, values are written to
     ``_calkit/values.tex`` for calkit.sty to format, and ``calkit.sty`` is
     put beside the documents. Anything no longer included is removed, since
-    nothing else writes there.
-
-    With ``always``, ``calkit.sty`` is written even when nothing is included
-    yet, so a document synced with Overleaf can start using its commands
-    there and still compile.
+    nothing else writes there, as is ``calkit.sty`` once no document loads
+    it.
 
     ``is_tracked`` says whether a project path is stored with DVC, so
     something that isn't pulled, e.g., on the hub, comes out as it would
@@ -734,16 +746,34 @@ def map_ck_components(
             if os.path.isfile(d)
         )
     )
-    components = list(
-        dict.fromkeys(c for doc in docs for c in find_ck_components(doc))
-    )
+    usage = [read_ck_usage(doc) for doc in docs]
+    components = list(dict.fromkeys(c for _, found in usage for c in found))
     out = os.path.join(folder, COMPONENTS_DIR)
-    if not components and not (always and docs):
+    style_path = os.path.join(folder, STYLE_FNAME)
+    if not any(loads for loads, _ in usage):
         if os.path.isdir(out):
             for dirpath, _, filenames in os.walk(out):
                 for name in filenames:
                     _make_writable(os.path.join(dirpath, name))
             shutil.rmtree(out)
+        # Only the one Calkit wrote, and never one that's committed
+        if os.path.isfile(style_path):
+            with open(style_path, encoding="utf-8", errors="replace") as f:
+                ours = "Calkit project components" in f.read()
+            try:
+                repo = calkit.git.get_repo(folder or ".")
+                committed = bool(
+                    repo.git.ls_files(
+                        "--",
+                        os.path.relpath(
+                            os.path.abspath(style_path), repo.working_dir
+                        ),
+                    )
+                )
+            except Exception:
+                committed = False
+            if ours and not committed:
+                os.remove(style_path)
         return []
     # Component paths are relative to the project, wherever the document is
     root = os.path.abspath(folder or ".")
@@ -871,7 +901,6 @@ def map_ck_components(
                 os.remove(path)
         if dirpath != out and not os.listdir(dirpath):
             os.rmdir(dirpath)
-    style_path = os.path.join(folder, STYLE_FNAME)
     new_style = not os.path.isfile(style_path)
     _write_if_changed(
         style_path, calkit.resources.read_text("latex", STYLE_FNAME)

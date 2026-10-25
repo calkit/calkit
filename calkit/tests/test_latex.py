@@ -119,7 +119,8 @@ def test_ck_components(tmp_dir):
             "\\end{document}\n"
         )
     # Inputs count, comments don't, and nothing repeats
-    components = calkit.latex.find_ck_components("paper/main.tex")
+    loads, components = calkit.latex.read_ck_usage("paper/main.tex")
+    assert loads
     assert [(c.kind, c.path, c.key, c.format) for c in components] == [
         ("value", "results/metrics.json", "rmse", ".2f"),
         ("figure", "figures/plot.png", None, ""),
@@ -175,21 +176,28 @@ def test_ck_components(tmp_dir):
     calkit.latex.map_ck_components("paper")
     assert not os.path.exists("paper/_calkit/tables")
     assert os.path.isfile("paper/_calkit/figures/plot.png")
-    # A folder whose documents cite nothing gets nothing
+    # A document that doesn't load calkit.sty gets nothing, since its
+    # commands couldn't compile
     os.makedirs("other")
     with open("other/main.tex", "w") as f:
-        f.write("\\documentclass{article}\n")
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{amsmath}\n"
+            "\\ckvalue{results/metrics.json}{rmse}\n"
+        )
+    assert calkit.latex.read_ck_usage("other/main.tex") == (False, [])
     assert calkit.latex.map_ck_components("other") == []
-    assert not os.path.exists("other/_calkit")
-    assert not os.path.exists("other/calkit.sty")
-    # Unless it's synced with Overleaf, where citing should compile before
-    # the next sync brings anything in
-    assert calkit.latex.map_ck_components("other", always=True) == []
+    assert os.listdir("other") == ["main.tex"]
+    # One that does gets it before including anything, so it compiles, e.g.,
+    # after loading it on Overleaf, including from a list of packages
+    with open("other/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n\\usepackage{amsmath, calkit}\n")
+    assert calkit.latex.map_ck_components("other") == []
     assert os.path.isfile("other/calkit.sty")
     assert os.path.isfile("other/_calkit/values.tex")
-    # A folder with no documents gets nothing either way
+    # A folder with no documents gets nothing
     os.makedirs("figures-only")
-    assert calkit.latex.map_ck_components("figures-only", always=True) == []
+    assert calkit.latex.map_ck_components("figures-only") == []
     assert os.listdir("figures-only") == []
 
     # Nothing outside the project is read, however it's named, and a figure
@@ -236,12 +244,13 @@ def test_ck_components(tmp_dir):
     # inputs are read from where TeX compiles
     os.makedirs("more/front")
     with open("more/front/preamble.tex", "w") as f:
-        f.write("\\documentclass{article}\n")
+        f.write("\\documentclass{article}\n\\usepackage[final]{calkit}\n")
     with open("more/a.tex", "w") as f:
         f.write("\\input{front/preamble}\n\\ckfigure{figures/plot}\n")
     with open("more/b.tex", "w") as f:
         f.write(
             "\\documentclass{article}\n"
+            "\\RequirePackage{calkit}\n"
             "\\ckvalue{../outside.json}{secret}\n"
             "\\ckvalue{/etc/outside.json}{secret}\n"
             "\\ckvalue{results/metrics.json}{rmse}\n"
@@ -320,14 +329,19 @@ def test_ck_components(tmp_dir):
     assert "tables/summary is not in the project yet" in problems
     with open("more/_calkit/values.tex") as f:
         assert "tables/summary" not in f.read()
-    # Without any commands left, the folder goes, though calkit.sty stays for
-    # a document that still loads it
+    # Once no document loads calkit.sty, the folder goes, and so does
+    # calkit.sty, since Calkit wrote it
     os.chmod("more/_calkit/figures/plot.png", 0o444)
     for name in ["a", "b"]:
         with open(f"more/{name}.tex", "w") as f:
             f.write("\\documentclass{article}\n")
     assert calkit.latex.map_ck_components("more") == []
     assert not os.path.exists("more/_calkit")
+    assert not os.path.exists("more/calkit.sty")
+    # But not one of the user's own
+    with open("more/calkit.sty", "w") as f:
+        f.write("\\ProvidesPackage{calkit}\n")
+    calkit.latex.map_ck_components("more")
     assert os.path.isfile("more/calkit.sty")
 
 

@@ -1398,7 +1398,7 @@ class OverleafSyncPaths:
         included = [
             c
             for doc in calkit.latex.root_documents(folder)
-            for c in calkit.latex.find_ck_components(doc)
+            for c in calkit.latex.read_ck_usage(doc)[1]
             if c.kind != "value"
         ]
         keep = set()
@@ -1585,7 +1585,6 @@ def get_sync_status(
     # what it would push
     map_ck_components(
         os.path.join(str(main_repo.working_dir), path_in_project),
-        always=True,
         is_tracked=_dvc_tracked(main_repo),
         previous_values=_overleaf_values(overleaf_repo),
     )
@@ -1998,7 +1997,6 @@ def sync(
     # push
     res["component_problems"] = map_ck_components(
         path_in_project_abs,
-        always=True,
         is_tracked=_dvc_tracked(main_repo),
         previous_values=_overleaf_values(overleaf_repo),
     )

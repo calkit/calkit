@@ -1465,11 +1465,11 @@ class LatexStage(Stage):
         return cmd
 
     # Project paths the document's components depend on, the files among
-    # them it reads copies of, and whether it includes any, set by
+    # them it reads copies of, and whether it loads calkit.sty, set by
     # read_component_paths
     _component_paths: list[str] = PrivateAttr(default_factory=list)
     _copied_paths: list[str] = PrivateAttr(default_factory=list)
-    _uses_components: bool = PrivateAttr(default=False)
+    _loads_calkit: bool = PrivateAttr(default=False)
 
     def read_component_paths(
         self, project_dir: str | None = None, outputs: Iterable[str] = ()
@@ -1505,8 +1505,7 @@ class LatexStage(Stage):
         document = os.path.join(
             project_dir or "", self.wdir or "", self.target_path
         )
-        components = calkit.latex.find_ck_components(document)
-        self._uses_components = bool(components)
+        self._loads_calkit, components = calkit.latex.read_ck_usage(document)
         paths = []
         copied = []
         for c in components:
@@ -1536,14 +1535,14 @@ class LatexStage(Stage):
         """What the document reads its components from, relative to the
         stage's ``wdir``: ``calkit.sty`` and ``_calkit/values.tex`` beside
         it, and the copies of figures and tables kept in Git, or nothing if
-        it includes none.
+        it doesn't load calkit.sty.
 
         Like cleaned notebooks, they're written before the pipeline runs or
         is checked, and kept out of Git. A figure a stage makes or DVC
         stores may only be copied after DVC checks the stage's dependencies
         are there, so the stage depends on the figure itself instead.
         """
-        if not self._uses_components:
+        if not self._loads_calkit:
             return []
         folder = posixpath.dirname(self.target_path)
         components_dir = posixpath.join(folder, calkit.latex.COMPONENTS_DIR)

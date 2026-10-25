@@ -65,13 +65,8 @@ def test_get_sync_status(tmp_dir):
     # The TeX file matches on both sides, so it isn't pending a push, and
     # wouldn't be flagged as a figure regardless
     assert "main.tex" not in pushes
-    # Calkit's own files go too, so the document can cite project content
-    assert set(pushes) == {
-        "figures/fig.png",
-        "calkit.sty",
-        "_calkit/README.md",
-        "_calkit/values.tex",
-    }
+    # Calkit's own files don't, since the document doesn't load calkit.sty
+    assert set(pushes) == {"figures/fig.png"}
     # Push by hand to represent a completed sync
     for rel in pushes:
         os.makedirs(os.path.dirname(overleaf_dir / rel), exist_ok=True)
@@ -198,14 +193,14 @@ def test_sync_ck_components(tmp_dir):
     def on_overleaf() -> set[str]:
         return set(calkit.git.ls_files(overleaf_repo))
 
-    # calkit.sty goes to Overleaf before anything is included, so a document
-    # can start using its commands there and still compile
-    pushes = {f["path"] for f in status()["files_to_push"]}
-    written = {"calkit.sty", "_calkit/README.md", "_calkit/values.tex"}
-    assert pushes == written
+    # Nothing of Calkit's goes to Overleaf for a document that doesn't load
+    # calkit.sty
+    assert status()["files_to_push"] == []
     sync()
-    assert written <= on_overleaf()
-    # What's included on Overleaf is there after one sync
+    assert not os.path.exists(os.path.join("paper", "calkit.sty"))
+    assert on_overleaf() == {"main.tex"}
+    # Loading it and including something on Overleaf brings both in after
+    # one sync
     main_tex = (
         "\\documentclass{article}\n\\usepackage{calkit}\n"
         "\\begin{document}\n\\ckfigure{figures/plot.png}\n"
@@ -215,7 +210,12 @@ def test_sync_ck_components(tmp_dir):
         f.write(main_tex)
     _commit_all(overleaf_repo, "Update on Overleaf.")
     assert sync()["component_problems"] == []
-    assert "_calkit/figures/plot.png" in on_overleaf()
+    assert {
+        "calkit.sty",
+        "_calkit/README.md",
+        "_calkit/values.tex",
+        "_calkit/figures/plot.png",
+    } <= on_overleaf()
     with open(overleaf_dir / "_calkit" / "values.tex") as f:
         assert "{1.5}" in f.read()
     assert status()["in_sync"]

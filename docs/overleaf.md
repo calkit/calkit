@@ -308,11 +308,13 @@ Overleaf can't compile.
 If one of them is edited on Overleaf, `calkit overleaf sync` says which
 files it's about to overwrite.
 
-Every sync also puts `calkit.sty` and the `_calkit` folder on Overleaf,
-starting with the first one after linking,
-so the document can use Calkit's
+Once the document loads the `calkit` package with `\usepackage{calkit}`,
+each sync also puts `calkit.sty` and the `_calkit` folder on Overleaf,
+so it can use Calkit's
 [commands for including project components](latex.md#including-project-components)
 there too.
+If the package is first loaded on Overleaf,
+the document can't compile there until the next sync brings `calkit.sty` in.
 Something newly included on Overleaf prints as **??** until the next sync
 brings it in, while a changed format takes effect right away.
 These are pushed one-way like other generated files,

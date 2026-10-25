@@ -2094,10 +2094,11 @@ def _ensure_latex_aux_gitignore(
         "*.toc",
         "*.vrb",
         "*.xdv",
-        # Written by Calkit before the pipeline runs or is checked, and when
-        # syncing with Overleaf
-        "/calkit.sty",
     ]
+    # Written by Calkit before the pipeline runs or is checked, and when
+    # syncing with Overleaf, for a document that loads it
+    if stage._loads_calkit:
+        aux_globs.append("/calkit.sty")
     # Stage path fields are relative to the stage's wdir, which in turn is
     # relative to the (sub)project being compiled.
     base = os.path.join(wdir or ".", stage.wdir) if stage.wdir else wdir or "."
@@ -2649,7 +2650,7 @@ def to_dvc(
     for stage in pipeline.stages.values():
         if isinstance(stage, LatexStage):
             stage.read_component_paths(wdir, outputs=output_paths)
-            if map_components and stage._uses_components:
+            if map_components and stage._loads_calkit:
                 document = os.path.join(
                     wdir or "", stage.wdir or "", stage.target_path
                 )

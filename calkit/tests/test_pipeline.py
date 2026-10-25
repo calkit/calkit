@@ -1750,7 +1750,8 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     # Another document in the same folder, using something else
     with open("paper/other.tex", "w") as f:
         f.write(
-            "\\documentclass{article}\n\\begin{document}\n"
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
             "\\ckvalue{results/other.json}{x}\n\\end{document}\n"
         )
     # A figure no stage makes
@@ -1768,7 +1769,8 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     os.makedirs("extra")
     with open("extra/main.tex", "w") as f:
         f.write(
-            "\\documentclass{article}\n\\begin{document}\n"
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
             "\\ckfigure{maps/world}\n\\ckfigure{maps/typo.png}\n"
             "\\ckfigure{photos/cat}\n\\ckfigure{images/logo.png}\n"
             "\\ckfigure{figures/fit_1.5}\n\\end{document}\n"
@@ -1877,7 +1879,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         "_calkit/figures/photo.png",
         "calkit.sty",
     } <= set(deps)
-    # A document that includes nothing depends on no copies
+    # A document that doesn't load calkit.sty depends on no copies
     os.makedirs("plain")
     with open("plain/main.tex", "w") as f:
         f.write("\\documentclass{article}\n")
@@ -3011,6 +3013,15 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert "*.pdf" not in contents
     assert "managed by calkit" in contents
     assert contents.count("# >>> calkit latex aux files") == 1
+    # calkit.sty is only ignored for a document that loads it, which only
+    # then gets one
+    assert "/calkit.sty" not in contents
+    stage._loads_calkit = True
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "/calkit.sty" in f.read()
+    stage._loads_calkit = False
+    assert _ensure_latex_aux_gitignore(stage)
     # Idempotent: re-running makes no change
     assert _ensure_latex_aux_gitignore(stage) is False
     # The globs are unanchored regardless of output_dir, so they catch aux

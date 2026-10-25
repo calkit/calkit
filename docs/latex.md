@@ -116,9 +116,10 @@ A figure or table can be named without its extension, as with
 `\includegraphics` and `\input`.
 Paths outside the project, or with `..` in them, aren't read.
 Before running or checking the pipeline, and before each
-`calkit latex build`, Calkit copies what the document includes into a
-`_calkit` folder beside it, writes the values it uses to
+`calkit latex build`, Calkit copies what a document that loads the package
+includes into a `_calkit` folder beside it, writes the values it uses to
 `_calkit/values.tex`, and puts `calkit.sty` next to the document.
+A document that doesn't load it gets none of these.
 Neither is committed to Git, since Calkit writes them again whenever they're
 needed.
 

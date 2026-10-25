@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 
 import git
@@ -64,10 +65,16 @@ def test_get_sync_status(tmp_dir):
     # The TeX file matches on both sides, so it isn't pending a push, and
     # wouldn't be flagged as a figure regardless
     assert "main.tex" not in pushes
-    # Push the figure by hand to represent a completed sync
-    os.makedirs(os.path.join(overleaf_dir, "figures"))
-    with open(os.path.join(overleaf_dir, "figures", "fig.png"), "wb") as fb:
-        fb.write(b"figure version 1")
+    # Calkit's own files go too, so the document can cite project content
+    assert set(pushes) == {
+        "figures/fig.png",
+        "calkit.sty",
+        "_calkit/values.tex",
+    }
+    # Push by hand to represent a completed sync
+    for rel in pushes:
+        os.makedirs(os.path.dirname(overleaf_dir / rel), exist_ok=True)
+        shutil.copy(os.path.join("paper", rel), overleaf_dir / rel)
     _commit_all(overleaf_repo, "Add figure")
     sync_info["last_sync_commit"] = overleaf_repo.head.commit.hexsha
     status = calkit.overleaf.get_sync_status(
@@ -137,8 +144,6 @@ def test_get_sync_status(tmp_dir):
 
 
 def test_sync_cited_content(tmp_dir):
-    import shutil
-
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     os.makedirs("figures")
@@ -147,27 +152,28 @@ def test_sync_cited_content(tmp_dir):
     os.makedirs("results")
     with open(os.path.join("results", "m.json"), "w") as f:
         f.write('{"x": 1.5}')
+    # Linked to Overleaf before anything is cited
     os.makedirs("paper")
-    main_tex = (
-        "\\documentclass{article}\n\\usepackage{calkit}\n"
-        "\\begin{document}\n\\ckfigure{figures/plot.png}\n"
-        "\\ckvalue{results/m.json}{x}\n\\end{document}\n"
+    plain_tex = (
+        "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n"
     )
     with open(os.path.join("paper", "main.tex"), "w") as f:
-        f.write(main_tex)
+        f.write(plain_tex)
     ck_info = calkit.load_calkit_info()
     ck_info["overleaf_sync"] = {
         "paper": {"url": "https://www.overleaf.com/project/abc123"}
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    _commit_all(repo, "Link paper")
     overleaf_dir = tmp_dir / "overleaf"
     os.makedirs(overleaf_dir)
     overleaf_repo = git.Repo.init(path=overleaf_dir)
     with open(os.path.join(overleaf_dir, "main.tex"), "w") as f:
-        f.write(main_tex)
+        f.write(plain_tex)
     _commit_all(overleaf_repo, "Initial commit")
     sync_info = calkit.overleaf.get_sync_info()["paper"]
+    sync_info["last_sync_commit"] = overleaf_repo.head.commit.hexsha
 
     def status() -> dict:
         return calkit.overleaf.get_sync_status(
@@ -177,34 +183,53 @@ def test_sync_cited_content(tmp_dir):
             sync_info_for_path=sync_info,
         )
 
-    # Checking brings in what's cited, including calkit.sty, which is
-    # committed with the document like any other file
-    status()
-    _commit_all(repo, "Add paper")
+    def sync() -> dict:
+        res = calkit.overleaf.sync(
+            main_repo=repo,
+            overleaf_repo=overleaf_repo,
+            path_in_project="paper",
+            sync_info_for_path=sync_info,
+            push=lambda _: None,
+        )
+        sync_info.update(calkit.overleaf.get_sync_info()["paper"])
+        return res
+
+    def on_overleaf() -> set[str]:
+        return set(calkit.git.ls_files(overleaf_repo))
+
+    # calkit.sty goes to Overleaf before anything is cited, so a document can
+    # start citing there and still compile
     pushes = {f["path"] for f in status()["files_to_push"]}
-    assert pushes == {
-        "calkit.sty",
-        "_calkit/figures/plot.png",
-        "_calkit/values.tex",
-    }
-    # Nothing under _calkit is committed to the project
-    assert not repo.ignored("paper/calkit.sty")
-    assert repo.ignored("paper/_calkit/values.tex")
-    # Represent a completed sync
-    for rel in pushes:
-        os.makedirs(os.path.dirname(overleaf_dir / rel) or ".", exist_ok=True)
-        shutil.copy(os.path.join("paper", rel), overleaf_dir / rel)
-    _commit_all(overleaf_repo, "Sync")
-    sync_info["last_sync_commit"] = overleaf_repo.head.commit.hexsha
+    assert pushes == {"calkit.sty", "_calkit/values.tex"}
+    sync()
+    assert {"calkit.sty", "_calkit/values.tex"} <= on_overleaf()
+    # What's cited on Overleaf is there after one sync
+    main_tex = (
+        "\\documentclass{article}\n\\usepackage{calkit}\n"
+        "\\begin{document}\n\\ckfigure{figures/plot.png}\n"
+        "\\ckvalue{results/m.json}{x}\n\\end{document}\n"
+    )
+    with open(os.path.join(overleaf_dir, "main.tex"), "w") as f:
+        f.write(main_tex)
+    _commit_all(overleaf_repo, "Update on Overleaf.")
+    assert sync()["cited_problems"] == []
+    assert "_calkit/figures/plot.png" in on_overleaf()
+    with open(overleaf_dir / "_calkit" / "values.tex") as f:
+        assert "{1.5}" in f.read()
     assert status()["in_sync"]
-    # An edit made on Overleaf to a copy isn't pulled back
+    # calkit.sty is committed with the document, but nothing under _calkit
+    assert "paper/calkit.sty" in calkit.git.ls_files(repo)
+    assert repo.ignored("paper/_calkit/values.tex")
+    # Edits made on Overleaf to what Calkit writes aren't pulled back
     paths = calkit.overleaf.OverleafSyncPaths(
         main_repo=repo,
         overleaf_repo=overleaf_repo,
         path_in_project="paper",
         sync_info_for_path=sync_info,
     )
-    assert "_calkit/values.tex" not in paths.files_to_copy_from_overleaf
+    assert not {"calkit.sty", "_calkit/values.tex"} & set(
+        paths.files_to_copy_from_overleaf
+    )
     # A new result is waiting to be pushed
     with open(os.path.join("results", "m.json"), "w") as f:
         f.write('{"x": 2.5}')

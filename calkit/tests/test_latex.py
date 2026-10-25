@@ -166,3 +166,12 @@ def test_cited_content(tmp_dir):
     assert calkit.latex.write_cited("other") == []
     assert not os.path.exists("other/_calkit")
     assert not os.path.exists("other/calkit.sty")
+    # Unless it's synced with Overleaf, where citing should compile before
+    # the next sync brings anything in
+    assert calkit.latex.write_cited("other", always=True) == []
+    assert os.path.isfile("other/calkit.sty")
+    assert os.path.isfile("other/_calkit/values.tex")
+    # A folder with no documents gets nothing either way
+    os.makedirs("figures-only")
+    assert calkit.latex.write_cited("figures-only", always=True) == []
+    assert os.listdir("figures-only") == []

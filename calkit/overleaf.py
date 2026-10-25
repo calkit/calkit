@@ -879,12 +879,6 @@ class OverleafSyncPaths:
         self.sync_info_for_path = deepcopy(sync_info_for_path)
         self.push_paths_from_config = sync_info_for_path.get("push_paths", [])
         self.last_sync_commit = last_sync_commit
-        # What the folder's documents cite has to be there to push
-        import calkit.latex
-
-        self.cited_problems = calkit.latex.write_cited(
-            os.path.join(str(main_repo.working_dir), path_in_project)
-        )
 
     @property
     def push_paths(self) -> list[str]:
@@ -1079,8 +1073,9 @@ class OverleafSyncPaths:
 
     @cached_property
     def mapped_files(self) -> set[str]:
-        """Files on disk under a map-paths destination, or copied into the
-        folder because its documents cite them.
+        """Files on disk under a map-paths destination, or written into the
+        folder by Calkit so its documents can cite project content, i.e.,
+        ``calkit.sty`` and ``_calkit``.
 
         Relative to ``path_in_project``. A destination may be a single file
         or a whole directory, so directories are walked.
@@ -1089,7 +1084,8 @@ class OverleafSyncPaths:
 
         root = os.path.join(self.main_repo.working_dir, self.path_in_project)
         res: set[str] = set()
-        for dest in sorted(self.map_paths_outputs | {calkit.latex.CITED_DIR}):
+        written = {calkit.latex.CITED_DIR, calkit.latex.STYLE_FNAME}
+        for dest in sorted(self.map_paths_outputs | written):
             abs_dest = os.path.join(root, dest)
             if os.path.isfile(abs_dest):
                 res.add(dest)
@@ -1131,6 +1127,8 @@ class OverleafSyncPaths:
         deleted locally since the last sync; such deletions are handled
         elsewhere in the sync logic.
         """
+        from calkit.latex import CITED_DIR, STYLE_FNAME
+
         all_ol_files = calkit.git.ls_files(self.overleaf_repo)
         res = []
         for fpath in all_ol_files:
@@ -1147,6 +1145,12 @@ class OverleafSyncPaths:
                 continue
             # Skip files that are under any push-only path
             if self._path_matches(fpath_posix, self.push_paths):
+                continue
+            # Calkit rewrites these on every sync, and _calkit's own ignore
+            # file may not exist yet, e.g., in a fresh clone on the hub
+            if fpath_posix == STYLE_FNAME or fpath_posix.startswith(
+                CITED_DIR + "/"
+            ):
                 continue
             res.append(fpath_posix)
         return res
@@ -1357,8 +1361,9 @@ class OverleafSyncPaths:
         sync and should not be deleted.
 
         A file from the last sync is kept if it is still stored locally
-        (tracked by Git or cached by DVC), was newly added on Overleaf since
-        the last sync, or is treated as ignored (gitignored or a
+        (tracked by Git or cached by DVC), is copied in by a map-paths stage
+        or Calkit, was newly added on Overleaf since the last sync, or is
+        treated as ignored (gitignored or a
         ``storage: null`` pipeline output). Only files that were genuinely
         removed from the project are deleted from Overleaf.
         """
@@ -1375,6 +1380,7 @@ class OverleafSyncPaths:
                 continue
             if (
                 f in self.stored_files
+                or f in self.mapped_files
                 or f in self.newly_added_on_overleaf
                 or self._is_ignored_for_sync(f)
             ):
@@ -1434,7 +1440,8 @@ def get_sync_status(
     """Compute the sync status between a project and an Overleaf project.
 
     This is the read-only counterpart to ``sync``: it reports what a sync
-    would do without changing either repo's files, though a missing last
+    would do without changing either repo's files, though what the documents
+    cite is copied in as ``calkit latex build`` would, and a missing last
     sync is rebuilt in the Overleaf repo's history as ``ensure_sync_base``
     describes. Both repos should already be up-to-date (pulled), same as for
     ``sync``.
@@ -1475,6 +1482,13 @@ def get_sync_status(
         if prefix_slash and not fig_posix.startswith(prefix_slash):
             continue
         declared_figures.add(fig_posix[len(prefix_slash) :])
+    # What the documents cite is copied in first, as a sync would, to see
+    # what it would push
+    from calkit.latex import write_cited
+
+    write_cited(
+        os.path.join(str(main_repo.working_dir), path_in_project), always=True
+    )
     paths = OverleafSyncPaths(
         main_repo=main_repo,
         overleaf_repo=overleaf_repo,
@@ -1877,6 +1891,20 @@ def sync(
     # except for copies whose source has diverged: pushing our version would
     # overwrite the Overleaf edit we just declined to pull, which is the loss
     # the warning above is there to prevent
+    # Bring in what the documents cite only now that Overleaf's edits are
+    # in, since those may cite something new, and look again at what to push
+    from calkit.latex import write_cited
+
+    res["cited_problems"] = write_cited(path_in_project_abs, always=True)
+    for problem in res["cited_problems"]:
+        print_info(f"Warning: {problem}; it will print as ?? on Overleaf")
+    paths = OverleafSyncPaths(
+        main_repo=main_repo,
+        overleaf_repo=overleaf_repo,
+        path_in_project=path_in_project,
+        sync_info_for_path=sync_info_for_path,
+        last_sync_commit=last_sync_commit,
+    )
     files_to_copy_to_overleaf = [
         p for p in paths.files_to_copy_to_overleaf if p not in diverged
     ]

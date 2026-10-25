@@ -615,7 +615,7 @@ def _write_if_changed(path: str, content: str | bytes) -> None:
         f.write(data)
 
 
-def write_cited(folder: str) -> list[str]:
+def write_cited(folder: str, always: bool = False) -> list[str]:
     """Bring what the documents in a folder cite into its ``_calkit``
     folder, so they build without the rest of the project, e.g., on
     Overleaf.
@@ -625,19 +625,22 @@ def write_cited(folder: str) -> list[str]:
     beside the documents. Anything no longer cited is removed, since
     nothing else writes there.
 
+    With ``always``, ``calkit.sty`` is written even when nothing is cited
+    yet, so a document synced with Overleaf can start citing there and
+    still compile.
+
     Returns what couldn't be brought in, e.g., a file the pipeline hasn't
     produced yet. Those print as ``??`` rather than failing the build.
     """
     import calkit.resources
     from calkit.questions import read_evidence_file, resolve_key
 
+    docs = root_documents(folder)
     citations = list(
-        dict.fromkeys(
-            c for doc in root_documents(folder) for c in find_citations(doc)
-        )
+        dict.fromkeys(c for doc in docs for c in find_citations(doc))
     )
     out = os.path.join(folder, CITED_DIR)
-    if not citations and not os.path.isdir(out):
+    if not citations and not os.path.isdir(out) and not (always and docs):
         return []
     # Cited paths are relative to the project, wherever the document is
     root = os.path.abspath(folder or ".")

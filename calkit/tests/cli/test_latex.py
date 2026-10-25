@@ -228,6 +228,8 @@ def test_build_ck_components(tmp_dir):
     import struct
     import zlib
 
+    import pypdfium2
+
     subprocess.check_call(["calkit", "init"])
     os.makedirs("results")
     with open("results/metrics.json", "w") as f:
@@ -237,6 +239,7 @@ def test_build_ck_components(tmp_dir):
                 "big": 1234567,
                 "label": "run_a",
                 "tiny": 1.234e-05,
+                "half": 0.5,
             },
             f,
         )
@@ -270,6 +273,9 @@ def test_build_ck_components(tmp_dir):
             "Options: \\ckvalue[round-mode=places,round-precision=1]"
             "{results/metrics.json}{rmse}.\n"
             "Grouped: \\ckvalue[,d]{results/metrics.json}{big}.\n"
+            "Ungrouped: \\ckvalue[.1f]{results/metrics.json}{big}.\n"
+            "Half: \\ckvalue[.3g]{results/metrics.json}{half}.\n"
+            "Large: \\ckvalue[.3g]{results/metrics.json}{big}.\n"
             "Label: \\ckvalue[.2f]{results/metrics.json}{label}.\n"
             "Tiny: \\ckvalue[.2f]{results/metrics.json}{tiny}.\n"
             "\\section{RMSE of \\ckvalue[.2f]{results/metrics.json}{rmse}}\n"
@@ -305,8 +311,6 @@ def test_build_ck_components(tmp_dir):
     assert "_calkit/figures/plot.png" in log
 
     def pdf_text() -> str:
-        import pypdfium2
-
         pdf = pypdfium2.PdfDocument("paper/main.pdf")
         try:
             return " ".join(pdf[0].get_textpage().get_text_range().split())
@@ -320,13 +324,16 @@ def test_build_ck_components(tmp_dir):
     assert "Figures: 0.123." in text
     assert "Options: 0.1." in text
     assert "Grouped: 1,234,567." in text
+    # As in Python, only grouped with a comma, and g neither pads nor
+    # writes a large number in full
+    assert "Ungrouped: 1234567.0." in text
+    assert "Half: 0.5." in text
+    assert "Large: 1.23 × 106" in text
     # An underscore comes back from the PDF as a space
     assert "Label: run a." in text
     # Fixed notation, though the value is written in exponent form
     assert "Tiny: 0.00." in text
     # A bookmark shows the value as it is, rather than the command
-    import pypdfium2
-
     pdf = pypdfium2.PdfDocument("paper/main.pdf")
     try:
         titles = [item.get_title() for item in pdf.get_toc()]

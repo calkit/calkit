@@ -10,7 +10,7 @@ import re
 import shutil
 import textwrap
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
 from calkit.core import LOCAL_DIR, ensure_local_dir
@@ -523,10 +523,12 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
 COMPONENTS_DIR = "_calkit"
 VALUES_FNAME = "values.tex"
 STYLE_FNAME = "calkit.sty"
-# calkit.sty's commands, each with an optional [...] and its {...} args
+# calkit.sty's commands, each with an optional [...] and its {...} args, of
+# which only \ckvalue has two, so a brace group after another is left alone
 _CK_COMMAND_RE = re.compile(
-    r"\\ck(value|figure|table)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}"
-    r"(?:\s*\{([^}]*)\})?"
+    r"\\ck(?P<kind>(?P<value>v)alue|figure|table)"
+    r"\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
+    r"(?(value)\s*\{(?P<second>[^}]*)\})"
 )
 _TEX_SPECIALS = {
     "\\": r"\textbackslash{}",
@@ -580,7 +582,9 @@ def find_ck_components(document: str) -> list[CkComponent]:
     lines = flatten(document, read=_read_leniently)
     text = "\n".join(_strip_comments(line.text) for line in lines)
     found: list[CkComponent] = []
-    for kind, option, first, second in _CK_COMMAND_RE.findall(text):
+    for match in _CK_COMMAND_RE.finditer(text):
+        kind, option, first = match.group("kind", "option", "first")
+        option, second = option or "", match.group("second") or ""
         if "#" in first + second:
             continue
         if kind == "value":
@@ -601,10 +605,9 @@ def component_path(
     wrong with it, with ``exists`` saying whether a project path is there.
 
     A figure or table named without an extension is found the way TeX
-    finds it, e.g., ``figures/plot`` as ``figures/plot.pdf`` or ``.png``.
+    finds it, e.g., ``figures/plot`` as ``figures/plot.pdf`` or ``.png``,
+    and so is one with a dot in its name, e.g., ``figures/fit_1.5``.
     """
-    from pathlib import PureWindowsPath
-
     raw = component.path.replace("\\", "/")
     if raw.startswith("/") or PureWindowsPath(component.path).drive:
         return None, f"{component.path} is outside the project"
@@ -615,13 +618,14 @@ def component_path(
     # wouldn't be found
     if ".." in raw.split("/"):
         return None, f"{component.path} can't include '..'"
-    if exists(rel):
-        return rel, None
-    if component.kind != "value" and not posixpath.splitext(rel)[1]:
+    candidates = [rel]
+    if component.kind != "value":
         exts = _GRAPHICS_EXTS if component.kind == "figure" else [".tex"]
-        for ext in exts:
-            if exists(rel + ext):
-                return rel + ext, None
+        if posixpath.splitext(rel)[1].lower() not in exts:
+            candidates = [rel + ext for ext in exts] + [rel]
+    for candidate in candidates:
+        if exists(candidate):
+            return candidate, None
     return None, f"{component.path} is not in the project yet"
 
 
@@ -691,6 +695,7 @@ def map_ck_components(
     documents: list[str] | None = None,
     always: bool = False,
     is_tracked: Callable[[str], bool] | None = None,
+    previous_values: str | None = None,
 ) -> list[str]:
     """Bring the components the documents in a folder include with
     calkit.sty's commands into its ``_calkit`` folder, so they build without
@@ -708,14 +713,17 @@ def map_ck_components(
     yet, so a document synced with Overleaf can start using its commands
     there and still compile.
 
-    ``is_tracked`` says whether a project path is stored with DVC, so a
-    figure or table named without an extension that isn't pulled, e.g., on
-    the hub, is found as it would be where it is, rather than changing what
-    TeX looks for.
+    ``is_tracked`` says whether a project path is stored with DVC, so
+    something that isn't pulled, e.g., on the hub, comes out as it would
+    where it is: a figure or table named without an extension is found the
+    same way, and a value is kept from ``previous_values``, e.g., Overleaf's
+    ``values.tex``, or the one being replaced. It's only asked about what
+    isn't here.
 
     Returns what couldn't be brought in, e.g., a file the pipeline hasn't
     produced yet. Those print as ``??`` rather than failing the build.
     """
+    import calkit.git
     import calkit.resources
     from calkit.questions import read_evidence_file, resolve_key
 
@@ -749,8 +757,16 @@ def map_ck_components(
     def is_file(rel: str) -> bool:
         return os.path.isfile(os.path.join(root, rel))
 
-    def is_file_or_tracked(rel: str) -> bool:
-        return is_file(rel) or bool(is_tracked and is_tracked(rel))
+    def find(c: CkComponent) -> tuple[str | None, str | None, bool]:
+        """Where a component is, what's wrong with it, and whether it's
+        here rather than only stored with DVC.
+        """
+        rel, problem = component_path(c, is_file)
+        if rel is None and is_tracked is not None:
+            tracked, _ = component_path(c, is_tracked)
+            if tracked is not None:
+                return tracked, None, False
+        return rel, problem, rel is not None
 
     problems: list[str] = []
     kept = {".gitignore", "README.md", VALUES_FNAME}
@@ -775,7 +791,7 @@ def map_ck_components(
     for c in components:
         if c.kind == "value":
             continue
-        rel, problem = component_path(c, is_file_or_tracked)
+        rel, problem, here = find(c)
         if rel is None:
             problems.append(str(problem))
             continue
@@ -784,7 +800,7 @@ def map_ck_components(
         # file from DVC's cache leaves a copy that can be updated.
         src = os.path.join(root, rel)
         dest = os.path.join(out, rel)
-        if is_file(rel):
+        if here:
             src_stat = os.stat(src)
             if not os.path.isfile(dest) or (
                 os.stat(dest).st_size,
@@ -800,6 +816,12 @@ def map_ck_components(
         # could be copied
         if rel != c.path:
             lines.append(f"\\cksetfile{{{c.path}}}{{{rel}}}\n")
+    if previous_values is None:
+        try:
+            with open(os.path.join(out, VALUES_FNAME), encoding="utf-8") as f:
+                previous_values = f.read()
+        except (OSError, UnicodeDecodeError):
+            previous_values = ""
     loaded: dict[str, Any] = {}
     # Formats are applied by calkit.sty, so a value is written once however
     # many ways it's formatted
@@ -808,9 +830,24 @@ def map_ck_components(
         if c.kind != "value" or (c.path, c.key) in written:
             continue
         written.add((c.path, c.key))
-        rel, problem = component_path(c, is_file)
+        rel, problem, here = find(c)
         if rel is None:
             problems.append(str(problem))
+            continue
+        if not here:
+            start = f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{"
+            kept_line = next(
+                (
+                    line + "\n"
+                    for line in previous_values.splitlines()
+                    if line.startswith(start)
+                ),
+                None,
+            )
+            if kept_line is None:
+                problems.append(f"{c.path} is stored with DVC and not pulled")
+            else:
+                lines.append(kept_line)
             continue
         try:
             if rel not in loaded:
@@ -842,8 +879,6 @@ def map_ck_components(
     # Written whenever it's needed, so kept out of Git, wherever this runs
     if new_style:
         try:
-            import calkit.git
-
             repo = calkit.git.get_repo(root)
             rel_style = os.path.relpath(
                 os.path.abspath(style_path), repo.working_dir
@@ -876,7 +911,9 @@ def expand_ck_components(
         return os.path.isfile(os.path.join(data_root, rel))
 
     def replace(match: re.Match[str]) -> str:
-        kind, option, first, second = match.groups()
+        kind, option, first, second = match.group(
+            "kind", "option", "first", "second"
+        )
         if "#" in first + (second or ""):
             return match.group(0)
         c = CkComponent(kind, first.strip(), (second or "").strip() or None)

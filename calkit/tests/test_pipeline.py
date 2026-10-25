@@ -1764,6 +1764,21 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     ]:
         with open(f"results/{name}.json", "w") as f:
             f.write(content)
+    # Components kept in other ways, in a document of their own
+    os.makedirs("extra")
+    with open("extra/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\begin{document}\n"
+            "\\ckfigure{maps/world}\n\\ckfigure{maps/typo.png}\n"
+            "\\ckfigure{photos/cat}\n\\ckfigure{images/logo.png}\n"
+            "\\ckfigure{figures/fit_1.5}\n\\end{document}\n"
+        )
+    os.makedirs("images")
+    for path in ["images/logo.png", "images/logo.png.dvc", "photos.dvc"]:
+        with open(path, "w") as f:
+            f.write("x")
+    with open("figures/fit_1.5.pdf", "w") as f:
+        f.write("pdf")
     # Tracked by DVC but not pulled
     os.makedirs("data")
     with open("data/summary.json.dvc", "w") as f:
@@ -1788,6 +1803,17 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "kind": "latex",
                     "environment": "tex",
                     "target_path": "paper/other.tex",
+                },
+                "maps": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "mkdir maps",
+                    "outputs": ["maps"],
+                },
+                "build-extra": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "extra/main.tex",
                 },
                 # Paths in a stage are relative to its wdir, while component
                 # paths are relative to the project
@@ -1831,6 +1857,18 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     assert "results/other.json" in stages["build-other"]["deps"]
     assert "results/other.json" not in deps
     assert "results/metrics.json" not in stages["build-other"]["deps"]
+    # One in a folder a stage makes or DVC stores depends on the folder,
+    # since which file it is, if any, isn't known until it's there, and only
+    # a copy of a file kept in Git is there before the stage runs on any
+    # clone, so a file stored with DVC is depended on itself
+    deps = stages["build-extra"]["deps"]
+    assert {"maps", "photos", "images/logo.png"} <= set(deps)
+    assert not any(d.startswith(("maps/", "photos/")) for d in deps)
+    assert "extra/_calkit/images/logo.png" not in deps
+    # A dot in a name isn't taken for an extension
+    assert {"figures/fit_1.5.pdf", "extra/_calkit/figures/fit_1.5.pdf"} <= set(
+        deps
+    )
     deps = stages["build-paper-wdir"]["deps"]
     assert {
         "../figures/plot.png",
@@ -1855,7 +1893,8 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     )
     # Compiling for a run or check maps the components in, kept out of Git,
     # with one stage building each PDF, as DVC requires
-    del ck_info["pipeline"]["stages"]["build-paper-wdir"]
+    for name in ["build-paper-wdir", "maps", "build-extra"]:
+        del ck_info["pipeline"]["stages"][name]
     del ck_info["pipeline"]["stages"]["build-plain"]
     with open("figures/plot.png", "wb") as fb:
         fb.write(b"png")
@@ -1875,7 +1914,8 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     for name in ["main", "other"]:
         with open(f"paper/{name}.pdf", "wb") as fb:
             fb.write(b"pdf")
-    os.remove("data/summary.json.dvc")
+    for path in ["data/summary.json.dvc", "images/logo.png.dvc", "photos.dvc"]:
+        os.remove(path)
     calkit.pipeline.to_dvc(write=True)
     subprocess.check_call(
         ["dvc", "commit", "-f", "plot", "build-paper", "build-other"]

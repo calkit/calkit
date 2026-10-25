@@ -46,83 +46,100 @@
 \cs_new_protected:Npn \__calkit_num:nn #1#2
   {
     \tl_set:Nx \l__calkit_spec_tl { \tl_trim_spaces:n {#1} }
-    \tl_if_in:NnTF \l__calkit_spec_tl { = }
-      { \exp_args:NV \__calkit_num_with:nn \l__calkit_spec_tl {#2} }
+    % Without a format, siunitx's defaults apply, including \sisetup's
+    \tl_if_empty:NTF \l__calkit_spec_tl { \num {#2} }
       {
-        \exp_args:NnV \regex_extract_once:nnNTF
-          { \A (,?) (?: \. (\d+) )? ([defg]?) \Z }
-          \l__calkit_spec_tl \l__calkit_spec_seq
+        \tl_if_in:NnTF \l__calkit_spec_tl { = }
+          { \exp_args:NV \__calkit_num_with:nn \l__calkit_spec_tl {#2} }
           {
-            \tl_clear:N \l__calkit_opts_tl
-            \tl_set:Nx \l__calkit_prec_tl
-              { \seq_item:Nn \l__calkit_spec_seq { 3 } }
-            \tl_set:Nx \l__calkit_type_tl
-              { \seq_item:Nn \l__calkit_spec_seq { 4 } }
-            \tl_set:Nx \l__calkit_group_tl
-              { \seq_item:Nn \l__calkit_spec_seq { 2 } }
-            \tl_if_empty:NF \l__calkit_group_tl
+            \exp_args:NnV \regex_extract_once:nnNTF
+              { \A (,?) (?: \. (\d+) )? ([defg]?) \Z }
+              \l__calkit_spec_tl \l__calkit_spec_seq
               {
-                \tl_put_right:Nn \l__calkit_opts_tl
+                \tl_clear:N \l__calkit_opts_tl
+                \tl_set:Nx \l__calkit_prec_tl
+                  { \seq_item:Nn \l__calkit_spec_seq { 3 } }
+                \tl_set:Nx \l__calkit_type_tl
+                  { \seq_item:Nn \l__calkit_spec_seq { 4 } }
+                \tl_set:Nx \l__calkit_group_tl
+                  { \seq_item:Nn \l__calkit_spec_seq { 2 } }
+                % Grouped only with a comma, as in Python
+                \tl_if_empty:NTF \l__calkit_group_tl
                   {
-                    group-digits = integer ,
-                    group-separator = { , } ,
-                    group-minimum-digits = 4 ,
+                    \tl_put_right:Nn \l__calkit_opts_tl
+                      { group-digits = none , }
                   }
-              }
-            % Python's default precision, and .3 alone means figures
-            \tl_if_empty:NTF \l__calkit_prec_tl
-              { \tl_set:Nn \l__calkit_prec_tl { 6 } }
-              {
-                \tl_if_empty:NT \l__calkit_type_tl
-                  { \tl_set:Nn \l__calkit_type_tl { g } }
-              }
-            % Fixed notation for f and d, since a number Calkit writes may be
-            % in exponent form, e.g., 1e-05
-            \str_case:Vn \l__calkit_type_tl
-              {
-                { f }
-                  {
-                    \tl_put_right:Nx \l__calkit_opts_tl
-                      {
-                        exponent-mode = fixed ,
-                        round-mode = places ,
-                        round-precision = \l__calkit_prec_tl
-                      }
-                  }
-                { e }
-                  {
-                    \tl_put_right:Nx \l__calkit_opts_tl
-                      {
-                        exponent-mode = scientific ,
-                        print-zero-exponent = true ,
-                        round-mode = places ,
-                        round-precision = \l__calkit_prec_tl
-                      }
-                  }
-                { g }
-                  {
-                    \tl_put_right:Nx \l__calkit_opts_tl
-                      {
-                        round-mode = figures ,
-                        round-precision = \l__calkit_prec_tl
-                      }
-                  }
-                { d }
                   {
                     \tl_put_right:Nn \l__calkit_opts_tl
                       {
-                        exponent-mode = fixed ,
-                        round-mode = places ,
-                        round-precision = 0
+                        group-digits = integer ,
+                        group-separator = { , } ,
+                        group-minimum-digits = 4 ,
                       }
                   }
+                % Python's default precision, and .3 alone means figures
+                \tl_if_empty:NTF \l__calkit_prec_tl
+                  { \tl_set:Nn \l__calkit_prec_tl { 6 } }
+                  {
+                    \tl_if_empty:NT \l__calkit_type_tl
+                      { \tl_set:Nn \l__calkit_type_tl { g } }
+                  }
+                % Fixed notation for f and d, since a number Calkit writes
+                % may be in exponent form, e.g., 1e-05
+                \str_case:Vn \l__calkit_type_tl
+                  {
+                    { f }
+                      {
+                        \tl_put_right:Nx \l__calkit_opts_tl
+                          {
+                            exponent-mode = fixed ,
+                            round-mode = places ,
+                            round-precision = \l__calkit_prec_tl
+                          }
+                      }
+                    { e }
+                      {
+                        \tl_put_right:Nx \l__calkit_opts_tl
+                          {
+                            exponent-mode = scientific ,
+                            print-zero-exponent = true ,
+                            round-mode = places ,
+                            round-precision = \l__calkit_prec_tl
+                          }
+                      }
+                    % Scientific where Python switches to it, i.e., below
+                    % 1e-4 or from 10 to the power of the precision, and
+                    % without padding
+                    { g }
+                      {
+                        \tl_put_right:Nx \l__calkit_opts_tl
+                          {
+                            round-mode = figures ,
+                            round-precision = \l__calkit_prec_tl ,
+                            round-pad = false ,
+                            drop-zero-decimal = true ,
+                            exponent-mode = threshold ,
+                            exponent-thresholds =
+                              -5 \c_colon_str \l__calkit_prec_tl
+                          }
+                      }
+                    { d }
+                      {
+                        \tl_put_right:Nn \l__calkit_opts_tl
+                          {
+                            exponent-mode = fixed ,
+                            round-mode = places ,
+                            round-precision = 0
+                          }
+                      }
+                  }
+                \exp_args:NV \__calkit_num_with:nn \l__calkit_opts_tl {#2}
               }
-            \exp_args:NV \__calkit_num_with:nn \l__calkit_opts_tl {#2}
-          }
-          {
-            \PackageWarning { calkit }
-              { Can't~apply~format~'#1'~in~TeX;~printing~the~value~as~is }
-            \num {#2}
+              {
+                \PackageWarning { calkit }
+                  { Can't~apply~format~'#1'~in~TeX;~printing~the~value~as~is }
+                \num {#2}
+              }
           }
       }
   }

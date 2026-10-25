@@ -8,7 +8,7 @@ import os
 import posixpath
 import re
 import shlex
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -1464,31 +1464,43 @@ class LatexStage(Stage):
         cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
-    # Project paths of the components the document includes with calkit.sty's
-    # commands, the files among them no stage makes, and whether it includes
-    # any, set by read_component_paths
+    # Project paths the document's components depend on, the files among
+    # them it reads copies of, and whether it includes any, set by
+    # read_component_paths
     _component_paths: list[str] = PrivateAttr(default_factory=list)
     _copied_paths: list[str] = PrivateAttr(default_factory=list)
     _uses_components: bool = PrivateAttr(default=False)
 
     def read_component_paths(
-        self,
-        project_dir: str | None = None,
-        is_input: Callable[[str], bool] | None = None,
-        is_output: Callable[[str], bool] | None = None,
+        self, project_dir: str | None = None, outputs: Iterable[str] = ()
     ) -> None:
         """Read which components the document includes with calkit.sty's
         commands, since they're as much inputs as its source.
 
-        Only paths ``is_input`` accepts are kept, e.g., ones that exist or a
-        stage produces, so a typo or a figure not made yet prints as ?? rather
-        than stopping the pipeline. Paths ``is_output`` accepts are ones a
-        stage makes. The pipeline calls this when compiling, since only it
-        knows where the project is.
+        Each is depended on where it's kept: the file, if it's there, stored
+        with DVC, or one of ``outputs``, which are the project paths stages
+        make, or the folder holding it, if that's stored with DVC or made by
+        a stage. A typo or a figure not made yet prints as ?? instead of
+        stopping the pipeline. The copies read of files kept in Git are
+        depended on too, which, unlike other copies, are there before the
+        stage runs on any clone. The pipeline calls this when compiling,
+        since only it knows where the project is.
         """
+        out_set = set(outputs)
 
         def exists(p: str) -> bool:
             return os.path.isfile(os.path.join(project_dir or "", p))
+
+        def is_input(p: str) -> bool:
+            return exists(p) or exists(p + ".dvc") or p in out_set
+
+        def folder_kept_elsewhere(p: str) -> str | None:
+            parts = p.split("/")
+            for i in range(1, len(parts)):
+                folder = "/".join(parts[:i])
+                if folder in out_set or exists(folder + ".dvc"):
+                    return folder
+            return None
 
         document = os.path.join(
             project_dir or "", self.wdir or "", self.target_path
@@ -1498,14 +1510,22 @@ class LatexStage(Stage):
         paths = []
         copied = []
         for c in components:
-            rel, _ = calkit.latex.component_path(c, is_input or exists)
+            named, _ = calkit.latex.component_path(c, lambda p: True)
+            if named is None:
+                continue
+            folder = folder_kept_elsewhere(named)
+            if folder is not None:
+                paths.append(folder)
+                continue
+            rel, _ = calkit.latex.component_path(c, is_input)
             if rel is None:
                 continue
             paths.append(rel)
             if (
                 c.kind != "value"
                 and exists(rel)
-                and not (is_output and is_output(rel))
+                and not exists(rel + ".dvc")
+                and rel not in out_set
             ):
                 copied.append(rel)
         self._component_paths = list(dict.fromkeys(paths))
@@ -1515,13 +1535,13 @@ class LatexStage(Stage):
     def component_copies(self) -> list[str]:
         """What the document reads its components from, relative to the
         stage's ``wdir``: ``calkit.sty`` and ``_calkit/values.tex`` beside
-        it, and the copies of figures and tables no stage makes, or nothing
-        if it includes none.
+        it, and the copies of figures and tables kept in Git, or nothing if
+        it includes none.
 
         Like cleaned notebooks, they're written before the pipeline runs or
-        is checked, and kept out of Git. A figure a stage makes is copied
-        only once it's made, after DVC checks the stage's dependencies are
-        there, so the stage depends on the figure itself instead.
+        is checked, and kept out of Git. A figure a stage makes or DVC
+        stores may only be copied after DVC checks the stage's dependencies
+        are there, so the stage depends on the figure itself instead.
         """
         if not self._uses_components:
             return []

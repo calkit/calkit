@@ -2629,8 +2629,7 @@ def to_dvc(
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
     pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
-    # A component is an input if it's there, tracked by DVC, or something a
-    # stage makes, and otherwise prints as ?? rather than stopping the run
+    # What stages make, so a document can depend on its components there
     output_paths: set[str] = set()
     for stage in pipeline.stages.values():
         try:
@@ -2647,28 +2646,9 @@ def to_dvc(
                         posixpath.join(stage.wdir or "", out_path)
                     )
                 )
-
-    def is_component_output(rel: str) -> bool:
-        return any(rel == o or rel.startswith(o + "/") for o in output_paths)
-
-    def is_component_input(rel: str) -> bool:
-        parts = rel.split("/")
-        return (
-            os.path.isfile(os.path.join(wdir or "", rel))
-            or any(
-                os.path.isfile(os.path.join(wdir or "", *parts[:i]) + ".dvc")
-                for i in range(1, len(parts) + 1)
-            )
-            or is_component_output(rel)
-        )
-
     for stage in pipeline.stages.values():
         if isinstance(stage, LatexStage):
-            stage.read_component_paths(
-                wdir,
-                is_input=is_component_input,
-                is_output=is_component_output,
-            )
+            stage.read_component_paths(wdir, outputs=output_paths)
             if map_components and stage._uses_components:
                 document = os.path.join(
                     wdir or "", stage.wdir or "", stage.target_path

@@ -155,6 +155,10 @@ or siunitx options:
 | `,d`, `,.2f`, etc.                     | Thousands grouped by commas | 1234567 → 1,234,567       |
 | `round-mode=places, round-precision=1` | siunitx options             | 0.123456 → 0.1            |
 
+As in Python, digits are only grouped with a comma,
+and `g` switches to scientific notation for very large or small numbers.
+Unlike Python, it keeps zeros left by rounding, e.g., 2.501 → 2.50.
+
 Without a format, siunitx's defaults apply, which print every digit,
 grouped in threes with thin spaces, e.g., 0.123 456.
 To set a default for the whole document, use `\sisetup`, e.g.,

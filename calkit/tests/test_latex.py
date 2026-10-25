@@ -199,7 +199,12 @@ def test_ck_components(tmp_dir):
             calkit.latex.CkComponent(kind, path),
             lambda rel: (
                 rel
-                in {"figures/plot.png", "tables/summary.tex", "results/m.json"}
+                in {
+                    "figures/plot.png",
+                    "figures/fit_1.5.pdf",
+                    "tables/summary.tex",
+                    "results/m.json",
+                }
             ),
         )
 
@@ -222,6 +227,10 @@ def test_ck_components(tmp_dir):
         None,
     )
     assert component_path("results/m")[0] is None
+    # A dot in a name isn't taken for an extension
+    assert component_path("figures/fit_1.5", "figure")[0] == (
+        "figures/fit_1.5.pdf"
+    )
     # Every document in a folder is mapped together, including one named
     # because its \documentclass is in a file it inputs, and an input's
     # inputs are read from where TeX compiles
@@ -259,6 +268,15 @@ def test_ck_components(tmp_dir):
     calkit.latex.map_ck_components("more", documents=["more/a.tex"])
     with open("more/_calkit/figures/plot.png", "rb") as f:
         assert f.read() == b"png, made again"
+    # What's stored with DVC is only looked up for what isn't here, since
+    # listing it is slow
+    asked: list[str] = []
+    calkit.latex.map_ck_components(
+        "more",
+        documents=["more/a.tex"],
+        is_tracked=lambda rel: bool(asked.append(rel)),
+    )
+    assert asked == []
     # One stored with DVC but not pulled, e.g., on the hub, is still found
     # where it would be, and a copy already there is kept
     os.remove("tables/summary.tex")
@@ -270,6 +288,34 @@ def test_ck_components(tmp_dir):
     with open("more/_calkit/values.tex") as f:
         assert "\\cksetfile{tables/summary}{tables/summary.tex}" in f.read()
     assert os.path.isfile("more/_calkit/tables/summary.tex")
+    # A value whose file isn't pulled is kept from the values given, e.g.,
+    # Overleaf's, or else the ones being replaced
+    os.rename("results/metrics.json", "metrics.json.bak")
+
+    def is_tracked(rel: str) -> bool:
+        return rel in {"tables/summary.tex", "results/metrics.json"}
+
+    for previous in [
+        "\\cksetvalue{results/metrics.json}{rmse}{n}{0.5}\n",
+        None,
+    ]:
+        problems = calkit.latex.map_ck_components(
+            "more",
+            documents=["more/a.tex"],
+            is_tracked=is_tracked,
+            previous_values=previous,
+        )
+        assert not any("metrics" in p for p in problems)
+        with open("more/_calkit/values.tex") as f:
+            assert "{results/metrics.json}{rmse}{n}{0.5}" in f.read()
+    problems = calkit.latex.map_ck_components(
+        "more",
+        documents=["more/a.tex"],
+        is_tracked=is_tracked,
+        previous_values="",
+    )
+    assert "results/metrics.json is stored with DVC and not pulled" in problems
+    os.rename("metrics.json.bak", "results/metrics.json")
     problems = calkit.latex.map_ck_components("more", documents=["more/a.tex"])
     assert "tables/summary is not in the project yet" in problems
     with open("more/_calkit/values.tex") as f:
@@ -304,6 +350,7 @@ def test_expand_ck_components(tmp_dir):
             "Error: \\ckvalue[.2f]{results/m.json}{rmse}.\n"
             "Run: \\ckvalue{results/m.json}{label}.\n"
             "\\ckfigure[width=1cm]{figures/plot}\n"
+            "\\ckfigure{figures/plot} {\\small (a) left}\n"
             "\\cktable{tables/t}\n"
             "Missing: \\ckvalue{results/m.json}{nope}.\n"
             "% \\ckvalue{results/m.json}{rmse}\n"
@@ -316,6 +363,10 @@ def test_expand_ck_components(tmp_dir):
     assert "Error: \\cknum[.2f]{0.456}." in text
     assert "Run: run\\_b." in text
     assert "\\includegraphics[width=1cm]{../figures/plot.png}" in text
+    # A brace group after a figure isn't taken for an argument
+    assert (
+        "\\includegraphics[]{../figures/plot.png} {\\small (a) left}" in text
+    )
     assert "\\begin{tabular}{l}B\\end{tabular}" in text
     # What can't be found is left to print as ??, and comments alone
     assert "\\ckvalue{results/m.json}{nope}" in text

@@ -217,8 +217,9 @@ def test_sync_ck_components(tmp_dir):
     with open(overleaf_dir / "_calkit" / "values.tex") as f:
         assert "{1.5}" in f.read()
     assert status()["in_sync"]
-    # calkit.sty is committed with the document, but nothing under _calkit
-    assert "paper/calkit.sty" in calkit.git.ls_files(repo)
+    # What Calkit writes is pushed, but kept out of the project's Git
+    assert "paper/calkit.sty" not in calkit.git.ls_files(repo)
+    assert repo.ignored("paper/calkit.sty")
     assert repo.ignored("paper/_calkit/values.tex")
     # Edits made on Overleaf to what Calkit writes aren't pulled back
     paths = calkit.overleaf.OverleafSyncPaths(

@@ -1801,8 +1801,9 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         f.write('{"rmse": 0.123}')
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    calkit.pipeline.to_dvc(write=True)
-    assert calkit.latex.map_all_in_pipeline() == []
+    calkit.pipeline.to_dvc(write=True, map_components=True)
+    # Written on every run and check, so kept out of Git
+    assert calkit.git.get_repo().ignored("paper/calkit.sty")
     with open("paper/_calkit/values.tex") as f:
         assert "{rmse}{n}{0.123}" in f.read()
     os.makedirs(".calkit/env-locks", exist_ok=True)
@@ -1874,7 +1875,6 @@ def test_get_status(tmp_dir):
         "Checking environment 'py'",
         "Compiling pipeline",
         "Cleaning notebooks",
-        "Mapping LaTeX components",
         "Finding stale stages",
     ]
     assert not status.failed_environment_checks

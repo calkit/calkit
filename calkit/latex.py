@@ -728,36 +728,6 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
     return problems
 
 
-def map_all_in_pipeline(
-    ck_info: dict | None = None, wdir: str | None = None
-) -> list[str]:
-    """Map in the components of every LaTeX stage's document that includes
-    any, before the pipeline is run or checked, the way notebooks are
-    cleaned, so the copies the stages depend on are there and current.
-
-    Returns what couldn't be brought in, e.g., a file not pulled yet.
-    """
-    import calkit
-
-    if ck_info is None:
-        ck_info = calkit.load_calkit_info(wdir=wdir)
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    folders = []
-    for stage in stages.values():
-        if not isinstance(stage, dict) or stage.get("kind") != "latex":
-            continue
-        target = stage.get("target_path")
-        if not isinstance(target, str):
-            continue
-        document = os.path.join(wdir or "", stage.get("wdir") or "", target)
-        if os.path.isfile(document) and find_ck_components(document):
-            folders.append(os.path.dirname(document))
-    problems = []
-    for folder in dict.fromkeys(folders):
-        problems += map_ck_components(folder)
-    return problems
-
-
 # Records of Word exports and merges: always kept on this machine, like run
 # logs, and in the project too when asked, e.g., with --log
 DOCX_EXPORTS_DIR = os.path.join(".calkit", "latex", "docx-exports")

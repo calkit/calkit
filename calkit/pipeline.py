@@ -1228,9 +1228,9 @@ def get_status(
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
-    This can compile the Calkit pipeline to DVC, clean notebook outputs,
-    map in the components LaTeX documents include with calkit.sty's commands,
-    check pipeline environments, then query DVC for out-of-date stages.
+    This can compile the Calkit pipeline to DVC, mapping in the components
+    LaTeX documents include with calkit.sty's commands as it does, clean
+    notebook outputs, check pipeline environments, then query DVC for out-of-date stages.
     With ``with_data_status``, DVC's data status is attached as well, left
     None if it fails so the caller can ask again and report why.
     ``progress`` is told what's being done as each step starts.
@@ -1353,7 +1353,12 @@ def get_status(
         ):
             step("Compiling pipeline")
             try:
-                to_dvc(ck_info=ck_info, write=True, manage_gitignore=False)
+                to_dvc(
+                    ck_info=ck_info,
+                    write=True,
+                    manage_gitignore=False,
+                    map_components=map_components,
+                )
             except Exception as e:
                 result["errors"].append(
                     f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
@@ -1369,16 +1374,6 @@ def get_status(
             except Exception as e:
                 result["errors"].append(
                     "Failed to clean notebooks in pipeline: "
-                    f"{e.__class__.__name__}: {e}"
-                )
-                return PipelineStatus.model_validate(result)
-        if map_components and ck_info.get("pipeline", {}).get("stages", {}):
-            step("Mapping LaTeX components")
-            try:
-                calkit.latex.map_all_in_pipeline(ck_info=ck_info)
-            except Exception as e:
-                result["errors"].append(
-                    "Failed to map LaTeX components: "
                     f"{e.__class__.__name__}: {e}"
                 )
                 return PipelineStatus.model_validate(result)
@@ -2098,6 +2093,9 @@ def _ensure_latex_aux_gitignore(
         "*.toc",
         "*.vrb",
         "*.xdv",
+        # Written by Calkit before the pipeline runs or is checked, and when
+        # syncing with Overleaf
+        "/calkit.sty",
     ]
     # Stage path fields are relative to the stage's wdir, which in turn is
     # relative to the (sub)project being compiled.
@@ -2311,6 +2309,7 @@ def to_dvc(
     verbose: bool = False,
     manage_gitignore: bool = True,
     for_run: bool = False,
+    map_components: bool = False,
 ) -> dict:
     """Compile a Calkit pipeline to a DVC pipeline.
 
@@ -2325,8 +2324,14 @@ def to_dvc(
     ``for_run`` is for compiling where the stages will run, which is the
     only place an env var a stage depends on is recorded as unset, since
     elsewhere, e.g., an editor's process, it may just not be set.
+
+    ``map_components`` maps in the components LaTeX documents include with
+    calkit.sty's commands, which their stages depend on, for compiling
+    before the pipeline is run or checked. Off otherwise, so compiling has
+    no side effects for, e.g., the hub committing an edit.
     """
     import calkit.dvc.zip
+    import calkit.latex
     import calkit.markdown
     import calkit.questions
     from calkit.environments import (
@@ -2431,6 +2436,7 @@ def to_dvc(
             verbose=verbose,
             manage_gitignore=manage_gitignore,
             for_run=for_run,
+            map_components=map_components,
         )
         if not sp_is_isolated:
             continue
@@ -2625,6 +2631,14 @@ def to_dvc(
     for stage in pipeline.stages.values():
         if isinstance(stage, LatexStage):
             stage.read_component_paths(wdir)
+            if map_components and stage._component_paths:
+                calkit.latex.map_ck_components(
+                    os.path.join(
+                        wdir or "",
+                        stage.wdir or "",
+                        os.path.dirname(stage.target_path),
+                    )
+                )
     if write:
         # The resolved setup commands each stage runs, written beside the
         # pipeline so the compiled command can name a path instead of

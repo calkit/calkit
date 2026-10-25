@@ -1646,7 +1646,7 @@ def sync(
     changes staged). See the ``--no-commit`` handling near the end of this
     function.
     """
-    from calkit.latex import map_ck_components
+    from calkit.latex import STYLE_FNAME, map_ck_components
 
     # Holds a mix of commits, paths, patches, and flags, so it's annotated
     # rather than inferred from whatever lands in it first.
@@ -2005,6 +2005,9 @@ def sync(
                 for p in calkit.AUTO_IGNORE_PREFIXES
             )
             or untracked_posix in auto_ignore_paths
+            # Written by Calkit on every sync, and pushed rather than
+            # committed
+            or untracked_posix == path_prefix + STYLE_FNAME
         ):
             if calkit.git.ensure_path_is_ignored(main_repo, untracked_posix):
                 print_info(f"Automatically ignoring {untracked_posix}")

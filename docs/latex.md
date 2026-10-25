@@ -89,6 +89,72 @@ Undeclared inputs mean editing the class file doesn't rebuild the paper, and
 the web app's in-browser editor, which loads exactly what the stage declares,
 can't compile the document at all.
 
+## Including project components
+
+A document can include figures, tables, and values from anywhere in the
+project by their path, with the commands in Calkit's `calkit` package:
+
+```latex
+\usepackage{calkit}
+...
+The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
+\ckfigure[width=0.7\textwidth]{figures/plot.png}
+\cktable{tables/summary.tex}
+```
+
+- `\ckvalue[format]{path}{key}` prints a value from a JSON, YAML, or TOML
+  file.
+  Keys are separated by dots to reach into nested values, e.g., `fit.slope`.
+- `\ckfigure[options]{path}` includes a figure, with the same options as
+  `\includegraphics`.
+- `\cktable{path}` includes a table, or any other LaTeX a stage writes.
+
+Paths are relative to the project, wherever the document is,
+so nothing needs copying into the document's folder,
+and no `map-paths` or `json-to-latex` stage is needed.
+Before running or checking the pipeline, and before each
+`calkit latex build`, Calkit copies what the document includes into a
+`_calkit` folder beside it, writes the values it uses to
+`_calkit/values.tex`, and puts `calkit.sty` next to the document.
+Neither is committed to Git, since Calkit writes them again whenever they're
+needed.
+
+The document's stage depends on everything it includes this way,
+without any of it being listed as an input,
+so `calkit run` builds the document after the stages that produce what it
+includes, and again whenever one of them changes.
+
+Anything not in the project yet, e.g., a figure the pipeline hasn't made,
+prints as **??** with a warning rather than failing the build.
+
+These commands are optional.
+`\includegraphics` and `\input` work as usual for files in the document's
+folder.
+
+### Formatting values
+
+The document formats numbers when it compiles, with the
+[siunitx](https://ctan.org/pkg/siunitx) package,
+so a changed format takes effect on the next build, including on Overleaf.
+A format is either a Python-style format spec, which Calkit translates,
+or siunitx options:
+
+| Format                                 | Meaning                     | Example                   |
+| -------------------------------------- | --------------------------- | ------------------------- |
+| `.2f`                                  | Decimal places              | 0.123456 → 0.12           |
+| `.3g` or `.3`                          | Significant figures         | 0.123456 → 0.123          |
+| `.2e`                                  | Scientific notation         | 0.000123456 → 1.23 × 10⁻⁴ |
+| `d`                                    | Whole number                | 42.7 → 43                 |
+| `,d`, `,.2f`, etc.                     | Thousands grouped by commas | 1234567 → 1,234,567       |
+| `round-mode=places, round-precision=1` | siunitx options             | 0.123456 → 0.1            |
+
+Without a format, siunitx's defaults apply, which print every digit.
+To set a default for the whole document, use `\sisetup`, e.g.,
+`\sisetup{round-mode=figures, round-precision=3}`.
+A value that isn't a number, e.g., a name, prints as it is.
+Since `%` starts a comment in LaTeX, a percentage is easiest written to the
+results file by the pipeline.
+
 ## Build dates
 
 pdfTeX writes the build time into the PDF,

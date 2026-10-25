@@ -1808,18 +1808,21 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         "data/summary.json",
     } <= set(deps)
     assert not any("typo" in d or "outside" in d for d in deps)
-    # Not on the copies, which a fresh clone doesn't have; calkit.sty is
-    # covered by its hash in the command instead
-    assert not any("_calkit" in d or "calkit.sty" in d for d in deps)
-    key = calkit.latex.style_hash()
-    assert f"--style-hash {key}" in stages["build-paper"]["cmd"]
+    # And on the copies it reads, like a cleaned notebook, so a new value or
+    # calkit.sty rebuilds it
+    assert {"paper/_calkit", "paper/calkit.sty"} <= set(deps)
     # Documents in one folder depend only on what each includes
     assert "results/other.json" in stages["build-other"]["deps"]
     assert "results/other.json" not in deps
     assert "results/metrics.json" not in stages["build-other"]["deps"]
     deps = stages["build-paper-wdir"]["deps"]
-    assert {"../figures/plot.png", "../results/metrics.json"} <= set(deps)
-    # A document that includes nothing has no hash
+    assert {
+        "../figures/plot.png",
+        "../results/metrics.json",
+        "_calkit",
+        "calkit.sty",
+    } <= set(deps)
+    # A document that includes nothing depends on no copies
     os.makedirs("plain")
     with open("plain/main.tex", "w") as f:
         f.write("\\documentclass{article}\n")
@@ -1829,7 +1832,10 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         "target_path": "plain/main.tex",
     }
     stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
-    assert "--style-hash" not in stages["build-plain"]["cmd"]
+    assert not any(
+        d.endswith(("_calkit", "calkit.sty"))
+        for d in stages["build-plain"]["deps"]
+    )
     # Compiling for a run or check maps the components in, kept out of Git,
     # with one stage building each PDF, as DVC requires
     del ck_info["pipeline"]["stages"]["build-paper-wdir"]
@@ -1867,18 +1873,19 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         return status.stale_stage_names
 
     assert stale() == []
-    # Without the copies, as in a fresh clone, nothing is stale, even to DVC
-    # on its own
+    # Without the copies, as in a fresh clone, DVC alone sees the documents
+    # as stale, but checking maps the copies in first, so they aren't
     shutil.rmtree("paper/_calkit")
     os.remove("paper/calkit.sty")
     out = subprocess.check_output(["dvc", "status", "--json"], text=True)
-    assert json.loads(out) == {}
+    assert "build-paper" in json.loads(out)
     assert stale() == []
     assert os.path.isfile("paper/_calkit/values.tex")
-    # A new value makes only the document using it stale
+    # A new value makes the document using it stale, and the other in its
+    # folder, since they share the copies
     with open("results/metrics.json", "w") as f:
         f.write('{"rmse": 0.456}')
-    assert stale() == ["build-paper"]
+    assert sorted(stale()) == ["build-other", "build-paper"]
 
 
 def test_get_status(tmp_dir):

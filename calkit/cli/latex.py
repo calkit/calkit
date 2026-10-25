@@ -655,17 +655,6 @@ def build(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
-    style_hash: Annotated[
-        str | None,
-        typer.Option(
-            "--style-hash",
-            help=(
-                "Hash of calkit.sty, which the pipeline puts in the command "
-                "so a new calkit.sty rebuilds the document."
-            ),
-            hidden=True,
-        ),
-    ] = None,
 ):
     """Build a PDF of a LaTeX document with latexmk.
 

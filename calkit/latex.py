@@ -661,17 +661,6 @@ def tex_value(value: Any) -> tuple[str, str]:
     return "n", repr(value)
 
 
-def style_hash() -> str:
-    """A short hash of the calkit.sty this Calkit writes, which a stage
-    building a document that uses it puts in its command, so a new calkit.sty
-    rebuilds the document.
-    """
-    import calkit.resources
-
-    text = calkit.resources.read_text("latex", STYLE_FNAME)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
-
-
 def _write_if_changed(path: str, content: str | bytes) -> None:
     """Write a file only if its content differs, so latexmk, which goes by
     content and timestamps, doesn't rebuild for nothing.

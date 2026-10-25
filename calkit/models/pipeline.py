@@ -1281,6 +1281,7 @@ class LatexStage(Stage):
             path
             for path in deps
             if path not in (self.target_path, self.latexmkrc_path)
+            and path not in self.component_copies
             and not path.startswith(".calkit/")
         ]
         # Changing the filter's script rebuilds the diff
@@ -1460,9 +1461,6 @@ class LatexStage(Stage):
             cmd += " --no-synctex"
         for arg in self.latexmk_args:
             cmd += f" --latexmk-arg {shlex.quote(arg)}"
-        # So a new calkit.sty, e.g., after an upgrade, rebuilds the document
-        if self._uses_components:
-            cmd += f" --style-hash {calkit.latex.style_hash()}"
         cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
@@ -1505,15 +1503,33 @@ class LatexStage(Stage):
         self._component_paths = list(dict.fromkeys(paths))
 
     @property
+    def component_copies(self) -> list[str]:
+        """What the document reads its components from: the ``_calkit``
+        folder and ``calkit.sty`` beside it, relative to the stage's
+        ``wdir``, or nothing if it includes none.
+
+        Like cleaned notebooks, they're written before the pipeline runs or
+        is checked, and kept out of Git. The folder, rather than each file
+        in it, since it's always there once mapped, while the copy of a
+        figure a stage hasn't made yet isn't.
+        """
+        if not self._uses_components:
+            return []
+        folder = posixpath.dirname(self.target_path)
+        return [
+            posixpath.join(folder, calkit.latex.COMPONENTS_DIR),
+            posixpath.join(folder, calkit.latex.STYLE_FNAME),
+        ]
+
+    @property
     def dvc_deps(self) -> list[str]:
-        # The copies Calkit maps in beside the document aren't deps, since
-        # they're written again before every run and check, so they'd only be
-        # missing from a fresh clone; calkit.sty is covered by its hash in the
-        # command
+        # The copies the document reads, and what they're copied from, so it
+        # builds after the stages making them
         deps = (
             [self.target_path]
             + super().dvc_deps
             + [self.path_from_wdir(p) for p in self._component_paths]
+            + self.component_copies
         )
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)

@@ -753,12 +753,23 @@ def map_ck_components(
         return is_file(rel) or bool(is_tracked and is_tracked(rel))
 
     problems: list[str] = []
-    kept = {".gitignore", VALUES_FNAME}
+    kept = {".gitignore", "README.md", VALUES_FNAME}
     _write_if_changed(
         os.path.join(out, ".gitignore"),
         "# Calkit copies the components the documents beside this folder\n"
         "# include into it\n"
         "*\n",
+    )
+    # Pushed to Overleaf with the rest, where the .gitignore isn't a hint
+    _write_if_changed(
+        os.path.join(out, "README.md"),
+        "# Don't edit anything here\n\n"
+        "Calkit writes this folder from the project, for the documents\n"
+        "beside it to include with `\\ckvalue`, `\\ckfigure`, and\n"
+        "`\\cktable`. It's rewritten whenever the pipeline runs or is\n"
+        "checked and on every Overleaf sync, so edits here are lost and\n"
+        "never reach the project.\n"
+        "To change a value, figure, or table, change where it comes from.\n",
     )
     lines = ["%% Written by Calkit from what the documents here include.\n"]
     for c in components:

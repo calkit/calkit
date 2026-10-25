@@ -69,6 +69,7 @@ def test_get_sync_status(tmp_dir):
     assert set(pushes) == {
         "figures/fig.png",
         "calkit.sty",
+        "_calkit/README.md",
         "_calkit/values.tex",
     }
     # Push by hand to represent a completed sync
@@ -200,9 +201,10 @@ def test_sync_ck_components(tmp_dir):
     # calkit.sty goes to Overleaf before anything is included, so a document
     # can start using its commands there and still compile
     pushes = {f["path"] for f in status()["files_to_push"]}
-    assert pushes == {"calkit.sty", "_calkit/values.tex"}
+    written = {"calkit.sty", "_calkit/README.md", "_calkit/values.tex"}
+    assert pushes == written
     sync()
-    assert {"calkit.sty", "_calkit/values.tex"} <= on_overleaf()
+    assert written <= on_overleaf()
     # What's included on Overleaf is there after one sync
     main_tex = (
         "\\documentclass{article}\n\\usepackage{calkit}\n"

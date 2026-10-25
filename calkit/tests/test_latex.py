@@ -159,6 +159,9 @@ def test_ck_components(tmp_dir):
     # Kept out of Git without touching the project's own .gitignore
     with open("paper/_calkit/.gitignore") as f:
         assert f.read().strip().endswith("*")
+    # And says not to edit it, which is all Overleaf shows
+    with open("paper/_calkit/README.md") as f:
+        assert "Don't edit" in f.read()
     assert os.path.isfile("paper/calkit.sty")
     # Unchanged content isn't rewritten, so latexmk has nothing to redo
     mtime = os.stat("paper/_calkit/values.tex").st_mtime_ns

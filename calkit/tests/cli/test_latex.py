@@ -230,6 +230,8 @@ def test_build_ck_components(tmp_dir):
 
     import pypdfium2
 
+    from calkit.cli import latex as cli_latex
+
     subprocess.check_call(["calkit", "init"])
     os.makedirs("results")
     with open("results/metrics.json", "w") as f:
@@ -371,15 +373,23 @@ def test_build_ck_components(tmp_dir):
                 "\\end{document}", "\\ckfigure{figures/gone}\n\\end{document}"
             )
         )
+    # Compiled without mapping again, wherever TeX is, e.g., in a container
     out = subprocess.run(
-        ["pdflatex", "-interaction=nonstopmode", "main.tex"],
-        cwd="paper",
+        cli_latex._tex_cmd(
+            ["latexmk", "-pdf", "-cd", "-interaction=nonstopmode"]
+            + ["paper/main.tex"],
+            environment=None,
+            no_check=True,
+            verbose=False,
+            dep="latexmk",
+        ),
         capture_output=True,
         text=True,
         errors="replace",
     )
     assert out.returncode == 0, out.stdout
-    assert "figures/gone hasn't been brought in yet" in out.stdout
+    with open("paper/main.log", errors="replace") as f:
+        assert "figures/gone hasn't been brought in yet" in f.read()
 
 
 @skipif_windows_docker

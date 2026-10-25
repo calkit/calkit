@@ -2648,6 +2648,9 @@ def to_dvc(
                     )
                 )
 
+    def is_component_output(rel: str) -> bool:
+        return any(rel == o or rel.startswith(o + "/") for o in output_paths)
+
     def is_component_input(rel: str) -> bool:
         parts = rel.split("/")
         return (
@@ -2656,12 +2659,16 @@ def to_dvc(
                 os.path.isfile(os.path.join(wdir or "", *parts[:i]) + ".dvc")
                 for i in range(1, len(parts) + 1)
             )
-            or any(rel == o or rel.startswith(o + "/") for o in output_paths)
+            or is_component_output(rel)
         )
 
     for stage in pipeline.stages.values():
         if isinstance(stage, LatexStage):
-            stage.read_component_paths(wdir, is_input=is_component_input)
+            stage.read_component_paths(
+                wdir,
+                is_input=is_component_input,
+                is_output=is_component_output,
+            )
             if map_components and stage._uses_components:
                 document = os.path.join(
                     wdir or "", stage.wdir or "", stage.target_path

@@ -1465,61 +1465,72 @@ class LatexStage(Stage):
         return cmd
 
     # Project paths of the components the document includes with calkit.sty's
-    # commands, and whether it includes any, set by read_component_paths
+    # commands, the files among them no stage makes, and whether it includes
+    # any, set by read_component_paths
     _component_paths: list[str] = PrivateAttr(default_factory=list)
+    _copied_paths: list[str] = PrivateAttr(default_factory=list)
     _uses_components: bool = PrivateAttr(default=False)
 
     def read_component_paths(
         self,
         project_dir: str | None = None,
         is_input: Callable[[str], bool] | None = None,
+        is_output: Callable[[str], bool] | None = None,
     ) -> None:
         """Read which components the document includes with calkit.sty's
         commands, since they're as much inputs as its source.
 
         Only paths ``is_input`` accepts are kept, e.g., ones that exist or a
         stage produces, so a typo or a figure not made yet prints as ?? rather
-        than stopping the pipeline. The pipeline calls this when compiling,
-        since only it knows where the project is.
+        than stopping the pipeline. Paths ``is_output`` accepts are ones a
+        stage makes. The pipeline calls this when compiling, since only it
+        knows where the project is.
         """
+
+        def exists(p: str) -> bool:
+            return os.path.isfile(os.path.join(project_dir or "", p))
+
         document = os.path.join(
             project_dir or "", self.wdir or "", self.target_path
         )
         components = calkit.latex.find_ck_components(document)
         self._uses_components = bool(components)
         paths = []
+        copied = []
         for c in components:
-            rel, _ = calkit.latex.component_path(
-                c,
-                is_input
-                or (
-                    lambda p: os.path.isfile(
-                        os.path.join(project_dir or "", p)
-                    )
-                ),
-            )
-            if rel is not None:
-                paths.append(rel)
+            rel, _ = calkit.latex.component_path(c, is_input or exists)
+            if rel is None:
+                continue
+            paths.append(rel)
+            if (
+                c.kind != "value"
+                and exists(rel)
+                and not (is_output and is_output(rel))
+            ):
+                copied.append(rel)
         self._component_paths = list(dict.fromkeys(paths))
+        self._copied_paths = list(dict.fromkeys(copied))
 
     @property
     def component_copies(self) -> list[str]:
-        """What the document reads its components from: the ``_calkit``
-        folder and ``calkit.sty`` beside it, relative to the stage's
-        ``wdir``, or nothing if it includes none.
+        """What the document reads its components from, relative to the
+        stage's ``wdir``: ``calkit.sty`` and ``_calkit/values.tex`` beside
+        it, and the copies of figures and tables no stage makes, or nothing
+        if it includes none.
 
         Like cleaned notebooks, they're written before the pipeline runs or
-        is checked, and kept out of Git. The folder, rather than each file
-        in it, since it's always there once mapped, while the copy of a
-        figure a stage hasn't made yet isn't.
+        is checked, and kept out of Git. A figure a stage makes is copied
+        only once it's made, after DVC checks the stage's dependencies are
+        there, so the stage depends on the figure itself instead.
         """
         if not self._uses_components:
             return []
         folder = posixpath.dirname(self.target_path)
+        components_dir = posixpath.join(folder, calkit.latex.COMPONENTS_DIR)
         return [
-            posixpath.join(folder, calkit.latex.COMPONENTS_DIR),
             posixpath.join(folder, calkit.latex.STYLE_FNAME),
-        ]
+            posixpath.join(components_dir, calkit.latex.VALUES_FNAME),
+        ] + [posixpath.join(components_dir, p) for p in self._copied_paths]
 
     @property
     def dvc_deps(self) -> list[str]:

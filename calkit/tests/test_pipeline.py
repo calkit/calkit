@@ -1737,6 +1737,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\input{sections/latin}\n"
             "\\ckfigure{figures/plot}\n"
             "\\ckfigure{figures/typo.png}\n"
+            "\\ckfigure{figures/photo.png}\n"
             "\\ckvalue{data/summary.json}{n}\n"
             "\\ckvalue{../outside.json}{secret}\n"
             "\\end{document}\n"
@@ -1752,6 +1753,10 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\documentclass{article}\n\\begin{document}\n"
             "\\ckvalue{results/other.json}{x}\n\\end{document}\n"
         )
+    # A figure no stage makes
+    os.makedirs("figures")
+    with open("figures/photo.png", "wb") as fb:
+        fb.write(b"photo")
     os.makedirs("results")
     for name, content in [
         ("metrics", '{"rmse": 0.123}'),
@@ -1809,8 +1814,19 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     } <= set(deps)
     assert not any("typo" in d or "outside" in d for d in deps)
     # And on the copies it reads, like a cleaned notebook, so a new value or
-    # calkit.sty rebuilds it
-    assert {"paper/_calkit", "paper/calkit.sty"} <= set(deps)
+    # calkit.sty rebuilds it, except a figure a stage makes, which is copied
+    # only after DVC checks the stage's dependencies are there
+    assert {
+        "paper/calkit.sty",
+        "paper/_calkit/values.tex",
+        "paper/_calkit/figures/photo.png",
+    } <= set(deps)
+    assert "paper/_calkit/figures/plot.png" not in deps
+    assert "paper/_calkit" not in deps
+    assert (
+        "paper/_calkit/figures/photo.png"
+        not in (stages["build-other"]["deps"])
+    )
     # Documents in one folder depend only on what each includes
     assert "results/other.json" in stages["build-other"]["deps"]
     assert "results/other.json" not in deps
@@ -1819,7 +1835,8 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     assert {
         "../figures/plot.png",
         "../results/metrics.json",
-        "_calkit",
+        "_calkit/values.tex",
+        "_calkit/figures/photo.png",
         "calkit.sty",
     } <= set(deps)
     # A document that includes nothing depends on no copies
@@ -1833,14 +1850,13 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     }
     stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     assert not any(
-        d.endswith(("_calkit", "calkit.sty"))
+        "_calkit" in d or d.endswith("calkit.sty")
         for d in stages["build-plain"]["deps"]
     )
     # Compiling for a run or check maps the components in, kept out of Git,
     # with one stage building each PDF, as DVC requires
     del ck_info["pipeline"]["stages"]["build-paper-wdir"]
     del ck_info["pipeline"]["stages"]["build-plain"]
-    os.makedirs("figures")
     with open("figures/plot.png", "wb") as fb:
         fb.write(b"png")
     with open("calkit.yaml", "w") as f:
@@ -1881,8 +1897,13 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     assert "build-paper" in json.loads(out)
     assert stale() == []
     assert os.path.isfile("paper/_calkit/values.tex")
+    # A new figure makes only the document including it stale
+    with open("figures/photo.png", "wb") as fb:
+        fb.write(b"new photo")
+    assert stale() == ["build-paper"]
+    subprocess.check_call(["dvc", "commit", "-f", "build-paper"])
     # A new value makes the document using it stale, and the other in its
-    # folder, since they share the copies
+    # folder, since they share values.tex
     with open("results/metrics.json", "w") as f:
         f.write('{"rmse": 0.456}')
     assert sorted(stale()) == ["build-other", "build-paper"]

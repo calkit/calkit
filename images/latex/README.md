@@ -6,7 +6,7 @@ Based on
 [carteakey/tinytex-docker](https://github.com/carteakey/tinytex-docker),
 the purpose of this image is to provide most of the packages scientific
 articles need without the <!-- calkit value key=texlive_full.unpacked_gb format="{:.1f}" -->6.2<!-- /calkit value --> GB
-of `texlive/texlive:latest-full`, a <!-- calkit value key=texlive_full.download_gb format="{:.1f}" -->2.8<!-- /calkit value --> GB
+of `texlive/texlive:latest-full`, a <!-- calkit value key=texlive_full.download_gb format="{:.1f}" -->2.7<!-- /calkit value --> GB
 download.
 Instead, this one is <!-- calkit value key=calkit.unpacked_mb format="{:.0f}" -->900<!-- /calkit value --> MB
 unpacked and <!-- calkit value key=calkit.download_mb format="{:.0f}" -->430<!-- /calkit value --> MB

@@ -1810,7 +1810,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     calkit.pipeline.to_dvc(write=True)
     subprocess.check_call(["dvc", "repro", "build-paper-components"])
     with open("paper/_calkit/values.tex") as f:
-        assert "{0.12}" in f.read()
+        assert "{rmse}{n}{0.123}" in f.read()
 
     def stale() -> bool:
         out = subprocess.check_output(

@@ -4,14 +4,17 @@
 %% anywhere, including Overleaf. Written by Calkit; commit it with the
 %% document.
 \NeedsTeXFormat{LaTeX2e}
-\ProvidesPackage{calkit}[2026/10/16 v0.1 Calkit project content]
+\ProvidesPackage{calkit}[2026/10/25 v0.2 Calkit project components]
 \RequirePackage{graphicx}
+\RequirePackage{siunitx}
 \def\ck@dir{_calkit}
 \let\ck@linkbase\@empty
-% Written by Calkit into _calkit/values.tex
+% Written by Calkit into _calkit/values.tex. A value's kind is n for a number,
+% which \ckvalue formats, or t for text, which it prints as is.
 \newcommand\cklinkbase[1]{\def\ck@linkbase{#1}}
 \newcommand\cksetvalue[4]{%
-  \expandafter\def\csname ck@v@#1@#2@#3\endcsname{#4}}
+  \expandafter\def\csname ck@v@#1@#2\endcsname{#4}%
+  \expandafter\def\csname ck@k@#1@#2\endcsname{#3}}
 \InputIfFileExists{\ck@dir/values.tex}{}{}
 % Included but not brought in yet, e.g., just inserted on Overleaf
 \newcommand\ck@missing[1]{%
@@ -20,11 +23,106 @@
 \newcommand\ck@link[2]{%
   \ifx\ck@linkbase\@empty #2%
   \else\ifdefined\href \href{\ck@linkbase/#1}{#2}\else #2\fi\fi}
-% \ckvalue[format]{path}{key}: a value from a results file. Calkit applies
-% the format, e.g., .2f, when it writes the value.
+% Numbers are formatted here rather than by Calkit, so changing a format,
+% e.g., on Overleaf, applies without bringing anything in again. A format is
+% siunitx options, passed to \num, or a Python format spec, which is turned
+% into them: .2f (decimal places), .3g or .3 (significant figures), .2e
+% (scientific), d (integer), with a leading comma to group thousands.
+\ExplSyntaxOn
+\seq_new:N \l__calkit_spec_seq
+\tl_new:N \l__calkit_opts_tl
+\tl_new:N \l__calkit_prec_tl
+\tl_new:N \l__calkit_type_tl
+\tl_new:N \l__calkit_group_tl
+\cs_new_protected:Npn \__calkit_num:nn #1#2
+  {
+    \tl_if_in:nnTF {#1} { = }
+      { \num [#1] {#2} }
+      {
+        \regex_extract_once:nnNTF
+          { \A (,?) (?: \. (\d+) )? ([defg]?) \Z }
+          {#1} \l__calkit_spec_seq
+          {
+            \tl_clear:N \l__calkit_opts_tl
+            \tl_set:Nx \l__calkit_prec_tl
+              { \seq_item:Nn \l__calkit_spec_seq { 3 } }
+            \tl_set:Nx \l__calkit_type_tl
+              { \seq_item:Nn \l__calkit_spec_seq { 4 } }
+            \tl_set:Nx \l__calkit_group_tl
+              { \seq_item:Nn \l__calkit_spec_seq { 2 } }
+            \tl_if_empty:NF \l__calkit_group_tl
+              {
+                \tl_put_right:Nn \l__calkit_opts_tl
+                  {
+                    group-digits = integer ,
+                    group-separator = { , } ,
+                    group-minimum-digits = 4 ,
+                  }
+              }
+            % Python's default precision, and .3 alone means figures
+            \tl_if_empty:NTF \l__calkit_prec_tl
+              { \tl_set:Nn \l__calkit_prec_tl { 6 } }
+              {
+                \tl_if_empty:NT \l__calkit_type_tl
+                  { \tl_set:Nn \l__calkit_type_tl { g } }
+              }
+            \str_case:Vn \l__calkit_type_tl
+              {
+                { f }
+                  {
+                    \tl_put_right:Nx \l__calkit_opts_tl
+                      {
+                        round-mode = places ,
+                        round-precision = \l__calkit_prec_tl
+                      }
+                  }
+                { e }
+                  {
+                    \tl_put_right:Nx \l__calkit_opts_tl
+                      {
+                        exponent-mode = scientific ,
+                        round-mode = places ,
+                        round-precision = \l__calkit_prec_tl
+                      }
+                  }
+                { g }
+                  {
+                    \tl_put_right:Nx \l__calkit_opts_tl
+                      {
+                        round-mode = figures ,
+                        round-precision = \l__calkit_prec_tl
+                      }
+                  }
+                { d }
+                  {
+                    \tl_put_right:Nn \l__calkit_opts_tl
+                      { round-mode = places , round-precision = 0 }
+                  }
+              }
+            \use:x
+              {
+                \exp_not:N \num
+                  [ \exp_not:V \l__calkit_opts_tl ] { \exp_not:n {#2} }
+              }
+          }
+          {
+            \PackageWarning { calkit }
+              { Can't~apply~format~'#1'~in~TeX;~printing~the~value~as~is }
+            \num {#2}
+          }
+      }
+  }
+\cs_new_protected:Npn \ck@value #1#2#3
+  {
+    \exp_args:Nv \str_if_eq:nnTF { ck@k@#2@#3 } { n }
+      { \exp_args:Nnv \__calkit_num:nn {#1} { ck@v@#2@#3 } }
+      { \use:c { ck@v@#2@#3 } }
+  }
+\ExplSyntaxOff
+% \ckvalue[format]{path}{key}: a value from a results file
 \newcommand\ckvalue[3][]{%
-  \ifcsname ck@v@#2@#3@#1\endcsname
-    \ck@link{#2?key=#3}{\csname ck@v@#2@#3@#1\endcsname}%
+  \ifcsname ck@v@#2@#3\endcsname
+    \ck@link{#2?key=#3}{\ck@value{#1}{#2}{#3}}%
   \else\ck@missing{#3 from #2}\fi}
 % \ckfigure[graphics options]{path}
 \newcommand\ckfigure[2][]{%

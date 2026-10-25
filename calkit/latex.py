@@ -554,7 +554,8 @@ class CkComponent:
     kind: str
     path: str
     key: str | None = None
-    # A Python format spec for a value, e.g., .2f
+    # How calkit.sty formats a value: siunitx options, or a Python format
+    # spec, e.g., .2f
     format: str = ""
 
 
@@ -596,16 +597,20 @@ def escape_tex(text: str) -> str:
     return "".join(_TEX_SPECIALS.get(c, c) for c in str(text))
 
 
-def format_value(value: Any, spec: str = "") -> str:
-    """A value as text for a document, with an optional format spec."""
+def tex_value(value: Any) -> tuple[str, str]:
+    """A value's kind and text for ``_calkit/values.tex``: ``n`` for a
+    number, written in full for calkit.sty to format, or ``t`` for text.
+    """
+    import math
+
     # MATLAB and NumPy write a scalar as a one-element array
     if isinstance(value, (list, tuple)) and len(value) == 1:
         value = value[0]
-    if spec:
-        return format(value, spec)
-    if isinstance(value, float):
-        return f"{value:g}"
-    return str(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "t", escape_tex(str(value))
+    if isinstance(value, float) and not math.isfinite(value):
+        return "t", escape_tex(str(value))
+    return "n", repr(value)
 
 
 def _write_if_changed(path: str, content: str | bytes) -> None:
@@ -679,17 +684,17 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
             kept.add(rel)
     lines = ["%% Written by Calkit from the values the documents here use.\n"]
     loaded: dict[str, Any] = {}
+    # Formats are applied by calkit.sty, so a value is written once however
+    # many ways it's formatted
+    written: set[tuple[str, str | None]] = set()
     for c in components:
-        if c.kind != "value":
+        if c.kind != "value" or (c.path, c.key) in written:
             continue
+        written.add((c.path, c.key))
         try:
             if c.path not in loaded:
                 loaded[c.path] = read_evidence_file(os.path.join(root, c.path))
-            text = escape_tex(
-                format_value(
-                    resolve_key(loaded[c.path], c.key or ""), c.format
-                )
-            )
+            kind, text = tex_value(resolve_key(loaded[c.path], c.key or ""))
         except KeyError:
             problems.append(f"{c.path} has no {c.key}")
             continue
@@ -697,7 +702,7 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
             problems.append(f"{c.key} from {c.path}: {e}")
             continue
         lines.append(
-            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{c.format}}}{{{text}}}\n"
+            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{kind}}}{{{text}}}\n"
         )
     _write_if_changed(os.path.join(out, VALUES_FNAME), "".join(lines))
     for dirpath, _, filenames in os.walk(out, topdown=False):

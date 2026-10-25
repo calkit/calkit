@@ -231,7 +231,7 @@ def test_build_ck_components(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("results")
     with open("results/metrics.json", "w") as f:
-        json.dump({"rmse": 0.123456}, f)
+        json.dump({"rmse": 0.123456, "big": 1234567, "label": "run_a"}, f)
     # The smallest PNG TeX will read: one white pixel
     raw = zlib.compress(b"\x00\xff\xff\xff")
     png = b"\x89PNG\r\n\x1a\n" + b"".join(
@@ -255,6 +255,11 @@ def test_build_ck_components(tmp_dir):
             "\\usepackage{calkit}\n"
             "\\begin{document}\n"
             "Error: \\ckvalue[.2f]{results/metrics.json}{rmse}.\n"
+            "Figures: \\ckvalue[.3g]{results/metrics.json}{rmse}.\n"
+            "Options: \\ckvalue[round-mode=places,round-precision=1]"
+            "{results/metrics.json}{rmse}.\n"
+            "Grouped: \\ckvalue[,d]{results/metrics.json}{big}.\n"
+            "Label: \\ckvalue[.2f]{results/metrics.json}{label}.\n"
             "\\ckfigure[width=1cm]{figures/plot.png}\n"
             "\\ckfigure{figures/not-yet.png}\n"
             "\\end{document}\n"
@@ -272,6 +277,46 @@ def test_build_ck_components(tmp_dir):
         log = f.read()
     assert "figures/not-yet.png hasn't been brought in yet" in log
     assert "_calkit/figures/plot.png" in log
+
+    def pdf_text() -> str:
+        import pypdfium2
+
+        pdf = pypdfium2.PdfDocument("paper/main.pdf")
+        try:
+            return " ".join(pdf[0].get_textpage().get_text_range().split())
+        finally:
+            pdf.close()
+
+    # calkit.sty formats numbers, from Python specs or siunitx options, and
+    # leaves text alone
+    text = pdf_text()
+    assert "Error: 0.12." in text
+    assert "Figures: 0.123." in text
+    assert "Options: 0.1." in text
+    assert "Grouped: 1,234,567." in text
+    # An underscore comes back from the PDF as a space
+    assert "Label: run a." in text
+    # A changed format applies without the values changing
+    with open("paper/_calkit/values.tex") as f:
+        values = f.read()
+    with open("paper/main.tex") as f:
+        main = f.read()
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            main.replace(
+                "[.2f]{results/metrics.json}{rmse}",
+                "[.4f]{results/metrics.json}{rmse}",
+            )
+        )
+    out = subprocess.run(
+        ["calkit", "latex", "build", "paper/main.tex"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "Error: 0.1235." in pdf_text()
+    with open("paper/_calkit/values.tex") as f:
+        assert f.read() == values
 
 
 @skipif_windows_docker

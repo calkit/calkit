@@ -141,9 +141,18 @@ def test_ck_components(tmp_dir):
     assert os.path.isfile("paper/_calkit/tables/summary.tex")
     with open("paper/_calkit/values.tex") as f:
         values = f.read()
-    assert "\\cksetvalue{results/metrics.json}{rmse}{.2f}{0.12}" in values
-    assert "\\cksetvalue{results/metrics.json}{fit.slope}{}{1.2345}" in values
-    assert "\\cksetvalue{results/metrics.json}{n_runs}{}{42}" in values
+    # Numbers are written in full, since calkit.sty formats them, so a format
+    # can change without anything being brought in again
+    assert "\\cksetvalue{results/metrics.json}{rmse}{n}{0.123456}" in values
+    assert "\\cksetvalue{results/metrics.json}{fit.slope}{n}{1.2345}" in values
+    assert "\\cksetvalue{results/metrics.json}{n_runs}{n}{42}" in values
+    assert ".2f" not in values
+    # Text is escaped, and only numbers are formatted
+    assert calkit.latex.tex_value("run_a") == ("t", "run\\_a")
+    assert calkit.latex.tex_value(True) == ("t", "True")
+    assert calkit.latex.tex_value(float("nan")) == ("t", "nan")
+    assert calkit.latex.tex_value([3]) == ("n", "3")
+    assert calkit.latex.tex_value(1e-05) == ("n", "1e-05")
     # Kept out of Git without touching the project's own .gitignore
     with open("paper/_calkit/.gitignore") as f:
         assert f.read().strip().endswith("*")

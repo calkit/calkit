@@ -7,11 +7,11 @@ lock files, such that a change in an environment causes a rerun.
 
 Before running, and before `calkit status` checks the pipeline,
 Calkit also prepares files the stages depend on that aren't stored in the
-project:
-it checks environments and writes their lock files,
-cleans the outputs out of notebooks,
-and copies the components LaTeX documents include with
-[Calkit's commands](../latex.md#including-project-components) beside them.
+project.
+It checks environments and writes their lock files,
+and cleans the outputs out of notebooks.
+Compiling a `latex` stage copies the components its document includes with
+[Calkit's commands](../latex.md#including-project-components) beside it.
 These steps are quick when nothing has changed, so they run every time.
 
 Each successfully completed stage is recorded in

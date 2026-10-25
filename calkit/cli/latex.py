@@ -563,12 +563,16 @@ def _run_latexmk(
 
 @latex_app.command(name="map-components")
 def map_components(
-    folder: Annotated[
-        str, typer.Argument(help="Folder holding the documents.")
-    ] = ".",
+    tex_file: Annotated[
+        str, typer.Argument(help="The .tex file whose components to map.")
+    ],
 ) -> None:
-    """Map in components the documents include with calkit.sty."""
-    for problem in calkit.latex.map_ck_components(folder):
+    """Map in components a LaTeX document includes with `\\ck*` commands."""
+    # Documents in one folder share its _calkit folder, so all of theirs are
+    # mapped, or mapping one would remove the others' copies
+    for problem in calkit.latex.map_ck_components(
+        os.path.dirname(tex_file) or "."
+    ):
         warn(f"{problem}; it will print as ??")
 
 

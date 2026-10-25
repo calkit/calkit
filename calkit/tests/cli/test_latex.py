@@ -264,6 +264,16 @@ def test_build_ck_components(tmp_dir):
             "\\ckfigure{figures/not-yet.png}\n"
             "\\end{document}\n"
         )
+    # Components can be mapped in without building
+    out = subprocess.run(
+        ["calkit", "latex", "map-components", "paper/main.tex"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "figures/not-yet.png is not in the project yet" in out.stdout
+    assert os.path.isfile("paper/_calkit/figures/plot.png")
+    assert os.path.isfile("paper/calkit.sty")
     out = subprocess.run(
         ["calkit", "latex", "build", "paper/main.tex"],
         capture_output=True,

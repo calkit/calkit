@@ -42,9 +42,9 @@ the block and strips the 4-space indentation of the admonition body, which
 breaks rendering.
 
 `calkit run` and `calkit status` preprocess the pipeline before asking DVC:
-they check environments, clean notebooks, and map LaTeX components into
-`_calkit/`, since each generates dependencies the compiled DVC pipeline
-reads.
+they check environments and clean notebooks, and compiling a LaTeX stage for
+them maps its document's components into `_calkit/`, since each generates
+dependencies the compiled DVC pipeline reads.
 This runs on every call, so only very fast work belongs there, e.g.,
 skipping unchanged files by size and timestamp rather than reading them.
 Anything slow belongs in a stage.

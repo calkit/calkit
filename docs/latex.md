@@ -91,8 +91,8 @@ can't compile the document at all.
 
 ## Including project components
 
-A document can include figures, tables, and values from anywhere in the
-project by their path, with the commands in Calkit's `calkit` package:
+A document can include figures, tables, and result values from anywhere in
+the project by their path, with the commands in Calkit's `calkit` package:
 
 ```latex
 \usepackage{calkit}

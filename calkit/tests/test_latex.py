@@ -185,3 +185,117 @@ def test_ck_components(tmp_dir):
     os.makedirs("figures-only")
     assert calkit.latex.map_ck_components("figures-only", always=True) == []
     assert os.listdir("figures-only") == []
+
+    # Nothing outside the project is read, however it's named, and a figure
+    # or table can be named without its extension, the way TeX finds it
+    def component_path(path: str, kind: str = "value") -> tuple:
+        return calkit.latex.component_path(
+            calkit.latex.CkComponent(kind, path),
+            lambda rel: (
+                rel
+                in {"figures/plot.png", "tables/summary.tex", "results/m.json"}
+            ),
+        )
+
+    assert component_path("../secret.json") == (
+        None,
+        "../secret.json is outside the project",
+    )
+    assert component_path("/etc/secret.json")[0] is None
+    assert component_path("C:\\secret.json")[0] is None
+    assert component_path("results/../results/m.json") == (
+        None,
+        "results/../results/m.json can't include '..'",
+    )
+    assert component_path("figures/plot", "figure") == (
+        "figures/plot.png",
+        None,
+    )
+    assert component_path("tables/summary", "table") == (
+        "tables/summary.tex",
+        None,
+    )
+    assert component_path("results/m")[0] is None
+    # Every document in a folder is mapped together, including one named
+    # because its \documentclass is in a file it inputs, and an input's
+    # inputs are read from where TeX compiles
+    os.makedirs("more/front")
+    with open("more/front/preamble.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    with open("more/a.tex", "w") as f:
+        f.write("\\input{front/preamble}\n\\ckfigure{figures/plot}\n")
+    with open("more/b.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\ckvalue{../outside.json}{secret}\n"
+            "\\ckvalue{/etc/outside.json}{secret}\n"
+            "\\ckvalue{results/metrics.json}{rmse}\n"
+            "\\input{front/nested}\n"
+        )
+    with open("more/front/nested.tex", "w") as f:
+        f.write("\\input{front/deeper}\n")
+    with open("more/front/deeper.tex", "w") as f:
+        f.write("\\cktable{tables/summary}\n")
+    problems = calkit.latex.map_ck_components("more", documents=["more/a.tex"])
+    assert "../outside.json is outside the project" in problems
+    assert "/etc/outside.json is outside the project" in problems
+    assert os.path.isfile("more/_calkit/figures/plot.png")
+    assert os.path.isfile("more/_calkit/tables/summary.tex")
+    with open("more/_calkit/values.tex") as f:
+        values = f.read()
+    assert "secret" not in values
+    assert "\\cksetfile{figures/plot}{figures/plot.png}" in values
+    assert "\\cksetvalue{results/metrics.json}{rmse}{n}{0.123456}" in values
+    # A read-only copy, e.g., of a file from DVC's cache, is still updated
+    os.chmod("more/_calkit/figures/plot.png", 0o444)
+    with open("figures/plot.png", "wb") as f:
+        f.write(b"png, made again")
+    calkit.latex.map_ck_components("more", documents=["more/a.tex"])
+    with open("more/_calkit/figures/plot.png", "rb") as f:
+        assert f.read() == b"png, made again"
+    # Without any commands left, the folder goes, though calkit.sty stays for
+    # a document that still loads it
+    os.chmod("more/_calkit/figures/plot.png", 0o444)
+    for name in ["a", "b"]:
+        with open(f"more/{name}.tex", "w") as f:
+            f.write("\\documentclass{article}\n")
+    assert calkit.latex.map_ck_components("more") == []
+    assert not os.path.exists("more/_calkit")
+    assert os.path.isfile("more/calkit.sty")
+
+
+def test_expand_ck_components(tmp_dir):
+    # A revision's data, apart from its sources, as for the working tree's
+    # side of a diff
+    os.makedirs("data/results")
+    with open("data/results/m.json", "w") as f:
+        f.write('{"rmse": 0.456, "label": "run_b"}')
+    os.makedirs("data/tables")
+    with open("data/tables/t.tex", "w") as f:
+        f.write("\\begin{tabular}{l}B\\end{tabular}")
+    os.makedirs("data/figures")
+    with open("data/figures/plot.png", "wb") as fb:
+        fb.write(b"png")
+    os.makedirs("src/paper")
+    with open("src/paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "Error: \\ckvalue[.2f]{results/m.json}{rmse}.\n"
+            "Run: \\ckvalue{results/m.json}{label}.\n"
+            "\\ckfigure[width=1cm]{figures/plot}\n"
+            "\\cktable{tables/t}\n"
+            "Missing: \\ckvalue{results/m.json}{nope}.\n"
+            "% \\ckvalue{results/m.json}{rmse}\n"
+        )
+    calkit.latex.expand_ck_components("src", "data", "paper/main.tex")
+    with open("src/paper/main.tex") as f:
+        text = f.read()
+    # Each command becomes what it shows, so latexdiff can mark a change,
+    # with numbers still formatted by calkit.sty
+    assert "Error: \\cknum[.2f]{0.456}." in text
+    assert "Run: run\\_b." in text
+    assert "\\includegraphics[width=1cm]{../figures/plot.png}" in text
+    assert "\\begin{tabular}{l}B\\end{tabular}" in text
+    # What can't be found is left to print as ??, and comments alone
+    assert "\\ckvalue{results/m.json}{nope}" in text
+    assert "% \\ckvalue{results/m.json}{rmse}" in text

@@ -1230,7 +1230,8 @@ def get_status(
 
     This can compile the Calkit pipeline to DVC, mapping in the components
     LaTeX documents include with calkit.sty's commands as it does, clean
-    notebook outputs, check pipeline environments, then query DVC for out-of-date stages.
+    notebook outputs, check pipeline environments, then query DVC for
+    out-of-date stages.
     With ``with_data_status``, DVC's data status is attached as well, left
     None if it fails so the caller can ask again and report why.
     ``progress`` is told what's being done as each step starts.
@@ -2628,16 +2629,45 @@ def to_dvc(
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
     pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
+    # A component is an input if it's there, tracked by DVC, or something a
+    # stage makes, and otherwise prints as ?? rather than stopping the run
+    output_paths: set[str] = set()
+    for stage in pipeline.stages.values():
+        try:
+            outs = stage.dvc_outs
+        except Exception:
+            continue
+        for dvc_out in outs:
+            out_path = (
+                next(iter(dvc_out)) if isinstance(dvc_out, dict) else dvc_out
+            )
+            if isinstance(out_path, str) and "${" not in out_path:
+                output_paths.add(
+                    posixpath.normpath(
+                        posixpath.join(stage.wdir or "", out_path)
+                    )
+                )
+
+    def is_component_input(rel: str) -> bool:
+        parts = rel.split("/")
+        return (
+            os.path.isfile(os.path.join(wdir or "", rel))
+            or any(
+                os.path.isfile(os.path.join(wdir or "", *parts[:i]) + ".dvc")
+                for i in range(1, len(parts) + 1)
+            )
+            or any(rel == o or rel.startswith(o + "/") for o in output_paths)
+        )
+
     for stage in pipeline.stages.values():
         if isinstance(stage, LatexStage):
-            stage.read_component_paths(wdir)
-            if map_components and stage._component_paths:
+            stage.read_component_paths(wdir, is_input=is_component_input)
+            if map_components and stage._uses_components:
+                document = os.path.join(
+                    wdir or "", stage.wdir or "", stage.target_path
+                )
                 calkit.latex.map_ck_components(
-                    os.path.join(
-                        wdir or "",
-                        stage.wdir or "",
-                        os.path.dirname(stage.target_path),
-                    )
+                    os.path.dirname(document), documents=[document]
                 )
     if write:
         # The resolved setup commands each stage runs, written beside the

@@ -221,7 +221,12 @@ def test_sync_ck_components(tmp_dir):
     assert "paper/calkit.sty" not in calkit.git.ls_files(repo)
     assert repo.ignored("paper/calkit.sty")
     assert repo.ignored("paper/_calkit/values.tex")
-    # Edits made on Overleaf to what Calkit writes aren't pulled back
+    # Edits made on Overleaf to what Calkit writes aren't pulled back, even
+    # where nothing ignores them, as in a fresh clone on the hub
+    shutil.rmtree(os.path.join("paper", "_calkit"))
+    calkit.git.ensure_path_is_not_ignored(repo, "paper/calkit.sty")
+    assert not repo.ignored("paper/calkit.sty")
+    assert not repo.ignored("paper/_calkit/values.tex")
     paths = calkit.overleaf.OverleafSyncPaths(
         main_repo=repo,
         overleaf_repo=overleaf_repo,

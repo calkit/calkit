@@ -1441,9 +1441,9 @@ def get_sync_status(
 
     This is the read-only counterpart to ``sync``: it reports what a sync
     would do without changing either repo's files, though the components
-    the documents include are copied in as ``calkit latex build`` would, and a missing last
-    sync is rebuilt in the Overleaf repo's history as ``ensure_sync_base``
-    describes. Both repos should already be up-to-date (pulled), same as for
+    the documents include are copied in as ``calkit latex build`` would,
+    and a missing last sync is rebuilt in the Overleaf repo's history as
+    ``ensure_sync_base`` describes. Both repos should already be up-to-date (pulled), same as for
     ``sync``.
 
     The returned dictionary reports how many commits are waiting on

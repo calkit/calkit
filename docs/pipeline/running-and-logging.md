@@ -10,7 +10,8 @@ Calkit also prepares files the stages depend on that aren't stored in the
 project.
 It checks environments and writes their lock files,
 and cleans the outputs out of notebooks.
-Compiling a `latex` stage copies the components its document includes with
+While turning each `latex` stage into a DVC stage, it also copies the
+components the document includes with
 [Calkit's commands](../latex.md#including-project-components) beside it.
 These steps are quick when nothing has changed, so they run every time.
 

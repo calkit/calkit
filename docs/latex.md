@@ -112,6 +112,9 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
 Paths are relative to the project, wherever the document is,
 so nothing needs copying into the document's folder,
 and no `map-paths` or `json-to-latex` stage is needed.
+A figure or table can be named without its extension, as with
+`\includegraphics` and `\input`.
+Paths outside the project, or with `..` in them, aren't read.
 Before running or checking the pipeline, and before each
 `calkit latex build`, Calkit copies what the document includes into a
 `_calkit` folder beside it, writes the values it uses to
@@ -123,9 +126,13 @@ The document's stage depends on everything it includes this way,
 without any of it being listed as an input,
 so `calkit run` builds the document after the stages that produce what it
 includes, and again whenever one of them changes.
+Calkit finds them by reading the document and the files it inputs,
+so a command inside a macro of your own, e.g., one that takes the key as
+an argument, isn't seen.
 
-Anything not in the project yet, e.g., a figure the pipeline hasn't made,
-prints as **??** with a warning rather than failing the build.
+Anything not in the project yet, e.g., a figure the pipeline hasn't made or
+a path with a typo, prints as **??** with a warning rather than failing the
+build.
 
 These commands are optional.
 `\includegraphics` and `\input` work as usual for files in the document's
@@ -148,12 +155,18 @@ or siunitx options:
 | `,d`, `,.2f`, etc.                     | Thousands grouped by commas | 1234567 → 1,234,567       |
 | `round-mode=places, round-precision=1` | siunitx options             | 0.123456 → 0.1            |
 
-Without a format, siunitx's defaults apply, which print every digit.
+Without a format, siunitx's defaults apply, which print every digit,
+grouped in threes with thin spaces, e.g., 0.123 456.
 To set a default for the whole document, use `\sisetup`, e.g.,
 `\sisetup{round-mode=figures, round-precision=3}`.
 A value that isn't a number, e.g., a name, prints as it is.
 Since `%` starts a comment in LaTeX, a percentage is easiest written to the
 results file by the pipeline.
+
+`\ckvalue` can't go inside siunitx's own commands or an `S` column, since
+those read their argument as a number.
+For a value with units, write the unit after it, e.g.,
+`\ckvalue[.2f]{results/metrics.json}{speed}~\unit{\metre\per\second}`.
 
 ## Build dates
 
@@ -175,6 +188,8 @@ A LaTeX PDF output is stored/tracked with DVC by default
 file changing and nothing about the document itself.
 Calkit can mark up one revision of a document against another with
 `latexdiff`, so additions and deletions appear where they happen.
+Each side's [project components](#including-project-components) are read
+from its own revision, so a changed value, figure, or table is marked too.
 
 List the comparisons a document should keep in its `latex` stage
 under the `diffs` list:

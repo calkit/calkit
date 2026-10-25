@@ -571,7 +571,7 @@ def map_components(
     # Documents in one folder share its _calkit folder, so all of theirs are
     # mapped, or mapping one would remove the others' copies
     for problem in calkit.latex.map_ck_components(
-        os.path.dirname(tex_file) or "."
+        os.path.dirname(tex_file) or ".", documents=[tex_file]
     ):
         warn(f"{problem}; it will print as ??")
 
@@ -655,6 +655,17 @@ def build(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
+    style_hash: Annotated[
+        str | None,
+        typer.Option(
+            "--style-hash",
+            help=(
+                "Hash of calkit.sty, which the pipeline puts in the command "
+                "so a new calkit.sty rebuilds the document."
+            ),
+            hidden=True,
+        ),
+    ] = None,
 ):
     """Build a PDF of a LaTeX document with latexmk.
 
@@ -674,7 +685,9 @@ def build(
     pdf_dir = output_dir if output_dir is not None else tex_dir
     # Components the document includes with calkit.sty's commands, e.g.,
     # \ckfigure, have to be beside it before TeX can read them
-    for problem in calkit.latex.map_ck_components(tex_dir):
+    for problem in calkit.latex.map_ck_components(
+        tex_dir, documents=[tex_file]
+    ):
         warn(f"{problem}; it will print as ??")
     if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
         fdb_dir = aux_dir if aux_dir is not None else tex_dir
@@ -988,6 +1001,7 @@ def diff(
     generates, are fetched as they were at that revision, so each side of
     the comparison shows its own.
     """
+    import calkit.resources
 
     def stage_path(stage: dict, path: str) -> str:
         """A stage's path in the project's frame rather than its wdir's."""
@@ -1550,6 +1564,22 @@ def diff(
         for root in prepared:
             break_verbatim_params(root)
             expand_wrapper_macros(root)
+            # Each side's own values, figures, and tables, read from its
+            # revision, or the working tree for its copy of the sources
+            calkit.latex.expand_ck_components(
+                root, "." if root == working_copy else root, tex_file
+            )
+        # \cknum in the marked-up document needs calkit.sty beside it
+        build_style = os.path.join(
+            head_root, os.path.dirname(tex_file), calkit.latex.STYLE_FNAME
+        )
+        if not os.path.isfile(build_style):
+            with open(build_style, "w", encoding="utf-8") as f:
+                f.write(
+                    calkit.resources.read_text(
+                        "latex", calkit.latex.STYLE_FNAME
+                    )
+                )
         point_changed_figures_at_base(checkouts["base"], head_root)
         _build_diff(
             base_tex_fpath=sides["base"],
@@ -1730,6 +1760,9 @@ def _build_diff(
         # chose otherwise
         if not any(a.startswith("--graphics-markup") for a in latexdiff_args):
             latexdiff_cmd.append("--graphics-markup=both")
+        # A value from calkit.sty is marked like text, so a changed one shows
+        # struck out beside its new value, rather than only as it is now
+        latexdiff_cmd.append("--append-safecmd=cknum")
         # User pass-through args come last so they can override Calkit's
         # defaults
         latexdiff_cmd += latexdiff_args

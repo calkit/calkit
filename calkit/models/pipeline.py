@@ -1281,7 +1281,6 @@ class LatexStage(Stage):
             path
             for path in deps
             if path not in (self.target_path, self.latexmkrc_path)
-            and path not in self.component_copies
             and not path.startswith(".calkit/")
         ]
         # Changing the filter's script rebuilds the diff
@@ -1461,53 +1460,60 @@ class LatexStage(Stage):
             cmd += " --no-synctex"
         for arg in self.latexmk_args:
             cmd += f" --latexmk-arg {shlex.quote(arg)}"
+        # So a new calkit.sty, e.g., after an upgrade, rebuilds the document
+        if self._uses_components:
+            cmd += f" --style-hash {calkit.latex.style_hash()}"
         cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
     # Project paths of the components the document includes with calkit.sty's
-    # commands, set by read_component_paths
+    # commands, and whether it includes any, set by read_component_paths
     _component_paths: list[str] = PrivateAttr(default_factory=list)
+    _uses_components: bool = PrivateAttr(default=False)
 
-    def read_component_paths(self, project_dir: str | None = None) -> None:
+    def read_component_paths(
+        self,
+        project_dir: str | None = None,
+        is_input: Callable[[str], bool] | None = None,
+    ) -> None:
         """Read which components the document includes with calkit.sty's
         commands, since they're as much inputs as its source.
 
-        The pipeline calls this when compiling, since only it knows where
-        the project is.
+        Only paths ``is_input`` accepts are kept, e.g., ones that exist or a
+        stage produces, so a typo or a figure not made yet prints as ?? rather
+        than stopping the pipeline. The pipeline calls this when compiling,
+        since only it knows where the project is.
         """
         document = os.path.join(
             project_dir or "", self.wdir or "", self.target_path
         )
-        self._component_paths = list(
-            dict.fromkeys(
-                c.path for c in calkit.latex.find_ck_components(document)
+        components = calkit.latex.find_ck_components(document)
+        self._uses_components = bool(components)
+        paths = []
+        for c in components:
+            rel, _ = calkit.latex.component_path(
+                c,
+                is_input
+                or (
+                    lambda p: os.path.isfile(
+                        os.path.join(project_dir or "", p)
+                    )
+                ),
             )
-        )
-
-    @property
-    def component_copies(self) -> list[str]:
-        """Where the document's components are copied beside it, relative to
-        the stage's ``wdir``, or nothing if it includes none.
-        """
-        if not self._component_paths:
-            return []
-        folder = posixpath.dirname(self.target_path)
-        return [
-            posixpath.join(folder, calkit.latex.COMPONENTS_DIR),
-            posixpath.join(folder, calkit.latex.STYLE_FNAME),
-        ]
+            if rel is not None:
+                paths.append(rel)
+        self._component_paths = list(dict.fromkeys(paths))
 
     @property
     def dvc_deps(self) -> list[str]:
-        # What the components are copied from, so the document builds after
-        # the stages making them, and the copies, which Calkit maps in before
-        # running or checking the pipeline, so a new value or calkit.sty
-        # makes it stale
+        # The copies Calkit maps in beside the document aren't deps, since
+        # they're written again before every run and check, so they'd only be
+        # missing from a fresh clone; calkit.sty is covered by its hash in the
+        # command
         deps = (
             [self.target_path]
             + super().dvc_deps
             + [self.path_from_wdir(p) for p in self._component_paths]
-            + self.component_copies
         )
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)

@@ -560,13 +560,29 @@ class CkComponent:
     format: str = ""
 
 
+def _read_leniently(path: str) -> str | None:
+    """A source file's text, with anything that isn't UTF-8 replaced, since
+    finding components mustn't fail on a document in another encoding.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return None
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
 def find_ck_components(document: str) -> list[CkComponent]:
     """The components a document includes with calkit.sty's commands,
     including in the files it inputs, in order and without repeats.
+
+    Commands in a macro's definition, whose arguments are its parameters,
+    e.g., ``#1``, aren't components until used, and can't be followed.
     """
-    text = "\n".join(_strip_comments(line.text) for line in flatten(document))
+    lines = flatten(document, read=_read_leniently)
+    text = "\n".join(_strip_comments(line.text) for line in lines)
     found: list[CkComponent] = []
     for kind, option, first, second in _CK_COMMAND_RE.findall(text):
+        if "#" in first + second:
+            continue
         if kind == "value":
             found.append(
                 CkComponent(
@@ -578,6 +594,37 @@ def find_ck_components(document: str) -> list[CkComponent]:
     return list(dict.fromkeys(found))
 
 
+def component_path(
+    component: CkComponent, exists: Callable[[str], bool]
+) -> tuple[str | None, str | None]:
+    """Where a component's file is, relative to the project, or what's
+    wrong with it, with ``exists`` saying whether a project path is there.
+
+    A figure or table named without an extension is found the way TeX
+    finds it, e.g., ``figures/plot`` as ``figures/plot.pdf`` or ``.png``.
+    """
+    from pathlib import PureWindowsPath
+
+    raw = component.path.replace("\\", "/")
+    if raw.startswith("/") or PureWindowsPath(component.path).drive:
+        return None, f"{component.path} is outside the project"
+    rel = posixpath.normpath(raw)
+    if rel == ".." or rel.startswith("../"):
+        return None, f"{component.path} is outside the project"
+    # TeX reads the path as written, so a copy at the normalized path
+    # wouldn't be found
+    if ".." in raw.split("/"):
+        return None, f"{component.path} can't include '..'"
+    if exists(rel):
+        return rel, None
+    if component.kind != "value" and not posixpath.splitext(rel)[1]:
+        exts = _GRAPHICS_EXTS if component.kind == "figure" else [".tex"]
+        for ext in exts:
+            if exists(rel + ext):
+                return rel + ext, None
+    return None, f"{component.path} is not in the project yet"
+
+
 def root_documents(folder: str) -> list[str]:
     """The documents directly in a folder, i.e., ``.tex`` files with a
     ``\\documentclass``, rather than the files they input.
@@ -587,7 +634,7 @@ def root_documents(folder: str) -> list[str]:
         path = os.path.join(folder, name)
         if not name.endswith(".tex") or not os.path.isfile(path):
             continue
-        text = read_file(path) or ""
+        text = _read_leniently(path) or ""
         if re.search(r"^\s*\\documentclass", _strip_comments(text), re.M):
             docs.append(path)
     return docs
@@ -614,6 +661,17 @@ def tex_value(value: Any) -> tuple[str, str]:
     return "n", repr(value)
 
 
+def style_hash() -> str:
+    """A short hash of the calkit.sty this Calkit writes, which a stage
+    building a document that uses it puts in its command, so a new calkit.sty
+    rebuilds the document.
+    """
+    import calkit.resources
+
+    text = calkit.resources.read_text("latex", STYLE_FNAME)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
 def _write_if_changed(path: str, content: str | bytes) -> None:
     """Write a file only if its content differs, so latexmk, which goes by
     content and timestamps, doesn't rebuild for nothing.
@@ -628,14 +686,31 @@ def _write_if_changed(path: str, content: str | bytes) -> None:
         f.write(data)
 
 
-def map_ck_components(folder: str, always: bool = False) -> list[str]:
+def _make_writable(path: str) -> None:
+    """Let a file be overwritten or removed, e.g., one copied from DVC's
+    cache, which is read-only, or on Windows, where read-only blocks
+    removal.
+    """
+    import stat
+
+    if os.path.exists(path) and not os.access(path, os.W_OK):
+        os.chmod(path, os.stat(path).st_mode | stat.S_IWUSR)
+
+
+def map_ck_components(
+    folder: str, documents: list[str] | None = None, always: bool = False
+) -> list[str]:
     """Bring the components the documents in a folder include with
     calkit.sty's commands into its ``_calkit`` folder, so they build without
     the rest of the project, e.g., on Overleaf.
 
-    Files are copied, values are written to ``_calkit/values.tex``
-    formatted as asked, and ``calkit.sty`` is put beside the documents.
-    Anything no longer included is removed, since nothing else writes there.
+    Every document directly in the folder is included, plus ``documents``,
+    e.g., one whose ``\\documentclass`` is in a file it inputs, since they
+    share the ``_calkit`` folder, and mapping one alone would remove the
+    others' copies. Files are copied, values are written to
+    ``_calkit/values.tex`` for calkit.sty to format, and ``calkit.sty`` is
+    put beside the documents. Anything no longer included is removed, since
+    nothing else writes there.
 
     With ``always``, ``calkit.sty`` is written even when nothing is included
     yet, so a document synced with Overleaf can start using its commands
@@ -647,12 +722,23 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
     import calkit.resources
     from calkit.questions import read_evidence_file, resolve_key
 
-    docs = root_documents(folder)
+    docs = list(
+        dict.fromkeys(
+            os.path.normpath(d)
+            for d in root_documents(folder) + (documents or [])
+            if os.path.isfile(d)
+        )
+    )
     components = list(
         dict.fromkeys(c for doc in docs for c in find_ck_components(doc))
     )
     out = os.path.join(folder, COMPONENTS_DIR)
-    if not components and not os.path.isdir(out) and not (always and docs):
+    if not components and not (always and docs):
+        if os.path.isdir(out):
+            for dirpath, _, filenames in os.walk(out):
+                for name in filenames:
+                    _make_writable(os.path.join(dirpath, name))
+            shutil.rmtree(out)
         return []
     # Component paths are relative to the project, wherever the document is
     root = os.path.abspath(folder or ".")
@@ -662,6 +748,10 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
             root = os.path.abspath(folder or ".")
             break
         root = parent
+
+    def is_file(rel: str) -> bool:
+        return os.path.isfile(os.path.join(root, rel))
+
     problems: list[str] = []
     kept = {".gitignore", VALUES_FNAME}
     _write_if_changed(
@@ -670,28 +760,31 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
         "# include into it\n"
         "*\n",
     )
+    lines = ["%% Written by Calkit from what the documents here include.\n"]
     for c in components:
         if c.kind == "value":
             continue
-        rel = posixpath.normpath(Path(c.path).as_posix())
+        rel, problem = component_path(c, is_file)
+        if rel is None:
+            problems.append(str(problem))
+            continue
+        # Skipped while size and timestamp match, since this runs before
+        # every status check. Only the content is copied, so a read-only
+        # file from DVC's cache leaves a copy that can be updated.
         src = os.path.join(root, rel)
-        if rel.startswith("../") or os.path.isabs(c.path):
-            problems.append(f"{c.path} is outside the project")
-        elif not os.path.isfile(src):
-            problems.append(f"{c.path} is not in the project yet")
-        else:
-            # Copied with its timestamp and skipped while size and timestamp
-            # match, since this runs before every status check
-            dest = os.path.join(out, rel)
-            src_stat = os.stat(src)
-            if not os.path.isfile(dest) or (
-                os.stat(dest).st_size,
-                os.stat(dest).st_mtime_ns,
-            ) != (src_stat.st_size, src_stat.st_mtime_ns):
-                os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-                shutil.copy2(src, dest)
-            kept.add(rel)
-    lines = ["%% Written by Calkit from the values the documents here use.\n"]
+        dest = os.path.join(out, rel)
+        src_stat = os.stat(src)
+        if not os.path.isfile(dest) or (
+            os.stat(dest).st_size,
+            os.stat(dest).st_mtime_ns,
+        ) != (src_stat.st_size, src_stat.st_mtime_ns):
+            os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+            _make_writable(dest)
+            shutil.copyfile(src, dest)
+            os.utime(dest, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+        kept.add(rel)
+        # Where TeX finds it, for one named without an extension
+        lines.append(f"\\cksetfile{{{c.path}}}{{{rel}}}\n")
     loaded: dict[str, Any] = {}
     # Formats are applied by calkit.sty, so a value is written once however
     # many ways it's formatted
@@ -700,10 +793,14 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
         if c.kind != "value" or (c.path, c.key) in written:
             continue
         written.add((c.path, c.key))
+        rel, problem = component_path(c, is_file)
+        if rel is None:
+            problems.append(str(problem))
+            continue
         try:
-            if c.path not in loaded:
-                loaded[c.path] = read_evidence_file(os.path.join(root, c.path))
-            kind, text = tex_value(resolve_key(loaded[c.path], c.key or ""))
+            if rel not in loaded:
+                loaded[rel] = read_evidence_file(os.path.join(root, rel))
+            kind, text = tex_value(resolve_key(loaded[rel], c.key or ""))
         except KeyError:
             problems.append(f"{c.path} has no {c.key}")
             continue
@@ -718,14 +815,95 @@ def map_ck_components(folder: str, always: bool = False) -> list[str]:
         for name in filenames:
             path = os.path.join(dirpath, name)
             if Path(os.path.relpath(path, out)).as_posix() not in kept:
+                _make_writable(path)
                 os.remove(path)
         if dirpath != out and not os.listdir(dirpath):
             os.rmdir(dirpath)
+    style_path = os.path.join(folder, STYLE_FNAME)
+    new_style = not os.path.isfile(style_path)
     _write_if_changed(
-        os.path.join(folder, STYLE_FNAME),
-        calkit.resources.read_text("latex", STYLE_FNAME),
+        style_path, calkit.resources.read_text("latex", STYLE_FNAME)
     )
+    # Written whenever it's needed, so kept out of Git, wherever this runs
+    if new_style:
+        try:
+            import calkit.git
+
+            repo = calkit.git.get_repo(root)
+            rel_style = os.path.relpath(
+                os.path.abspath(style_path), repo.working_dir
+            )
+            if not repo.git.ls_files("--", rel_style):
+                calkit.git.ensure_path_is_ignored(repo, rel_style)
+        except Exception:
+            pass
     return problems
+
+
+def expand_ck_components(
+    source_root: str, data_root: str, document: str
+) -> None:
+    """Replace calkit.sty's commands in a document and the files it inputs
+    with what they show, read from ``data_root``, so latexdiff can mark a
+    changed value, figure, or table.
+
+    The sources are rewritten under ``source_root``, e.g., a checkout of a
+    revision, and ``document`` is relative to it. A figure becomes an
+    ``\\includegraphics`` of its file and a table its contents, and a value
+    a ``\\cknum`` of the number, which calkit.sty formats. A command whose
+    component can't be found is left alone, to print as ``??``.
+    """
+    from calkit.questions import read_evidence_file, resolve_key
+
+    doc_dir = os.path.dirname(document)
+
+    def is_file(rel: str) -> bool:
+        return os.path.isfile(os.path.join(data_root, rel))
+
+    def replace(match: re.Match[str]) -> str:
+        kind, option, first, second = match.groups()
+        if "#" in first + (second or ""):
+            return match.group(0)
+        c = CkComponent(kind, first.strip(), (second or "").strip() or None)
+        rel, _ = component_path(c, is_file)
+        if rel is None:
+            return match.group(0)
+        if kind == "figure":
+            name = posixpath.relpath(rel, doc_dir or ".")
+            return f"\\includegraphics[{option or ''}]{{{name}}}"
+        if kind == "table":
+            return _read_leniently(os.path.join(data_root, rel)) or ""
+        try:
+            value = resolve_key(
+                read_evidence_file(os.path.join(data_root, rel)), c.key or ""
+            )
+        except Exception:
+            return match.group(0)
+        value_kind, text = tex_value(value)
+        if value_kind == "t":
+            return text
+        return f"\\cknum[{(option or '').strip()}]{{{text}}}"
+
+    sources = [document] + [
+        path
+        for path in detect_inputs(document, wdir=source_root)
+        if Path(path).suffix in _SOURCE_EXTS
+    ]
+    for source in dict.fromkeys(sources):
+        path = Path(source_root, source)
+        text = _read_leniently(str(path))
+        if text is None:
+            continue
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            code, comment = line, ""
+            m = re.search(r"(?<!\\)%", line)
+            if m:
+                code, comment = line[: m.start()], line[m.start() :]
+            lines[i] = _CK_COMMAND_RE.sub(replace, code) + comment
+        new_text = "\n".join(lines)
+        if new_text != text:
+            path.write_text(new_text, encoding="utf-8")
 
 
 # Records of Word exports and merges: always kept on this machine, like run
@@ -924,7 +1102,9 @@ def flatten(
                 child = start / target
                 if child.suffix == "":
                     child = child.with_suffix(".tex")
-                visit(child, child.parent)
+                # TeX reads \input paths from where it compiles, and only
+                # \import moves that to the imported file's folder
+                visit(child, child.parent if cmd == "import" else base)
                 continue
             out.append(SourceLine(rel, i, line))
 

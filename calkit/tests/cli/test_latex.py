@@ -354,6 +354,25 @@ def test_build_ck_components(tmp_dir):
     assert "Error: 0.1235." in pdf_text()
     with open("paper/_calkit/values.tex") as f:
         assert f.read() == values
+    # A file found for one named without an extension, but not copied, e.g.,
+    # stored with DVC and not pulled, prints as ?? too
+    with open("paper/_calkit/values.tex", "a") as f:
+        f.write("\\cksetfile{figures/gone}{figures/gone.png}\n")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            main.replace(
+                "\\end{document}", "\\ckfigure{figures/gone}\n\\end{document}"
+            )
+        )
+    out = subprocess.run(
+        ["pdflatex", "-interaction=nonstopmode", "main.tex"],
+        cwd="paper",
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    assert out.returncode == 0, out.stdout
+    assert "figures/gone hasn't been brought in yet" in out.stdout
 
 
 @skipif_windows_docker

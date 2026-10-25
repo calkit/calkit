@@ -499,6 +499,9 @@ def test_ensure_sync_base(tmp_dir: str) -> None:
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w") as z:
                 z.writestr("main.tex", "On Overleaf now\n")
+                # Put there by Calkit, though the project can't make it,
+                # e.g., the copy of a figure stored with DVC
+                z.writestr("_calkit/figures/fit.png", "png")
             return buf.getvalue()
 
     def ensure(last_sync_commit: str, missing_ok: bool = False) -> str | None:
@@ -543,6 +546,22 @@ def test_ensure_sync_base(tmp_dir: str) -> None:
     n_commits = len(list(mirror.iter_commits()))
     assert ensure("a" * 40) == base
     assert len(list(mirror.iter_commits())) == n_commits
+    # What Calkit puts on Overleaf is taken as unchanged there, and a change
+    # only to it doesn't come back into the project
+    assert mirror.git.show(f"{base}:_calkit/figures/fit.png") == "png"
+
+    def n_changes() -> int:
+        return len(calkit.overleaf.get_commits_since_last_sync(mirror, base))
+
+    assert n_changes() == 1
+    os.makedirs(os.path.join(mirror.working_dir, "_calkit"), exist_ok=True)
+    with open(
+        os.path.join(mirror.working_dir, "_calkit", "values.tex"), "w"
+    ) as f:
+        f.write("values\n")
+    mirror.git.add("-f", "_calkit/values.tex")
+    mirror.git.commit("-m", "Update on Overleaf.")
+    assert n_changes() == 1
     # A checkpoint saved in a commit made by hand may hold edits that were
     # never on Overleaf
     record(".", "b" * 40, "Save the sync")

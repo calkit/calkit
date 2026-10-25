@@ -687,7 +687,10 @@ def _make_writable(path: str) -> None:
 
 
 def map_ck_components(
-    folder: str, documents: list[str] | None = None, always: bool = False
+    folder: str,
+    documents: list[str] | None = None,
+    always: bool = False,
+    is_tracked: Callable[[str], bool] | None = None,
 ) -> list[str]:
     """Bring the components the documents in a folder include with
     calkit.sty's commands into its ``_calkit`` folder, so they build without
@@ -704,6 +707,11 @@ def map_ck_components(
     With ``always``, ``calkit.sty`` is written even when nothing is included
     yet, so a document synced with Overleaf can start using its commands
     there and still compile.
+
+    ``is_tracked`` says whether a project path is stored with DVC, so a
+    figure or table named without an extension that isn't pulled, e.g., on
+    the hub, is found as it would be where it is, rather than changing what
+    TeX looks for.
 
     Returns what couldn't be brought in, e.g., a file the pipeline hasn't
     produced yet. Those print as ``??`` rather than failing the build.
@@ -741,6 +749,9 @@ def map_ck_components(
     def is_file(rel: str) -> bool:
         return os.path.isfile(os.path.join(root, rel))
 
+    def is_file_or_tracked(rel: str) -> bool:
+        return is_file(rel) or bool(is_tracked and is_tracked(rel))
+
     problems: list[str] = []
     kept = {".gitignore", VALUES_FNAME}
     _write_if_changed(
@@ -753,7 +764,7 @@ def map_ck_components(
     for c in components:
         if c.kind == "value":
             continue
-        rel, problem = component_path(c, is_file)
+        rel, problem = component_path(c, is_file_or_tracked)
         if rel is None:
             problems.append(str(problem))
             continue
@@ -762,18 +773,22 @@ def map_ck_components(
         # file from DVC's cache leaves a copy that can be updated.
         src = os.path.join(root, rel)
         dest = os.path.join(out, rel)
-        src_stat = os.stat(src)
-        if not os.path.isfile(dest) or (
-            os.stat(dest).st_size,
-            os.stat(dest).st_mtime_ns,
-        ) != (src_stat.st_size, src_stat.st_mtime_ns):
-            os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-            _make_writable(dest)
-            shutil.copyfile(src, dest)
-            os.utime(dest, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+        if is_file(rel):
+            src_stat = os.stat(src)
+            if not os.path.isfile(dest) or (
+                os.stat(dest).st_size,
+                os.stat(dest).st_mtime_ns,
+            ) != (src_stat.st_size, src_stat.st_mtime_ns):
+                os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+                _make_writable(dest)
+                shutil.copyfile(src, dest)
+                os.utime(dest, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
         kept.add(rel)
-        # Where TeX finds it, for one named without an extension
-        lines.append(f"\\cksetfile{{{c.path}}}{{{rel}}}\n")
+        # Where TeX finds one named without an extension, and nothing for one
+        # named in full, so values.tex is the same whether or not the file
+        # could be copied
+        if rel != c.path:
+            lines.append(f"\\cksetfile{{{c.path}}}{{{rel}}}\n")
     loaded: dict[str, Any] = {}
     # Formats are applied by calkit.sty, so a value is written once however
     # many ways it's formatted

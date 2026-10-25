@@ -564,6 +564,8 @@ def ensure_sync_base(
     """
     from gitdb import IStream  # type: ignore[import-untyped]
 
+    import calkit.latex
+
     def store(obj: Any) -> None:
         stream = IStream(str(obj.type).encode(), obj.size, obj.data_stream)
         repo.odb.store(stream)
@@ -660,8 +662,20 @@ def ensure_sync_base(
             ).split("\0")
             if rel and rel not in pushed and blob_at(head.tree, rel) is None
         ]
+        # And what Calkit puts on Overleaf, which may not all be here, e.g.,
+        # the copy of a figure that isn't pulled
+        written = {
+            rel
+            for rel in repo.git.ls_tree(
+                "-r", "-z", "--name-only", head.tree.hexsha
+            ).split("\0")
+            if rel == calkit.latex.STYLE_FNAME
+            or rel.startswith(calkit.latex.COMPONENTS_DIR + "/")
+        }
         extra = {}
-        for rel in sorted(paths.dvc_files | paths.mapped_files | set(sources)):
+        for rel in sorted(
+            paths.dvc_files | paths.mapped_files | written | set(sources)
+        ):
             if blob_at(tree, rel) is not None:
                 continue
             blob = None
@@ -1413,18 +1427,63 @@ class OverleafSyncPaths:
         )
 
 
+def _dvc_tracked(repo: git.Repo) -> Callable[[str], bool]:
+    """Whether a project path is stored with DVC, listed only if asked,
+    since that's slow.
+    """
+    tracked: set[str] | None = None
+
+    def is_tracked(rel: str) -> bool:
+        nonlocal tracked
+        if tracked is None:
+            try:
+                import calkit.dvc
+
+                tracked = {
+                    Path(p).as_posix()
+                    for p in calkit.dvc.list_paths(
+                        wdir=str(repo.working_dir), recursive=True
+                    )
+                }
+            except Exception:
+                tracked = set()
+        return rel in tracked
+
+    return is_tracked
+
+
 def get_commits_since_last_sync(
     overleaf_repo: git.Repo, last_sync_commit: str | None
 ) -> list[git.Commit]:
-    """Commits on Overleaf since the last sync that change files, so a
-    download on top of a rebuilt last sync that matches it isn't counted.
+    """Commits on Overleaf since the last sync that change files a sync
+    brings back, so neither a download on top of a rebuilt last sync that
+    matches it, nor a change only to what Calkit puts there, e.g., copied
+    components, is counted.
     """
+    from calkit.latex import COMPONENTS_DIR, STYLE_FNAME
+
+    def brings_back(c: git.Commit) -> bool:
+        if not c.parents:
+            return True
+        changed = overleaf_repo.git.diff_tree(
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "-z",
+            c.parents[0].hexsha,
+            c.hexsha,
+        ).split("\0")
+        return any(
+            p and p != STYLE_FNAME and not p.startswith(COMPONENTS_DIR + "/")
+            for p in changed
+        )
+
     if not last_sync_commit:
         return []
     return [
         c
         for c in overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
-        if not c.parents or c.tree.hexsha != c.parents[0].tree.hexsha
+        if brings_back(c)
     ]
 
 
@@ -1501,7 +1560,9 @@ def get_sync_status(
     # The documents' components are copied in first, as a sync would, to see
     # what it would push
     map_ck_components(
-        os.path.join(str(main_repo.working_dir), path_in_project), always=True
+        os.path.join(str(main_repo.working_dir), path_in_project),
+        always=True,
+        is_tracked=_dvc_tracked(main_repo),
     )
     paths = OverleafSyncPaths(
         main_repo=main_repo,
@@ -1911,7 +1972,7 @@ def sync(
     # in, since those may include something new, and look again at what to
     # push
     res["component_problems"] = map_ck_components(
-        path_in_project_abs, always=True
+        path_in_project_abs, always=True, is_tracked=_dvc_tracked(main_repo)
     )
     for problem in res["component_problems"]:
         print_info(f"Warning: {problem}; it will print as ?? on Overleaf")

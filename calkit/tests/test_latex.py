@@ -147,6 +147,9 @@ def test_ck_components(tmp_dir):
     assert "\\cksetvalue{results/metrics.json}{fit.slope}{n}{1.2345}" in values
     assert "\\cksetvalue{results/metrics.json}{n_runs}{n}{42}" in values
     assert ".2f" not in values
+    # Where TeX finds a file is only written for one named without an
+    # extension
+    assert "cksetfile" not in values
     # Text is escaped, and only numbers are formatted
     assert calkit.latex.tex_value("run_a") == ("t", "run\\_a")
     assert calkit.latex.tex_value(True) == ("t", "True")
@@ -253,6 +256,21 @@ def test_ck_components(tmp_dir):
     calkit.latex.map_ck_components("more", documents=["more/a.tex"])
     with open("more/_calkit/figures/plot.png", "rb") as f:
         assert f.read() == b"png, made again"
+    # One stored with DVC but not pulled, e.g., on the hub, is still found
+    # where it would be, and a copy already there is kept
+    os.remove("tables/summary.tex")
+    calkit.latex.map_ck_components(
+        "more",
+        documents=["more/a.tex"],
+        is_tracked=lambda rel: rel == "tables/summary.tex",
+    )
+    with open("more/_calkit/values.tex") as f:
+        assert "\\cksetfile{tables/summary}{tables/summary.tex}" in f.read()
+    assert os.path.isfile("more/_calkit/tables/summary.tex")
+    problems = calkit.latex.map_ck_components("more", documents=["more/a.tex"])
+    assert "tables/summary is not in the project yet" in problems
+    with open("more/_calkit/values.tex") as f:
+        assert "tables/summary" not in f.read()
     # Without any commands left, the folder goes, though calkit.sty stays for
     # a document that still loads it
     os.chmod("more/_calkit/figures/plot.png", 0o444)

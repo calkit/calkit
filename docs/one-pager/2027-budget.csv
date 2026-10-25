@@ -1,7 +1,8 @@
 item,category,basis,quantity,unit,unit_cost
-Curriculum development,fellow,Adapting workshop material,40,hour,75
-Running workshops,fellow,2 Boston workshops × 40 hours,80,hour,75
-Project support,fellow,About 20 researchers × 7 hours,140,hour,75
-Workshop costs,workshops,"4 workshops, with rooms from host institutions",4,workshop,750
-Travel,workshops,One trip to co-run a Boston workshop,1,trip,1500
+Curriculum development,fellows,"Workshop material, including working with AI agents",80,hour,75
+Running workshops,fellows,8 workshops × 30 hours,240,hour,75
+Project support,fellows,About 60 researchers × 7 hours,420,hour,75
+Workshop costs,workshops,"8 workshops, with rooms from host institutions",8,workshop,750
+Travel,workshops,6 trips to run workshops beyond Boston and LA,6,trip,2000
+Development,development,Fixes and features from workshop feedback,200,hour,100
 Cloud hosting,hosting,If Google Cloud credits aren't renewed,1,year,5000

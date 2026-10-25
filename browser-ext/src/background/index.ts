@@ -38,6 +38,11 @@ function projectPath(owner: string, project: string): string {
   )}`;
 }
 
+// The session Overleaf's web app signs in with, which lets the hub sync for
+// users without Overleaf Premium, whose Git integration needs a token
+const OVERLEAF_URL = "https://www.overleaf.com";
+const OVERLEAF_SESSION_COOKIE = "overleaf_session2";
+
 const MAX_PREVIEW_BYTES = 2_000_000;
 const MAX_VIEWER_BYTES = 25_000_000;
 
@@ -251,6 +256,21 @@ async function handle(message: Request): Promise<unknown> {
         method: "PUT",
         body: { token: message.token },
       });
+    case "overleaf.connectSession": {
+      // Read here, since Overleaf keeps the cookie from page scripts, and
+      // only when the user asks, so it's never held otherwise
+      const cookie = await chrome.cookies.get({
+        url: OVERLEAF_URL,
+        name: OVERLEAF_SESSION_COOKIE,
+      });
+      if (!cookie) {
+        throw new Error("Sign in to Overleaf first");
+      }
+      return request<{ message: string }>("/user/overleaf-session", {
+        method: "PUT",
+        body: { session: cookie.value },
+      });
+    }
     case "overleaf.import":
       return request<{ path: string; title: string }>(
         `${projectPath(message.owner, message.project)}/publications/overleaf`,

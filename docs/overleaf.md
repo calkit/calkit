@@ -27,12 +27,16 @@ Calkit can also ensure files like figures are always sent from
 the local project (where they are generated) up to Overleaf,
 so the PDF output looks the same in either system.
 
-## Generating and storing an Overleaf token
+## Connecting to Overleaf
 
-In order for Calkit to interact with Overleaf,
-you'll need to set a token in the config.
-To do this,
-visit the
+Calkit can connect to Overleaf in one of two ways:
+with a Git token, which requires Overleaf Premium,
+or with your browser's login session, which works with any Overleaf account.
+If both are set, Calkit uses the token.
+
+### With Overleaf Premium
+
+Visit the
 [Overleaf user settings page](https://www.overleaf.com/user/settings)
 and scroll down to the
 "Your Git authentication tokens" section.
@@ -41,6 +45,60 @@ Generate a token, copy it, and then set it in your Calkit config with:
 ```sh
 calkit config set overleaf_token {paste your token here}
 ```
+
+### Without Overleaf Premium
+
+Sign in to [overleaf.com](https://www.overleaf.com) in your browser,
+then copy the value of its `overleaf_session2` cookie:
+open the browser's developer tools,
+go to Application > Cookies (Chrome, Edge) or Storage > Cookies (Firefox),
+select `https://www.overleaf.com`,
+and copy the value in the `overleaf_session2` row.
+Then run:
+
+```sh
+calkit overleaf login
+```
+
+and paste it when prompted.
+Calkit checks the session with Overleaf before storing it in your Calkit
+config.
+
+<!-- prettier-ignore -->
+!!! warning "A session gives full access to your Overleaf account"
+    A Git token can only read and write projects,
+    but a session can do anything you can do while signed in to Overleaf.
+    Treat it like a password and don't share it.
+
+To sync from [calkit.io](https://calkit.io) or the
+[browser extension](browser-ext/index.md),
+your Calkit account needs the session too.
+Either click **Connect with Overleaf login** in the extension's panel on an
+Overleaf project page, which sends it without copying anything,
+or run:
+
+```sh
+calkit overleaf login --hub
+```
+
+Once your account has one,
+`calkit overleaf sync` uses it on any machine signed in to Calkit,
+so there's no cookie to copy there.
+
+A session keeps working until you sign out of Overleaf in that browser or it
+expires.
+When Overleaf rejects it, Calkit first checks your Calkit account for a
+newer one, e.g., after you've connected again from the extension,
+and otherwise asks for a new one,
+so copy the cookie again after signing back in.
+If a Git token stops working, e.g., because Premium has ended,
+Calkit uses the session instead, if one is set.
+
+Syncing works the same way with either,
+except for how edits made on Overleaf show up in the project's history:
+with a token, each Overleaf edit keeps its author and time,
+while with a session, all the edits since the last sync arrive together,
+credited to whoever ran the sync.
 
 ## Importing an Overleaf project
 
@@ -89,10 +147,23 @@ pass its path, e.g.:
 calkit overleaf sync paper
 ```
 
-After syncing, you'll probably want to ensure the local PDF is up-to-date
-by calling `calkit run`, and if anything has changed,
-commit and push those changes to the hub with
-`calkit save -am "Run pipeline"`.
+A sync:
+
+1. Pulls new commits to the project, e.g., from a sync on Calkit or another
+   computer, so the same Overleaf edits aren't brought in twice.
+   Pass `--no-pull` to skip this.
+2. Commits local [edits you've made](#uncommitted-changes) to the synced
+   folder.
+3. Brings in edits made on Overleaf and sends yours up.
+4. Rebuilds each document that changed in either location,
+   saves the new PDF to the project, and pushes the project.
+
+Only the document's own build stage is run,
+not the stages it depends on, which could take a long time.
+To run those too, pass `--upstream`.
+To only sync the source files without rebuilding, pass `--no-build`.
+If the rebuild fails, Calkit warns and still saves and pushes the sync,
+so you can fix the build and call `calkit run` afterward.
 
 For a version that takes care of the surrounding steps for you, see
 [guided syncing](#guided-syncing-push-and-pull) below.
@@ -116,9 +187,14 @@ An Overleaf project has no branches, so whatever is synced there is what
 every collaborator sees and writes against.
 Two situations make that misleading, and Calkit refuses to sync in both:
 
-1. **The pipeline is out-of-date.**
+1. **The pipeline is out-of-date for the document.**
    Syncing would send figures or results that don't match the code that
    supposedly produced them.
+   Only stages the document's build depends on,
+   or that write into the synced folder, count.
+   Out-of-date stages elsewhere in the project don't stop a sync,
+   and neither does the document's own build stage,
+   since the document is rebuilt after syncing.
    Run `calkit run` first, or pass `--allow-stale` to sync anyway, e.g., to
    push preliminary results from a long simulation you're still debugging.
 2. **The current branch is missing commits from the default branch.**
@@ -129,7 +205,7 @@ Two situations make that misleading, and Calkit refuses to sync in both:
 Note that the second check is about content, not branch names.
 Working on a branch is fine as long as it contains everything already on the
 default branch, so a branch cut from the tip of `main` syncs happily,
-while a local `main` that's behind the remote does not.
+and a local `main` that's behind the remote is pulled first.
 This matters when `main` is protected: pulling from Overleaf creates commits,
 so it can't happen on a branch you can't commit to.
 Create a branch from the tip of `main` and sync from there.
@@ -176,31 +252,26 @@ The same checks apply wherever a sync happens, including
 The sync at the _start_ of `calkit run --overleaf` is exempt, since running
 the pipeline is what's about to make it current.
 
-### A clean working tree is required
+### Uncommitted changes
 
-Syncing requires the synced folder to have no uncommitted changes.
-If there are any (staged or unstaged), Calkit raises an error like:
+Edits you've made to files in the synced folder are committed before
+syncing, with a message like "Update paper before Overleaf sync",
+and pushed along with the sync.
+That way the project and Overleaf end up with the same edits,
+rather than Overleaf having edits the project doesn't,
+which could conflict with different changes you make locally later.
+New files in the folder are only synced once they're
+[stored](#what-gets-synced) in the project,
+e.g., with `calkit save`.
 
-```
-Uncommitted changes found in {wdir}.
-Commit or stash them before syncing with Overleaf,
-or use --auto-commit/-a to automatically commit them.
-```
+Changes elsewhere in the project,
+including uncommitted edits to `calkit.yaml`,
+are left as they are:
+they aren't committed with the sync and don't stop it.
 
-This is because incoming Overleaf edits are applied to the synced path with
-`git am`, which operates on commits and refuses to run against a dirty working
-tree.
-Requiring a clean tree also keeps the sync recoverable: the commit you were on
-before the sync is a clean checkpoint, so Calkit can cleanly reset back to it
-(e.g., for [`--no-commit`](#syncing-without-committing-no-commit)) or abort a
-failed patch without entangling or losing your in-progress edits.
-
-To let Calkit commit your local changes for you before syncing instead of
-erroring, pass `--auto-commit`/`-a`:
-
-```sh
-calkit overleaf sync --auto-commit
-```
+With [`--no-commit`](#syncing-without-committing-no-commit),
+Calkit doesn't commit anything for you,
+so the synced folder needs to have no uncommitted changes.
 
 ### What gets synced
 
@@ -340,6 +411,9 @@ made them yourself.
     and history are not retained.
     Omit `--no-commit` (the default) if preserving Overleaf editors'
     authorship matters to you.
+    This doesn't apply when
+    [syncing with a browser session](#without-overleaf-premium),
+    which doesn't keep Overleaf authorship either way.
 
 ## Example
 

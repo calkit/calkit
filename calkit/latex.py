@@ -58,7 +58,7 @@ WORKING_NAME = "working"
 # of a full TeX Live image. Pinned to an exact tag rather than :latest so
 # a document keeps building against the same TeX until this is moved
 # deliberately; what it carries is recorded in images/latex/README.md.
-DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.6"
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.7"
 # The environment created for a document that doesn't have one, wherever
 # that happens: a new publication, an Overleaf import, or a stage whose
 # environment is worked out from what it runs. Copied where it's used,
@@ -70,6 +70,55 @@ DEFAULT_LATEX_ENVIRONMENT = {
 }
 
 
+# TeX run before the document, leaving the dates and trailer ID out of the
+# PDF. Even taken from a commit, the date changes when history is rewritten,
+# e.g., by a squash merge, which changes the bytes of an identical document.
+# The ID, which pdfTeX derives from the date, is put back from the content
+# afterwards by ``set_content_id``. XeTeX's driver can't leave them out, so
+# its PDF keeps the source date.
+PDF_PRETEX = (
+    r"\ifdefined\pdfinfoomitdate\pdfinfoomitdate=1 \pdftrailerid{}"
+    # LuaTeX's flags for CreationDate (32), ModDate (64), and ID (512)
+    r"\else\ifdefined\pdfvariable\pdfvariable suppressoptionalinfo 608 "
+    r"\pdfvariable trailerid{}\fi\fi"
+)
+
+
+def set_content_id(pdf_path: str) -> bool:
+    """Give a PDF with no trailer ID one hashed from its content.
+
+    PDF/A and PDF 2.0 require an ID, and a viewer keeps its first half when
+    it saves an annotated copy, so a PDF back from review can still be
+    matched to its build. Hashing the bytes keeps the ID the same for the
+    same content. Only the last cross-reference section's dictionary
+    changes, which comes after every offset the file records, so they all
+    stay valid. Returns whether an ID was added.
+    """
+    data = Path(pdf_path).read_bytes()
+    pos = data.rfind(b"startxref")
+    m = re.match(rb"startxref\s+(\d+)", data[pos:]) if pos >= 0 else None
+    if m is None:
+        return False
+    section = int(m.group(1))
+    tail = data[section:pos]
+    # A table's dictionary follows the 'trailer' keyword, and a stream's is
+    # its own, ending where the stream starts
+    if tail.startswith(b"xref"):
+        start = tail.find(b"trailer")
+        end = len(tail)
+    else:
+        start = 0
+        end = tail.find(b"stream")
+    opening = tail.find(b"<<", start) if start >= 0 else -1
+    if opening < 0 or end < 0 or re.search(rb"/ID\b", tail[opening:end]):
+        return False
+    digest = hashlib.md5(data).hexdigest().upper().encode()
+    at = section + opening + 2
+    entry = b" /ID [<" + digest + b"> <" + digest + b">]"
+    Path(pdf_path).write_bytes(data[:at] + entry + data[at:])
+    return True
+
+
 def get_source_date_epoch(tex_file: str) -> str | None:
     """When to say the PDF was built, in seconds since the epoch.
 
@@ -77,7 +126,8 @@ def get_source_date_epoch(tex_file: str) -> str | None:
     ID, so two builds of identical source differ byte for byte, and every
     rebuild rewrites the output's hash in ``dvc.lock``. Taking the date
     from the last commit that touched the document keeps it meaningful
-    while the bytes stay put until the document itself changes.
+    while the bytes stay put until the document itself changes. Where
+    ``PDF_PRETEX`` leaves the date out, it still sets ``\\today``.
     """
     import subprocess
 

@@ -34,6 +34,7 @@ from calkit.models.io import (
     InputsFromStageOutputs,
     PathInput,
     PathOutput,
+    ScheduleInput,
 )
 from calkit.models.iteration import (
     ExpandedParametersType,
@@ -44,7 +45,9 @@ from calkit.models.iteration import (
 from calkit.models.requirements import RequirementType
 
 # What a stage's 'inputs' can list
-StageInput = str | EnvVarInput | PathInput | InputsFromStageOutputs
+StageInput = (
+    str | EnvVarInput | ScheduleInput | PathInput | InputsFromStageOutputs
+)
 
 
 def is_flag_and_value(arg: str) -> bool:
@@ -339,8 +342,9 @@ class Stage(Model):
         default=[],
         description="Paths this stage depends on, which trigger a rerun when "
         "they change. Normally plain path strings; an object carrying a "
-        "'path' is also accepted, and an 'env-var' entry makes the stage "
-        "depend on an environment variable's value.",
+        "'path' is also accepted, an 'env-var' entry makes the stage "
+        "depend on an environment variable's value, and a 'schedule' entry "
+        "makes it run once per period, e.g., once a day.",
         json_schema_extra=_allow_null,
     )
     # TODO: Support database outputs
@@ -643,6 +647,22 @@ class Stage(Model):
         return rel_path
 
     @property
+    def input_paths(self) -> list[str]:
+        """The paths among this stage's inputs, i.e., not what's generated
+        for it, e.g., its schedule's period file.
+        """
+        paths = []
+        for i in self.inputs:
+            if isinstance(
+                i, (InputsFromStageOutputs, EnvVarInput, ScheduleInput)
+            ):
+                continue
+            path = i if isinstance(i, str) else i.path
+            if path not in paths:
+                paths.append(path)
+        return paths
+
+    @property
     def dvc_deps(self) -> list[str]:
         deps = []
         setup_file = self.setup_file_path
@@ -652,9 +672,11 @@ class Stage(Model):
         if env_var_file is not None:
             deps.append(self.path_from_wdir(env_var_file))
         for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
-                continue
-            path = i if isinstance(i, str) else i.path
+            if isinstance(i, ScheduleInput):
+                period_file = self.path_from_wdir(i.period_file_path)
+                if period_file not in deps:
+                    deps.append(period_file)
+        for path in self.input_paths:
             if path not in deps:
                 deps.append(path)
         return deps
@@ -858,10 +880,7 @@ class Stage(Model):
         """
         cmd = self.dvc_cmd
         deps = self.dvc_deps
-        for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
-                continue
-            path = i if isinstance(i, str) else i.path
+        for path in self.input_paths:
             if path not in deps:
                 deps.append(path)
         # Each path appears once: a stage that names the same one twice, e.g.
@@ -1547,9 +1566,9 @@ class JsonToLatexStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = "calkit latex from-json"
-        # dvc_deps rather than inputs, since an input can be an object
-        # carrying a path, which would otherwise interpolate its repr.
-        for input_path in self.dvc_deps:
+        # Only the declared paths, since what's generated for the stage, e.g.,
+        # its setup or schedule period file, isn't data
+        for input_path in self.input_paths:
             cmd += f" '{input_path}'"
         for out in self.outputs:
             if isinstance(out, str):
@@ -2526,6 +2545,11 @@ class MarkdownStage(Stage):
     @property
     def markdown_path(self) -> str:
         return Path(self.target_path).as_posix()
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        # The outputs belong to the stages the file expands into
+        return []
 
 
 class Pipeline(Model):

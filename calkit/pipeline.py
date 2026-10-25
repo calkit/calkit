@@ -1223,6 +1223,7 @@ def get_status(
     with_storage_problems: bool = False,
     quiet_environment_checks: bool = False,
     progress: Callable[[str], None] | None = None,
+    start_docker: Callable[[], None] | None = None,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
@@ -1231,12 +1232,27 @@ def get_status(
     With ``with_data_status``, DVC's data status is attached as well, left
     None if it fails so the caller can ask again and report why.
     ``progress`` is told what's being done as each step starts.
+    ``start_docker`` is called when a stage needs Docker and it isn't
+    ready, e.g., to offer to start it, and raises ``DockerNotReadyError``
+    if it still isn't.
     """
 
     def step(text: str) -> None:
         if progress is not None:
             progress(text)
 
+    def check_envs(docker_required: bool) -> dict:
+        return calkit.environments.check_all_in_pipeline(
+            ck_info=ck_info,
+            targets=targets,
+            force=force_env_check,
+            skip_stages=list(result["gated_stages"]),
+            quiet=quiet_environment_checks,
+            progress=progress,
+            docker_required=docker_required,
+        )
+
+    import calkit.docker
     import calkit.environments
     import calkit.markdown
 
@@ -1300,14 +1316,20 @@ def get_status(
                     remote=False,
                 )
                 result["gated_stages"] = gated | gate_errors
-                env_checks = calkit.environments.check_all_in_pipeline(
-                    ck_info=ck_info,
-                    targets=targets,
-                    force=force_env_check,
-                    skip_stages=list(result["gated_stages"]),
-                    quiet=quiet_environment_checks,
-                    progress=progress,
-                )
+
+                try:
+                    env_checks = check_envs(docker_required=True)
+                except calkit.docker.DockerNotReadyError:
+                    # Docker not running doesn't make anything stale, so
+                    # without it only the environments that need it fail
+                    ready = False
+                    if start_docker is not None:
+                        try:
+                            start_docker()
+                            ready = True
+                        except calkit.docker.DockerNotReadyError:
+                            pass
+                    env_checks = check_envs(docker_required=ready)
                 result["environment_checks"] = env_checks
             except Exception as e:
                 result["errors"].append(
@@ -2011,11 +2033,19 @@ def _ensure_latex_aux_gitignore(
         return posixpath.normpath(path.replace("\\", "/"))
 
     aux_globs = [
+        # Acronym lists from glossaries
+        "*.acn",
+        "*.acr",
+        "*.alg",
         "*.aux",
         "*.bbl",
         "*.bcf",
         "*.blg",
+        # Back references from backref
+        "*.brf",
         "*.dvi",
+        # Endnotes from endnotes
+        "*.ent",
         "*.fdb_latexmk",
         "*.fls",
         "*.glg",
@@ -2025,16 +2055,27 @@ def _ensure_latex_aux_gitignore(
         "*.ilg",
         "*.ind",
         "*.ist",
+        # Lists of algorithms and listings
+        "*.loa",
         "*.lof",
         "*.log",
+        "*.lol",
         "*.lot",
         "*.nav",
+        # Nomenclature from nomencl
+        "*.nlg",
+        "*.nlo",
+        "*.nls",
         "*.out",
         "*.run.xml",
         "*.snm",
         # Written by elsarticle, among other classes
         "*.spl",
         "*.synctex.gz",
+        # The list of todos from todonotes
+        "*.tdo",
+        # Theorem lists from ntheorem
+        "*.thm",
         "*.toc",
         "*.vrb",
         "*.xdv",
@@ -2279,7 +2320,7 @@ def to_dvc(
         resolve_env_var,
         write_switch_env_lock,
     )
-    from calkit.models.io import EnvVarInput
+    from calkit.models.io import EnvVarInput, ScheduleInput
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -2627,6 +2668,12 @@ def to_dvc(
                 marker="calkit stage env vars",
                 lines=["/.calkit/env-vars/"],
             )
+        # The current period of each schedule a stage runs on, so the stage
+        # goes out of date when the next period starts
+        for stage in pipeline.stages.values():
+            for i in stage.inputs:
+                if isinstance(i, ScheduleInput):
+                    i.write_period_file(wdir=wdir)
         # Remove files left by stages that were renamed, deleted, or no
         # longer need one, since the command files are committed
         for gen_dir, kept in [

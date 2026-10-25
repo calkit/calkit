@@ -199,6 +199,28 @@ def test_build(tmp_dir):
         )
     subprocess.check_call(["calkit", "latex", "build", "paper/main.tex"])
     assert os.path.isfile("paper/main.pdf")
+    # The same source dated differently, e.g., after a squash merge, builds
+    # the same bytes, with no date and an ID taken from the content
+    for engine in ["-pdf", "-lualatex"]:
+        built = []
+        for epoch in ["1700000000", "1800000000"]:
+            os.remove("paper/main.pdf")
+            subprocess.check_call(
+                [
+                    "calkit",
+                    "latex",
+                    "build",
+                    "--force",
+                    f"--latexmk-arg={engine}",
+                    "paper/main.tex",
+                ],
+                env=os.environ | {"SOURCE_DATE_EPOCH": epoch},
+            )
+            with open("paper/main.pdf", "rb") as f:
+                built.append(f.read())
+        assert built[0] == built[1], engine
+        assert b"/CreationDate" not in built[0]
+        assert built[0].count(b"/ID [<") == 1
 
 
 @skipif_windows_docker
@@ -282,6 +304,19 @@ def test_build_output_and_aux_dirs(tmp_dir):
     assert os.path.isfile("paper/build/main.pdf")
     assert not os.path.isfile("paper/main.pdf")
     assert os.path.isfile("paper/aux/main.aux")
+    # Wherever a latexmkrc, as a pipeline stage passes one, or a
+    # pass-through -outdir puts the PDF, it gets an ID
+    with open("paper/latexmkrc", "w") as f:
+        f.write("$out_dir = 'rc-out';\n")
+    for args, pdf in [
+        (["--latexmk-rc", "paper/latexmkrc"], "paper/rc-out/main.pdf"),
+        (["--latexmk-arg=-outdir=arg-out"], "paper/arg-out/main.pdf"),
+    ]:
+        subprocess.check_call(
+            ["calkit", "latex", "build", *args, "paper/main.tex"]
+        )
+        with open(pdf, "rb") as f:
+            assert f.read().count(b"/ID [<") == 1, pdf
 
 
 def test_build_localizes_synctex(tmp_dir, monkeypatch):

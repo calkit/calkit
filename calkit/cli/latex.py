@@ -647,6 +647,8 @@ def build(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
+    import time
+
     # latexmk records a failed run in its file database and then refuses
     # to try again, reporting "Nothing to do" and exiting non-zero with no
     # PDF. Running it again is the first thing anyone does after a
@@ -686,6 +688,7 @@ def build(
         rel = Path(os.path.relpath(aux_dir, tex_dir)).as_posix()
         latexmk_cmd.append(f"-auxdir={rel}")
     latexmk_cmd.append("-interaction=nonstopmode")
+    latexmk_cmd.append(f"-usepretex={calkit.latex.PDF_PRETEX}")
     # User pass-through args come last so they can override Calkit's defaults.
     latexmk_cmd += latexmk_args
     latexmk_cmd.append(tex_file)
@@ -699,6 +702,8 @@ def build(
         env_vars=tex_env_vars,
     )
     log_dir = aux_dir or output_dir or tex_dir
+    # A little early, for file systems that keep times coarsely
+    started = time.time() - 2
     if _run_latexmk(
         cmd,
         env=(os.environ | tex_env_vars) if tex_env_vars else None,
@@ -708,6 +713,17 @@ def build(
         verbose=verbose,
     ):
         raise_error("latexmk failed")
+    # A latexmkrc or a pass-through -outdir can put the PDF elsewhere, so
+    # whichever this build wrote gets its ID
+    pdf_fpaths = [os.path.join(pdf_dir, stem + ".pdf")] + glob.glob(
+        os.path.join(tex_dir, "**", stem + ".pdf"), recursive=True
+    )
+    for pdf_fpath in dict.fromkeys(map(os.path.normpath, pdf_fpaths)):
+        if (
+            os.path.isfile(pdf_fpath)
+            and os.path.getmtime(pdf_fpath) >= started
+        ):
+            calkit.latex.set_content_id(pdf_fpath)
     if not no_synctex:
         # A container build records its own paths, which reverse search in
         # a viewer can't open
@@ -1787,6 +1803,7 @@ def _build_diff(
             "-interaction=nonstopmode",
             f"-auxdir={rel_aux}",
             f"-outdir={rel_aux}",
+            f"-usepretex={calkit.latex.PDF_PRETEX}",
         ]
         if not verbose:
             latexmk_cmd.append("-silent")
@@ -1855,6 +1872,7 @@ def _build_diff(
             )
         if not os.path.isfile(built):
             raise_error("latexmk did not produce a PDF")
+        calkit.latex.set_content_id(built)
         os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
         shutil.move(built, output)
         # A checkout is removed afterwards, but the working tree's document

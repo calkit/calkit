@@ -29,6 +29,7 @@
 | [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                            |
 | [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
 | [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
+| [`merge`](#top-command-merge)                    | Merge a branch, resolving dvc.lock and stage run records per stage.                                          |
 | [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                           |
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
@@ -45,11 +46,11 @@
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
+| [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
-| [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
 
 ## Top-level command details
@@ -566,6 +567,40 @@ Arguments:
 | Argument | Type | Required | Default | Description  |
 | -------- | ---- | -------- | ------- | ------------ |
 | `name`   | str  | yes      |         | Branch name. |
+
+<a id="top-command-merge"></a>
+
+### `calkit merge`
+
+Merge a branch, resolving dvc.lock and stage run records per stage.
+
+A stage changed on both sides needs a choice: ours, theirs, or rerun, which also decides its run record and Git-tracked outputs. DVC-tracked outputs are checked out to match afterwards. Other conflicts are left to resolve before 'calkit merge --continue'.
+
+Usage:
+
+```text
+calkit merge [OPTIONS] [BRANCH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                     |
+| -------- | ---- | -------- | ------- | ----------------------------------------------- |
+| `branch` | str  | no       |         | Branch or commit to merge into the current one. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                  |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--continue`      | boolean | no       | False   | Finish a merge stopped by conflicts.                                         |
+| `--abort`         | boolean | no       | False   | Abort the merge in progress.                                                 |
+| `--squash`        | boolean | no       | False   | Combine the branch's changes into one commit.                                |
+| `--message`, `-m` | str     | no       |         | Commit message (default: Git's for the merge or squash).                     |
+| `--ours`, `-o`    | str     | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t`  | str     | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`   | str     | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`        | str     | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+| `--git-arg`       | str     | no       |         | Additional Git merge args.                                                   |
 
 <a id="top-command-stash"></a>
 
@@ -2710,6 +2745,7 @@ Update objects.
 | [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                          |
 | [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                                |
 | [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                         |
+| [`latex-image`](#subcommand-update-latex-image)       | Point LaTeX environments at Calkit's pinned LaTeX image.                             |
 | [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                          |
 | [`env`](#subcommand-update-env)                       | Update an environment.                                                               |
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
@@ -2975,6 +3011,20 @@ Options:
 | `--image`      | str     | no       |         | Docker image name/tag.                                                                                                                                               |
 | `--registry`   | str     | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
 | `--lock`       | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
+
+<a id="subcommand-update-latex-image"></a>
+
+#### `calkit update latex-image`
+
+Point LaTeX environments at Calkit's pinned LaTeX image.
+
+Updates Docker environments that use Calkit or TeX Live's LaTeX images, including ones a switch defines in place, then relocks them.
+
+Usage:
+
+```text
+calkit update latex-image
+```
 
 <a id="subcommand-update-slurm-env"></a>
 
@@ -3639,6 +3689,54 @@ Options:
 | `--json`          | boolean | no       | False   | Output the report as JSON.                                                            |
 | `--no-pipeline`   | boolean | no       | False   | Skip asking DVC which stages are out of date, which is the slowest part of the check. |
 
+<a id="command-group-fix"></a>
+
+### `calkit fix`
+
+Fix things.
+
+| Command                                              | Description                                                     |
+| ---------------------------------------------------- | --------------------------------------------------------------- |
+| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.      |
+| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC). |
+
+<a id="subcommand-fix-merge-conflicts"></a>
+
+#### `calkit fix merge-conflicts`
+
+Resolve merge conflicts in dvc.lock and stage run records.
+
+Each stage is merged whole. A stage changed on one side takes that side, and one changed on both needs a choice, which also decides its run record and Git-tracked outputs. Stages are named as in 'calkit check stage-runs', e.g., 'sub/dvc.yaml:stage' for a subproject's.
+
+Usage:
+
+```text
+calkit fix merge-conflicts [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                  |
+| ---------------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--ours`, `-o`   | str  | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t` | str  | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`  | str  | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`       | str  | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+
+<a id="subcommand-fix-storage"></a>
+
+#### `calkit fix storage`
+
+Move paths to where they're declared to be stored (Git or DVC).
+
+Same as 'calkit check storage --fix'.
+
+Usage:
+
+```text
+calkit fix storage
+```
+
 <a id="command-group-latex-tex"></a>
 
 ### `calkit latex|tex`
@@ -3654,7 +3752,6 @@ Work with LaTeX.
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
 | [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
 | [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
-| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX or Markdown source.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3877,31 +3974,39 @@ Options:
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
 
-<a id="subcommand-latex-tex-comments"></a>
-
-#### `calkit latex|tex comments`
-
-Work with review comments in LaTeX or Markdown source.
-
-Usage:
-
-```text
-calkit latex|tex comments COMMAND [ARGS]...
-```
-
 <a id="command-group-overleaf-ol"></a>
 
 ### `calkit overleaf|ol`
 
 Interact with Overleaf.
 
-| Command                                           | Description                                                    |
-| ------------------------------------------------- | -------------------------------------------------------------- |
-| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                 |
-| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                    |
-| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project. |
-| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.       |
-| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.   |
+| Command                                           | Description                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| [`login`](#subcommand-overleaf-ol-login)          | Sign in with a browser session to sync without Overleaf Premium. |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                   |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                      |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project.   |
+| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.         |
+| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.     |
+
+<a id="subcommand-overleaf-ol-login"></a>
+
+#### `calkit overleaf|ol login`
+
+Sign in with a browser session to sync without Overleaf Premium.
+
+Usage:
+
+```text
+calkit overleaf|ol login [OPTIONS]
+```
+
+Options:
+
+| Option      | Type    | Required | Default | Description                                                |
+| ----------- | ------- | -------- | ------- | ---------------------------------------------------------- |
+| `--session` | str     | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
+| `--hub`     | boolean | no       | False   | Also save session to Calkit hub, so it can sync there.     |
 
 <a id="subcommand-overleaf-ol-import"></a>
 
@@ -3941,6 +4046,8 @@ Options:
 
 Sync folders with Overleaf.
 
+Local edits are committed first, and documents changed on either side are rebuilt and saved with the sync.
+
 Usage:
 
 ```text
@@ -3955,17 +4062,19 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
-| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
-| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
-| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
-| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
-| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
-| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
-| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
-| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
-| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`       | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--no-push`         | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`         | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`     | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`      | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
+| `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |
 
 <a id="subcommand-overleaf-ol-status-st"></a>
 
@@ -4227,60 +4336,6 @@ Options:
 | ---------------- | ------- | -------- | ------- | ----------------------------------- |
 | `--follow`, `-f` | boolean | no       | False   | Follow the log output like tail -f. |
 
-<a id="command-group-dev"></a>
-
-### `calkit dev`
-
-Developer tools.
-
-| Command                              | Description                                                     |
-| ------------------------------------ | --------------------------------------------------------------- |
-| [`python`](#subcommand-dev-python)   | Start an Python shell in Calkit's environment.                  |
-| [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment.                 |
-| [`upgrade`](#subcommand-dev-upgrade) | Update a dev (editable) install: pull the branch and reinstall. |
-
-<a id="subcommand-dev-python"></a>
-
-#### `calkit dev python`
-
-Start an Python shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev python [OPTIONS]
-```
-
-<a id="subcommand-dev-ipython"></a>
-
-#### `calkit dev ipython`
-
-Start an IPython shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev ipython [OPTIONS]
-```
-
-<a id="subcommand-dev-upgrade"></a>
-
-#### `calkit dev upgrade`
-
-Update a dev (editable) install: pull the branch and reinstall.
-
-Usage:
-
-```text
-calkit dev upgrade [BRANCH]
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description                                                                                                                                    |
-| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `branch` | str  | no       |         | Branch to install from: the worktree that has it checked out, or else the install's own, if it has no changes. Defaults to the current branch. |
-
 <a id="command-group-sync"></a>
 
 ### `calkit sync`
@@ -4386,6 +4441,8 @@ Options:
 
 Sync folders with Overleaf.
 
+Local edits are committed first, and documents changed on either side are rebuilt and saved with the sync.
+
 Usage:
 
 ```text
@@ -4400,14 +4457,16 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
-| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
-| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
-| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
-| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
-| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
-| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
-| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
-| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
-| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`       | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--no-push`         | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`         | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`     | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`      | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
+| `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |

@@ -10,16 +10,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: e162af7de51414910b2b8caa1f74872a
-      size: 130219
+      md5: f7adddafd3fac5d1208ec0f97c8d69fb
+      size: 131577
     - path: calkit/docx.py
       hash: md5
       md5: 3f34445a3e65cf2c10f908b84de55fd2
       size: 55475
     - path: calkit/latex.py
       hash: md5
-      md5: 104af08b71292dec025e34da3a6311dc
-      size: 72708
+      md5: 42b77a5dba0fd87bc7e14a0274840711
+      size: 79569
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -116,8 +116,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: 104af08b71292dec025e34da3a6311dc
-      size: 72708
+      md5: 42b77a5dba0fd87bc7e14a0274840711
+      size: 79569
     - path: uv.lock
       hash: md5
       md5: 78cff1621fa9cb37be1d99412ed26e0f

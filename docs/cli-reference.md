@@ -3999,14 +3999,15 @@ Options:
 
 Interact with Overleaf.
 
-| Command                                           | Description                                                      |
-| ------------------------------------------------- | ---------------------------------------------------------------- |
-| [`login`](#subcommand-overleaf-ol-login)          | Sign in with a browser session to sync without Overleaf Premium. |
-| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                   |
-| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                      |
-| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project.   |
-| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.         |
-| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.     |
+| Command                                           | Description                                                                   |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [`login`](#subcommand-overleaf-ol-login)          | Sign in with a browser session to sync without Overleaf Premium.              |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                                |
+| [`link`](#subcommand-overleaf-ol-link)            | Link a folder in the project to an Overleaf project, pushing its files there. |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                                   |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project.                |
+| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.                      |
+| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.                  |
 
 <a id="subcommand-overleaf-ol-login"></a>
 
@@ -4058,6 +4059,36 @@ Options:
 | `--no-commit`         | boolean | no       | False   | Do not commit changes to repo.                                                                                             |
 | `--overwrite`, `-f`   | boolean | no       | False   | Force adding the publication even if it already exists.                                                                    |
 | `--push-only`, `-P`   | boolean | no       | False   | Push local files to Overleaf without pulling. Useful when initializing a new Overleaf project from local files.            |
+
+<a id="subcommand-overleaf-ol-link"></a>
+
+#### `calkit overleaf|ol link`
+
+Link a folder in the project to an Overleaf project, pushing its files there.
+
+Like 'import --push-only', for a document that starts in the project.
+
+Usage:
+
+```text
+calkit overleaf|ol link [OPTIONS] FOLDER PROJECT-URL
+```
+
+Arguments:
+
+| Argument      | Type | Required | Default | Description                                                                    |
+| ------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------ |
+| `folder`      | str  | yes      |         | Folder in the project, e.g., 'paper'.                                          |
+| `project_url` | str  | yes      |         | Overleaf project URL, e.g., https://www.overleaf.com/project/6800005973cb2e35. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                    |
+| ------------------- | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `--title`, `-t`     | str     | no       |         | Title, if the publication isn't in calkit.yaml yet.            |
+| `--target`, `-T`    | str     | no       |         | Target TeX file in the folder.                                 |
+| `--push-path`, `-p` | str     | no       |         | Paths in the folder to only push to Overleaf, e.g., 'figures'. |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                 |
 
 <a id="subcommand-overleaf-ol-sync"></a>
 

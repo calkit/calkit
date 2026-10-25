@@ -10,16 +10,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 363f86206816a41e19bc358b1528e777
-      size: 130026
+      md5: d4713de797f0c13670ba14dbbcdbf9c5
+      size: 129431
     - path: calkit/docx.py
       hash: md5
       md5: 3f34445a3e65cf2c10f908b84de55fd2
       size: 55475
     - path: calkit/latex.py
       hash: md5
-      md5: 79e3c44f1856f169cfe622b20461a65d
-      size: 71900
+      md5: 5c4ecf4b2073302edad13fbd9ad52533
+      size: 64721
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -55,16 +55,16 @@ stages:
       size: 311
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
+      md5: 570c437a70ca9bc83a398cc7d69b364c
+      size: 173888
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
+      md5: 570c437a70ca9bc83a398cc7d69b364c
+      size: 173888
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: bfcb54dde172c809c24a777941dcface
-      size: 36224
+      md5: 66f2e7c5c7ac323267430f7faf196687
+      size: 36782
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/plot-latex-word-round-trip.py
@@ -79,16 +79,16 @@ stages:
       size: 55475
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
+      md5: 570c437a70ca9bc83a398cc7d69b364c
+      size: 173888
     - path: results/latex-word-round-trip/rebuilt.pdf
       hash: md5
-      md5: 6a04754199f6a394429ca0c07e4ecda6
-      size: 173896
+      md5: 570c437a70ca9bc83a398cc7d69b364c
+      size: 173888
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: bfcb54dde172c809c24a777941dcface
-      size: 36224
+      md5: 66f2e7c5c7ac323267430f7faf196687
+      size: 36782
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: 53cbdd1fe8da4d6897b3b0856b749857
@@ -100,8 +100,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: e26e6d8161aee299460812cd7efbaa0d
-      size: 202869
+      md5: a6b63aff2556cb6d3fe743105eb2adfe
+      size: 277313
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -116,8 +116,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: 79e3c44f1856f169cfe622b20461a65d
-      size: 71900
+      md5: 5c4ecf4b2073302edad13fbd9ad52533
+      size: 64721
     - path: uv.lock
       hash: md5
       md5: 78cff1621fa9cb37be1d99412ed26e0f
@@ -125,7 +125,7 @@ stages:
     outs:
     - path: images/latex/sizes.json
       hash: md5
-      md5: ec9ac7c3ade85e066f0568af2a892eeb
+      md5: 0dbc29899d3cc272e981ab4891f5cfb4
       size: 335
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
@@ -363,8 +363,8 @@ stages:
       size: 5
     - path: data/calkit-projects/papers.csv
       hash: md5
-      md5: 11d1e6b06fd39c5e3505673bd15ea5d6
-      size: 5231
+      md5: 2c5a4859e8f02e4ec0787e5a2f851955
+      size: 5241
     - path: scripts/traction.py
       hash: md5
       md5: 3c46a0f6c5ec81bddb3cfc6b089c173d
@@ -400,7 +400,7 @@ stages:
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 52054c7c4074920b111daa816880342c
+      md5: 00658d04d153615722cca451356d8249
       size: 11725
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
@@ -415,7 +415,7 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 52054c7c4074920b111daa816880342c
+      md5: 00658d04d153615722cca451356d8249
       size: 11725
     - path: scripts/find-calkit-papers.py
       hash: md5
@@ -428,5 +428,5 @@ stages:
     outs:
     - path: data/calkit-projects/papers.csv
       hash: md5
-      md5: 11d1e6b06fd39c5e3505673bd15ea5d6
-      size: 5231
+      md5: 2c5a4859e8f02e4ec0787e5a2f851955
+      size: 5241

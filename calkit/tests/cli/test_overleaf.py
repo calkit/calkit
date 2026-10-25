@@ -535,6 +535,65 @@ def test_overleaf_sync_trailing_slash_or_space(tmp_dir):
     assert res2.returncode == 0, f"Trailing space sync failed: {res2.stderr}"
 
 
+def test_overleaf_link(tmp_dir):
+    pid = str(uuid.uuid4())
+    ol_repo = _make_temp_overleaf_project(pid)
+    ol_repo.git.config(["receive.denyCurrentBranch", "ignore"])
+    subprocess.run(["calkit", "init"], check=True)
+    repo = git.Repo()
+    tmp_remote = (
+        Path(tempfile.gettempdir()) / "overleaf-sync-remotes" / pid
+    ).as_posix()
+    os.makedirs(tmp_remote, exist_ok=True)
+    git.Repo.init(path=tmp_remote, bare=True)
+    repo.git.config(["push.autoSetupRemote", "true"])
+    repo.git.remote(["add", "origin", tmp_remote])
+    ol_url = calkit.overleaf.get_git_remote_url(pid, "no token")
+    # A paper already in the project, with no title the TeX would give
+    os.makedirs("paper")
+    with open(os.path.join("paper", "main.tex"), "w") as f:
+        f.write("\\documentclass{article}\n\\begin{document}\nHi\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "paper": {
+                "kind": "latex",
+                "environment": "tex",
+                "target_path": "paper/main.tex",
+            }
+        }
+    }
+    ck_info["publications"] = [
+        {"path": "paper/main.pdf", "title": "A paper", "kind": "report"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo.git.add("-A")
+    repo.git.commit("-m", "Add paper")
+    # Linking keeps the publication, fills in its stage, and pushes
+    subprocess.run(["calkit", "overleaf", "link", "paper", ol_url], check=True)
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["publications"] == [
+        {
+            "path": "paper/main.pdf",
+            "title": "A paper",
+            "kind": "report",
+            "stage": "paper",
+        }
+    ]
+    assert list(ck_info["pipeline"]["stages"]) == ["paper"]
+    assert ck_info["overleaf_sync"]["paper"]["url"] == ol_url
+    assert "Hi" in ol_repo.git.show("HEAD:main.tex")
+    # A folder already synced is refused before anything changes
+    res = subprocess.run(
+        ["calkit", "overleaf", "link", "paper", ol_url],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "already synced with Overleaf" in res.stderr + res.stdout
+
+
 def test_get_repo_disables_credential_store(tmp_dir):
     # Set up a repo to act as the Overleaf remote (in the test env the remote
     # URL is a local directory)

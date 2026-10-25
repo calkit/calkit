@@ -516,13 +516,14 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
     return sorted(found)
 
 
-#: Where Calkit puts what the documents in a folder cite. Not hidden,
-#: since Overleaf drops dot-folders from an uploaded zip.
-CITED_DIR = "_calkit"
-CITED_VALUES_FNAME = "values.tex"
+# Where Calkit puts the components that the documents in a folder include
+# with calkit.sty's commands. Not hidden, since Overleaf drops dot-folders
+# from an uploaded zip.
+COMPONENTS_DIR = "_calkit"
+VALUES_FNAME = "values.tex"
 STYLE_FNAME = "calkit.sty"
 # calkit.sty's commands, each with an optional [...] and its {...} args
-_CITE_RE = re.compile(
+_CK_COMMAND_RE = re.compile(
     r"\\ck(value|figure|table)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}"
     r"(?:\s*\{([^}]*)\})?"
 )
@@ -541,31 +542,37 @@ _TEX_SPECIALS = {
 
 
 @dataclass(frozen=True)
-class Citation:
-    """Project content a document cites with one of calkit.sty's commands,
-    by its path relative to the project root.
+class CkComponent:
+    """A document component included with one of calkit.sty's commands,
+    named by its path relative to the project root.
+
+    Components can be integrated other ways, e.g., a stage writing into the
+    document's folder, a map-paths copy, or json-to-latex; this is only the
+    kind Calkit brings in itself.
     """
 
     kind: str
     path: str
     key: str | None = None
-    #: A Python format spec for a value, e.g., ``.2f``
+    # A Python format spec for a value, e.g., .2f
     format: str = ""
 
 
-def find_citations(document: str) -> list[Citation]:
-    """What a document cites with calkit.sty's commands, including in the
-    files it inputs, in order and without repeats.
+def find_ck_components(document: str) -> list[CkComponent]:
+    """The components a document includes with calkit.sty's commands,
+    including in the files it inputs, in order and without repeats.
     """
     text = "\n".join(_strip_comments(line.text) for line in flatten(document))
-    found: list[Citation] = []
-    for kind, option, first, second in _CITE_RE.findall(text):
+    found: list[CkComponent] = []
+    for kind, option, first, second in _CK_COMMAND_RE.findall(text):
         if kind == "value":
             found.append(
-                Citation(kind, first.strip(), second.strip(), option.strip())
+                CkComponent(
+                    kind, first.strip(), second.strip(), option.strip()
+                )
             )
         else:
-            found.append(Citation(kind, first.strip()))
+            found.append(CkComponent(kind, first.strip()))
     return list(dict.fromkeys(found))
 
 
@@ -615,19 +622,18 @@ def _write_if_changed(path: str, content: str | bytes) -> None:
         f.write(data)
 
 
-def write_cited(folder: str, always: bool = False) -> list[str]:
-    """Bring what the documents in a folder cite into its ``_calkit``
-    folder, so they build without the rest of the project, e.g., on
-    Overleaf.
+def write_ck_components(folder: str, always: bool = False) -> list[str]:
+    """Bring the components the documents in a folder include with
+    calkit.sty's commands into its ``_calkit`` folder, so they build without
+    the rest of the project, e.g., on Overleaf.
 
-    Cited files are copied, the values cited are written to
-    ``_calkit/values.tex`` formatted as asked, and ``calkit.sty`` is put
-    beside the documents. Anything no longer cited is removed, since
-    nothing else writes there.
+    Files are copied, values are written to ``_calkit/values.tex``
+    formatted as asked, and ``calkit.sty`` is put beside the documents.
+    Anything no longer included is removed, since nothing else writes there.
 
-    With ``always``, ``calkit.sty`` is written even when nothing is cited
-    yet, so a document synced with Overleaf can start citing there and
-    still compile.
+    With ``always``, ``calkit.sty`` is written even when nothing is included
+    yet, so a document synced with Overleaf can start using its commands
+    there and still compile.
 
     Returns what couldn't be brought in, e.g., a file the pipeline hasn't
     produced yet. Those print as ``??`` rather than failing the build.
@@ -636,13 +642,13 @@ def write_cited(folder: str, always: bool = False) -> list[str]:
     from calkit.questions import read_evidence_file, resolve_key
 
     docs = root_documents(folder)
-    citations = list(
-        dict.fromkeys(c for doc in docs for c in find_citations(doc))
+    components = list(
+        dict.fromkeys(c for doc in docs for c in find_ck_components(doc))
     )
-    out = os.path.join(folder, CITED_DIR)
-    if not citations and not os.path.isdir(out) and not (always and docs):
+    out = os.path.join(folder, COMPONENTS_DIR)
+    if not components and not os.path.isdir(out) and not (always and docs):
         return []
-    # Cited paths are relative to the project, wherever the document is
+    # Component paths are relative to the project, wherever the document is
     root = os.path.abspath(folder or ".")
     while not os.path.isfile(os.path.join(root, "calkit.yaml")):
         parent = os.path.dirname(root)
@@ -651,13 +657,14 @@ def write_cited(folder: str, always: bool = False) -> list[str]:
             break
         root = parent
     problems: list[str] = []
-    kept = {".gitignore", CITED_VALUES_FNAME}
+    kept = {".gitignore", VALUES_FNAME}
     _write_if_changed(
         os.path.join(out, ".gitignore"),
-        "# Calkit copies what the documents beside this folder cite into it\n"
+        "# Calkit copies the components the documents beside this folder\n"
+        "# include into it\n"
         "*\n",
     )
-    for c in citations:
+    for c in components:
         if c.kind == "value":
             continue
         rel = posixpath.normpath(Path(c.path).as_posix())
@@ -670,9 +677,9 @@ def write_cited(folder: str, always: bool = False) -> list[str]:
             with open(src, "rb") as f:
                 _write_if_changed(os.path.join(out, rel), f.read())
             kept.add(rel)
-    lines = ["%% Written by Calkit from what the documents here cite.\n"]
+    lines = ["%% Written by Calkit from the values the documents here use.\n"]
     loaded: dict[str, Any] = {}
-    for c in citations:
+    for c in components:
         if c.kind != "value":
             continue
         try:
@@ -689,7 +696,7 @@ def write_cited(folder: str, always: bool = False) -> list[str]:
         lines.append(
             f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{c.format}}}{{{text}}}\n"
         )
-    _write_if_changed(os.path.join(out, CITED_VALUES_FNAME), "".join(lines))
+    _write_if_changed(os.path.join(out, VALUES_FNAME), "".join(lines))
     for dirpath, _, filenames in os.walk(out, topdown=False):
         for name in filenames:
             path = os.path.join(dirpath, name)

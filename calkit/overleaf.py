@@ -1074,7 +1074,7 @@ class OverleafSyncPaths:
     @cached_property
     def mapped_files(self) -> set[str]:
         """Files on disk under a map-paths destination, or written into the
-        folder by Calkit so its documents can cite project content, i.e.,
+        folder by Calkit so its documents can include project components, i.e.,
         ``calkit.sty`` and ``_calkit``.
 
         Relative to ``path_in_project``. A destination may be a single file
@@ -1084,7 +1084,7 @@ class OverleafSyncPaths:
 
         root = os.path.join(self.main_repo.working_dir, self.path_in_project)
         res: set[str] = set()
-        written = {calkit.latex.CITED_DIR, calkit.latex.STYLE_FNAME}
+        written = {calkit.latex.COMPONENTS_DIR, calkit.latex.STYLE_FNAME}
         for dest in sorted(self.map_paths_outputs | written):
             abs_dest = os.path.join(root, dest)
             if os.path.isfile(abs_dest):
@@ -1127,7 +1127,7 @@ class OverleafSyncPaths:
         deleted locally since the last sync; such deletions are handled
         elsewhere in the sync logic.
         """
-        from calkit.latex import CITED_DIR, STYLE_FNAME
+        from calkit.latex import COMPONENTS_DIR, STYLE_FNAME
 
         all_ol_files = calkit.git.ls_files(self.overleaf_repo)
         res = []
@@ -1149,7 +1149,7 @@ class OverleafSyncPaths:
             # Calkit rewrites these on every sync, and _calkit's own ignore
             # file may not exist yet, e.g., in a fresh clone on the hub
             if fpath_posix == STYLE_FNAME or fpath_posix.startswith(
-                CITED_DIR + "/"
+                COMPONENTS_DIR + "/"
             ):
                 continue
             res.append(fpath_posix)
@@ -1371,10 +1371,10 @@ class OverleafSyncPaths:
 
         keep = set()
         for f in self.files_in_overleaf_last_sync:
-            # No longer cited, so no longer copied, and nothing else writes
+            # No longer included, so no longer copied, and nothing else writes
             # there
             if (
-                f.startswith(calkit.latex.CITED_DIR + "/")
+                f.startswith(calkit.latex.COMPONENTS_DIR + "/")
                 and f not in self.mapped_files
             ):
                 continue
@@ -1440,8 +1440,8 @@ def get_sync_status(
     """Compute the sync status between a project and an Overleaf project.
 
     This is the read-only counterpart to ``sync``: it reports what a sync
-    would do without changing either repo's files, though what the documents
-    cite is copied in as ``calkit latex build`` would, and a missing last
+    would do without changing either repo's files, though the components
+    the documents include are copied in as ``calkit latex build`` would, and a missing last
     sync is rebuilt in the Overleaf repo's history as ``ensure_sync_base``
     describes. Both repos should already be up-to-date (pulled), same as for
     ``sync``.
@@ -1452,6 +1452,8 @@ def get_sync_status(
     would be deleted from Overleaf. Each file is flagged as a figure or
     not, so callers can surface out-of-date figures specifically.
     """
+    from calkit.latex import write_ck_components
+
     path_in_project = Path(path_in_project).as_posix()
     if sync_info_for_path is None:
         sync_info_for_path = get_sync_info(wdir=main_repo.working_dir).get(
@@ -1482,11 +1484,9 @@ def get_sync_status(
         if prefix_slash and not fig_posix.startswith(prefix_slash):
             continue
         declared_figures.add(fig_posix[len(prefix_slash) :])
-    # What the documents cite is copied in first, as a sync would, to see
+    # The documents' components are copied in first, as a sync would, to see
     # what it would push
-    from calkit.latex import write_cited
-
-    write_cited(
+    write_ck_components(
         os.path.join(str(main_repo.working_dir), path_in_project), always=True
     )
     paths = OverleafSyncPaths(
@@ -1646,6 +1646,8 @@ def sync(
     changes staged). See the ``--no-commit`` handling near the end of this
     function.
     """
+    from calkit.latex import write_ck_components
+
     # Holds a mix of commits, paths, patches, and flags, so it's annotated
     # rather than inferred from whatever lands in it first.
     res: dict = {}
@@ -1891,12 +1893,13 @@ def sync(
     # except for copies whose source has diverged: pushing our version would
     # overwrite the Overleaf edit we just declined to pull, which is the loss
     # the warning above is there to prevent
-    # Bring in what the documents cite only now that Overleaf's edits are
-    # in, since those may cite something new, and look again at what to push
-    from calkit.latex import write_cited
-
-    res["cited_problems"] = write_cited(path_in_project_abs, always=True)
-    for problem in res["cited_problems"]:
+    # Bring in the documents' components only now that Overleaf's edits are
+    # in, since those may include something new, and look again at what to
+    # push
+    res["component_problems"] = write_ck_components(
+        path_in_project_abs, always=True
+    )
+    for problem in res["component_problems"]:
         print_info(f"Warning: {problem}; it will print as ?? on Overleaf")
     paths = OverleafSyncPaths(
         main_repo=main_repo,

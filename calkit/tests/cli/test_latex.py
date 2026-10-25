@@ -224,7 +224,7 @@ def test_build(tmp_dir):
 
 
 @skipif_windows_docker
-def test_build_cited_content(tmp_dir):
+def test_build_ck_components(tmp_dir):
     import struct
     import zlib
 

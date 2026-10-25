@@ -143,7 +143,7 @@ def test_get_sync_status(tmp_dir):
     assert status["files_to_delete"][0]["figure"]
 
 
-def test_sync_cited_content(tmp_dir):
+def test_sync_ck_components(tmp_dir):
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     os.makedirs("figures")
@@ -152,7 +152,7 @@ def test_sync_cited_content(tmp_dir):
     os.makedirs("results")
     with open(os.path.join("results", "m.json"), "w") as f:
         f.write('{"x": 1.5}')
-    # Linked to Overleaf before anything is cited
+    # Linked to Overleaf before anything is included
     os.makedirs("paper")
     plain_tex = (
         "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n"
@@ -197,13 +197,13 @@ def test_sync_cited_content(tmp_dir):
     def on_overleaf() -> set[str]:
         return set(calkit.git.ls_files(overleaf_repo))
 
-    # calkit.sty goes to Overleaf before anything is cited, so a document can
-    # start citing there and still compile
+    # calkit.sty goes to Overleaf before anything is included, so a document
+    # can start using its commands there and still compile
     pushes = {f["path"] for f in status()["files_to_push"]}
     assert pushes == {"calkit.sty", "_calkit/values.tex"}
     sync()
     assert {"calkit.sty", "_calkit/values.tex"} <= on_overleaf()
-    # What's cited on Overleaf is there after one sync
+    # What's included on Overleaf is there after one sync
     main_tex = (
         "\\documentclass{article}\n\\usepackage{calkit}\n"
         "\\begin{document}\n\\ckfigure{figures/plot.png}\n"
@@ -212,7 +212,7 @@ def test_sync_cited_content(tmp_dir):
     with open(os.path.join(overleaf_dir, "main.tex"), "w") as f:
         f.write(main_tex)
     _commit_all(overleaf_repo, "Update on Overleaf.")
-    assert sync()["cited_problems"] == []
+    assert sync()["component_problems"] == []
     assert "_calkit/figures/plot.png" in on_overleaf()
     with open(overleaf_dir / "_calkit" / "values.tex") as f:
         assert "{1.5}" in f.read()
@@ -235,7 +235,7 @@ def test_sync_cited_content(tmp_dir):
         f.write('{"x": 2.5}')
     pushes = {f["path"] for f in status()["files_to_push"]}
     assert pushes == {"_calkit/values.tex"}
-    # A figure no longer cited is deleted from Overleaf
+    # A figure no longer included is deleted from Overleaf
     with open(os.path.join("paper", "main.tex"), "w") as f:
         f.write(main_tex.replace("\\ckfigure{figures/plot.png}\n", ""))
     _commit_all(repo, "Drop figure")

@@ -1,5 +1,5 @@
-%% calkit.sty -- content from a Calkit project, cited by its path in the
-%% project. Calkit copies what a document cites into _calkit/ beside it and
+%% calkit.sty -- components from a Calkit project, named by their path in the
+%% project. Calkit copies what a document includes into _calkit/ beside it and
 %% writes the values it uses to _calkit/values.tex, so the document builds
 %% anywhere, including Overleaf. Written by Calkit; commit it with the
 %% document.
@@ -13,7 +13,7 @@
 \newcommand\cksetvalue[4]{%
   \expandafter\def\csname ck@v@#1@#2@#3\endcsname{#4}}
 \InputIfFileExists{\ck@dir/values.tex}{}{}
-% Cited but not brought in yet, e.g., just inserted on Overleaf
+% Included but not brought in yet, e.g., just inserted on Overleaf
 \newcommand\ck@missing[1]{%
   \PackageWarning{calkit}{#1 hasn't been brought in yet; sync with Calkit}%
   \textbf{??}}

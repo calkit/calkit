@@ -1462,17 +1462,32 @@ class LatexStage(Stage):
         cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
-    #: Project paths the document cites with calkit.sty's commands, which
-    #: only something that can read the document knows, so the pipeline
-    #: sets them when compiling
-    _cited_paths: list[str] = PrivateAttr(default_factory=list)
+    # Project paths of the components the document includes with calkit.sty's
+    # commands, set by read_component_paths
+    _component_paths: list[str] = PrivateAttr(default_factory=list)
+
+    def read_component_paths(self, project_dir: str | None = None) -> None:
+        """Read which components the document includes with calkit.sty's
+        commands, since they're as much inputs as its source.
+
+        The pipeline calls this when compiling, since only it knows where
+        the project is.
+        """
+        document = os.path.join(
+            project_dir or "", self.wdir or "", self.target_path
+        )
+        self._component_paths = list(
+            dict.fromkeys(
+                c.path for c in calkit.latex.find_ck_components(document)
+            )
+        )
 
     @property
     def dvc_deps(self) -> list[str]:
         deps = (
             [self.target_path]
             + super().dvc_deps
-            + [self.path_from_wdir(p) for p in self._cited_paths]
+            + [self.path_from_wdir(p) for p in self._component_paths]
         )
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)

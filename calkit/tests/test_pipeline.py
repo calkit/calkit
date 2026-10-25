@@ -1725,7 +1725,7 @@ def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     assert repo.ignored("paper/main.nlo")
 
 
-def test_to_dvc_latex_cited_deps(tmp_dir):
+def test_to_dvc_latex_component_deps(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("paper/sections")
     with open("paper/main.tex", "w") as f:
@@ -1747,7 +1747,7 @@ def test_to_dvc_latex_cited_deps(tmp_dir):
                     "environment": "tex",
                     "target_path": "paper/main.tex",
                 },
-                # Paths in a stage are relative to its wdir, while cited
+                # Paths in a stage are relative to its wdir, while component
                 # paths are relative to the project
                 "build-paper-wdir": {
                     "kind": "latex",

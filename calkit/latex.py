@@ -610,11 +610,11 @@ def read_ck_usage(document: str) -> tuple[bool, list[CkComponent]]:
     return True, list(dict.fromkeys(found))
 
 
-def component_path(
-    component: CkComponent, exists: Callable[[str], bool]
-) -> tuple[str | None, str | None]:
-    """Where a component's file is, relative to the project, or what's
-    wrong with it, with ``exists`` saying whether a project path is there.
+def component_candidates(
+    component: CkComponent,
+) -> tuple[list[str], str | None]:
+    """The project paths a component's file could be at, in the order TeX
+    tries them, or what's wrong with how it's named.
 
     A figure or table named without an extension is found the way TeX
     finds it, e.g., ``figures/plot`` as ``figures/plot.pdf`` or ``.png``,
@@ -622,19 +622,30 @@ def component_path(
     """
     raw = component.path.replace("\\", "/")
     if raw.startswith("/") or PureWindowsPath(component.path).drive:
-        return None, f"{component.path} is outside the project"
+        return [], f"{component.path} is outside the project"
     rel = posixpath.normpath(raw)
     if rel == ".." or rel.startswith("../"):
-        return None, f"{component.path} is outside the project"
+        return [], f"{component.path} is outside the project"
     # TeX reads the path as written, so a copy at the normalized path
     # wouldn't be found
     if ".." in raw.split("/"):
-        return None, f"{component.path} can't include '..'"
-    candidates = [rel]
+        return [], f"{component.path} can't include '..'"
     if component.kind != "value":
         exts = _GRAPHICS_EXTS if component.kind == "figure" else [".tex"]
         if posixpath.splitext(rel)[1].lower() not in exts:
-            candidates = [rel + ext for ext in exts] + [rel]
+            return [rel + ext for ext in exts] + [rel], None
+    return [rel], None
+
+
+def component_path(
+    component: CkComponent, exists: Callable[[str], bool]
+) -> tuple[str | None, str | None]:
+    """Where a component's file is, relative to the project, or what's
+    wrong with it, with ``exists`` saying whether a project path is there.
+    """
+    candidates, problem = component_candidates(component)
+    if problem is not None:
+        return None, problem
     for candidate in candidates:
         if exists(candidate):
             return candidate, None
@@ -694,12 +705,55 @@ def _write_if_changed(path: str, content: str | bytes) -> None:
 def _make_writable(path: str) -> None:
     """Let a file be overwritten or removed, e.g., one copied from DVC's
     cache, which is read-only, or on Windows, where read-only blocks
-    removal.
+    removal. A link is left alone, since that would change what it points
+    to.
     """
     import stat
 
-    if os.path.exists(path) and not os.access(path, os.W_OK):
+    if (
+        os.path.exists(path)
+        and not os.path.islink(path)
+        and not os.access(path, os.W_OK)
+    ):
         os.chmod(path, os.stat(path).st_mode | stat.S_IWUSR)
+
+
+def _is_within(path: str, base: str) -> bool:
+    try:
+        return os.path.commonpath([path, base]) == base
+    except ValueError:
+        return False
+
+
+def _within_project(path: str, root: str) -> bool:
+    """Whether a file is really in the project, rather than reached through
+    a link out of it, e.g., a symlink committed to Git, so nothing outside
+    is read and pushed to Overleaf. DVC's cache counts, since DVC can check
+    files out as links to it.
+    """
+    real = os.path.realpath(path)
+    real_root = os.path.realpath(root)
+    if _is_within(real, real_root):
+        return True
+    # A cache kept elsewhere, only looked for when a link leaves the project
+    dvc_dir = os.path.join(real_root, ".dvc")
+    for name in ["config", "config.local"]:
+        try:
+            with open(os.path.join(dvc_dir, name), encoding="utf-8") as f:
+                config = f.read()
+        except OSError:
+            continue
+        section = re.search(
+            r"^\[cache\]\s*$(.*?)(?=^\[|\Z)", config, re.M | re.S
+        )
+        match = section and re.search(
+            r"^\s*dir\s*=\s*(.+?)\s*$", section.group(1), re.M
+        )
+        if match:
+            cache = os.path.realpath(os.path.join(dvc_dir, match.group(1)))
+            if _is_within(real, cache):
+                return True
+    return False
 
 
 def map_ck_components(
@@ -751,6 +805,25 @@ def map_ck_components(
     components = list(dict.fromkeys(c for _, found in usage for c in found))
     out = os.path.join(folder, COMPONENTS_DIR)
     style_path = os.path.join(folder, STYLE_FNAME)
+    # Nothing is written, changed, or removed through a link, e.g., one
+    # committed to Git, which could point anywhere
+    for path in [out, style_path]:
+        if os.path.islink(path):
+            return [f"{path} is a link, so Calkit won't write there"]
+    real_out = os.path.realpath(out)
+    own = {".gitignore", "README.md", VALUES_FNAME}
+
+    def can_write(dest: str) -> bool:
+        """Whether a file can go in _calkit without following a link out of
+        it, removing a link where the file goes.
+        """
+        parent = os.path.realpath(os.path.dirname(dest))
+        if not _is_within(parent, real_out):
+            return False
+        if os.path.islink(dest):
+            os.remove(dest)
+        return True
+
     if not any(loads for loads, _ in usage):
         if os.path.isdir(out):
             for dirpath, _, filenames in os.walk(out):
@@ -793,6 +866,13 @@ def map_ck_components(
         here rather than only stored with DVC.
         """
         rel, problem = component_path(c, is_file)
+        if rel is not None and not _within_project(
+            os.path.join(root, rel), root
+        ):
+            return None, f"{c.path} links outside the project", False
+        # Calkit's own files in _calkit can't be replaced by a copy
+        if c.kind != "value" and rel in own:
+            return None, f"{c.path} has a name Calkit uses in _calkit", False
         if rel is None and is_tracked is not None:
             tracked, _ = component_path(c, is_tracked)
             if tracked is not None:
@@ -800,7 +880,9 @@ def map_ck_components(
         return rel, problem, rel is not None
 
     problems: list[str] = []
-    kept = {".gitignore", "README.md", VALUES_FNAME}
+    kept = set(own)
+    for name in own:
+        can_write(os.path.join(out, name))
     _write_if_changed(
         os.path.join(out, ".gitignore"),
         "# Calkit copies the components the documents beside this folder\n"
@@ -831,6 +913,9 @@ def map_ck_components(
         # file from DVC's cache leaves a copy that can be updated.
         src = os.path.join(root, rel)
         dest = os.path.join(out, rel)
+        if not can_write(dest):
+            problems.append(f"{c.path} would be copied through a link")
+            continue
         if here:
             src_stat = os.stat(src)
             if not os.path.isfile(dest) or (
@@ -938,7 +1023,8 @@ def expand_ck_components(
     doc_dir = os.path.dirname(document)
 
     def is_file(rel: str) -> bool:
-        return os.path.isfile(os.path.join(data_root, rel))
+        path = os.path.join(data_root, rel)
+        return os.path.isfile(path) and _within_project(path, data_root)
 
     def replace(match: re.Match[str]) -> str:
         kind, option, first, second = match.group(
@@ -976,14 +1062,22 @@ def expand_ck_components(
         text = _read_leniently(str(path))
         if text is None:
             continue
-        lines = text.split("\n")
-        for i, line in enumerate(lines):
-            code, comment = line, ""
+        # Comments are set aside, marked by their number, so a command split
+        # across lines is still found, but none in a comment
+        comments: list[str] = []
+        code_lines = []
+        for line in text.split("\n"):
             m = re.search(r"(?<!\\)%", line)
             if m:
-                code, comment = line[: m.start()], line[m.start() :]
-            lines[i] = _CK_COMMAND_RE.sub(replace, code) + comment
-        new_text = "\n".join(lines)
+                code_lines.append(f"{line[: m.start()]}\0{len(comments)}\0")
+                comments.append(line[m.start() :])
+            else:
+                code_lines.append(line)
+        new_text = re.sub(
+            "\0(\\d+)\0",
+            lambda m: comments[int(m.group(1))],
+            _CK_COMMAND_RE.sub(replace, "\n".join(code_lines)),
+        )
         if new_text != text:
             path.write_text(new_text, encoding="utf-8")
 

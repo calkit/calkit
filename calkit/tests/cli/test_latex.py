@@ -927,6 +927,49 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert result.returncode == 0, result.stderr
     old_md5 = hashlib.md5(b"old\n").hexdigest()
     assert os.path.isfile(f".dvc/cache/files/md5/{old_md5[:2]}/{old_md5[2:]}")
+    # What each revision's calkit.sty commands include is fetched as it was
+    # then, even with no stage depending on it, at the paths TeX would try
+    os.makedirs("results", exist_ok=True)
+    os.makedirs("notes")
+    with open("notes/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\nX: \\ckvalue{results/m.json}{x}.\n"
+            "\\cktable{tables/t}\n\\end{document}\n"
+        )
+    os.makedirs("tables", exist_ok=True)
+    for x in [1, 2]:
+        with open("results/m.json", "w") as f:
+            json.dump({"x": x}, f)
+        with open("tables/t.tex", "w") as f:
+            f.write(f"Table {x}\n")
+        subprocess.check_call(
+            ["calkit", "dvc", "add", "-q", "results/m.json", "tables/t.tex"]
+        )
+        _commit(f"notes {x}")
+        if x == 1:
+            subprocess.check_call(["git", "tag", "notes-v1"])
+    os.remove("results/m.json")
+    os.remove("tables/t.tex")
+    result = subprocess.run(
+        ["calkit", "latex", "diff", "notes/main.tex", "--from", "notes-v1"]
+        + ["--to", "HEAD", "--keep-tex", "--force"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    kept_stem = get_diff_path(
+        "notes/main.tex", "notes-v1", "HEAD"
+    ).removesuffix(".pdf")
+    with open(f"{kept_stem}-old.tex", encoding="utf-8") as f:
+        old_tex = f.read()
+    with open(f"{kept_stem}-new.tex", encoding="utf-8") as f:
+        new_tex = f.read()
+    assert "X: \\cknum[]{1}." in old_tex
+    assert "Table 1" in old_tex
+    assert "X: \\cknum[]{2}." in new_tex
+    assert "Table 2" in new_tex
 
 
 def test_marked_up_digest_ignores_the_header():

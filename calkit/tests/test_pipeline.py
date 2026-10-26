@@ -1773,14 +1773,16 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\begin{document}\n"
             "\\ckfigure{maps/world}\n\\ckfigure{maps/typo.png}\n"
             "\\ckfigure{photos/cat}\n\\ckfigure{images/logo.png}\n"
-            "\\ckfigure{figures/fit_1.5}\n\\end{document}\n"
+            "\\ckfigure{figures/fit_1.5}\n\\ckfigure{figures/sweep-2}\n"
+            "\\end{document}\n"
         )
     os.makedirs("images")
     for path in ["images/logo.png", "images/logo.png.dvc", "photos.dvc"]:
         with open(path, "w") as f:
             f.write("x")
-    with open("figures/fit_1.5.pdf", "w") as f:
-        f.write("pdf")
+    for path in ["figures/fit_1.5.pdf", "figures/sweep-2.png"]:
+        with open(path, "w") as f:
+            f.write("x")
     # Tracked by DVC but not pulled
     os.makedirs("data")
     with open("data/summary.json.dvc", "w") as f:
@@ -1811,6 +1813,14 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "environment": "_system",
                     "command": "mkdir maps",
                     "outputs": ["maps"],
+                },
+                "sweep": {
+                    "kind": "python-script",
+                    "environment": "_system",
+                    "script_path": "sweep.py",
+                    "args": ["{n}"],
+                    "outputs": ["figures/sweep-{n}.png"],
+                    "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
                 },
                 "build-extra": {
                     "kind": "latex",
@@ -1867,6 +1877,9 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     assert {"maps", "photos", "images/logo.png"} <= set(deps)
     assert not any(d.startswith(("maps/", "photos/")) for d in deps)
     assert "extra/_calkit/images/logo.png" not in deps
+    # Nor is a file an iterated stage makes, once it's there
+    assert "figures/sweep-2.png" in deps
+    assert "extra/_calkit/figures/sweep-2.png" not in deps
     # A dot in a name isn't taken for an extension
     assert {"figures/fit_1.5.pdf", "extra/_calkit/figures/fit_1.5.pdf"} <= set(
         deps
@@ -1895,7 +1908,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     )
     # Compiling for a run or check maps the components in, kept out of Git,
     # with one stage building each PDF, as DVC requires
-    for name in ["build-paper-wdir", "maps", "build-extra"]:
+    for name in ["build-paper-wdir", "maps", "sweep", "build-extra"]:
         del ck_info["pipeline"]["stages"][name]
     del ck_info["pipeline"]["stages"]["build-plain"]
     with open("figures/plot.png", "wb") as fb:

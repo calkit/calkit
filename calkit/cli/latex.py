@@ -1351,7 +1351,7 @@ def diff(
         which can't say what's inside, so those directories beside the
         document are included whole. Neither finds another stage's output
         DVC doesn't cache, so the pipeline's inputs for the document are
-        added too.
+        added too, as are the components the document includes.
         """
         doc_dir = Path(root, os.path.dirname(tex_file))
         pointed = [
@@ -1360,7 +1360,17 @@ def diff(
             if p.is_file()
         ]
         detected = calkit.latex.detect_inputs(tex_file, wdir=root)
-        return detected + pointed + pipeline_inputs
+        # What the revision's own calkit.sty commands include, which the
+        # stage may not depend on now, at each path TeX would try
+        _, components = calkit.latex.read_ck_usage(
+            os.path.join(root, tex_file)
+        )
+        included = [
+            path
+            for c in components
+            for path in calkit.latex.component_candidates(c)[0]
+        ]
+        return detected + pointed + included + pipeline_inputs
 
     def point_changed_figures_at_base(base_root: str, head_root: str) -> None:
         """Make the older side's changed figures refer to its own copies.

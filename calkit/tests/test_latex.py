@@ -3,6 +3,9 @@
 import gzip
 import json
 import os
+import shutil
+import sys
+import tempfile
 from pathlib import Path
 
 import calkit.latex
@@ -239,6 +242,57 @@ def test_ck_components(tmp_dir):
     assert component_path("figures/fit_1.5", "figure")[0] == (
         "figures/fit_1.5.pdf"
     )
+    # Nothing is read through a link out of the project, e.g., one committed
+    # to Git, though one within it is fine, as is one into DVC's cache,
+    # wherever that's kept, and a name Calkit uses in _calkit can't be
+    # included
+    if sys.platform != "win32":
+        outside = tempfile.mkdtemp()
+        with open(os.path.join(outside, "secret.json"), "w") as f:
+            f.write('{"key": "hunter2"}')
+        cache = tempfile.mkdtemp()
+        with open(os.path.join(cache, "cached.png"), "wb") as fb:
+            fb.write(b"cached")
+        os.makedirs(".dvc", exist_ok=True)
+        with open(".dvc/config", "w") as f:
+            f.write(f"[cache]\n    dir = {cache}\n")
+        os.symlink(os.path.join(outside, "secret.json"), "results/secret.json")
+        os.symlink(os.path.abspath("figures/plot.png"), "figures/inside.png")
+        os.symlink(os.path.join(cache, "cached.png"), "figures/cached.png")
+        with open("values.tex", "w") as f:
+            f.write("A table")
+        os.makedirs("linked")
+        with open("linked/main.tex", "w") as f:
+            f.write(
+                "\\documentclass{article}\n\\usepackage{calkit}\n"
+                "\\ckvalue{results/secret.json}{key}\n"
+                "\\ckfigure{figures/inside.png}\n"
+                "\\ckfigure{figures/cached.png}\n"
+                "\\cktable{values.tex}\n"
+            )
+        problems = calkit.latex.map_ck_components("linked")
+        assert "results/secret.json links outside the project" in problems
+        assert "values.tex has a name Calkit uses in _calkit" in problems
+        with open("linked/_calkit/values.tex") as f:
+            assert "hunter2" not in f.read()
+        with open("linked/_calkit/figures/cached.png", "rb") as fb:
+            assert fb.read() == b"cached"
+        assert os.path.isfile("linked/_calkit/figures/inside.png")
+        # Nor is anything written, changed, or removed through a link, e.g.,
+        # _calkit, or a folder in it
+        shutil.rmtree("linked/_calkit")
+        os.symlink(outside, "linked/_calkit")
+        assert calkit.latex.map_ck_components("linked") == [
+            os.path.join("linked", "_calkit")
+            + " is a link, so Calkit won't write there"
+        ]
+        assert os.listdir(outside) == ["secret.json"]
+        os.remove("linked/_calkit")
+        os.makedirs("linked/_calkit")
+        os.symlink(outside, "linked/_calkit/figures")
+        problems = calkit.latex.map_ck_components("linked")
+        assert "figures/inside.png would be copied through a link" in problems
+        assert os.listdir(outside) == ["secret.json"]
     # Every document in a folder is mapped together, including one named
     # because its \documentclass is in a file it inputs, and an input's
     # inputs are read from where TeX compiles
@@ -362,6 +416,7 @@ def test_expand_ck_components(tmp_dir):
             "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/plot} {\\small (a) left}\n"
             "\\cktable{tables/t}\n"
+            "Split: \\ckvalue{results/m.json}\n  {rmse}.\n"
             "Missing: \\ckvalue{results/m.json}{nope}.\n"
             "% \\ckvalue{results/m.json}{rmse}\n"
         )
@@ -371,6 +426,8 @@ def test_expand_ck_components(tmp_dir):
     # Each command becomes what it shows, so latexdiff can mark a change,
     # with numbers still formatted by calkit.sty
     assert "Error: \\cknum[.2f]{0.456}." in text
+    # Including one split across lines
+    assert "Split: \\cknum[]{0.456}." in text
     assert "Run: run\\_b." in text
     assert "\\includegraphics[width=1cm]{../figures/plot.png}" in text
     # A brace group after a figure isn't taken for an argument

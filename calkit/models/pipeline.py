@@ -665,14 +665,14 @@ class Stage(Model):
     def preprocess(
         self,
         project_dir: str | None,
-        outputs: set[str],
+        is_output: Callable[[str], bool],
         write_files: bool = False,
     ) -> None:
         """Work out what the stage depends on from the project before it's
         compiled, for a kind of stage whose sources name some of it.
 
-        ``project_dir`` is where the project is, and ``outputs`` are the
-        project paths stages make. With ``write_files``, the stage also
+        ``project_dir`` is where the project is, and ``is_output`` says
+        whether a stage makes a project path. With ``write_files``, the stage also
         writes files it reads that aren't kept in the project, since it's
         about to run or have its status checked. That happens on every
         call, so only fast work belongs here.
@@ -1490,7 +1490,7 @@ class LatexStage(Stage):
     def preprocess(
         self,
         project_dir: str | None,
-        outputs: set[str],
+        is_output: Callable[[str], bool],
         write_files: bool = False,
     ) -> None:
         """Read which components the document includes with calkit.sty's
@@ -1509,13 +1509,13 @@ class LatexStage(Stage):
             return os.path.isfile(os.path.join(project_dir or "", p))
 
         def is_input(p: str) -> bool:
-            return exists(p) or exists(p + ".dvc") or p in outputs
+            return exists(p) or exists(p + ".dvc") or is_output(p)
 
         def folder_kept_elsewhere(p: str) -> str | None:
             parts = p.split("/")
             for i in range(1, len(parts)):
                 folder = "/".join(parts[:i])
-                if folder in outputs or exists(folder + ".dvc"):
+                if is_output(folder) or exists(folder + ".dvc"):
                     return folder
             return None
 
@@ -1541,7 +1541,7 @@ class LatexStage(Stage):
                 c.kind != "value"
                 and exists(rel)
                 and not exists(rel + ".dvc")
-                and rel not in outputs
+                and not is_output(rel)
             ):
                 copied.append(rel)
         self._component_paths = list(dict.fromkeys(paths))
@@ -2973,8 +2973,12 @@ class Pipeline(Model):
     ) -> None:
         """Let each stage work out what it depends on from the project,
         telling it where the project is and what stages make.
+
+        An iterated stage's outputs are patterns, e.g., ``plot-{n}.png``,
+        which match whatever each iteration makes.
         """
         outputs: set[str] = set()
+        patterns: list[re.Pattern[str]] = []
         for stage in self.stages.values():
             try:
                 dvc_outs = stage.dvc_outs
@@ -2986,14 +2990,28 @@ class Pipeline(Model):
                     if isinstance(dvc_out, dict)
                     else dvc_out
                 )
-                if isinstance(path, str) and "${" not in path:
-                    outputs.add(
-                        posixpath.normpath(
-                            posixpath.join(stage.wdir or "", path)
+                if not isinstance(path, str):
+                    continue
+                path = posixpath.normpath(
+                    posixpath.join(stage.wdir or "", path)
+                )
+                if stage.iterate_over and "{" in path:
+                    patterns.append(
+                        re.compile(
+                            re.sub(
+                                r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)
+                            )
+                            + r"\Z"
                         )
                     )
+                elif "${" not in path:
+                    outputs.add(path)
+
+        def is_output(path: str) -> bool:
+            return path in outputs or any(p.match(path) for p in patterns)
+
         for stage in self.stages.values():
-            stage.preprocess(project_dir, outputs, write_files=write_files)
+            stage.preprocess(project_dir, is_output, write_files=write_files)
 
     def resolve_procedure_paths(self, procedures: dict) -> None:
         """Tell procedure stages where their procedure is written down.

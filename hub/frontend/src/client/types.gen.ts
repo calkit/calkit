@@ -2424,6 +2424,53 @@ export type LatexCommentsMove = {
 }
 
 /**
+ * LatexComponents
+ *
+ * What a document needs beside it for calkit.sty's commands, as
+ * ``calkit latex build`` would write it.
+ */
+export type LatexComponents = {
+  /**
+   * Loads Calkit
+   */
+  loads_calkit: boolean
+  /**
+   * Style
+   */
+  style?: string | null
+  /**
+   * Values
+   */
+  values?: string | null
+  /**
+   * Copies
+   */
+  copies?: Array<string>
+  /**
+   * Problems
+   */
+  problems?: Array<string>
+}
+
+/**
+ * LatexComponentsRequest
+ *
+ * A LaTeX document to bring calkit.sty's components in for.
+ */
+export type LatexComponentsRequest = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Sources
+   */
+  sources?: {
+    [key: string]: string
+  }
+}
+
+/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -4160,7 +4207,7 @@ export type PublicationComponent = {
   /**
    * Via
    */
-  via?: "folder" | "input"
+  via?: "folder" | "input" | "included"
   /**
    * Stage
    */
@@ -10889,6 +10936,47 @@ export type GetProjectPublicationComponentsResponses = {
 
 export type GetProjectPublicationComponentsResponse =
   GetProjectPublicationComponentsResponses[keyof GetProjectPublicationComponentsResponses]
+
+export type PostProjectLatexComponentsData = {
+  body: LatexComponentsRequest
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/latex-components"
+}
+
+export type PostProjectLatexComponentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexComponentsError =
+  PostProjectLatexComponentsErrors[keyof PostProjectLatexComponentsErrors]
+
+export type PostProjectLatexComponentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComponents
+}
+
+export type PostProjectLatexComponentsResponse =
+  PostProjectLatexComponentsResponses[keyof PostProjectLatexComponentsResponses]
 
 export type PostProjectMiscData = {
   body: MiscArtifactPost

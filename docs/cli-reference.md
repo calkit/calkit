@@ -3743,15 +3743,16 @@ calkit fix storage
 
 Work with LaTeX.
 
-| Command                                                  | Description                                                   |
-| -------------------------------------------------------- | ------------------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                 |
-| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command. |
-| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.       |
-| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                 |
-| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
-| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
+| Command                                                  | Description                                                       |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                     |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.     |
+| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.           |
+| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                     |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.             |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3834,6 +3835,24 @@ Options:
 | `--pandoc-arg`        | str     | no       |         | Another argument for pandoc; can be given more than once.                                          |
 | `--no-check`          | boolean | no       | False   | Don't check the environment first.                                                                 |
 | `--verbose`, `-v`     | boolean | no       | False   | Print commands.                                                                                    |
+
+<a id="subcommand-latex-tex-map-components"></a>
+
+#### `calkit latex|tex map-components`
+
+Map in components a LaTeX document includes with `\ck*` commands.
+
+Usage:
+
+```text
+calkit latex|tex map-components TEX-FILE
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                            |
+| ---------- | ---- | -------- | ------- | -------------------------------------- |
+| `tex_file` | str  | yes      |         | The .tex file whose components to map. |
 
 <a id="subcommand-latex-tex-build"></a>
 

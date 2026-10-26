@@ -1217,6 +1217,7 @@ def get_status(
     wdir: str | None = None,
     check_environments: bool = True,
     clean_notebooks: bool = True,
+    preprocess_stages: bool = True,
     compile_to_dvc: bool = True,
     force_env_check: bool = False,
     with_data_status: bool = False,
@@ -1227,8 +1228,10 @@ def get_status(
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
-    This can compile the Calkit pipeline to DVC, clean notebook outputs,
-    check pipeline environments, then query DVC for out-of-date stages.
+    This can compile the Calkit pipeline to DVC, letting stages write the
+    files they read that aren't kept in the project as it does, clean
+    notebook outputs, check pipeline environments, then query DVC for
+    out-of-date stages.
     With ``with_data_status``, DVC's data status is attached as well, left
     None if it fails so the caller can ask again and report why.
     ``progress`` is told what's being done as each step starts.
@@ -1254,6 +1257,7 @@ def get_status(
 
     import calkit.docker
     import calkit.environments
+    import calkit.latex
     import calkit.markdown
 
     prev_cwd = os.getcwd()
@@ -1350,7 +1354,12 @@ def get_status(
         ):
             step("Compiling pipeline")
             try:
-                to_dvc(ck_info=ck_info, write=True, manage_gitignore=False)
+                to_dvc(
+                    ck_info=ck_info,
+                    write=True,
+                    manage_gitignore=False,
+                    preprocess_stages=preprocess_stages,
+                )
             except Exception as e:
                 result["errors"].append(
                     f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
@@ -2080,6 +2089,10 @@ def _ensure_latex_aux_gitignore(
         "*.vrb",
         "*.xdv",
     ]
+    # Written by Calkit before the pipeline runs or is checked, and when
+    # syncing with Overleaf, for a document that loads it
+    if stage._loads_calkit:
+        aux_globs.append("/calkit.sty")
     # Stage path fields are relative to the stage's wdir, which in turn is
     # relative to the (sub)project being compiled.
     base = os.path.join(wdir or ".", stage.wdir) if stage.wdir else wdir or "."
@@ -2292,6 +2305,7 @@ def to_dvc(
     verbose: bool = False,
     manage_gitignore: bool = True,
     for_run: bool = False,
+    preprocess_stages: bool = False,
 ) -> dict:
     """Compile a Calkit pipeline to a DVC pipeline.
 
@@ -2306,8 +2320,14 @@ def to_dvc(
     ``for_run`` is for compiling where the stages will run, which is the
     only place an env var a stage depends on is recorded as unset, since
     elsewhere, e.g., an editor's process, it may just not be set.
+
+    ``preprocess_stages`` lets stages write files they read that aren't
+    kept in the project, which they depend on, for compiling before the
+    pipeline is run or checked. Off otherwise, so compiling has no side
+    effects for, e.g., the hub committing an edit.
     """
     import calkit.dvc.zip
+    import calkit.latex
     import calkit.markdown
     import calkit.questions
     from calkit.environments import (
@@ -2412,6 +2432,7 @@ def to_dvc(
             verbose=verbose,
             manage_gitignore=manage_gitignore,
             for_run=for_run,
+            preprocess_stages=preprocess_stages,
         )
         if not sp_is_isolated:
             continue
@@ -2603,6 +2624,9 @@ def to_dvc(
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
     pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
+    # Stages that work out what they depend on from the project, which only
+    # the pipeline knows the location of
+    pipeline.preprocess_stages(wdir, write_files=preprocess_stages)
     if write:
         # The resolved setup commands each stage runs, written beside the
         # pipeline so the compiled command can name a path instead of

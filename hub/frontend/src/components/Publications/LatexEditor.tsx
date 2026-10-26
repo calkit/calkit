@@ -42,9 +42,12 @@ import {
 } from "../../lib/latexCompiler"
 import {
   type MappedPath,
+  type ProjectFile,
   TEXT_EXT,
   ext,
+  loadCalkitComponents,
   loadLatexProject,
+  loadsCalkit,
   mappedPaths,
 } from "../../lib/latexProject"
 import { fetchTree, newBudget } from "../../lib/projectFiles"
@@ -136,6 +139,8 @@ const LatexEditor = ({
   const binariesRef = useRef<Map<string, Uint8Array>>(new Map())
   // Text files the pipeline produces: compiled with, but never edited or saved.
   const generatedRef = useRef<Set<string>>(new Set())
+  // What calkit.sty's commands include, fetched once, by project path
+  const calkitCopiesRef = useRef<Map<string, ProjectFile | null>>(new Map())
   const initializedRef = useRef(false)
   const compilingRef = useRef(false)
   const pendingCompileRef = useRef(false)
@@ -393,13 +398,45 @@ const LatexEditor = ({
           onLog: (line) => setLog((l) => `${l}${line}\n`),
         })
       }
-      const files: LatexFile[] = []
+      const contents = new Map<string, string | Uint8Array>()
       for (const [path, text] of buffersRef.current) {
-        files.push({ path, contents: text })
+        contents.set(path, text)
       }
       for (const [path, bytes] of binariesRef.current) {
-        files.push({ path, contents: bytes })
+        contents.set(path, bytes)
       }
+      // What calkit.sty's commands include, which isn't committed, read
+      // from the editor's text so a new command works before it's saved.
+      // Calkit's calkit.sty replaces any committed copy.
+      if (loadsCalkit(buffersRef.current.values())) {
+        try {
+          const { files: components, problems } = await loadCalkitComponents(
+            ownerName,
+            projectName,
+            mainPath,
+            Object.fromEntries(buffersRef.current),
+            calkitCopiesRef.current,
+          )
+          for (const f of components) {
+            contents.set(
+              f.path,
+              f.kind === "text" ? f.text ?? "" : f.bytes ?? new Uint8Array(),
+            )
+          }
+          for (const problem of problems) {
+            setLog((l) => `${l}Calkit: ${problem}; it will print as ??\n`)
+          }
+        } catch (e) {
+          setLog(
+            (l) =>
+              `${l}Calkit: couldn't bring in what calkit.sty includes: ${e}\n`,
+          )
+        }
+      }
+      const files: LatexFile[] = [...contents].map(([path, c]) => ({
+        path,
+        contents: c,
+      }))
       const result = await compilerRef.current.compile(files, mainPath)
       // exit_code can be 0 with an empty PDF (busytex returns an empty array
       // when no PDF was written) — treat that as a failure, not a blank preview.
@@ -722,6 +759,7 @@ const LatexEditor = ({
     }
     setPulling(true)
     setStatus("Pulling latest changes…")
+    calkitCopiesRef.current.clear()
     try {
       const files = await loadLatexProject(
         ownerName,

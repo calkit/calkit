@@ -561,6 +561,17 @@ def _run_latexmk(
             os.remove(fdb_path)
 
 
+@latex_app.command(name="map-components")
+def map_components(
+    tex_file: Annotated[
+        str, typer.Argument(help="The .tex file whose components to map.")
+    ],
+) -> None:
+    """Map in components a LaTeX document includes with `\\ck*` commands."""
+    for problem in calkit.latex.map_ck_components(tex_file):
+        warn(f"{problem}; it will print as ??")
+
+
 @latex_app.command(name="build")
 def build(
     tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
@@ -657,6 +668,10 @@ def build(
     tex_dir = os.path.dirname(tex_file) or "."
     stem = Path(tex_file).stem
     pdf_dir = output_dir if output_dir is not None else tex_dir
+    # Components the document includes with calkit.sty's commands, e.g.,
+    # \ckfigure, have to be beside it before TeX can read them
+    for problem in calkit.latex.map_ck_components(tex_file):
+        warn(f"{problem}; it will print as ??")
     if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
         fdb_dir = aux_dir if aux_dir is not None else tex_dir
         fdb_fpath = os.path.join(fdb_dir, stem + ".fdb_latexmk")
@@ -969,6 +984,7 @@ def diff(
     generates, are fetched as they were at that revision, so each side of
     the comparison shows its own.
     """
+    import calkit.resources
 
     def stage_path(stage: dict, path: str) -> str:
         """A stage's path in the project's frame rather than its wdir's."""
@@ -1335,7 +1351,7 @@ def diff(
         which can't say what's inside, so those directories beside the
         document are included whole. Neither finds another stage's output
         DVC doesn't cache, so the pipeline's inputs for the document are
-        added too.
+        added too, as are the components the document includes.
         """
         doc_dir = Path(root, os.path.dirname(tex_file))
         pointed = [
@@ -1344,7 +1360,17 @@ def diff(
             if p.is_file()
         ]
         detected = calkit.latex.detect_inputs(tex_file, wdir=root)
-        return detected + pointed + pipeline_inputs
+        # What the revision's own calkit.sty commands include, which the
+        # stage may not depend on now, at each path TeX would try
+        _, components = calkit.latex.read_ck_usage(
+            os.path.join(root, tex_file)
+        )
+        included = [
+            path
+            for c in components
+            for path in calkit.latex.component_candidates(c)[0]
+        ]
+        return detected + pointed + included + pipeline_inputs
 
     def point_changed_figures_at_base(base_root: str, head_root: str) -> None:
         """Make the older side's changed figures refer to its own copies.
@@ -1531,6 +1557,22 @@ def diff(
         for root in prepared:
             break_verbatim_params(root)
             expand_wrapper_macros(root)
+            # Each side's own values, figures, and tables, read from its
+            # revision, or the working tree for its copy of the sources
+            calkit.latex.expand_ck_components(
+                root, "." if root == working_copy else root, tex_file
+            )
+        # \cknum in the marked-up document needs calkit.sty beside it
+        build_style = os.path.join(
+            head_root, os.path.dirname(tex_file), calkit.latex.STYLE_FNAME
+        )
+        if not os.path.isfile(build_style):
+            with open(build_style, "w", encoding="utf-8") as f:
+                f.write(
+                    calkit.resources.read_text(
+                        "latex", calkit.latex.STYLE_FNAME
+                    )
+                )
         point_changed_figures_at_base(checkouts["base"], head_root)
         _build_diff(
             base_tex_fpath=sides["base"],
@@ -1711,6 +1753,9 @@ def _build_diff(
         # chose otherwise
         if not any(a.startswith("--graphics-markup") for a in latexdiff_args):
             latexdiff_cmd.append("--graphics-markup=both")
+        # A value from calkit.sty is marked like text, so a changed one shows
+        # struck out beside its new value, rather than only as it is now
+        latexdiff_cmd.append("--append-safecmd=cknum")
         # User pass-through args come last so they can override Calkit's
         # defaults
         latexdiff_cmd += latexdiff_args

@@ -778,6 +778,55 @@ def is_tty() -> bool:
         return False
 
 
+def is_mintty(stream: Any) -> bool:
+    """True when a stream is a Git Bash or Cygwin (mintty) terminal.
+
+    mintty gives native programs a named pipe rather than a console, so
+    Python sees no terminal and picks the ANSI code page, even though
+    mintty shows UTF-8 and ANSI escapes. It's told apart by the pipe's
+    name, as Git for Windows does.
+    """
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class FileNameInfo(ctypes.Structure):
+        _fields_ = [
+            ("FileNameLength", wintypes.DWORD),
+            ("FileName", wintypes.WCHAR * 260),
+        ]
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetFileType.argtypes = [wintypes.HANDLE]
+    kernel32.GetFileInformationByHandleEx.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel32.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    # FILE_TYPE_PIPE
+    if kernel32.GetFileType(handle) != 3:
+        return False
+    info = FileNameInfo()
+    # FileNameInfo
+    if not kernel32.GetFileInformationByHandleEx(
+        handle, 2, ctypes.byref(info), ctypes.sizeof(info)
+    ):
+        return False
+    name = info.FileName[: info.FileNameLength // 2]
+    return (
+        re.match(r"\\(cygwin|msys)-[0-9a-f]+-pty\d+-(from|to)-master", name)
+        is not None
+    )
+
+
 def check_dep_exists(
     name: str,
     kind: Literal["app", "env-var", "calkit-config"] = "app",

@@ -1679,7 +1679,10 @@ def update_path_storage(
     # calkit.yaml has it now must be known to be up to date
     if outputs and to == "dvc":
         status = calkit.pipeline.get_status(
-            ck_info=ck_info, check_environments=False, clean_notebooks=False
+            ck_info=ck_info,
+            check_environments=False,
+            clean_notebooks=False,
+            preprocess_stages=False,
         )
         if status.errors:
             raise_error(
@@ -2212,7 +2215,7 @@ def update_hub(
             typer.echo("Committing changes")
             repo.git.commit(to_commit + ["-m", f"Connect to {hub_url}"])
         _adopt_hub_history(repo)
-    typer.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")
+    calkit.echo(f"✅ Connected; project is at {hub_url}/{owner}/{name}")
 
 
 @update_app.command(name="comment")

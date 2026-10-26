@@ -73,6 +73,7 @@ from app.security import (
 from app.storage import get_storage_usage
 from app.subscriptions import PLAN_IDS, get_monthly_price, get_storage_limit
 from app.zenodo import AUTH_URL as ZENODO_AUTH_URL
+from calkit.overleaf import AuthError, WebClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -890,7 +891,11 @@ def get_user_github_app_installations(
 class ConnectedAccounts(BaseModel):
     github: bool
     zenodo: bool
+    # Either Overleaf credential, and which ones, since a Git token and a
+    # browser session are saved and replaced separately
     overleaf: bool
+    overleaf_token: bool = False
+    overleaf_session: bool = False
     google: bool
     zotero: bool
     # Whether a Calkit CLI has ever authenticated as this user, which is the
@@ -924,9 +929,15 @@ def get_user_connected_accounts(
     except HTTPException:
         pass
     # Overleaf doesn't have refresh logic, just check if credential exists
-    overleaf_cred = current_user.get_external_credential(provider="overleaf")
-    overleaf_connected = (
-        overleaf_cred is not None or current_user.overleaf_token is not None
+    overleaf_token = (
+        current_user.get_external_credential(provider="overleaf") is not None
+        or current_user.overleaf_token is not None
+    )
+    overleaf_session = (
+        users.get_overleaf_session_credential(
+            session=session, user=current_user
+        )
+        is not None
     )
     # Zotero API keys don't expire, so there's nothing to refresh
     zotero_cred = current_user.get_external_credential(provider="zotero")
@@ -958,7 +969,9 @@ def get_user_connected_accounts(
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
-        overleaf=overleaf_connected,
+        overleaf=overleaf_token or overleaf_session,
+        overleaf_token=overleaf_token,
+        overleaf_session=overleaf_session,
         google=google_connected,
         zotero=zotero_cred is not None,
         cli=cli_connected,
@@ -1052,6 +1065,43 @@ def put_user_overleaf_token(
         expires=req.expires,
     )
     return Message(message="Token saved successfully")
+
+
+class OverleafSessionPut(BaseModel):
+    session: str
+
+
+class OverleafSessionResponse(BaseModel):
+    session: str
+
+
+@router.put("/user/overleaf-session")
+def put_user_overleaf_session(
+    req: OverleafSessionPut, session: SessionDep, current_user: CurrentUser
+) -> Message:
+    """Save the current user's Overleaf browser session, for syncing
+    without Overleaf Premium.
+    """
+    try:
+        WebClient(req.session).csrf_token
+    except AuthError:
+        raise HTTPException(422, "Overleaf didn't accept that session")
+    except Exception as e:
+        logger.warning(f"Could not check Overleaf session: {e}")
+        raise HTTPException(502, "Could not reach Overleaf")
+    users.save_overleaf_session(
+        session=session, user=current_user, cookie=req.session
+    )
+    return Message(message="Session saved successfully")
+
+
+@router.get("/user/overleaf-session")
+def get_user_overleaf_session(
+    session: SessionDep, current_user: CurrentUser
+) -> OverleafSessionResponse:
+    return OverleafSessionResponse(
+        session=users.get_overleaf_session(session=session, user=current_user)
+    )
 
 
 @router.post("/user/google-auth")
@@ -1248,8 +1298,14 @@ def delete_user_external_credential(
     # Also delete legacy tokens if they exist
     if provider == "zenodo" and current_user.zenodo_token:
         session.delete(current_user.zenodo_token)
-    elif provider == "overleaf" and current_user.overleaf_token:
-        session.delete(current_user.overleaf_token)
+    elif provider == "overleaf":
+        if current_user.overleaf_token:
+            session.delete(current_user.overleaf_token)
+        overleaf_session = users.get_overleaf_session_credential(
+            session=session, user=current_user
+        )
+        if overleaf_session:
+            session.delete(overleaf_session)
     session.commit()
     return Message(message=f"{provider.capitalize()} account disconnected")
 

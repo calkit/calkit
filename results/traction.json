@@ -1,8 +1,8 @@
 {
-  "date": "2026-10-22",
+  "date": "2026-10-26",
   "hub_users": 138,
   "hub_projects": 52,
-  "hub_projects_worked_on": 16,
+  "hub_projects_worked_on": 17,
   "hub_project_owners": 37,
   "hub_excluded_accounts": [
     "calkit",
@@ -11,12 +11,12 @@
   ],
   "hub_monthly_active_users": 8,
   "hub_monthly_active_signed_in_users": 5,
-  "hub_human_project_visits_last_30_days": 6,
-  "hub_projects_viewed_last_30_days": 6,
+  "hub_human_project_visits_last_30_days": 7,
+  "hub_projects_viewed_last_30_days": 7,
   "github_stars": 60,
   "github_forks": 17,
   "pypi_downloads_last_month": 3616,
-  "releases": 327,
-  "releases_per_week_last_90_days": 7.8,
+  "releases": 330,
+  "releases_per_week_last_90_days": 8.0,
   "papers_shipped": 5
 }

@@ -28,6 +28,7 @@
 | [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                            |
 | [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
 | [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
+| [`merge`](#top-command-merge)                    | Merge a branch, resolving dvc.lock and stage run records per stage.                                          |
 | [`stash`](#top-command-stash)                    | Stash workspace changes, including DVC-tracked data, or bring them back.                                     |
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
@@ -44,11 +45,11 @@
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
+| [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
-| [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
 
 ## Top-level command details
@@ -553,6 +554,40 @@ Arguments:
 | Argument | Type | Required | Default | Description  |
 | -------- | ---- | -------- | ------- | ------------ |
 | `name`   | str  | yes      |         | Branch name. |
+
+<a id="top-command-merge"></a>
+
+### `calkit merge`
+
+Merge a branch, resolving dvc.lock and stage run records per stage.
+
+A stage changed on both sides needs a choice: ours, theirs, or rerun, which also decides its run record and Git-tracked outputs. DVC-tracked outputs are checked out to match afterwards. Other conflicts are left to resolve before 'calkit merge --continue'.
+
+Usage:
+
+```text
+calkit merge [OPTIONS] [BRANCH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                     |
+| -------- | ---- | -------- | ------- | ----------------------------------------------- |
+| `branch` | str  | no       |         | Branch or commit to merge into the current one. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                  |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--continue`      | boolean | no       | False   | Finish a merge stopped by conflicts.                                         |
+| `--abort`         | boolean | no       | False   | Abort the merge in progress.                                                 |
+| `--squash`        | boolean | no       | False   | Combine the branch's changes into one commit.                                |
+| `--message`, `-m` | str     | no       |         | Commit message (default: Git's for the merge or squash).                     |
+| `--ours`, `-o`    | str     | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t`  | str     | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`   | str     | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`        | str     | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+| `--git-arg`       | str     | no       |         | Additional Git merge args.                                                   |
 
 <a id="top-command-stash"></a>
 
@@ -3674,22 +3709,70 @@ Options:
 | `--json`          | boolean | no       | False   | Output the report as JSON.                                                            |
 | `--no-pipeline`   | boolean | no       | False   | Skip asking DVC which stages are out of date, which is the slowest part of the check. |
 
+<a id="command-group-fix"></a>
+
+### `calkit fix`
+
+Fix things.
+
+| Command                                              | Description                                                     |
+| ---------------------------------------------------- | --------------------------------------------------------------- |
+| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.      |
+| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC). |
+
+<a id="subcommand-fix-merge-conflicts"></a>
+
+#### `calkit fix merge-conflicts`
+
+Resolve merge conflicts in dvc.lock and stage run records.
+
+Each stage is merged whole. A stage changed on one side takes that side, and one changed on both needs a choice, which also decides its run record and Git-tracked outputs. Stages are named as in 'calkit check stage-runs', e.g., 'sub/dvc.yaml:stage' for a subproject's.
+
+Usage:
+
+```text
+calkit fix merge-conflicts [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                  |
+| ---------------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--ours`, `-o`   | str  | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t` | str  | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`  | str  | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`       | str  | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+
+<a id="subcommand-fix-storage"></a>
+
+#### `calkit fix storage`
+
+Move paths to where they're declared to be stored (Git or DVC).
+
+Same as 'calkit check storage --fix'.
+
+Usage:
+
+```text
+calkit fix storage
+```
+
 <a id="command-group-latex-tex"></a>
 
 ### `calkit latex|tex`
 
 Work with LaTeX.
 
-| Command                                                  | Description                                                   |
-| -------------------------------------------------------- | ------------------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                 |
-| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command. |
-| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.       |
-| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                 |
-| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
-| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
-| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX or Markdown source.        |
+| Command                                                  | Description                                                       |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                     |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.     |
+| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.           |
+| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                     |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.             |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3772,6 +3855,24 @@ Options:
 | `--pandoc-arg`        | str     | no       |         | Another argument for pandoc; can be given more than once.                                          |
 | `--no-check`          | boolean | no       | False   | Don't check the environment first.                                                                 |
 | `--verbose`, `-v`     | boolean | no       | False   | Print commands.                                                                                    |
+
+<a id="subcommand-latex-tex-map-components"></a>
+
+#### `calkit latex|tex map-components`
+
+Map in components a LaTeX document includes with `\ck*` commands.
+
+Usage:
+
+```text
+calkit latex|tex map-components TEX-FILE
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                            |
+| ---------- | ---- | -------- | ------- | -------------------------------------- |
+| `tex_file` | str  | yes      |         | The .tex file whose components to map. |
 
 <a id="subcommand-latex-tex-build"></a>
 
@@ -3912,229 +4013,21 @@ Options:
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
 
-<a id="subcommand-latex-tex-comments"></a>
-
-#### `calkit latex|tex comments`
-
-Work with review comments in LaTeX or Markdown source.
-
-Usage:
-
-```text
-calkit latex|tex comments COMMAND [ARGS]...
-```
-
-| Command                                             | Description                                                          |
-| --------------------------------------------------- | -------------------------------------------------------------------- |
-| [`list`](#subcommand-latex-tex-comments-list)       | Same as 'calkit list comments'.                                      |
-| [`locate`](#subcommand-latex-tex-comments-locate)   | Find the paragraph some rendered text is in, or a source line is in. |
-| [`add`](#subcommand-latex-tex-comments-add)         | Same as 'calkit new comment'.                                        |
-| [`reply`](#subcommand-latex-tex-comments-reply)     | Same as 'calkit update comment --reply'.                             |
-| [`resolve`](#subcommand-latex-tex-comments-resolve) | Same as 'calkit update comment --resolve'.                           |
-| [`reopen`](#subcommand-latex-tex-comments-reopen)   | Same as 'calkit update comment --reopen'.                            |
-| [`delete`](#subcommand-latex-tex-comments-delete)   | Same as 'calkit delete comment'.                                     |
-
-<a id="subcommand-latex-tex-comments-list"></a>
-
-##### `calkit latex|tex comments list`
-
-Same as 'calkit list comments'.
-
-Usage:
-
-```text
-calkit latex|tex comments list [OPTIONS] TEX-PATH
-```
-
-Arguments:
-
-| Argument   | Type | Required | Default | Description |
-| ---------- | ---- | -------- | ------- | ----------- |
-| `tex_path` | str  | yes      |         |             |
-
-Options:
-
-| Option               | Type    | Required | Default | Description |
-| -------------------- | ------- | -------- | ------- | ----------- |
-| `--unresolved`, `-u` | boolean | no       | False   |             |
-| `--json`             | boolean | no       | False   |             |
-
-<a id="subcommand-latex-tex-comments-locate"></a>
-
-##### `calkit latex|tex comments locate`
-
-Find the paragraph some rendered text is in, or a source line is in.
-
-This is how a place in a PDF built without SyncTeX, or by someone else, can be matched to the source.
-
-Usage:
-
-```text
-calkit latex|tex comments locate [OPTIONS] TEX-PATH
-```
-
-Arguments:
-
-| Argument   | Type | Required | Default | Description                                    |
-| ---------- | ---- | -------- | ------- | ---------------------------------------------- |
-| `tex_path` | str  | yes      |         | Document to search, including files it inputs. |
-
-Options:
-
-| Option         | Type    | Required | Default | Description                                      |
-| -------------- | ------- | -------- | ------- | ------------------------------------------------ |
-| `--text`       | str     | no       |         | Rendered text, e.g., a line copied from the PDF. |
-| `--path`       | str     | no       |         | File with the line to look up.                   |
-| `--line`, `-l` | int     | no       |         | Line to look up in --path.                       |
-| `--json`       | boolean | no       | False   | Output result as JSON.                           |
-
-<a id="subcommand-latex-tex-comments-add"></a>
-
-##### `calkit latex|tex comments add`
-
-Same as 'calkit new comment'.
-
-Usage:
-
-```text
-calkit latex|tex comments add [OPTIONS] TEX-PATH
-```
-
-Arguments:
-
-| Argument   | Type | Required | Default | Description |
-| ---------- | ---- | -------- | ------- | ----------- |
-| `tex_path` | str  | yes      |         |             |
-
-Options:
-
-| Option         | Type    | Required | Default | Description |
-| -------------- | ------- | -------- | ------- | ----------- |
-| `--line`, `-l` | int     | yes      |         |             |
-| `--text`, `-m` | str     | yes      |         |             |
-| `--highlight`  | str     | no       |         |             |
-| `--occ`        | int     | no       | 0       |             |
-| `--author`     | str     | no       |         |             |
-| `--email`      | str     | no       |         |             |
-| `--json`       | boolean | no       | False   |             |
-
-<a id="subcommand-latex-tex-comments-reply"></a>
-
-##### `calkit latex|tex comments reply`
-
-Same as 'calkit update comment --reply'.
-
-Usage:
-
-```text
-calkit latex|tex comments reply [OPTIONS] TEX-PATH
-```
-
-Arguments:
-
-| Argument   | Type | Required | Default | Description |
-| ---------- | ---- | -------- | ------- | ----------- |
-| `tex_path` | str  | yes      |         |             |
-
-Options:
-
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--text`, `-m` | str  | yes      |         |                                   |
-| `--id`         | str  | no       |         | ID of the thread.                 |
-| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
-| `--author`     | str  | no       |         |                                   |
-| `--email`      | str  | no       |         |                                   |
-
-<a id="subcommand-latex-tex-comments-resolve"></a>
-
-##### `calkit latex|tex comments resolve`
-
-Same as 'calkit update comment --resolve'.
-
-Usage:
-
-```text
-calkit latex|tex comments resolve [OPTIONS] TEX-PATH
-```
-
-Arguments:
-
-| Argument   | Type | Required | Default | Description |
-| ---------- | ---- | -------- | ------- | ----------- |
-| `tex_path` | str  | yes      |         |             |
-
-Options:
-
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--id`         | str  | no       |         | ID of the thread.                 |
-| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
-
-<a id="subcommand-latex-tex-comments-reopen"></a>
-
-##### `calkit latex|tex comments reopen`
-
-Same as 'calkit update comment --reopen'.
-
-Usage:
-
-```text
-calkit latex|tex comments reopen [OPTIONS] TEX-PATH
-```
-
-Arguments:
-
-| Argument   | Type | Required | Default | Description |
-| ---------- | ---- | -------- | ------- | ----------- |
-| `tex_path` | str  | yes      |         |             |
-
-Options:
-
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--id`         | str  | no       |         | ID of the thread.                 |
-| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
-
-<a id="subcommand-latex-tex-comments-delete"></a>
-
-##### `calkit latex|tex comments delete`
-
-Same as 'calkit delete comment'.
-
-Usage:
-
-```text
-calkit latex|tex comments delete [OPTIONS] TEX-PATH
-```
-
-Arguments:
-
-| Argument   | Type | Required | Default | Description |
-| ---------- | ---- | -------- | ------- | ----------- |
-| `tex_path` | str  | yes      |         |             |
-
-Options:
-
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--id`         | str  | no       |         | ID of the thread.                 |
-| `--line`, `-l` | int  | no       |         | Number of any line in the thread. |
-
 <a id="command-group-overleaf-ol"></a>
 
 ### `calkit overleaf|ol`
 
 Interact with Overleaf.
 
-| Command                                           | Description                                                      |
-| ------------------------------------------------- | ---------------------------------------------------------------- |
-| [`login`](#subcommand-overleaf-ol-login)          | Sign in with a browser session to sync without Overleaf Premium. |
-| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                   |
-| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                      |
-| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project.   |
-| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.         |
-| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.     |
+| Command                                           | Description                                                                   |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [`login`](#subcommand-overleaf-ol-login)          | Sign in with a browser session to sync without Overleaf Premium.              |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                                |
+| [`link`](#subcommand-overleaf-ol-link)            | Link a folder in the project to an Overleaf project, pushing its files there. |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                                   |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project.                |
+| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.                      |
+| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.                  |
 
 <a id="subcommand-overleaf-ol-login"></a>
 
@@ -4150,9 +4043,10 @@ calkit overleaf|ol login [OPTIONS]
 
 Options:
 
-| Option      | Type | Required | Default | Description                                                |
-| ----------- | ---- | -------- | ------- | ---------------------------------------------------------- |
-| `--session` | str  | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
+| Option      | Type    | Required | Default | Description                                                |
+| ----------- | ------- | -------- | ------- | ---------------------------------------------------------- |
+| `--session` | str     | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
+| `--hub`     | boolean | no       | False   | Also save session to Calkit hub, so it can sync there.     |
 
 <a id="subcommand-overleaf-ol-import"></a>
 
@@ -4185,6 +4079,36 @@ Options:
 | `--no-commit`         | boolean | no       | False   | Do not commit changes to repo.                                                                                             |
 | `--overwrite`, `-f`   | boolean | no       | False   | Force adding the publication even if it already exists.                                                                    |
 | `--push-only`, `-P`   | boolean | no       | False   | Push local files to Overleaf without pulling. Useful when initializing a new Overleaf project from local files.            |
+
+<a id="subcommand-overleaf-ol-link"></a>
+
+#### `calkit overleaf|ol link`
+
+Link a folder in the project to an Overleaf project, pushing its files there.
+
+Like 'import --push-only', for a document that starts in the project.
+
+Usage:
+
+```text
+calkit overleaf|ol link [OPTIONS] FOLDER PROJECT-URL
+```
+
+Arguments:
+
+| Argument      | Type | Required | Default | Description                                                                    |
+| ------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------ |
+| `folder`      | str  | yes      |         | Folder in the project, e.g., 'paper'.                                          |
+| `project_url` | str  | yes      |         | Overleaf project URL, e.g., https://www.overleaf.com/project/6800005973cb2e35. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                    |
+| ------------------- | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `--title`, `-t`     | str     | no       |         | Title, if the publication isn't in calkit.yaml yet.            |
+| `--target`, `-T`    | str     | no       |         | Target TeX file in the folder.                                 |
+| `--push-path`, `-p` | str     | no       |         | Paths in the folder to only push to Overleaf, e.g., 'figures'. |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                 |
 
 <a id="subcommand-overleaf-ol-sync"></a>
 
@@ -4220,6 +4144,7 @@ Options:
 | `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
 | `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
 | `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |
 
 <a id="subcommand-overleaf-ol-status-st"></a>
 
@@ -4478,17 +4403,16 @@ Usage:
 calkit hub|cloud link COMMAND [ARGS]...
 ```
 
-| Command                                                       | Description                                                                                     |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| [`install`](#subcommand-hub-cloud-link-install)               | Link this machine to a hub and run the hub link as a service.                                   |
-| [`start`](#subcommand-hub-cloud-link-start)                   | Run the hub link in the foreground, e.g., inside tmux.                                          |
-| [`status`](#subcommand-hub-cloud-link-status)                 | Show this machine's hub links and their workspaces.                                             |
-| [`stop`](#subcommand-hub-cloud-link-stop)                     | Stop the hub link's service until it's restarted, for every hub unless one is given.            |
-| [`restart`](#subcommand-hub-cloud-link-restart)               | Restart the hub link's service, e.g., after updating Calkit, for every hub unless one is given. |
-| [`logs`](#subcommand-hub-cloud-link-logs)                     | Show the hub link service's logs.                                                               |
-| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace)   | Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or one on another hub.      |
-| [`git-credential`](#subcommand-hub-cloud-link-git-credential) | Give Git a GitHub token for one repo in a hub link's session.                                   |
-| [`uninstall`](#subcommand-hub-cloud-link-uninstall)           | Revoke this machine on the hub and remove its hub link.                                         |
+| Command                                                     | Description                                                                                     |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [`install`](#subcommand-hub-cloud-link-install)             | Link this machine to a hub and run the hub link as a service.                                   |
+| [`start`](#subcommand-hub-cloud-link-start)                 | Run the hub link in the foreground, e.g., inside tmux.                                          |
+| [`status`](#subcommand-hub-cloud-link-status)               | Show this machine's hub links and their workspaces.                                             |
+| [`stop`](#subcommand-hub-cloud-link-stop)                   | Stop the hub link's service until it's restarted, for every hub unless one is given.            |
+| [`restart`](#subcommand-hub-cloud-link-restart)             | Restart the hub link's service, e.g., after updating Calkit, for every hub unless one is given. |
+| [`logs`](#subcommand-hub-cloud-link-logs)                   | Show the hub link service's logs.                                                               |
+| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace) | Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or one on another hub.      |
+| [`uninstall`](#subcommand-hub-cloud-link-uninstall)         | Revoke this machine on the hub and remove its hub link.                                         |
 
 <a id="subcommand-hub-cloud-link-install"></a>
 
@@ -4628,26 +4552,6 @@ Options:
 | ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
 
-<a id="subcommand-hub-cloud-link-git-credential"></a>
-
-##### `calkit hub|cloud link git-credential`
-
-Give Git a GitHub token for one repo in a hub link's session.
-
-Sessions and actions the link runs set this up for https://github.com only, with the repo's path.
-
-Usage:
-
-```text
-calkit hub|cloud link git-credential OPERATION
-```
-
-Arguments:
-
-| Argument    | Type | Required | Default | Description                          |
-| ----------- | ---- | -------- | ------- | ------------------------------------ |
-| `operation` | str  | yes      |         | What Git asks: get, store, or erase. |
-
 <a id="subcommand-hub-cloud-link-uninstall"></a>
 
 ##### `calkit hub|cloud link uninstall`
@@ -4773,60 +4677,6 @@ Options:
 | Option           | Type    | Required | Default | Description                         |
 | ---------------- | ------- | -------- | ------- | ----------------------------------- |
 | `--follow`, `-f` | boolean | no       | False   | Follow the log output like tail -f. |
-
-<a id="command-group-dev"></a>
-
-### `calkit dev`
-
-Developer tools.
-
-| Command                              | Description                                                     |
-| ------------------------------------ | --------------------------------------------------------------- |
-| [`python`](#subcommand-dev-python)   | Start an Python shell in Calkit's environment.                  |
-| [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment.                 |
-| [`upgrade`](#subcommand-dev-upgrade) | Update a dev (editable) install: pull the branch and reinstall. |
-
-<a id="subcommand-dev-python"></a>
-
-#### `calkit dev python`
-
-Start an Python shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev python [OPTIONS]
-```
-
-<a id="subcommand-dev-ipython"></a>
-
-#### `calkit dev ipython`
-
-Start an IPython shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev ipython [OPTIONS]
-```
-
-<a id="subcommand-dev-upgrade"></a>
-
-#### `calkit dev upgrade`
-
-Update a dev (editable) install: pull the branch and reinstall.
-
-Usage:
-
-```text
-calkit dev upgrade [BRANCH]
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description                                                                                                                                    |
-| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `branch` | str  | no       |         | Branch to install from: the worktree that has it checked out, or else the install's own, if it has no changes. Defaults to the current branch. |
 
 <a id="command-group-sync"></a>
 
@@ -4961,3 +4811,4 @@ Options:
 | `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
 | `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
 | `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |

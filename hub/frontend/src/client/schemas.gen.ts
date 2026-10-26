@@ -929,6 +929,16 @@ export const ConnectedAccountsSchema = {
       type: "boolean",
       title: "Overleaf",
     },
+    overleaf_token: {
+      type: "boolean",
+      title: "Overleaf Token",
+      default: false,
+    },
+    overleaf_session: {
+      type: "boolean",
+      title: "Overleaf Session",
+      default: false,
+    },
     google: {
       type: "boolean",
       title: "Google",
@@ -4432,6 +4442,79 @@ export const LatexCommentsMoveSchema = {
   title: "LatexCommentsMove",
 } as const
 
+export const LatexComponentsSchema = {
+  properties: {
+    loads_calkit: {
+      type: "boolean",
+      title: "Loads Calkit",
+    },
+    style: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Style",
+    },
+    values: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
+    copies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Copies",
+      default: [],
+    },
+    problems: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Problems",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["loads_calkit"],
+  title: "LatexComponents",
+  description:
+    "What a document needs beside it for calkit.sty's commands, as\n``calkit latex build`` would write it.",
+} as const
+
+export const LatexComponentsRequestSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    sources: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Sources",
+      default: {},
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "LatexComponentsRequest",
+  description: "A LaTeX document to bring calkit.sty's components in for.",
+} as const
+
 export const LogoutRequestSchema = {
   properties: {
     refresh_token: {
@@ -5721,6 +5804,30 @@ export const OverleafLookupSchema = {
   type: "object",
   required: ["links", "projects_scanned", "projects_remaining"],
   title: "OverleafLookup",
+} as const
+
+export const OverleafSessionPutSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionPut",
+} as const
+
+export const OverleafSessionResponseSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionResponse",
 } as const
 
 export const OverleafSyncPostSchema = {
@@ -7970,7 +8077,7 @@ export const PublicationComponentSchema = {
     },
     via: {
       type: "string",
-      enum: ["folder", "input"],
+      enum: ["folder", "input", "included"],
       title: "Via",
       default: "folder",
     },

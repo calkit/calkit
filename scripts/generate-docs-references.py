@@ -128,8 +128,11 @@ def _command_desc_full(cmd: TyperCommand) -> str:
 
 
 def _list_commands(group: TyperGroup) -> list[tuple[str, TyperCommand]]:
-    names = list(group.commands.keys())
-    return [(name, group.commands[name]) for name in names]
+    return [
+        (name, cmd)
+        for name, cmd in group.commands.items()
+        if not getattr(cmd, "hidden", False)
+    ]
 
 
 def _list_unique_commands(

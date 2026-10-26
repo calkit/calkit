@@ -254,6 +254,7 @@ import type {
   GetUserGithubTokenResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
+  GetUserOverleafSessionResponses,
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
@@ -278,6 +279,7 @@ import type {
   LatexCommentPost,
   LatexCommentReplyPost,
   LatexCommentsMove,
+  LatexComponentsRequest,
   ListReleaseSharesErrors,
   ListReleaseSharesResponses,
   LoginAccessTokenErrors,
@@ -304,6 +306,7 @@ import type {
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
+  OverleafSessionPut,
   OverleafSyncPost,
   ParseReleaseUrlErrors,
   ParseReleaseUrlResponses,
@@ -398,6 +401,8 @@ import type {
   PostProjectLatexCommentResponses,
   PostProjectLatexCommentsMoveErrors,
   PostProjectLatexCommentsMoveResponses,
+  PostProjectLatexComponentsErrors,
+  PostProjectLatexComponentsResponses,
   PostProjectMapPathsErrors,
   PostProjectMapPathsResponses,
   PostProjectMiscErrors,
@@ -482,6 +487,8 @@ import type {
   PutProjectReferenceNotesResponses,
   PutUserOnboardingFlagErrors,
   PutUserOnboardingFlagResponses,
+  PutUserOverleafSessionErrors,
+  PutUserOverleafSessionResponses,
   PutUserOverleafTokenErrors,
   PutUserOverleafTokenResponses,
   PutUserSubscriptionAdminErrors,
@@ -2078,6 +2085,62 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/overleaf-token",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Overleaf Session
+   */
+  public static getUserOverleafSession<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserOverleafSessionResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserOverleafSessionResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-session",
+      ...options,
+    })
+  }
+
+  /**
+   * Put User Overleaf Session
+   *
+   * Save the current user's Overleaf browser session, for syncing
+   * without Overleaf Premium.
+   */
+  public static putUserOverleafSession<ThrowOnError extends boolean = true>(
+    parameters: {
+      overleafSessionPut: OverleafSessionPut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutUserOverleafSessionResponses,
+    PutUserOverleafSessionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "overleafSessionPut", map: "body" }] }],
+    )
+    return (options?.client ?? client).put<
+      PutUserOverleafSessionResponses,
+      PutUserOverleafSessionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-session",
       ...options,
       ...params,
       headers: {
@@ -4940,6 +5003,64 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/publications/components",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Post Project Latex Components
+   *
+   * What a LaTeX document needs beside it for calkit.sty's commands, as
+   * ``calkit latex build`` would write it, for compiling it elsewhere, e.g.,
+   * in the browser.
+   *
+   * The document and the files it inputs are read from ``sources`` where
+   * given, e.g., an editor's unsaved text, and otherwise from the project at
+   * ``ref``. Values are read here, from Git or DVC storage. Copies are named
+   * by their project paths, each going at the same path under ``_calkit``
+   * beside the document, for the caller to fetch, since a figure may be
+   * large or stored with DVC.
+   */
+  public static postProjectLatexComponents<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      ref?: string | null
+      latexComponentsRequest: LatexComponentsRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexComponentsResponses,
+    PostProjectLatexComponentsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "ref" },
+            { key: "latexComponentsRequest", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexComponentsResponses,
+      PostProjectLatexComponentsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-components",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

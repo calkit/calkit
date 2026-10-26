@@ -7292,7 +7292,7 @@ export const PublicationComponentSchema = {
     },
     via: {
       type: "string",
-      enum: ["folder", "input"],
+      enum: ["folder", "input", "included"],
       title: "Via",
       default: "folder",
     },

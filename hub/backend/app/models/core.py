@@ -1547,9 +1547,9 @@ class PublicationComponent(BaseModel):
     # Repo-relative
     path: str
     kind: Literal["produced", "authored", "attested", "imported", "unknown"]
-    # In the publication's folder, or read by its build stage from
-    # elsewhere in the project
-    via: Literal["folder", "input"] = "folder"
+    # In the publication's folder, read by its build stage from elsewhere
+    # in the project, or included by a document with calkit.sty's commands
+    via: Literal["folder", "input", "included"] = "folder"
     # For "produced": the stage that makes it, and that stage's kind, so a
     # map-paths copy can be told from something computed
     stage: str | None = None

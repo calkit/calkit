@@ -4207,7 +4207,7 @@ export type PublicationComponent = {
   /**
    * Via
    */
-  via?: "folder" | "input"
+  via?: "folder" | "input" | "included"
   /**
    * Stage
    */

@@ -432,9 +432,9 @@ function ComponentsModal({
         <ModalBody pb={4}>
           <Text fontSize="sm" color="ui.dim" mb={3}>
             Everything in <Code fontSize="xs">{folder}</Code>, plus what its
-            build stage reads from elsewhere in the project, and where each came
-            from. A reader can only trust a figure or table whose origin is
-            recorded.
+            build stage reads or its document includes from elsewhere in the
+            project, and where each came from. A reader can only trust a figure
+            or table whose origin is recorded.
           </Text>
           {sorted.length === 0 ? (
             <Text fontSize="sm">
@@ -476,9 +476,9 @@ function ComponentsModal({
                               {relativeComponentPath(item.path, folder)}
                             </Code>
                           </Link>
-                          {item.via === "input" ? (
+                          {item.via !== "folder" ? (
                             <Text as="span" fontSize="xs" color="ui.dim" ml={1}>
-                              input
+                              {item.via}
                             </Text>
                           ) : null}
                         </Td>
@@ -625,8 +625,8 @@ export default function PublicationComponents({
         <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
           {data.folder}
         </Code>
-        {data.items.some((item) => item.via === "input")
-          ? " and its inputs"
+        {data.items.some((item) => item.via !== "folder")
+          ? " and what it reads from elsewhere"
           : ""}
       </Link>
       {raise ? (

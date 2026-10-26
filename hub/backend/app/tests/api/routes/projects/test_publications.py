@@ -396,6 +396,39 @@ def test_get_project_publication_components(
         by_path = {item["path"]: item for item in resp.json()["items"]}
         assert by_path["paper/paper.tex"]["source"] == "overleaf"
         assert by_path["paper/figures/x.png"]["source"] is None
+        # What calkit.sty's commands include is listed where it comes from,
+        # rather than as Calkit's copies beside the document
+        wdir = repo.working_dir
+        with open(os.path.join(wdir, "paper", "paper.tex"), "w") as f:
+            f.write(
+                "\\documentclass{article}\n\\usepackage{calkit}\n"
+                "\\ckvalue{results/summary.json}{n}\n\\ckfigure{figures/gen}\n"
+                "\\ckfigure{data/table.csv}\n"
+            )
+        os.makedirs(os.path.join(wdir, "paper", "_calkit", "figures"))
+        for rel in [
+            "calkit.sty",
+            "_calkit/values.tex",
+            "_calkit/README.md",
+            "_calkit/figures/gen.png",
+        ]:
+            with open(os.path.join(wdir, "paper", rel), "w") as f:
+                f.write("Written by Calkit")
+        resp = client.get(
+            f"{URL}/components",
+            params={"path": "paper/paper.pdf"},
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        by_path = {item["path"]: item for item in resp.json()["items"]}
+        assert not any(
+            p == "paper/calkit.sty" or p.startswith("paper/_calkit/")
+            for p in by_path
+        )
+        assert by_path["results/summary.json"]["via"] == "included"
+        assert by_path["figures/gen.png"]["via"] == "included"
+        # One that's already an input is listed once
+        assert by_path["data/table.csv"]["via"] == "input"
         # A path leaving the project is refused
         resp = client.get(
             f"{URL}/components",

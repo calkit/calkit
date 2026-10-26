@@ -663,9 +663,13 @@ def find_shown(document: str, wdir: str | None = None) -> list[str]:
     commands or included plainly, e.g., with ``\\includegraphics`` or
     ``\\input``, relative to ``wdir`` like ``document`` is.
     """
-    cited = [
-        c.path for c in find_citations(os.path.join(wdir or ".", document))
-    ]
+    _, components = read_ck_usage(os.path.join(wdir or ".", document))
+    cited = []
+    for c in components:
+        rel, _ = component_path(
+            c, lambda p: os.path.isfile(os.path.join(wdir or ".", p))
+        )
+        cited.append(rel or c.path)
     return list(dict.fromkeys(cited + detect_inputs(document, wdir=wdir)))
 
 

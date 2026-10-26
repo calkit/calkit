@@ -8,7 +8,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as vscode from "vscode";
 import YAML from "yaml";
-import { pathWithInstallDirs } from "./cli";
+import { missingInstallDirs } from "./cli";
 import {
   compactSlurmOptions,
   findCalkitEnvKernelSourceCandidate,
@@ -263,14 +263,16 @@ export function activate(context: vscode.ExtensionContext): void {
   outputChannel = vscode.window.createOutputChannel("Calkit");
   context.subscriptions.push(outputChannel);
   // Before anything runs calkit, which VS Code may not have on PATH
-  const fullPath = pathWithInstallDirs(
+  const addedDirs = missingInstallDirs(
     process.env,
     os.homedir(),
     process.platform,
   );
-  if (fullPath !== undefined) {
-    log(`Added install folders missing from PATH: ${fullPath}`);
-    process.env.PATH = fullPath;
+  if (addedDirs.length) {
+    process.env.PATH = [process.env.PATH, ...addedDirs]
+      .filter(Boolean)
+      .join(path.delimiter);
+    log(`Added install folders missing from PATH: ${addedDirs.join(", ")}`);
   }
   slurmStatusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,

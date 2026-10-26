@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import * as path from "node:path";
 import test from "node:test";
-import { pathWithInstallDirs } from "../cli";
+import { missingInstallDirs } from "../cli";
 
-test("pathWithInstallDirs adds install folders missing from PATH", () => {
+test("missingInstallDirs finds install folders missing from PATH", () => {
   const home = "/home/me";
   const local = path.join(home, ".local", "bin");
   const pixi = path.join(home, ".pixi", "bin");
@@ -12,43 +12,60 @@ test("pathWithInstallDirs adds install folders missing from PATH", () => {
     (p: string) =>
       dirs.includes(p);
   // VS Code started without the shell's PATH: uv's and pixi's folders, and
-  // Homebrew's on a Mac
-  assert.equal(
-    pathWithInstallDirs(
+  // Homebrew's and MacTeX's on a Mac
+  assert.deepEqual(
+    missingInstallDirs(
       { PATH: "/usr/bin:/bin" },
       home,
       "darwin",
-      at(local, pixi, "/opt/homebrew/bin"),
+      at(local, pixi, "/opt/homebrew/bin", "/Library/TeX/texbin"),
     ),
-    `/usr/bin:/bin:${local}:${pixi}:/opt/homebrew/bin`,
+    [local, pixi, "/opt/homebrew/bin", "/Library/TeX/texbin"],
   );
   // Nothing to add when PATH already has them, or they don't exist
-  assert.equal(
-    pathWithInstallDirs(
+  assert.deepEqual(
+    missingInstallDirs(
       { PATH: `/usr/bin:${local}` },
       home,
       "darwin",
       at(local),
     ),
-    undefined,
+    [],
   );
-  assert.equal(
-    pathWithInstallDirs({ PATH: "/usr/bin" }, home, "darwin", at()),
-    undefined,
+  assert.deepEqual(
+    missingInstallDirs({ PATH: "/usr/bin" }, home, "darwin", at()),
+    [],
   );
-  // Folders set by environment variables, and no Homebrew off a Mac
-  assert.equal(
-    pathWithInstallDirs(
-      { PATH: "/usr/bin", UV_TOOL_BIN_DIR: "/tools", PIXI_HOME: "/px" },
+  // Folders set by environment variables, an unset PATH, and nothing
+  // Mac-only elsewhere
+  const pixiHome = path.join("/px", "bin");
+  assert.deepEqual(
+    missingInstallDirs(
+      { UV_TOOL_BIN_DIR: "/tools", PIXI_HOME: "/px" },
       home,
       "linux",
-      at("/tools", "/px/bin", "/opt/homebrew/bin"),
+      at("/tools", pixiHome, "/opt/homebrew/bin"),
     ),
-    "/usr/bin:/tools:/px/bin",
+    ["/tools", pixiHome],
+  );
+  // The same folder named twice is added once
+  assert.deepEqual(
+    missingInstallDirs(
+      { PATH: "/usr/bin", XDG_BIN_HOME: local },
+      home,
+      "linux",
+      at(local),
+    ),
+    [local],
   );
   // Windows separates PATH with semicolons
-  assert.equal(
-    pathWithInstallDirs({ PATH: "C:\\Windows" }, home, "win32", at(local)),
-    `C:\\Windows;${local}`,
+  assert.deepEqual(
+    missingInstallDirs(
+      { PATH: `C:\\Windows;${local}` },
+      home,
+      "win32",
+      at(local),
+    ),
+    [],
   );
 });

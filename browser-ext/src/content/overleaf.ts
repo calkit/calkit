@@ -9,7 +9,7 @@ import {
   type Citation,
   citationAt,
   citationText,
-  includeCandidates,
+  citationCandidates,
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import { isUnsupportedByHub, RequestFailed, send } from "../core/messages";
@@ -87,17 +87,17 @@ function provenanceFor(
 
 /**
  * Where a file the document shows came from, finding it in the project
- * first if it's included plainly, since TeX names it relative to the
- * document and may leave off the extension.
+ * first, since TeX may find it under a name with an extension added, and
+ * finds a plainly included one relative to the document.
  */
 async function citationProvenance(
   link: OverleafLinkPublic,
   citation: Citation,
 ): Promise<Provenance> {
-  if (!citation.included) {
+  if (citation.kind === "value") {
     return provenanceFor(link, citation.path, citation.key);
   }
-  const candidates = includeCandidates(link.path, citation);
+  const candidates = citationCandidates(link.path, citation);
   let first: Provenance | null = null;
   for (const candidate of candidates) {
     const provenance = await provenanceFor(link, candidate);
@@ -155,8 +155,8 @@ function renderProvenance(
   );
   const fileUrl = (path: string) =>
     `${base}/files?path=${encodeURIComponent(path)}`;
-  // An included file is named as the project has it, not as written
-  const path = citation.included ? provenance.path : citation.path;
+  // A file is named as the project has it, not as written
+  const path = citation.kind === "value" ? citation.path : provenance.path;
   const label = citation.key ? `${path}: ${citation.key}` : path;
   container.append(el("div", { class: "name", text: label }));
   if (provenance.copied_from) {

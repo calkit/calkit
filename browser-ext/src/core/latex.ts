@@ -44,9 +44,11 @@ export interface Citation {
   included?: boolean;
 }
 
-// Mirrors _CITE_RE in calkit/latex.py
-const CITE_RE =
-  /\\ck(value|figure|table)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}(?:\s*\{([^}]*)\})?/g;
+// Mirror _CK_COMMAND_RE in calkit/latex.py, where only \ckvalue takes a
+// second brace group
+const CK_VALUE_RE =
+  /\\ck(value)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}\s*\{([^}]*)\}/g;
+const CK_FILE_RE = /\\ck(figure|table)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}/g;
 // The plain commands among _INPUT_COMMANDS in calkit/latex.py that show
 // something from the project
 const INCLUDE_RE =
@@ -63,7 +65,11 @@ const GRAPHICS_EXTS = [".pdf", ".png", ".jpg", ".jpeg", ".eps", ".ps", ".gif"];
  */
 export function citationAt(line: string, offset: number): Citation | null {
   const comment = line.search(/(?<!\\)%/);
-  const matches = [...line.matchAll(CITE_RE), ...line.matchAll(INCLUDE_RE)];
+  const matches = [
+    ...line.matchAll(CK_VALUE_RE),
+    ...line.matchAll(CK_FILE_RE),
+    ...line.matchAll(INCLUDE_RE),
+  ];
   for (const match of matches) {
     const start = match.index ?? 0;
     if (comment >= 0 && start >= comment) {
@@ -92,15 +98,27 @@ export function citationAt(line: string, offset: number): Citation | null {
 }
 
 /**
- * Where in the project an included file could be, in the order TeX tries
- * them, given the folder the Overleaf project syncs with.
+ * Where in the project a cited or included file could be, in the order TeX
+ * tries them, given the folder the Overleaf project syncs with.
  *
- * Mirrors the lookup in ``detect_inputs`` in calkit/latex.py.
+ * Mirrors ``component_candidates`` in calkit/latex.py for calkit.sty's
+ * commands, and the lookup in ``detect_inputs`` for plain includes.
  */
-export function includeCandidates(
+export function citationCandidates(
   folder: string,
   citation: Citation,
 ): string[] {
+  const exts = citation.kind === "figure" ? GRAPHICS_EXTS : [".tex"];
+  if (!citation.included) {
+    const path = citation.path.replace(/^\.\//, "");
+    if (
+      citation.kind === "value" ||
+      exts.some((ext) => path.toLowerCase().endsWith(ext))
+    ) {
+      return [path];
+    }
+    return [...exts.map((ext) => path + ext), path];
+  }
   const parts: string[] = [];
   for (const part of `${folder}/${citation.path}`.split("/")) {
     if (part === "..") {
@@ -110,7 +128,6 @@ export function includeCandidates(
     }
   }
   const path = parts.join("/");
-  const exts = citation.kind === "figure" ? GRAPHICS_EXTS : [".tex"];
   if (exts.some((ext) => path.toLowerCase().endsWith(ext))) {
     return [path];
   }

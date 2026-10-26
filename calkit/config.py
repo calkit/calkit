@@ -252,6 +252,7 @@ KEYRING_FIELDS = frozenset(
         "zenodo_token",
         "caltechdata_token",
         "overleaf_token",
+        "overleaf_session",
     ]
 )
 
@@ -428,6 +429,8 @@ class Settings(BaseSettings):
     zenodo_token: KeyringOptionalSecret | None = None
     caltechdata_token: KeyringOptionalSecret | None = None
     overleaf_token: KeyringOptionalSecret | None = None
+    # Browser session cookie, for syncing without Overleaf's Git integration
+    overleaf_session: KeyringOptionalSecret | None = None
 
     # Which fields have been resolved from the keyring, so a secret that
     # is genuinely absent isn't looked up again, and an assignment (even

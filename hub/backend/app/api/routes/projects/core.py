@@ -103,6 +103,7 @@ from app.dvc import (
     run_dvc_command,
 )
 from app.git import (
+    OVERLEAF_SESSION_REJECTED,
     RepoTree,
     expire_shared_read_clone,
     get_ck_info,
@@ -129,6 +130,8 @@ from app.models import (
     Figure,
     FileLock,
     GitRef,
+    LatexComponents,
+    LatexComponentsRequest,
     Message,
     MiscArtifact,
     Notebook,
@@ -6055,10 +6058,22 @@ def get_project_publication_components(
             not folder or PurePosixPath(out_path).is_relative_to(folder)
         ):
             file_paths.append(out_path)
+    # Calkit writes calkit.sty and _calkit beside a document that uses
+    # calkit.sty's commands, so what those include is listed where it comes
+    # from instead
+    managed_style = posixpath.join(folder, calkit.latex.STYLE_FNAME)
+    managed_dir = posixpath.join(folder, calkit.latex.COMPONENTS_DIR) + "/"
+    documents = [
+        p
+        for p in file_paths
+        if p.endswith(".tex") and not p.startswith(managed_dir)
+    ]
     file_paths = [
         p
         for p in sorted(file_paths)
         if p != pub_path
+        and p != managed_style
+        and not p.startswith(managed_dir)
         and not any(part.startswith(".") for part in p.split("/"))
         and not any(p.endswith(ext) for ext in LATEX_BUILD_EXTS)
     ]
@@ -6122,6 +6137,35 @@ def get_project_publication_components(
         if p not in file_paths
         and not any(part.startswith(".") for part in p.split("/"))
     ]
+
+    def read_source(source: str) -> str | None:
+        try:
+            return tree.read_bytes(posixpath.normpath(source)).decode(
+                "utf-8", errors="replace"
+            )
+        except Exception:
+            return None
+
+    def is_project_file(rel: str) -> bool:
+        out = dvc_outs.get(rel)
+        return tree.is_file(rel) or bool(
+            out and out.get("md5") and not str(out["md5"]).endswith(".dir")
+        )
+
+    included_paths: list[str] = []
+    for document in documents:
+        _, ck_components = calkit.latex.read_ck_usage(
+            document, read=read_source
+        )
+        for c in ck_components:
+            rel, _ = calkit.latex.component_path(c, is_project_file)
+            if (
+                rel is not None
+                and rel not in file_paths
+                and rel not in input_paths
+                and rel not in included_paths
+            ):
+                included_paths.append(rel)
     # What calkit.yaml attributes, by path
     declared: dict[str, Literal["attested", "imported"]] = {}
     for section in ["figures", "datasets", "misc"]:
@@ -6147,9 +6191,11 @@ def get_project_publication_components(
     # Figure hashes are computed once, and only if something needs them
     figure_md5s: dict[str, str | None] = {}
     items: list[PublicationComponent] = []
-    for p, via in [(p, "folder") for p in file_paths] + [
-        (p, "input") for p in input_paths
-    ]:
+    for p, via in (
+        [(p, "folder") for p in file_paths]
+        + [(p, "input") for p in input_paths]
+        + [(p, "included") for p in sorted(included_paths)]
+    ):
         size: int | None = None
         if tree.is_file(p):
             size = tree.size(p)
@@ -6220,6 +6266,93 @@ def get_project_publication_components(
         folder=folder,
         items=items,
         n_unknown=sum(1 for item in items if item.kind == "unknown"),
+    )
+
+
+# Results files are read whole for their values
+LATEX_COMPONENT_VALUES_MAX_BYTES = 10_000_000
+
+
+@router.post("/projects/{owner_name}/{project_name}/latex-components")
+def post_project_latex_components(
+    owner_name: str,
+    project_name: str,
+    req: LatexComponentsRequest,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    ref: str | None = None,
+) -> LatexComponents:
+    """What a LaTeX document needs beside it for calkit.sty's commands, as
+    ``calkit latex build`` would write it, for compiling it elsewhere, e.g.,
+    in the browser.
+
+    The document and the files it inputs are read from ``sources`` where
+    given, e.g., an editor's unsaved text, and otherwise from the project at
+    ``ref``. Values are read here, from Git or DVC storage. Copies are named
+    by their project paths, each going at the same path under ``_calkit``
+    beside the document, for the caller to fetch, since a figure may be
+    large or stored with DVC.
+    """
+    tex_path = _normalize_artifact_file_path(req.path)
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    tree = get_repo_tree_for_ref(repo, ref)
+    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    sources = {posixpath.normpath(p): t for p, t in req.sources.items()}
+
+    def read(path: str) -> str | None:
+        key = posixpath.normpath(Path(path).as_posix())
+        if key in sources:
+            return sources[key]
+        try:
+            return tree.read_bytes(key).decode("utf-8", errors="replace")
+        except Exception:
+            return None
+
+    def is_file(rel: str) -> bool:
+        out = dvc_outs.get(rel)
+        return tree.is_file(rel) or bool(
+            out and out.get("md5") and not str(out["md5"]).endswith(".dir")
+        )
+
+    def is_outside(rel: str) -> bool:
+        return tree.is_symlink(rel) and not tree.is_safe_symlink(rel)
+
+    def read_data(rel: str) -> Any:
+        data = app.projects.read_project_file(
+            project=project,
+            tree=tree,
+            path=rel,
+            max_bytes=LATEX_COMPONENT_VALUES_MAX_BYTES,
+            session=session,
+            current_user=current_user,
+        )
+        return calkit.questions.parse_evidence_text(data.decode("utf-8"), rel)
+
+    loads, components = calkit.latex.read_ck_usage(tex_path, read=read)
+    if not loads:
+        return LatexComponents(loads_calkit=False)
+    plan = calkit.latex.plan_ck_components(
+        components, is_file=is_file, read_data=read_data, is_outside=is_outside
+    )
+    return LatexComponents(
+        loads_calkit=True,
+        style=calkit.resources.read_text("latex", calkit.latex.STYLE_FNAME),
+        values=plan.values,
+        copies=[rel for rel, here in plan.files.items() if here],
+        problems=plan.problems,
     )
 
 
@@ -6913,17 +7046,18 @@ async def post_project_overleaf_publication(
                 token=overleaf_token,
                 expires=None,
             )
-        try:
-            users.get_overleaf_token(session=session, user=current_user)
-        except HTTPException:
-            raise HTTPException(400, "No Overleaf token found")
+        # 401 like the other Overleaf routes, so clients offer to connect
+        overleaf_auth = users.get_overleaf_auth(
+            session=session, user=current_user
+        )
         try:
             with get_overleaf_repo(
                 project=project,
                 user=current_user,
                 session=session,
                 overleaf_project_id=overleaf_project_id,
-            ) as overleaf_repo:
+                overleaf_auth=overleaf_auth,
+            ) as (overleaf_repo, _):
                 # Snapshot the files and commit while the clone is locked, so
                 # a concurrent pull or sync can't change them mid-import; the
                 # directory is removed when the snapshot is garbage collected
@@ -7205,10 +7339,7 @@ def post_project_overleaf_sync(
     current_user: CurrentUser,
     session: SessionDep,
 ) -> OverleafSyncResponse:
-    try:
-        users.get_overleaf_token(session=session, user=current_user)
-    except HTTPException:
-        raise HTTPException(401, "Overleaf token not found")
+    overleaf_auth = users.get_overleaf_auth(session=session, user=current_user)
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7237,7 +7368,8 @@ def post_project_overleaf_sync(
             user=current_user,
             session=session,
             overleaf_project_id=overleaf_project_id,
-        ) as overleaf_repo:
+            overleaf_auth=overleaf_auth,
+        ) as (overleaf_repo, overleaf_push):
             res = calkit.overleaf.sync(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,
@@ -7247,6 +7379,7 @@ def post_project_overleaf_sync(
                 sync_info_for_path=None,
                 print_info=logger.info,
                 no_commit=False,
+                push=overleaf_push,
             )
     except HTTPException:
         raise
@@ -7259,6 +7392,11 @@ def post_project_overleaf_sync(
             event_name="Overleaf sync failed",
             add_event_info={"path": path_in_project, "exception": str(e)},
         )
+        # Only a session's push raises these, since 'git push' doesn't
+        if isinstance(e, calkit.overleaf.AuthError):
+            raise HTTPException(401, OVERLEAF_SESSION_REJECTED)
+        if isinstance(e, calkit.overleaf.ChangedOnOverleafError):
+            raise HTTPException(409, str(e))
         raise HTTPException(
             400, "Overleaf sync failed; try locally with Calkit CLI"
         )
@@ -7329,10 +7467,7 @@ def get_project_overleaf_sync_status(
     folder with ``path`` or to the folders synced with a single Overleaf
     project with ``overleaf_project_id``.
     """
-    try:
-        users.get_overleaf_token(session=session, user=current_user)
-    except HTTPException:
-        raise HTTPException(401, "Overleaf token not found")
+    overleaf_auth = users.get_overleaf_auth(session=session, user=current_user)
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7412,7 +7547,8 @@ def get_project_overleaf_sync_status(
             user=current_user,
             session=session,
             overleaf_project_id=this_overleaf_project_id,
-        ) as overleaf_repo:
+            overleaf_auth=overleaf_auth,
+        ) as (overleaf_repo, _):
             status = calkit.overleaf.get_sync_status(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,

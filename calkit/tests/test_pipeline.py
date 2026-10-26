@@ -7,11 +7,13 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from unittest import mock
 
 import git
 import pytest
 
 import calkit
+import calkit.docker
 import calkit.git
 import calkit.notebooks
 import calkit.pipeline
@@ -1718,31 +1720,114 @@ def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     assert "# >>> calkit latex aux files (managed by calkit) >>>" in lines
     assert "*.aux" in lines
     assert "*.pdf" not in lines
+    # Including what packages like endnotes and nomencl write
+    assert repo.ignored("paper/main.ent")
+    assert repo.ignored("paper/main.nlo")
 
 
-def test_to_dvc_latex_cited_deps(tmp_dir):
+def test_to_dvc_latex_component_deps(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("paper/sections")
     with open("paper/main.tex", "w") as f:
         f.write(
             "\\documentclass{article}\n"
+            "\\usepackage{calkit}\n"
             "\\begin{document}\n"
             "\\input{sections/results}\n"
-            "\\ckfigure{figures/plot.png}\n"
+            "\\input{sections/latin}\n"
+            "\\ckfigure{figures/plot}\n"
+            "\\ckfigure{figures/typo.png}\n"
+            "\\ckfigure{figures/photo.png}\n"
+            "\\ckvalue{data/summary.json}{n}\n"
+            "\\ckvalue{../outside.json}{secret}\n"
             "\\end{document}\n"
         )
     with open("paper/sections/results.tex", "w") as f:
         f.write("\\ckvalue[.2f]{results/metrics.json}{rmse}\n")
+    # Not UTF-8, which mustn't stop the pipeline compiling
+    with open("paper/sections/latin.tex", "wb") as fb:
+        fb.write("Caf\u00e9\n".encode("latin-1"))
+    # Another document in the same folder, using something else
+    with open("paper/other.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "\\ckvalue{results/other.json}{x}\n\\end{document}\n"
+        )
+    # A figure no stage makes
+    os.makedirs("figures")
+    with open("figures/photo.png", "wb") as fb:
+        fb.write(b"photo")
+    os.makedirs("results")
+    for name, content in [
+        ("metrics", '{"rmse": 0.123}'),
+        ("other", '{"x": 1}'),
+    ]:
+        with open(f"results/{name}.json", "w") as f:
+            f.write(content)
+    # Components kept in other ways, in a document of their own
+    os.makedirs("extra")
+    with open("extra/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "\\ckfigure{maps/world}\n\\ckfigure{maps/typo.png}\n"
+            "\\ckfigure{photos/cat}\n\\ckfigure{images/logo.png}\n"
+            "\\ckfigure{figures/fit_1.5}\n\\ckfigure{figures/sweep-2}\n"
+            "\\end{document}\n"
+        )
+    os.makedirs("images")
+    for path in ["images/logo.png", "images/logo.png.dvc", "photos.dvc"]:
+        with open(path, "w") as f:
+            f.write("x")
+    for path in ["figures/fit_1.5.pdf", "figures/sweep-2.png"]:
+        with open(path, "w") as f:
+            f.write("x")
+    # Tracked by DVC but not pulled
+    os.makedirs("data")
+    with open("data/summary.json.dvc", "w") as f:
+        f.write("outs:\n- md5: abc\n  path: summary.json\n")
     ck_info = {
         "environments": {"tex": {"kind": "docker", "image": "texlive"}},
         "pipeline": {
             "stages": {
+                # Makes the figure, which hasn't run yet
+                "plot": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo png > figures/plot.png",
+                    "outputs": ["figures/plot.png"],
+                },
                 "build-paper": {
                     "kind": "latex",
                     "environment": "tex",
                     "target_path": "paper/main.tex",
                 },
-                # Paths in a stage are relative to its wdir, while cited
+                "build-other": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/other.tex",
+                },
+                "maps": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "mkdir maps",
+                    "outputs": ["maps"],
+                },
+                "sweep": {
+                    "kind": "python-script",
+                    "environment": "_system",
+                    "script_path": "sweep.py",
+                    "args": ["{n}"],
+                    "outputs": ["figures/sweep-{n}.png"],
+                    "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
+                },
+                "build-extra": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "extra/main.tex",
+                },
+                # Paths in a stage are relative to its wdir, while component
                 # paths are relative to the project
                 "build-paper-wdir": {
                     "kind": "latex",
@@ -1754,13 +1839,129 @@ def test_to_dvc_latex_cited_deps(tmp_dir):
         },
     }
     stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    # The document depends on what it includes that's there, tracked by DVC,
+    # or made by a stage, including through an input, so it builds after the
+    # stages making them; a typo or something outside the project prints as
+    # ?? rather than stopping the run
     deps = stages["build-paper"]["deps"]
-    assert "figures/plot.png" in deps
-    # Including what an input cites
-    assert "results/metrics.json" in deps
+    assert deps[0] == "paper/main.tex"
+    assert {
+        "results/metrics.json",
+        "figures/plot.png",
+        "data/summary.json",
+    } <= set(deps)
+    assert not any("typo" in d or "outside" in d for d in deps)
+    # And on the copies it reads, like a cleaned notebook, so a new value or
+    # calkit.sty rebuilds it, except a figure a stage makes, which is copied
+    # only after DVC checks the stage's dependencies are there
+    assert {
+        "paper/calkit.sty",
+        "paper/_calkit/values.tex",
+        "paper/_calkit/figures/photo.png",
+    } <= set(deps)
+    assert "paper/_calkit/figures/plot.png" not in deps
+    assert "paper/_calkit" not in deps
+    assert (
+        "paper/_calkit/figures/photo.png"
+        not in (stages["build-other"]["deps"])
+    )
+    # Documents in one folder depend only on what each includes
+    assert "results/other.json" in stages["build-other"]["deps"]
+    assert "results/other.json" not in deps
+    assert "results/metrics.json" not in stages["build-other"]["deps"]
+    # One in a folder a stage makes or DVC stores depends on the folder,
+    # since which file it is, if any, isn't known until it's there, and only
+    # a copy of a file kept in Git is there before the stage runs on any
+    # clone, so a file stored with DVC is depended on itself
+    deps = stages["build-extra"]["deps"]
+    assert {"maps", "photos", "images/logo.png"} <= set(deps)
+    assert not any(d.startswith(("maps/", "photos/")) for d in deps)
+    assert "extra/_calkit/images/logo.png" not in deps
+    # Nor is a file an iterated stage makes, once it's there
+    assert "figures/sweep-2.png" in deps
+    assert "extra/_calkit/figures/sweep-2.png" not in deps
+    # A dot in a name isn't taken for an extension
+    assert {"figures/fit_1.5.pdf", "extra/_calkit/figures/fit_1.5.pdf"} <= set(
+        deps
+    )
     deps = stages["build-paper-wdir"]["deps"]
-    assert "../figures/plot.png" in deps
-    assert "../results/metrics.json" in deps
+    assert {
+        "../figures/plot.png",
+        "../results/metrics.json",
+        "_calkit/values.tex",
+        "_calkit/figures/photo.png",
+        "calkit.sty",
+    } <= set(deps)
+    # A document that doesn't load calkit.sty depends on no copies
+    os.makedirs("plain")
+    with open("plain/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    ck_info["pipeline"]["stages"]["build-plain"] = {
+        "kind": "latex",
+        "environment": "tex",
+        "target_path": "plain/main.tex",
+    }
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    assert not any(
+        "_calkit" in d or d.endswith("calkit.sty")
+        for d in stages["build-plain"]["deps"]
+    )
+    # Compiling for a run or check maps the components in, kept out of Git,
+    # with one stage building each PDF, as DVC requires
+    for name in ["build-paper-wdir", "maps", "sweep", "build-extra"]:
+        del ck_info["pipeline"]["stages"][name]
+    del ck_info["pipeline"]["stages"]["build-plain"]
+    with open("figures/plot.png", "wb") as fb:
+        fb.write(b"png")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(write=True, preprocess_stages=True)
+    with open("paper/_calkit/values.tex") as f:
+        values = f.read()
+    assert "{rmse}{n}{0.123}" in values
+    assert "{results/other.json}{x}{n}{1}" in values
+    assert "secret" not in values
+    assert os.path.isfile("paper/_calkit/figures/plot.png")
+    assert calkit.git.get_repo().ignored("paper/calkit.sty")
+    os.makedirs(".calkit/env-locks", exist_ok=True)
+    with open(".calkit/env-locks/tex", "w") as f:
+        f.write("lock")
+    for name in ["main", "other"]:
+        with open(f"paper/{name}.pdf", "wb") as fb:
+            fb.write(b"pdf")
+    for path in ["data/summary.json.dvc", "images/logo.png.dvc", "photos.dvc"]:
+        os.remove(path)
+    calkit.pipeline.to_dvc(write=True)
+    subprocess.check_call(
+        ["dvc", "commit", "-f", "plot", "build-paper", "build-other"]
+    )
+
+    def stale() -> list[str]:
+        status = calkit.pipeline.get_status(check_environments=False)
+        assert not status.errors, status.errors
+        # Nothing the stages read is Git-ignored
+        assert not status.ignored_files_in_inputs
+        return status.stale_stage_names
+
+    assert stale() == []
+    # Without the copies, as in a fresh clone, DVC alone sees the documents
+    # as stale, but checking maps the copies in first, so they aren't
+    shutil.rmtree("paper/_calkit")
+    os.remove("paper/calkit.sty")
+    out = subprocess.check_output(["dvc", "status", "--json"], text=True)
+    assert "build-paper" in json.loads(out)
+    assert stale() == []
+    assert os.path.isfile("paper/_calkit/values.tex")
+    # A new figure makes only the document including it stale
+    with open("figures/photo.png", "wb") as fb:
+        fb.write(b"new photo")
+    assert stale() == ["build-paper"]
+    subprocess.check_call(["dvc", "commit", "-f", "build-paper"])
+    # A new value makes the document using it stale, and the other in its
+    # folder, since they share values.tex
+    with open("results/metrics.json", "w") as f:
+        f.write('{"rmse": 0.456}')
+    assert sorted(stale()) == ["build-other", "build-paper"]
 
 
 def test_get_status(tmp_dir):
@@ -1857,6 +2058,45 @@ def test_get_status(tmp_dir):
     assert status.storage_problems is not None
     assert [p["path"] for p in status.storage_problems] == ["my-output.out"]
     assert "storage_problems" not in status.model_dump()
+    # Docker not running doesn't stop the status from being worked out; only
+    # a Docker environment that has to be checked again fails
+    ck_info["environments"]["d"] = {"kind": "docker", "image": "alpine"}
+    ck_info["pipeline"]["stages"]["in-docker"] = {
+        "kind": "command",
+        "command": "echo hi",
+        "environment": "d",
+    }
+    not_running = calkit.docker.DockerNotReadyError("not running")
+    with (
+        mock.patch("calkit.docker.ensure_ready", side_effect=not_running),
+        mock.patch(
+            "calkit.cli.check.check_environment", side_effect=not_running
+        ),
+    ):
+        status = calkit.pipeline.get_status(ck_info=ck_info)
+        assert not status.errors
+        assert status.failed_environment_checks == ["d"]
+        # Nor when it can't be started
+        start_docker = mock.Mock(side_effect=not_running)
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, start_docker=start_docker
+        )
+        start_docker.assert_called_once()
+        assert status.failed_environment_checks == ["d"]
+    # Once it's started, its environment is checked as usual
+    with (
+        mock.patch(
+            "calkit.docker.ensure_ready", side_effect=[not_running, None]
+        ),
+        mock.patch("calkit.cli.check.check_environment"),
+    ):
+        start_docker = mock.Mock()
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, start_docker=start_docker
+        )
+    start_docker.assert_called_once()
+    assert not status.errors
+    assert not status.failed_environment_checks
 
 
 def test_get_status_excludes_frozen_stage(tmp_dir):
@@ -2786,6 +3026,15 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert "*.pdf" not in contents
     assert "managed by calkit" in contents
     assert contents.count("# >>> calkit latex aux files") == 1
+    # calkit.sty is only ignored for a document that loads it, which only
+    # then gets one
+    assert "/calkit.sty" not in contents
+    stage._loads_calkit = True
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "/calkit.sty" in f.read()
+    stage._loads_calkit = False
+    assert _ensure_latex_aux_gitignore(stage)
     # Idempotent: re-running makes no change
     assert _ensure_latex_aux_gitignore(stage) is False
     # The globs are unanchored regardless of output_dir, so they catch aux

@@ -67,8 +67,8 @@ stages:
     desc: Automatically generated from the 'research-flow-figure' stage in
       calkit.yaml. Changes made here will be overwritten.
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=4
-      --attendees=25 --supported=20 --indirect-rate=0
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8
+      --attendees=25 --supported=60 --indirect-rate=0
     deps:
       - scripts/budget.py
       - docs/one-pager/2027-budget.csv
@@ -80,6 +80,59 @@ stages:
           persist: false
     desc: Automatically generated from the 'budget-2027' stage in calkit.yaml.
       Changes made here will be overwritten.
+  budget-2027-figure:
+    cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
+    deps:
+      - scripts/plot-budget.py
+      - results/2027-budget.json
+      - uv.lock
+      - .python-version
+    outs:
+      - docs/img/2027-budget.png
+    desc: Automatically generated from the 'budget-2027-figure' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  find-calkit-projects:
+    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
+    deps:
+      - scripts/find-calkit-projects.py
+      - .calkit/local/current-periods/1-day-utc.txt
+      - uv.lock
+      - .python-version
+    outs:
+      - data/calkit-projects/projects.csv:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'find-calkit-projects' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  find-calkit-papers:
+    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
+    deps:
+      - scripts/find-calkit-papers.py
+      - .calkit/local/current-periods/1-day-utc.txt
+      - data/calkit-projects/projects.csv
+      - uv.lock
+      - .python-version
+    outs:
+      - data/calkit-projects/papers.csv:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'find-calkit-papers' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  traction:
+    cmd: calkit xenv -n dev --no-check -- python scripts/traction.py
+      --exclude-hub-account=pwbachant --exclude-hub-account=calkit
+    deps:
+      - scripts/traction.py
+      - .calkit/local/current-periods/1-day-utc.txt
+      - data/calkit-projects/papers.csv
+      - uv.lock
+      - .python-version
+    outs:
+      - results/traction.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'traction' stage in calkit.yaml.
+      Changes made here will be overwritten.
   one-pager/pdf:
     cmd: calkit latex from-markdown docs/one-pager/main.md -o
       docs/one-pager/main.pdf -e tex --no-check --template
@@ -88,8 +141,10 @@ stages:
     deps:
       - docs/one-pager/main.md
       - docs/one-pager/one-pager.lua
+      - results/traction.json
       - results/2027-budget.json
       - docs/img/pipeline.png
+      - docs/img/2027-budget.png
       - calkit.yaml
       - .calkit/env-locks/tex
       - docs/one-pager/template.tex

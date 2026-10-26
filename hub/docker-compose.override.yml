@@ -1,7 +1,8 @@
 # Name the dev stack for the product rather than the directory it lives
 # in, since Compose project names are global on the machine and 'hub'
 # is ambiguous. Production and staging pass --project-name explicitly,
-# so this only affects dev.
+# and make dev names each worktree's stack in .env, so this only
+# affects a checkout without that, e.g., in CI.
 name: calkit
 
 services:
@@ -82,11 +83,20 @@ services:
       dockerfile: hub/backend/Dockerfile
       args:
         INSTALL_DEV: ${INSTALL_DEV-true}
+    # Run with uvicorn rather than `fastapi run`, which can't watch the
+    # calkit package too, so edits to it reload the server
     command:
-      - fastapi
-      - run
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
       - --reload
-      - "app/main.py"
+      - --reload-dir
+      - .
+      - --reload-dir
+      - ../../calkit
     environment:
       SMTP_HOST: "mailcatcher"
       SMTP_PORT: "1025"
@@ -138,11 +148,20 @@ services:
       dockerfile: hub/backend/Dockerfile
       args:
         INSTALL_DEV: ${INSTALL_DEV-true}
+    # Run with uvicorn rather than `fastapi run`, which can't watch the
+    # calkit package too, so edits to it reload the server
     command:
-      - fastapi
-      - run
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
       - --reload
-      - "app/main.py"
+      - --reload-dir
+      - .
+      - --reload-dir
+      - ../../calkit
 
   mailcatcher:
     image: schickling/mailcatcher

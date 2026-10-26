@@ -5,8 +5,10 @@ import { promisify } from "node:util";
 import * as http from "node:http";
 import * as https from "node:https";
 import * as net from "node:net";
+import * as os from "node:os";
 import * as vscode from "vscode";
 import YAML from "yaml";
+import { missingInstallDirs } from "./cli";
 import {
   compactSlurmOptions,
   findCalkitEnvKernelSourceCandidate,
@@ -260,6 +262,18 @@ export function activate(context: vscode.ExtensionContext): void {
   extensionContextRef = context;
   outputChannel = vscode.window.createOutputChannel("Calkit");
   context.subscriptions.push(outputChannel);
+  // Before anything runs calkit, which VS Code may not have on PATH
+  const addedDirs = missingInstallDirs(
+    process.env,
+    os.homedir(),
+    process.platform,
+  );
+  if (addedDirs.length) {
+    process.env.PATH = [process.env.PATH, ...addedDirs]
+      .filter(Boolean)
+      .join(path.delimiter);
+    log(`Added install folders missing from PATH: ${addedDirs.join(", ")}`);
+  }
   slurmStatusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
     200,
@@ -484,13 +498,26 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // A document and the PDF its stage builds take each other's place,
-  // like a Plotly figure and its preview. The other file opens in the same
-  // group first, since closing the last tab first can close the group too.
+  // like a Plotly figure and its preview, unless the other is open already,
+  // in which case it's shown and both stay open. The other file opens in the
+  // same group first, since closing the last tab first can close the group.
   const swapActiveTab = async (
     from: vscode.Uri,
-    open: () => Promise<unknown>,
+    to: vscode.Uri,
+    open: (column: vscode.ViewColumn) => Promise<unknown>,
   ): Promise<void> => {
-    await open();
+    const active = vscode.window.tabGroups.activeTabGroup;
+    const shown = [
+      active,
+      ...vscode.window.tabGroups.all.filter((group) => group !== active),
+    ]
+      .flatMap((group) => group.tabs)
+      .find((tab) => tabResourceUri(tab)?.toString() === to.toString());
+    if (shown) {
+      await open(shown.group.viewColumn);
+      return;
+    }
+    await open(vscode.ViewColumn.Active);
     const group = vscode.window.tabGroups.activeTabGroup;
     const previous = group.tabs.find(
       (tab) =>
@@ -532,13 +559,13 @@ export function activate(context: vscode.ExtensionContext): void {
           );
           return;
         }
-        await swapActiveTab(fileUri, () =>
+        await swapActiveTab(fileUri, pdfUri, (column) =>
           Promise.resolve(
             vscode.commands.executeCommand(
               "vscode.openWith",
               pdfUri,
               PDF_REVIEW_VIEW_TYPE,
-              vscode.ViewColumn.Active,
+              column,
             ),
           ),
         );
@@ -654,10 +681,10 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const sourceUri = vscode.Uri.file(path.join(workspaceRoot, sourceFile));
-        await swapActiveTab(fileUri, () =>
+        await swapActiveTab(fileUri, sourceUri, (column) =>
           Promise.resolve(
             vscode.window.showTextDocument(sourceUri, {
-              viewColumn: vscode.ViewColumn.Active,
+              viewColumn: column,
               preview: false,
             }),
           ),

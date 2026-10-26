@@ -31,6 +31,50 @@ export type AccountPublic = {
 }
 
 /**
+ * ActiveCounts
+ */
+export type ActiveCounts = {
+  /**
+   * Last Day
+   */
+  last_day: number
+  /**
+   * Last 7 Days
+   */
+  last_7_days: number
+  /**
+   * Last 30 Days
+   */
+  last_30_days: number
+}
+
+/**
+ * AnalyticsStats
+ */
+export type AnalyticsStats = {
+  /**
+   * Likely human users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.
+   */
+  active_users: ActiveCounts
+  /**
+   * Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.
+   */
+  active_visitors: ActiveCounts
+  /**
+   * Visitor-days from visitors who didn't accept analytics, i.e., distinct (UTC day, visitor) pairs with a page view in the window that followed input and wasn't from a bot. Not unique people: their IDs reset daily, so one person visiting on three days counts three times.
+   */
+  human_visits: ActiveCounts
+  /**
+   * Human visits as above that included a project page, leaving out projects owned by excluded accounts
+   */
+  human_project_visits: ActiveCounts
+  /**
+   * Distinct projects, not owned by excluded accounts, with human visits as above
+   */
+  projects_viewed: ActiveCounts
+}
+
+/**
  * Body_login-login_access_token
  */
 export type BodyLoginLoginAccessToken = {
@@ -365,6 +409,14 @@ export type ConnectedAccounts = {
    * Overleaf
    */
   overleaf: boolean
+  /**
+   * Overleaf Token
+   */
+  overleaf_token?: boolean
+  /**
+   * Overleaf Session
+   */
+  overleaf_session?: boolean
   /**
    * Google
    */
@@ -1989,6 +2041,22 @@ export type HttpRequestAccess = {
 }
 
 /**
+ * HubStats
+ */
+export type HubStats = {
+  users: UserStats
+  projects: ProjectStats
+  /**
+   * Excluded Accounts
+   */
+  excluded_accounts: Array<string>
+  /**
+   * From Mixpanel; null when not configured or unreachable
+   */
+  analytics?: AnalyticsStats | null
+}
+
+/**
  * HubVersion
  */
 export type HubVersion = {
@@ -2353,6 +2421,53 @@ export type LatexCommentsMove = {
    * Ref
    */
   ref?: string | null
+}
+
+/**
+ * LatexComponents
+ *
+ * What a document needs beside it for calkit.sty's commands, as
+ * ``calkit latex build`` would write it.
+ */
+export type LatexComponents = {
+  /**
+   * Loads Calkit
+   */
+  loads_calkit: boolean
+  /**
+   * Style
+   */
+  style?: string | null
+  /**
+   * Values
+   */
+  values?: string | null
+  /**
+   * Copies
+   */
+  copies?: Array<string>
+  /**
+   * Problems
+   */
+  problems?: Array<string>
+}
+
+/**
+ * LatexComponentsRequest
+ *
+ * A LaTeX document to bring calkit.sty's components in for.
+ */
+export type LatexComponentsRequest = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Sources
+   */
+  sources?: {
+    [key: string]: string
+  }
 }
 
 /**
@@ -2875,6 +2990,26 @@ export type OverleafLookup = {
    * Projects Remaining
    */
   projects_remaining: number
+}
+
+/**
+ * OverleafSessionPut
+ */
+export type OverleafSessionPut = {
+  /**
+   * Session
+   */
+  session: string
+}
+
+/**
+ * OverleafSessionResponse
+ */
+export type OverleafSessionResponse = {
+  /**
+   * Session
+   */
+  session: string
 }
 
 /**
@@ -3918,6 +4053,36 @@ export type ProjectPushEventPost = {
 }
 
 /**
+ * ProjectStats
+ */
+export type ProjectStats = {
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Public
+   */
+  public: number
+  /**
+   * Private
+   */
+  private: number
+  /**
+   * Owners
+   */
+  owners: number
+  /**
+   * Worked On
+   */
+  worked_on: number
+  /**
+   * Updated Last 90 Days
+   */
+  updated_last_90_days: number
+}
+
+/**
  * ProjectStatus
  */
 export type ProjectStatus = {
@@ -4042,7 +4207,7 @@ export type PublicationComponent = {
   /**
    * Via
    */
-  via?: "folder" | "input"
+  via?: "folder" | "input" | "included"
   /**
    * Stage
    */
@@ -6127,6 +6292,26 @@ export type UserRegister = {
 }
 
 /**
+ * UserStats
+ */
+export type UserStats = {
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Verified
+   */
+  verified: number
+  /**
+   * Likely Human
+   *
+   * Users with a GitHub or other connected identity, a verified email, an invitation to a project or org, a personal access token, or sessions on two or more days. Password signup checks none of these, so it's how bot accounts get in.
+   */
+  likely_human: number
+}
+
+/**
  * UserSubscription
  */
 export type UserSubscription = {
@@ -8195,6 +8380,50 @@ export type PutUserOverleafTokenResponses = {
 export type PutUserOverleafTokenResponse =
   PutUserOverleafTokenResponses[keyof PutUserOverleafTokenResponses]
 
+export type GetUserOverleafSessionData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/overleaf-session"
+}
+
+export type GetUserOverleafSessionResponses = {
+  /**
+   * Successful Response
+   */
+  200: OverleafSessionResponse
+}
+
+export type GetUserOverleafSessionResponse =
+  GetUserOverleafSessionResponses[keyof GetUserOverleafSessionResponses]
+
+export type PutUserOverleafSessionData = {
+  body: OverleafSessionPut
+  path?: never
+  query?: never
+  url: "/user/overleaf-session"
+}
+
+export type PutUserOverleafSessionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutUserOverleafSessionError =
+  PutUserOverleafSessionErrors[keyof PutUserOverleafSessionErrors]
+
+export type PutUserOverleafSessionResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PutUserOverleafSessionResponse =
+  PutUserOverleafSessionResponses[keyof PutUserOverleafSessionResponses]
+
 export type PostUserGoogleAuthData = {
   body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
@@ -8565,6 +8794,41 @@ export type PostDiscountCodeResponses = {
 
 export type PostDiscountCodeResponse =
   PostDiscountCodeResponses[keyof PostDiscountCodeResponses]
+
+export type GetHubStatsData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Exclude
+     */
+    exclude?: Array<string>
+    /**
+     * Include Superusers
+     */
+    include_superusers?: boolean
+  }
+  url: "/stats"
+}
+
+export type GetHubStatsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetHubStatsError = GetHubStatsErrors[keyof GetHubStatsErrors]
+
+export type GetHubStatsResponses = {
+  /**
+   * Successful Response
+   */
+  200: HubStats
+}
+
+export type GetHubStatsResponse =
+  GetHubStatsResponses[keyof GetHubStatsResponses]
 
 export type GetSubscriptionPlansData = {
   body?: never
@@ -10672,6 +10936,47 @@ export type GetProjectPublicationComponentsResponses = {
 
 export type GetProjectPublicationComponentsResponse =
   GetProjectPublicationComponentsResponses[keyof GetProjectPublicationComponentsResponses]
+
+export type PostProjectLatexComponentsData = {
+  body: LatexComponentsRequest
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/latex-components"
+}
+
+export type PostProjectLatexComponentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexComponentsError =
+  PostProjectLatexComponentsErrors[keyof PostProjectLatexComponentsErrors]
+
+export type PostProjectLatexComponentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComponents
+}
+
+export type PostProjectLatexComponentsResponse =
+  PostProjectLatexComponentsResponses[keyof PostProjectLatexComponentsResponses]
 
 export type PostProjectMiscData = {
   body: MiscArtifactPost

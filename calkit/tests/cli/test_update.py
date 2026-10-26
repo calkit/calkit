@@ -486,6 +486,73 @@ def test_update_docker_env_registry(tmp_dir):
     assert result.exit_code != 0
 
 
+def test_update_latex_image(tmp_dir, monkeypatch):
+    import calkit.cli.check
+    from calkit.latex import DEFAULT_LATEX_IMAGE
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "tex": {"kind": "docker", "image": "ghcr.io/calkit/latex"},
+        "old": {"kind": "docker", "image": "ghcr.io/calkit/latex:0.1.0"},
+        "full": {"kind": "docker", "image": "texlive/texlive:latest-full"},
+        "built": {
+            "kind": "docker",
+            "path": "Dockerfile",
+            "image": "texlive/texlive",
+        },
+        "other": {"kind": "docker", "image": "python:3.12"},
+        "py": {"kind": "uv", "path": "pyproject.toml"},
+        # An option defined in place is updated as 'switched.1'; a named one
+        # is updated as itself, or not at all
+        "switched": {
+            "kind": "switch",
+            "switch": [
+                {
+                    "when": [{"os_is": "linux"}],
+                    "use": {
+                        "kind": "docker",
+                        "image": "ghcr.io/calkit/latex:0.1.0",
+                    },
+                },
+                {"use": "other"},
+            ],
+        },
+    }
+    calkit.save_calkit_info(ck_info)
+    lock_fpath = calkit.environments.get_all_docker_lock_fpaths("tex")[0]
+    os.makedirs(os.path.dirname(lock_fpath))
+    with open(lock_fpath, "w") as f:
+        json.dump({"RepoDigests": ["sha256:old"]}, f)
+    relocked = []
+    monkeypatch.setattr(
+        calkit.cli.check,
+        "check_environment",
+        lambda env_name, verbose=False: relocked.append(env_name),
+    )
+    # Environments on Calkit's or TeX Live's image move to the pinned one and
+    # are relocked, with stale locks removed so the old image isn't pulled
+    # back by its digest
+    result = runner.invoke(update_app, ["latex-image"])
+    assert result.exit_code == 0, result.output
+    envs = calkit.load_calkit_info()["environments"]
+    for name in ["tex", "old", "full"]:
+        assert envs[name]["image"] == DEFAULT_LATEX_IMAGE
+    assert envs["switched"]["switch"][0]["use"]["image"] == DEFAULT_LATEX_IMAGE
+    assert envs["switched"]["switch"][1]["use"] == "other"
+    assert relocked == ["tex", "old", "full", "switched.1"]
+    assert not os.path.exists(lock_fpath)
+    # Others are left alone, including one built from a Dockerfile
+    assert envs["built"]["image"] == "texlive/texlive"
+    assert envs["other"]["image"] == "python:3.12"
+    # Once they're pinned there's nothing to do
+    relocked.clear()
+    result = runner.invoke(update_app, ["latex-image"])
+    assert result.exit_code == 0, result.output
+    assert "No LaTeX environments to update" in result.output
+    assert relocked == []
+
+
 def test_update_imported_from_detects_the_kind(tmp_dir):
     # 'calkit update <kind> --imported-from' takes a source written one
     # way and works out which it is, so the VS Code extension's "define

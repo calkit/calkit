@@ -561,6 +561,17 @@ def _run_latexmk(
             os.remove(fdb_path)
 
 
+@latex_app.command(name="map-components")
+def map_components(
+    tex_file: Annotated[
+        str, typer.Argument(help="The .tex file whose components to map.")
+    ],
+) -> None:
+    """Map in components a LaTeX document includes with `\\ck*` commands."""
+    for problem in calkit.latex.map_ck_components(tex_file):
+        warn(f"{problem}; it will print as ??")
+
+
 @latex_app.command(name="build")
 def build(
     tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
@@ -647,6 +658,8 @@ def build(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
+    import time
+
     # latexmk records a failed run in its file database and then refuses
     # to try again, reporting "Nothing to do" and exiting non-zero with no
     # PDF. Running it again is the first thing anyone does after a
@@ -655,9 +668,9 @@ def build(
     tex_dir = os.path.dirname(tex_file) or "."
     stem = Path(tex_file).stem
     pdf_dir = output_dir if output_dir is not None else tex_dir
-    # What the document cites from the project, e.g., with \ckfigure, has
-    # to be beside it before TeX can read it
-    for problem in calkit.latex.write_cited(tex_dir):
+    # Components the document includes with calkit.sty's commands, e.g.,
+    # \ckfigure, have to be beside it before TeX can read them
+    for problem in calkit.latex.map_ck_components(tex_file):
         warn(f"{problem}; it will print as ??")
     # Plain \includegraphics counts as much as \ckfigure, and is fine
     # wherever the pipeline made the file
@@ -698,6 +711,7 @@ def build(
         rel = Path(os.path.relpath(aux_dir, tex_dir)).as_posix()
         latexmk_cmd.append(f"-auxdir={rel}")
     latexmk_cmd.append("-interaction=nonstopmode")
+    latexmk_cmd.append(f"-usepretex={calkit.latex.PDF_PRETEX}")
     # User pass-through args come last so they can override Calkit's defaults.
     latexmk_cmd += latexmk_args
     latexmk_cmd.append(tex_file)
@@ -711,6 +725,8 @@ def build(
         env_vars=tex_env_vars,
     )
     log_dir = aux_dir or output_dir or tex_dir
+    # A little early, for file systems that keep times coarsely
+    started = time.time() - 2
     if _run_latexmk(
         cmd,
         env=(os.environ | tex_env_vars) if tex_env_vars else None,
@@ -720,6 +736,17 @@ def build(
         verbose=verbose,
     ):
         raise_error("latexmk failed")
+    # A latexmkrc or a pass-through -outdir can put the PDF elsewhere, so
+    # whichever this build wrote gets its ID
+    pdf_fpaths = [os.path.join(pdf_dir, stem + ".pdf")] + glob.glob(
+        os.path.join(tex_dir, "**", stem + ".pdf"), recursive=True
+    )
+    for pdf_fpath in dict.fromkeys(map(os.path.normpath, pdf_fpaths)):
+        if (
+            os.path.isfile(pdf_fpath)
+            and os.path.getmtime(pdf_fpath) >= started
+        ):
+            calkit.latex.set_content_id(pdf_fpath)
     if not no_synctex:
         # A container build records its own paths, which reverse search in
         # a viewer can't open
@@ -969,6 +996,7 @@ def diff(
     generates, are fetched as they were at that revision, so each side of
     the comparison shows its own.
     """
+    import calkit.resources
 
     def stage_path(stage: dict, path: str) -> str:
         """A stage's path in the project's frame rather than its wdir's."""
@@ -1335,7 +1363,7 @@ def diff(
         which can't say what's inside, so those directories beside the
         document are included whole. Neither finds another stage's output
         DVC doesn't cache, so the pipeline's inputs for the document are
-        added too.
+        added too, as are the components the document includes.
         """
         doc_dir = Path(root, os.path.dirname(tex_file))
         pointed = [
@@ -1344,7 +1372,17 @@ def diff(
             if p.is_file()
         ]
         detected = calkit.latex.detect_inputs(tex_file, wdir=root)
-        return detected + pointed + pipeline_inputs
+        # What the revision's own calkit.sty commands include, which the
+        # stage may not depend on now, at each path TeX would try
+        _, components = calkit.latex.read_ck_usage(
+            os.path.join(root, tex_file)
+        )
+        included = [
+            path
+            for c in components
+            for path in calkit.latex.component_candidates(c)[0]
+        ]
+        return detected + pointed + included + pipeline_inputs
 
     def point_changed_figures_at_base(base_root: str, head_root: str) -> None:
         """Make the older side's changed figures refer to its own copies.
@@ -1531,6 +1569,22 @@ def diff(
         for root in prepared:
             break_verbatim_params(root)
             expand_wrapper_macros(root)
+            # Each side's own values, figures, and tables, read from its
+            # revision, or the working tree for its copy of the sources
+            calkit.latex.expand_ck_components(
+                root, "." if root == working_copy else root, tex_file
+            )
+        # \cknum in the marked-up document needs calkit.sty beside it
+        build_style = os.path.join(
+            head_root, os.path.dirname(tex_file), calkit.latex.STYLE_FNAME
+        )
+        if not os.path.isfile(build_style):
+            with open(build_style, "w", encoding="utf-8") as f:
+                f.write(
+                    calkit.resources.read_text(
+                        "latex", calkit.latex.STYLE_FNAME
+                    )
+                )
         point_changed_figures_at_base(checkouts["base"], head_root)
         _build_diff(
             base_tex_fpath=sides["base"],
@@ -1711,6 +1765,9 @@ def _build_diff(
         # chose otherwise
         if not any(a.startswith("--graphics-markup") for a in latexdiff_args):
             latexdiff_cmd.append("--graphics-markup=both")
+        # A value from calkit.sty is marked like text, so a changed one shows
+        # struck out beside its new value, rather than only as it is now
+        latexdiff_cmd.append("--append-safecmd=cknum")
         # User pass-through args come last so they can override Calkit's
         # defaults
         latexdiff_cmd += latexdiff_args
@@ -1799,6 +1856,7 @@ def _build_diff(
             "-interaction=nonstopmode",
             f"-auxdir={rel_aux}",
             f"-outdir={rel_aux}",
+            f"-usepretex={calkit.latex.PDF_PRETEX}",
         ]
         if not verbose:
             latexmk_cmd.append("-silent")
@@ -1867,6 +1925,7 @@ def _build_diff(
             )
         if not os.path.isfile(built):
             raise_error("latexmk did not produce a PDF")
+        calkit.latex.set_content_id(built)
         os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
         shutil.move(built, output)
         # A checkout is removed afterwards, but the working tree's document

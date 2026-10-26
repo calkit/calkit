@@ -35,9 +35,14 @@ The approach is one sentence on how the question is answered.
 The evidence references artifacts created by the project pipeline,
 so each answer can be traced back to the raw data and code behind it,
 as long as the pipeline is up to date.
-`calkit list questions` shows the pipeline stages behind each question's
+`calkit show question` shows the pipeline stages behind a question's
 evidence, worked out from the pipeline itself, so they never need to be
 written down.
+`calkit list questions`, or `calkit ls q` for short,
+lists every question with a row of letters,
+H A V V,
+for whether it has a hypothesis, an answer,
+and has been verified and validated.
 Together, the questions form a structured summary of the project's
 findings,
 and the natural place to start when reviewing a project.
@@ -127,7 +132,7 @@ spec:
 answer: The closure cuts the error by about {improvement:.1f}x.
 ```
 
-`calkit list questions` shows the text with these placeholders filled in
+`calkit show question` shows the text with these placeholders filled in
 from the results files, so the number always matches what the pipeline
 produced.
 Use `--raw` to see the text as written.
@@ -346,7 +351,7 @@ A key that doesn't exist renders as `??`.
 The stage depends on `calkit.yaml` and on every file the questions cite as
 evidence, so the text is rebuilt when an answer or a value it reads
 changes.
-Unlike the display in `calkit list questions`, a placeholder that can't be
+Unlike the display in `calkit show question`, a placeholder that can't be
 filled is an error here rather than being left in the text.
 The same output can be written without a stage with
 `calkit latex from-questions -o questions.tex`.

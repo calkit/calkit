@@ -48,7 +48,7 @@ Deterministic, done by `calkit check questions` — never re-derive by hand:
   added it;
 - which pipeline stages are behind each question's evidence, upstream
   first, listed by `calkit check questions --verbose` and
-  `calkit list questions`;
+  `calkit show question <n>`;
 - each `value` entry reads a file a pipeline stage produces, or one
   declared with `imported_from`; anything else is an error, since a number
   nothing computes is a magic number;
@@ -142,7 +142,7 @@ here.
    review or the answer is one the paper leans on.
 2. For each **stale** question, the report names the evidence that changed
    and the commit the answer dates from. Read the rendered answer
-   (`calkit list questions`) against the current evidence, and if it helps,
+   (`calkit show question <n>`) against the current evidence, and if it helps,
    the old evidence (`git show <commit>:<path>`). Decide:
    - **The claim still holds**: say so, with what you checked. Recording
      that is the user's sign-off, not yours: suggest they run

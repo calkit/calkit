@@ -11,9 +11,132 @@ from typing import Annotated
 
 import typer
 
-from calkit.cli import AliasGroup, raise_error, warn
+from calkit.cli import AliasGroup, echo_json, raise_error, warn
 
 show_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+
+
+@show_app.command(name="question|q")
+def show_question(
+    question: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The question's 1-based position, as 'calkit list questions' "
+                "numbers it, or its name."
+            )
+        ),
+    ],
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+    raw: Annotated[
+        bool,
+        typer.Option(
+            "--raw",
+            help="Show the text as written, with its {name} placeholders, "
+            "instead of rendered from the evidence.",
+        ),
+    ] = False,
+) -> None:
+    """Show a question in full, with its evidence and sign-offs.
+
+    Placeholders in the text, such as ``{improvement:.1f}``, are filled from
+    the question's value evidence, so numbers shown are read from the
+    results files rather than retyped into ``calkit.yaml``. The pipeline
+    stages behind its evidence are shown too, upstream first.
+    """
+    import calkit
+    from calkit.questions import (
+        TEMPLATED_FIELDS,
+        SignOffCheck,
+        check_questions,
+        format_letters,
+        placeholders,
+        question_index,
+        render_question,
+    )
+
+    def echo_value(key: str, value: object, indent: str) -> None:
+        # YAML-like, leaving out what isn't set
+        if isinstance(value, dict):
+            typer.echo(f"{indent}{key}:")
+            for k, v in value.items():
+                if v is not None:
+                    echo_value(k, v, indent + "  ")
+        elif isinstance(value, list):
+            typer.echo(f"{indent}{key}:")
+            for item in value:
+                if not isinstance(item, dict):
+                    typer.echo(f"{indent}  - {item}")
+                    continue
+                item = {k: v for k, v in item.items() if v is not None}
+                for n, (k, v) in enumerate(item.items()):
+                    prefix = f"{indent}  - " if n == 0 else f"{indent}    "
+                    if isinstance(v, dict):
+                        typer.echo(f"{prefix}{k}:")
+                        for k1, v1 in v.items():
+                            typer.echo(f"{indent}      {k1}: {v1}")
+                    else:
+                        typer.echo(f"{prefix}{k}: {v}")
+        else:
+            typer.echo(f"{indent}{key}: {value}")
+
+    def checked(c: SignOffCheck) -> dict:
+        with_ai = f" (with {', '.join(c.with_ai)})" if c.with_ai else ""
+        return {
+            "by": c.by + with_ai,
+            "date": c.date,
+            "notes": c.notes,
+            "status": c.status + (f": {c.message}" if c.message else ""),
+        }
+
+    ck_info = calkit.load_calkit_info()
+    questions = ck_info.get("questions") or []
+    try:
+        index = question_index(questions, question)
+    except ValueError as e:
+        raise_error(str(e))
+    entry = questions[index]
+    shown = entry if raw else render_question(entry, ck_info)
+    fields = dict(shown) if isinstance(shown, dict) else {"question": shown}
+    check = next(
+        c
+        for c in check_questions(ck_info, check_pipeline=False).questions
+        if c.project is None and c.index == index + 1
+    )
+    # A placeholder left as written looks exactly like text somebody meant
+    # literally, so say when one couldn't be filled. A conditional answer
+    # still in clauses is one whose conditions couldn't be read.
+    texts = [fields.get(f) or "" for f in TEMPLATED_FIELDS] + [
+        ev.get("explanation") or ""
+        for ev in fields.get("evidence") or []
+        if isinstance(ev, dict)
+    ]
+    if not raw and any(isinstance(t, dict) or placeholders(t) for t in texts):
+        warn(
+            "Some placeholders or conditions could not be filled from the "
+            "evidence. Run 'calkit check questions' to see why; 'calkit pull' "
+            "if the results files are not here yet.",
+            err=json_output,
+        )
+    # The stages are derived, so shown ahead of the answer but never written
+    out: dict = {}
+    for k, v in fields.items():
+        if k == "answer" and check.stages:
+            out["stages"] = check.stages
+        out[k] = v
+    if check.stages:
+        out.setdefault("stages", check.stages)
+    if json_output:
+        echo_json({**out, "check": check.model_dump(mode="json")})
+        return
+    out["verifications"] = [checked(c) for c in check.verifications] or None
+    out["validations"] = [checked(c) for c in check.validations] or None
+    typer.echo(f"{index + 1}. {format_letters(check)}  {out.pop('question')}")
+    for k, v in out.items():
+        if v is not None:
+            echo_value(k, v, "    ")
 
 
 @show_app.command(name="latex-diff")

@@ -1963,7 +1963,7 @@ List Calkit objects.
 | [`datasets`](#subcommand-list-ls-datasets)                      | List datasets in the project.                                                                  |
 | [`results`](#subcommand-list-ls-results)                        | List results in the project.                                                                   |
 | [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.                                                             |
-| [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).                                                      |
+| [`questions\|q`](#subcommand-list-ls-questions-q)               | List the project's questions (1-indexed).                                                      |
 | [`comments`](#subcommand-list-ls-comments)                      | List review comment threads in LaTeX and Markdown documents.                                   |
 | [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.                                                              |
 | [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
@@ -2074,26 +2074,25 @@ Options:
 | `--json`          | boolean | no       | False   | Output result as JSON.                                                |
 | `--declared-only` | boolean | no       | False   | Only list presentations declared in calkit.yaml; skip auto-detection. |
 
-<a id="subcommand-list-ls-questions"></a>
+<a id="subcommand-list-ls-questions-q"></a>
 
-#### `calkit list|ls questions`
+#### `calkit list|ls questions|q`
 
 List the project's questions (1-indexed).
 
-Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. The pipeline stages behind each question's evidence are shown too, upstream first. Subprojects' questions are listed too, numbered within each, and in the JSON output each has a `project` key with the subproject's path.
+Each has a row of letters: H if it has a hypothesis, A if it's answered, then V if it's verified and V if it's validated, colored as in the hub, with a dash for each it doesn't have yet. Evidence isn't checked against the pipeline here; 'calkit check questions' does that. Subprojects' questions are listed too, numbered within each. Use 'calkit show question' to see one in full.
 
 Usage:
 
 ```text
-calkit list|ls questions [OPTIONS]
+calkit list|ls questions|q [OPTIONS]
 ```
 
 Options:
 
-| Option   | Type    | Required | Default | Description                                                                                    |
-| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
-| `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-comments"></a>
 
@@ -2391,9 +2390,37 @@ Options:
 
 Show Calkit objects.
 
-| Command                                     | Description                           |
-| ------------------------------------------- | ------------------------------------- |
-| [`latex-diff`](#subcommand-show-latex-diff) | Open a LaTeX diff the pipeline keeps. |
+| Command                                      | Description                                               |
+| -------------------------------------------- | --------------------------------------------------------- |
+| [`question\|q`](#subcommand-show-question-q) | Show a question in full, with its evidence and sign-offs. |
+| [`latex-diff`](#subcommand-show-latex-diff)  | Open a LaTeX diff the pipeline keeps.                     |
+
+<a id="subcommand-show-question-q"></a>
+
+#### `calkit show question|q`
+
+Show a question in full, with its evidence and sign-offs.
+
+Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. The pipeline stages behind its evidence are shown too, upstream first.
+
+Usage:
+
+```text
+calkit show question|q [OPTIONS] QUESTION
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                          |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description                                                                                    |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
+| `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
 
 <a id="subcommand-show-latex-diff"></a>
 

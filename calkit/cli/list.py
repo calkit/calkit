@@ -183,152 +183,44 @@ def list_presentations(
     _list_artifacts("presentations", json_output, declared_only)
 
 
-def _echo_question(n: int, question: str | dict, project: str = "") -> None:
-    """Print a single question in the human-readable YAML-ish listing format.
-
-    String questions are shown as a numbered line. Rich (dict) questions are
-    shown with their text on the first line followed by hypothesis, answer,
-    evidence, and any other fields in YAML-like indented form. A
-    subproject's are numbered within it and prefixed with its path, as
-    ``calkit check questions`` names them.
-    """
-    where = f"{project}: " if project else ""
-    if isinstance(question, str):
-        typer.echo(f"{where}{n}. {question}")
-        return
-    # Copy so popping 'question' doesn't mutate the caller's dict.
-    question = dict(question)
-    text = question.pop("question", "")
-    typer.echo(f"{where}{n}. question: {text}")
-    # Rendering fills every field, so leave out the ones that aren't set
-    for k, v in question.items():
-        if v is None:
-            continue
-        if isinstance(v, dict):
-            typer.echo(f"    {k}:")
-            for k1, v1 in v.items():
-                typer.echo(f"      {k1}: {v1}")
-        elif isinstance(v, list):
-            typer.echo(f"    {k}:")
-            for item in v:
-                if isinstance(item, dict):
-                    item = {
-                        k1: v1 for k1, v1 in item.items() if v1 is not None
-                    }
-                    for n1, (k1, v1) in enumerate(item.items()):
-                        prefix = "      - " if n1 == 0 else "        "
-                        if isinstance(v1, dict):
-                            typer.echo(f"{prefix}{k1}:")
-                            for k2, v2 in v1.items():
-                                typer.echo(f"          {k2}: {v2}")
-                        else:
-                            typer.echo(f"{prefix}{k1}: {v1}")
-                else:
-                    typer.echo(f"        - {item}")
-        else:
-            typer.echo(f"    {k}: {v}")
-
-
-@list_app.command(name="questions")
+@list_app.command(name="questions|q")
 def list_questions(
     json_output: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
-    raw: Annotated[
-        bool,
-        typer.Option(
-            "--raw",
-            help="Show the text as written, with its {name} placeholders, "
-            "instead of rendered from the evidence.",
-        ),
-    ] = False,
-):
+) -> None:
     """List the project's questions (1-indexed).
 
-    Placeholders in the text, such as ``{improvement:.1f}``, are filled from
-    the question's value evidence, so numbers shown are read from the
-    results files rather than retyped into ``calkit.yaml``. The pipeline
-    stages behind each question's evidence are shown too, upstream first.
-    Subprojects' questions are listed too, numbered within each, and in the
-    JSON output each has a ``project`` key with the subproject's path.
+    Each has a row of letters: H if it has a hypothesis, A if it's answered,
+    then V if it's verified and V if it's validated, colored as in the hub,
+    with a dash for each it doesn't have yet. Evidence isn't checked against
+    the pipeline here; 'calkit check questions' does that. Subprojects'
+    questions are listed too, numbered within each. Use 'calkit show
+    question' to see one in full.
     """
-    from pathlib import Path
+    from calkit.questions import check_questions, format_letters
 
-    from calkit.questions import (
-        TEMPLATED_FIELDS,
-        placeholders,
-        question_stages,
-        render_question,
-    )
-
-    def _with_stages(question: str | dict, info: dict) -> str | dict:
-        # Derived from the evidence, so shown ahead of the answer but never
-        # written back
-        stages = question_stages(question, info)
-        if isinstance(question, str) or not stages:
-            return question
-        out: dict = {}
-        for k, v in question.items():
-            if k == "answer":
-                out["stages"] = stages
-            out[k] = v
-        out.setdefault("stages", stages)
-        return out
-
-    def _texts(question: dict) -> list[str | dict]:
-        evidence = question.get("evidence") or []
-        return [question.get(f) or "" for f in TEMPLATED_FIELDS] + [
-            ev.get("explanation") or ""
-            for ev in evidence
-            if isinstance(ev, dict)
-        ]
-
-    # Each with its 1-based index in its own project and that project's
-    # path, empty for this one
-    listed: list[tuple[int, str | dict, str]] = []
-    for wdir, info in calkit.iter_projects():
-        project = "" if wdir == "." else Path(wdir).as_posix()
-        for n, q in enumerate(info.get("questions", []) or [], start=1):
-            if not raw:
-                q = _with_stages(render_question(q, info, wdir=wdir), info)
-            listed.append((n, q, project))
-    questions = [q for _, q, _ in listed]
-    if not raw:
-        # A placeholder left as written looks exactly like text somebody
-        # meant literally, so say when one could not be filled rather than
-        # let a fresh clone read as a project that types its braces. Any
-        # placeholder left standing counts, whether it names evidence that
-        # could not be read or names nothing at all: a brace meant to stay
-        # in the text is written '{{' and never reaches here. A conditional
-        # answer still in clauses is one whose conditions could not be read.
-        unfilled = any(
-            isinstance(text, dict) or placeholders(text)
-            for q in questions
-            if isinstance(q, dict)
-            for text in _texts(q)
-        )
-        if unfilled:
-            warn(
-                "Some placeholders or conditions could not be filled from "
-                "the evidence. "
-                "Run 'calkit check questions' to see why; 'calkit pull' if "
-                "the results files are not here yet.",
-                err=json_output,
-            )
+    status = check_questions(check_pipeline=False)
     if json_output:
         echo_json(
             [
-                q
-                if not project
-                else {"project": project, "question": q}
-                if isinstance(q, str)
-                else {"project": project, **q}
-                for _, q, project in listed
+                {
+                    "project": q.project,
+                    "index": q.index,
+                    "question": q.question,
+                    "hypothesis": q.hypothesis,
+                    "answered": q.answered,
+                    "status": q.status,
+                    "verification_status": q.verification_status,
+                    "validation_status": q.validation_status,
+                }
+                for q in status.questions
             ]
         )
         return
-    for n, question, project in listed:
-        _echo_question(n, question, project)
+    for q in status.questions:
+        where = f"{q.project}: " if q.project else ""
+        typer.echo(f"{where}{q.index}. {format_letters(q)}  {q.question}")
 
 
 @list_app.command(name="comments")

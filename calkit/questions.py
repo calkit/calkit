@@ -1865,6 +1865,46 @@ def check_questions(
     return QuestionsStatus(questions=checks)
 
 
+def question_index(questions: list, ref: str) -> int:
+    """The 0-based index of a question given by its 1-based position or its
+    name."""
+    if ref.isdigit():
+        index = int(ref) - 1
+        if not 0 <= index < len(questions):
+            raise ValueError(
+                f"There is no question {ref}; there are {len(questions)}."
+            )
+        return index
+    for n, q in enumerate(questions):
+        if isinstance(q, dict) and q.get("name") == ref:
+            return n
+    raise ValueError(f"No question is named {ref!r}.")
+
+
+def format_letters(check: QuestionCheck) -> str:
+    """The H A V V row: hypothesis, answer, verified, and validated, colored
+    as the hub colors them, with a dash for each that isn't there yet."""
+    import click
+
+    answer = {
+        "unanswered": None,
+        "ok": "green",
+        "missing": "red",
+        "error": "red",
+    }.get(check.status, "yellow")
+    sign_off = {"none": None, "current": "green", "stale": "yellow"}
+    letters = [
+        ("H", "green" if check.hypothesis else None),
+        ("A", answer),
+        ("V", sign_off[check.verification_status]),
+        ("V", sign_off[check.validation_status]),
+    ]
+    return " ".join(
+        click.style(letter, fg=color) if color else click.style("-", dim=True)
+        for letter, color in letters
+    )
+
+
 def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     """A human-readable report, one block per question needing attention.
 

@@ -101,3 +101,97 @@ def test_show_latex_diff(tmp_dir, tmp_path_factory):
     assert result.returncode == 0, result.stderr
     assert "is stale" in result.stdout
     assert opened.read_text().strip() == out
+
+
+def test_show_question(tmp_dir):
+    import json
+
+    def show(*args: str) -> str:
+        return subprocess.check_output(
+            ["calkit", "show", "q", *args], text=True
+        )
+
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(["calkit", "new", "question", "Does it work?"])
+    os.makedirs("results")
+    with open("results/metrics.json", "w") as f:
+        json.dump({"accuracy": 0.9, "scores": {"f1": 0.8}}, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"].append(
+        {
+            "question": "What is the effect?",
+            "name": "effect",
+            "hypothesis": "It improves performance.",
+            "approach": "Score it.",
+            "answer": "Accuracy is {acc}.",
+            "evidence": [
+                {"kind": "figure", "path": "figures/performance.png"},
+                {
+                    "kind": "publication",
+                    "path": "paper/paper.pdf",
+                    "explanation": "See the results section.",
+                },
+                {
+                    "kind": "result",
+                    "path": "results/metrics.json",
+                    "values": {"acc": "accuracy", "f1": "scores.f1"},
+                },
+            ],
+            "verifications": [
+                {
+                    "by": {
+                        "name": "Ada",
+                        "email": "ada@example.org",
+                        "with_ai": "Claude Opus 5",
+                    },
+                    "date": "2026-10-04",
+                    "notes": "Read metrics.py.",
+                }
+            ],
+        }
+    )
+    ck_info["pipeline"] = {
+        "stages": {
+            "metrics": {
+                "kind": "python-script",
+                "environment": "py",
+                "script_path": "metrics.py",
+                "outputs": ["results/metrics.json"],
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # By position or name, rendered from the evidence, with the stages
+    # derived ahead of the answer and each sign-off's status
+    out = show("effect")
+    assert out == show("2")
+    assert out.startswith("2. H A V -  What is the effect?\n")
+    assert "    stages:\n      - metrics\n    answer: Accuracy is 0.9." in out
+    assert "      - kind: figure\n        path: figures/performance.png" in out
+    assert "        explanation: See the results section." in out
+    # A result's values are listed one per line under it
+    assert (
+        "        values:\n          acc: accuracy\n          f1: scores.f1"
+        in out
+    )
+    assert "      - by: Ada (with Claude Opus 5)\n" in out
+    assert "        notes: Read metrics.py.\n" in out
+    assert "        status: current: not yet committed" in out
+    # Fields that aren't set aren't shown
+    assert "None" not in out and "validations" not in out
+    assert show("1") == "1. - - - -  Does it work?\n"
+    # As written, and for tools
+    assert "answer: Accuracy is {acc}." in show("2", "--raw")
+    shown = json.loads(show("effect", "--json"))
+    assert shown["answer"] == "Accuracy is 0.9."
+    assert shown["stages"] == ["metrics"]
+    assert shown["verifications"][0]["by"]["email"] == "ada@example.org"
+    assert shown["check"]["verification_status"] == "current"
+    # A question that isn't there is an error
+    for ref, message in [("3", "There is no question 3"), ("x", "named 'x'")]:
+        result = subprocess.run(
+            ["calkit", "show", "q", ref], capture_output=True, text=True
+        )
+        assert result.returncode != 0
+        assert message in result.stdout + result.stderr

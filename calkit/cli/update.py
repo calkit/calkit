@@ -1590,6 +1590,8 @@ def update_question(
     import git
     from ruamel.yaml.comments import CommentedMap
 
+    from calkit.questions import question_index
+
     def git_config(key: str) -> str | None:
         try:
             return git.Git().config("--get", key).strip() or None
@@ -1620,21 +1622,10 @@ def update_question(
         raise_error("No updates specified.")
     ck_info = calkit.load_calkit_info()
     questions = ck_info.get("questions") or []
-    if question.isdigit():
-        index = int(question) - 1
-        if not 0 <= index < len(questions):
-            raise_error(
-                f"There is no question {question}; there are {len(questions)}."
-            )
-    else:
-        found = [
-            n
-            for n, q in enumerate(questions)
-            if isinstance(q, dict) and q.get("name") == question
-        ]
-        if not found:
-            raise_error(f"No question is named {question!r}.")
-        index = found[0]
+    try:
+        index = question_index(questions, question)
+    except ValueError as e:
+        raise_error(str(e))
     entry = questions[index]
     if isinstance(entry, str):
         entry = CommentedMap(question=entry)

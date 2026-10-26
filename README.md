@@ -419,12 +419,15 @@ and `{r2}` is read from one of those files rather than typed in by hand.
 We can see the rendered answer with:
 
 ```sh
-calkit list questions
+calkit show question 1
 ```
 
 ```
-1. question: How does the system respond to increasing $x$?
+1. H A - -  How does the system respond to increasing $x$?
     hypothesis: The value of $y$ increases linearly with $x$.
+    stages:
+      - collect-data
+      - analyze
     answer: $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
     evidence:
       - kind: figure

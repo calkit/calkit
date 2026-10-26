@@ -400,7 +400,7 @@ stages:
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: d362efe20687c6ef9bbfc9b538fd65b4
+      md5: ed37e033e8c5beb26f9392d1dd817d67
       size: 11725
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
@@ -415,7 +415,7 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: d362efe20687c6ef9bbfc9b538fd65b4
+      md5: ed37e033e8c5beb26f9392d1dd817d67
       size: 11725
     - path: scripts/find-calkit-papers.py
       hash: md5

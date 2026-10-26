@@ -616,28 +616,22 @@ export default function PublicationComponents({
     })
   return (
     <Box fontSize="sm" mb={1} wordBreak="break-word">
-      <Text as="span" fontWeight="semibold">
-        Components:
-      </Text>{" "}
-      <Link onClick={openModal}>
-        {nItems} {nItems === 1 ? "file" : "files"} in{" "}
-        <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
-          {data.folder}
-        </Code>
-        {data.items.some((item) => item.via !== "folder")
-          ? " and what it reads from elsewhere"
-          : ""}
+      <Link
+        onClick={openModal}
+        title={raise ? `${nUnknown} of unknown origin` : undefined}
+      >
+        <Text as="span" fontWeight="semibold">
+          Components:
+        </Text>{" "}
+        {/* Red when something, e.g., a figure, has no recorded origin */}
+        <Text
+          as="span"
+          color={raise ? "red.400" : undefined}
+          fontWeight={raise ? "semibold" : undefined}
+        >
+          {nItems}
+        </Text>
       </Link>
-      {raise ? (
-        <Badge colorScheme="orange" ml={1}>
-          {nUnknown} of unknown origin
-        </Badge>
-      ) : null}
-      {raise && canResolve ? (
-        <Button size="xs" variant="outline" ml={1} onClick={openModal}>
-          Fix
-        </Button>
-      ) : null}
       <ComponentsModal
         isOpen={Boolean(componentsOpen)}
         onClose={closeModal}

@@ -26,6 +26,7 @@ import typer
 from typing_extensions import Annotated, Optional
 
 import calkit
+import calkit.merge
 from calkit import (
     AUTO_IGNORE_PATHS,
     AUTO_IGNORE_PREFIXES,
@@ -54,6 +55,13 @@ from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.fix import (
+    OursOpt,
+    PreferOpt,
+    RerunOpt,
+    TheirsOpt,
+    fix_app,
+)
 from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
@@ -89,6 +97,7 @@ app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
+app.add_typer(fix_app, name="fix", help="Fix things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
@@ -115,10 +124,26 @@ def _to_shell_cmd(cmd: list[str]) -> str:
         return cmd[0]
     quoted_cmd = []
     for part in cmd:
-        # Find quotes within quotes and escape them
-        if " " in part or '"' in part[1:-1] or "'" in part[1:-1]:
-            part = part.replace('"', r"\"")
-            quoted_cmd.append(f'"{part}"')
+        if (
+            any(c.isspace() for c in part)
+            or '"' in part[1:-1]
+            or "'" in part[1:-1]
+        ):
+            # Quotes are escaped, and backslashes before one, including the
+            # closing quote, are doubled so they stay literal
+            escaped = ""
+            backslashes = 0
+            for c in part:
+                if c == "\\":
+                    backslashes += 1
+                    continue
+                if c == '"':
+                    escaped += "\\" * (2 * backslashes + 1) + c
+                else:
+                    escaped += "\\" * backslashes + c
+                backslashes = 0
+            escaped += "\\" * 2 * backslashes
+            quoted_cmd.append(f'"{escaped}"')
         else:
             quoted_cmd.append(part)
     return " ".join(quoted_cmd)
@@ -397,6 +422,8 @@ def clone(
         location = url.split("/")[-1].removesuffix(".git")
     typer.echo(f"Moving into repo dir: {location}")
     os.chdir(location)
+    # So Git merges dvc.lock and stage run records stage by stage
+    calkit.merge.configure_driver()
     # Setup auth for any Calkit remotes
     if not no_config_remote:
         remotes = calkit.dvc.get_remotes()
@@ -526,6 +553,18 @@ def get_status(
         if isinstance(spinner, Status):
             spinner.update(text)
 
+    def start_docker() -> None:
+        # Asked with the spinner out of the way, as in 'calkit run'
+        import calkit.docker
+
+        if isinstance(spinner, Status):
+            spinner.stop()
+        try:
+            calkit.docker.ensure_ready(interactive=True)
+        finally:
+            if isinstance(spinner, Status):
+                spinner.start()
+
     def get_dvc_data_status() -> dict:
         # Reuse what the pipeline status computed under the same DVC lock
         if (
@@ -574,8 +613,14 @@ def get_status(
             git.Repo.init()
         # Likewise, if this isn't a DVC repo, initialize one so the pipeline
         # can be compiled and its status reported. DVC init requires a Git
-        # repo, which the block above ensures exists.
-        if not os.path.isfile(os.path.join(".dvc", "config")):
+        # repo, which the block above ensures exists. Ask DVC rather than
+        # looking for ./.dvc, since its discovery walks up and a subproject
+        # inside an initialized parent would otherwise get a nested repo.
+        from dvc.exceptions import NotDvcRepoError
+
+        try:
+            calkit.dvc.get_dvc_repo()
+        except NotDvcRepoError:
             typer.echo("Initializing DVC repository")
             try:
                 result = calkit.dvc.init(quiet=True)
@@ -583,6 +628,11 @@ def get_status(
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
                 raise_error(f"Failed to initialize DVC repository: {e}")
+        except Exception as e:
+            # E.g., DVC's site cache dir isn't writable, which init can't fix
+            raise_error(
+                f"Failed to open DVC repo: {e.__class__.__name__}: {e}"
+            )
     valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:
@@ -597,15 +647,23 @@ def get_status(
     # while, e.g., when environments are checked again, so a spinner shows
     # until then. It writes to its own copy of the terminal, since what the
     # environment checks' tools print is discarded.
+    # Whether there's someone to ask is worked out before the spinner starts
+    can_ask = not as_json and calkit.core.is_tty()
     spinner: AbstractContextManager = nullcontext()
-    if not as_json and sys.stderr.isatty():
+    mintty = calkit.core.is_mintty(sys.stderr)
+    if not as_json and (sys.stderr.isatty() or mintty):
         import logging
 
         from rich.console import Console
 
-        spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
-            "Checking status"
-        )
+        # mintty takes ANSI and UTF-8, though it isn't a console
+        spinner = Console(
+            file=os.fdopen(
+                os.dup(2), "w", encoding="utf-8" if mintty else None
+            ),
+            force_terminal=mintty or None,
+            legacy_windows=False if mintty else None,
+        ).status("Checking status")
         # DVC's progress bars would each be printed above the spinner, and
         # they're shown only if this is at or below their level
         logging.getLogger("dvc.progress").setLevel(logging.CRITICAL + 1)
@@ -638,6 +696,7 @@ def get_status(
                 with_storage_problems="dvc" in categories,
                 quiet_environment_checks=True,
                 progress=step,
+                start_docker=start_docker if can_ask else None,
             )
             if pipeline_status.failed_environment_checks:
                 warn(
@@ -807,6 +866,19 @@ def get_status(
         if targets:
             git_cmd += ["--"] + targets
         run_cmd(git_cmd)
+        try:
+            repo = calkit.git.get_repo()
+            unmerged = calkit.merge.get_unmerged_paths(repo)
+            operation = calkit.merge.get_operation(repo)
+        except Exception:
+            unmerged, operation = [], None
+        if operation is not None and any(
+            calkit.merge.is_merged_file(p) for p in unmerged
+        ):
+            typer.echo(
+                "Run 'calkit fix merge-conflicts' to resolve the conflicts "
+                "in dvc.lock and stage run records"
+            )
         typer.echo()
     if "dvc" in categories:
         print_sep("DVC")
@@ -1771,12 +1843,23 @@ def pull(
             dvc_args.append("-f")
     if not no_git:
         typer.echo("Git pulling")
+        # So Git merges dvc.lock and stage run records stage by stage
+        calkit.merge.configure_driver()
         try:
             git_cmd = ["git", "pull"]
             if not no_recursive and "--recurse-submodules" not in git_args:
                 git_cmd.append("--recurse-submodules")
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
+            repo = calkit.git.get_repo()
+            if calkit.merge.get_operation(repo) is not None and any(
+                calkit.merge.is_merged_file(p)
+                for p in calkit.merge.get_unmerged_paths(repo)
+            ):
+                typer.echo(
+                    "Run 'calkit fix merge-conflicts' to resolve the "
+                    "conflicts in dvc.lock and stage run records"
+                )
             raise_error("Git pull failed")
     if not no_dvc:
         typer.echo("DVC pulling")
@@ -3085,6 +3168,8 @@ def run(
             subprocess.check_call(["git", "init"])
         except subprocess.CalledProcessError:
             raise_error("Failed to initialize Git repo")
+    # So Git merges dvc.lock and stage run records stage by stage
+    calkit.merge.configure_driver()
     # Set env vars
     calkit.set_env_vars(ck_info=ck_info)
     # Stages that can't run here are skipped, keeping their outputs, and
@@ -3101,12 +3186,18 @@ def run(
     # someone to ask is worked out first
     can_ask = is_tty()
     spinner: Any = None
-    if not (quiet or verbose) and sys.stderr.isatty():
+    mintty = calkit.core.is_mintty(sys.stderr)
+    if not (quiet or verbose) and (sys.stderr.isatty() or mintty):
         from rich.console import Console
 
-        spinner = Console(file=os.fdopen(os.dup(2), "w")).status(
-            "Getting ready to run"
-        )
+        # mintty takes ANSI and UTF-8, though it isn't a console
+        spinner = Console(
+            file=os.fdopen(
+                os.dup(2), "w", encoding="utf-8" if mintty else None
+            ),
+            force_terminal=mintty or None,
+            legacy_windows=False if mintty else None,
+        ).status("Getting ready to run")
     with spinner or contextlib.nullcontext():
         step("Getting system information", "💻")
         # Only the stages this run can reach are checked, so nothing else
@@ -3244,6 +3335,7 @@ def run(
                     no_push=True,
                     verbose=verbose,
                     allow_stale=True,
+                    no_build=True,
                 )
         # Compile the DVC pipeline (and subproject pipelines)
         dvc_stages = None
@@ -3741,12 +3833,19 @@ def run(
         for n, info in stage_run_info.items()
         if info.get("status") == "completed"
     ]
+    written: list[str] = []
     if ran and not dry:
-        try:
-            with open(STAGE_RUNS_FPATH) as f:
-                stage_runs = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            stage_runs = {}
+        # By the directory of the dvc.lock recording each stage, since a
+        # subproject's runs are kept with it. This project's too, for the
+        # records it holds of a subproject's from before.
+        stage_runs: dict[str | None, dict] = {}
+        for lock_dir in {None} | {
+            calkit.dvc.split_lock_stage_name(n)[0] for n in ran
+        }:
+            try:
+                stage_runs[lock_dir] = calkit.read_stage_runs(lock_dir)
+            except json.JSONDecodeError:
+                stage_runs[lock_dir] = {}
         # By machine env, where None is this machine; a remote machine's
         # properties were already read once this run
         machine_info: dict[str, dict | None] = {}
@@ -3816,15 +3915,34 @@ def run(
                 }
                 if isinstance(props.get("memory_gb"), (int, float)):
                     entry["system"]["memory_gb"] = round(props["memory_gb"], 1)
-            stage_runs[stage_name] = entry
-        # Sorted so runs on different machines merge cleanly
-        with open(STAGE_RUNS_FPATH, "w") as f:
-            json.dump(dict(sorted(stage_runs.items())), f, indent=2)
-            f.write("\n")
+            stage_runs[lock_dir][lock_name] = entry
+            # Replacing a record made from here, from before a subproject's
+            # were kept with it
+            if lock_dir is not None:
+                for key in list(stage_runs[None]):
+                    if calkit.dvc.split_lock_stage_name(key) == (
+                        lock_dir,
+                        lock_name,
+                    ):
+                        del stage_runs[None][key]
+        for lock_dir, runs in stage_runs.items():
+            fpath = os.path.join(lock_dir or "", STAGE_RUNS_FPATH)
+            if not runs and not os.path.exists(fpath):
+                continue
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            # Sorted so runs on different machines merge cleanly
+            with open(fpath, "w") as f:
+                json.dump(dict(sorted(runs.items())), f, indent=2)
+                f.write("\n")
+            written.append(fpath)
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-    calkit.environments.stage_calkit_files()
+    # A subproject's record is staged with this project's files, since
+    # whether to stage them is this project's setting
+    calkit.environments.stage_calkit_files(
+        extra_paths=[p for p in written if p != STAGE_RUNS_FPATH]
+    )
     if failed:
         try:
             calkit.dvc.restore_output_ignores()
@@ -3855,6 +3973,7 @@ def run(
             verbose=verbose,
             no_commit=False,
             no_push=not save_after_run,
+            no_build=True,
         )
     return {"dvc_stages": dvc_stages, "stage_run_info": stage_run_info}
 
@@ -4726,7 +4845,7 @@ def install_app(
         ok = _install.prompt_and_install(name, interactive=is_tty())
     if not ok:
         raise_error(f"Failed to install '{name}'")
-    typer.echo(f"✅ Installed '{name}'")
+    calkit.echo(f"✅ Installed '{name}'")
 
 
 @app.command(name="xproc|runproc", help="Execute a procedure.")
@@ -4989,6 +5108,133 @@ def switch_branch(
     # the new branch's DVC data and unzip to the workspace
     calkit.dvc.run_dvc_command(["checkout"])
     calkit.dvc.zip.sync_all(direction="to-workspace")
+
+
+@app.command(name="merge")
+def merge(
+    branch: Annotated[
+        str | None,
+        typer.Argument(help="Branch or commit to merge into the current one."),
+    ] = None,
+    cont: Annotated[
+        bool,
+        typer.Option(
+            "--continue", help="Finish a merge stopped by conflicts."
+        ),
+    ] = False,
+    abort: Annotated[
+        bool, typer.Option("--abort", help="Abort the merge in progress.")
+    ] = False,
+    squash: Annotated[
+        bool,
+        typer.Option(
+            "--squash", help="Combine the branch's changes into one commit."
+        ),
+    ] = False,
+    message: Annotated[
+        str | None,
+        typer.Option(
+            "--message",
+            "-m",
+            help="Commit message (default: Git's for the merge or squash).",
+        ),
+    ] = None,
+    ours: OursOpt = [],
+    theirs: TheirsOpt = [],
+    rerun: RerunOpt = [],
+    prefer: PreferOpt = None,
+    git_args: Annotated[
+        list[str],
+        typer.Option("--git-arg", help="Additional Git merge args."),
+    ] = [],
+) -> None:
+    """Merge a branch, resolving dvc.lock and stage run records per stage.
+
+    A stage changed on both sides needs a choice: ours, theirs, or rerun,
+    which also decides its run record and Git-tracked outputs. DVC-tracked
+    outputs are checked out to match afterwards. Other conflicts are left
+    to resolve before 'calkit merge --continue'.
+    """
+    from calkit.cli.fix import checkout_dvc_outputs, resolve_merge_conflicts
+
+    if sum([branch is not None, cont, abort]) != 1:
+        raise_error("Give a branch, --continue, or --abort")
+    if squash and branch is None:
+        raise_error("--squash needs a branch")
+    repo = calkit.git.get_repo()
+
+    def commit() -> None:
+        cmd = ["git", "commit"] + (
+            ["-m", message] if message else ["--no-edit"]
+        )
+        if subprocess.call(cmd) != 0:
+            raise_error("Git commit failed")
+        checkout_dvc_outputs()
+
+    if abort:
+        op = calkit.merge.get_operation(repo)
+        # A squash merge has no merge to abort, only changes to reset
+        if op is not None and op[0] == "squash":
+            cmd = ["git", "reset", "--merge"]
+        else:
+            cmd = ["git", "merge", "--abort"]
+        if subprocess.call(cmd) != 0:
+            raise_error("Git merge abort failed")
+        checkout_dvc_outputs()
+        return
+    if branch is not None:
+        calkit.merge.configure_driver()
+        cmd = ["git", "merge", "--no-edit"]
+        if squash:
+            cmd.append("--squash")
+        elif message:
+            cmd += ["-m", message]
+        if subprocess.call(cmd + git_args + [branch]) == 0:
+            # A squash merge stops short of committing
+            staged = subprocess.call(["git", "diff", "--cached", "--quiet"])
+            if squash and staged:
+                commit()
+            else:
+                checkout_dvc_outputs()
+            return
+    op = calkit.merge.get_operation(repo)
+    if op is None or op[0] not in ("merge", "squash"):
+        raise_error(
+            "Git merge failed"
+            if branch is not None
+            else "No merge is in progress"
+        )
+    if any(
+        calkit.merge.is_merged_file(p)
+        for p in calkit.merge.get_unmerged_paths(repo)
+    ):
+        result = resolve_merge_conflicts(
+            ours=ours, theirs=theirs, rerun=rerun, prefer=prefer
+        )
+        unmerged = result["unmerged"]
+    else:
+        unmerged = calkit.merge.get_unmerged_paths(repo)
+        if unmerged:
+            typer.echo("Still in conflict:")
+            for path in unmerged:
+                typer.echo(f"  {path}")
+    if unmerged:
+        raise_error(
+            "Resolve the conflicts, 'git add' them, then run "
+            "'calkit merge --continue'"
+        )
+    commit()
+
+
+@app.command(name="merge-driver", hidden=True)
+def merge_driver(
+    base: Annotated[str, typer.Argument()],
+    ours: Annotated[str, typer.Argument()],
+    theirs: Annotated[str, typer.Argument()],
+    path: Annotated[str, typer.Argument()],
+) -> None:
+    """Merge a file whose content is grouped by stage, as Git's merge driver."""
+    raise typer.Exit(calkit.merge.run_driver(base, ours, theirs, path))
 
 
 @app.command(name="stash")

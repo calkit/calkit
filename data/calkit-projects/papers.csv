@@ -1,0 +1,41 @@
+project,title,kind,status,year,doi,archive_doi,found_via,is_pete,is_example_or_test
+https://github.com/abachant/example-calkit-basic,The paper,,in-progress,,,,calkit.yaml,True,True
+https://github.com/abachant/poetry-metering,Test Paper,,in-progress,,,,calkit.yaml,False,False
+https://github.com/alexlib/test-calkit-latex,jfm article,journal-article,in-progress,,,,calkit.yaml,False,True
+https://github.com/boom-astro/boom-paper,"A real-time, multi-survey, optical alert system broker operating at scale",journal-article,archived,2026,,10.22002/xkxga-41b84,calkit.yaml,True,False
+https://github.com/calkit/example-basic,The paper,,in-progress,,,,calkit.yaml,True,True
+https://github.com/calkit/example-julia,This is the paper,conference-paper,in-progress,,,,calkit.yaml,True,True
+https://github.com/calkit/example-overleaf,The paper,journal-article,in-progress,,,,calkit.yaml,True,True
+https://github.com/petebachant/boom-paper,"A real-time, multi-survey, optical alert system broker operating at scale",journal-article,archived,2026,,10.22002/xkxga-41b84,calkit.yaml,True,False
+https://github.com/petebachant/boundary-layer-turbulence-modeling,Deriving a new RANS model from DNS data,journal-article,in-progress,,,,calkit.yaml,True,True
+https://github.com/petebachant/calkit-latex-codespaces,The paper,report,in-progress,,,,calkit.yaml,True,False
+https://github.com/petebachant/calkit-project-1,The paper,,in-progress,,,,calkit.yaml,True,False
+https://github.com/petebachant/calkit-project-1,Paper 2,,in-progress,,,,calkit.yaml,True,False
+https://github.com/petebachant/calkit-project-1,Paper 2,,in-progress,,,,calkit.yaml,True,False
+https://github.com/petebachant/calkit-test-4,Paper 2,book,in-progress,,,,calkit.yaml,True,True
+https://github.com/petebachant/calkit-xr-demo,A Simple Workflow for Processing and Visualizing Experimental Data,,in-progress,,,,calkit.yaml,True,True
+https://github.com/petebachant/example-basic,The paper,,in-progress,,,,calkit.yaml,True,True
+https://github.com/petebachant/office-repro-example,Investigation of reproducibility,,in-progress,,,,calkit.yaml,True,True
+https://github.com/petebachant/PhD-thesis,Physical and numerical modeling of cross-flow turbines,phd-thesis,in-progress,,,,calkit.yaml,True,False
+https://github.com/petebachant/rans-boundary-layer-validation,Validating RANS models,journal-article,in-progress,,,,calkit.yaml,True,False
+https://github.com/petebachant/repro-dacre-et-al-2024,"The effects of diet and semiochemical exposure on male Bactrocera dorsalis (Hendel) (Diptera: Tephritidae) metabolic rate at a range of temperatures
+",,predates-project,2024,10.1016/j.jinsphys.2024.104718,10.25403/UPresearchdata.27314991.v1,calkit.yaml,True,False
+https://github.com/petebachant/test-1,A paper about things,journal-article,archived,2026,,10.555.znznznz,calkit.yaml,True,True
+https://github.com/petebachant/test-1,A paper about things,report,archived,2026,,10.555.znznznz,calkit.yaml,True,True
+https://github.com/petebachant/test-1,A Simple Workflow for Processing and Visualizing Experimental Data,report,archived,2026,,10.555.znznznz,calkit.yaml,True,True
+https://github.com/petebachant/test-1,[Thesis Title],phd-thesis,archived,2026,,10.555.znznznz,calkit.yaml,True,True
+https://github.com/petebachant/test-2,The paper,,in-progress,,,,calkit.yaml,True,True
+https://github.com/petebachant/test-2,The paper,journal-article,in-progress,,,,calkit.yaml,True,True
+https://github.com/petebachant/test-2,Overleaf paper,,in-progress,,,,calkit.yaml,True,True
+https://github.com/petebachant/test-2,This is a paper about the analysis,journal-article,in-progress,,,,calkit.yaml,True,True
+https://github.com/pwbachant/my-analysis,This is a paper about the analysis,,in-progress,,,,calkit.yaml,True,False
+https://github.com/pwbachant/some-cool-thing,This is paper 2,conference-paper,in-progress,,,,calkit.yaml,True,False
+https://github.com/symbiotic-engineering/MDOcean,Modeling - Journal (Applied Ocean Research),journal-article,in-progress,,,,calkit.yaml,False,False
+https://github.com/symbiotic-engineering/MDOcean,Optimization - Journal (Renewable Energy),journal-article,in-progress,,,,calkit.yaml,False,False
+https://github.com/symbiotic-engineering/MDOcean,Grid Value - Conference (UMERC),conference-paper,in-progress,,,,calkit.yaml,False,False
+https://github.com/symbiotic-engineering/MDOcean,PhD Dissertation,phd-thesis,archived,2026,,10.5281/zenodo.22713459,calkit.yaml,False,False
+https://github.com/symbiotic-engineering/MDOcean,"Development, Validation, and Benchmarking of a Multidisciplinary Semi-Analytical Model for Wave Energy Converters",preprint,preprint,2026,10.48550/arxiv.2606.22739,,datacite,False,False
+https://github.com/symbiotic-engineering/OpenFLASH,Numerics of the matched eigenfunction method for computing wave forces on concentric bodies,journal-article,archived,2026,,10.5281/zenodo.20530090,calkit.yaml,False,False
+https://github.com/symbiotic-engineering/OpenFLASH,pubs/joss/paper.md,,archived,2026,,10.5281/zenodo.20530090,calkit.yaml,False,False
+https://github.com/tai03102004/project-final,The paper,,in-progress,,,,calkit.yaml,True,False
+https://github.com/tai03102004/project-final,Tiêu đề khoá luận,journal-article,in-progress,,,,calkit.yaml,True,False

@@ -724,3 +724,13 @@ def test_get_storage_problems(tmp_dir):
     ]
     assert "big.txt" in large
     assert "big.bin" not in large
+
+
+def test_split_lock_stage_name():
+    assert calkit.dvc.split_lock_stage_name("a") == (None, "a")
+    assert calkit.dvc.split_lock_stage_name("sub/dvc.yaml:a") == ("sub", "a")
+    assert calkit.dvc.split_lock_stage_name("a/b/dvc.yaml:c") == ("a/b", "c")
+    # As DVC names a subproject's stage on Windows
+    assert calkit.dvc.split_lock_stage_name("sub\\dvc.yaml:a") == ("sub", "a")
+    # A colon that isn't after a dvc.yaml is part of the name
+    assert calkit.dvc.split_lock_stage_name("a:b") == (None, "a:b")

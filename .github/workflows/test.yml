@@ -115,11 +115,13 @@ jobs:
       - name: Setup Miniforge
         uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
         with:
-          miniforge-version: latest
+          # 26.9.4-0 fails 'conda init' on Windows; back to latest once
+          # https://github.com/conda-forge/miniforge/issues/913 is fixed
+          miniforge-version: 26.7.2-1
           auto-activate-base: true
           conda-remove-defaults: true
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@9dabb60412d3d2d967a8d682f7ce01317af40514 # v0.11.0
+        uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
         with:
           run-install: false
       - name: Install Juliaup

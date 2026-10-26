@@ -94,7 +94,7 @@ _FoldPreservingRepresenter.add_representer(
 class _FoldPreservingEmitter(ruamel.yaml.emitter.Emitter):
     def write_plain(self, text: Any, split: Any = True) -> None:
         fold_pos = getattr(text, "fold_pos", None)
-        if not fold_pos or not split or self.root_context:
+        if self.root_context or not text or (split and not fold_pos):
             return super().write_plain(text, split)
 
         def write(data: str) -> None:
@@ -109,8 +109,10 @@ class _FoldPreservingEmitter(ruamel.yaml.emitter.Emitter):
             write(" ")
         self.whitespace = False
         self.indention = False
+        # A simple key gets no breaks: ruamel still wraps one past the width,
+        # but a key can't span lines
         start = 0
-        for pos in fold_pos:
+        for pos in fold_pos if split and fold_pos else []:
             write(text[start:pos])
             self.write_indent()
             self.whitespace = False
@@ -331,6 +333,21 @@ DVC_EXTENSIONS = [
 DVC_SIZE_THRESH_BYTES = 5_000_000
 # How each stage's current outputs were made, kept with the project
 STAGE_RUNS_FPATH = os.path.join(".calkit", "stage-runs.json")
+
+
+def read_stage_runs(wdir: str | None = None) -> dict:
+    """The recorded runs of the stages a project's ``dvc.lock`` records, by
+    their names there.
+
+    Kept beside that ``dvc.lock``, so a subproject's are in its own
+    directory whether its stages ran from it or from its parent.
+    """
+    try:
+        with open(os.path.join(wdir or "", STAGE_RUNS_FPATH)) as f:
+            stage_runs = json.load(f)
+    except OSError:
+        return {}
+    return stage_runs if isinstance(stage_runs, dict) else {}
 
 
 def check_or_x(val: bool | int) -> str:
@@ -759,6 +776,55 @@ def is_tty() -> bool:
         return sys.stdin.isatty() and sys.stdout.isatty()
     except (AttributeError, ValueError):
         return False
+
+
+def is_mintty(stream: Any) -> bool:
+    """True when a stream is a Git Bash or Cygwin (mintty) terminal.
+
+    mintty gives native programs a named pipe rather than a console, so
+    Python sees no terminal and picks the ANSI code page, even though
+    mintty shows UTF-8 and ANSI escapes. It's told apart by the pipe's
+    name, as Git for Windows does.
+    """
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class FileNameInfo(ctypes.Structure):
+        _fields_ = [
+            ("FileNameLength", wintypes.DWORD),
+            ("FileName", wintypes.WCHAR * 260),
+        ]
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetFileType.argtypes = [wintypes.HANDLE]
+    kernel32.GetFileInformationByHandleEx.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel32.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    # FILE_TYPE_PIPE
+    if kernel32.GetFileType(handle) != 3:
+        return False
+    info = FileNameInfo()
+    # FileNameInfo
+    if not kernel32.GetFileInformationByHandleEx(
+        handle, 2, ctypes.byref(info), ctypes.sizeof(info)
+    ):
+        return False
+    name = info.FileName[: info.FileNameLength // 2]
+    return (
+        re.match(r"\\(cygwin|msys)-[0-9a-f]+-pty\d+-(from|to)-master", name)
+        is not None
+    )
 
 
 def check_dep_exists(

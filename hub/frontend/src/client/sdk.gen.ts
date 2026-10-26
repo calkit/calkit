@@ -102,6 +102,8 @@ import type {
   GetFeatureVoteStatusResponses,
   GetFeedbackErrors,
   GetFeedbackResponses,
+  GetHubStatsErrors,
+  GetHubStatsResponses,
   GetHubVersionResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
@@ -241,6 +243,7 @@ import type {
   GetUserGithubTokenResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
+  GetUserOverleafSessionResponses,
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
@@ -285,6 +288,7 @@ import type {
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
+  OverleafSessionPut,
   OverleafSyncPost,
   ParseReleaseUrlErrors,
   ParseReleaseUrlResponses,
@@ -436,6 +440,8 @@ import type {
   PutProjectReferenceNotesResponses,
   PutUserOnboardingFlagErrors,
   PutUserOnboardingFlagResponses,
+  PutUserOverleafSessionErrors,
+  PutUserOverleafSessionResponses,
   PutUserOverleafTokenErrors,
   PutUserOverleafTokenResponses,
   PutUserSubscriptionAdminErrors,
@@ -1935,6 +1941,62 @@ export class UsersService {
   }
 
   /**
+   * Get User Overleaf Session
+   */
+  public static getUserOverleafSession<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserOverleafSessionResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserOverleafSessionResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-session",
+      ...options,
+    })
+  }
+
+  /**
+   * Put User Overleaf Session
+   *
+   * Save the current user's Overleaf browser session, for syncing
+   * without Overleaf Premium.
+   */
+  public static putUserOverleafSession<ThrowOnError extends boolean = true>(
+    parameters: {
+      overleafSessionPut: OverleafSessionPut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutUserOverleafSessionResponses,
+    PutUserOverleafSessionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "overleafSessionPut", map: "body" }] }],
+    )
+    return (options?.client ?? client).put<
+      PutUserOverleafSessionResponses,
+      PutUserOverleafSessionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-session",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Post User Google Auth
    *
    * Authenticate with Google using authorization code.
@@ -2382,6 +2444,49 @@ export class MiscService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Hub Stats
+   *
+   * Count the hub's users and projects, e.g., to report usage.
+   *
+   * Superusers and what their accounts own are left out by default, since
+   * staff and their demos aren't usage. ``exclude`` names more accounts to
+   * leave out, e.g., an org holding examples. Subprojects count with their
+   * parent rather than on their own. Activity follows ``Project.updated``,
+   * which tracks the latest commit the hub has seen. ``analytics`` comes from
+   * Mixpanel, when read access to it is configured.
+   */
+  public static getHubStats<ThrowOnError extends boolean = true>(
+    parameters?: {
+      exclude?: Array<string>
+      include_superusers?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetHubStatsResponses, GetHubStatsErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "exclude" },
+            { in: "query", key: "include_superusers" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetHubStatsResponses,
+      GetHubStatsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/stats",
+      ...options,
+      ...params,
     })
   }
 

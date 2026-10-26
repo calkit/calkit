@@ -7,11 +7,13 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from unittest import mock
 
 import git
 import pytest
 
 import calkit
+import calkit.docker
 import calkit.git
 import calkit.notebooks
 import calkit.pipeline
@@ -230,7 +232,34 @@ def test_to_dvc():
     assert "something" in matrix["param_a"]
     outs = dvc_stages["process-data"]["outs"]
     assert outs[0] == "out-${item.param_a}.txt"
-    print(dvc_stages)
+    # A flag and its value in one item still splits, with a warning even
+    # when it ends in a backslash, and an iterated value with a space in it
+    # stays one argument
+    ck_info["pipeline"]["stages"] = {
+        "plot": {
+            "kind": "python-script",
+            "script_path": "plot.py",
+            "args": [
+                "--theta {theta}",
+                "--output C:\\tmp\\",
+                "--title",
+                "{title}",
+            ],
+            "environment": "py",
+            "iterate_over": [
+                {"arg_name": "theta", "values": [1]},
+                {"arg_name": "title", "values": ["a b"]},
+            ],
+        }
+    }
+    with pytest.warns(UserWarning) as record:
+        dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    messages = [str(w.message) for w in record]
+    assert any("['--theta', '{theta}']" in m for m in messages)
+    assert any(r"['--output', 'C:\\tmp\\']" in m for m in messages)
+    assert dvc_stages["plot"]["cmd"].endswith(
+        "plot.py --theta ${item.theta} --output C:\\tmp\\ --title ${item.title}"
+    )
 
 
 def test_to_dvc_from_matrix_outs():
@@ -1691,6 +1720,9 @@ def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     assert "# >>> calkit latex aux files (managed by calkit) >>>" in lines
     assert "*.aux" in lines
     assert "*.pdf" not in lines
+    # Including what packages like endnotes and nomencl write
+    assert repo.ignored("paper/main.ent")
+    assert repo.ignored("paper/main.nlo")
 
 
 def test_get_status(tmp_dir):
@@ -1787,6 +1819,45 @@ def test_get_status(tmp_dir):
     assert status.storage_problems is not None
     assert [p["path"] for p in status.storage_problems] == ["my-output.out"]
     assert "storage_problems" not in status.model_dump()
+    # Docker not running doesn't stop the status from being worked out; only
+    # a Docker environment that has to be checked again fails
+    ck_info["environments"]["d"] = {"kind": "docker", "image": "alpine"}
+    ck_info["pipeline"]["stages"]["in-docker"] = {
+        "kind": "command",
+        "command": "echo hi",
+        "environment": "d",
+    }
+    not_running = calkit.docker.DockerNotReadyError("not running")
+    with (
+        mock.patch("calkit.docker.ensure_ready", side_effect=not_running),
+        mock.patch(
+            "calkit.cli.check.check_environment", side_effect=not_running
+        ),
+    ):
+        status = calkit.pipeline.get_status(ck_info=ck_info)
+        assert not status.errors
+        assert status.failed_environment_checks == ["d"]
+        # Nor when it can't be started
+        start_docker = mock.Mock(side_effect=not_running)
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, start_docker=start_docker
+        )
+        start_docker.assert_called_once()
+        assert status.failed_environment_checks == ["d"]
+    # Once it's started, its environment is checked as usual
+    with (
+        mock.patch(
+            "calkit.docker.ensure_ready", side_effect=[not_running, None]
+        ),
+        mock.patch("calkit.cli.check.check_environment"),
+    ):
+        start_docker = mock.Mock()
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, start_docker=start_docker
+        )
+    start_docker.assert_called_once()
+    assert not status.errors
+    assert not status.failed_environment_checks
 
 
 def test_get_status_excludes_frozen_stage(tmp_dir):

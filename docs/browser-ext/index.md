@@ -25,9 +25,18 @@ and select "Sign in."
 <!-- prettier-ignore -->
 !!! note
 
-    Syncing from the extension requires an Overleaf token stored in your
-    Calkit account, the same as syncing from calkit.io. See
-    [Overleaf integration](../overleaf.md) for how to set that up.
+    Syncing from the extension, the same as syncing from calkit.io,
+    needs your Calkit account to have access to Overleaf.
+    If it doesn't, the panel asks for an Overleaf Git token,
+    which requires Overleaf Premium,
+    and offers **Connect with Overleaf login**, which works without it.
+    See [Overleaf integration](../overleaf.md#connecting-to-overleaf)
+    for more.
+
+**Connect with Overleaf login** sends the session your browser is signed in to
+Overleaf with to your Calkit account, so the hub can sync for you.
+If you later sign out of Overleaf, that session stops working,
+and the panel offers to connect again.
 
 Opening an Overleaf project shows the Calkit button in the corner, which
 turns amber when a sync would do something, so a figure that was

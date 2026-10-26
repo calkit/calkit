@@ -6,6 +6,7 @@ import platform
 import shutil
 import socket
 import subprocess
+import sys
 from datetime import timedelta
 from unittest import mock
 
@@ -16,7 +17,7 @@ import calkit.environments
 import calkit.latex
 
 
-def test_check_all_in_pipeline(tmp_dir):
+def test_check_all_in_pipeline(tmp_dir, capfd):
     ck_info: dict = {
         "environments": {
             "py1": {
@@ -209,6 +210,32 @@ def test_check_all_in_pipeline(tmp_dir):
     assert set(res) == {"py1", "far", "nope", "py3"}
     assert not res["nope"]["success"]
     assert not os.path.isdir(".venv2")
+
+    # Quiet discards what the checks and their tools print, and leaves the
+    # terminal's handles intact, since on Windows Click keeps its own. Nobody
+    # can answer a prompt there either, so they get no input.
+    def noisy_check(*args: object, **kwargs: object) -> None:
+        print("from python")
+        subprocess.run(["git", "--version"])
+        with pytest.raises(EOFError):
+            input("Continue? ")
+        assert subprocess.run([sys.executable, "-c", "input()"]).returncode
+
+    capfd.readouterr()
+    if sys.platform == "win32":
+        import msvcrt
+
+        stderr_handle = msvcrt.get_osfhandle(2)
+    with mock.patch(
+        "calkit.cli.check.check_environment", side_effect=noisy_check
+    ):
+        res = calkit.environments.check_all_in_pipeline(
+            skip_stages=["skipped"], force=True, quiet=True
+        )
+    assert res["py1"]["success"]
+    assert capfd.readouterr() == ("", "")
+    if sys.platform == "win32":
+        assert msvcrt.get_osfhandle(2) == stderr_handle
     assert calkit.environments.check_inner_env_there(
         ["calkit", "xenv", "-n", "py2", "--no-check", "--", "a", "--no-check"]
     ) == ["calkit", "xenv", "-n", "py2", "--", "a", "--no-check"]
@@ -2495,3 +2522,32 @@ def test_switch_env(tmp_dir, monkeypatch):
     assert "--setup-file .calkit/stage-setup/job.json" in cmd
     assert "module load" not in cmd
     assert ".calkit/stage-setup/job.json" in stages["job"]["deps"]
+
+
+def test_stage_calkit_files(tmp_dir):
+    import git
+
+    repo = git.Repo.init()
+    os.makedirs(".dvc")
+    with open(os.path.join(".dvc", "config"), "w") as f:
+        f.write("[core]\n    autostage = true\n")
+    os.makedirs(os.path.join(".calkit", "env-locks"))
+    with open(os.path.join(".calkit", "env-locks", "py.json"), "w") as f:
+        f.write("{}\n")
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        f.write("{}\n")
+    # Everything Calkit wrote is staged
+    calkit.environments.stage_calkit_files()
+    staged = repo.git.diff("--cached", "--name-only").split()
+    assert ".calkit/env-locks/py.json" in staged
+    assert ".calkit/stage-runs.json" in staged
+    # A file the project ignores is left out, without a warning, and the
+    # rest are still staged
+    repo.git.reset()
+    with open(".gitignore", "w") as f:
+        f.write(".calkit/stage-runs.json\n")
+    with mock.patch("calkit.cli.warn") as warn:
+        calkit.environments.stage_calkit_files()
+    warn.assert_not_called()
+    staged = repo.git.diff("--cached", "--name-only").split()
+    assert staged == [".calkit/env-locks/py.json"]

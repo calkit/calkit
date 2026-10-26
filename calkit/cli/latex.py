@@ -568,11 +568,7 @@ def map_components(
     ],
 ) -> None:
     """Map in components a LaTeX document includes with `\\ck*` commands."""
-    # Documents in one folder share its _calkit folder, so all of theirs are
-    # mapped, or mapping one would remove the others' copies
-    for problem in calkit.latex.map_ck_components(
-        os.path.dirname(tex_file) or ".", documents=[tex_file]
-    ):
+    for problem in calkit.latex.map_ck_components(tex_file):
         warn(f"{problem}; it will print as ??")
 
 
@@ -674,9 +670,7 @@ def build(
     pdf_dir = output_dir if output_dir is not None else tex_dir
     # Components the document includes with calkit.sty's commands, e.g.,
     # \ckfigure, have to be beside it before TeX can read them
-    for problem in calkit.latex.map_ck_components(
-        tex_dir, documents=[tex_file]
-    ):
+    for problem in calkit.latex.map_ck_components(tex_file):
         warn(f"{problem}; it will print as ??")
     if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
         fdb_dir = aux_dir if aux_dir is not None else tex_dir

@@ -1682,7 +1682,7 @@ def update_path_storage(
             ck_info=ck_info,
             check_environments=False,
             clean_notebooks=False,
-            map_components=False,
+            preprocess_stages=False,
         )
         if status.errors:
             raise_error(

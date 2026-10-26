@@ -1902,7 +1902,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         fb.write(b"png")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    calkit.pipeline.to_dvc(write=True, map_components=True)
+    calkit.pipeline.to_dvc(write=True, preprocess_stages=True)
     with open("paper/_calkit/values.tex") as f:
         values = f.read()
     assert "{rmse}{n}{0.123}" in values

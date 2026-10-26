@@ -8,7 +8,7 @@ import os
 import posixpath
 import re
 import shlex
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -661,6 +661,22 @@ class Stage(Model):
             if path not in paths:
                 paths.append(path)
         return paths
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        outputs: set[str],
+        write_files: bool = False,
+    ) -> None:
+        """Work out what the stage depends on from the project before it's
+        compiled, for a kind of stage whose sources name some of it.
+
+        ``project_dir`` is where the project is, and ``outputs`` are the
+        project paths stages make. With ``write_files``, the stage also
+        writes files it reads that aren't kept in the project, since it's
+        about to run or have its status checked. That happens on every
+        call, so only fast work belongs here.
+        """
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -1466,39 +1482,40 @@ class LatexStage(Stage):
 
     # Project paths the document's components depend on, the files among
     # them it reads copies of, and whether it loads calkit.sty, set by
-    # read_component_paths
+    # preprocess
     _component_paths: list[str] = PrivateAttr(default_factory=list)
     _copied_paths: list[str] = PrivateAttr(default_factory=list)
     _loads_calkit: bool = PrivateAttr(default=False)
 
-    def read_component_paths(
-        self, project_dir: str | None = None, outputs: Iterable[str] = ()
+    def preprocess(
+        self,
+        project_dir: str | None,
+        outputs: set[str],
+        write_files: bool = False,
     ) -> None:
         """Read which components the document includes with calkit.sty's
-        commands, since they're as much inputs as its source.
+        commands, since they're as much inputs as its source, and with
+        ``write_files``, map them in beside it.
 
         Each is depended on where it's kept: the file, if it's there, stored
-        with DVC, or one of ``outputs``, which are the project paths stages
-        make, or the folder holding it, if that's stored with DVC or made by
-        a stage. A typo or a figure not made yet prints as ?? instead of
-        stopping the pipeline. The copies read of files kept in Git are
-        depended on too, which, unlike other copies, are there before the
-        stage runs on any clone. The pipeline calls this when compiling,
-        since only it knows where the project is.
+        with DVC, or a stage output, or the folder holding it, if that's
+        stored with DVC or a stage output. A typo or a figure not made yet
+        prints as ?? instead of stopping the pipeline. The copies read of
+        files kept in Git are depended on too, which, unlike other copies,
+        are there before the stage runs on any clone.
         """
-        out_set = set(outputs)
 
         def exists(p: str) -> bool:
             return os.path.isfile(os.path.join(project_dir or "", p))
 
         def is_input(p: str) -> bool:
-            return exists(p) or exists(p + ".dvc") or p in out_set
+            return exists(p) or exists(p + ".dvc") or p in outputs
 
         def folder_kept_elsewhere(p: str) -> str | None:
             parts = p.split("/")
             for i in range(1, len(parts)):
                 folder = "/".join(parts[:i])
-                if folder in out_set or exists(folder + ".dvc"):
+                if folder in outputs or exists(folder + ".dvc"):
                     return folder
             return None
 
@@ -1524,11 +1541,13 @@ class LatexStage(Stage):
                 c.kind != "value"
                 and exists(rel)
                 and not exists(rel + ".dvc")
-                and rel not in out_set
+                and rel not in outputs
             ):
                 copied.append(rel)
         self._component_paths = list(dict.fromkeys(paths))
         self._copied_paths = list(dict.fromkeys(copied))
+        if write_files and self._loads_calkit:
+            calkit.latex.map_ck_components(document)
 
     @property
     def component_copies(self) -> list[str]:
@@ -2948,6 +2967,33 @@ class Pipeline(Model):
                 ]
             converted[name] = calkit_yaml_stage
         return converted
+
+    def preprocess_stages(
+        self, project_dir: str | None, write_files: bool = False
+    ) -> None:
+        """Let each stage work out what it depends on from the project,
+        telling it where the project is and what stages make.
+        """
+        outputs: set[str] = set()
+        for stage in self.stages.values():
+            try:
+                dvc_outs = stage.dvc_outs
+            except Exception:
+                continue
+            for dvc_out in dvc_outs:
+                path = (
+                    next(iter(dvc_out))
+                    if isinstance(dvc_out, dict)
+                    else dvc_out
+                )
+                if isinstance(path, str) and "${" not in path:
+                    outputs.add(
+                        posixpath.normpath(
+                            posixpath.join(stage.wdir or "", path)
+                        )
+                    )
+        for stage in self.stages.values():
+            stage.preprocess(project_dir, outputs, write_files=write_files)
 
     def resolve_procedure_paths(self, procedures: dict) -> None:
         """Tell procedure stages where their procedure is written down.

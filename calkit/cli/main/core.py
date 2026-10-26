@@ -3346,7 +3346,7 @@ def run(
                     ck_info=ck_info,
                     write=True,
                     for_run=True,
-                    map_components=True,
+                    preprocess_stages=True,
                 )
             except Exception as e:
                 os.environ.pop("CALKIT_PIPELINE_RUNNING", None)

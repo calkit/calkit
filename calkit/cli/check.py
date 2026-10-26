@@ -2468,7 +2468,7 @@ def check_storage(
         status = calkit.pipeline.get_status(
             check_environments=False,
             clean_notebooks=False,
-            map_components=False,
+            preprocess_stages=False,
         )
         if not status.errors:
             stale = {n.split("@")[0] for n in status.stale_stage_names}

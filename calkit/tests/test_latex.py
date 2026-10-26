@@ -260,7 +260,7 @@ def test_ck_components(tmp_dir):
         f.write("\\input{front/deeper}\n")
     with open("more/front/deeper.tex", "w") as f:
         f.write("\\cktable{tables/summary}\n")
-    problems = calkit.latex.map_ck_components("more", documents=["more/a.tex"])
+    problems = calkit.latex.map_ck_components("more/a.tex")
     assert "../outside.json is outside the project" in problems
     assert "/etc/outside.json is outside the project" in problems
     assert os.path.isfile("more/_calkit/figures/plot.png")
@@ -274,15 +274,14 @@ def test_ck_components(tmp_dir):
     os.chmod("more/_calkit/figures/plot.png", 0o444)
     with open("figures/plot.png", "wb") as f:
         f.write(b"png, made again")
-    calkit.latex.map_ck_components("more", documents=["more/a.tex"])
+    calkit.latex.map_ck_components("more/a.tex")
     with open("more/_calkit/figures/plot.png", "rb") as f:
         assert f.read() == b"png, made again"
     # What's stored with DVC is only looked up for what isn't here, since
     # listing it is slow
     asked: list[str] = []
     calkit.latex.map_ck_components(
-        "more",
-        documents=["more/a.tex"],
+        "more/a.tex",
         is_tracked=lambda rel: bool(asked.append(rel)),
     )
     assert asked == []
@@ -290,8 +289,7 @@ def test_ck_components(tmp_dir):
     # where it would be, and a copy already there is kept
     os.remove("tables/summary.tex")
     calkit.latex.map_ck_components(
-        "more",
-        documents=["more/a.tex"],
+        "more/a.tex",
         is_tracked=lambda rel: rel == "tables/summary.tex",
     )
     with open("more/_calkit/values.tex") as f:
@@ -309,8 +307,7 @@ def test_ck_components(tmp_dir):
         None,
     ]:
         problems = calkit.latex.map_ck_components(
-            "more",
-            documents=["more/a.tex"],
+            "more/a.tex",
             is_tracked=is_tracked,
             previous_values=previous,
         )
@@ -318,14 +315,13 @@ def test_ck_components(tmp_dir):
         with open("more/_calkit/values.tex") as f:
             assert "{results/metrics.json}{rmse}{n}{0.5}" in f.read()
     problems = calkit.latex.map_ck_components(
-        "more",
-        documents=["more/a.tex"],
+        "more/a.tex",
         is_tracked=is_tracked,
         previous_values="",
     )
     assert "results/metrics.json is stored with DVC and not pulled" in problems
     os.rename("metrics.json.bak", "results/metrics.json")
-    problems = calkit.latex.map_ck_components("more", documents=["more/a.tex"])
+    problems = calkit.latex.map_ck_components("more/a.tex")
     assert "tables/summary is not in the project yet" in problems
     with open("more/_calkit/values.tex") as f:
         assert "tables/summary" not in f.read()

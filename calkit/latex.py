@@ -703,23 +703,22 @@ def _make_writable(path: str) -> None:
 
 
 def map_ck_components(
-    folder: str,
-    documents: list[str] | None = None,
+    path: str,
     is_tracked: Callable[[str], bool] | None = None,
     previous_values: str | None = None,
 ) -> list[str]:
-    """Bring the components the documents in a folder include with
-    calkit.sty's commands into its ``_calkit`` folder, so they build without
-    the rest of the project, e.g., on Overleaf.
+    """Bring the components a document, or the documents in a folder,
+    include with calkit.sty's commands into the ``_calkit`` folder beside
+    them, so they build without the rest of the project, e.g., on Overleaf.
 
     Only documents that load calkit.sty are mapped, so Calkit writes nothing
     beside one that doesn't. One that does gets ``calkit.sty`` and
     ``_calkit`` even before it includes anything, so it compiles.
 
-    Every document directly in the folder is included, plus ``documents``,
-    e.g., one whose ``\\documentclass`` is in a file it inputs, since they
-    share the ``_calkit`` folder, and mapping one alone would remove the
-    others' copies. Files are copied, values are written to
+    Every document directly in the folder is included, plus the document
+    named, e.g., one whose ``\\documentclass`` is in a file it inputs, since
+    they share the ``_calkit`` folder, and mapping one alone would remove
+    the others' copies. Files are copied, values are written to
     ``_calkit/values.tex`` for calkit.sty to format, and ``calkit.sty`` is
     put beside the documents. Anything no longer included is removed, since
     nothing else writes there, as is ``calkit.sty`` once no document loads
@@ -739,10 +738,12 @@ def map_ck_components(
     import calkit.resources
     from calkit.questions import read_evidence_file, resolve_key
 
+    named = [] if os.path.isdir(path or ".") else [path]
+    folder = os.path.dirname(path) if named else path
     docs = list(
         dict.fromkeys(
             os.path.normpath(d)
-            for d in root_documents(folder) + (documents or [])
+            for d in root_documents(folder) + named
             if os.path.isfile(d)
         )
     )

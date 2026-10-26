@@ -563,6 +563,8 @@ def ensure_sync_base(
     """
     from gitdb import IStream  # type: ignore[import-untyped]
 
+    import calkit.latex
+
     def store(obj: Any) -> None:
         stream = IStream(str(obj.type).encode(), obj.size, obj.data_stream)
         repo.odb.store(stream)
@@ -659,8 +661,20 @@ def ensure_sync_base(
             ).split("\0")
             if rel and rel not in pushed and blob_at(head.tree, rel) is None
         ]
+        # And what Calkit puts on Overleaf, which may not all be here, e.g.,
+        # the copy of a figure that isn't pulled
+        written = {
+            rel
+            for rel in repo.git.ls_tree(
+                "-r", "-z", "--name-only", head.tree.hexsha
+            ).split("\0")
+            if rel == calkit.latex.STYLE_FNAME
+            or rel.startswith(calkit.latex.COMPONENTS_DIR + "/")
+        }
         extra = {}
-        for rel in sorted(paths.dvc_files | paths.mapped_files | set(sources)):
+        for rel in sorted(
+            paths.dvc_files | paths.mapped_files | written | set(sources)
+        ):
             if blob_at(tree, rel) is not None:
                 continue
             blob = None
@@ -1073,14 +1087,19 @@ class OverleafSyncPaths:
 
     @cached_property
     def mapped_files(self) -> set[str]:
-        """Files on disk under a map-paths destination.
+        """Files on disk under a map-paths destination, or written into the
+        folder by Calkit so its documents can include project components, i.e.,
+        ``calkit.sty`` and ``_calkit``.
 
         Relative to ``path_in_project``. A destination may be a single file
         or a whole directory, so directories are walked.
         """
+        import calkit.latex
+
         root = os.path.join(self.main_repo.working_dir, self.path_in_project)
         res: set[str] = set()
-        for dest in self.map_paths_outputs:
+        written = {calkit.latex.COMPONENTS_DIR, calkit.latex.STYLE_FNAME}
+        for dest in sorted(self.map_paths_outputs | written):
             abs_dest = os.path.join(root, dest)
             if os.path.isfile(abs_dest):
                 res.add(dest)
@@ -1122,6 +1141,8 @@ class OverleafSyncPaths:
         deleted locally since the last sync; such deletions are handled
         elsewhere in the sync logic.
         """
+        from calkit.latex import COMPONENTS_DIR, STYLE_FNAME
+
         all_ol_files = calkit.git.ls_files(self.overleaf_repo)
         res = []
         for fpath in all_ol_files:
@@ -1138,6 +1159,12 @@ class OverleafSyncPaths:
                 continue
             # Skip files that are under any push-only path
             if self._path_matches(fpath_posix, self.push_paths):
+                continue
+            # Calkit rewrites these on every sync, and _calkit's own ignore
+            # file may not exist yet, e.g., in a fresh clone on the hub
+            if fpath_posix == STYLE_FNAME or fpath_posix.startswith(
+                COMPONENTS_DIR + "/"
+            ):
                 continue
             res.append(fpath_posix)
         return res
@@ -1348,15 +1375,46 @@ class OverleafSyncPaths:
         sync and should not be deleted.
 
         A file from the last sync is kept if it is still stored locally
-        (tracked by Git or cached by DVC), was newly added on Overleaf since
-        the last sync, or is treated as ignored (gitignored or a
-        ``storage: null`` pipeline output). Only files that were genuinely
-        removed from the project are deleted from Overleaf.
+        (tracked by Git or cached by DVC), is copied in by a map-paths stage
+        or Calkit, was newly added on Overleaf since the last sync, or is
+        treated as ignored (gitignored or a
+        ``storage: null`` pipeline output). A copy Calkit made is also kept
+        while the documents still include it, even if it couldn't be copied
+        this time. Only files that were genuinely removed from the project
+        are deleted from Overleaf.
         """
+        import calkit.latex
+
+        def is_included(rel: str) -> bool:
+            """Whether a document still includes a file, found the way TeX
+            would find it, since it can be named without its extension.
+            """
+            return any(
+                calkit.latex.component_path(c, lambda p: p == rel)[0] == rel
+                for c in included
+            )
+
+        folder = os.path.join(self.main_repo.working_dir, self.path_in_project)
+        included = [
+            c
+            for doc in calkit.latex.root_documents(folder)
+            for c in calkit.latex.read_ck_usage(doc)[1]
+            if c.kind != "value"
+        ]
         keep = set()
+        prefix = calkit.latex.COMPONENTS_DIR + "/"
         for f in self.files_in_overleaf_last_sync:
+            if f.startswith(prefix) and f not in self.mapped_files:
+                # Still included but not copied this time, e.g., a figure DVC
+                # stores that isn't pulled here, as on the hub, so Overleaf
+                # keeps the copy it has rather than losing the figure
+                if is_included(f[len(prefix) :]):
+                    keep.add(f)
+                # Otherwise no longer included, and nothing else writes there
+                continue
             if (
                 f in self.stored_files
+                or f in self.mapped_files
                 or f in self.newly_added_on_overleaf
                 or self._is_ignored_for_sync(f)
             ):
@@ -1375,18 +1433,81 @@ class OverleafSyncPaths:
         )
 
 
+def _overleaf_values(overleaf_repo: git.Repo) -> str | None:
+    """The ``values.tex`` Overleaf has, which holds values a clone without
+    DVC's data, e.g., the hub's, can't read.
+    """
+    import calkit.latex
+
+    path = os.path.join(
+        str(overleaf_repo.working_dir),
+        calkit.latex.COMPONENTS_DIR,
+        calkit.latex.VALUES_FNAME,
+    )
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _dvc_tracked(repo: git.Repo) -> Callable[[str], bool]:
+    """Whether a project path is stored with DVC, listed only if asked,
+    since that's slow.
+    """
+    import calkit.dvc
+
+    tracked: set[str] | None = None
+
+    def is_tracked(rel: str) -> bool:
+        nonlocal tracked
+        if tracked is None:
+            try:
+                tracked = {
+                    Path(p).as_posix()
+                    for p in calkit.dvc.list_paths(
+                        wdir=str(repo.working_dir), recursive=True
+                    )
+                }
+            except Exception:
+                tracked = set()
+        return rel in tracked
+
+    return is_tracked
+
+
 def get_commits_since_last_sync(
     overleaf_repo: git.Repo, last_sync_commit: str | None
 ) -> list[git.Commit]:
-    """Commits on Overleaf since the last sync that change files, so a
-    download on top of a rebuilt last sync that matches it isn't counted.
+    """Commits on Overleaf since the last sync that change files a sync
+    brings back, so neither a download on top of a rebuilt last sync that
+    matches it, nor a change only to what Calkit puts there, e.g., copied
+    components, is counted.
     """
+    from calkit.latex import COMPONENTS_DIR, STYLE_FNAME
+
+    def brings_back(c: git.Commit) -> bool:
+        if not c.parents:
+            return True
+        changed = overleaf_repo.git.diff_tree(
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "-z",
+            c.parents[0].hexsha,
+            c.hexsha,
+        ).split("\0")
+        return any(
+            p and p != STYLE_FNAME and not p.startswith(COMPONENTS_DIR + "/")
+            for p in changed
+        )
+
     if not last_sync_commit:
         return []
     return [
         c
         for c in overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
-        if not c.parents or c.tree.hexsha != c.parents[0].tree.hexsha
+        if brings_back(c)
     ]
 
 
@@ -1416,10 +1537,11 @@ def get_sync_status(
     """Compute the sync status between a project and an Overleaf project.
 
     This is the read-only counterpart to ``sync``: it reports what a sync
-    would do without changing either repo's files, though a missing last
-    sync is rebuilt in the Overleaf repo's history as ``ensure_sync_base``
-    describes. Both repos should already be up-to-date (pulled), same as for
-    ``sync``.
+    would do without changing either repo's files, though the components
+    the documents include are copied in as ``calkit latex build`` would,
+    and a missing last sync is rebuilt in the Overleaf repo's history as
+    ``ensure_sync_base`` describes. Both repos should already be up-to-date
+    (pulled), same as for ``sync``.
 
     The returned dictionary reports how many commits are waiting on
     Overleaf, which stored files differ from their Overleaf counterparts
@@ -1427,6 +1549,8 @@ def get_sync_status(
     would be deleted from Overleaf. Each file is flagged as a figure or
     not, so callers can surface out-of-date figures specifically.
     """
+    from calkit.latex import map_ck_components
+
     path_in_project = Path(path_in_project).as_posix()
     if sync_info_for_path is None:
         sync_info_for_path = get_sync_info(wdir=main_repo.working_dir).get(
@@ -1457,6 +1581,13 @@ def get_sync_status(
         if prefix_slash and not fig_posix.startswith(prefix_slash):
             continue
         declared_figures.add(fig_posix[len(prefix_slash) :])
+    # The documents' components are copied in first, as a sync would, to see
+    # what it would push
+    map_ck_components(
+        os.path.join(str(main_repo.working_dir), path_in_project),
+        is_tracked=_dvc_tracked(main_repo),
+        previous_values=_overleaf_values(overleaf_repo),
+    )
     paths = OverleafSyncPaths(
         main_repo=main_repo,
         overleaf_repo=overleaf_repo,
@@ -1614,6 +1745,8 @@ def sync(
     changes staged). See the ``--no-commit`` handling near the end of this
     function.
     """
+    from calkit.latex import STYLE_FNAME, map_ck_components
+
     # Holds a mix of commits, paths, patches, and flags, so it's annotated
     # rather than inferred from whatever lands in it first.
     res: dict = {}
@@ -1859,6 +1992,23 @@ def sync(
     # except for copies whose source has diverged: pushing our version would
     # overwrite the Overleaf edit we just declined to pull, which is the loss
     # the warning above is there to prevent
+    # Bring in the documents' components only now that Overleaf's edits are
+    # in, since those may include something new, and look again at what to
+    # push
+    res["component_problems"] = map_ck_components(
+        path_in_project_abs,
+        is_tracked=_dvc_tracked(main_repo),
+        previous_values=_overleaf_values(overleaf_repo),
+    )
+    for problem in res["component_problems"]:
+        print_info(f"Warning: {problem}; it will print as ?? on Overleaf")
+    paths = OverleafSyncPaths(
+        main_repo=main_repo,
+        overleaf_repo=overleaf_repo,
+        path_in_project=path_in_project,
+        sync_info_for_path=sync_info_for_path,
+        last_sync_commit=last_sync_commit,
+    )
     files_to_copy_to_overleaf = [
         p for p in paths.files_to_copy_to_overleaf if p not in diverged
     ]
@@ -1956,11 +2106,28 @@ def sync(
                 for p in calkit.AUTO_IGNORE_PREFIXES
             )
             or untracked_posix in auto_ignore_paths
+            # Written by Calkit on every sync, and pushed rather than
+            # committed
+            or untracked_posix == path_prefix + STYLE_FNAME
         ):
             if calkit.git.ensure_path_is_ignored(main_repo, untracked_posix):
                 print_info(f"Automatically ignoring {untracked_posix}")
                 main_repo.git.add(".gitignore")
                 gitignore_modified = True
+    # Mapping ignores calkit.sty when it's first written, maybe during an
+    # earlier status check, so the rule may still need committing
+    try:
+        style_ignore_source = main_repo.git.check_ignore(
+            "-v", "--", path_prefix + STYLE_FNAME
+        ).split(":", 1)[0]
+    except git.GitCommandError:
+        style_ignore_source = ""
+    if style_ignore_source.endswith(".gitignore") and main_repo.git.status(
+        "--porcelain", "--", style_ignore_source
+    ):
+        main_repo.git.add(style_ignore_source)
+    else:
+        style_ignore_source = ""
     # Stage the changes in the project repo
     res["committed_project"] = False
     main_repo.git.add(path_in_project)
@@ -1982,6 +2149,8 @@ def sync(
             paths_to_commit.append(src_rel)
     if gitignore_modified:
         paths_to_commit.append(".gitignore")
+    if style_ignore_source and style_ignore_source not in paths_to_commit:
+        paths_to_commit.append(style_ignore_source)
     staged_diff = main_repo.git.diff(["--staged"] + paths_to_commit)
     if staged_diff and not no_commit:
         print_info("Committing changes to project repo")

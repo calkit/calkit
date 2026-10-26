@@ -3343,7 +3343,10 @@ def run(
             step("Compiling DVC pipeline", "🔀")
             try:
                 dvc_stages = calkit.pipeline.to_dvc(
-                    ck_info=ck_info, write=True, for_run=True
+                    ck_info=ck_info,
+                    write=True,
+                    for_run=True,
+                    preprocess_stages=True,
                 )
             except Exception as e:
                 os.environ.pop("CALKIT_PIPELINE_RUNNING", None)

@@ -2466,7 +2466,9 @@ def check_storage(
     stale: set[str] | None = set()
     if any(p["stage"] for p in to_record):
         status = calkit.pipeline.get_status(
-            check_environments=False, clean_notebooks=False
+            check_environments=False,
+            clean_notebooks=False,
+            preprocess_stages=False,
         )
         if not status.errors:
             stale = {n.split("@")[0] for n in status.stale_stage_names}

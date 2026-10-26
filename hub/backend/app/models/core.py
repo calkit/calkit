@@ -1547,9 +1547,9 @@ class PublicationComponent(BaseModel):
     # Repo-relative
     path: str
     kind: Literal["produced", "authored", "attested", "imported", "unknown"]
-    # In the publication's folder, or read by its build stage from
-    # elsewhere in the project
-    via: Literal["folder", "input"] = "folder"
+    # In the publication's folder, read by its build stage from elsewhere
+    # in the project, or included by a document with calkit.sty's commands
+    via: Literal["folder", "input", "included"] = "folder"
     # For "produced": the stage that makes it, and that stage's kind, so a
     # map-paths copy can be told from something computed
     stage: str | None = None
@@ -1565,6 +1565,30 @@ class PublicationComponents(BaseModel):
     folder: str
     items: list[PublicationComponent]
     n_unknown: int
+
+
+class LatexComponentsRequest(BaseModel):
+    """A LaTeX document to bring calkit.sty's components in for."""
+
+    # Repo-relative
+    path: str
+    # Text that differs from what's committed, e.g., an editor's unsaved
+    # changes, by repo-relative path
+    sources: dict[str, str] = {}
+
+
+class LatexComponents(BaseModel):
+    """What a document needs beside it for calkit.sty's commands, as
+    ``calkit latex build`` would write it.
+    """
+
+    loads_calkit: bool
+    # calkit.sty from this hub's Calkit, and _calkit/values.tex
+    style: str | None = None
+    values: str | None = None
+    # Project paths to copy into _calkit, each at the same path under it
+    copies: list[str] = []
+    problems: list[str] = []
 
 
 class MiscArtifact(BaseModel):

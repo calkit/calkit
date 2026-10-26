@@ -1851,7 +1851,10 @@ def update_path_storage(
     # calkit.yaml has it now must be known to be up to date
     if outputs and to == "dvc":
         status = calkit.pipeline.get_status(
-            ck_info=ck_info, check_environments=False, clean_notebooks=False
+            ck_info=ck_info,
+            check_environments=False,
+            clean_notebooks=False,
+            preprocess_stages=False,
         )
         if status.errors:
             raise_error(

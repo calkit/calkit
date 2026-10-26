@@ -377,14 +377,6 @@ but not yet pushed to storage.
 The hub's check-in badges use the same words, e.g., "1 not shared"
 rather than "1 ahead".
 
-A workspace on `main` can sync with the hub automatically, pushing what's
-saved and pulling what's new, so for work straight on the project the
-saved and shared states collapse into one, while change batches keep an
-explicit step before anything reaches `main`.
-It's opt-in per workspace, since it pushes without asking, and stops at
-anything that needs a person, e.g., a merge conflict, which the hub then
-shows on that workspace.
-
 What's in view decides where edits go.
 Viewing the hub or a batch, edits are saved to it as commits, and builds
 run in a managed workspace on a machine, as in [editor
@@ -436,6 +428,64 @@ recomputing them.
 A lock keyed on the stage and its input hashes, held while a stage runs on
 that machine, makes a second request for the same computation wait for the
 first instead of submitting its own job.
+
+### Keeping workspaces in sync
+
+The goal is for every workspace of a project to stay up to date with it,
+unless its user is deliberately working apart, so nobody builds on or
+edits an old version.
+Git and DVC still carry the changes; what the link adds is moving them
+promptly, without being asked, where that's safe.
+
+A workspace can follow its branch's upstream, pulling new commits as they
+land, e.g., an Overleaf sync from the browser extension, a save in the
+hub's editor, or a merged change batch, so they reach a laptop's checkout
+within about a minute, ready for a local build.
+When the hub pushes to a branch, or hears of a push from GitHub, its reply
+to the next check-in names the branch and its new commit for each
+workspace following it.
+That reply is only a hint: the link fetches from the workspace's own
+remote and fast-forwards to what's there, so a hub could at most make a
+workspace pull what its remote already has, and following needs no grant
+or second factor.
+The link also fetches on its own every so often, so workspaces whose
+remote isn't on the hub, or whose hub is down, still follow, and the hint
+only makes it faster.
+
+Pulling waits or stops wherever it could surprise someone:
+
+- It waits while a run holds DVC's lock, since changing inputs mid-run
+  would make the run's record wrong, and while an agent is running in the
+  workspace.
+- Uncommitted changes don't stop it unless the new commits touch the same
+  files, which Git refuses, and the hub then says so, e.g., "can't pull:
+  local changes to paper.tex".
+- It doesn't merge diverged branches, and the hub shows the divergence on
+  the workspace.
+- DVC pulls only the outputs whose pointers the new commits changed.
+
+Following is opt-in per workspace at first, and could become the default
+for workspaces nobody is working in.
+Pushing is a separate opt-in, for workspaces on `main`, since it shares
+without asking: what's saved there is pushed, so for work straight on the
+project the saved and shared states collapse into one, while change
+batches keep an explicit step before anything reaches `main`.
+Both stop at anything that needs a person, e.g., a merge conflict, which
+the hub then shows on that workspace.
+
+Collaborators working on the same branch at the same time is the case Git
+handles worst, since neither learns of the other until a push is rejected
+or a merge conflicts.
+The hub already gets every linked workspace's branch, commit, and last
+activity, and knows who is editing in its own editor, so it can tell a
+project's collaborators when someone else is actively working on their
+branch, e.g., "Alex is also working on main, active 5 minutes ago".
+When their uncommitted changes touch the same files, it can warn before
+either saves, e.g., "you and Alex both changed paper.tex", which needs
+changed paths, capped, added to check-ins.
+This shares who, which branch, and which files, never the machine, its
+name, or access to it, so it doesn't wait on sharing machines, but it's
+opt-in per project, since it tells collaborators when someone is working.
 
 ### Sessions and the workspace view
 
@@ -775,10 +825,14 @@ so it follows the pipeline integration phase.
    A New workspace picker lists linked machines and GitHub Codespaces,
    with a vote for cloud accounts, and then Codespaces become a provider,
    so users without a machine have one to build on.
+   Workspaces following their upstream, so Overleaf syncs and hub edits
+   reach them without a manual pull.
 3. Pipeline integration: stages on hosts served by a linked machine run through
    the relay, and shared DVC caches and stage locks per machine.
 4. Detached remote stages.
-5. Sharing: collaborator workspaces and multiplayer.
+5. Sharing: collaborator workspaces and multiplayer, starting with
+   telling collaborators who else is working on their branch, which
+   needs no machine sharing.
    Machines stay owner-only until how others may use one is decided;
    anything run for someone else would be sandboxed, e.g., in a
    container with only their workspace mounted.
@@ -874,6 +928,7 @@ so it follows the pipeline integration phase.
 - **Live file sync between workspaces.** Would make workspaces feel like
   one, but conflicts with agents and concurrent runs would be silent and
   unrecoverable, where Git makes them explicit.
+  Following upstream gets most of the benefit through Git.
 - **Name a machine in project environments.** Machine names are per
   user, so the project would only work for its author.
 - **Declare machines in `calkit.yaml`, as sketched in #90.** Ties a

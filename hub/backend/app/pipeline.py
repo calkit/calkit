@@ -984,8 +984,8 @@ def find_stage_for_path(
 class PipelineAtRef(NamedTuple):
     """A project's pipeline at one ref, and what's stale in it."""
 
-    dvc_yaml: dict
-    dvc_lock: dict
+    dvc_yaml: dict[str, Any]
+    dvc_lock: dict[str, Any]
     statuses: dict[str, StageStatus]
     frozen: set[str]
 
@@ -998,8 +998,8 @@ def pipeline_at_ref(
     Best-effort, so a project whose pipeline can't be read reports nothing
     rather than failing whatever asked.
     """
-    dvc_yaml: dict = {}
-    dvc_lock: dict = {}
+    dvc_yaml: dict[str, Any] = {}
+    dvc_lock: dict[str, Any] = {}
     statuses: dict[str, StageStatus] = {}
     frozen: set[str] = set()
     try:

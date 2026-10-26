@@ -364,10 +364,9 @@ function OriginCell({ item }: { item: PublicationComponent }) {
         </Link>
       </>
     )
-  if (item.kind === "authored")
-    return item.source === "overleaf"
-      ? "Written in Overleaf"
-      : "Written in this repo"
+  // Where it's edited, e.g., Overleaf, is where work happens, not where it
+  // came from
+  if (item.kind === "authored") return "Created in the project"
   if (item.kind === "attested") return "Made by hand or with AI"
   if (item.kind === "imported") return "Imported from elsewhere"
   return (

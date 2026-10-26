@@ -4458,6 +4458,10 @@ export type QuestionPublic = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4465,6 +4469,14 @@ export type QuestionPublic = {
    * Evidence
    */
   evidence?: Array<QuestionEvidence>
+  /**
+   * Verifications
+   */
+  verifications?: Array<QuestionSignOff>
+  /**
+   * Validations
+   */
+  validations?: Array<QuestionSignOff>
 }
 
 /**
@@ -4480,6 +4492,10 @@ export type QuestionPut = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4487,6 +4503,44 @@ export type QuestionPut = {
    * Evidence
    */
   evidence?: Array<QuestionEvidencePost>
+}
+
+/**
+ * QuestionSignOff
+ *
+ * A verification or validation of a question, checked against history.
+ *
+ * A verification says the stages behind the evidence implement the
+ * approach; a validation says the approach suits the question and the
+ * evidence justifies the answer. Stale means what it vouches for changed
+ * after the commit that added it; unchecked means that commit couldn't be
+ * found.
+ */
+export type QuestionSignOff = {
+  /**
+   * By
+   */
+  by: string
+  /**
+   * Date
+   */
+  date?: string | null
+  /**
+   * Notes
+   */
+  notes?: string | null
+  /**
+   * With Ai
+   */
+  with_ai?: Array<string>
+  /**
+   * Status
+   */
+  status: "current" | "stale" | "unchecked"
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**

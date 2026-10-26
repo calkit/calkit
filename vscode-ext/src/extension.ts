@@ -43,6 +43,7 @@ import {
   type QuestionOrigin,
   type Subproject,
 } from "./subprojects";
+import { alignQuestionChecks, parseQuestionChecks } from "./questions";
 import {
   formatYamlSyntaxError,
   yamlSyntaxError,
@@ -2603,6 +2604,7 @@ async function refreshPipelineOutputContext(
   // forces it.
   if (force || isAutoRefreshStatusEnabled()) {
     ensureRunStatusPolling(context);
+    void refreshQuestionChecks(workspaceRoot);
   }
 }
 
@@ -2826,6 +2828,57 @@ async function pollPipelineRunStatus(
     );
   } else {
     runStatusPolling = false;
+  }
+}
+
+// Each question's status from `calkit check questions`, shown in the sidebar.
+// It reads Git history, so it runs in the background, one at a time, with a
+// request made while one runs queued to run after it.
+let questionChecksRunning = false;
+let questionChecksQueued = false;
+
+async function refreshQuestionChecks(workspaceRoot: string): Promise<void> {
+  if (questionChecksRunning) {
+    questionChecksQueued = true;
+    return;
+  }
+  questionChecksRunning = true;
+  try {
+    do {
+      questionChecksQueued = false;
+      if (!(currentCalkitConfig?.questions ?? []).length) {
+        sidebarProvider?.setQuestionChecks([]);
+        continue;
+      }
+      let stdout = "";
+      try {
+        suppressRwlockUntil = Date.now() + 5000;
+        // Without the pipeline, since the sidebar already knows which stages
+        // are stale and asking DVC is the slow part
+        ({ stdout } = await execFileAsync(
+          "calkit",
+          ["check", "questions", "--json", "--no-pipeline"],
+          { cwd: workspaceRoot, timeout: 120_000, maxBuffer: 32 * 1024 * 1024 },
+        ));
+      } catch (error) {
+        // It exits nonzero when a question fails, with the report still on
+        // stdout; with no report, e.g., an older CLI, questions show no status
+        stdout = String((error as { stdout?: unknown }).stdout ?? "");
+        if (!stdout.trim()) {
+          log(`Question check failed: ${String(error)}`);
+        }
+      } finally {
+        suppressRwlockUntil = Date.now() + 5000;
+      }
+      sidebarProvider?.setQuestionChecks(
+        alignQuestionChecks(
+          parseQuestionChecks(stdout),
+          currentQuestionOrigins,
+        ),
+      );
+    } while (questionChecksQueued);
+  } finally {
+    questionChecksRunning = false;
   }
 }
 

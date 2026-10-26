@@ -15,9 +15,18 @@ changing underneath an answer. This skill covers what a check cannot:
 whether the sentence still follows from the evidence, and whether the
 question's `approach` describes what its pipeline stages actually do.
 
-A person saying an answer holds is recorded as a review under the
-question's `reviews`. A review is theirs, not yours: you read and report,
-and they sign off.
+People sign off on a question in two ways, and the two are easy to mix up:
+
+- **Verification**, under `verifications`: the stages behind the evidence
+  implement the `approach` correctly, i.e., the answer was worked out
+  right. It is about code against the approach sentence, not about whether
+  the answer is true.
+- **Validation**, under `validations`: the approach suits the question and
+  the evidence justifies the answer, i.e., the right thing was worked out.
+  It is about whether the claim is logical and defensible, not about the
+  code.
+
+A sign-off is theirs, not yours: you read and report, and they sign off.
 
 ## Division of labor
 
@@ -31,8 +40,12 @@ Deterministic, done by `calkit check questions` — never re-derive by hand:
 - every publication `label` still exists in the LaTeX source;
 - no evidence has changed (Git history for Git-tracked outputs, `dvc.lock`
   for DVC-tracked ones) since the commit that last edited the question;
-- no review is stale, i.e., neither the evidence nor the question has
-  changed since the commit that added it;
+- no verification is stale, i.e., neither the approach nor any of the
+  question's stages, their definitions or what `dvc.lock` lists as their
+  dependencies, has changed since the commit that added it;
+- no validation is stale, i.e., neither the question, its hypothesis,
+  approach, or answer, nor its evidence has changed since the commit that
+  added it;
 - which pipeline stages are behind each question's evidence, upstream
   first, listed by `calkit check questions --verbose` and
   `calkit list questions`;
@@ -47,8 +60,9 @@ Judgment, done here — the check reads paths and hashes, and cannot read a
 sentence:
 
 - **does the evidence actually support the answer**, which is the reason
-  this skill exists;
-- **does the `approach` describe what the stages implement**;
+  this skill exists and what a validation vouches for;
+- **does the `approach` describe what the stages implement**, which is what
+  a verification vouches for;
 - does the answer still follow from the evidence, given what changed;
 - are numbers retyped into the prose that should be `{name}` placeholders;
 - does a claim resting on a threshold use a conditional answer, with a
@@ -56,7 +70,7 @@ sentence:
 - is the answer concise, and does it point at the publication section that
   carries the argument rather than repeating it.
 
-## Does the evidence support the answer?
+## Does the evidence support the answer? (validation)
 
 A question can pass every deterministic check and still be wrong: the
 paths resolve, the numbers render, nothing has changed since — and the
@@ -96,7 +110,7 @@ evidence does not support the sentence, propose the sentence it does
 support and let the user decide; never edit the answer to match the
 evidence without showing them both.
 
-## Does the approach match the implementation?
+## Does the approach match the implementation? (verification)
 
 `approach` is one sentence on how the question is answered. The stages it
 summarizes are derived from the evidence, so they can't drift, but the
@@ -115,7 +129,9 @@ sentence can. For each question with an `approach`:
 
 Report mismatches with the line of code and the words they contradict, and
 propose a corrected sentence. A question with an answer and no `approach`
-is worth one: draft it from the stages and let the user decide.
+is worth one: draft it from the stages and let the user decide. Whether
+the approach is the right one for the question belongs to validation, not
+here.
 
 ## Procedure
 
@@ -130,9 +146,10 @@ is worth one: draft it from the stages and let the user decide.
    the old evidence (`git show <commit>:<path>`). Decide:
    - **The claim still holds**: say so, with what you checked. Recording
      that is the user's sign-off, not yours: suggest they run
-     `calkit update question <n> --review "<what they checked>"`, adding
+     `calkit update question <n> --validate "<what they checked>"`, or
+     `--verify` for the approach against the code, adding
      `--with-ai "<your model>"` if your reading informed theirs. Never add
-     or refresh a review yourself unless they ask you to, and then only
+     or refresh a sign-off yourself unless they ask you to, and then only
      with their Git identity and that disclosure.
    - **The claim no longer holds**: draft a corrected answer, show the user
      the old and new text side by side with the values that changed, and
@@ -140,11 +157,13 @@ is worth one: draft it from the stages and let the user decide.
    - **The evidence changed because a stage is not reproducible** (same
      inputs, different output): that is a pipeline defect, not an answer
      defect. Report it as such and do not rewrite the answer to match noise.
-3. For each question whose **review is stale**, the report names what
-   changed since the reviewer signed off: evidence, with old and new
-   values, or the question's own text. Do the reading in step 2 against
-   the version they signed off on (`git show <commit>:calkit.yaml`), and
-   tell the user which reviewers need to look again and at what.
+3. For each **stale verification or validation**, the report names what
+   changed since the person signed off: for a verification, the approach,
+   a stage, or a dependency it ran; for a validation, evidence, with old
+   and new values, or the question's own text. Redo the matching reading
+   above against the version they signed off on
+   (`git show <commit>:calkit.yaml`), and tell the user who needs to look
+   again and at what.
 4. For each **unattributed** evidence entry, ask where the file came
    from. If a stage should produce it, that is a pipeline gap worth
    reporting. If it was imported or made by hand, declare it under
@@ -159,13 +178,13 @@ is worth one: draft it from the stages and let the user decide.
    evidence carries into a `{name:...}` placeholder on a `value` entry, so
    it is read from the results file rather than retyped.
 
-7. Run the evidence-supports-the-answer and approach reviews above on every
-   question in scope, `ok` ones included. A question the CLI passed is where an
+7. Run the validation and verification readings above on every question
+   in scope, `ok` ones included. A question the CLI passed is where an
    unsupported claim survives, because nothing else looks at it.
 
-Never edit a question or add a review just to clear the check. A review
-records a person having read the answer against the evidence, and one
-added without that is a false statement about the project, not a tidy-up.
+Never edit a question or add a sign-off just to clear the check. A
+sign-off records a person having done the reading, and one added without
+that is a false statement about the project, not a tidy-up.
 
 ## Writing answers
 
@@ -215,7 +234,7 @@ added without that is a false statement about the project, not a tidy-up.
 
 ## Reporting
 
-Relay a short table: question index, status, review status, what changed,
-what you did or propose. Quote values, not adjectives. If the pipeline is stale
+Relay a short table: question index, status, verification and validation
+status, what changed, what you did or propose. Quote values, not adjectives. If the pipeline is stale
 (`calkit status`), say so first, since the evidence may be about to change
 again.

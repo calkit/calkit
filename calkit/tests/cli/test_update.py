@@ -1095,12 +1095,16 @@ def test_update_question(tmp_dir):
             ]
         }
     )
-    # Nothing to do, no such question, or AI disclosed with no review
+    # Nothing to do, no such question, AI disclosed with no sign-off, or a
+    # sign-off with nothing to sign off on
     for args in [
         ["question", "1"],
         ["question", "3", "--notes", "x"],
         ["question", "nope", "--notes", "x"],
         ["question", "1", "--with-ai", "Claude Opus 5"],
+        ["question", "1", "--verify", ""],
+        ["question", "1", "--approach", "Run it.", "--validate", ""],
+        ["question", "2", "--verify", ""],
     ]:
         result = runner.invoke(update_app, args)
         assert result.exit_code != 0, args
@@ -1111,8 +1115,8 @@ def test_update_question(tmp_dir):
     assert result.exit_code == 0, result.output
     questions = calkit.load_calkit_info()["questions"]
     assert questions[0] == {"question": "Does it work?", "approach": "Run it."}
-    # By name, a new field goes where it would be written by hand, and a
-    # review is recorded from Git's identity, covering this same update
+    # By name, a new field goes where it would be written by hand, and
+    # sign-offs are recorded from Git's identity, covering this same update
     result = runner.invoke(
         update_app,
         [
@@ -1120,8 +1124,10 @@ def test_update_question(tmp_dir):
             "why",
             "--approach",
             "Ask.",
-            "--review",
-            "Read it.",
+            "--verify",
+            "Read the code.",
+            "--validate",
+            "Read the answer.",
             "--with-ai",
             "Claude Opus 5",
         ],
@@ -1135,28 +1141,26 @@ def test_update_question(tmp_dir):
         "approach",
         "answer",
         "evidence",
-        "reviews",
+        "verifications",
+        "validations",
     ]
-    assert q["reviews"] == [
-        {
-            "by": {
-                "name": "Ada",
-                "email": "ada@example.org",
-                "with_ai": "Claude Opus 5",
-            },
-            "date": date.today(),
-            "notes": "Read it.",
-        }
-    ]
-    # Reviewing again replaces that reviewer's sign-off, and notes are
-    # optional
-    result = runner.invoke(update_app, ["question", "2", "--review", ""])
+    ada = {"name": "Ada", "email": "ada@example.org"}
+    for field, notes in [
+        ("verifications", "Read the code."),
+        ("validations", "Read the answer."),
+    ]:
+        # With the time, so signing off again the same day is a new record
+        signed = q[field][0].pop("date")
+        assert signed.tzinfo is not None and signed.date() == date.today()
+        assert q[field] == [
+            {"by": {**ada, "with_ai": "Claude Opus 5"}, "notes": notes}
+        ]
+    # Signing off again replaces that person's sign-off of that kind only,
+    # and notes are optional
+    result = runner.invoke(update_app, ["question", "2", "--validate", ""])
     assert result.exit_code == 0, result.output
     q = calkit.load_calkit_info()["questions"][1]
-    assert q["reviews"] == [
-        {
-            "by": {"name": "Ada", "email": "ada@example.org"},
-            "date": date.today(),
-        }
-    ]
+    assert q["validations"][0].pop("date") >= signed
+    assert q["validations"] == [{"by": ada}]
+    assert q["verifications"][0]["notes"] == "Read the code."
     assert ProjectInfo.model_validate(calkit.load_calkit_info())

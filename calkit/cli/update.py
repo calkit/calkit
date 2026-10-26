@@ -1548,16 +1548,25 @@ def update_question(
     notes: Annotated[
         str | None, typer.Option("--notes", help="New notes on the question.")
     ] = None,
-    review: Annotated[
+    verify: Annotated[
         str | None,
         typer.Option(
-            "--review",
+            "--verify",
             help=(
-                "Sign off that the answer follows from the evidence, with "
-                "what you checked, e.g., 'Read the figure against the "
-                "answer.' Recorded with your Git name and email and today's "
-                "date, replacing any earlier review of yours, and applies to "
-                "the question as updated by this command."
+                "Sign off that the pipeline stages behind the evidence "
+                "implement the approach correctly, with what you checked, "
+                "e.g., 'fit.py fits both models as stated.'"
+            ),
+        ),
+    ] = None,
+    validate: Annotated[
+        str | None,
+        typer.Option(
+            "--validate",
+            help=(
+                "Sign off that the approach suits the question and the "
+                "evidence justifies the answer, with what you checked, e.g., "
+                "'The R^2 gap justifies quadratic.'"
             ),
         ),
     ] = None,
@@ -1566,13 +1575,18 @@ def update_question(
         typer.Option(
             "--with-ai",
             help=(
-                "A generative AI tool used in reviewing, e.g., 'Claude Opus "
-                "5'. Can be given more than once."
+                "A generative AI tool used in verifying or validating, e.g., "
+                "'Claude Opus 5'. Can be given more than once."
             ),
         ),
     ] = None,
 ) -> None:
-    """Update a question in calkit.yaml, or sign off on its answer."""
+    """Update a question in calkit.yaml, or verify or validate it.
+
+    A sign-off is recorded with your Git name and email and the time,
+    replaces any earlier one of yours of the same kind, and applies to the
+    question as updated by this command.
+    """
     import git
     from ruamel.yaml.comments import CommentedMap
 
@@ -1582,9 +1596,15 @@ def update_question(
         except git.GitCommandError:
             return None
 
-    if with_ai and review is None:
+    sign_offs = {
+        k: v
+        for k, v in [("verifications", verify), ("validations", validate)]
+        if v is not None
+    }
+    if with_ai and not sign_offs:
         raise_error(
-            "--with-ai discloses tools used in a review; add --review."
+            "--with-ai discloses tools used in signing off; add --verify or "
+            "--validate."
         )
     updates = {
         k: v
@@ -1596,7 +1616,7 @@ def update_question(
         ]
         if v is not None
     }
-    if not updates and review is None:
+    if not updates and not sign_offs:
         raise_error("No updates specified.")
     ck_info = calkit.load_calkit_info()
     questions = ck_info.get("questions") or []
@@ -1631,26 +1651,35 @@ def update_question(
             entry.insert(later[0] if later else len(entry), key, value)
         else:
             entry[key] = value
-    if review is not None:
-        email = git_config("user.email")
-        if email is None:
-            raise_error(
-                "A review is recorded with your Git email; set it with "
-                "'git config user.email'."
-            )
+    # Each needs the thing it signs off on
+    if "verifications" in sign_offs and not entry.get("approach"):
+        raise_error(
+            "A verification checks the code against the approach; "
+            "add one with --approach."
+        )
+    if "validations" in sign_offs and not entry.get("answer"):
+        raise_error("A validation checks the answer; add one with --answer.")
+    email = git_config("user.email") if sign_offs else None
+    if sign_offs and email is None:
+        raise_error(
+            "A sign-off is recorded with your Git email; set it with "
+            "'git config user.email'."
+        )
+    for field, sign_off_notes in sign_offs.items():
         by = CommentedMap()
         if name := git_config("user.name"):
             by["name"] = name
         by["email"] = email
         if with_ai:
             by["with_ai"] = with_ai[0] if len(with_ai) == 1 else with_ai
-        new = CommentedMap(by=by, date=datetime.now().date())
-        if review:
-            new["notes"] = review
-        # One per reviewer: reviewing again replaces their earlier one
-        entry["reviews"] = [
+        now = datetime.now().astimezone().replace(microsecond=0)
+        new = CommentedMap(by=by, date=now)
+        if sign_off_notes:
+            new["notes"] = sign_off_notes
+        # One per person: signing off again replaces their earlier one
+        entry[field] = [
             r
-            for r in entry.get("reviews") or []
+            for r in entry.get(field) or []
             if (r.get("by") or {}).get("email") != email
         ] + [new]
     ck_info["questions"] = questions

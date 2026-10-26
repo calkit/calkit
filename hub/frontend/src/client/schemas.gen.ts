@@ -7835,6 +7835,17 @@ export const QuestionPublicSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7852,6 +7863,22 @@ export const QuestionPublicSchema = {
       },
       type: "array",
       title: "Evidence",
+      default: [],
+    },
+    verifications: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Verifications",
+      default: [],
+    },
+    validations: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Validations",
       default: [],
     },
   },
@@ -7884,6 +7911,17 @@ export const QuestionPutSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7906,6 +7944,66 @@ export const QuestionPutSchema = {
   },
   type: "object",
   title: "QuestionPut",
+} as const
+
+export const QuestionSignOffSchema = {
+  properties: {
+    by: {
+      type: "string",
+      title: "By",
+    },
+    date: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date",
+    },
+    notes: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Notes",
+    },
+    with_ai: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "With Ai",
+      default: [],
+    },
+    status: {
+      type: "string",
+      enum: ["current", "stale", "unchecked"],
+      title: "Status",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["by", "status"],
+  title: "QuestionSignOff",
+  description:
+    "A verification or validation of a question, checked against history.\n\nA verification says the stages behind the evidence implement the\napproach; a validation says the approach suits the question and the\nevidence justifies the answer. Stale means what it vouches for changed\nafter the commit that added it; unchecked means that commit couldn't be\nfound.",
 } as const
 
 export const ReferenceEntrySchema = {

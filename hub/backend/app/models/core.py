@@ -1662,19 +1662,44 @@ class QuestionEvidencePost(SQLModel):
     git_ref: str | None = None
 
 
+class QuestionSignOff(SQLModel):
+    """A verification or validation of a question, checked against history.
+
+    A verification says the stages behind the evidence implement the
+    approach; a validation says the approach suits the question and the
+    evidence justifies the answer. Stale means what it vouches for changed
+    after the commit that added it; unchecked means that commit couldn't be
+    found.
+    """
+
+    # Their name, or their email if no name is given
+    by: str
+    date: str | None = None
+    notes: str | None = None
+    with_ai: list[str] = []
+    status: Literal["current", "stale", "unchecked"]
+    # What changed, when stale
+    message: str | None = None
+
+
 class QuestionPublic(SQLModel):
     id: uuid.UUID
     project_id: uuid.UUID
     number: int
     question: str
     hypothesis: str | None = None
+    approach: str | None = None
     answer: str | None = None
     evidence: list[QuestionEvidence] = []
+    verifications: list[QuestionSignOff] = []
+    validations: list[QuestionSignOff] = []
 
 
 class QuestionPut(SQLModel):
     question: str | None = None
     hypothesis: str | None = None
+    # Left as is when not sent, so an older client can't clear it
+    approach: str | None = None
     answer: str | None = None
     evidence: list[QuestionEvidencePost] = []
 

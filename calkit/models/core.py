@@ -2000,23 +2000,27 @@ class DocumentEvidence(Model):
     )
 
 
-class Review(Model):
-    """A person's sign-off that a question's answer follows from its evidence.
+class SignOff(Model):
+    """A person's sign-off on a question, as a verification or validation.
 
-    It applies to the question and evidence as they were at the commit that
-    added it, which is read from Git rather than written here. Evidence
-    changing after that commit, or the question being edited, makes it
-    stale, so a sign-off can't quietly carry over to results nobody read.
+    It applies to the question as it was at the commit that added it, which
+    is read from Git rather than written here, so a sign-off can't quietly
+    carry over to something nobody checked.
     """
 
     model_config = ConfigDict(extra="forbid")
     by: _Person = Field(
         description=(
-            "Who signed off. Generative AI tools used in reviewing are "
-            "disclosed with their ``with_ai``."
+            "Who signed off. Generative AI tools used are disclosed with "
+            "their ``with_ai``."
         )
     )
-    date: date_type = Field(description="When they signed off.")
+    date: date_type | datetime = Field(
+        description=(
+            "When they signed off. Written with the time, so signing off "
+            "again, even on the same day, records a new sign-off."
+        )
+    )
     notes: str | None = Field(
         default=None,
         description="What they checked, or anything they want on record.",
@@ -2040,9 +2044,12 @@ class Question(Model):
 
     An answer is a claim about the evidence as it was when the answer was
     last edited, and Git records when that was. ``calkit check questions``
-    reports evidence that has changed since that commit. A person saying
-    the answer still holds is recorded as a review, which goes stale in
-    turn when the evidence or the question changes after it.
+    reports evidence that has changed since that commit. People sign off on
+    a question in two ways. A verification says the stages behind the
+    evidence implement the ``approach``, and goes stale when the approach or
+    those stages change. A validation says the approach suits the question
+    and the evidence justifies the answer, and goes stale when the question
+    or its evidence changes.
     """
 
     name: str | None = Field(
@@ -2093,12 +2100,23 @@ class Question(Model):
         ]
         | None
     ) = None
-    reviews: list[Review] | None = Field(
+    verifications: list[SignOff] | None = Field(
         default=None,
         description=(
-            "Sign-offs that the answer follows from the evidence, one per "
-            "reviewer; reviewing again replaces that reviewer's entry, and "
-            "Git keeps the earlier ones."
+            "Sign-offs that the pipeline stages behind the evidence implement "
+            "the approach correctly, i.e., the answer was worked out right. "
+            "Stale once the approach or any of those stages changes. One per "
+            "person; signing off again replaces theirs."
+        ),
+    )
+    validations: list[SignOff] | None = Field(
+        default=None,
+        description=(
+            "Sign-offs that the approach suits the question and the evidence "
+            "justifies the answer, i.e., the right thing was worked out. "
+            "Stale once the question, hypothesis, approach, answer, or "
+            "evidence changes. One per person; signing off again replaces "
+            "theirs."
         ),
     )
 

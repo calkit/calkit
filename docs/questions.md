@@ -214,48 +214,66 @@ last edited in `calkit.yaml`, according to Git history, or `dvc.lock` for
 DVC-tracked files.
 This doesn't fail the check, since the answer may still be correct,
 but it's a sign the answer should be read again.
-If it still holds, [review it](#reviewing-answers) to record that.
+If it still holds, [validate it](#verifying-and-validating-answers) to
+record that.
 
 Checking questions is separate from `calkit status` because it needs to
 read the history of `calkit.yaml`.
 
-## Reviewing answers
+## Verifying and validating answers
 
-Once someone has read an answer against its evidence, and the code behind
-it against the approach, they can sign off on it:
+<!-- TODO(Pete): explain verification vs. validation here. -->
+
+Sign off on a question with `calkit update question`:
 
 ```sh
-calkit update question 1 --review "Read the fit against the figure."
+calkit update question 1 --verify "fit.py fits both models as stated."
+calkit update question 1 --validate "The R^2 gap justifies quadratic."
 ```
 
-This adds a review to the question, with the reviewer's name and email from
-Git and today's date, replacing any earlier review of theirs:
+Each adds a sign-off with your name and email from Git and the time,
+replacing any earlier one of yours of the same kind:
 
 ```yaml
 questions:
   - question: How does the system respond to increasing $x$?
     # ...
-    reviews:
+    verifications:
       - by:
           name: Ada Lovelace
           email: ada@example.org
-        date: 2026-10-05
-        notes: Read the fit against the figure.
+        date: 2026-10-05 14:32:10-04:00
+        notes: fit.py fits both models as stated.
+    validations:
+      - by:
+          name: Ada Lovelace
+          email: ada@example.org
+        date: 2026-10-05 14:32:11-04:00
+        notes: The R^2 gap justifies quadratic.
 ```
 
-Add `--with-ai` to note any AI tools used in reviewing,
+Add `--with-ai` to note any AI tools used,
 e.g., `--with-ai "Claude Opus 5.5"`.
 
-A review covers the question and its evidence as they were when it was
-added.
-If the evidence changes afterward, or the question is edited,
-the review goes stale and `calkit check questions` fails until someone
-reviews it again.
-A question nobody has reviewed doesn't fail the check.
+A sign-off covers the project as it was when it was added,
+and goes stale when what it vouches for changes:
+
+- A verification goes stale when the approach changes,
+  or any of the question's stages does,
+  i.e., its definition in `calkit.yaml`,
+  or a dependency `dvc.lock` lists for it, such as its script.
+- A validation goes stale when the question, hypothesis, approach, or answer
+  changes, or any of its evidence does,
+  including evidence pinned to a branch or tag that has moved since.
+
+Editing a question's `notes` doesn't make either stale.
+A stale sign-off fails `calkit check questions` until someone signs off
+again.
+A question nobody has signed off on doesn't fail the check.
 
 Because every answer leads to its evidence and the stages behind it,
-a project can be reviewed a little at a time as the work goes,
-rather than all at once at the end.
+a project can be verified and validated a little at a time as the work
+goes, rather than all at once at the end.
 
 ## Quoting questions and answers in a LaTeX document
 

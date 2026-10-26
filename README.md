@@ -422,20 +422,21 @@ We can see the rendered answer with:
 calkit show question 1
 ```
 
-```
-1. H A - -  How does the system respond to increasing $x$?
-    hypothesis: The value of $y$ increases linearly with $x$.
-    stages:
-      - collect-data
-      - analyze
-    answer: $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
-    evidence:
-      - kind: figure
-        path: figures/x-vs-y.png
-      - kind: value
-        path: results/summary.json
-        key: r_squared_quadratic
-        name: r2
+```markdown
+## 1. How does the system respond to increasing $x$?
+
+`H A - -`
+
+**Hypothesis:** The value of $y$ increases linearly with $x$.
+
+**Stages:** `collect-data`, `analyze`
+
+**Answer:** $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
+
+### Evidence
+
+- Figure `figures/x-vs-y.png`
+- Value `results/summary.json` as `r2` at `r_squared_quadratic` = 0.985
 ```
 
 The evidence files are produced by the pipeline,

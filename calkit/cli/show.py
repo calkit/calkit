@@ -39,7 +39,7 @@ def show_question(
         ),
     ] = False,
 ) -> None:
-    """Show a question in full, with its evidence and sign-offs.
+    """Show a question in full as Markdown, with its evidence and sign-offs.
 
     Placeholders in the text, such as ``{improvement:.1f}``, are filled from
     the question's value evidence, so numbers shown are read from the
@@ -49,6 +49,7 @@ def show_question(
     import calkit
     from calkit.questions import (
         TEMPLATED_FIELDS,
+        EvidenceCheck,
         SignOffCheck,
         check_questions,
         format_letters,
@@ -57,39 +58,56 @@ def show_question(
         render_question,
     )
 
-    def echo_value(key: str, value: object, indent: str) -> None:
-        # YAML-like, leaving out what isn't set
-        if isinstance(value, dict):
-            typer.echo(f"{indent}{key}:")
-            for k, v in value.items():
-                if v is not None:
-                    echo_value(k, v, indent + "  ")
-        elif isinstance(value, list):
-            typer.echo(f"{indent}{key}:")
-            for item in value:
-                if not isinstance(item, dict):
-                    typer.echo(f"{indent}  - {item}")
-                    continue
-                item = {k: v for k, v in item.items() if v is not None}
-                for n, (k, v) in enumerate(item.items()):
-                    prefix = f"{indent}  - " if n == 0 else f"{indent}    "
-                    if isinstance(v, dict):
-                        typer.echo(f"{prefix}{k}:")
-                        for k1, v1 in v.items():
-                            typer.echo(f"{indent}      {k1}: {v1}")
-                    else:
-                        typer.echo(f"{prefix}{k}: {v}")
-        else:
-            typer.echo(f"{indent}{key}: {value}")
+    def evidence_line(ev: dict, c: EvidenceCheck | None) -> list[str]:
+        kind = ev.get("kind", "result")
+        line = f"- {kind.capitalize()} `{ev.get('path', '')}`"
+        sub = []
+        if kind == "value" or (kind == "result" and ev.get("key")):
+            name = ev.get("name")
+            if name and name != ev["key"]:
+                line += f" as `{name}`"
+            line += f" at `{ev['key']}`"
+            if c is not None and c.current is not None:
+                line += f" = {c.current}"
+        for name, key in (ev.get("values") or {}).items():
+            value = (c.values or {}).get(name) if c is not None else None
+            sub.append(
+                f"  - `{name}` at `{key}`"
+                + (f" = {value}" if value is not None else "")
+            )
+        if ev.get("section"):
+            line += f", section {ev['section']}"
+        if ev.get("label"):
+            line += f" (`{ev['label']}`)"
+        if ev.get("git_ref"):
+            line += f", pinned to `{ev['git_ref']}`"
+        if ev.get("explanation"):
+            line += f": {ev['explanation']}"
+        if c is not None and c.status not in ("ok", "skipped"):
+            line += f" *({c.status}" + (f": {c.message}" if c.message else "")
+            line += ")*"
+        return [line] + sub
 
-    def checked(c: SignOffCheck) -> dict:
-        with_ai = f" (with {', '.join(c.with_ai)})" if c.with_ai else ""
-        return {
-            "by": c.by + with_ai,
-            "date": c.date,
-            "notes": c.notes,
-            "status": c.status + (f": {c.message}" if c.message else ""),
-        }
+    def sign_off_line(c: SignOffCheck) -> str:
+        line = "- " + c.by
+        if c.with_ai:
+            line += f" (with {', '.join(c.with_ai)})"
+        if c.date:
+            line += f", {c.date}"
+        line += f" *({c.status}" + (f": {c.message}" if c.message else "")
+        line += ")*"
+        return line + (f": {c.notes}" if c.notes else "")
+
+    def text(value: object) -> str:
+        # A conditional answer left in its branches lists them
+        if not isinstance(value, dict):
+            return str(value)
+        lines = []
+        for clause, branch in value.items():
+            word, _, condition = str(clause).partition(" ")
+            cond = f" `{condition}`" if condition else ""
+            lines.append(f"- **{word}**{cond}: {branch}")
+        return "\n".join(lines)
 
     ck_info = calkit.load_calkit_info()
     questions = ck_info.get("questions") or []
@@ -118,7 +136,7 @@ def show_question(
             "Some placeholders or conditions could not be filled from the "
             "evidence. Run 'calkit check questions' to see why; 'calkit pull' "
             "if the results files are not here yet.",
-            err=json_output,
+            err=True,
         )
     # The stages are derived, so shown ahead of the answer but never written
     out: dict = {}
@@ -131,12 +149,39 @@ def show_question(
     if json_output:
         echo_json({**out, "check": check.model_dump(mode="json")})
         return
-    out["verifications"] = [checked(c) for c in check.verifications] or None
-    out["validations"] = [checked(c) for c in check.validations] or None
-    typer.echo(f"{index + 1}. {format_letters(check)}  {out.pop('question')}")
+    lines = [
+        f"# {index + 1}. {out['question']}",
+        f"`{format_letters(check)}`",
+    ]
     for k, v in out.items():
-        if v is not None:
-            echo_value(k, v, "    ")
+        if k == "stages":
+            lines.append("**Stages:** " + ", ".join(f"`{s}`" for s in v))
+        elif k == "name":
+            lines.append(f"**Name:** `{v}`")
+        elif k in ("hypothesis", "approach", "answer") and v is not None:
+            sep = "\n\n" if isinstance(v, dict) else " "
+            lines.append(f"**{k.capitalize()}:**{sep}{text(v)}")
+    evidence = [ev for ev in out.get("evidence") or [] if isinstance(ev, dict)]
+    if evidence:
+        checks: list = check.evidence or [None] * len(evidence)
+        lines.append(
+            "## Evidence\n\n"
+            + "\n".join(
+                "\n".join(evidence_line(ev, c))
+                for ev, c in zip(evidence, checks)
+            )
+        )
+    if out.get("notes"):
+        lines.append(f"## Notes\n\n{text(out['notes'])}")
+    for title, sign_offs in [
+        ("Verifications", check.verifications),
+        ("Validations", check.validations),
+    ]:
+        if sign_offs:
+            lines.append(
+                f"## {title}\n\n" + "\n".join(map(sign_off_line, sign_offs))
+            )
+    typer.echo("\n\n".join(lines))
 
 
 @show_app.command(name="latex-diff")

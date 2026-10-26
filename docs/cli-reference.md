@@ -2390,16 +2390,16 @@ Options:
 
 Show Calkit objects.
 
-| Command                                      | Description                                               |
-| -------------------------------------------- | --------------------------------------------------------- |
-| [`question\|q`](#subcommand-show-question-q) | Show a question in full, with its evidence and sign-offs. |
-| [`latex-diff`](#subcommand-show-latex-diff)  | Open a LaTeX diff the pipeline keeps.                     |
+| Command                                      | Description                                                           |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| [`question\|q`](#subcommand-show-question-q) | Show a question in full as Markdown, with its evidence and sign-offs. |
+| [`latex-diff`](#subcommand-show-latex-diff)  | Open a LaTeX diff the pipeline keeps.                                 |
 
 <a id="subcommand-show-question-q"></a>
 
 #### `calkit show question|q`
 
-Show a question in full, with its evidence and sign-offs.
+Show a question in full as Markdown, with its evidence and sign-offs.
 
 Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. The pipeline stages behind its evidence are shown too, upstream first.
 

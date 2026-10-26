@@ -35,9 +35,9 @@ The approach is one sentence on how the question is answered.
 The evidence references artifacts created by the project pipeline,
 so each answer can be traced back to the raw data and code behind it,
 as long as the pipeline is up to date.
-`calkit show question` shows the pipeline stages behind a question's
-evidence, worked out from the pipeline itself, so they never need to be
-written down.
+`calkit show question` prints a question as Markdown,
+including the pipeline stages behind its evidence,
+worked out from the pipeline itself, so they never need to be written down.
 `calkit list questions`, or `calkit ls q` for short,
 lists every question with a row of letters,
 H A V V,

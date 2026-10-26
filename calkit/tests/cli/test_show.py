@@ -162,32 +162,42 @@ def test_show_question(tmp_dir):
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    # By position or name, rendered from the evidence, with the stages
-    # derived ahead of the answer and each sign-off's status
+    # By position or name, as Markdown rendered from the evidence, with the
+    # stages derived ahead of the answer and each sign-off's status
     out = show("effect")
     assert out == show("2")
-    assert out.startswith("2. H A V -  What is the effect?\n")
-    assert "    stages:\n      - metrics\n    answer: Accuracy is 0.9." in out
-    assert "      - kind: figure\n        path: figures/performance.png" in out
-    assert "        explanation: See the results section." in out
-    # A result's values are listed one per line under it
+    assert out.startswith("# 2. What is the effect?\n\n`H A V -`\n\n")
+    assert "**Stages:** `metrics`\n\n**Answer:** Accuracy is 0.9.\n" in out
+    assert "## Evidence\n\n- Figure `figures/performance.png` *(missing" in out
+    assert ": See the results section. *(missing" in out
+    # A result's values are listed under it, with what they read
     assert (
-        "        values:\n          acc: accuracy\n          f1: scores.f1"
-        in out
-    )
-    assert "      - by: Ada (with Claude Opus 5)\n" in out
-    assert "        notes: Read metrics.py.\n" in out
-    assert "        status: current: not yet committed" in out
+        "- Result `results/metrics.json`\n"
+        "  - `acc` at `accuracy` = 0.9\n"
+        "  - `f1` at `scores.f1` = 0.8\n"
+    ) in out
+    assert (
+        "## Verifications\n\n- Ada (with Claude Opus 5), 2026-10-04 "
+        "*(current: not yet committed"
+    ) in out
+    assert out.endswith(": Read metrics.py.\n")
     # Fields that aren't set aren't shown
-    assert "None" not in out and "validations" not in out
-    assert show("1") == "1. - - - -  Does it work?\n"
+    assert "None" not in out and "Validations" not in out
+    assert show("1") == "# 1. Does it work?\n\n`- - - -`\n"
     # As written, and for tools
-    assert "answer: Accuracy is {acc}." in show("2", "--raw")
+    assert "**Answer:** Accuracy is {acc}." in show("2", "--raw")
     shown = json.loads(show("effect", "--json"))
     assert shown["answer"] == "Accuracy is 0.9."
     assert shown["stages"] == ["metrics"]
     assert shown["verifications"][0]["by"]["email"] == "ada@example.org"
     assert shown["check"]["verification_status"] == "current"
+    # A conditional answer left in its branches lists them
+    ck_info["questions"][1]["answer"] = {"if acc > 0.5": "Yes.", "else": "No."}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert (
+        "**Answer:**\n\n- **if** `acc > 0.5`: Yes.\n- **else**: No.\n"
+    ) in show("2", "--raw")
     # A question that isn't there is an error
     for ref, message in [("3", "There is no question 3"), ("x", "named 'x'")]:
         result = subprocess.run(

@@ -425,7 +425,7 @@ function ComponentsModal({
       <ModalOverlay />
       <ModalContent>
         <ModalHeader pb={1}>
-          Components of {publication.title || publication.path}
+          Components in '{publication.title || publication.path}'
         </ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={4}>

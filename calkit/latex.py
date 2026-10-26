@@ -523,6 +523,8 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
 COMPONENTS_DIR = "_calkit"
 VALUES_FNAME = "values.tex"
 STYLE_FNAME = "calkit.sty"
+# What Calkit writes in _calkit itself, which no component can replace
+_CALKIT_OWN_FILES = (".gitignore", "README.md", VALUES_FNAME)
 # calkit.sty's commands, each with an optional [...] and its {...} args, of
 # which only \ckvalue has two, so a brace group after another is left alone
 _CK_COMMAND_RE = re.compile(
@@ -575,17 +577,21 @@ def _read_leniently(path: str) -> str | None:
     return p.read_text(encoding="utf-8", errors="replace")
 
 
-def read_ck_usage(document: str) -> tuple[bool, list[CkComponent]]:
+def read_ck_usage(
+    document: str, read: Callable[[str], str | None] = _read_leniently
+) -> tuple[bool, list[CkComponent]]:
     """Whether a document loads calkit.sty, and the components it includes
     with its commands, including in the files it inputs, in order and
     without repeats.
+
+    Files are read with ``read``, e.g., from the hub's copy of a repo.
 
     Commands in a document that doesn't load calkit.sty can't compile, so
     they aren't components. Nor are commands in a macro's definition, whose
     arguments are its parameters, e.g., ``#1``, until used, which can't be
     followed.
     """
-    lines = flatten(document, read=_read_leniently)
+    lines = flatten(document, read=read)
     text = "\n".join(_strip_comments(line.text) for line in lines)
     loads = any(
         "calkit" in (name.strip() for name in m.group(1).split(","))
@@ -756,6 +762,113 @@ def _within_project(path: str, root: str) -> bool:
     return False
 
 
+@dataclass
+class CkMapping:
+    """What goes in a ``_calkit`` folder for the components documents
+    include: the project files copied in, each with whether it's there to
+    copy rather than only stored with DVC, the text of ``values.tex``, and
+    what couldn't be brought in.
+    """
+
+    files: dict[str, bool]
+    values: str
+    problems: list[str]
+
+
+def plan_ck_components(
+    components: list[CkComponent],
+    is_file: Callable[[str], bool],
+    read_data: Callable[[str], Any],
+    is_tracked: Callable[[str], bool] | None = None,
+    is_outside: Callable[[str], bool] | None = None,
+    previous_values: str = "",
+) -> CkMapping:
+    """Work out what goes in ``_calkit`` for some components, reading the
+    project only through the functions given, so it works wherever its
+    files are, e.g., in the hub's copy of a repo.
+
+    ``is_file`` says whether a project path is there, ``read_data`` reads a
+    results file's data, and ``is_outside`` whether a path is reached
+    through a link out of the project. ``is_tracked`` and
+    ``previous_values`` are as for ``map_ck_components``.
+    """
+    from calkit.questions import resolve_key
+
+    def find(c: CkComponent) -> tuple[str | None, str | None, bool]:
+        """Where a component is, what's wrong with it, and whether it's
+        here rather than only stored with DVC.
+        """
+        rel, problem = component_path(c, is_file)
+        if rel is not None and is_outside is not None and is_outside(rel):
+            return None, f"{c.path} links outside the project", False
+        # Calkit's own files in _calkit can't be replaced by a copy
+        if c.kind != "value" and rel in _CALKIT_OWN_FILES:
+            return None, f"{c.path} has a name Calkit uses in _calkit", False
+        if rel is None and is_tracked is not None:
+            tracked, _ = component_path(c, is_tracked)
+            if tracked is not None:
+                return tracked, None, False
+        return rel, problem, rel is not None
+
+    files: dict[str, bool] = {}
+    problems: list[str] = []
+    lines = ["%% Written by Calkit from what the documents here include.\n"]
+    for c in components:
+        if c.kind == "value":
+            continue
+        rel, problem, here = find(c)
+        if rel is None:
+            problems.append(str(problem))
+            continue
+        files[rel] = files.get(rel, False) or here
+        # Where TeX finds one named without an extension, and nothing for one
+        # named in full, so values.tex is the same whether or not the file
+        # could be copied
+        if rel != c.path:
+            lines.append(f"\\cksetfile{{{c.path}}}{{{rel}}}\n")
+    loaded: dict[str, Any] = {}
+    # Formats are applied by calkit.sty, so a value is written once however
+    # many ways it's formatted
+    written: set[tuple[str, str | None]] = set()
+    for c in components:
+        if c.kind != "value" or (c.path, c.key) in written:
+            continue
+        written.add((c.path, c.key))
+        rel, problem, here = find(c)
+        if rel is None:
+            problems.append(str(problem))
+            continue
+        if not here:
+            start = f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{"
+            kept_line = next(
+                (
+                    line + "\n"
+                    for line in previous_values.splitlines()
+                    if line.startswith(start)
+                ),
+                None,
+            )
+            if kept_line is None:
+                problems.append(f"{c.path} is stored with DVC and not pulled")
+            else:
+                lines.append(kept_line)
+            continue
+        try:
+            if rel not in loaded:
+                loaded[rel] = read_data(rel)
+            kind, text = tex_value(resolve_key(loaded[rel], c.key or ""))
+        except KeyError:
+            problems.append(f"{c.path} has no {c.key}")
+            continue
+        except Exception as e:
+            problems.append(f"{c.key} from {c.path}: {e}")
+            continue
+        lines.append(
+            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{kind}}}{{{text}}}\n"
+        )
+    return CkMapping(files=files, values="".join(lines), problems=problems)
+
+
 def map_ck_components(
     path: str,
     is_tracked: Callable[[str], bool] | None = None,
@@ -790,7 +903,7 @@ def map_ck_components(
     """
     import calkit.git
     import calkit.resources
-    from calkit.questions import read_evidence_file, resolve_key
+    from calkit.questions import read_evidence_file
 
     named = [] if os.path.isdir(path or ".") else [path]
     folder = os.path.dirname(path) if named else path
@@ -811,7 +924,6 @@ def map_ck_components(
         if os.path.islink(path):
             return [f"{path} is a link, so Calkit won't write there"]
     real_out = os.path.realpath(out)
-    own = {".gitignore", "README.md", VALUES_FNAME}
 
     def can_write(dest: str) -> bool:
         """Whether a file can go in _calkit without following a link out of
@@ -857,31 +969,25 @@ def map_ck_components(
             root = os.path.abspath(folder or ".")
             break
         root = parent
-
-    def is_file(rel: str) -> bool:
-        return os.path.isfile(os.path.join(root, rel))
-
-    def find(c: CkComponent) -> tuple[str | None, str | None, bool]:
-        """Where a component is, what's wrong with it, and whether it's
-        here rather than only stored with DVC.
-        """
-        rel, problem = component_path(c, is_file)
-        if rel is not None and not _within_project(
-            os.path.join(root, rel), root
-        ):
-            return None, f"{c.path} links outside the project", False
-        # Calkit's own files in _calkit can't be replaced by a copy
-        if c.kind != "value" and rel in own:
-            return None, f"{c.path} has a name Calkit uses in _calkit", False
-        if rel is None and is_tracked is not None:
-            tracked, _ = component_path(c, is_tracked)
-            if tracked is not None:
-                return tracked, None, False
-        return rel, problem, rel is not None
-
-    problems: list[str] = []
-    kept = set(own)
-    for name in own:
+    if previous_values is None:
+        try:
+            with open(os.path.join(out, VALUES_FNAME), encoding="utf-8") as f:
+                previous_values = f.read()
+        except (OSError, UnicodeDecodeError):
+            previous_values = ""
+    plan = plan_ck_components(
+        components,
+        is_file=lambda rel: os.path.isfile(os.path.join(root, rel)),
+        read_data=lambda rel: read_evidence_file(os.path.join(root, rel)),
+        is_tracked=is_tracked,
+        is_outside=lambda rel: (
+            not _within_project(os.path.join(root, rel), root)
+        ),
+        previous_values=previous_values,
+    )
+    problems = list(plan.problems)
+    kept = set(_CALKIT_OWN_FILES) | set(plan.files)
+    for name in _CALKIT_OWN_FILES:
         can_write(os.path.join(out, name))
     _write_if_changed(
         os.path.join(out, ".gitignore"),
@@ -900,21 +1006,14 @@ def map_ck_components(
         "never reach the project.\n"
         "To change a value, figure, or table, change where it comes from.\n",
     )
-    lines = ["%% Written by Calkit from what the documents here include.\n"]
-    for c in components:
-        if c.kind == "value":
-            continue
-        rel, problem, here = find(c)
-        if rel is None:
-            problems.append(str(problem))
-            continue
+    for rel, here in plan.files.items():
         # Skipped while size and timestamp match, since this runs before
         # every status check. Only the content is copied, so a read-only
         # file from DVC's cache leaves a copy that can be updated.
         src = os.path.join(root, rel)
         dest = os.path.join(out, rel)
         if not can_write(dest):
-            problems.append(f"{c.path} would be copied through a link")
+            problems.append(f"{rel} would be copied through a link")
             continue
         if here:
             src_stat = os.stat(src)
@@ -926,59 +1025,7 @@ def map_ck_components(
                 _make_writable(dest)
                 shutil.copyfile(src, dest)
                 os.utime(dest, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
-        kept.add(rel)
-        # Where TeX finds one named without an extension, and nothing for one
-        # named in full, so values.tex is the same whether or not the file
-        # could be copied
-        if rel != c.path:
-            lines.append(f"\\cksetfile{{{c.path}}}{{{rel}}}\n")
-    if previous_values is None:
-        try:
-            with open(os.path.join(out, VALUES_FNAME), encoding="utf-8") as f:
-                previous_values = f.read()
-        except (OSError, UnicodeDecodeError):
-            previous_values = ""
-    loaded: dict[str, Any] = {}
-    # Formats are applied by calkit.sty, so a value is written once however
-    # many ways it's formatted
-    written: set[tuple[str, str | None]] = set()
-    for c in components:
-        if c.kind != "value" or (c.path, c.key) in written:
-            continue
-        written.add((c.path, c.key))
-        rel, problem, here = find(c)
-        if rel is None:
-            problems.append(str(problem))
-            continue
-        if not here:
-            start = f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{"
-            kept_line = next(
-                (
-                    line + "\n"
-                    for line in previous_values.splitlines()
-                    if line.startswith(start)
-                ),
-                None,
-            )
-            if kept_line is None:
-                problems.append(f"{c.path} is stored with DVC and not pulled")
-            else:
-                lines.append(kept_line)
-            continue
-        try:
-            if rel not in loaded:
-                loaded[rel] = read_evidence_file(os.path.join(root, rel))
-            kind, text = tex_value(resolve_key(loaded[rel], c.key or ""))
-        except KeyError:
-            problems.append(f"{c.path} has no {c.key}")
-            continue
-        except Exception as e:
-            problems.append(f"{c.key} from {c.path}: {e}")
-            continue
-        lines.append(
-            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{kind}}}{{{text}}}\n"
-        )
-    _write_if_changed(os.path.join(out, VALUES_FNAME), "".join(lines))
+    _write_if_changed(os.path.join(out, VALUES_FNAME), plan.values)
     for dirpath, _, filenames in os.walk(out, topdown=False):
         for name in filenames:
             path = os.path.join(dirpath, name)

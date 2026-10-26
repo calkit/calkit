@@ -4116,6 +4116,79 @@ export const LatexCommentsMoveSchema = {
   title: "LatexCommentsMove",
 } as const
 
+export const LatexComponentsSchema = {
+  properties: {
+    loads_calkit: {
+      type: "boolean",
+      title: "Loads Calkit",
+    },
+    style: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Style",
+    },
+    values: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
+    copies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Copies",
+      default: [],
+    },
+    problems: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Problems",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["loads_calkit"],
+  title: "LatexComponents",
+  description:
+    "What a document needs beside it for calkit.sty's commands, as\n``calkit latex build`` would write it.",
+} as const
+
+export const LatexComponentsRequestSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    sources: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Sources",
+      default: {},
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "LatexComponentsRequest",
+  description: "A LaTeX document to bring calkit.sty's components in for.",
+} as const
+
 export const MapPathEntrySchema = {
   properties: {
     src: {

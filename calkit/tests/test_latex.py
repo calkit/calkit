@@ -242,6 +242,23 @@ def test_ck_components(tmp_dir):
     assert component_path("figures/fit_1.5", "figure")[0] == (
         "figures/fit_1.5.pdf"
     )
+    # The same can be worked out without the files on disk, e.g., from the
+    # hub's copy of a repo, with figures stored with DVC fetched by name
+    plan = calkit.latex.plan_ck_components(
+        [
+            calkit.latex.CkComponent("figure", "figures/plot"),
+            calkit.latex.CkComponent("value", "results/m.json", "x"),
+            calkit.latex.CkComponent("table", "README.md"),
+        ],
+        is_file=lambda rel: (
+            rel in {"figures/plot.png", "results/m.json", "README.md"}
+        ),
+        read_data=lambda rel: {"x": 2},
+    )
+    assert plan.files == {"figures/plot.png": True}
+    assert "\\cksetfile{figures/plot}{figures/plot.png}" in plan.values
+    assert "\\cksetvalue{results/m.json}{x}{n}{2}" in plan.values
+    assert plan.problems == ["README.md has a name Calkit uses in _calkit"]
     # Nothing is read through a link out of the project, e.g., one committed
     # to Git, though one within it is fine, as is one into DVC's cache,
     # wherever that's kept, and a name Calkit uses in _calkit can't be

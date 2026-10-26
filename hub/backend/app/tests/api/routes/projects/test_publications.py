@@ -542,3 +542,79 @@ def test_get_project_publications_latex_diffs(
     ]
     assert notes_diffs[0]["stage"] == "build-notes-diff-v1"
     assert pubs["other/main.pdf"]["latex_diffs"] == []
+
+
+def test_post_project_latex_components(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    main_tex = (
+        "\\documentclass{article}\n\\usepackage{calkit}\n"
+        "\\begin{document}\n\\input{sections/results}\n"
+        "\\ckfigure{figures/plot}\n\\ckfigure{figures/stored.png}\n"
+        "\\ckfigure{figures/missing.png}\n\\end{document}\n"
+    )
+    files = {
+        "results/m.json": b'{"x": 1.5, "y": 2}',
+        "figures/plot.png": b"png",
+        "paper/main.tex": main_tex.encode(),
+        "paper/sections/results.tex": b"\\ckvalue[.1f]{results/m.json}{x}\n",
+    }
+    repo, _ = _make_repo(tmp_path, files, {"name": "p"})
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        id=uuid.uuid4(),
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
+    # A figure stored with DVC, which the caller fetches like any other
+    dvc_outs = {"figures/stored.png": {"md5": "a" * 32, "size": 3}}
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch("app.api.routes.projects.core.get_repo", return_value=repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.dvc_outputs_from_tree",
+            return_value=dvc_outs,
+        ),
+    ):
+
+        def post(sources: dict[str, str] | None = None) -> dict[str, Any]:
+            resp = client.post(
+                "/projects/o/p/latex-components",
+                json={"path": "paper/main.tex", "sources": sources or {}},
+                headers=normal_user_token_headers,
+            )
+            assert resp.status_code == 200, resp.text
+            return resp.json()
+
+        # What calkit latex build would write beside the document, with
+        # values read here and copies named for the caller to fetch
+        body = post()
+        assert body["loads_calkit"]
+        assert "Calkit project components" in body["style"]
+        assert "\\cksetvalue{results/m.json}{x}{n}{1.5}" in body["values"]
+        assert "\\cksetfile{figures/plot}{figures/plot.png}" in body["values"]
+        assert body["copies"] == ["figures/plot.png", "figures/stored.png"]
+        assert body["problems"] == [
+            "figures/missing.png is not in the project yet"
+        ]
+        # The editor's unsaved text is read instead of what's committed
+        body = post(
+            {"paper/sections/results.tex": "\\ckvalue{results/m.json}{y}\n"}
+        )
+        assert "{results/m.json}{y}{n}{2}" in body["values"]
+        assert "{results/m.json}{x}" not in body["values"]
+        # And a document that doesn't load calkit.sty needs nothing
+        body = post({"paper/main.tex": "\\documentclass{article}\n"})
+        assert body == {
+            "loads_calkit": False,
+            "style": None,
+            "values": None,
+            "copies": [],
+            "problems": [],
+        }

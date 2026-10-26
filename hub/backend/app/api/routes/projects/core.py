@@ -130,6 +130,8 @@ from app.models import (
     Figure,
     FileLock,
     GitRef,
+    LatexComponents,
+    LatexComponentsRequest,
     Message,
     MiscArtifact,
     Notebook,
@@ -6221,6 +6223,93 @@ def get_project_publication_components(
         folder=folder,
         items=items,
         n_unknown=sum(1 for item in items if item.kind == "unknown"),
+    )
+
+
+# Results files are read whole for their values
+LATEX_COMPONENT_VALUES_MAX_BYTES = 10_000_000
+
+
+@router.post("/projects/{owner_name}/{project_name}/latex-components")
+def post_project_latex_components(
+    owner_name: str,
+    project_name: str,
+    req: LatexComponentsRequest,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    ref: str | None = None,
+) -> LatexComponents:
+    """What a LaTeX document needs beside it for calkit.sty's commands, as
+    ``calkit latex build`` would write it, for compiling it elsewhere, e.g.,
+    in the browser.
+
+    The document and the files it inputs are read from ``sources`` where
+    given, e.g., an editor's unsaved text, and otherwise from the project at
+    ``ref``. Values are read here, from Git or DVC storage. Copies are named
+    by their project paths, each going at the same path under ``_calkit``
+    beside the document, for the caller to fetch, since a figure may be
+    large or stored with DVC.
+    """
+    tex_path = _normalize_artifact_file_path(req.path)
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    tree = get_repo_tree_for_ref(repo, ref)
+    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    sources = {posixpath.normpath(p): t for p, t in req.sources.items()}
+
+    def read(path: str) -> str | None:
+        key = posixpath.normpath(Path(path).as_posix())
+        if key in sources:
+            return sources[key]
+        try:
+            return tree.read_bytes(key).decode("utf-8", errors="replace")
+        except Exception:
+            return None
+
+    def is_file(rel: str) -> bool:
+        out = dvc_outs.get(rel)
+        return tree.is_file(rel) or bool(
+            out and out.get("md5") and not str(out["md5"]).endswith(".dir")
+        )
+
+    def is_outside(rel: str) -> bool:
+        return tree.is_symlink(rel) and not tree.is_safe_symlink(rel)
+
+    def read_data(rel: str) -> Any:
+        data = app.projects.read_project_file(
+            project=project,
+            tree=tree,
+            path=rel,
+            max_bytes=LATEX_COMPONENT_VALUES_MAX_BYTES,
+            session=session,
+            current_user=current_user,
+        )
+        return calkit.questions.parse_evidence_text(data.decode("utf-8"), rel)
+
+    loads, components = calkit.latex.read_ck_usage(tex_path, read=read)
+    if not loads:
+        return LatexComponents(loads_calkit=False)
+    plan = calkit.latex.plan_ck_components(
+        components, is_file=is_file, read_data=read_data, is_outside=is_outside
+    )
+    return LatexComponents(
+        loads_calkit=True,
+        style=calkit.resources.read_text("latex", calkit.latex.STYLE_FNAME),
+        values=plan.values,
+        copies=[rel for rel, here in plan.files.items() if here],
+        problems=plan.problems,
     )
 
 

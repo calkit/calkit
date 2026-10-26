@@ -222,13 +222,42 @@ read the history of `calkit.yaml`.
 
 ## Verifying and validating answers
 
-<!-- TODO(Pete): explain verification vs. validation here. -->
+Before trusting an answer, someone should check it,
+and there are two different things to check.
+The terms come from computational science and engineering,
+where they're often summed up as:
+
+> Verification: Are we solving the equations right?
+
+> Validation: Are we solving the right equations?
+
+For a question in a Calkit project,
+verification means checking that the implementation matches the approach,
+i.e., that the pipeline stages behind the evidence do what the approach
+says they do.
+If the approach says we fit linear and quadratic models to $y$ at ten
+values of $x$,
+verifying means reading the code and confirming that's what it does.
+
+Validation means checking that the answer is justified.
+Does the approach make sense for the question?
+Does the evidence actually back up the answer,
+and is the reasoning logical?
+An answer can be verified and still not valid,
+e.g., if the quadratic fit only wins on $R^2$,
+which an extra parameter can never make worse.
+
+Basically, verification is about the code,
+and validation is about the argument.
+They don't need to be done by the same person,
+e.g., someone who knows the code can verify,
+and a domain expert can validate.
 
 Sign off on a question with `calkit update question`:
 
 ```sh
 calkit update question 1 --verify "fit.py fits both models as stated."
-calkit update question 1 --validate "The R^2 gap justifies quadratic."
+calkit update question 1 --validate "The linear fit's residuals curve."
 ```
 
 Each adds a sign-off with your name and email from Git and the time,
@@ -249,7 +278,7 @@ questions:
           name: Ada Lovelace
           email: ada@example.org
         date: 2026-10-05 14:32:11-04:00
-        notes: The R^2 gap justifies quadratic.
+        notes: The linear fit's residuals curve.
 ```
 
 Add `--with-ai` to note any AI tools used,

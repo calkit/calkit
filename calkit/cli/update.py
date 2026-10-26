@@ -1566,7 +1566,7 @@ def update_question(
             help=(
                 "Sign off that the approach suits the question and the "
                 "evidence justifies the answer, with what you checked, e.g., "
-                "'The R^2 gap justifies quadratic.'"
+                "'The linear fit's residuals curve.'"
             ),
         ),
     ] = None,

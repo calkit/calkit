@@ -7,9 +7,10 @@ import hashlib
 import os
 import posixpath
 import re
+import shutil
 import textwrap
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
 from calkit.core import LOCAL_DIR, ensure_local_dir
@@ -58,7 +59,7 @@ WORKING_NAME = "working"
 # of a full TeX Live image. Pinned to an exact tag rather than :latest so
 # a document keeps building against the same TeX until this is moved
 # deliberately; what it carries is recorded in images/latex/README.md.
-DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.6"
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.7"
 # The environment created for a document that doesn't have one, wherever
 # that happens: a new publication, an Overleaf import, or a stage whose
 # environment is worked out from what it runs. Copied where it's used,
@@ -70,6 +71,55 @@ DEFAULT_LATEX_ENVIRONMENT = {
 }
 
 
+# TeX run before the document, leaving the dates and trailer ID out of the
+# PDF. Even taken from a commit, the date changes when history is rewritten,
+# e.g., by a squash merge, which changes the bytes of an identical document.
+# The ID, which pdfTeX derives from the date, is put back from the content
+# afterwards by ``set_content_id``. XeTeX's driver can't leave them out, so
+# its PDF keeps the source date.
+PDF_PRETEX = (
+    r"\ifdefined\pdfinfoomitdate\pdfinfoomitdate=1 \pdftrailerid{}"
+    # LuaTeX's flags for CreationDate (32), ModDate (64), and ID (512)
+    r"\else\ifdefined\pdfvariable\pdfvariable suppressoptionalinfo 608 "
+    r"\pdfvariable trailerid{}\fi\fi"
+)
+
+
+def set_content_id(pdf_path: str) -> bool:
+    """Give a PDF with no trailer ID one hashed from its content.
+
+    PDF/A and PDF 2.0 require an ID, and a viewer keeps its first half when
+    it saves an annotated copy, so a PDF back from review can still be
+    matched to its build. Hashing the bytes keeps the ID the same for the
+    same content. Only the last cross-reference section's dictionary
+    changes, which comes after every offset the file records, so they all
+    stay valid. Returns whether an ID was added.
+    """
+    data = Path(pdf_path).read_bytes()
+    pos = data.rfind(b"startxref")
+    m = re.match(rb"startxref\s+(\d+)", data[pos:]) if pos >= 0 else None
+    if m is None:
+        return False
+    section = int(m.group(1))
+    tail = data[section:pos]
+    # A table's dictionary follows the 'trailer' keyword, and a stream's is
+    # its own, ending where the stream starts
+    if tail.startswith(b"xref"):
+        start = tail.find(b"trailer")
+        end = len(tail)
+    else:
+        start = 0
+        end = tail.find(b"stream")
+    opening = tail.find(b"<<", start) if start >= 0 else -1
+    if opening < 0 or end < 0 or re.search(rb"/ID\b", tail[opening:end]):
+        return False
+    digest = hashlib.md5(data).hexdigest().upper().encode()
+    at = section + opening + 2
+    entry = b" /ID [<" + digest + b"> <" + digest + b">]"
+    Path(pdf_path).write_bytes(data[:at] + entry + data[at:])
+    return True
+
+
 def get_source_date_epoch(tex_file: str) -> str | None:
     """When to say the PDF was built, in seconds since the epoch.
 
@@ -77,7 +127,8 @@ def get_source_date_epoch(tex_file: str) -> str | None:
     ID, so two builds of identical source differ byte for byte, and every
     rebuild rewrites the output's hash in ``dvc.lock``. Taking the date
     from the last commit that touched the document keeps it meaningful
-    while the bytes stay put until the document itself changes.
+    while the bytes stay put until the document itself changes. Where
+    ``PDF_PRETEX`` leaves the date out, it still sets ``\\today``.
     """
     import subprocess
 
@@ -466,15 +517,23 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
     return sorted(found)
 
 
-#: Where Calkit puts what the documents in a folder cite. Not hidden,
-#: since Overleaf drops dot-folders from an uploaded zip.
-CITED_DIR = "_calkit"
-CITED_VALUES_FNAME = "values.tex"
+# Where Calkit puts the components that the documents in a folder include
+# with calkit.sty's commands. Not hidden, since Overleaf drops dot-folders
+# from an uploaded zip.
+COMPONENTS_DIR = "_calkit"
+VALUES_FNAME = "values.tex"
 STYLE_FNAME = "calkit.sty"
-# calkit.sty's commands, each with an optional [...] and its {...} args
-_CITE_RE = re.compile(
-    r"\\ck(value|figure|table)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}"
-    r"(?:\s*\{([^}]*)\})?"
+# What Calkit writes in _calkit itself, which no component can replace
+_CALKIT_OWN_FILES = (".gitignore", "README.md", VALUES_FNAME)
+# calkit.sty's commands, each with an optional [...] and its {...} args, of
+# which only \ckvalue has two, so a brace group after another is left alone
+_CK_COMMAND_RE = re.compile(
+    r"\\ck(?P<kind>(?P<value>v)alue|figure|table)"
+    r"\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
+    r"(?(value)\s*\{(?P<second>[^}]*)\})"
+)
+_PACKAGE_RE = re.compile(
+    r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}"
 )
 _TEX_SPECIALS = {
     "\\": r"\textbackslash{}",
@@ -491,32 +550,112 @@ _TEX_SPECIALS = {
 
 
 @dataclass(frozen=True)
-class Citation:
-    """Project content a document cites with one of calkit.sty's commands,
-    by its path relative to the project root.
+class CkComponent:
+    """A document component included with one of calkit.sty's commands,
+    named by its path relative to the project root.
+
+    Components can be integrated other ways, e.g., a stage writing into the
+    document's folder, a map-paths copy, or json-to-latex; this is only the
+    kind Calkit brings in itself.
     """
 
     kind: str
     path: str
     key: str | None = None
-    #: A Python format spec for a value, e.g., ``.2f``
+    # How calkit.sty formats a value: siunitx options, or a Python format
+    # spec, e.g., .2f
     format: str = ""
 
 
-def find_citations(document: str) -> list[Citation]:
-    """What a document cites with calkit.sty's commands, including in the
-    files it inputs, in order and without repeats.
+def _read_leniently(path: str) -> str | None:
+    """A source file's text, with anything that isn't UTF-8 replaced, since
+    finding components mustn't fail on a document in another encoding.
     """
-    text = "\n".join(_strip_comments(line.text) for line in flatten(document))
-    found: list[Citation] = []
-    for kind, option, first, second in _CITE_RE.findall(text):
+    p = Path(path)
+    if not p.is_file():
+        return None
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
+def read_ck_usage(
+    document: str, read: Callable[[str], str | None] = _read_leniently
+) -> tuple[bool, list[CkComponent]]:
+    """Whether a document loads calkit.sty, and the components it includes
+    with its commands, including in the files it inputs, in order and
+    without repeats.
+
+    Files are read with ``read``, e.g., from the hub's copy of a repo.
+
+    Commands in a document that doesn't load calkit.sty can't compile, so
+    they aren't components. Nor are commands in a macro's definition, whose
+    arguments are its parameters, e.g., ``#1``, until used, which can't be
+    followed.
+    """
+    lines = flatten(document, read=read)
+    text = "\n".join(_strip_comments(line.text) for line in lines)
+    loads = any(
+        "calkit" in (name.strip() for name in m.group(1).split(","))
+        for m in _PACKAGE_RE.finditer(text)
+    )
+    if not loads:
+        return False, []
+    found: list[CkComponent] = []
+    for match in _CK_COMMAND_RE.finditer(text):
+        kind, option, first = match.group("kind", "option", "first")
+        option, second = option or "", match.group("second") or ""
+        if "#" in first + second:
+            continue
         if kind == "value":
             found.append(
-                Citation(kind, first.strip(), second.strip(), option.strip())
+                CkComponent(
+                    kind, first.strip(), second.strip(), option.strip()
+                )
             )
         else:
-            found.append(Citation(kind, first.strip()))
-    return list(dict.fromkeys(found))
+            found.append(CkComponent(kind, first.strip()))
+    return True, list(dict.fromkeys(found))
+
+
+def component_candidates(
+    component: CkComponent,
+) -> tuple[list[str], str | None]:
+    """The project paths a component's file could be at, in the order TeX
+    tries them, or what's wrong with how it's named.
+
+    A figure or table named without an extension is found the way TeX
+    finds it, e.g., ``figures/plot`` as ``figures/plot.pdf`` or ``.png``,
+    and so is one with a dot in its name, e.g., ``figures/fit_1.5``.
+    """
+    raw = component.path.replace("\\", "/")
+    if raw.startswith("/") or PureWindowsPath(component.path).drive:
+        return [], f"{component.path} is outside the project"
+    rel = posixpath.normpath(raw)
+    if rel == ".." or rel.startswith("../"):
+        return [], f"{component.path} is outside the project"
+    # TeX reads the path as written, so a copy at the normalized path
+    # wouldn't be found
+    if ".." in raw.split("/"):
+        return [], f"{component.path} can't include '..'"
+    if component.kind != "value":
+        exts = _GRAPHICS_EXTS if component.kind == "figure" else [".tex"]
+        if posixpath.splitext(rel)[1].lower() not in exts:
+            return [rel + ext for ext in exts] + [rel], None
+    return [rel], None
+
+
+def component_path(
+    component: CkComponent, exists: Callable[[str], bool]
+) -> tuple[str | None, str | None]:
+    """Where a component's file is, relative to the project, or what's
+    wrong with it, with ``exists`` saying whether a project path is there.
+    """
+    candidates, problem = component_candidates(component)
+    if problem is not None:
+        return None, problem
+    for candidate in candidates:
+        if exists(candidate):
+            return candidate, None
+    return None, f"{component.path} is not in the project yet"
 
 
 def find_shown(document: str, wdir: str | None = None) -> list[str]:
@@ -539,7 +678,7 @@ def root_documents(folder: str) -> list[str]:
         path = os.path.join(folder, name)
         if not name.endswith(".tex") or not os.path.isfile(path):
             continue
-        text = read_file(path) or ""
+        text = _read_leniently(path) or ""
         if re.search(r"^\s*\\documentclass", _strip_comments(text), re.M):
             docs.append(path)
     return docs
@@ -550,16 +689,20 @@ def escape_tex(text: str) -> str:
     return "".join(_TEX_SPECIALS.get(c, c) for c in str(text))
 
 
-def format_value(value: Any, spec: str = "") -> str:
-    """A value as text for a document, with an optional format spec."""
+def tex_value(value: Any) -> tuple[str, str]:
+    """A value's kind and text for ``_calkit/values.tex``: ``n`` for a
+    number, written in full for calkit.sty to format, or ``t`` for text.
+    """
+    import math
+
     # MATLAB and NumPy write a scalar as a one-element array
     if isinstance(value, (list, tuple)) and len(value) == 1:
         value = value[0]
-    if spec:
-        return format(value, spec)
-    if isinstance(value, float):
-        return f"{value:g}"
-    return str(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "t", escape_tex(str(value))
+    if isinstance(value, float) and not math.isfinite(value):
+        return "t", escape_tex(str(value))
+    return "n", repr(value)
 
 
 def _write_if_changed(path: str, content: str | bytes) -> None:
@@ -576,31 +719,264 @@ def _write_if_changed(path: str, content: str | bytes) -> None:
         f.write(data)
 
 
-def write_cited(folder: str) -> list[str]:
-    """Bring what the documents in a folder cite into its ``_calkit``
-    folder, so they build without the rest of the project, e.g., on
-    Overleaf.
+def _make_writable(path: str) -> None:
+    """Let a file be overwritten or removed, e.g., one copied from DVC's
+    cache, which is read-only, or on Windows, where read-only blocks
+    removal. A link is left alone, since that would change what it points
+    to.
+    """
+    import stat
 
-    Cited files are copied, the values cited are written to
-    ``_calkit/values.tex`` formatted as asked, and ``calkit.sty`` is put
-    beside the documents. Anything no longer cited is removed, since
-    nothing else writes there.
+    if (
+        os.path.exists(path)
+        and not os.path.islink(path)
+        and not os.access(path, os.W_OK)
+    ):
+        os.chmod(path, os.stat(path).st_mode | stat.S_IWUSR)
+
+
+def _is_within(path: str, base: str) -> bool:
+    try:
+        return os.path.commonpath([path, base]) == base
+    except ValueError:
+        return False
+
+
+def _within_project(path: str, root: str) -> bool:
+    """Whether a file is really in the project, rather than reached through
+    a link out of it, e.g., a symlink committed to Git, so nothing outside
+    is read and pushed to Overleaf. DVC's cache counts, since DVC can check
+    files out as links to it.
+    """
+    real = os.path.realpath(path)
+    real_root = os.path.realpath(root)
+    if _is_within(real, real_root):
+        return True
+    # A cache kept elsewhere, only looked for when a link leaves the project
+    dvc_dir = os.path.join(real_root, ".dvc")
+    for name in ["config", "config.local"]:
+        try:
+            with open(os.path.join(dvc_dir, name), encoding="utf-8") as f:
+                config = f.read()
+        except OSError:
+            continue
+        section = re.search(
+            r"^\[cache\]\s*$(.*?)(?=^\[|\Z)", config, re.M | re.S
+        )
+        match = section and re.search(
+            r"^\s*dir\s*=\s*(.+?)\s*$", section.group(1), re.M
+        )
+        if match:
+            cache = os.path.realpath(os.path.join(dvc_dir, match.group(1)))
+            if _is_within(real, cache):
+                return True
+    return False
+
+
+@dataclass
+class CkMapping:
+    """What goes in a ``_calkit`` folder for the components documents
+    include: the project files copied in, each with whether it's there to
+    copy rather than only stored with DVC, the text of ``values.tex``, and
+    what couldn't be brought in.
+    """
+
+    files: dict[str, bool]
+    values: str
+    problems: list[str]
+
+
+def plan_ck_components(
+    components: list[CkComponent],
+    is_file: Callable[[str], bool],
+    read_data: Callable[[str], Any],
+    is_tracked: Callable[[str], bool] | None = None,
+    is_outside: Callable[[str], bool] | None = None,
+    previous_values: str = "",
+    link_base: str | None = None,
+) -> CkMapping:
+    """Work out what goes in ``_calkit`` for some components, reading the
+    project only through the functions given, so it works wherever its
+    files are, e.g., in the hub's copy of a repo.
+
+    ``is_file`` says whether a project path is there, ``read_data`` reads a
+    results file's data, and ``is_outside`` whether a path is reached
+    through a link out of the project. ``is_tracked`` and
+    ``previous_values`` are as for ``map_ck_components``. ``link_base`` is
+    the project's URL on its hub, which components link to in the PDF.
+    """
+    from calkit.questions import resolve_key
+
+    def find(c: CkComponent) -> tuple[str | None, str | None, bool]:
+        """Where a component is, what's wrong with it, and whether it's
+        here rather than only stored with DVC.
+        """
+        rel, problem = component_path(c, is_file)
+        if rel is not None and is_outside is not None and is_outside(rel):
+            return None, f"{c.path} links outside the project", False
+        # Calkit's own files in _calkit can't be replaced by a copy
+        if c.kind != "value" and rel in _CALKIT_OWN_FILES:
+            return None, f"{c.path} has a name Calkit uses in _calkit", False
+        if rel is None and is_tracked is not None:
+            tracked, _ = component_path(c, is_tracked)
+            if tracked is not None:
+                return tracked, None, False
+        return rel, problem, rel is not None
+
+    files: dict[str, bool] = {}
+    problems: list[str] = []
+    lines = ["%% Written by Calkit from what the documents here include.\n"]
+    if link_base:
+        lines.append(f"\\cklinkbase{{{link_base}}}\n")
+    for c in components:
+        if c.kind == "value":
+            continue
+        rel, problem, here = find(c)
+        if rel is None:
+            problems.append(str(problem))
+            continue
+        files[rel] = files.get(rel, False) or here
+        # Where TeX finds one named without an extension, and nothing for one
+        # named in full, so values.tex is the same whether or not the file
+        # could be copied
+        if rel != c.path:
+            lines.append(f"\\cksetfile{{{c.path}}}{{{rel}}}\n")
+    loaded: dict[str, Any] = {}
+    # Formats are applied by calkit.sty, so a value is written once however
+    # many ways it's formatted
+    written: set[tuple[str, str | None]] = set()
+    for c in components:
+        if c.kind != "value" or (c.path, c.key) in written:
+            continue
+        written.add((c.path, c.key))
+        rel, problem, here = find(c)
+        if rel is None:
+            problems.append(str(problem))
+            continue
+        if not here:
+            start = f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{"
+            kept_line = next(
+                (
+                    line + "\n"
+                    for line in previous_values.splitlines()
+                    if line.startswith(start)
+                ),
+                None,
+            )
+            if kept_line is None:
+                problems.append(f"{c.path} is stored with DVC and not pulled")
+            else:
+                lines.append(kept_line)
+            continue
+        try:
+            if rel not in loaded:
+                loaded[rel] = read_data(rel)
+            kind, text = tex_value(resolve_key(loaded[rel], c.key or ""))
+        except KeyError:
+            problems.append(f"{c.path} has no {c.key}")
+            continue
+        except Exception as e:
+            problems.append(f"{c.key} from {c.path}: {e}")
+            continue
+        lines.append(
+            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{kind}}}{{{text}}}\n"
+        )
+    return CkMapping(files=files, values="".join(lines), problems=problems)
+
+
+def map_ck_components(
+    path: str,
+    is_tracked: Callable[[str], bool] | None = None,
+    previous_values: str | None = None,
+) -> list[str]:
+    """Bring the components a document, or the documents in a folder,
+    include with calkit.sty's commands into the ``_calkit`` folder beside
+    them, so they build without the rest of the project, e.g., on Overleaf.
+
+    Only documents that load calkit.sty are mapped, so Calkit writes nothing
+    beside one that doesn't. One that does gets ``calkit.sty`` and
+    ``_calkit`` even before it includes anything, so it compiles.
+
+    Every document directly in the folder is included, plus the document
+    named, e.g., one whose ``\\documentclass`` is in a file it inputs, since
+    they share the ``_calkit`` folder, and mapping one alone would remove
+    the others' copies. Files are copied, values are written to
+    ``_calkit/values.tex`` for calkit.sty to format, and ``calkit.sty`` is
+    put beside the documents. Anything no longer included is removed, since
+    nothing else writes there, as is ``calkit.sty`` once no document loads
+    it.
+
+    ``is_tracked`` says whether a project path is stored with DVC, so
+    something that isn't pulled, e.g., on the hub, comes out as it would
+    where it is: a figure or table named without an extension is found the
+    same way, and a value is kept from ``previous_values``, e.g., Overleaf's
+    ``values.tex``, or the one being replaced. It's only asked about what
+    isn't here.
 
     Returns what couldn't be brought in, e.g., a file the pipeline hasn't
     produced yet. Those print as ``??`` rather than failing the build.
     """
+    import calkit.git
     import calkit.resources
-    from calkit.questions import read_evidence_file, resolve_key
+    from calkit.questions import read_evidence_file
 
-    citations = list(
+    named = [] if os.path.isdir(path or ".") else [path]
+    folder = os.path.dirname(path) if named else path
+    docs = list(
         dict.fromkeys(
-            c for doc in root_documents(folder) for c in find_citations(doc)
+            os.path.normpath(d)
+            for d in root_documents(folder) + named
+            if os.path.isfile(d)
         )
     )
-    out = os.path.join(folder, CITED_DIR)
-    if not citations and not os.path.isdir(out):
+    usage = [read_ck_usage(doc) for doc in docs]
+    components = list(dict.fromkeys(c for _, found in usage for c in found))
+    out = os.path.join(folder, COMPONENTS_DIR)
+    style_path = os.path.join(folder, STYLE_FNAME)
+    # Nothing is written, changed, or removed through a link, e.g., one
+    # committed to Git, which could point anywhere
+    for path in [out, style_path]:
+        if os.path.islink(path):
+            return [f"{path} is a link, so Calkit won't write there"]
+    real_out = os.path.realpath(out)
+
+    def can_write(dest: str) -> bool:
+        """Whether a file can go in _calkit without following a link out of
+        it, removing a link where the file goes.
+        """
+        parent = os.path.realpath(os.path.dirname(dest))
+        if not _is_within(parent, real_out):
+            return False
+        if os.path.islink(dest):
+            os.remove(dest)
+        return True
+
+    if not any(loads for loads, _ in usage):
+        if os.path.isdir(out):
+            for dirpath, _, filenames in os.walk(out):
+                for name in filenames:
+                    _make_writable(os.path.join(dirpath, name))
+            shutil.rmtree(out)
+        # Only the one Calkit wrote, and never one that's committed
+        if os.path.isfile(style_path):
+            with open(style_path, encoding="utf-8", errors="replace") as f:
+                ours = "Calkit project components" in f.read()
+            try:
+                repo = calkit.git.get_repo(folder or ".")
+                committed = bool(
+                    repo.git.ls_files(
+                        "--",
+                        os.path.relpath(
+                            os.path.abspath(style_path), repo.working_dir
+                        ),
+                    )
+                )
+            except Exception:
+                committed = False
+            if ours and not committed:
+                os.remove(style_path)
         return []
-    # Cited paths are relative to the project, wherever the document is
+    # Component paths are relative to the project, wherever the document is
     root = os.path.abspath(folder or ".")
     while not os.path.isfile(os.path.join(root, "calkit.yaml")):
         parent = os.path.dirname(root)
@@ -608,71 +984,176 @@ def write_cited(folder: str) -> list[str]:
             root = os.path.abspath(folder or ".")
             break
         root = parent
-    problems: list[str] = []
-    kept = {".gitignore", CITED_VALUES_FNAME}
-    _write_if_changed(
-        os.path.join(out, ".gitignore"),
-        "# Calkit copies what the documents beside this folder cite into it\n"
-        "*\n",
-    )
-    for c in citations:
-        if c.kind == "value":
-            continue
-        rel = posixpath.normpath(Path(c.path).as_posix())
-        src = os.path.join(root, rel)
-        if rel.startswith("../") or os.path.isabs(c.path):
-            problems.append(f"{c.path} is outside the project")
-        elif not os.path.isfile(src):
-            problems.append(f"{c.path} is not in the project yet")
-        else:
-            with open(src, "rb") as f:
-                _write_if_changed(os.path.join(out, rel), f.read())
-            kept.add(rel)
-    lines = ["%% Written by Calkit from what the documents here cite.\n"]
-    # Where each citation links to, i.e., the project on its hub, when the
-    # project says where that is
+    # Components link to the project on its hub, when it's known whose it is
+    link_base = None
     try:
         import calkit.config
 
-        hub = calkit.load_calkit_info(wdir=root).get("hub") or "calkit.io"
+        hub = calkit.load_calkit_info(wdir=root, read_only=True).get("hub")
+        hub = hub or "calkit.io"
         project = calkit.detect_project_name(wdir=root)
-        lines.append(
-            f"\\cklinkbase{{{calkit.config.normalize_hub_url(hub)}/"
-            f"{project}}}\n"
-        )
+        link_base = f"{calkit.config.normalize_hub_url(hub)}/{project}"
     except Exception:
         pass
-    loaded: dict[str, Any] = {}
-    for c in citations:
-        if c.kind != "value":
-            continue
+    if previous_values is None:
         try:
-            if c.path not in loaded:
-                loaded[c.path] = read_evidence_file(os.path.join(root, c.path))
-            text = escape_tex(
-                format_value(
-                    resolve_key(loaded[c.path], c.key or ""), c.format
-                )
-            )
-        except Exception as e:
-            problems.append(f"{c.key} from {c.path}: {e}")
+            with open(os.path.join(out, VALUES_FNAME), encoding="utf-8") as f:
+                previous_values = f.read()
+        except (OSError, UnicodeDecodeError):
+            previous_values = ""
+    plan = plan_ck_components(
+        components,
+        is_file=lambda rel: os.path.isfile(os.path.join(root, rel)),
+        read_data=lambda rel: read_evidence_file(os.path.join(root, rel)),
+        is_tracked=is_tracked,
+        is_outside=lambda rel: (
+            not _within_project(os.path.join(root, rel), root)
+        ),
+        previous_values=previous_values,
+        link_base=link_base,
+    )
+    problems = list(plan.problems)
+    kept = set(_CALKIT_OWN_FILES) | set(plan.files)
+    for name in _CALKIT_OWN_FILES:
+        can_write(os.path.join(out, name))
+    _write_if_changed(
+        os.path.join(out, ".gitignore"),
+        "# Calkit copies the components the documents beside this folder\n"
+        "# include into it\n"
+        "*\n",
+    )
+    # Pushed to Overleaf with the rest, where the .gitignore isn't a hint
+    _write_if_changed(
+        os.path.join(out, "README.md"),
+        "# Don't edit anything here\n\n"
+        "Calkit writes this folder from the project, for the documents\n"
+        "beside it to include with `\\ckvalue`, `\\ckfigure`, and\n"
+        "`\\cktable`. It's rewritten whenever the pipeline runs or is\n"
+        "checked and on every Overleaf sync, so edits here are lost and\n"
+        "never reach the project.\n"
+        "To change a value, figure, or table, change where it comes from.\n",
+    )
+    for rel, here in plan.files.items():
+        # Skipped while size and timestamp match, since this runs before
+        # every status check. Only the content is copied, so a read-only
+        # file from DVC's cache leaves a copy that can be updated.
+        src = os.path.join(root, rel)
+        dest = os.path.join(out, rel)
+        if not can_write(dest):
+            problems.append(f"{rel} would be copied through a link")
             continue
-        lines.append(
-            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{c.format}}}{{{text}}}\n"
-        )
-    _write_if_changed(os.path.join(out, CITED_VALUES_FNAME), "".join(lines))
+        if here:
+            src_stat = os.stat(src)
+            if not os.path.isfile(dest) or (
+                os.stat(dest).st_size,
+                os.stat(dest).st_mtime_ns,
+            ) != (src_stat.st_size, src_stat.st_mtime_ns):
+                os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+                _make_writable(dest)
+                shutil.copyfile(src, dest)
+                os.utime(dest, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+    _write_if_changed(os.path.join(out, VALUES_FNAME), plan.values)
     for dirpath, _, filenames in os.walk(out, topdown=False):
         for name in filenames:
             path = os.path.join(dirpath, name)
             if Path(os.path.relpath(path, out)).as_posix() not in kept:
+                _make_writable(path)
                 os.remove(path)
         if dirpath != out and not os.listdir(dirpath):
             os.rmdir(dirpath)
+    new_style = not os.path.isfile(style_path)
     _write_if_changed(
-        os.path.join(folder, STYLE_FNAME),
-        calkit.resources.read_text("latex", STYLE_FNAME),
+        style_path, calkit.resources.read_text("latex", STYLE_FNAME)
     )
+    # Written whenever it's needed, so kept out of Git, wherever this runs
+    if new_style:
+        try:
+            repo = calkit.git.get_repo(root)
+            rel_style = os.path.relpath(
+                os.path.abspath(style_path), repo.working_dir
+            )
+            if not repo.git.ls_files("--", rel_style):
+                calkit.git.ensure_path_is_ignored(repo, rel_style)
+        except Exception:
+            pass
     return problems
+
+
+def expand_ck_components(
+    source_root: str, data_root: str, document: str
+) -> None:
+    """Replace calkit.sty's commands in a document and the files it inputs
+    with what they show, read from ``data_root``, so latexdiff can mark a
+    changed value, figure, or table.
+
+    The sources are rewritten under ``source_root``, e.g., a checkout of a
+    revision, and ``document`` is relative to it. A figure becomes an
+    ``\\includegraphics`` of its file and a table its contents, and a value
+    a ``\\cknum`` of the number, which calkit.sty formats. A command whose
+    component can't be found is left alone, to print as ``??``.
+    """
+    from calkit.questions import read_evidence_file, resolve_key
+
+    doc_dir = os.path.dirname(document)
+
+    def is_file(rel: str) -> bool:
+        path = os.path.join(data_root, rel)
+        return os.path.isfile(path) and _within_project(path, data_root)
+
+    def replace(match: re.Match[str]) -> str:
+        kind, option, first, second = match.group(
+            "kind", "option", "first", "second"
+        )
+        if "#" in first + (second or ""):
+            return match.group(0)
+        c = CkComponent(kind, first.strip(), (second or "").strip() or None)
+        rel, _ = component_path(c, is_file)
+        if rel is None:
+            return match.group(0)
+        if kind == "figure":
+            name = posixpath.relpath(rel, doc_dir or ".")
+            return f"\\includegraphics[{option or ''}]{{{name}}}"
+        if kind == "table":
+            return _read_leniently(os.path.join(data_root, rel)) or ""
+        try:
+            value = resolve_key(
+                read_evidence_file(os.path.join(data_root, rel)), c.key or ""
+            )
+        except Exception:
+            return match.group(0)
+        value_kind, text = tex_value(value)
+        if value_kind == "t":
+            return text
+        return f"\\cknum[{(option or '').strip()}]{{{text}}}"
+
+    sources = [document] + [
+        path
+        for path in detect_inputs(document, wdir=source_root)
+        if Path(path).suffix in _SOURCE_EXTS
+    ]
+    for source in dict.fromkeys(sources):
+        path = Path(source_root, source)
+        text = _read_leniently(str(path))
+        if text is None:
+            continue
+        # Comments are set aside, marked by their number, so a command split
+        # across lines is still found, but none in a comment
+        comments: list[str] = []
+        code_lines = []
+        for line in text.split("\n"):
+            m = re.search(r"(?<!\\)%", line)
+            if m:
+                code_lines.append(f"{line[: m.start()]}\0{len(comments)}\0")
+                comments.append(line[m.start() :])
+            else:
+                code_lines.append(line)
+        new_text = re.sub(
+            "\0(\\d+)\0",
+            lambda m: comments[int(m.group(1))],
+            _CK_COMMAND_RE.sub(replace, "\n".join(code_lines)),
+        )
+        if new_text != text:
+            path.write_text(new_text, encoding="utf-8")
 
 
 # Records of Word exports and merges: always kept on this machine, like run
@@ -871,7 +1352,9 @@ def flatten(
                 child = start / target
                 if child.suffix == "":
                     child = child.with_suffix(".tex")
-                visit(child, child.parent)
+                # TeX reads \input paths from where it compiles, and only
+                # \import moves that to the imported file's folder
+                visit(child, child.parent if cmd == "import" else base)
                 continue
             out.append(SourceLine(rel, i, line))
 

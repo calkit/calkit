@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   citationAt,
   citationText,
-  includeCandidates,
+  citationCandidates,
   isDiffableDocument,
   latexDiffPath,
   refDirName,
@@ -62,6 +62,10 @@ describe("citationAt", () => {
   test("ignores text between commands and commands in comments", () => {
     expect(citationAt(line, line.indexOf("and"))).toBeNull();
     expect(citationAt(line, line.indexOf("tables/t.tex"))).toBeNull();
+    // Only a value takes a second brace group, as in calkit/latex.py
+    const after = "\\ckfigure{figures/a}{caption}";
+    expect(citationAt(after, after.indexOf("caption"))).toBeNull();
+    expect(citationAt("\\ckvalue{results/m.json}", 3)).toBeNull();
   });
 
   test("finds plain includes too, by the path as written", () => {
@@ -100,31 +104,71 @@ describe("citationAt", () => {
   });
 });
 
-describe("includeCandidates", () => {
+describe("citationCandidates", () => {
   test("tries the name as written, then what TeX would add", () => {
     const figure = { kind: "figure", options: "", included: true } as const;
-    expect(includeCandidates("paper", { ...figure, path: "figs/fit" })).toEqual(
-      [
-        "paper/figs/fit",
-        "paper/figs/fit.pdf",
-        "paper/figs/fit.png",
-        "paper/figs/fit.jpg",
-        "paper/figs/fit.jpeg",
-        "paper/figs/fit.eps",
-        "paper/figs/fit.ps",
-        "paper/figs/fit.gif",
-      ],
-    );
+    expect(
+      citationCandidates("paper", { ...figure, path: "figs/fit" }),
+    ).toEqual([
+      "paper/figs/fit",
+      "paper/figs/fit.pdf",
+      "paper/figs/fit.png",
+      "paper/figs/fit.jpg",
+      "paper/figs/fit.jpeg",
+      "paper/figs/fit.eps",
+      "paper/figs/fit.ps",
+      "paper/figs/fit.gif",
+    ]);
     // An extension already written is the only place to look, and a path
     // can climb out of the paper's folder
     expect(
-      includeCandidates("pubs/paper", {
+      citationCandidates("pubs/paper", {
         ...figure,
         path: "../../figures/a.PNG",
       }),
     ).toEqual(["figures/a.PNG"]);
     expect(
-      includeCandidates(".", { kind: "file", path: "./t", options: "" }),
+      citationCandidates(".", {
+        kind: "file",
+        path: "./t",
+        options: "",
+        included: true,
+      }),
     ).toEqual(["t", "t.tex"]);
+  });
+
+  test("finds calkit.sty's components from the project root", () => {
+    // Extensions first, as calkit.sty looks for them
+    expect(
+      citationCandidates("paper", {
+        kind: "figure",
+        path: "figures/fit_1.5",
+        options: "",
+      }),
+    ).toEqual([
+      "figures/fit_1.5.pdf",
+      "figures/fit_1.5.png",
+      "figures/fit_1.5.jpg",
+      "figures/fit_1.5.jpeg",
+      "figures/fit_1.5.eps",
+      "figures/fit_1.5.ps",
+      "figures/fit_1.5.gif",
+      "figures/fit_1.5",
+    ]);
+    expect(
+      citationCandidates("paper", {
+        kind: "table",
+        path: "tables/t.tex",
+        options: "",
+      }),
+    ).toEqual(["tables/t.tex"]);
+    expect(
+      citationCandidates("paper", {
+        kind: "value",
+        path: "results/m.json",
+        key: "x",
+        options: "",
+      }),
+    ).toEqual(["results/m.json"]);
   });
 });

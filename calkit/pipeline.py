@@ -1217,27 +1217,47 @@ def get_status(
     wdir: str | None = None,
     check_environments: bool = True,
     clean_notebooks: bool = True,
+    preprocess_stages: bool = True,
     compile_to_dvc: bool = True,
     force_env_check: bool = False,
     with_data_status: bool = False,
     with_storage_problems: bool = False,
     quiet_environment_checks: bool = False,
     progress: Callable[[str], None] | None = None,
+    start_docker: Callable[[], None] | None = None,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
-    This can compile the Calkit pipeline to DVC, clean notebook outputs,
-    check pipeline environments, then query DVC for out-of-date stages.
+    This can compile the Calkit pipeline to DVC, letting stages write the
+    files they read that aren't kept in the project as it does, clean
+    notebook outputs, check pipeline environments, then query DVC for
+    out-of-date stages.
     With ``with_data_status``, DVC's data status is attached as well, left
     None if it fails so the caller can ask again and report why.
     ``progress`` is told what's being done as each step starts.
+    ``start_docker`` is called when a stage needs Docker and it isn't
+    ready, e.g., to offer to start it, and raises ``DockerNotReadyError``
+    if it still isn't.
     """
 
     def step(text: str) -> None:
         if progress is not None:
             progress(text)
 
+    def check_envs(docker_required: bool) -> dict:
+        return calkit.environments.check_all_in_pipeline(
+            ck_info=ck_info,
+            targets=targets,
+            force=force_env_check,
+            skip_stages=list(result["gated_stages"]),
+            quiet=quiet_environment_checks,
+            progress=progress,
+            docker_required=docker_required,
+        )
+
+    import calkit.docker
     import calkit.environments
+    import calkit.latex
     import calkit.markdown
 
     prev_cwd = os.getcwd()
@@ -1300,14 +1320,20 @@ def get_status(
                     remote=False,
                 )
                 result["gated_stages"] = gated | gate_errors
-                env_checks = calkit.environments.check_all_in_pipeline(
-                    ck_info=ck_info,
-                    targets=targets,
-                    force=force_env_check,
-                    skip_stages=list(result["gated_stages"]),
-                    quiet=quiet_environment_checks,
-                    progress=progress,
-                )
+
+                try:
+                    env_checks = check_envs(docker_required=True)
+                except calkit.docker.DockerNotReadyError:
+                    # Docker not running doesn't make anything stale, so
+                    # without it only the environments that need it fail
+                    ready = False
+                    if start_docker is not None:
+                        try:
+                            start_docker()
+                            ready = True
+                        except calkit.docker.DockerNotReadyError:
+                            pass
+                    env_checks = check_envs(docker_required=ready)
                 result["environment_checks"] = env_checks
             except Exception as e:
                 result["errors"].append(
@@ -1328,7 +1354,12 @@ def get_status(
         ):
             step("Compiling pipeline")
             try:
-                to_dvc(ck_info=ck_info, write=True, manage_gitignore=False)
+                to_dvc(
+                    ck_info=ck_info,
+                    write=True,
+                    manage_gitignore=False,
+                    preprocess_stages=preprocess_stages,
+                )
             except Exception as e:
                 result["errors"].append(
                     f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
@@ -2036,11 +2067,19 @@ def _ensure_latex_aux_gitignore(
         return posixpath.normpath(path.replace("\\", "/"))
 
     aux_globs = [
+        # Acronym lists from glossaries
+        "*.acn",
+        "*.acr",
+        "*.alg",
         "*.aux",
         "*.bbl",
         "*.bcf",
         "*.blg",
+        # Back references from backref
+        "*.brf",
         "*.dvi",
+        # Endnotes from endnotes
+        "*.ent",
         "*.fdb_latexmk",
         "*.fls",
         "*.glg",
@@ -2050,20 +2089,35 @@ def _ensure_latex_aux_gitignore(
         "*.ilg",
         "*.ind",
         "*.ist",
+        # Lists of algorithms and listings
+        "*.loa",
         "*.lof",
         "*.log",
+        "*.lol",
         "*.lot",
         "*.nav",
+        # Nomenclature from nomencl
+        "*.nlg",
+        "*.nlo",
+        "*.nls",
         "*.out",
         "*.run.xml",
         "*.snm",
         # Written by elsarticle, among other classes
         "*.spl",
         "*.synctex.gz",
+        # The list of todos from todonotes
+        "*.tdo",
+        # Theorem lists from ntheorem
+        "*.thm",
         "*.toc",
         "*.vrb",
         "*.xdv",
     ]
+    # Written by Calkit before the pipeline runs or is checked, and when
+    # syncing with Overleaf, for a document that loads it
+    if stage._loads_calkit:
+        aux_globs.append("/calkit.sty")
     # Stage path fields are relative to the stage's wdir, which in turn is
     # relative to the (sub)project being compiled.
     base = os.path.join(wdir or ".", stage.wdir) if stage.wdir else wdir or "."
@@ -2276,6 +2330,7 @@ def to_dvc(
     verbose: bool = False,
     manage_gitignore: bool = True,
     for_run: bool = False,
+    preprocess_stages: bool = False,
 ) -> dict:
     """Compile a Calkit pipeline to a DVC pipeline.
 
@@ -2290,8 +2345,14 @@ def to_dvc(
     ``for_run`` is for compiling where the stages will run, which is the
     only place an env var a stage depends on is recorded as unset, since
     elsewhere, e.g., an editor's process, it may just not be set.
+
+    ``preprocess_stages`` lets stages write files they read that aren't
+    kept in the project, which they depend on, for compiling before the
+    pipeline is run or checked. Off otherwise, so compiling has no side
+    effects for, e.g., the hub committing an edit.
     """
     import calkit.dvc.zip
+    import calkit.latex
     import calkit.markdown
     import calkit.questions
     from calkit.environments import (
@@ -2304,7 +2365,7 @@ def to_dvc(
         resolve_env_var,
         write_switch_env_lock,
     )
-    from calkit.models.io import EnvVarInput
+    from calkit.models.io import EnvVarInput, ScheduleInput
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -2396,6 +2457,7 @@ def to_dvc(
             verbose=verbose,
             manage_gitignore=manage_gitignore,
             for_run=for_run,
+            preprocess_stages=preprocess_stages,
         )
         if not sp_is_isolated:
             continue
@@ -2587,19 +2649,9 @@ def to_dvc(
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
     pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
-    # A document's cited project content is as much an input as its source
-    import calkit.latex
-
-    for stage in pipeline.stages.values():
-        if isinstance(stage, LatexStage):
-            document = os.path.join(
-                wdir or "", stage.wdir or "", stage.target_path
-            )
-            stage._cited_paths = list(
-                dict.fromkeys(
-                    c.path for c in calkit.latex.find_citations(document)
-                )
-            )
+    # Stages that work out what they depend on from the project, which only
+    # the pipeline knows the location of
+    pipeline.preprocess_stages(wdir, write_files=preprocess_stages)
     if write:
         # The resolved setup commands each stage runs, written beside the
         # pipeline so the compiled command can name a path instead of
@@ -2652,6 +2704,12 @@ def to_dvc(
                 marker="calkit stage env vars",
                 lines=["/.calkit/env-vars/"],
             )
+        # The current period of each schedule a stage runs on, so the stage
+        # goes out of date when the next period starts
+        for stage in pipeline.stages.values():
+            for i in stage.inputs:
+                if isinstance(i, ScheduleInput):
+                    i.write_period_file(wdir=wdir)
         # Remove files left by stages that were renamed, deleted, or no
         # longer need one, since the command files are committed
         for gen_dir, kept in [

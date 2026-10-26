@@ -1,23 +1,26 @@
-%% calkit.sty -- content from a Calkit project, cited by its path in the
-%% project. Calkit copies what a document cites into _calkit/ beside it and
+%% calkit.sty -- components from a Calkit project, named by their path in the
+%% project. Calkit copies what a document includes into _calkit/ beside it and
 %% writes the values it uses to _calkit/values.tex, so the document builds
-%% anywhere, including Overleaf. Written by Calkit; commit it with the
-%% document.
+%% anywhere, including Overleaf. Written by Calkit, and kept out of Git, since
+%% Calkit writes it again before running or checking the pipeline.
 \NeedsTeXFormat{LaTeX2e}
-\ProvidesPackage{calkit}[2026/10/16 v0.1 Calkit project content]
+\ProvidesPackage{calkit}[2026/10/25 v0.2 Calkit project components]
 \newif\ifck@links \ck@linkstrue
 % Without links, e.g., for a journal that shouldn't see the project
 \DeclareOption{nolinks}{\ck@linksfalse}
 \ProcessOptions\relax
-\RequirePackage{graphicx}
+\RequirePackage{siunitx}
+% Loaded at the end of the preamble, so options the document gives graphicx
+% itself, before or after loading calkit, don't clash
+\ifdefined\AddToHook
+  \AddToHook{begindocument/before}{\RequirePackage{graphicx}}
+\else
+  \RequirePackage{graphicx}
+\fi
 \def\ck@dir{_calkit}
 \let\ck@linkbase\@empty
-% Written by Calkit into _calkit/values.tex
 \newcommand\cklinkbase[1]{\def\ck@linkbase{#1}}
-\newcommand\cksetvalue[4]{%
-  \expandafter\def\csname ck@v@#1@#2@#3\endcsname{#4}}
-\InputIfFileExists{\ck@dir/values.tex}{}{}
-% Cited but not brought in yet, e.g., just inserted on Overleaf
+% Included but not brought in yet, e.g., just inserted on Overleaf
 \newcommand\ck@missing[1]{%
   \PackageWarning{calkit}{#1 hasn't been brought in yet; sync with Calkit}%
   \textbf{??}}
@@ -27,17 +30,186 @@
   \ifck@links\ifx\ck@linkbase\@empty #2%
   \else\ifdefined\href \href{\ck@linkbase/#1}{#2}\else #2\fi\fi
   \else #2\fi}
-% \ckvalue[format]{path}{key}: a value from a results file. Calkit applies
-% the format, e.g., .2f, when it writes the value.
+% Numbers are formatted here rather than by Calkit, so changing a format,
+% e.g., on Overleaf, applies without bringing anything in again. A format is
+% siunitx options, passed to \num, or a Python format spec, which is turned
+% into them: .2f (decimal places), .3g or .3 (significant figures), .2e
+% (scientific), d (integer), with a leading comma to group thousands.
+\ExplSyntaxOn
+\seq_new:N \l__calkit_spec_seq
+\tl_new:N \l__calkit_spec_tl
+\tl_new:N \l__calkit_opts_tl
+\tl_new:N \l__calkit_prec_tl
+\tl_new:N \l__calkit_type_tl
+\tl_new:N \l__calkit_group_tl
+% Names as Calkit writes them: spaces trimmed, and characters like ~ made
+% harmless
+\cs_new:Npn \__calkit_name:n #1 { \tl_trim_spaces:o { \tl_to_str:n {#1} } }
+\cs_new:Npn \__calkit_value_cs:nn #1#2
+  { ck@v@ \__calkit_name:n {#1} @ \__calkit_name:n {#2} }
+\cs_new:Npn \__calkit_kind_cs:nn #1#2
+  { ck@k@ \__calkit_name:n {#1} @ \__calkit_name:n {#2} }
+\cs_new_protected:Npn \__calkit_num_with:nn #1#2 { \num [#1] {#2} }
+\cs_new_protected:Npn \__calkit_num:nn #1#2
+  {
+    \tl_set:Nx \l__calkit_spec_tl { \tl_trim_spaces:n {#1} }
+    % Without a format, siunitx's defaults apply, including \sisetup's
+    \tl_if_empty:NTF \l__calkit_spec_tl { \num {#2} }
+      {
+        \tl_if_in:NnTF \l__calkit_spec_tl { = }
+          { \exp_args:NV \__calkit_num_with:nn \l__calkit_spec_tl {#2} }
+          {
+            \exp_args:NnV \regex_extract_once:nnNTF
+              { \A (,?) (?: \. (\d+) )? ([defg]?) \Z }
+              \l__calkit_spec_tl \l__calkit_spec_seq
+              {
+                \tl_clear:N \l__calkit_opts_tl
+                \tl_set:Nx \l__calkit_prec_tl
+                  { \seq_item:Nn \l__calkit_spec_seq { 3 } }
+                \tl_set:Nx \l__calkit_type_tl
+                  { \seq_item:Nn \l__calkit_spec_seq { 4 } }
+                \tl_set:Nx \l__calkit_group_tl
+                  { \seq_item:Nn \l__calkit_spec_seq { 2 } }
+                % Grouped only with a comma, as in Python
+                \tl_if_empty:NTF \l__calkit_group_tl
+                  {
+                    \tl_put_right:Nn \l__calkit_opts_tl
+                      { group-digits = none , }
+                  }
+                  {
+                    \tl_put_right:Nn \l__calkit_opts_tl
+                      {
+                        group-digits = integer ,
+                        group-separator = { , } ,
+                        group-minimum-digits = 4 ,
+                      }
+                  }
+                % Python's default precision, and .3 alone means figures
+                \tl_if_empty:NTF \l__calkit_prec_tl
+                  { \tl_set:Nn \l__calkit_prec_tl { 6 } }
+                  {
+                    \tl_if_empty:NT \l__calkit_type_tl
+                      { \tl_set:Nn \l__calkit_type_tl { g } }
+                  }
+                % Fixed notation for f and d, since a number Calkit writes
+                % may be in exponent form, e.g., 1e-05
+                \str_case:Vn \l__calkit_type_tl
+                  {
+                    { f }
+                      {
+                        \tl_put_right:Nx \l__calkit_opts_tl
+                          {
+                            exponent-mode = fixed ,
+                            round-mode = places ,
+                            round-precision = \l__calkit_prec_tl
+                          }
+                      }
+                    { e }
+                      {
+                        \tl_put_right:Nx \l__calkit_opts_tl
+                          {
+                            exponent-mode = scientific ,
+                            print-zero-exponent = true ,
+                            round-mode = places ,
+                            round-precision = \l__calkit_prec_tl
+                          }
+                      }
+                    % Scientific where Python switches to it, i.e., below
+                    % 1e-4 or from 10 to the power of the precision, and
+                    % without padding
+                    { g }
+                      {
+                        \tl_put_right:Nx \l__calkit_opts_tl
+                          {
+                            round-mode = figures ,
+                            round-precision = \l__calkit_prec_tl ,
+                            round-pad = false ,
+                            drop-zero-decimal = true ,
+                            exponent-mode = threshold ,
+                            exponent-thresholds =
+                              -5 \c_colon_str \l__calkit_prec_tl
+                          }
+                      }
+                    { d }
+                      {
+                        \tl_put_right:Nn \l__calkit_opts_tl
+                          {
+                            exponent-mode = fixed ,
+                            round-mode = places ,
+                            round-precision = 0
+                          }
+                      }
+                  }
+                \exp_args:NV \__calkit_num_with:nn \l__calkit_opts_tl {#2}
+              }
+              {
+                \PackageWarning { calkit }
+                  { Can't~apply~format~'#1'~in~TeX;~printing~the~value~as~is }
+                \num {#2}
+              }
+          }
+      }
+  }
+\cs_new_protected:Npn \ck@value #1#2#3
+  {
+    \exp_args:Nv \str_if_eq:nnTF { \__calkit_kind_cs:nn {#2} {#3} } { n }
+      {
+        \exp_args:Nnv \__calkit_num:nn {#1}
+          { \__calkit_value_cs:nn {#2} {#3} }
+      }
+      { \use:c { \__calkit_value_cs:nn {#2} {#3} } }
+  }
+\cs_new:Npn \ck@if@value #1#2
+  { \cs_if_exist:cTF { \__calkit_value_cs:nn {#1} {#2} } }
+% Where a file is in _calkit, for one named without an extension
+\cs_new:Npn \ck@if@file #1
+  { \cs_if_exist:cTF { ck@f@ \__calkit_name:n {#1} } }
+\cs_new:Npn \ck@file #1 { \use:c { ck@f@ \__calkit_name:n {#1} } }
+% Written by Calkit into _calkit/values.tex. A value's kind is n for a
+% number, which \ckvalue formats, or t for text, which it prints as is.
+\cs_new_protected:Npn \cksetvalue #1#2#3#4
+  {
+    \cs_set:cpn { \__calkit_value_cs:nn {#1} {#2} } {#4}
+    \cs_set:cpn { \__calkit_kind_cs:nn {#1} {#2} } {#3}
+  }
+\cs_new_protected:Npn \cksetfile #1#2
+  { \cs_set:cpn { ck@f@ \__calkit_name:n {#1} } {#2} }
+% The value as it is, for a PDF bookmark, e.g., from a \section with hyperref
+\cs_new:Npn \ck@plain #1#2
+  {
+    \cs_if_exist:cTF { \__calkit_value_cs:nn {#1} {#2} }
+      { \use:c { \__calkit_value_cs:nn {#1} {#2} } } { ?? }
+  }
+\cs_new_eq:NN \ck@num \__calkit_num:nn
+\ExplSyntaxOff
+\InputIfFileExists{\ck@dir/values.tex}{}{}
+% \cknum[format]{number}: a number formatted the way \ckvalue formats one,
+% which is what Calkit writes \ckvalue as to mark up a diff
+\newcommand\cknum[2][]{\ck@num{#1}{#2}}
+% \ckvalue[format]{path}{key}: a value from a results file
 \newcommand\ckvalue[3][]{%
-  \ifcsname ck@v@#2@#3@#1\endcsname
-    \ck@link{results?path=#2\string&key=#3}{\csname ck@v@#2@#3@#1\endcsname}%
-  \else\ck@missing{#3 from #2}\fi}
+  \ck@if@value{#2}{#3}%
+    {\ck@link{results?path=#2\string&key=#3}{\ck@value{#1}{#2}{#3}}}%
+    {\ck@missing{#3 from #2}}}
+\ifdefined\NewExpandableDocumentCommand
+  \NewExpandableDocumentCommand\ck@plainvalue{O{}mm}{\ck@plain{#2}{#3}}
+  \AtBeginDocument{%
+    \ifdefined\pdfstringdefDisableCommands
+      \pdfstringdefDisableCommands{\let\ckvalue\ck@plainvalue}%
+    \fi}
+\fi
 % \ckfigure[graphics options]{path}
 \newcommand\ckfigure[2][]{%
-  \IfFileExists{\ck@dir/#2}%
-    {\ck@link{figures?path=#2}{\includegraphics[#1]{\ck@dir/#2}}}%
-    {\ck@missing{#2}}}
+  \ck@if@file{#2}%
+    {\IfFileExists{\ck@dir/\ck@file{#2}}%
+      {\ck@link{figures?path=#2}{\includegraphics[#1]{\ck@dir/\ck@file{#2}}}}%
+      {\ck@missing{#2}}}%
+    {\IfFileExists{\ck@dir/#2}%
+      {\ck@link{figures?path=#2}{\includegraphics[#1]{\ck@dir/#2}}}%
+      {\ck@missing{#2}}}}
 % \cktable{path}: a table or other TeX a stage generated
 \newcommand\cktable[1]{%
-  \IfFileExists{\ck@dir/#1}{\input{\ck@dir/#1}}{\ck@missing{#1}}}
+  \ck@if@file{#1}%
+    {\IfFileExists{\ck@dir/\ck@file{#1}}%
+      {\input{\ck@dir/\ck@file{#1}}}{\ck@missing{#1}}}%
+    {\IfFileExists{\ck@dir/#1}{\input{\ck@dir/#1}}{\ck@missing{#1}}}}

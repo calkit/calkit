@@ -9,7 +9,7 @@ import {
   type Citation,
   citationAt,
   citationText,
-  includeCandidates,
+  citationCandidates,
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import { isUnsupportedByHub, RequestFailed, send } from "../core/messages";
@@ -43,6 +43,19 @@ const CARD_ID = "calkit-overleaf-citation-card";
 let panel: Panel | null = null;
 let currentProjectId: string | null = null;
 let hubWebUrl = "https://calkit.io";
+// The last status found for this page, so opening the panel shows it at
+// once instead of waiting for the hub to check Overleaf all over again
+let lastCheck: {
+  overleafProjectId: string;
+  hubWebUrl: string;
+  link: OverleafLinkPublic;
+  status: OverleafSyncStatus;
+  // What the last sync did, kept through the check that follows it
+  notice?: string;
+} | null = null;
+// Bumped by each load, each sync, and each sign-in change, so a check
+// that finishes after any of them doesn't draw over it
+let loadGeneration = 0;
 let tokenWatcher: MutationObserver | null = null;
 // The Calkit project this Overleaf project syncs with, once found
 let currentLink: OverleafLinkPublic | null = null;
@@ -74,17 +87,17 @@ function provenanceFor(
 
 /**
  * Where a file the document shows came from, finding it in the project
- * first if it's included plainly, since TeX names it relative to the
- * document and may leave off the extension.
+ * first, since TeX may find it under a name with an extension added, and
+ * finds a plainly included one relative to the document.
  */
 async function citationProvenance(
   link: OverleafLinkPublic,
   citation: Citation,
 ): Promise<Provenance> {
-  if (!citation.included) {
+  if (citation.kind === "value") {
     return provenanceFor(link, citation.path, citation.key);
   }
-  const candidates = includeCandidates(link.path, citation);
+  const candidates = citationCandidates(link.path, citation);
   let first: Provenance | null = null;
   for (const candidate of candidates) {
     const provenance = await provenanceFor(link, candidate);
@@ -142,8 +155,8 @@ function renderProvenance(
   );
   const fileUrl = (path: string) =>
     `${base}/files?path=${encodeURIComponent(path)}`;
-  // An included file is named as the project has it, not as written
-  const path = citation.included ? provenance.path : citation.path;
+  // A file is named as the project has it, not as written
+  const path = citation.kind === "value" ? citation.path : provenance.path;
   const label = citation.key ? `${path}: ${citation.key}` : path;
   container.append(el("div", { class: "name", text: label }));
   if (provenance.copied_from) {
@@ -626,12 +639,51 @@ function isOverleafTokenProblem(e: unknown): boolean {
   );
 }
 
-/** Ask for an Overleaf Git token, and save it to the hub. */
+/**
+ * Ask for an Overleaf Git token, and save it to the hub, or, without
+ * Overleaf Premium, connect the browser's Overleaf login instead.
+ */
 function renderTokenForm(
   container: HTMLElement,
-  rejected: boolean,
+  problem: string,
   reload: () => void,
 ): void {
+  const rejected = problem.includes("rejected");
+  const sessionRejected = rejected && problem.includes("session");
+  const connectMessage = el("div", { class: "small" });
+  const connect = el("button", {
+    class: sessionRejected ? "action" : "action secondary",
+    text: "Connect with Overleaf login",
+  });
+  connect.addEventListener("click", async () => {
+    connect.disabled = true;
+    clear(connectMessage).append(loading("Connecting"));
+    try {
+      await send({ type: "overleaf.connectSession" });
+      reload();
+    } catch (e) {
+      connect.disabled = false;
+      clear(connectMessage).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  const connectSection = el("div", { style: { marginTop: "12px" } }, [
+    el("div", {
+      class: "small",
+      text: sessionRejected
+        ? "Overleaf no longer accepts the Overleaf login Calkit saved. " +
+          "Connect it again to keep syncing."
+        : "No Overleaf Premium? Calkit can sync using your Overleaf " +
+          "login instead of a token.",
+    }),
+    el("div", { class: "actions" }, [connect]),
+    connectMessage,
+  ]);
+  if (sessionRejected) {
+    container.append(connectSection);
+    return;
+  }
   const input = textInput({ placeholder: "olp_..." });
   input.type = "password";
   const message = el("div", { class: "small" });
@@ -683,7 +735,25 @@ function renderTokenForm(
       }),
     ]),
     message,
+    connectSection,
   );
+}
+
+/**
+ * Show a failure, offering to connect Overleaf when that's what's missing,
+ * so a first link or import works without Premium too.
+ */
+function renderOverleafFailure(e: unknown, reload: () => void): HTMLElement {
+  if (isOverleafTokenProblem(e)) {
+    const container = el("div");
+    renderTokenForm(
+      container,
+      e instanceof Error ? e.message : String(e),
+      reload,
+    );
+    return container;
+  }
+  return renderFailure(e, { onSignedIn: reload });
 }
 
 /**
@@ -885,6 +955,7 @@ function renderStatus(
   });
   const message = el("div", { class: "small" });
   syncButton.addEventListener("click", async () => {
+    loadGeneration++;
     syncButton.disabled = true;
     clear(message).append(loading("Syncing"));
     try {
@@ -894,16 +965,25 @@ function renderStatus(
         project: link.project_name,
         path: status.path,
       });
-      clear(message).append(
-        el("span", {
-          class: "dim",
-          text:
-            `Synced. ${result.commits_from_overleaf} change` +
-            `${
-              result.commits_from_overleaf === 1 ? "" : "s"
-            } came from Overleaf.`,
-        }),
-      );
+      // Shown as in sync straight away, since that's what a sync leaves,
+      // while the hub confirms it
+      lastSyncNeeded = false;
+      lastCheck = {
+        overleafProjectId: link.overleaf_project_id,
+        hubWebUrl,
+        link,
+        status: {
+          ...status,
+          in_sync: true,
+          files_to_push: [],
+          files_to_delete: [],
+          commits_from_overleaf: 0,
+        },
+        notice:
+          `Synced. ${result.commits_from_overleaf} change` +
+          `${result.commits_from_overleaf === 1 ? "" : "s"} came from ` +
+          "Overleaf.",
+      };
       reload();
     } catch (e) {
       syncButton.disabled = false;
@@ -972,9 +1052,7 @@ async function renderPicker(
         ]),
       );
     } catch (e) {
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
+      clear(message).append(renderOverleafFailure(e, reload));
     }
   };
   const runSearch = async () => {
@@ -1192,7 +1270,7 @@ async function renderAttachForm(
       reload();
     } catch (e) {
       attach.disabled = false;
-      clear(message).append(renderFailure(e, { onSignedIn: reload }));
+      clear(message).append(renderOverleafFailure(e, reload));
     }
   });
   container.append(
@@ -1258,9 +1336,7 @@ function renderImportForm(
       reload();
     } catch (e) {
       importButton.disabled = false;
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
+      clear(message).append(renderOverleafFailure(e, reload));
     }
   });
   return [
@@ -1278,6 +1354,8 @@ async function load(overleafProjectId: string): Promise<void> {
     return;
   }
   const body = panel.body;
+  const generation = ++loadGeneration;
+  const current = () => generation === loadGeneration;
   clear(body).append(loading());
   const reload = () => void load(overleafProjectId);
   try {
@@ -1294,7 +1372,31 @@ async function load(overleafProjectId: string): Promise<void> {
         }),
       ],
     );
-    clear(body).append(pickers, loading("Looking for the linked project"));
+    const cached =
+      lastCheck?.overleafProjectId === overleafProjectId &&
+      lastCheck.hubWebUrl === hubWebUrl
+        ? lastCheck
+        : null;
+    const content = el("div");
+    clear(body).append(pickers, content);
+    const showNotice = () => {
+      if (cached?.notice) {
+        content.append(
+          el("div", {
+            class: "dim small",
+            style: { marginTop: "6px" },
+            text: cached.notice,
+          }),
+        );
+      }
+    };
+    if (cached) {
+      renderStatus(content, cached.link, cached.status, reload);
+      showNotice();
+      content.append(loading("Checking for changes"));
+    } else {
+      content.append(loading("Looking for the linked project"));
+    }
     // The index answers at once when this Overleaf project has been seen
     // before; otherwise the hub reads through the user's projects, active
     // one first, and remembers what it finds
@@ -1303,6 +1405,9 @@ async function load(overleafProjectId: string): Promise<void> {
       overleafProjectId,
       activeProject: settings.activeProject ?? undefined,
     });
+    if (!current()) {
+      return;
+    }
     const links = lookup.links;
     if (!links.length) {
       clear(body).append(pickers);
@@ -1328,15 +1433,14 @@ async function load(overleafProjectId: string): Promise<void> {
       await renderPicker(chooser, overleafProjectId, reload);
       return;
     }
-    clear(body).append(pickers);
-    const content = el("div");
-    body.append(content);
     // A folder in more than one project is rare, so the first link is the
     // one shown, with the rest offered as alternatives underneath
     const link = links[0];
-    clear(content).append(
-      loading(`Checking ${link.project_owner_name}/${link.project_name}`),
-    );
+    if (!cached) {
+      clear(content).append(
+        loading(`Checking ${link.project_owner_name}/${link.project_name}`),
+      );
+    }
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
@@ -1344,6 +1448,9 @@ async function load(overleafProjectId: string): Promise<void> {
       overleafProjectId,
       path: link.path,
     });
+    if (!current()) {
+      return;
+    }
     if (!statuses.length) {
       clear(content).append(
         el("div", {
@@ -1358,7 +1465,9 @@ async function load(overleafProjectId: string): Promise<void> {
     lastTokenProblem = false;
     lastSyncNeeded = !statuses[0].in_sync;
     currentLink = link;
+    lastCheck = { overleafProjectId, hubWebUrl, link, status: statuses[0] };
     renderStatus(content, link, statuses[0], reload);
+    showNotice();
     content.append(renderInsert(link, statuses[0].path, reload));
     if (links.length > 1) {
       content.append(
@@ -1370,6 +1479,9 @@ async function load(overleafProjectId: string): Promise<void> {
       );
     }
   } catch (e) {
+    if (!current()) {
+      return;
+    }
     clear(body);
     if (e instanceof RequestFailed && e.notSignedIn) {
       // With a hub picker alongside, since credentials are per hub and a
@@ -1398,15 +1510,20 @@ async function load(overleafProjectId: string): Promise<void> {
       );
       return;
     }
+    // The picker stays, since the problem may be with this hub, e.g., an
+    // Overleaf token only another hub has, and switching is the way out
+    const hubPicker = el("div", { style: { marginBottom: "8px" } }, [
+      await renderHubPicker(reload),
+    ]);
     if (isOverleafTokenProblem(e)) {
-      renderTokenForm(
-        body,
-        e instanceof Error && e.message.includes("rejected"),
-        reload,
-      );
+      body.append(hubPicker);
+      renderTokenForm(body, e instanceof Error ? e.message : String(e), reload);
       return;
     }
-    body.append(errorMessage(e instanceof Error ? e.message : String(e)));
+    body.append(
+      hubPicker,
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
   }
 }
 
@@ -1522,6 +1639,12 @@ function sync(): void {
  * shows: an amber button when a sync would do something.
  */
 async function checkSyncStatus(overleafProjectId: string): Promise<void> {
+  // An answer from a hub or sign-in that has since changed describes
+  // something else, so it's dropped rather than cached
+  const generation = loadGeneration;
+  const hub = await getHubWebUrl();
+  const current = async () =>
+    generation === loadGeneration && (await getHubWebUrl()) === hub;
   try {
     const settings = await send({ type: "settings.get" });
     const lookup = await send({
@@ -1541,8 +1664,14 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       overleafProjectId,
       path: link.path,
     });
+    if (!(await current())) {
+      return;
+    }
     lastTokenProblem = false;
     lastSyncNeeded = Boolean(statuses.length) && !statuses[0].in_sync;
+    lastCheck = statuses.length
+      ? { overleafProjectId, hubWebUrl: hub, link, status: statuses[0] }
+      : null;
     // Nothing to say if the panel was opened in the meantime, or if the
     // page moved on to another project
     if (panel || currentProjectId !== overleafProjectId) {
@@ -1553,6 +1682,9 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       lastSyncNeeded ? "attention" : "idle",
     );
   } catch (e) {
+    if (!(await current())) {
+      return;
+    }
     // A token problem is worth a nudge, since nothing works until it's
     // fixed; anything else the panel explains when opened
     lastTokenProblem = isOverleafTokenProblem(e);
@@ -1610,10 +1742,12 @@ runContentScript({
     }
     const overleafProjectId = currentProjectId;
     // What the last session found says nothing about this one
+    loadGeneration++;
     lastSyncNeeded = false;
     lastTokenProblem = false;
     currentLink = null;
     provenanceCache.clear();
+    lastCheck = null;
     if (panel) {
       void load(overleafProjectId);
     } else {

@@ -850,6 +850,93 @@ def test_post_user_zotero_auth(
     )
 
 
+def test_put_user_overleaf_session(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    from calkit.overleaf import AuthError, WebClient
+
+    r = client.get("/user", headers=normal_user_token_headers)
+    user = db.get(User, uuid.UUID(r.json()["id"]))
+    assert user
+    # Start without any Overleaf credential
+    client.delete(
+        "/user/external-credentials/overleaf",
+        headers=normal_user_token_headers,
+    )
+    r = client.get("/user/overleaf-session", headers=normal_user_token_headers)
+    assert r.status_code == 404
+
+    def put(csrf_token):
+        client_cls = type(
+            "Client",
+            (),
+            {"__init__": lambda self, s: None, "csrf_token": csrf_token},
+        )
+        with patch("app.api.routes.users.WebClient", client_cls):
+            return client.put(
+                "/user/overleaf-session",
+                headers=normal_user_token_headers,
+                json={"session": "s3cret"},
+            )
+
+    def fail(error):
+        def raise_error(self):
+            raise error
+
+        return property(raise_error)
+
+    # The session is checked with Overleaf before it's saved
+    assert put(fail(AuthError("rejected"))).status_code == 422
+    assert put(fail(RuntimeError("offline"))).status_code == 502
+    r = client.get("/user/overleaf-session", headers=normal_user_token_headers)
+    assert r.status_code == 404
+    assert put("tok").status_code == 200
+    r = client.get("/user/overleaf-session", headers=normal_user_token_headers)
+    assert r.json() == {"session": "s3cret"}
+    r = client.get(
+        "/user/connected-accounts", headers=normal_user_token_headers
+    )
+    assert r.json()["overleaf"]
+    assert r.json()["overleaf_session"]
+    assert not r.json()["overleaf_token"]
+    # Without a Git token, syncs use the session, and stored encrypted
+    db.refresh(user)
+    auth = users.get_overleaf_auth(session=db, user=user)
+    assert isinstance(auth, WebClient)
+    assert auth.session == "s3cret"
+    credential = users.get_overleaf_session_credential(session=db, user=user)
+    assert credential is not None
+    assert "s3cret" not in credential.secret_payload
+    # A Git token takes precedence
+    users.save_overleaf_token(
+        session=db, user=user, token="olp_token", expires=None
+    )
+    assert users.get_overleaf_auth(session=db, user=user) == "olp_token"
+    r = client.get(
+        "/user/connected-accounts", headers=normal_user_token_headers
+    )
+    assert r.json()["overleaf_token"]
+    assert r.json()["overleaf_session"]
+    # Disconnecting Overleaf removes both
+    r = client.delete(
+        "/user/external-credentials/overleaf",
+        headers=normal_user_token_headers,
+    )
+    assert r.status_code == 200
+    db.expire_all()
+    r = client.get("/user/overleaf-session", headers=normal_user_token_headers)
+    assert r.status_code == 404
+    with pytest.raises(HTTPException) as e:
+        users.get_overleaf_auth(session=db, user=user)
+    assert e.value.status_code == 401
+    r = client.get(
+        "/user/connected-accounts", headers=normal_user_token_headers
+    )
+    assert not r.json()["overleaf"]
+    assert not r.json()["overleaf_token"]
+    assert not r.json()["overleaf_session"]
+
+
 def _github_auth(client: TestClient, headers: dict[str, str], username: str):
     """Drive POST /user/github-auth with GitHub's responses stubbed out."""
 

@@ -4063,9 +4063,11 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
 
 
 def test_get_stage_for_output_reads_map_paths_destinations():
+    from typing import Any
+
     from calkit.pipeline import get_map_paths_source, get_stage_for_output
 
-    ck_info = {
+    ck_info: dict[str, Any] = {
         "pipeline": {
             "stages": {
                 "copy": {

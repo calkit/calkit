@@ -117,7 +117,7 @@ def get_project_provenance(
             or calkit.pipeline.get_stage_for_output(path, ck_info)
         )
 
-    def ck_stage_for(stage: str) -> dict | None:
+    def ck_stage_for(stage: str) -> dict[str, Any] | None:
         # A matrix stage's expansions share one definition
         stages = (ck_info.get("pipeline") or {}).get("stages") or {}
         ck_stage = stages.get(stage.split("@")[0])

@@ -1,21 +1,34 @@
 # LaTeX documents
 
-Calkit builds LaTeX documents with `latexmk`, in whichever
-[environment](environments.md) the project defines:
+LaTeX is a longstanding favorite typesetting system for technical
+documents, and its math syntax has become the de facto standard.
+It's also a great choice to use in a Calkit pipeline to produce
+papers and theses since it can easily include figures, tables, and
+even numerical result values produced in other stages,
+so there's no need to copy/paste them in, like you might in
+like Microsoft Word.
+
+For one-off compilation,
+Calkit offers a `calkit latex build` command,
+which will invoke `latexmk`, optionally using one of the
+project's [environments](environments.md):
 
 ```sh
 calkit latex build paper/main.tex --env tex
 ```
 
-Without `--env`, `latexmk` runs directly if it's installed, and in a TeX Live
+Without `--env`, `latexmk` is called directly
+if it's installed on the system, and in Calkit's TinyTeX/TeXlive
 container if it isn't.
 
 ## Adding a document to the pipeline
 
-A one-off build isn't reproducible on its own.
-Add the document to the [pipeline](pipeline/index.md) as a `latex` stage, and
-`calkit run` rebuilds it whenever the source or any of its inputs change,
-and skips it when nothing has:
+If your project involves more than just writing,
+you'll likely have other stages that create figures and results.
+Tie these all together by
+adding the document to the [pipeline](pipeline/index.md) as a `latex` stage,
+and `calkit run` will rebuild it whenever the source or any of
+its inputs change, skipping if not:
 
 ```sh
 calkit new latex-stage --name paper --target paper/main.tex --environment tex
@@ -32,19 +45,20 @@ pipeline:
       target_path: paper/main.tex
 ```
 
-The compiled PDF is an output of the stage without being declared, so there's
-nothing to add for it.
-Use `--output` only for the extras a build produces, and see the
-[pipeline docs](pipeline/index.md) for the attributes every stage shares,
-e.g., `inputs`, which can include figures, tables, and results
-converted to [.tex from JSON](pipeline/index.md#json-to-latex).
+## Using a template
 
-To start a document from scratch instead, `calkit new publication` writes the
-source files, the environment, and the stage in one go:
+To start a new document from scratch, `calkit new publication` writes the
+source files, the environment, and the stage in one go.
+For example, this command will start a journal article using the
+Journal of Fluid Mechanics (JFM) template in a folder called `paper`:
 
 ```sh
-calkit new publication paper --template latex/jfm --stage paper \
-    --environment tex --kind journal-article --title "A cool paper"
+calkit new publication paper \
+    --template latex/jfm \
+    --stage paper \
+    --environment tex \
+    --kind journal-article \
+    --title "A cool paper"
 ```
 
 Available templates are `latex/article` (generic), `latex/ieee-conference`
@@ -72,15 +86,12 @@ you'll need to install packages the usual way.
 
 ## Inputs
 
-A document's class, style, bibliography, and figure files are inputs to
-building it, but LaTeX resolves those itself, so the pipeline can't see them
-unless the stage declares them.
-`calkit new latex-stage` and `calkit new publication` read the document and
+A document's class, style, bibliography, and figure files
+need to be declared as inputs to its pipeline stage.
+`calkit new latex-stage` and `calkit new publication`
+scan through the document and
 add the ones that live in the project, following `\input`, `\include`, and
 any class or style file that loads others.
-Anything that comes from TeX Live is left alone, since it isn't the project's
-to track, and anything an already-declared directory covers is left off
-rather than listed again underneath it.
 Pass `--no-detect-inputs` to turn this off, and `--input` to add more.
 `calkit xr` detects the same inputs when the command it wraps builds a
 document.
@@ -92,7 +103,7 @@ can't compile the document at all.
 ## Including project components
 
 A document can include figures, tables, and result values from anywhere in
-the project by their path, with the commands in Calkit's `calkit` package:
+the project by their path, with the commands the `calkit` package:
 
 ```latex
 \usepackage{calkit}
@@ -289,7 +300,7 @@ possible with the `--pipeline` option,
 which creates a standalone pipeline for the LaTeX stage and everything
 it depends on upstream.
 
-### Where they go
+### Where diffs are stored
 
 Each comparison gets a directory named after what it compares, with the
 document's own path inside it:
@@ -547,7 +558,7 @@ which can misplace a thread on a paragraph that's repeated word for word.
 ### On the Calkit Hub
 
 On the Calkit Hub, comments on a publication that a `latex` stage builds
-are kept in the same way, in its `.tex` source,
+are stored the same way, in its `.tex` source,
 so they show up for anyone who views the document,
 whether in VS Code, from the command line, or on the hub.
 A comment made on the hub is saved to the source on the branch being viewed.

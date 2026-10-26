@@ -1,6 +1,7 @@
-# Requirements, configuration, and secrets
+# Project requirements and setup
 
-One major barrier to reproducibility is dependency management.
+One major barrier to reproducibility is documenting and repeating
+the steps it took to get ready to run a project.
 If one relies too much on system-level dependencies,
 this can lead to reproducibility issues because a full system is hard to
 define with sufficient detail.
@@ -51,14 +52,14 @@ changing anything.
 ```yaml
 requirements:
   - docker
-  - name: STRAVA_CLIENT_ID
-    kind: env-var
+  - kind: env-var
+    name: STRAVA_CLIENT_ID
     notes: >
       The STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET environmental
       variables can be set in the .env file after creating a Strava
       application at https://www.strava.com/settings/api
-  - name: STRAVA_CLIENT_SECRET
-    kind: env-var
+  - kind: env-var
+    name: STRAVA_CLIENT_SECRET
 ```
 
 As we can see in the notes for `STRAVA_CLIENT_ID`,
@@ -81,7 +82,7 @@ env_vars:
 These will then be set for calls to the `run` and `xenv` commands.
 
 When `calkit run` (or `calkit check reqs`) encounters a missing
-`env-var` requirement on an interactive terminal, it prompts the user
+`env-var` requirement in an interactive shell, it prompts the user
 for a value, writes it to `.env`, and exports it for the rest of the
 run.
 `calkit status` does the same, except that a variable left unset is
@@ -96,23 +97,19 @@ the default:
 
 ```yaml
 requirements:
-  - name: DB_URL
-    kind: env-var
+  - kind: env-var
+    name: DB_URL
     default: postgres://localhost:5432/dev
 ```
 
 In non-interactive contexts (CI), the same missing variable still
 raises a clear error so failures aren't silent.
 
-## Requiring something of the machine
+## Machine requirements
 
-Not everything a project needs is something you can install.
-A simulation that needs a certain amount of memory to finish, or a stage
-that divides work across cores, is making a claim about the machine
-rather than about what's on it.
-Those are written as a `kind` naming the property, with no name, since
-`cpu-count` already says everything there is to say about which property
-is meant:
+It is possible to define requirements of the system on which the
+project is being run, e.g., how many CPU cores, how much memory, etc.
+For example:
 
 ```yaml
 requirements:
@@ -122,13 +119,14 @@ requirements:
     min: 32
   - kind: os
     equals: [Linux, Darwin]
-  - kind: python-version
+  - kind: calkit-python-version
     version_spec: ">=3.11"
 ```
 
 `cpu-count` and `memory-gb` take `min` and/or `max`.
 Everything else takes `equals`---matched case-insensitively, and a list
-means any one of them will do---or a `version_spec` for properties that
+means any one of them will do---`matches`, a glob like `*.cluster.edu`
+that is matched the same way, or a `version_spec` for properties that
 are versions.
 The properties available are the machine-describing ones from the table
 in [environments](environments.md#system);
@@ -145,6 +143,71 @@ Checking these means reading the machine, which is what
 `calkit describe system` reports.
 A property the machine doesn't report is an error rather than a silent
 pass---an unanswerable question isn't a satisfied one.
+
+## Stage or environment specific requirements
+
+Requirements in the project's `requirements` section apply to the whole
+project, so a machine that doesn't meet them can't run anything.
+A requirement that only some stages have can go on those stages, or on
+an environment that describes a machine, i.e., a `system`, `slurm` or
+`pbs` environment, which applies it to every stage using that
+environment.
+Other environments, e.g., `conda` or `uv-venv`, describe what's
+installed rather than the machine, so they can't have requirements;
+pair one with a machine instead, as in `cluster:py`:
+
+```yaml
+environments:
+  ml:
+    kind: system
+    requirements:
+      - matlab
+  cluster:
+    kind: system
+    requirements:
+      - kind: hostname
+        matches: "*.cluster.edu"
+  py:
+    kind: uv-venv
+    path: requirements.txt
+pipeline:
+  stages:
+    fetch:
+      kind: python-script
+      script_path: scripts/fetch.py
+      environment: cluster:py
+      requirements:
+        - kind: env-var
+          name: DATA_TOKEN
+```
+
+On a machine where a stage's requirements, or its environments', aren't
+met, `calkit run` skips that stage rather than failing.
+The same goes for a stage whose `switch` environment picks nothing
+there, or whose `system` environment is locked to another machine.
+A `slurm` or `pbs` environment without a `host` requires its
+scheduler's `sbatch` or `qsub` on this machine.
+Its outputs are kept, so stages that use them still run.
+A stage that needs an output a skipped stage hasn't made, e.g., one
+made on a cluster and not pulled, is skipped too, as are the stages
+after it.
+It stays out of date in `calkit status`, which says why it can't run
+there, and the run ends by listing the out-of-date stages it skipped.
+Requirements of an environment on another machine, e.g., a `system`
+environment with a `host`, are checked on that machine by `calkit run`.
+`calkit status` doesn't connect to other machines,
+so it doesn't check those.
+
+Some skips still fail the run, after the stages that can run have run:
+
+- One of the stages named on the command line, e.g.,
+  `calkit run fetch`, is out of date and can't run.
+- A stage is out of date and can't run because something is wrong
+  rather than because the project says so, e.g., its machine can't be
+  reached.
+- Any stage is out of date and can't run, with `calkit run --strict`,
+  e.g., in CI for a project whose stages should all run there.
+  The `calkit/run` action takes it as `run_args: --strict`.
 
 ## Pinning the Calkit CLI version
 
@@ -252,7 +315,7 @@ That way there's always a record of what Calkit changed on the machine.
 
 ## Setup requirements
 
-Some preconditions aren't files or environment variables -- they're
+Some preconditions aren't files or environment variables---they're
 one-time per-machine actions like `gh auth login` or
 `huggingface-cli login`.
 The `setup` requirement kind captures these declaratively:
@@ -330,15 +393,15 @@ Within a single `calkit run` or `calkit check reqs`, Calkit processes
 requirements in four phases regardless of the order they appear in
 `calkit.yaml`:
 
-1. **machine properties** -- first, because a machine too small to run
+1. **machine properties**: First, because a machine too small to run
    the project at all should say so before anything is installed on it.
-2. **`env-var`** -- prompted next so installers and setup steps can
+2. **`env-var`**: Prompted next so installers and setup steps can
    read newly-set variables.
-3. **`app`** -- env managers like `pixi` and `uv` must exist before
+3. **`app`**: Environment managers like `pixi` and `uv` must exist before
    any setup step that runs inside one of those environments. Missing
    apps with a registered installer trigger the auto-install prompt
    here.
-4. **`setup`** -- last, since `check_command` typically wraps
+4. **`setup`**: Last, since `check_command` typically wraps
    `calkit xenv` and depends on both apps and env vars.
 
 This ordering means a single fresh-clone `calkit run` can prompt for

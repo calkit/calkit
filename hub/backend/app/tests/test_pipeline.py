@@ -6,6 +6,7 @@ import git
 
 from app.git import get_repo_tree_for_ref
 from app.pipeline import (
+    StageStatus,
     _precompute_storage_presence,
     calc_overall_pipeline_status,
     compute_stage_statuses,
@@ -783,6 +784,64 @@ def test_frozen_stage_with_real_change_is_not_stale(tmp_path):
     assert statuses["run"].status == "frozen"
 
 
+def test_declared_deps_and_outs_missing_from_lock(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    files = {"script.py": "print('hi')\n", "new.csv": "a\n", "out.txt": "r\n"}
+    _commit(repo, files, "init")
+    tree = get_repo_tree_for_ref(repo, None)
+    locked = {
+        "cmd": "python script.py",
+        "deps": [{"path": "script.py", "md5": _md5(files["script.py"])}],
+        "outs": [{"path": "out.txt", "md5": _md5(files["out.txt"])}],
+    }
+    dvc_lock = {
+        "stages": {
+            name: locked for name in ("added", "dropped", "frozen", "loop@a")
+        }
+    }
+    dvc_yaml = {
+        "stages": {
+            # A dep and an out declared since the last run, so with no hash
+            "added": {
+                "cmd": "python script.py",
+                "deps": ["script.py", "new.csv"],
+                "outs": ["out.txt", {"extra.txt": {"cache": False}}],
+            },
+            # Dropping a declaration leaves the locked hashes to compare,
+            # which still match, so DVC doesn't call it changed
+            "dropped": {"cmd": "python script.py", "outs": ["out.txt"]},
+            "frozen": {
+                "cmd": "python script.py",
+                "deps": ["script.py", "new.csv"],
+                "outs": ["out.txt"],
+                "frozen": True,
+            },
+            # A foreach stage declares under 'do', and a templated path can't
+            # be compared without resolving it
+            "loop": {
+                "foreach": ["a"],
+                "do": {
+                    "cmd": "python script.py",
+                    "deps": ["script.py", "${item}.csv"],
+                    "outs": ["out.txt"],
+                },
+            },
+        }
+    }
+    statuses = compute_stage_statuses(
+        dvc_yaml, dvc_lock, tree, "o", "p", FakeFS()
+    )
+    assert statuses["added"].status == "stale"
+    assert statuses["added"].modified_inputs == ["new.csv"]
+    assert statuses["added"].modified_outputs == ["extra.txt"]
+    assert statuses["dropped"].status == "up-to-date"
+    assert statuses["loop@a"].status == "up-to-date"
+    # Frozen still reads as frozen, but its change keeps it tainted
+    assert statuses["frozen"].status == "frozen"
+    assert statuses["frozen"].modified_inputs == ["new.csv"]
+    assert "frozen" in find_frozen_tainted_stages(dvc_yaml, dvc_lock, statuses)
+
+
 def test_find_stage_for_path_directory_output():
     """Issue 622: a figure produced into a stage's output *directory* must map
     back to that stage, not just on an exact out-path match."""
@@ -1097,6 +1156,28 @@ def test_find_frozen_tainted_stages() -> None:
         "clean",
         "plot",
     }
+    # A frozen stage that still matches dvc.lock taints nothing, even with
+    # its outputs missing from storage; one whose inputs moved does.
+    assert (
+        find_frozen_tainted_stages(
+            dvc_yaml,
+            dvc_lock,
+            {
+                "collect": StageStatus(
+                    status="frozen", missing_outputs=["data/raw.csv"]
+                )
+            },
+        )
+        == set()
+    )
+    for changed in (
+        StageStatus(status="frozen", modified_command=True),
+        StageStatus(status="frozen", modified_inputs=["collect.py"]),
+        StageStatus(status="frozen", modified_outputs=["data/raw.csv"]),
+    ):
+        assert find_frozen_tainted_stages(
+            dvc_yaml, dvc_lock, {"collect": changed}
+        ) == {"collect", "clean", "plot"}
     # Nothing frozen, nothing tainted -- including a cycle's worth of stages,
     # which the walk must not loop on.
     assert (

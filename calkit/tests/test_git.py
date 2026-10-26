@@ -651,3 +651,32 @@ def test_ensure_path_is_not_filtered(tmp_dir):
     assert calkit.git.get_filter_driver(repo, path) is None
     rule = f"{path} -filter"
     assert attributes.read_text().splitlines().count(rule) == 1
+
+
+def test_get_staged_files_for_a_deleted_path(tmp_dir):
+    repo = git.Repo.init()
+    Path("keep.txt").write_text("keep\n")
+    Path("gone.txt").write_text("gone\n")
+    Path("other.txt").write_text("other\n")
+    repo.git.add(["keep.txt", "gone.txt", "other.txt"])
+    repo.git.commit(["-m", "First commit"])
+    os.remove("gone.txt")
+    repo.git.add(["-u"])
+    # The deleted path is a pathspec, not a ref
+    assert calkit.git.get_staged_files(path="gone.txt", repo=repo) == [
+        "gone.txt"
+    ]
+    assert calkit.git.get_staged_files_with_status(
+        path="gone.txt", repo=repo
+    ) == [{"status": "D", "path": "gone.txt"}]
+    # A path that still exists, and one with nothing staged for it
+    Path("keep.txt").write_text("changed\n")
+    repo.git.add(["keep.txt"])
+    assert calkit.git.get_staged_files(path="keep.txt", repo=repo) == [
+        "keep.txt"
+    ]
+    assert calkit.git.get_staged_files(path="other.txt", repo=repo) == []
+    assert sorted(calkit.git.get_staged_files(repo=repo)) == [
+        "gone.txt",
+        "keep.txt",
+    ]

@@ -15,8 +15,10 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import pytest
+import typer
 
 import calkit.cli.latex
 import calkit.docx
@@ -171,6 +173,26 @@ def test_latex_source_helpers(project: Path) -> None:
         False,
     )
     assert back.entries[0].email == "email@mail.com"
+    # An ID, an issue, and attributes from a newer schema survive a rewrite
+    newer = [
+        "% COMMENT id=0a1b2c3d issue=https://github.com/o/r/issues/7",
+        '%   origin={tool: "x", v: 2} note="two words"',
+        "%   A:",
+        "%     Hi.",
+    ]
+    back = calkit.latex.parse_comments(newer)[0]
+    assert (back.id, back.issue) == (
+        "0a1b2c3d",
+        "https://github.com/o/r/issues/7",
+    )
+    assert back.attrs == {"origin": {"tool": "x", "v": 2}, "note": "two words"}
+    again = calkit.latex.parse_comments(back.render())[0]
+    assert (again.id, again.issue, again.attrs, again.entries) == (
+        back.id,
+        back.issue,
+        back.attrs,
+        back.entries,
+    )
     assert calkit.latex.word_date("2026-09-06T08:44:00Z") == "2026-09-06 08:44"
     assert calkit.latex.make_bookmark_name("paper/main.tex", 19).startswith(
         "ck_"
@@ -282,9 +304,68 @@ def test_docx_round_trip(
         calkit.cli.latex.to_docx("paper/main.pdf", engine="word")
     assert runs and runs[0][-3:] == ["calkit", "run", "build-paper"]
     Path("calkit.yaml").write_text("", encoding="utf-8")
+    first = calkit.docx.Document("paper/main-for-review.docx").read_original()
+    assert first is not None
+    # Exported again for a reproducible build, it makes the same file
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
+    exports = []
+    for _ in range(2):
+        calkit.cli.latex.to_docx("paper/main.pdf", engine="word", force=True)
+        exports.append(Path("paper/main-for-review.docx").read_bytes())
+    assert exports[0] == exports[1]
+    # TeX4ht gets the same date, so \today in the Word copy matches the PDF,
+    # run directly or in the stage's environment; it makes no ODT here
+    dated = {"SOURCE_DATE_EPOCH": "1790000000", "FORCE_SOURCE_DATE": "1"}
+    envs: list[dict[str, str]] = []
+
+    class Make4ht:
+        pid = 0
+
+        def __init__(
+            self, cmd: list[str], env: dict | None = None, **kw: object
+        ) -> None:
+            envs.append(env or {})
+
+        def communicate(self, timeout: float) -> tuple[bytes, None]:
+            return b"", None
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(calkit.docx, "find_soffice", lambda: "soffice")
+        mp.setattr(calkit, "check_dep_exists", lambda dep: True)
+        mp.setattr(calkit.cli.latex.subprocess, "Popen", Make4ht)
+        with pytest.raises(typer.Exit):
+            calkit.cli.latex.to_docx(
+                "paper/main.pdf", engine="libreoffice", force=True
+            )
+    assert len(envs) == 1 and dated.items() <= envs[0].items()
+    Path("calkit.yaml").write_text(
+        "pipeline:\n  stages:\n    build-paper:\n      kind: latex\n"
+        "      target_path: paper/main.tex\n      environment: tex\n",
+        encoding="utf-8",
+    )
+    runs = []
+
+    def run_recorded(
+        cmd: list[str], **kw: object
+    ) -> subprocess.CompletedProcess:
+        runs.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(calkit.docx, "find_soffice", lambda: "soffice")
+        mp.setattr(calkit.cli.latex.subprocess, "run", run_recorded)
+        with pytest.raises(typer.Exit):
+            calkit.cli.latex.to_docx(
+                "paper/main.pdf", engine="libreoffice", force=True
+            )
+    xenv = next(cmd for cmd in runs if "xenv" in cmd)
+    assert {f"--env-var={k}={v}" for k, v in dated.items()} <= set(xenv)
+    Path("calkit.yaml").write_text("", encoding="utf-8")
+    monkeypatch.delenv("SOURCE_DATE_EPOCH")
     doc = calkit.docx.Document("paper/main-for-review.docx")
     original = doc.read_original()
     assert original is not None
+    assert original.id != first.id
     assert original.source == "paper/main.tex"
     assert original.id
     assert doc.tracking and doc.protection is None
@@ -327,12 +408,15 @@ def test_docx_round_trip(
     assert comments[1].parent_id == comments[0].para_id
     model = next(p for p in paras if p.text.startswith("The mean velocity"))
     assert comments[0].bookmark == model.bookmark
-    # The record stays on this machine unless asked for, named by time
-    records = os.listdir(calkit.latex.LOCAL_DOCX_EXPORTS_DIR)
-    assert len(records) == 1
-    assert re.fullmatch(
-        rf"\d{{4}}-\d\d-\d\dT\d\d-\d\d-\d\d-{original.id}\.json",
-        records[0],
+    # The record stays on this machine unless asked for, named by time,
+    # one per export
+    records = sorted(os.listdir(calkit.latex.LOCAL_DOCX_EXPORTS_DIR))
+    matches = [
+        re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d(\.\d)?-(.+)\.json", r)
+        for r in records
+    ]
+    assert sorted(m.group(2) for m in matches if m) == sorted(
+        [first.id, original.id, original.id]
     )
     assert not os.path.exists(calkit.latex.DOCX_EXPORTS_DIR)
     export = LatexDocxExport.model_validate_json(
@@ -467,13 +551,27 @@ def test_docx_round_trip(
     )
     assert "Figures were changed in Word" in out and "image1.png" in out
     main = Path("paper/main.tex").read_text(encoding="utf-8")
-    # A thread resolved in Word is marked resolved in the source, and
-    # exports back to Word as resolved
+    # A thread resolved in Word is marked resolved in the source, keeping
+    # the ID and issue Word can't carry, and exports back to Word as
+    # resolved
+    methods = Path("paper/methods.tex").read_text(encoding="utf-8")
+    assert "% COMMENT\n%   T. Author:" in methods
+    Path("paper/methods.tex").write_text(
+        methods.replace(
+            "% COMMENT\n%   T. Author:",
+            "% COMMENT id=0a1b2c3d issue=https://github.com/o/r/issues/7\n"
+            "%   T. Author:",
+        ),
+        encoding="utf-8",
+    )
     subprocess.run(
         ["calkit", "latex", "merge-docx", "reviews/resolved.docx"], check=True
     )
     methods = Path("paper/methods.tex").read_text(encoding="utf-8")
-    assert "% COMMENT resolved=true\n%   T. Author:" in methods
+    assert (
+        "% COMMENT id=0a1b2c3d resolved=true "
+        "issue=https://github.com/o/r/issues/7\n%   T. Author:"
+    ) in methods
     parsed = calkit.latex.parse_comments(methods.split("\n"))
     assert [c.resolved for c in parsed] == [True]
     # With --log, the record is kept in the project too
@@ -604,6 +702,13 @@ def test_docx_round_trip(
         assert lo_sent is not None and len(lo_sent.equations) == 1
         assert len(lo_sent.paragraphs) >= 15
         assert any(p.text == "(1)" for p in lo.paragraphs)
+        # A reference to an equation links to it inside the document, not
+        # to TeX4ht's build directory
+        body = lo.parts["word/document.xml"].decode("utf-8")
+        anchors = re.findall(r'w:anchor="([^"]+)"', body)
+        marks = set(re.findall(r'w:bookmarkStart [^>]*w:name="([^"]+)"', body))
+        assert anchors and set(anchors) <= marks
+        assert "HYPERLINK" not in body and ".4om" not in body
         main = Path("paper/main.tex").read_text(encoding="utf-8")
         methods = Path("paper/methods.tex").read_text(encoding="utf-8")
         res = subprocess.run(
@@ -615,3 +720,48 @@ def test_docx_round_trip(
         assert "Applied 0 edits" in res.stdout
         assert Path("paper/main.tex").read_text(encoding="utf-8") == main
         assert Path("paper/methods.tex").read_text(encoding="utf-8") == methods
+
+
+def test_equation_links() -> None:
+    content = (
+        "<text:p>See (<text:a xlink:href='main-m7.4om#x7-3001r2' "
+        "xlink:type='simple'>2</text:a>), "
+        '<text:a xlink:href="main-m7.4om#x7-3001r3">3</text:a>, '
+        "<text:a xlink:href='#Xsmith2020'>Smith</text:a>, "
+        "<text:a xlink:href='https://calkit.io/a.html#b'>web</text:a> and "
+        "<text:a xlink:href='other.4om#x9'>gone</text:a>.</text:p>"
+        "<text:p><draw:frame draw:name='obj-7'><draw:object "
+        "xlink:href='./main-m7' xlink:show='embed'/></draw:frame></text:p>"
+    )
+    out = calkit.docx._link_into_objects(content)
+    # Links into an object point at bookmarks beside it
+    assert "xlink:href='#x7-3001r2'" in out
+    assert 'xlink:href="#x7-3001r3"' in out
+    assert (
+        "<text:p><text:bookmark text:name='x7-3001r2'/>"
+        "<text:bookmark text:name='x7-3001r3'/><draw:frame" in out
+    )
+    # Links within the document or out of it, or to an object that isn't
+    # there, are left alone
+    assert "xlink:href='#Xsmith2020'" in out
+    assert "xlink:href='https://calkit.io/a.html#b'" in out
+    assert "xlink:href='other.4om#x9'" in out
+    assert calkit.docx._link_into_objects(out) == out
+    # A kept bookmark goes on the row it's for, not just the first
+    doc = calkit.docx.Document(str(FIXTURES / "export.docx"))
+    w, m = calkit.docx.W, calkit.docx.M
+    before = next(doc.doc.iter(calkit.docx._tag(w, "p")))
+    rows = [
+        (ET.Element(calkit.docx._tag(m, "oMath")), "4", "ck_a"),
+        (ET.Element(calkit.docx._tag(m, "oMath")), "5", "ck_a_r2"),
+    ]
+    doc.insert_equations(before, rows, 100, keep={1: [("x13-3004r5", "7")]})
+    tbl = next(doc.doc.iter(calkit.docx._tag(w, "tbl")))
+    names = [
+        [
+            b.get(calkit.docx._tag(w, "name"))
+            for b in tr.iter(calkit.docx._tag(w, "bookmarkStart"))
+        ]
+        for tr in tbl.iter(calkit.docx._tag(w, "tr"))
+    ]
+    assert names == [["ck_a"], ["ck_a_r2", "x13-3004r5"]]

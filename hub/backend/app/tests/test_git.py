@@ -730,6 +730,88 @@ def _fake_overleaf_clone(files: dict[str, str]):
     return clone
 
 
+def test_get_overleaf_repo_resets_and_locks(tmp_path, monkeypatch) -> None:
+    import shutil
+    from types import SimpleNamespace
+
+    from app.config import settings
+
+    project = _StubProject(f"ck-overleaf-{random.randint(0, 10**9)}")
+    user = SimpleNamespace(github_username="ck-test-user")
+    monkeypatch.setattr(app.git.users, "get_overleaf_token", lambda **k: "t")
+    monkeypatch.setattr(app.git, "_configure_committer", lambda *a, **k: None)
+    # Stand in for Overleaf with a local repo, cloned where the hub keeps it
+    remote = git.Repo.init(tmp_path / "remote")
+    _identify(remote)
+    _commit(remote, "main.tex", "v1")
+    repo_dir = os.path.join(
+        settings.CLONE_ROOT,
+        "ck-test-user",
+        project.owner_github_name,
+        project.name,
+        "overleaf",
+        "abc",
+        "repo",
+    )
+    clone = git.Repo.clone_from(remote.working_dir, repo_dir)
+    _identify(clone)
+    # Leave the clone diverged and dirty, like after a sync whose push to
+    # Overleaf failed, while Overleaf moved on with a conflicting edit
+    _commit(clone, "main.tex", "local")
+    Path(repo_dir, "leftover.tex").write_text("untracked")
+    head = _commit(remote, "main.tex", "v2")
+
+    def get():
+        return app.git.get_overleaf_repo(
+            project=project,
+            user=user,
+            session=object(),
+            overleaf_project_id="abc",
+        )
+
+    with get() as repo:
+        assert repo.head.commit.hexsha == head
+        assert Path(repo_dir, "main.tex").read_text() == "v2"
+        assert not Path(repo_dir, "leftover.tex").exists()
+        # Another sync of the same clone has to wait its turn
+        monkeypatch.setattr(app.git, "OVERLEAF_LOCK_TIMEOUT", 0)
+        with pytest.raises(HTTPException) as e:
+            with get():
+                pass
+        assert e.value.status_code == 409
+    # The lock is released afterwards, even if the sync fails
+    with pytest.raises(RuntimeError):
+        with get():
+            raise RuntimeError("Sync failed")
+    with get():
+        pass
+
+    # Overleaf rejecting the token asks for a new one, both when pulling into
+    # the clone and when cloning afresh, rather than failing with a 500
+    def reject(*args, **kwargs):
+        raise app.git.calkit.overleaf.AuthError("Authentication failed")
+
+    monkeypatch.setattr(app.git.calkit.overleaf, "pull", reject)
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.status_code == 401
+    assert e.value.detail == app.git.OVERLEAF_TOKEN_REJECTED
+    shutil.rmtree(repo_dir)
+    monkeypatch.setattr(
+        app.git.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(
+            returncode=128,
+            stderr="fatal: Authentication failed for 'https://x@git.overleaf.com/abc/'",
+        ),
+    )
+    with pytest.raises(HTTPException) as e:
+        with get():
+            pass
+    assert e.value.status_code == 401
+
+
 def _read_title(files: dict[str, str]):
     from unittest.mock import patch
 

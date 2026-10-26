@@ -246,6 +246,11 @@ async function handle(message: Request): Promise<unknown> {
         `${projectPath(message.owner, message.project)}/overleaf-syncs`,
         { method: "POST", body: { path: message.path } },
       );
+    case "overleaf.setToken":
+      return request<{ message: string }>("/user/overleaf-token", {
+        method: "PUT",
+        body: { token: message.token },
+      });
     case "overleaf.import":
       return request<{ path: string; title: string }>(
         `${projectPath(message.owner, message.project)}/publications/overleaf`,

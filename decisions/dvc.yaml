@@ -1,0 +1,89 @@
+stages:
+  parse-dvc-lock-pure:
+    cmd: calkit xenv -n pure --no-check -- python scripts/parse-dvc-lock.py
+      --out=results/ruamel-yaml-clib/pure.json
+    deps:
+      - scripts/parse-dvc-lock.py
+      - .calkit/env-locks/pure
+    outs:
+      - results/ruamel-yaml-clib/pure.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'parse-dvc-lock-pure' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  parse-dvc-lock-clib:
+    cmd: calkit xenv -n clib --no-check -- python scripts/parse-dvc-lock.py
+      --out=results/ruamel-yaml-clib/clib.json
+    deps:
+      - scripts/parse-dvc-lock.py
+      - .calkit/env-locks/clib
+    outs:
+      - results/ruamel-yaml-clib/clib.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'parse-dvc-lock-clib' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  compare-dvc-lock-parsing:
+    cmd: calkit xenv -n pure --no-check -- python
+      scripts/compare-dvc-lock-parsing.py
+    deps:
+      - scripts/compare-dvc-lock-parsing.py
+      - results/ruamel-yaml-clib/pure.json
+      - results/ruamel-yaml-clib/clib.json
+      - .calkit/env-locks/pure
+    outs:
+      - results/ruamel-yaml-clib.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'compare-dvc-lock-parsing' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  time-imports:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/time-imports.py
+      --out=results/imports.json
+    deps:
+      - scripts/time-imports.py
+      - ../calkit/calc.py
+      - ../calkit/cli/describe.py
+      - ../calkit/models/base.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/imports.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-imports' stage in calkit.yaml.
+      Changes made here will be overwritten.
+  time-docker-image-check:
+    cmd: calkit xenv -n calkit --no-check -- python
+      scripts/time-docker-image-check.py --out=results/docker-image-check.json
+    deps:
+      - scripts/time-docker-image-check.py
+      - ../calkit/docker.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/docker-image-check.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-docker-image-check' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  time-cli-build:
+    cmd: calkit xenv -n calkit --no-check -- python scripts/time-cli-build.py
+      --out=results/cli-build.json
+    deps:
+      - scripts/time-cli-build.py
+      - ../calkit/cli/__init__.py
+      - ../uv.lock
+      - ../.python-version
+    outs:
+      - results/cli-build.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'time-cli-build' stage in
+      calkit.yaml. Changes made here will be overwritten.

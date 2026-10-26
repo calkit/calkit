@@ -387,9 +387,95 @@ if omitted.
 For example:
 
 ```latex
-% COMMENT resolved=false highlight={text: "something", occ: 0}
+% COMMENT id=3f9a2c1b resolved=false highlight={text: "something", occ: 0}
 %   Someone Name <email@mail.com> (2025-01-01 01:00):
 %     This is a comment.
 %   Person, Other:
 %     That's a very good comment.
 ```
+
+The metadata a thread can have:
+
+- `id`: eight hexadecimal characters that identify the thread,
+  so tools can find it after the lines around it change.
+  A thread gets one the first time a tool edits it.
+- `resolved`: `true` once the discussion is done.
+  The thread stays in the source, so it can be reopened.
+- `highlight`: the text in the following paragraph, as it reads in the PDF,
+  that the thread is about, and `occ`, which occurrence of that text it is.
+  Without a highlight, a thread is about the whole paragraph.
+- `issue`: the URL of an issue that mirrors the thread, e.g., on GitHub.
+
+Tools keep any other metadata they don't recognize when they rewrite a
+thread, so newer attributes survive older tools.
+
+### From the command line
+
+`calkit latex comments` reads and edits threads in place.
+To list a document's threads, including those in files it inputs,
+in the order they appear:
+
+```sh
+calkit latex comments list paper/main.tex --unresolved
+```
+
+To start a thread above the paragraph at a line, about some of its text:
+
+```sh
+calkit latex comments add paper/intro.tex --line 12 \
+  --highlight "the wake recovers" -m "How quickly?"
+```
+
+This prints the new thread's ID, which `reply`, `resolve`, `reopen`,
+and `delete` take with `--id`.
+They also take `--line` with the number of any line in the thread:
+
+```sh
+calkit latex comments reply paper/intro.tex --id 3f9a2c1b -m "Within 3D."
+calkit latex comments resolve paper/intro.tex --id 3f9a2c1b
+```
+
+Authors default to Git's `user.name` and `user.email`.
+Pass `--json` to `list` or `add` for output other programs can read.
+
+### In VS Code
+
+The Calkit extension opens a `latex` stage's PDF in its PDF Review viewer,
+which shows the document's threads as highlights on the PDF and in a side
+panel, where they can be replied to, resolved, reopened, and deleted.
+The Comments button shows how many are open, and hides or shows them.
+
+Selecting text in the PDF offers to comment on it,
+which writes a new thread into the source above that paragraph,
+or to go to the source, which opens the `.tex` file with that text selected.
+Right-clicking the PDF, or Cmd/Ctrl-clicking it, goes to the source too.
+Cmd/Ctrl+Alt+Shift+J switches between a `.tex` file and its PDF,
+at the cursor, and Cmd/Ctrl+F searches the PDF's text.
+
+The viewer uses the SyncTeX file `latexmk` writes beside the PDF to find
+where things are.
+A PDF built elsewhere won't have one, e.g., one pulled from DVC,
+so the viewer finds each paragraph by its text instead,
+which can misplace a thread on a paragraph that's repeated word for word.
+
+### On the Calkit Hub
+
+On the Calkit Hub, comments on a publication that a `latex` stage builds
+are kept in the same way, in its `.tex` source,
+so they show up for anyone who views the document,
+whether in VS Code, from the command line, or on the hub.
+A comment made on the hub is saved to the source on the branch being viewed.
+Comments made while viewing a release or another past version go on a new
+branch from it instead, with a pull request to bring them into the main
+branch.
+
+The hub's LaTeX editor shows the threads in the file being edited,
+and comments made there are saved along with the file.
+
+Comments made on the hub before it stored them in the source are listed as
+kept on the hub, with a button to move them into the source.
+
+When commenting on the hub, a thread can optionally also be posted as a
+GitHub issue, which is linked from the thread's `issue` metadata.
+Replies and resolving are copied to the issue,
+and closing the issue resolves the thread.

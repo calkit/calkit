@@ -24,7 +24,7 @@ gui: ## Run the GUI in dev mode.
 
 .PHONY: build
 build: ## Build the GUI with PyInstaller.
-	@uv run pyinstaller --onefile --icon resources/icon.ico --name calkit-assistant main.py
+	@uv run pyinstaller --onefile --icon resources/icon.ico --copy-metadata calkit-assistant --add-data resources/vscode-extensions.json:resources --name calkit-assistant main.py
 
 .PHONY: icon
 icon: ../hub/frontend/public/assets/images/c-to-the-k.svg ## Create the app icon.

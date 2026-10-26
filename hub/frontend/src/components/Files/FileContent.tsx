@@ -14,7 +14,7 @@ interface FileContentProps {
    * repo path resolve against it, as they do on the project page. */
   accountName?: string
   projectName?: string
-  ref?: string
+  gitRef?: string
 }
 
 // Render a Quarto/R Markdown source as Markdown while keeping the leading
@@ -56,7 +56,7 @@ function FileContent({
   item,
   accountName,
   projectName,
-  ref,
+  gitRef,
 }: FileContentProps) {
   const { name, content, url } = item
   // Match extensions case-insensitively so all-caps names (FOO.PDF, IMG.PNG,
@@ -136,7 +136,7 @@ function FileContent({
               ? {
                   accountName,
                   projectName,
-                  ref,
+                  ref: gitRef,
                   dir: item.path.includes("/")
                     ? item.path.slice(0, item.path.lastIndexOf("/"))
                     : undefined,

@@ -15,9 +15,10 @@ never pushed, or pinned to a Git ref that doesn't exist); a reference is
 broken (a key that doesn't resolve, a placeholder that names no evidence, a
 label missing from the LaTeX); the stage that produces it is out of date, so
 what's on disk isn't what the project would produce now; or the stage is
-frozen, or downstream of one, in which case the pipeline will never call it
-out of date however far its inputs have moved -- and only a ``git_ref`` on
-the citation says which version is meant.
+frozen, or downstream of one, and its inputs or outputs have moved from
+what dvc.lock records, in which case the pipeline will never rerun it --
+and only a ``git_ref`` on the citation says which version is meant. A
+frozen stage that still matches dvc.lock is as current as any other.
 
 Evidence pinned with ``git_ref`` is checked at that ref rather than in the
 working tree. A pin is a claim about one version, so nothing about the
@@ -39,20 +40,25 @@ something that is no longer there.
 
 from __future__ import annotations
 
-import ast
 import datetime
 import glob
 import io
 import json
-import operator
 import os
 import re
 import string
-from typing import Any, Literal, TypeGuard
+from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 import calkit
+from calkit.conditions import (
+    evaluate_condition,
+    is_conditional,
+    parse_conditional,
+    select_branch,
+)
 
 EvidenceStatus = Literal[
     "ok",
@@ -112,6 +118,8 @@ class QuestionCheck(BaseModel):
 
     #: 1-based, matching ``calkit list questions``
     index: int
+    #: The subproject it belongs to, relative to the project, if not this one
+    project: str | None = None
     question: str
     answered: bool
     status: QuestionStatus
@@ -328,149 +336,6 @@ def _placeholder_problems(text: str, values: dict[str, Any]) -> list[str]:
     return []
 
 
-_IF_KEY = re.compile(r"^\s*(if|elif)\s+(.+?)\s*$")
-_ELSE_KEY = re.compile(r"^\s*else\s*$")
-_COMPARISONS = {
-    ast.Lt: operator.lt,
-    ast.LtE: operator.le,
-    ast.Gt: operator.gt,
-    ast.GtE: operator.ge,
-    ast.Eq: operator.eq,
-    ast.NotEq: operator.ne,
-}
-
-
-def is_conditional(value: Any) -> TypeGuard[dict]:
-    """Whether a value picks its wording with ``if``/``elif``/``else``."""
-    return isinstance(value, dict)
-
-
-def parse_conditional(clauses: dict) -> list[tuple[str | None, str]]:
-    """Read a conditional's keys into ordered ``(condition, wording)``.
-
-    The condition is ``None`` for ``else``. Keys are read in the order
-    they appear in the file, so the clauses are tried in the order they
-    were written.
-    """
-    parsed: list[tuple[str | None, str]] = []
-    for position, (key, wording) in enumerate(clauses.items()):
-        opened = _IF_KEY.match(str(key))
-        if opened:
-            keyword, condition = opened.groups()
-            if keyword == "if" and position:
-                raise ValueError("only the first clause may be 'if'")
-            if keyword == "elif" and not parsed:
-                raise ValueError("'elif' with no 'if' before it")
-            parsed.append((condition, str(wording)))
-            continue
-        if _ELSE_KEY.match(str(key)):
-            if not parsed:
-                raise ValueError("'else' with no 'if' before it")
-            parsed.append((None, str(wording)))
-            continue
-        raise ValueError(f"expected 'if', 'elif' or 'else', got {key!r}")
-    if not parsed:
-        raise ValueError("a conditional needs at least an 'if' clause")
-    for condition, _ in parsed[:-1]:
-        if condition is None:
-            raise ValueError("'else' must be the last clause")
-    return parsed
-
-
-def _operand(node: ast.AST, values: dict[str, Any]) -> Any:
-    """One side of a comparison, resolved against the evidence values.
-
-    Names and literals are read directly; anything else is arithmetic and
-    goes to the same evaluator the calculations use, so there is one
-    audited path for arithmetic rather than two.
-    """
-    if isinstance(node, ast.Constant):
-        return node.value
-    if isinstance(node, ast.Name):
-        if node.id not in values:
-            raise KeyError(node.id)
-        return values[node.id]
-    for inner in ast.walk(node):
-        if isinstance(inner, ast.Name) and inner.id not in values:
-            raise KeyError(inner.id)
-    import arithmetic_eval  # type: ignore[import-untyped]
-
-    return arithmetic_eval.evaluate(ast.unparse(node), values)
-
-
-def _truth(node: ast.AST, values: dict[str, Any]) -> bool:
-    if isinstance(node, ast.BoolOp):
-        # Not short-circuited, so a misspelled name is an error whatever
-        # the current values are
-        outcomes = [_truth(v, values) for v in node.values]
-        if isinstance(node.op, ast.And):
-            return all(outcomes)
-        return any(outcomes)
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
-        return not _truth(node.operand, values)
-    if isinstance(node, ast.Compare):
-        left = _operand(node.left, values)
-        for op, comparator in zip(node.ops, node.comparators):
-            right = _operand(comparator, values)
-            compare = _COMPARISONS.get(type(op))
-            if compare is None:
-                raise ValueError(
-                    f"{type(op).__name__} is not a supported comparison"
-                )
-            if not compare(left, right):
-                return False
-            left = right
-        return True
-    if isinstance(node, ast.Name):
-        value = _operand(node, values)
-        # Only a true/false value stands alone, so a number is never
-        # silently read as its truthiness
-        if isinstance(value, bool):
-            return value
-    raise ValueError(
-        "a condition must compare values, e.g., 'p < 0.05', "
-        "or name a true/false value"
-    )
-
-
-def evaluate_condition(expression: str, values: dict[str, Any]) -> bool:
-    """Evaluate one ``if``/``elif`` condition against the evidence values.
-
-    Only comparisons, ``and``/``or``/``not`` and arithmetic are allowed, so
-    a condition read from ``calkit.yaml`` cannot call anything.
-    """
-    try:
-        tree = ast.parse(expression, mode="eval")
-    except SyntaxError as e:
-        raise ValueError(f"cannot parse condition {expression!r}: {e}") from e
-    try:
-        return bool(_truth(tree.body, values))
-    except KeyError:
-        # A name like 'paired-gain.vawt-8' reads as arithmetic and
-        # attribute access, so the failure would otherwise name a
-        # fragment of it and look like missing evidence.
-        unusable = [
-            name
-            for name in values
-            if not name.isidentifier() and name in expression
-        ]
-        if unusable:
-            raise ValueError(
-                f"condition {expression!r} refers to {unusable[0]!r}, which "
-                "cannot be read as a variable; give that evidence a 'name' "
-                "that is a valid Python identifier"
-            ) from None
-        raise
-    except ValueError:
-        raise
-    except Exception as e:
-        # E.g., comparing a string to a number, or syntax arithmetic_eval
-        # refuses, so callers only have to handle one kind of bad condition
-        raise ValueError(
-            f"cannot evaluate condition {expression!r}: {e}"
-        ) from e
-
-
 def check_conditional(clauses: dict, values: dict[str, Any]) -> list[str]:
     """Problems with every clause of a conditional, not just the one chosen.
 
@@ -502,14 +367,6 @@ def check_conditional(clauses: dict, values: dict[str, Any]) -> list[str]:
             "'else' clause"
         )
     return messages
-
-
-def select_branch(clauses: dict, values: dict[str, Any]) -> str:
-    """The wording whose condition holds, for a conditional answer."""
-    for condition, wording in parse_conditional(clauses):
-        if condition is None or evaluate_condition(condition, values):
-            return wording
-    raise ValueError("no condition held and there is no 'else' clause")
 
 
 def render(text: str | dict | None, values: dict[str, Any]) -> str | None:
@@ -580,7 +437,18 @@ def render_question(
         if not keys:
             continue
         try:
-            data = read_evidence_file(os.path.join(wdir, ev["path"]))
+            git_ref = _declared_git_ref(ev)
+            if git_ref is None:
+                data = read_evidence_file(os.path.join(wdir, ev["path"]))
+            else:
+                # Pinned, so read as it was there
+                import calkit.git
+
+                repo = calkit.git.get_repo(wdir)
+                text = _read_at_ref(repo, git_ref, ev["path"], wdir)
+                if text is None:
+                    raise FileNotFoundError(f"not found at {git_ref}")
+                data = parse_evidence_text(text, ev["path"])
         except Exception as e:
             if strict:
                 raise ValueError(f"Can't read {ev['path']}: {e}") from e
@@ -1198,10 +1066,16 @@ def _declared_git_ref(ev: dict) -> str | None:
     return git_ref if isinstance(git_ref, str) else str(git_ref)
 
 
-def _read_at_ref(repo: Any, git_ref: str, path: str) -> str | None:
-    """The text of ``path`` at ``git_ref``, or None if it isn't there."""
+def _read_at_ref(
+    repo: Any, git_ref: str, path: str, wdir: str = "."
+) -> str | None:
+    """The text of ``path``, relative to ``wdir``, at ``git_ref``, or None if
+    it isn't there.
+    """
+    # The project can be a subproject, and Git reads paths from the root
+    rel = os.path.relpath(os.path.join(wdir, path), repo.working_dir)
     try:
-        return str(repo.git.show(f"{git_ref}:{path}"))
+        return str(repo.git.show(f"{git_ref}:{Path(rel).as_posix()}"))
     except Exception:
         return None
 
@@ -1228,9 +1102,9 @@ def check_pinned_evidence(
         out.status = "missing"
         out.message = f"Git ref {git_ref!r} was not found; push it or fix it"
         return out
-    text = _read_at_ref(repo, git_ref, out.path)
+    text = _read_at_ref(repo, git_ref, out.path, wdir)
     if text is None:
-        lock = _read_at_ref(repo, git_ref, "dvc.lock")
+        lock = _read_at_ref(repo, git_ref, "dvc.lock", wdir)
         if lock is not None and _lock_hash(lock, out.path) is not None:
             # Tracked by DVC at that commit: present, but its content lives
             # in storage, so a cited value can't be read from here.
@@ -1433,9 +1307,9 @@ def check_evidence(
                     None,
                     [
                         out.message,
-                        f"stage '{base}' is frozen, or downstream of one, so "
-                        "nothing will report it out of date; cite a git_ref "
-                        "to pin which version this is",
+                        f"stage '{base}' is frozen, or downstream of one, "
+                        "and no longer matches dvc.lock, so it won't be "
+                        "rerun; cite a git_ref to pin which version this is",
                     ],
                 )
             )
@@ -1650,17 +1524,25 @@ def pipeline_stage_sets(
         return set(), set()
     stale: set[str] = set()
     frozen: set[str] = set()
-    try:
-        status = get_status(
-            ck_info=ck_info,
-            wdir=wdir,
-            check_environments=False,
-            clean_notebooks=False,
-            compile_to_dvc=False,
-        )
-        stale = {n.split("@")[0] for n in status.stale_stage_names}
-    except Exception:
-        pass
+    # DVC never calls a frozen stage out of date, so with nothing else in the
+    # pipeline, e.g., a subproject of decisions, there's nothing to ask it
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    all_frozen = all(
+        isinstance(stage, dict) and stage.get("frozen")
+        for stage in stages.values()
+    )
+    if not all_frozen:
+        try:
+            status = get_status(
+                ck_info=ck_info,
+                wdir=wdir,
+                check_environments=False,
+                clean_notebooks=False,
+                compile_to_dvc=False,
+            )
+            stale = {n.split("@")[0] for n in status.stale_stage_names}
+        except Exception:
+            pass
     try:
         frozen = frozen_tainted_stage_names(ck_info=ck_info, wdir=wdir)
     except Exception:
@@ -1707,22 +1589,36 @@ def check_questions(
         stale_stages, frozen_stages = pipeline_stage_sets(
             ck_info, wdir, check_pipeline
         )
-    return QuestionsStatus(
-        questions=[
-            check_question(
-                n,
-                q,
-                ck_info,
-                wdir,
-                repo,
-                history,
-                stale_stages=stale_stages,
-                frozen_stages=frozen_stages,
-                check_history=check_history,
-            )
-            for n, q in enumerate(questions, start=1)
-        ]
-    )
+    checks = [
+        check_question(
+            n,
+            q,
+            ck_info,
+            wdir,
+            repo,
+            history,
+            stale_stages=stale_stages,
+            frozen_stages=frozen_stages,
+            check_history=check_history,
+        )
+        for n, q in enumerate(questions, start=1)
+    ]
+    # A subproject's questions are part of what the project answers
+    for subproject in ck_info.get("subprojects") or []:
+        path = subproject.get("path") if isinstance(subproject, dict) else None
+        if not isinstance(path, str) or not os.path.isfile(
+            os.path.join(wdir, path, "calkit.yaml")
+        ):
+            continue
+        sp_status = check_questions(
+            wdir=os.path.join(wdir, path),
+            check_pipeline=check_pipeline,
+            check_history=check_history,
+        )
+        for q in sp_status.questions:
+            q.project = Path(path, q.project or "").as_posix()
+            checks.append(q)
+    return QuestionsStatus(questions=checks)
 
 
 def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
@@ -1746,8 +1642,9 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
         )
         if not verbose and not needs_attention:
             continue
+        where = f"{q.project}: " if q.project else ""
         review = f", review {q.review_status}" if q.reviews else ""
-        lines.append(f"{q.index}. [{q.status}{review}] {q.question}")
+        lines.append(f"{where}{q.index}. [{q.status}{review}] {q.question}")
         if q.message:
             lines.append(f"     {q.message}")
         if verbose and q.stages:

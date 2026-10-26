@@ -8,8 +8,8 @@ the purpose of this image is to provide most of the packages scientific
 articles need without the <!-- calkit value key=texlive_full.unpacked_gb format="{:.1f}" -->6.2<!-- /calkit value --> GB
 of `texlive/texlive:latest-full`, a <!-- calkit value key=texlive_full.download_gb format="{:.1f}" -->2.7<!-- /calkit value --> GB
 download.
-Instead, this one is <!-- calkit value key=calkit.unpacked_mb format="{:.0f}" -->731<!-- /calkit value --> MB
-unpacked and <!-- calkit value key=calkit.download_mb format="{:.0f}" -->400<!-- /calkit value --> MB
+Instead, this one is <!-- calkit value key=calkit.unpacked_mb format="{:.0f}" -->900<!-- /calkit value --> MB
+unpacked and <!-- calkit value key=calkit.download_mb format="{:.0f}" -->430<!-- /calkit value --> MB
 to download, which speeds up downloads.
 These are measured for amd64, as described [below](#measuring-its-size).
 When run through `calkit latex build`,
@@ -128,6 +128,12 @@ def run(*args: str) -> str:
     return res.stdout
 
 
+def round2(x: float) -> float:
+    # Two significant figures, so measurement jitter between runs doesn't
+    # change the file
+    return float(f"{x:.2g}")
+
+
 def sizes(image: str) -> dict:
     # The files inside the container, since what Docker reports depends
     # on the platform and storage driver, and the compressed layers a
@@ -167,10 +173,10 @@ def sizes(image: str) -> dict:
     download = sum(layer["size"] for layer in manifest["layers"])
     return {
         "image": image,
-        "unpacked_mb": unpacked / 1e6,
-        "download_mb": download / 1e6,
-        "unpacked_gb": unpacked / 1e9,
-        "download_gb": download / 1e9,
+        "unpacked_mb": round2(unpacked / 1e6),
+        "download_mb": round2(download / 1e6),
+        "unpacked_gb": round2(unpacked / 1e9),
+        "download_gb": round2(download / 1e9),
     }
 
 

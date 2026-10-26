@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import timezone
-from typing import Any
+from typing import Any, Iterator
 
 import git
 from fastapi import HTTPException
@@ -935,6 +935,56 @@ def push_and_expire(
         _record_remote_head(project, name, head)
 
 
+def commit_to_branch(
+    project: Project,
+    repo: git.Repo,
+    base: str,
+    files: dict[str, str],
+    message: str,
+    author: tuple[str, str],
+    branch: str,
+) -> str:
+    """Commit files on top of a commit and push the result as a branch.
+
+    Nothing is checked out, so this can write to any branch, not only the
+    one a user's clone has out, without disturbing the checkout. The push
+    only moves the branch forward, so if someone else moved it since
+    *base*, Git refuses and this raises ``GitCommandError`` for the caller
+    to start again from the new tip. Returns the new commit's SHA.
+    """
+    from io import BytesIO
+
+    from gitdb import IStream
+
+    refuse_if_shared(repo)
+    name, email = author
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {
+            "GIT_INDEX_FILE": os.path.join(tmp, "index"),
+            "GIT_AUTHOR_NAME": name,
+            "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name,
+            "GIT_COMMITTER_EMAIL": email,
+        }
+        repo.git.read_tree(base, env=env)
+        for path, content in files.items():
+            data = content.encode("utf-8")
+            sha = repo.odb.store(
+                IStream("blob", len(data), BytesIO(data))
+            ).hexsha.decode()
+            # Keep an executable bit, say, if the file had one
+            listed = repo.git.ls_tree(base, "--", path).split(" ", 1)
+            mode = listed[0] if listed[0] else "100644"
+            repo.git.update_index(
+                "--add", "--cacheinfo", f"{mode},{sha},{path}", env=env
+            )
+        tree = repo.git.write_tree(env=env)
+        commit = repo.git.commit_tree(tree, "-p", base, "-m", message, env=env)
+    repo.git.push(["origin", f"{commit}:refs/heads/{branch}"])
+    expire_shared_read_clone(project, branch, head=commit)
+    return commit
+
+
 def record_project_update(
     project: Project, repo: git.Repo, session: Session
 ) -> None:
@@ -1107,10 +1157,29 @@ def get_dvc_pipeline_from_repo(
         return (load_yaml_fast(f.read()) if read_only else ryaml.load(f)) or {}
 
 
+# Seconds to wait for another sync of the same Overleaf clone to finish
+OVERLEAF_LOCK_TIMEOUT = 60
+
+
+# Distinct from the hub's own credential errors, so a client asks for a new
+# Overleaf token rather than for the user to sign in again
+OVERLEAF_TOKEN_REJECTED = (
+    "Overleaf rejected your Git token, so it may have expired or been "
+    "revoked. Generate a new one under 'Git Integration' in your Overleaf "
+    "account settings."
+)
+
+
+@contextmanager
 def get_overleaf_repo(
     project: Project, user: User, session: Session, overleaf_project_id: str
-) -> git.Repo:
-    """Get a freshly pulled Overleaf repository for a user/project."""
+) -> Iterator[git.Repo]:
+    """Get a freshly pulled Overleaf repository for a user/project.
+
+    The clone is locked while in use, since a sync resets it and copies files
+    into it, so a concurrent sync or status check could wipe those files or
+    record Overleaf edits as synced without pulling them.
+    """
     owner_name, project_name = project.owner_github_name, project.name
     base_dir = (
         f"{settings.CLONE_ROOT}/{user.github_username}/{owner_name}/"
@@ -1123,21 +1192,48 @@ def get_overleaf_repo(
     # (username "git" for Overleaf)
     git_plain_url = f"https://git.overleaf.com/{overleaf_project_id}"
     overleaf_auth = _make_git_auth_env(overleaf_token, username="git")
-    if os.path.isdir(repo_dir):
-        repo = git.Repo(repo_dir)
-        repo.git.update_environment(**overleaf_auth)
-        repo.git.pull()
-    else:
-        subprocess.check_call(
-            ["git", "clone", git_plain_url, repo_dir],
-            env={**os.environ, **overleaf_auth},
-            timeout=300,
+    try:
+        lock = FileLock(
+            os.path.join(base_dir, "syncing.lock"),
+            timeout=OVERLEAF_LOCK_TIMEOUT,
         )
-        repo = git.Repo(repo_dir)
-        repo.git.update_environment(**overleaf_auth)
-    # Run git config so we make commits as this user (with safe fallbacks)
-    _configure_committer(repo, user, session=session)
-    return repo
+        lock.acquire()
+    except Timeout:
+        raise HTTPException(
+            409, "Another Overleaf sync of this project is running"
+        )
+    try:
+        try:
+            if os.path.isdir(repo_dir):
+                repo = git.Repo(repo_dir)
+                repo.git.update_environment(**overleaf_auth)
+                # Resets rather than merges, so a sync that failed after
+                # committing to the clone can't block every later pull
+                calkit.overleaf.pull(repo)
+            else:
+                cloned = subprocess.run(
+                    ["git", "clone", git_plain_url, repo_dir],
+                    env={**os.environ, **overleaf_auth},
+                    timeout=300,
+                    capture_output=True,
+                    text=True,
+                )
+                if cloned.returncode != 0:
+                    raise calkit.overleaf._git_error(
+                        GitCommandError(
+                            ["git", "clone"], cloned.returncode, cloned.stderr
+                        ),
+                        "clone",
+                    )
+                repo = git.Repo(repo_dir)
+                repo.git.update_environment(**overleaf_auth)
+        except calkit.overleaf.AuthError:
+            raise HTTPException(401, OVERLEAF_TOKEN_REJECTED)
+        # Run git config so we make commits as this user (with safe fallbacks)
+        _configure_committer(repo, user, session=session)
+        yield repo
+    finally:
+        lock.release()
 
 
 # Names a main document usually goes by, tried before falling back to

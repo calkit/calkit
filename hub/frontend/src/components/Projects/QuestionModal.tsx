@@ -1,4 +1,9 @@
 import {
+  Accordion,
+  AccordionButton,
+  AccordionIcon,
+  AccordionItem,
+  AccordionPanel,
   Badge,
   Box,
   Code,
@@ -21,7 +26,13 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import { FaArrowLeft, FaChevronLeft, FaChevronRight } from "react-icons/fa"
+import {
+  FaArrowLeft,
+  FaCheck,
+  FaChevronLeft,
+  FaChevronRight,
+  FaRegSquare,
+} from "react-icons/fa"
 import { FaExternalLinkAlt, FaRegFileAlt } from "react-icons/fa"
 import { FiGrid } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
@@ -41,7 +52,7 @@ import CommentsPanel, {
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import Tooltip from "../Common/Tooltip"
-import FigureView from "../Figures/FigureView"
+import FigureView, { PlotlyThumbnail } from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
 import SandboxedHtml from "../Common/SandboxedHtml"
 import PublicationView from "../Publications/PublicationView"
@@ -79,6 +90,46 @@ export const isEvidenceStale = (evidence: QuestionEvidence) =>
 /** Whether the cited artifact resolves to nothing at all. */
 export const isEvidenceMissing = (evidence: QuestionEvidence) =>
   evidence.stale_reason === "missing"
+
+/** The one mark a question gets in a list, worst first.
+ *
+ * No answer, then an answer with nothing behind it, then evidence that can't
+ * be found at all, then evidence that has merely drifted -- staleness that
+ * only shows once a question is open is staleness nobody sees. All four are
+ * icons of the same size, so they land on one line down the list.
+ */
+export const questionMark = (question: QuestionPublic) =>
+  !question.answer
+    ? {
+        icon: FaRegSquare,
+        color: "red.400",
+        label: "Not yet answered",
+      }
+    : !question.evidence?.length
+      ? {
+          icon: FaRegSquare,
+          color: "orange.300",
+          label: "Answered, but nothing is linked to back it up",
+        }
+      : question.evidence.some(isEvidenceMissing)
+        ? {
+            icon: FaCheck,
+            color: "red.400",
+            label:
+              "Answered, but some of its evidence can't be found -- it may never have been pushed, or it cites a Git ref that doesn't exist.",
+          }
+        : question.evidence.some(isEvidenceStale)
+          ? {
+              icon: FaCheck,
+              color: "orange.300",
+              label:
+                "Answered, but some of its evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.",
+            }
+          : {
+              icon: FaCheck,
+              color: "green.400",
+              label: "Answered, and every piece of its evidence is up to date",
+            }
 
 const STALE_MARKS: Record<
   string,
@@ -243,8 +294,12 @@ function EvidenceCard({
           objectFit="contain"
         />
       )
+    } else if (fig?.content && ext === "json") {
+      // Same stripped-down drawing as the gallery, since a live plot this
+      // small squishes its labels into the traces.
+      thumb = <PlotlyThumbnail figure={fig} height={150} />
     } else if (fig && (fig.content || fig.url)) {
-      // Plotly JSON, PDFs, etc. go through the shared figure renderer.
+      // PDFs, etc. go through the shared figure renderer.
       thumb = <FigureView figure={fig} fillHeight />
     } else {
       thumb = (
@@ -994,6 +1049,150 @@ function QuestionModal({
                 )}
               </Box>
             </Flex>
+          )}
+        </ModalBody>
+      </ModalContent>
+    </Modal>
+  )
+}
+
+/** Every question at once, each expanding in place to its answer and evidence.
+ *
+ * For reading a project's questions through rather than one at a time. The
+ * discussion, and the full view of an evidence item, are still the question's
+ * own page, which is what onOpenQuestion goes to.
+ */
+export function QuestionsModal({
+  questions,
+  isOpen,
+  onClose,
+  accountName,
+  projectName,
+  gitRef,
+  onOpenQuestion,
+}: {
+  questions: QuestionPublic[]
+  isOpen: boolean
+  onClose: () => void
+  accountName: string
+  projectName: string
+  gitRef?: string
+  onOpenQuestion: (questionNumber: number, evidenceIndex?: number) => void
+}) {
+  const subtleColor = useColorModeValue("gray.600", "gray.400")
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="6xl"
+      scrollBehavior="inside"
+      isCentered
+      motionPreset="none"
+    >
+      <ModalOverlay />
+      <ModalContent maxW={{ base: "100%", lg: "72vw" }} maxH="88vh">
+        <ModalHeader>Questions</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody pt={0} pb={4}>
+          {questions.length ? (
+            <Accordion allowMultiple>
+              {questions.map((question) => {
+                const mark = questionMark(question)
+                const evidence = question.evidence ?? []
+                return (
+                  <AccordionItem key={question.id}>
+                    <AccordionButton px={2} sx={{ "& p": { my: 0 } }}>
+                      <Box flex="1" minW={0} textAlign="left">
+                        <Markdown>
+                          {`${question.number}. ${question.question}`}
+                        </Markdown>
+                      </Box>
+                      <Tooltip label={mark.label}>
+                        <Flex mx={2} flexShrink={0} align="center">
+                          <Icon as={mark.icon} color={mark.color} />
+                        </Flex>
+                      </Tooltip>
+                      <AccordionIcon />
+                    </AccordionButton>
+                    <AccordionPanel px={2} pb={4}>
+                      {question.hypothesis ? (
+                        <Box mb={3}>
+                          <Text
+                            fontSize="xs"
+                            fontWeight="bold"
+                            color={subtleColor}
+                          >
+                            Hypothesis
+                          </Text>
+                          <Box mt={1}>
+                            <Markdown foldedProse>
+                              {question.hypothesis}
+                            </Markdown>
+                          </Box>
+                        </Box>
+                      ) : null}
+                      {question.answer ? (
+                        <Box mb={3}>
+                          <Text
+                            fontSize="xs"
+                            fontWeight="bold"
+                            color={subtleColor}
+                          >
+                            Answer
+                          </Text>
+                          <Box mt={1}>
+                            <Markdown foldedProse>{question.answer}</Markdown>
+                          </Box>
+                        </Box>
+                      ) : (
+                        <Text fontSize="sm" color={subtleColor} mb={3}>
+                          Not yet answered.
+                        </Text>
+                      )}
+                      <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
+                        Evidence
+                      </Text>
+                      {evidence.length ? (
+                        <SimpleGrid
+                          columns={{ base: 1, md: 2, xl: 3 }}
+                          spacing={3}
+                          mt={2}
+                        >
+                          {evidence.map((ev, i) => (
+                            <EvidenceCard
+                              key={`${ev.kind}:${ev.path}:${i}`}
+                              evidence={ev}
+                              accountName={accountName}
+                              projectName={projectName}
+                              gitRef={gitRef}
+                              onOpen={() => onOpenQuestion(question.number, i)}
+                            />
+                          ))}
+                        </SimpleGrid>
+                      ) : (
+                        <Text fontSize="sm" color={subtleColor} mt={1}>
+                          None linked yet.
+                        </Text>
+                      )}
+                      <Link
+                        as="button"
+                        type="button"
+                        fontSize="sm"
+                        display="inline-block"
+                        mt={3}
+                        onClick={() => onOpenQuestion(question.number)}
+                      >
+                        Open question and discussion →
+                      </Link>
+                    </AccordionPanel>
+                  </AccordionItem>
+                )
+              })}
+            </Accordion>
+          ) : (
+            <Text fontSize="sm" color={subtleColor}>
+              No research questions defined yet.
+            </Text>
           )}
         </ModalBody>
       </ModalContent>

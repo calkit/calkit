@@ -35,29 +35,6 @@ def digest(paths: list[str]) -> str:
     return h.hexdigest()
 
 
-def to_pdf(docx: Path, pdf: Path) -> None:
-    # As LibreOffice lays it out, which is available everywhere this runs
-    soffice = calkit.docx.find_soffice()
-    if soffice is None:
-        sys.exit("LibreOffice is needed to show the Word copy")
-    with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run(
-            [
-                soffice,
-                f"-env:UserInstallation={Path(tmp, 'profile').as_uri()}",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                tmp,
-                str(docx),
-            ],
-            check=True,
-            capture_output=True,
-        )
-        shutil.move(Path(tmp, docx.stem + ".pdf"), pdf)
-
-
 OUT.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory() as tmp:
     proj = Path(tmp, "latex-word")
@@ -73,9 +50,25 @@ with tempfile.TemporaryDirectory() as tmp:
         "-c",
         "user.email=calkit@calkit.io",
     ]
+    # Dated as the example's last commit, which the LaTeX build and the
+    # figure's PDF take their date from, so the PDFs only change when the
+    # example does
+    date = subprocess.check_output(
+        ["git", "log", "-1", "--format=%cI", "--", "examples/latex-word"],
+        text=True,
+    ).strip()
+    os.environ["SOURCE_DATE_EPOCH"] = subprocess.check_output(
+        ["git", "log", "-1", "--format=%ct", "--", "examples/latex-word"],
+        text=True,
+    ).strip()
     subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
     subprocess.run(git + ["add", "-A"], cwd=proj, check=True)
-    subprocess.run(git + ["commit", "-q", "-m", "Copy"], cwd=proj, check=True)
+    subprocess.run(
+        git + ["commit", "-q", "-m", "Copy"],
+        cwd=proj,
+        check=True,
+        env=os.environ | {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date},
+    )
     # LaTeX to PDF
     calkit_cmd(proj, "run")
     shutil.copy(proj / "paper" / "main.pdf", OUT / "original.pdf")
@@ -96,7 +89,6 @@ with tempfile.TemporaryDirectory() as tmp:
         "paper/review.docx",
     )
     shutil.copy(docx, OUT / "review.docx")
-    to_pdf(docx, OUT / "review.pdf")
     calkit_cmd(proj, "latex", "merge-docx", "paper/review.docx")
     after = digest(sources)
     # And to PDF again, rebuilding only the paper: forcing the stage would

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import shutil
 import string
 import subprocess
 import sys
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 
@@ -187,6 +189,200 @@ def from_questions(
             os.makedirs(outdir, exist_ok=True)
         with open(out_path, "w") as f:
             json2latex.dump(command_name, values, f)
+
+
+@latex_app.command(name="from-markdown")
+def from_markdown(
+    md_path: Annotated[
+        str, typer.Argument(help="The Markdown file to build.")
+    ],
+    outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--output",
+            "-o",
+            help="Where to write the PDF, or the LaTeX with a .tex "
+            "extension; can be given more than once.",
+        ),
+    ],
+    environment: Annotated[
+        str | None,
+        typer.Option(
+            "--environment",
+            "-e",
+            help="Environment to run pandoc and LaTeX in, e.g., one using "
+            "Calkit's LaTeX image, which includes both.",
+        ),
+    ] = None,
+    template_path: Annotated[
+        str | None, typer.Option("--template", help="Pandoc template.")
+    ] = None,
+    filters: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--filter", help="Pandoc Lua filter; can be given more than once."
+        ),
+    ] = None,
+    pandoc_args: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--pandoc-arg",
+            help="Another argument for pandoc; can be given more than once.",
+        ),
+    ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option("--no-check", help="Don't check the environment first."),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print commands.")
+    ] = False,
+) -> None:
+    """Build a Markdown file into a PDF with pandoc and LaTeX.
+
+    Value markers are filled from their results files, which keeps the
+    Markdown itself current too, and each value links to the question on
+    the project's hub whose evidence cites it. The template gets the Calkit
+    version and the project's URL as the ``calkit-version``,
+    ``project-url``, and ``project`` variables.
+    """
+    import calkit.docx
+    import calkit.markdown
+
+    def question_url(value: calkit.markdown.MarkdownValue) -> str | None:
+        # The question whose evidence cites this value, or failing that,
+        # the first to cite its file
+        if project_url is None:
+            return None
+        first = None
+        for n, q in enumerate(ck_info.get("questions") or [], start=1):
+            evidence = q.get("evidence") if isinstance(q, dict) else None
+            for ev in evidence or []:
+                if not isinstance(ev, dict) or ev.get("path") != value.path:
+                    continue
+                keys = [ev.get("key"), *(ev.get("values") or {}).values()]
+                if value.key in keys:
+                    return f"{project_url}/questions/{n}"
+                first = first or n
+        return f"{project_url}/questions/{first}" if first else None
+
+    def to_latex(tex_path: str) -> None:
+        # Images are pointed at from where the LaTeX is, by a filter that
+        # runs before the others, so they see the paths LaTeX will
+        build_dir = os.path.dirname(tex_path) or "."
+        os.makedirs(build_dir, exist_ok=True)
+        stem = Path(tex_path).stem
+        src_path = f"{build_dir}/{stem}.pandoc.md"
+        with open(src_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(
+                calkit.markdown.prepare_for_pdf(
+                    text, md_path, link=question_url
+                )
+            )
+        prefix = Path(os.path.relpath(md_dir, build_dir)).as_posix()
+        repoint = f"{build_dir}/{stem}.images.lua"
+        with open(repoint, "w", encoding="utf-8", newline="\n") as f:
+            f.write(calkit.markdown.image_prefix_filter(prefix))
+        args = [src_path, "-o", tex_path, "--standalone"]
+        if template_path is not None:
+            args += ["--template", template_path]
+        for path in [repoint, *(filters or [])]:
+            args += ["--lua-filter", path]
+        args += [f"--variable=calkit-version:{version}"]
+        if project_url is not None:
+            args += [
+                f"--variable=project-url:{project_url}",
+                f"--variable=project:{project_url.split('://', 1)[1]}",
+            ]
+        args += pandoc_args or []
+        if environment is not None:
+            cmd = _tex_cmd(
+                ["pandoc", *args], environment, no_check, verbose, dep="pandoc"
+            )
+        else:
+            pandoc = calkit.docx.find_pandoc()
+            if pandoc is None:
+                raise_error(
+                    "Pandoc is needed; name an environment that has it, "
+                    "e.g., one using Calkit's LaTeX image, or install it"
+                )
+            cmd = [pandoc, *args]
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError:
+            raise_error(f"Pandoc failed to convert {md_path}")
+
+    for output in outputs:
+        if not output.endswith((".pdf", ".tex")):
+            raise_error("Outputs must be .pdf or .tex files")
+    # Paths go into the build directory's, so they have to be the
+    # project's own
+    rel = os.path.relpath(md_path)
+    if rel == ".." or rel.startswith(".." + os.sep) or os.path.isabs(rel):
+        raise_error(f"{md_path} isn't in this project")
+    md_path = Path(rel).as_posix()
+    md_dir = os.path.dirname(md_path) or "."
+    ck_info = calkit.load_calkit_info()
+    project_url = None
+    if ck_info.get("owner") and ck_info.get("name"):
+        hub = str(ck_info.get("hub") or "calkit.io").rstrip("/")
+        if "://" not in hub:
+            hub = "https://" + hub
+        project_url = f"{hub}/{ck_info['owner']}/{ck_info['name']}"
+    # A local version's commit is the project's own, which isn't Calkit's,
+    # and a development build's count of commits since the last release
+    # changes with every commit, which would change the PDF on every rebuild
+    version = re.sub(r"\.dev\d+$", ".dev", calkit.__version__.split("+")[0])
+    with open(md_path, encoding="utf-8") as f:
+        text = f.read()
+    try:
+        text, changed = calkit.markdown.set_values(text, md_path)
+    except calkit.markdown.MarkdownParseError as e:
+        raise_error(str(e))
+    if changed:
+        with open(md_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+    for output in outputs:
+        if output.endswith(".tex"):
+            to_latex(output)
+    if not any(o.endswith(".pdf") for o in outputs):
+        return
+    # A PDF is built in the machine-local directory, which is kept out of
+    # version control, and dated by the file's last commit rather than the
+    # build directory's, which has none of its own
+    build_dir = Path(
+        calkit.ensure_local_dir(), "markdown", md_path, "pdf"
+    ).as_posix()
+    tex_path = f"{build_dir}/{Path(md_path).stem}.tex"
+    to_latex(tex_path)
+    cmd = [sys.executable, "-m", "calkit", "latex", "build"]
+    if environment is not None:
+        cmd += ["-e", environment]
+    if no_check:
+        cmd += ["--no-check"]
+    env = os.environ.copy()
+    epoch = calkit.latex.get_source_date_epoch(md_path)
+    if epoch is not None:
+        env["SOURCE_DATE_EPOCH"] = epoch
+    # A document can fail after it's typeset, e.g., one that checks its
+    # length, so what a failed build got as far as is worth a look, and
+    # without an older PDF there it can't be mistaken for one
+    pdf = Path(tex_path).with_suffix(".pdf")
+    pdf.unlink(missing_ok=True)
+    try:
+        subprocess.check_call(cmd + [tex_path], env=env)
+    except subprocess.CalledProcessError:
+        if pdf.is_file():
+            raise_error(
+                f"LaTeX failed to build {tex_path}; the PDF it got as far "
+                f"as is at {pdf.as_posix()}"
+            )
+        raise_error(f"LaTeX failed to build {tex_path}")
+    for output in outputs:
+        if output.endswith(".pdf"):
+            if os.path.dirname(output):
+                os.makedirs(os.path.dirname(output), exist_ok=True)
+            shutil.copyfile(pdf, output)
 
 
 def _tex_cmd(
@@ -508,6 +704,28 @@ def build(
         verbose=verbose,
     ):
         raise_error("latexmk failed")
+    if not no_synctex:
+        # A container build records its own paths, which reverse search in
+        # a viewer can't open
+        synctex_paths = [
+            os.path.join(pdf_dir, stem + ext)
+            for ext in (".synctex.gz", ".synctex")
+        ]
+        if latexmk_rc_path is not None and output_dir is None:
+            # The rc can set $out_dir, which Calkit doesn't read
+            synctex_paths += sorted(
+                glob.glob(
+                    os.path.join(tex_dir, "**", stem + ".synctex*"),
+                    recursive=True,
+                ),
+                key=os.path.getmtime,
+                reverse=True,
+            )
+        synctex_path = next(
+            (p for p in synctex_paths if os.path.isfile(p)), None
+        )
+        if synctex_path is not None:
+            calkit.latex.localize_synctex(synctex_path, tex_dir)
 
 
 DIFF_TMP_DIR = calkit.latex.DIFF_TMP_DIR
@@ -1827,6 +2045,11 @@ def to_docx(
             return out
 
         existing = listing() - {job + ".bbl"}
+        # Dated like the PDF, so \today matches it and a rebuild of an
+        # unchanged source doesn't change
+        tex_env_vars = _tex_env_vars(
+            calkit.latex.get_source_date_epoch(source)
+        )
         # TeX can loop forever, e.g., older TeX4ht on a cases environment,
         # so a run gets a time limit, and loses its LaTeX child with it
         import time
@@ -1840,6 +2063,7 @@ def to_docx(
                 proc = subprocess.Popen(
                     m4h,
                     cwd=src_dir,
+                    env=os.environ | tex_env_vars,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     start_new_session=sys.platform != "win32",
@@ -1872,6 +2096,7 @@ def to_docx(
                         no_check=True,
                         verbose=False,
                         dep="make4ht",
+                        env_vars=tex_env_vars,
                     ),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -2121,6 +2346,15 @@ def to_docx(
         )
         maths = calkit.docx.latex_to_omml([p[2] for p in pieces], preamble)
         converted = dict(zip([(id(p[0]), p[1]) for p in pieces], maths))
+        # What each link within the document shows, e.g., an equation's
+        # number, by the bookmark it goes to
+        link_text = {
+            h.get(calkit.docx._tag(calkit.docx.W, "anchor"), ""): "".join(
+                t.text or ""
+                for t in h.iter(calkit.docx._tag(calkit.docx.W, "t"))
+            ).strip()
+            for h in doc.doc.iter(calkit.docx._tag(calkit.docx.W, "hyperlink"))
+        }
         bid = 100000
         last_number: str | None = None
         for group, gap, numbers, lead, before_para, after_para in plans:
@@ -2156,7 +2390,30 @@ def to_docx(
             ):
                 if para.element is not None and para.element in unit.iter(w_p):
                     doc.move_out(para.element, unit, after=end)
-            doc.insert_equations(gap[0], rows, bid)
+            # The conversion's own bookmarks on the equations, which
+            # references in the text link to, wholly inside what's replaced,
+            # each on the row whose number the references show
+            w_name = calkit.docx._tag(calkit.docx.W, "name")
+            w_id = calkit.docx._tag(calkit.docx.W, "id")
+            ended = {
+                e.get(w_id)
+                for el in gap
+                for e in el.iter(
+                    calkit.docx._tag(calkit.docx.W, "bookmarkEnd")
+                )
+            }
+            row_of = {num: i for i, (_, num, _) in enumerate(rows) if num}
+            keep: dict[int, list[tuple[str, str]]] = {}
+            for el in gap:
+                for b in el.iter(
+                    calkit.docx._tag(calkit.docx.W, "bookmarkStart")
+                ):
+                    name = b.get(w_name, "")
+                    if name in original or b.get(w_id) not in ended:
+                        continue
+                    row = row_of.get(link_text.get(name, ""), 0)
+                    keep.setdefault(row, []).append((name, b.get(w_id, "")))
+            doc.insert_equations(gap[0], rows, bid, keep=keep)
             bid += len(rows)
             for el in gap:
                 doc.remove(el)
@@ -2358,7 +2615,20 @@ def to_docx(
         dirty = any(repo.is_dirty(path=p) for p in {ln.path for ln in lines})
     except Exception:
         pass
-    export_id = str(uuid.uuid4())
+    # At random, so each export can be told apart, unless the build is asked
+    # to be reproducible, in which case it comes from what was exported
+    if os.environ.get("SOURCE_DATE_EPOCH"):
+        doc.save()
+        export_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                json.dumps(
+                    [calkit.get_md5(output), rev, source, original, equations]
+                ),
+            )
+        )
+    else:
+        export_id = str(uuid.uuid4())
     doc.write_original(
         calkit.docx.Original(
             export_id,
@@ -2741,6 +3011,12 @@ def merge_docx(
                     and existing.resolved == tc.resolved
                 ):
                     continue
+                # Word can't carry these, so they come from the source
+                tc.id, tc.issue, tc.attrs = (
+                    existing.id,
+                    existing.issue,
+                    existing.attrs,
+                )
                 # Word knows neither emails nor what the source already
                 # recorded, so carry those over for unchanged messages
                 known = {(e.author, e.text): e for e in existing.entries}
@@ -2818,3 +3094,204 @@ def merge_docx(
         f"already there, {counts['pending']} pending, {counts['unplaced']} "
         f"unplaced); {added} comments added, {updated} updated"
     )
+
+
+comments_app = typer.Typer(no_args_is_help=True)
+# Comments are the project's, so they're worked with like its other objects,
+# e.g., 'calkit new comment'; these are kept for what already uses them
+latex_app.add_typer(
+    comments_app,
+    name="comments",
+    help="Work with review comments in LaTeX or Markdown source.",
+    hidden=True,
+)
+
+_ID_OPTION = typer.Option("--id", help="ID of the thread.")
+_LINE_OPTION = typer.Option(
+    "--line", "-l", help="Number of any line in the thread."
+)
+
+
+def comment_entry(
+    text: str, author: str | None, email: str | None
+) -> calkit.latex.Entry:
+    """A message for a thread, by Git's user unless someone else is named."""
+    import datetime
+
+    import git
+
+    if author is None:
+        try:
+            author = git.Git().config("--get", "user.name").strip()
+            email = email or git.Git().config("--get", "user.email").strip()
+        except git.GitCommandError:
+            raise_error("Set --author, or Git's user.name")
+    date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    return calkit.latex.Entry(author, text, email or None, date)
+
+
+def edit_comment(
+    path: str | None,
+    id: str | None,
+    line: int | None,
+    edit: Callable[[calkit.latex.TexComment], None] | None,
+) -> calkit.latex.TexComment:
+    """Apply an edit to one thread and write the file back, giving the
+    thread an ID if it had none, or delete it without an edit.
+
+    A thread found by its ID can be in any of the project's documents.
+    """
+    if (id is None) == (line is None):
+        raise_error("Specify one of --id or --line")
+    if path is None:
+        if id is None:
+            raise_error("Specify the file a --line is in")
+        path = calkit.latex.find_comment_path(calkit.load_calkit_info(), id)
+        if path is None:
+            raise_error(f"No comment thread {id} in the project's documents")
+    if not os.path.isfile(path):
+        raise_error(f"{path} does not exist")
+    lines = Path(path).read_text(encoding="utf-8").split("\n")
+    tc = calkit.latex.find_comment(lines, id=id, lineno=line)
+    if tc is None:
+        raise_error(f"No comment thread in {path} at {id or line}")
+    if edit is None:
+        del lines[tc.lineno - 1 : tc.lineno - 1 + tc.nlines]
+    else:
+        edit(tc)
+        tc.id = tc.id or calkit.latex.new_comment_id()
+        calkit.latex.write_comment(lines, tc)
+    Path(path).write_text("\n".join(lines), encoding="utf-8")
+    return tc
+
+
+@comments_app.command(name="list")
+def list_comments(
+    tex_path: Annotated[str, typer.Argument()],
+    unresolved: Annotated[bool, typer.Option("--unresolved", "-u")] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Same as 'calkit list comments'."""
+    from calkit.cli.list import list_comments
+
+    list_comments(tex_path, unresolved=unresolved, as_json=as_json)
+
+
+@comments_app.command(name="locate")
+def locate_paragraph(
+    tex_path: Annotated[
+        str,
+        typer.Argument(help="Document to search, including files it inputs."),
+    ],
+    text: Annotated[
+        str | None,
+        typer.Option(
+            "--text", help="Rendered text, e.g., a line copied from the PDF."
+        ),
+    ] = None,
+    path: Annotated[
+        str | None,
+        typer.Option("--path", help="File with the line to look up."),
+    ] = None,
+    line: Annotated[
+        int | None,
+        typer.Option("--line", "-l", help="Line to look up in --path."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+) -> None:
+    """Find the paragraph some rendered text is in, or a source line is in.
+
+    This is how a place in a PDF built without SyncTeX, or by someone else,
+    can be matched to the source.
+    """
+    if (text is None) == (line is None):
+        raise_error("Specify one of --text or --path and --line")
+    if not os.path.isfile(tex_path):
+        raise_error(f"{tex_path} does not exist")
+    found = calkit.latex.locate_block(tex_path, text, path, line)
+    if found is None:
+        raise_error("No matching paragraph found")
+    out = {
+        "path": found.path,
+        "line": found.lineno,
+        "end_line": found.lines[-1].lineno,
+        "text": found.text or calkit.latex.display_text(found),
+    }
+    if as_json:
+        typer.echo(json.dumps(out, indent=2))
+    else:
+        typer.echo(f"{out['path']}:{out['line']}")
+
+
+@comments_app.command(name="add")
+def add_comment(
+    tex_path: Annotated[str, typer.Argument()],
+    line: Annotated[int, typer.Option("--line", "-l")],
+    text: Annotated[str, typer.Option("--text", "-m")],
+    highlight: Annotated[str | None, typer.Option("--highlight")] = None,
+    occ: Annotated[int, typer.Option("--occ")] = 0,
+    author: Annotated[str | None, typer.Option("--author")] = None,
+    email: Annotated[str | None, typer.Option("--email")] = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Same as 'calkit new comment'."""
+    from calkit.cli.new import new_comment
+
+    new_comment(
+        tex_path, line, text, highlight, occ, author, email, as_json=as_json
+    )
+
+
+@comments_app.command(name="reply")
+def reply_to_comment(
+    tex_path: Annotated[str, typer.Argument()],
+    text: Annotated[str, typer.Option("--text", "-m")],
+    id: Annotated[str | None, _ID_OPTION] = None,
+    line: Annotated[int | None, _LINE_OPTION] = None,
+    author: Annotated[str | None, typer.Option("--author")] = None,
+    email: Annotated[str | None, typer.Option("--email")] = None,
+) -> None:
+    """Same as 'calkit update comment --reply'."""
+    from calkit.cli.update import update_comment
+
+    update_comment(
+        tex_path, id=id, line=line, reply=text, author=author, email=email
+    )
+
+
+@comments_app.command(name="resolve")
+def resolve_comment(
+    tex_path: Annotated[str, typer.Argument()],
+    id: Annotated[str | None, _ID_OPTION] = None,
+    line: Annotated[int | None, _LINE_OPTION] = None,
+) -> None:
+    """Same as 'calkit update comment --resolve'."""
+    from calkit.cli.update import update_comment
+
+    update_comment(tex_path, id=id, line=line, resolve=True)
+
+
+@comments_app.command(name="reopen")
+def reopen_comment(
+    tex_path: Annotated[str, typer.Argument()],
+    id: Annotated[str | None, _ID_OPTION] = None,
+    line: Annotated[int | None, _LINE_OPTION] = None,
+) -> None:
+    """Same as 'calkit update comment --reopen'."""
+    from calkit.cli.update import update_comment
+
+    update_comment(tex_path, id=id, line=line, reopen=True)
+
+
+@comments_app.command(name="delete")
+def delete_comment(
+    tex_path: Annotated[str, typer.Argument()],
+    id: Annotated[str | None, _ID_OPTION] = None,
+    line: Annotated[int | None, _LINE_OPTION] = None,
+) -> None:
+    """Same as 'calkit delete comment'."""
+    from calkit.cli.delete import delete_comment
+
+    delete_comment(tex_path, id=id, line=line)

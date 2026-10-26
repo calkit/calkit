@@ -866,9 +866,13 @@ class CalkitFileSystem(AbstractFileSystem):
         return self._get_info_for_parsed_path(owner, project, file_path)
 
     def info_many(
-        self, paths: list[str], **kwargs
+        self, paths: list[str], content: bool = True, **kwargs
     ) -> dict[str, dict[str, Any]]:
-        """Get metadata for multiple paths in a batch API call."""
+        """Get metadata for multiple paths in a batch API call.
+
+        With ``content``, each small file's bytes come back too, saving
+        a request per file for callers that will read them.
+        """
         if not paths:
             return {}
         grouped: dict[tuple[str, str], list[tuple[str, str]]] = {}
@@ -888,7 +892,7 @@ class CalkitFileSystem(AbstractFileSystem):
                     project=project,
                     paths=file_paths,
                     operation="info",
-                    include=["info", "content"],
+                    include=["info", "content"] if content else ["info"],
                 )
                 batch_results = resp.get("results")
                 if isinstance(batch_results, dict):

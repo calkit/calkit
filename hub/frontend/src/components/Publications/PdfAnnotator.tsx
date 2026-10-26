@@ -10,6 +10,7 @@
 import {
   Avatar,
   Box,
+  Portal,
   Button,
   Checkbox,
   Flex,
@@ -40,12 +41,18 @@ import "react-pdf-highlighter/dist/style.css"
 import { ExternalLinkIcon } from "@chakra-ui/icons"
 import { FaCheck, FaGithub, FaUndo } from "react-icons/fa"
 
+import type { AxiosError } from "axios"
 import {
   type CommentHighlight,
+  type LatexComments,
+  type LatexCommentThread,
   type ProjectComment,
   ProjectsService,
 } from "../../client"
 import useAuth from "../../hooks/useAuth"
+import useCustomToast from "../../hooks/useCustomToast"
+import { handleError } from "../../lib/errors"
+import type { PanelComment } from "../Common/CommentsPanel"
 import PdfDocumentViewer, {
   type HighlightTransform,
   type OnSelectionFinished,
@@ -86,6 +93,138 @@ export function commentToHighlight(
   }
 }
 
+// A thread kept in a LaTeX source, as a highlight, if its place in the PDF
+// was found
+export function latexThreadToHighlight(
+  t: LatexCommentThread,
+): AnnotationHighlight | null {
+  if (!t.position) return null
+  const first = t.messages[0]
+  return {
+    id: t.key,
+    dbId: t.key,
+    position: t.position as unknown as IHighlight["position"],
+    content: { text: t.highlight ?? undefined },
+    comment: { text: first?.text ?? "", emoji: "" },
+    commentBody: first?.text ?? "",
+    authorName: first?.author ?? null,
+    createdAt: first?.date ?? "",
+    resolved: t.resolved,
+    externalUrl: t.issue ?? null,
+  }
+}
+
+// A thread kept in a LaTeX source as the comments panel shows it: its first
+// message, then the replies to it
+export function latexThreadToPanelComments(
+  t: LatexCommentThread,
+): PanelComment[] {
+  return t.messages.map((m, i) => ({
+    id: i ? `${t.key}#${i}` : t.key,
+    parentId: i ? t.key : null,
+    authorName: m.author,
+    comment: m.text,
+    created: m.date ?? null,
+    resolved: t.resolved ? "resolved" : null,
+    externalUrl: i ? null : t.issue ?? null,
+    hasHighlight: !i && !!t.position,
+    highlightText: i ? null : t.highlight ?? null,
+  }))
+}
+
+// Comments on a PDF built from LaTeX, which live in its source at the ref
+// being viewed. Each change is a commit there, and comes back with the
+// threads as they are after it.
+export function useLatexComments(
+  ownerName: string,
+  projectName: string,
+  path: string,
+  gitRef: string | null | undefined,
+  enabled: boolean,
+) {
+  const queryClient = useQueryClient()
+  const showToast = useCustomToast()
+  const queryKey = [
+    "projects",
+    ownerName,
+    projectName,
+    "latex-comments",
+    path,
+    gitRef ?? null,
+  ]
+  const ids = { owner_name: ownerName, project_name: projectName }
+  const ref = gitRef ?? null
+  const handlers = {
+    onSuccess: (data: LatexComments) =>
+      queryClient.setQueryData(queryKey, data),
+    onError: (err: AxiosError) => handleError(err, showToast),
+  }
+  const query = useQuery({
+    queryKey,
+    queryFn: () =>
+      ProjectsService.getProjectLatexComments({ ...ids, path, ref }).then(
+        (response) => response.data,
+      ),
+    enabled,
+  })
+  const post = useMutation({
+    mutationFn: (vars: {
+      comment: string
+      highlight: CommentHighlight | null
+      createIssue: boolean
+    }) =>
+      ProjectsService.postProjectLatexComment({
+        ...ids,
+        latexCommentPost: {
+          path,
+          ref,
+          comment: vars.comment,
+          highlight: vars.highlight,
+          create_github_issue: vars.createIssue,
+        },
+      }).then((response) => response.data),
+    ...handlers,
+  })
+  const reply = useMutation({
+    mutationFn: (vars: { key: string; body: string }) =>
+      ProjectsService.postProjectLatexCommentReply({
+        ...ids,
+        latexCommentReplyPost: { path, ref, key: vars.key, body: vars.body },
+      }).then((response) => response.data),
+    ...handlers,
+  })
+  const resolve = useMutation({
+    mutationFn: (vars: { key: string; resolved: boolean }) =>
+      ProjectsService.patchProjectLatexComment({
+        ...ids,
+        latexCommentPatch: {
+          path,
+          ref,
+          key: vars.key,
+          resolved: vars.resolved,
+        },
+      }).then((response) => response.data),
+    ...handlers,
+  })
+  // Comments kept on the hub, from before the source kept them, moved into
+  // the source in one commit
+  const move = useMutation({
+    mutationFn: () =>
+      ProjectsService.postProjectLatexCommentsMove({
+        ...ids,
+        latexCommentsMove: { path, ref },
+      }).then((response) => response.data),
+    onSuccess: (data: LatexComments) => {
+      queryClient.setQueryData(queryKey, data)
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "comments"],
+      })
+    },
+    onError: handlers.onError,
+  })
+  return { query, post, reply, resolve, move }
+}
+
 // ---------------------------------------------------------------------------
 // Inline tip shown when user finishes selecting text
 // ---------------------------------------------------------------------------
@@ -93,19 +232,41 @@ export function AddCommentTip({
   onConfirm,
   onCancel,
   hideIssueCheckbox = false,
+  defaultCreateIssue = true,
+  anchor,
 }: {
-  onConfirm: (text: string, createIssue: boolean) => void
+  // Kept open, saving, until a promise it returns settles, so a failure
+  // leaves the comment to try again
+  onConfirm: (text: string, createIssue: boolean) => void | Promise<unknown>
   onCancel: () => void
   // Hide the "Create GitHub issue" checkbox (e.g. for release review, where
   // issue mirroring is handled server-side and isn't a reviewer choice).
   hideIssueCheckbox?: boolean
+  defaultCreateIssue?: boolean
+  // Where the selection is on screen, to show the box just below it rather
+  // than in react-pdf-highlighter's tip container, which places it from
+  // measurements of the page that can be stale, leaving it off to the side
+  // or under the page
+  anchor?: DOMRect | null
 }) {
   const [text, setText] = useState("")
-  const [createIssue, setCreateIssue] = useState(true)
+  const [createIssue, setCreateIssue] = useState(defaultCreateIssue)
+  const [saving, setSaving] = useState(false)
   const bg = useColorModeValue("white", "gray.800")
+  const save = async () => {
+    if (!text.trim() || saving) return
+    setSaving(true)
+    try {
+      await onConfirm(text.trim(), createIssue)
+    } catch {
+      // The caller's mutation shows the error; the text stays for a retry
+    } finally {
+      setSaving(false)
+    }
+  }
   const borderColor = useColorModeValue("gray.200", "gray.600")
 
-  return (
+  const box = (
     <Box
       bg={bg}
       borderWidth={1}
@@ -122,11 +283,12 @@ export function AddCommentTip({
         size="sm"
         rows={3}
         value={text}
+        isDisabled={saving}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim()) {
             e.preventDefault()
-            onConfirm(text.trim(), createIssue)
+            void save()
           }
         }}
         mb={2}
@@ -136,6 +298,7 @@ export function AddCommentTip({
           size="sm"
           mb={2}
           isChecked={createIssue}
+          isDisabled={saving}
           onChange={(e) => setCreateIssue(e.target.checked)}
         >
           Create GitHub issue
@@ -146,15 +309,42 @@ export function AddCommentTip({
           size="xs"
           variant="primary"
           isDisabled={!text.trim()}
-          onClick={() => onConfirm(text.trim(), createIssue)}
+          isLoading={saving}
+          onClick={() => void save()}
         >
           Save
         </Button>
-        <Button size="xs" variant="ghost" onClick={onCancel}>
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={onCancel}
+          isDisabled={saving}
+        >
           Cancel
         </Button>
       </Flex>
     </Box>
+  )
+  if (!anchor) return box
+  const width = 260
+  const left = Math.min(
+    Math.max(anchor.left + anchor.width / 2 - width / 2, 8),
+    window.innerWidth - width - 8,
+  )
+  // Below the selection if it fits, else above it
+  const below = anchor.bottom + 180 < window.innerHeight
+  return (
+    <Portal>
+      <Box
+        position="fixed"
+        left={`${left}px`}
+        top={below ? `${anchor.bottom + 6}px` : undefined}
+        bottom={below ? undefined : `${window.innerHeight - anchor.top + 6}px`}
+        zIndex="popover"
+      >
+        {box}
+      </Box>
+    </Portal>
   )
 }
 
@@ -172,10 +362,13 @@ export function HighlightPopup({
   canResolve: boolean
   isResolved: boolean
   isResolving?: boolean
-  onResolve: (resolved: boolean) => void
+  onResolve: (resolved: boolean) => void | Promise<unknown>
 }) {
   const bg = useColorModeValue("white", "gray.800")
   const borderColor = useColorModeValue("gray.200", "gray.600")
+  // The popup is drawn when it's hovered, so it keeps its own state while
+  // the change it asked for is made
+  const [resolving, setResolving] = useState(false)
 
   return (
     <Box
@@ -210,7 +403,7 @@ export function HighlightPopup({
           </Flex>
         </Box>
         {canResolve &&
-          (isResolving ? (
+          (isResolving || resolving ? (
             <Spinner size="xs" color="ui.main" />
           ) : (
             <IconButton
@@ -219,7 +412,14 @@ export function HighlightPopup({
               size="xs"
               variant="ghost"
               colorScheme={isResolved ? "gray" : "green"}
-              onClick={() => onResolve(!isResolved)}
+              onClick={async () => {
+                setResolving(true)
+                try {
+                  await onResolve(!isResolved)
+                } finally {
+                  setResolving(false)
+                }
+              }}
             />
           ))}
       </Flex>
@@ -263,6 +463,8 @@ interface PdfAnnotatorProps {
   // Optional element rendered in the viewer toolbar, e.g. an "Edit LaTeX"
   // button.
   toolbarAction?: ReactNode
+  // Built from LaTeX, so comments live in its source rather than here
+  latex?: boolean
 }
 
 export default function PdfAnnotator({
@@ -276,9 +478,18 @@ export default function PdfAnnotator({
   pagedNav = false,
   externalScrollRef,
   toolbarAction,
+  latex = false,
 }: PdfAnnotatorProps) {
   const { user } = useAuth()
   const queryClient = useQueryClient()
+  const showToast = useCustomToast()
+  const latexComments = useLatexComments(
+    ownerName,
+    projectName,
+    publicationPath,
+    gitRef,
+    latex,
+  )
 
   const commentsQuery = useQuery({
     queryKey: [
@@ -316,7 +527,8 @@ export default function PdfAnnotator({
           git_ref: gitRef ?? null,
         },
       }).then((response) => response.data),
-    onSuccess: () => {
+    // Settled once the comments are back, so whatever waits on it sees them
+    onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: [
           "projects",
@@ -326,8 +538,8 @@ export default function PdfAnnotator({
           artifactType,
           publicationPath,
         ],
-      })
-    },
+      }),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   const resolveMutation = useMutation({
@@ -341,7 +553,8 @@ export default function PdfAnnotator({
         comment_id: commentId,
         projectCommentPatch: { resolved },
       }).then((response) => response.data),
-    onSuccess: () => {
+    // Settled once the comments are back, so whatever waits on it sees them
+    onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: [
           "projects",
@@ -351,35 +564,49 @@ export default function PdfAnnotator({
           artifactType,
           publicationPath,
         ],
-      })
-    },
+      }),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   const comments: ProjectComment[] = commentsQuery.data ?? []
   // Derive highlights straight from the query data so the array only changes
   // when the comments (or the resolved filter) actually change, not on every
   // parent render.
+  const latexThreads = latexComments.query.data?.threads
   const highlights: AnnotationHighlight[] = useMemo(
     () =>
-      comments
-        .filter((c) => showResolved || !c.resolved)
-        .map(commentToHighlight)
-        .filter((h): h is AnnotationHighlight => h !== null),
-    [comments, showResolved],
+      [
+        // Comments kept on the hub show too until they're moved
+        ...(latex ? latexThreads ?? [] : [])
+          .filter((t) => showResolved || !t.resolved)
+          .map(latexThreadToHighlight),
+        ...comments
+          .filter((c) => showResolved || !c.resolved)
+          .map(commentToHighlight),
+      ].filter((h): h is AnnotationHighlight => h !== null),
+    [latex, latexThreads, comments, showResolved],
   )
 
   const handleAddHighlight = useCallback(
     (newHighlight: NewHighlight, commentText: string, createIssue: boolean) => {
-      postMutation.mutate({
+      const highlight = {
+        position: newHighlight.position as unknown as Record<string, unknown>,
+        content: newHighlight.content as unknown as Record<string, unknown>,
+      } as CommentHighlight
+      if (latex) {
+        return latexComments.post.mutateAsync({
+          comment: commentText,
+          highlight,
+          createIssue,
+        })
+      }
+      return postMutation.mutateAsync({
         comment: commentText,
-        highlight: {
-          position: newHighlight.position as unknown as Record<string, unknown>,
-          content: newHighlight.content as unknown as Record<string, unknown>,
-        } as CommentHighlight,
+        highlight,
         create_github_issue: createIssue,
       })
     },
-    [postMutation],
+    [latex, latexComments.post, postMutation],
   )
 
   const onSelectionFinished: OnSelectionFinished = useCallback(
@@ -388,11 +615,21 @@ export default function PdfAnnotator({
       // selection remains visible while the user types in the comment box
       // (typing clears document.getSelection(), which otherwise makes
       // isCollapsed=true and drops the visual selection).
+      const selection = window.getSelection()
+      const anchor =
+        selection && selection.rangeCount > 0
+          ? selection.getRangeAt(0).getBoundingClientRect()
+          : null
       transformSelection()
-      return user ? (
+      const canComment = latex
+        ? !!latexComments.query.data?.can_comment
+        : !!user
+      return canComment ? (
         <AddCommentTip
-          onConfirm={(text, createIssue) => {
-            handleAddHighlight(
+          anchor={anchor}
+          defaultCreateIssue={!latex}
+          onConfirm={async (text, createIssue) => {
+            await handleAddHighlight(
               { position, content, comment: { text, emoji: "" } },
               text,
               createIssue,
@@ -403,7 +640,7 @@ export default function PdfAnnotator({
         />
       ) : null
     },
-    [user, handleAddHighlight],
+    [user, latex, latexComments.query.data, handleAddHighlight],
   )
 
   const highlightTransform: HighlightTransform = useCallback(
@@ -436,18 +673,33 @@ export default function PdfAnnotator({
           popupContent={
             <HighlightPopup
               highlight={annotHL}
-              canResolve={!!user}
+              canResolve={
+                latex ? !!latexComments.query.data?.can_comment : !!user
+              }
               isResolved={annotHL.resolved}
               isResolving={
-                resolveMutation.isPending &&
-                resolveMutation.variables?.commentId === annotHL.dbId
+                (latexComments.resolve.isPending &&
+                  latexComments.resolve.variables?.key === annotHL.dbId) ||
+                (resolveMutation.isPending &&
+                  resolveMutation.variables?.commentId === annotHL.dbId)
               }
-              onResolve={(resolved) => {
-                resolveMutation.mutate({
-                  commentId: annotHL.dbId,
-                  resolved,
-                })
-                hideTip()
+              onResolve={async (resolved) => {
+                try {
+                  if (latex && !comments.some((c) => c.id === annotHL.dbId)) {
+                    await latexComments.resolve.mutateAsync({
+                      key: annotHL.dbId,
+                      resolved,
+                    })
+                  } else {
+                    await resolveMutation.mutateAsync({
+                      commentId: annotHL.dbId,
+                      resolved,
+                    })
+                  }
+                  hideTip()
+                } catch {
+                  // The mutation shows the error
+                }
               }}
             />
           }
@@ -459,7 +711,14 @@ export default function PdfAnnotator({
         </Popup>
       )
     },
-    [user, resolveMutation],
+    [
+      user,
+      latex,
+      comments,
+      latexComments.query.data,
+      latexComments.resolve,
+      resolveMutation,
+    ],
   )
 
   return (

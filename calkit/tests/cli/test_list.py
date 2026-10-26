@@ -20,6 +20,87 @@ def test_list_environments(tmp_dir):
     assert json.loads(out) == envs
 
 
+def test_list_requirements(tmp_dir):
+    subprocess.check_call(["calkit", "list", "reqs"])
+    ck_info = {
+        "requirements": [
+            "git>=2.40",
+            {
+                "kind": "env-var",
+                "name": "TOKEN",
+                "setup_command": "claude setup-token",
+            },
+            {"kind": "aws-credentials", "account_id": "012345678901"},
+            {"kind": "cpu-count", "min": 4},
+        ],
+        "environments": {
+            "cluster": {
+                "kind": "system",
+                "requirements": [{"kind": "hostname", "matches": "*.edu"}],
+            },
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+            "site": {
+                "kind": "switch",
+                "switch": [
+                    {
+                        "when": [{"os_is": "linux"}],
+                        "use": {
+                            "kind": "system",
+                            "requirements": ["sbatch"],
+                        },
+                    },
+                    {"use": "cluster"},
+                ],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "fetch": {
+                    "kind": "shell-command",
+                    "command": "echo hi",
+                    "requirements": [{"kind": "env-var", "name": "DATA"}],
+                },
+                "other": {"kind": "shell-command", "command": "echo hi"},
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Each is normalized and says where it was declared
+    out = subprocess.check_output(
+        ["calkit", "list", "requirements", "--json"], text=True
+    )
+    reqs = json.loads(out)
+    assert [(r["source"], r["name"]) for r in reqs] == [
+        ("project", "git"),
+        ("project", "TOKEN"),
+        ("project", "aws-credentials-012345678901"),
+        ("project", "cpu-count"),
+        ("environment 'cluster'", "hostname"),
+        ("environment 'site.1'", "sbatch"),
+        ("stage 'fetch'", "DATA"),
+    ]
+    assert reqs[0]["version_spec"] == ">=2.40"
+    assert reqs[1]["setup_command"] == "claude setup-token"
+    out = subprocess.check_output(["calkit", "list", "reqs"], text=True)
+    assert "Project:\n  - git (app)\n      version_spec: >=2.40" in out
+    assert "setup_command: claude setup-token" in out
+    assert "  - cpu-count\n      min: 4" in out
+    assert "Environment 'cluster':\n  - hostname" in out
+    assert "Stage 'fetch':\n  - DATA (env-var)" in out
+    # A malformed one says where it is
+    ck_info["pipeline"]["stages"]["fetch"]["requirements"] = [
+        {"kind": "env-var"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        ["calkit", "list", "reqs"], capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "In stage 'fetch'" in res.stderr + res.stdout
+
+
 def test_list_releases(tmp_dir):
     # Internal releases are never published, so no lookup is attempted, but
     # a stray 'published' key must not override the status we determined
@@ -125,6 +206,61 @@ def test_list_stages(tmp_dir):
         text=True,
     )
     assert set(json.loads(out)) == {"stage1"}
+    # Subprojects' stages are listed as 'calkit run' addresses them
+    os.makedirs("sub/nested")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "subprojects": [{"path": "nested"}],
+                "pipeline": {
+                    "stages": {"s": ck_info["pipeline"]["stages"]["stage2"]}
+                },
+            },
+            f,
+        )
+    with open("sub/nested/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": {"n": {}}}}, f)
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "list", "stages"], text=True)
+    assert out.split() == ["stage1", "stage2", "sub:s", "sub/nested:n"]
+
+
+def test_list_subprojects(tmp_dir):
+    out = subprocess.check_output(["calkit", "list", "subprojects"], text=True)
+    assert out == ""
+    os.makedirs("a/b")
+    os.makedirs("c")
+    os.makedirs("missing-config")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "subprojects": [
+                    {"path": "a", "description": "The A one."},
+                    {"path": "c"},
+                    # Skipped, as 'calkit run' skips it
+                    {"path": "missing-config"},
+                ]
+            },
+            f,
+        )
+    # A nested one, and one naming its parent, which isn't repeated
+    with open("a/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"subprojects": [{"path": "b"}, {"path": ".."}]}, f)
+    for path in ["a/b", "c"]:
+        with open(f"{path}/calkit.yaml", "w") as f:
+            calkit.ryaml.dump({}, f)
+    out = subprocess.check_output(["calkit", "list", "subprojects"], text=True)
+    assert out.split() == ["a", "a/b", "c"]
+    out = subprocess.check_output(
+        ["calkit", "list", "subprojects", "--json"], text=True
+    )
+    assert json.loads(out) == {
+        "a": {"parent": ".", "description": "The A one."},
+        "a/b": {"parent": "a", "description": None},
+        "c": {"parent": ".", "description": None},
+    }
 
 
 def test_list_latex_diffs(tmp_dir):
@@ -316,6 +452,67 @@ def test_list_questions(tmp_dir):
     )
     # Fields that aren't set aren't listed
     assert "None" not in out
+
+
+def test_list_comments(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    INTRO = "% COMMENT id=aaaa0001\n%   A:\n%     Why?\nIntro text.\n"
+    NOTE = (
+        "# Note\n\n<!-- COMMENT id=bbbb0002 resolved=true\n  B:\n    Hm.\n"
+        "-->\nSome text.\n"
+    )
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\input{intro}\n\nA paragraph.\n")
+    with open("paper/intro.tex", "w") as f:
+        f.write(INTRO)
+    os.makedirs("docs")
+    with open("docs/note.md", "w") as f:
+        f.write(NOTE)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "paper": {
+                            "kind": "latex",
+                            "target_path": "main.tex",
+                            "wdir": "paper",
+                            "environment": "_system",
+                        },
+                        "note": {
+                            "kind": "markdown",
+                            "target_path": "docs/note.md",
+                            "pdf": {"environment": "_system"},
+                        },
+                    }
+                }
+            },
+            f,
+        )
+    with open("README.md", "w") as f:
+        f.write("% COMMENT id=cccc0003\n%   C:\n%     Not built.\nText.\n")
+    # Without a path, every document built into a PDF is listed, with the
+    # files it inputs, but nothing else
+    listed = json.loads(ck("list", "comments", "--json"))
+    assert [(c["path"], c["id"]) for c in listed] == [
+        ("paper/intro.tex", "aaaa0001"),
+        ("docs/note.md", "bbbb0002"),
+    ]
+    assert listed[1]["anchor"]["text"] == "Some text."
+    # With one, only that document is, and open threads can be picked out
+    listed = json.loads(ck("list", "comments", "docs/note.md", "--json"))
+    assert [c["id"] for c in listed] == ["bbbb0002"]
+    assert "bbbb0002" not in ck("list", "comments", "-u")
+    assert "paper/intro.tex:1 [aaaa0001]" in ck("list", "comments")
+    res = subprocess.run(
+        ["calkit", "list", "comments", "missing.md"], capture_output=True
+    )
+    assert res.returncode != 0
 
 
 def test_list_remotes(tmp_dir):

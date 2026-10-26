@@ -540,7 +540,7 @@ function Files() {
                   item={selectedItemQuery.data!}
                   accountName={accountName}
                   projectName={projectName}
-                  ref={ref}
+                  gitRef={ref}
                 />
               ) : null}
             </Box>

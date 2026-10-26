@@ -117,6 +117,7 @@ export type Request =
       path?: string;
     }
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
+  | { type: "overleaf.setToken"; token: string }
   | {
       type: "overleaf.import";
       owner: string;
@@ -181,6 +182,7 @@ export interface ResponseMap {
   "overleaf.lookup": OverleafLookup;
   "overleaf.status": OverleafSyncStatus[];
   "overleaf.sync": OverleafSyncResponse;
+  "overleaf.setToken": { message: string };
   "overleaf.import": { path: string; title: string };
   "references.list": References[];
   "references.search": ReferenceSearchMatch[];
@@ -199,6 +201,37 @@ export interface ResponseMap {
 export interface UrlChanged {
   type: "url.changed";
   url: string;
+}
+
+/**
+ * Sent from the service worker to every surface when a sign-in or sign-out
+ * completes, so whichever surface started it, the others stop showing the
+ * old state.
+ */
+export interface AuthChanged {
+  type: "auth.changed";
+}
+
+/** Run a callback whenever someone signs in or out, from any surface. */
+export function onAuthChange(callback: () => void): () => void {
+  const listener = (message: AuthChanged) => {
+    if (message?.type === "auth.changed") {
+      callback();
+    }
+    return false;
+  };
+  try {
+    chrome.runtime.onMessage.addListener(listener);
+  } catch {
+    return () => undefined;
+  }
+  return () => {
+    try {
+      chrome.runtime.onMessage.removeListener(listener);
+    } catch {
+      // Already gone with the context
+    }
+  };
 }
 
 /**

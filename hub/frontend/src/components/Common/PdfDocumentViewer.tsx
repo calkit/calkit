@@ -325,6 +325,8 @@ interface PdfViewerInnerProps extends PdfDocumentViewerProps {
   containerRef: RefObject<HTMLDivElement>
 }
 
+const NO_HIGHLIGHTS: IHighlight[] = []
+
 function PdfViewerInner({
   url,
   pdfDocument,
@@ -382,8 +384,14 @@ function PdfViewerInner({
   // (after deduplication) so componentDidUpdate re-renders highlight layers
   // against the surviving page nodes. highlightsKey is a deliberate trigger;
   // referencing it here keeps it a real dependency.
+  //
+  // None until PdfHighlighter's viewer exists, as the same empty array, since
+  // a change of highlights before then has it look up pages on a viewer it
+  // doesn't have yet, which throws. The bump once text layers exist brings
+  // them in.
   const renderedHighlights = useMemo(() => {
     void highlightsKey
+    if (!highlighterRef.current?.viewer) return NO_HIGHLIGHTS
     return highlights ? [...highlights] : []
   }, [highlights, highlightsKey])
 

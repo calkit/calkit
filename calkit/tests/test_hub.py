@@ -294,7 +294,7 @@ def test_request_retries_on_401_with_refresh(monkeypatch):
             return Resp401()
         return Resp200()
 
-    monkeypatch.setattr(hub.requests, "get", _fake_get)
+    monkeypatch.setattr(hub._session, "get", _fake_get)
     monkeypatch.setitem(hub._tokens, base_url, fresh)
     monkeypatch.setattr(hub, "_try_refresh", lambda: fresh)
     result = hub._request("get", "/test", base_url=base_url)
@@ -333,7 +333,7 @@ def test_request_invalid_credentials_403_triggers_refresh(monkeypatch):
         call_count["n"] += 1
         return Resp403() if call_count["n"] == 1 else Resp200()
 
-    monkeypatch.setattr(hub.requests, "get", _fake_get)
+    monkeypatch.setattr(hub._session, "get", _fake_get)
     monkeypatch.setitem(hub._tokens, base_url, fresh)
     monkeypatch.setattr(hub, "_try_refresh", lambda: fresh)
     result = hub._request("get", "/test", base_url=base_url)
@@ -369,7 +369,7 @@ def test_request_permission_403_does_not_trigger_refresh(monkeypatch):
         refresh_calls["n"] += 1
         return fresh
 
-    monkeypatch.setattr(hub.requests, "post", _fake_post)
+    monkeypatch.setattr(hub._session, "post", _fake_post)
     monkeypatch.setitem(hub._tokens, base_url, fresh)
     monkeypatch.setattr(hub, "_try_refresh", _fake_refresh)
     with pytest.raises(Exception):
@@ -410,7 +410,7 @@ def test_request_retries_on_transient_5xx(monkeypatch):
             calls["n"] += 1
             return Resp(status)
 
-        monkeypatch.setattr(hub.requests, "get", _fake_get)
+        monkeypatch.setattr(hub._session, "get", _fake_get)
         result = hub._request("get", "/test", base_url=base_url)
         assert result == {"ok": True}
         assert calls["n"] == 2
@@ -421,7 +421,7 @@ def test_request_retries_on_transient_5xx(monkeypatch):
         persistent["n"] += 1
         return Resp(500)
 
-    monkeypatch.setattr(hub.requests, "get", _fake_get_500)
+    monkeypatch.setattr(hub._session, "get", _fake_get_500)
     with pytest.raises(HTTPError):
         hub._request("get", "/test", base_url=base_url)
     # Initial attempt plus max_retries follow-ups.
@@ -458,7 +458,7 @@ def test_request_retries_on_network_error(monkeypatch):
             raise errors[calls["n"] - 1]
         return Resp200()
 
-    monkeypatch.setattr(hub.requests, "get", _fake_get)
+    monkeypatch.setattr(hub._session, "get", _fake_get)
     assert hub._request("get", "/test", base_url=base_url) == {"ok": True}
     assert calls["n"] == 3
     # Case 2: a persistent network error exhausts retries and propagates.
@@ -468,7 +468,7 @@ def test_request_retries_on_network_error(monkeypatch):
         persistent["n"] += 1
         raise Timeout("read timeout")
 
-    monkeypatch.setattr(hub.requests, "get", _always_timeout)
+    monkeypatch.setattr(hub._session, "get", _always_timeout)
     with pytest.raises(Timeout):
         hub._request("get", "/test", base_url=base_url)
     assert persistent["n"] == 11
@@ -533,7 +533,7 @@ def test_request_can_skip_retries_and_login(monkeypatch):
         attempts["n"] += 1
         return _Resp()
 
-    monkeypatch.setattr(calkit.hub.requests, "post", fake_post)
+    monkeypatch.setattr(calkit.hub._session, "post", fake_post)
     monkeypatch.setattr(calkit.hub, "get_headers", lambda h, auth=True: {})
     monkeypatch.setattr(calkit.hub, "get_base_url", lambda: "http://x")
     with pytest.raises(calkit.hub.HTTPError):

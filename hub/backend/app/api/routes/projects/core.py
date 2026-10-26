@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 import zipfile
 from copy import deepcopy
@@ -372,18 +373,17 @@ def get_projects(
             where_clause,
             Project.owner_account.has(Account.name == owner_name.lower()),  # type: ignore
         )
+    repo_clause = None
     if github_repo is not None:
         # An exact repo lookup, e.g. for resolving the project behind a
         # GitHub page. The repo URL is stored with or without the .git
         # suffix depending on how the project was created.
         repo_url = f"https://github.com/{github_repo.strip('/')}"
-        where_clause = and_(
-            where_clause,
-            or_(
-                func.lower(Project.git_repo_url) == repo_url.lower(),
-                func.lower(Project.git_repo_url) == f"{repo_url.lower()}.git",
-            ),
+        repo_clause = or_(
+            func.lower(Project.git_repo_url) == repo_url.lower(),
+            func.lower(Project.git_repo_url) == f"{repo_url.lower()}.git",
         )
+        where_clause = and_(where_clause, repo_clause)
     if search_for is not None:
         search_for = f"%{search_for}%"
         where_clause = and_(
@@ -418,6 +418,24 @@ def get_projects(
         .offset(offset)
     )
     projects = session.exec(select_query).all()
+    if repo_clause is not None and current_user is not None and not projects:
+        # GitHub-derived access is only in the clause above once it's been
+        # cached, so a collaborator who has never opened the project has it
+        # resolved here rather than being told the repo has no project
+        project = session.exec(select(Project).where(repo_clause)).first()
+        if project is not None:
+            try:
+                project = app.projects.get_project(
+                    session=session,
+                    owner_name=project.owner_account_name,
+                    project_name=project.name,
+                    current_user=current_user,
+                    min_access_level=min_access_level,
+                )
+                projects = [project]
+                count = 1
+            except HTTPException:
+                pass
     return ProjectsPublic(data=projects, count=count)  # type: ignore
 
 
@@ -923,7 +941,9 @@ def post_project(
             ) and membership.role_name in ["owner", "admin", "write"]:
                 is_user_org = True
                 break
-        if not is_user_org:
+        # Adding an existing repo can instead rest on managing that repo on
+        # GitHub, which is checked once it's fetched below
+        if not is_user_org and not project_in.git_repo_exists:
             raise HTTPException(
                 403,
                 "Can only create projects for yourself or organizations you "
@@ -1213,32 +1233,88 @@ def post_project(
                 400, "Templates can only be used with new repos"
             )
         repo = resp.json()
+        github_access: str | None = None
         if owner_name != current_user.github_username:
             # This is either an org repo, or someone else's that we shouldn't
             # be able to import
             if repo["owner"]["type"] != "Organization":
                 raise HTTPException(400, "Non-user repos must be from an org")
-            # This org must exist in Calkit and the user must have access to it
-            # First check if this org exists in Calkit and try to create it
-            # if it doesn't
             org = orgs.get_org_by_github_name(
                 session=session, github_name=owner_name
             )
+            role = None
+            for membership in current_user.org_memberships:
+                if org is not None and membership.org_id == org.id:
+                    role = membership.role_name
+            # A collaborator outside the org can be the one working in the
+            # repo, and adding it writes nothing they couldn't push themselves
+            permissions = repo.get("permissions") or {}
+            if role not in ["owner", "admin"] and not permissions.get("push"):
+                logger.info("User can't write to this org or repo")
+                raise HTTPException(
+                    403,
+                    (
+                        "Must be an owner or admin of an org, or have write "
+                        "access to the repo, to create projects for it"
+                    ),
+                )
+            if role not in ["owner", "admin"]:
+                github_access = (
+                    "admin" if permissions.get("admin") else "write"
+                )
             if org is None:
-                logger.info(f"Org '{owner_name}' does not exist in DB")
-                # Try to create the org
-                post_org(
-                    req=OrgPost(github_name=owner_name),
-                    session=session,
-                    current_user=current_user,
+                # The app installed on the repo stands in for an org owner's
+                # approval; the org has no members here until one claims it
+                install_resp = requests.get(
+                    f"{repo_api_url}/installation",
+                    headers={
+                        "Authorization": (
+                            f"Bearer {github.create_app_token()}"
+                        ),
+                        "Accept": "application/vnd.github+json",
+                    },
+                    timeout=15,
                 )
-                org = orgs.get_org_by_github_name(
-                    session=session, github_name=owner_name
+                if install_resp.status_code == 404:
+                    raise HTTPException(
+                        400,
+                        "The Calkit GitHub App is not installed for this "
+                        "repo; ask an owner of the org to install it by "
+                        "visiting "
+                        "https://github.com/apps/calkit/installations/"
+                        "select_target",
+                    )
+                if install_resp.status_code != 200:
+                    logger.warning(
+                        "Could not look up the app installation for "
+                        f"{owner_name}/{repo_name}: "
+                        f"{install_resp.status_code}"
+                    )
+                    raise HTTPException(
+                        502,
+                        "Could not verify the GitHub App installation; "
+                        "try again",
+                    )
+                logger.info(f"Adding org '{owner_name}' with no members")
+                github_name = repo["owner"]["login"]
+                org = Org(
+                    account=Account(
+                        name=github_name.lower(),
+                        display_name=github_name,
+                        github_name=github_name,
+                    ),
+                    subscription=OrgSubscription(
+                        plan_id=0,
+                        n_users=1,
+                        price=0.0,
+                        period_months=1,
+                        subscriber_user_id=current_user.id,
+                    ),
                 )
-            assert isinstance(org, Org)
-            account_id = org.account.id
-            subscription = org.subscription
-            if subscription is None:
+                session.add(org)
+                session.commit()
+                session.refresh(org)
+            if org.subscription is None:
                 logger.info(f"Org '{owner_name}' does not have a subscription")
                 # Give the org a free subscription
                 org.subscription = OrgSubscription(
@@ -1252,22 +1328,6 @@ def post_project(
                 session.add(org.subscription)
                 session.commit()
                 session.refresh(org.subscription)
-                subscription = org.subscription
-            # Check access to the org
-            role = None
-            for membership in current_user.org_memberships:
-                if membership.org.account.name.lower() == owner_name.lower():
-                    role = membership.role_name
-            # TODO: If we have no role defined, check on GitHub
-            if role not in ["owner", "admin"]:
-                logger.info("User is not an admin or owner of this org")
-                raise HTTPException(
-                    403,
-                    (
-                        "Must be an owner or admin of an org to create "
-                        "projects for it"
-                    ),
-                )
             owner_account_id = org.account.id
         else:
             owner_account_id = current_user.account.id
@@ -1282,6 +1342,16 @@ def post_project(
         session.add(project)
         session.commit()
         session.refresh(project)
+        # Recorded up front so a collaborator outside the org sees it listed
+        if github_access is not None:
+            session.add(
+                UserProjectAccess(
+                    project_id=project.id,
+                    user_id=current_user.id,
+                    github_access=github_access,
+                )
+            )
+            session.commit()
     return project  # type: ignore
 
 
@@ -2447,10 +2517,10 @@ def _set_evidence_stage(
 
     A frozen stage is the case staleness can't speak to: DVC won't re-run it
     whatever its inputs do, so it reports up to date forever, and so does
-    everything built from its outputs. Naming a Git ref settles it -- the
-    citation then refers to one version of the artifact rather than to
-    whatever the frozen stage last happened to leave behind -- so only an
-    unpinned one is flagged.
+    everything built from its outputs. One that has moved from dvc.lock is
+    flagged, unless a Git ref settles it -- the citation then refers to one
+    version of the artifact rather than to whatever the frozen stage last
+    happened to leave behind.
     """
     stage = (
         (item.figure.stage if item.figure else None)
@@ -2693,7 +2763,9 @@ def _build_questions_public(
                 fs=get_object_fs(),
                 cache_token=resolve_commit_sha(repo, ev_ref),
             )
-            frozen_stages = find_frozen_tainted_stages(dvc_yaml, dvc_lock)
+            frozen_stages = find_frozen_tainted_stages(
+                dvc_yaml, dvc_lock, stage_statuses
+            )
         except Exception as e:
             logger.warning(
                 f"Failed to compute pipeline status for questions at "
@@ -4141,6 +4213,18 @@ def get_project_comments(
         query = query.where(ProjectComment.artifact_type == artifact_type)
     if artifact_path is not None:
         query = query.where(ProjectComment.artifact_path == artifact_path)
+    # Ones moved into a LaTeX document's source are kept there now, along
+    # with any replies to them
+    moved = select(ProjectComment.id).where(
+        ProjectComment.project_id == project.id,
+        col(ProjectComment.moved_to_source).is_not(None),
+    )
+    query = query.where(col(ProjectComment.moved_to_source).is_(None)).where(
+        or_(
+            col(ProjectComment.parent_id).is_(None),
+            col(ProjectComment.parent_id).not_in(moved),
+        )
+    )
     comments = list(session.exec(query).all())
     _sync_github_issue_resolutions(session, comments, current_user)
     return comments
@@ -4431,6 +4515,10 @@ def post_project_comment_reply(
         if thread_root_id != comment_id
         else comment
     )
+    if thread_root and thread_root.moved_to_source:
+        raise HTTPException(
+            409, "This thread was moved into the document's source"
+        )
     if thread_root and thread_root.external_url:
         _try_post_github_issue_comment(
             session, current_user, thread_root.external_url, reply.body
@@ -6794,6 +6882,7 @@ async def post_project_overleaf_publication(
     # Determine mode: link vs zip
     import_zip_mode = file is not None
     overleaf_repo = None
+    overleaf_commit: str | None = None
     zf: zipfile.ZipFile | None = None
     # Files the Overleaf project carries, relative to its root, so what's
     # being replaced can be compared against what's coming in
@@ -6829,13 +6918,43 @@ async def post_project_overleaf_publication(
         except HTTPException:
             raise HTTPException(400, "No Overleaf token found")
         try:
-            overleaf_repo = get_overleaf_repo(
+            with get_overleaf_repo(
                 project=project,
                 user=current_user,
                 session=session,
                 overleaf_project_id=overleaf_project_id,
-            )
-        except GitCommandError as e:
+            ) as overleaf_repo:
+                # Snapshot the files and commit while the clone is locked, so
+                # a concurrent pull or sync can't change them mid-import; the
+                # directory is removed when the snapshot is garbage collected
+                overleaf_snapshot = tempfile.TemporaryDirectory(
+                    prefix="overleaf-import-"
+                )
+                overleaf_abs_path = os.path.join(
+                    overleaf_snapshot.name, "repo"
+                )
+                shutil.copytree(
+                    overleaf_repo.working_dir,
+                    overleaf_abs_path,
+                    ignore=shutil.ignore_patterns(".git"),
+                )
+                overleaf_commit = overleaf_repo.head.commit.hexsha
+                for dirpath, dirnames, filenames in os.walk(overleaf_abs_path):
+                    dirnames[:] = [d for d in dirnames if d != ".git"]
+                    for fname in filenames:
+                        incoming_files.append(
+                            Path(
+                                os.path.relpath(
+                                    os.path.join(dirpath, fname),
+                                    overleaf_abs_path,
+                                )
+                            ).as_posix()
+                        )
+        except (
+            GitCommandError,
+            RuntimeError,
+            subprocess.CalledProcessError,
+        ) as e:
             logger.error(f"Failed to clone Overleaf repo: {e}")
             raise HTTPException(
                 400,
@@ -6844,17 +6963,6 @@ async def post_project_overleaf_publication(
                     "and that Git integration is enabled on Overleaf"
                 ),
             )
-        overleaf_abs_path = str(overleaf_repo.working_dir)
-        for dirpath, dirnames, filenames in os.walk(overleaf_abs_path):
-            dirnames[:] = [d for d in dirnames if d != ".git"]
-            for fname in filenames:
-                incoming_files.append(
-                    Path(
-                        os.path.relpath(
-                            os.path.join(dirpath, fname), overleaf_abs_path
-                        )
-                    ).as_posix()
-                )
     if replacing:
         # A reference file the Overleaf project also carries stays
         # declared; the rest go with the folder
@@ -6976,12 +7084,11 @@ async def post_project_overleaf_publication(
         overleaf_sync_in_ck_info = ck_info.get("overleaf_sync", {})
         overleaf_sync_in_ck_info[path] = {"url": overleaf_project_url}
         ck_info["overleaf_sync"] = overleaf_sync_in_ck_info
-        last_overleaf_sync_commit = overleaf_repo.head.commit.hexsha
         calkit.overleaf.write_sync_info(
             synced_path=path,
             info={
                 "project_id": overleaf_project_id,
-                "last_sync_commit": last_overleaf_sync_commit,
+                "last_sync_commit": overleaf_commit,
             },
             wdir=repo.working_dir,
         )
@@ -7112,7 +7219,7 @@ def post_project_overleaf_sync(
     repo = get_repo(project=project, user=current_user, session=session)
     ck_info = get_ck_info_from_repo(repo)
     overleaf_sync_info = calkit.overleaf.get_sync_info(
-        wdir=repo.working_dir, ck_info=ck_info, fix_legacy=True
+        wdir=repo.working_dir, ck_info=ck_info
     )
     app.projects.record_overleaf_links(
         session=session, project=project, repo=repo
@@ -7124,21 +7231,25 @@ def post_project_overleaf_sync(
     if path_in_project not in overleaf_sync_info:
         raise HTTPException(404, "Overleaf sync info not found for path")
     overleaf_project_id = overleaf_sync_info[path_in_project]["project_id"]
-    overleaf_repo = get_overleaf_repo(
-        project=project,
-        user=current_user,
-        session=session,
-        overleaf_project_id=overleaf_project_id,
-    )
     try:
-        res = calkit.overleaf.sync(
-            main_repo=repo,
-            overleaf_repo=overleaf_repo,
-            path_in_project=path_in_project,
-            sync_info_for_path=overleaf_sync_info[path_in_project],
-            print_info=logger.info,
-            no_commit=False,
-        )
+        with get_overleaf_repo(
+            project=project,
+            user=current_user,
+            session=session,
+            overleaf_project_id=overleaf_project_id,
+        ) as overleaf_repo:
+            res = calkit.overleaf.sync(
+                main_repo=repo,
+                overleaf_repo=overleaf_repo,
+                path_in_project=path_in_project,
+                # Reloaded under the lock, in case a sync we waited on just
+                # moved the checkpoint, which also fixes any legacy schema
+                sync_info_for_path=None,
+                print_info=logger.info,
+                no_commit=False,
+            )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.info(f"Failed to sync: {e}")
         if "in the middle of an am session" in repo.git.status():
@@ -7296,19 +7407,21 @@ def get_project_overleaf_sync_status(
         if not this_overleaf_project_id:
             logger.info(f"No Overleaf project ID for '{path_in_project}'")
             continue
-        overleaf_repo = get_overleaf_repo(
+        with get_overleaf_repo(
             project=project,
             user=current_user,
             session=session,
             overleaf_project_id=this_overleaf_project_id,
-        )
-        status = calkit.overleaf.get_sync_status(
-            main_repo=repo,
-            overleaf_repo=overleaf_repo,
-            path_in_project=path_in_project,
-            sync_info_for_path=sync_info_for_path,
-            ck_info=ck_info,
-        )
+        ) as overleaf_repo:
+            status = calkit.overleaf.get_sync_status(
+                main_repo=repo,
+                overleaf_repo=overleaf_repo,
+                path_in_project=path_in_project,
+                # Reloaded under the lock, in case a sync we waited on just
+                # moved the checkpoint
+                sync_info_for_path=None,
+                ck_info=ck_info,
+            )
         resp.append(
             OverleafSyncStatus(
                 path=status["path_in_project"],

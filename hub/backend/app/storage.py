@@ -110,6 +110,9 @@ def remove_gcs_content_type(fpath):
 
 
 def get_object_fs() -> s3fs.S3FileSystem | gcsfs.GCSFileSystem:
+    # Without caching listings: the instance outlives a request, so a cached
+    # listing would hide objects other workers have written since, and an
+    # object that exists would be reported missing
     if settings.object_storage_type == "s3":
         # An unset endpoint URL means AWS S3 itself; unset credentials let
         # s3fs fall back to the standard AWS credential chain
@@ -117,8 +120,11 @@ def get_object_fs() -> s3fs.S3FileSystem | gcsfs.GCSFileSystem:
             endpoint_url=settings.OBJECT_STORAGE_ENDPOINT_URL,
             key=settings.OBJECT_STORAGE_KEY,
             secret=settings.OBJECT_STORAGE_SECRET,
+            use_listings_cache=False,
         )
-    return gcsfs.GCSFileSystem(token=get_gcs_credentials())
+    return gcsfs.GCSFileSystem(
+        token=get_gcs_credentials(), use_listings_cache=False
+    )
 
 
 def get_data_prefix() -> str:

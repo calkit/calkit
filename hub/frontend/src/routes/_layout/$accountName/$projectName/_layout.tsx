@@ -28,6 +28,7 @@ import {
   ModalHeader,
   ModalOverlay,
   Portal,
+  Skeleton,
   Spinner,
   Text,
   VStack,
@@ -56,7 +57,6 @@ import {
   type ProjectPublic,
   ProjectsService,
 } from "../../../../client"
-import LoadingSpinner from "../../../../components/Common/LoadingSpinner"
 import ProjectCommandPalette from "../../../../components/Common/ProjectCommandPalette"
 import Sidebar from "../../../../components/Common/Sidebar"
 import CloneProject from "../../../../components/Projects/CloneProject"
@@ -508,167 +508,171 @@ function ProjectLayout() {
 
   return (
     <>
-      {isPending ? (
-        <LoadingSpinner height="100vh" />
-      ) : (
-        <Flex>
-          <ProjectCommandPalette />
-          <Sidebar basePath={`/${accountName}/${projectName}`} />
+      <Flex>
+        <ProjectCommandPalette />
+        <Sidebar basePath={`/${accountName}/${projectName}`} />
+        <Container
+          maxW="full"
+          mx={6}
+          height="calc(100vh - 64px)"
+          overflow="hidden"
+          display="flex"
+          flexDirection="column"
+          px={0}
+        >
           <Container
-            maxW="full"
-            mx={6}
-            height="calc(100vh - 64px)"
-            overflow="hidden"
+            maxW="100%"
+            alignContent="center"
+            alignItems="center"
+            mt={5}
+            mb={4}
             display="flex"
-            flexDirection="column"
+            flexWrap="wrap"
             px={0}
+            flexShrink={0}
           >
-            <Container
-              maxW="100%"
-              alignContent="center"
-              alignItems="center"
-              mt={5}
-              mb={4}
-              display="flex"
-              flexWrap="wrap"
-              px={0}
-              flexShrink={0}
-            >
-              <Box maxW="100%" mr={2}>
-                <Heading size={titleSize}>{project?.title}</Heading>
-              </Box>
-              {currentRef && currentRef !== defaultBranch?.name && (
-                <Box mr={2} pb={0.5} alignSelf="center">
-                  <Code
-                    fontSize="xs"
-                    cursor="pointer"
-                    title="Click to reset to default branch"
-                    onClick={() => setRef(undefined)}
-                    px={2}
-                    py={0.5}
-                    borderRadius="md"
-                    colorScheme="orange"
-                  >
-                    {currentRef} ✕
-                  </Code>
+            {/* Only the title waits on the project; the page below renders
+                its own placeholders in its own shape meanwhile */}
+            {isPending ? (
+              <Skeleton height="36px" width="40%" />
+            ) : (
+              <>
+                <Box maxW="100%" mr={2}>
+                  <Heading size={titleSize}>{project?.title}</Heading>
                 </Box>
-              )}
-              {/* Public/private badge */}
-              <Box mr={2} pb={0.5}>
-                <Badge
-                  color={project?.is_public ? "green.500" : "yellow.500"}
-                  onClick={() => {
-                    !project?.is_public ? projectPublicModal.onOpen() : null
-                  }}
-                  cursor={!project?.is_public ? "pointer" : "default"}
-                >
-                  {project?.is_public ? "Public" : "Private"}
-                </Badge>
-                {project && !project?.is_public ? (
-                  <MakeProjectPublic
-                    project={project}
-                    isOpen={projectPublicModal.isOpen}
-                    onClose={projectPublicModal.onClose}
-                  />
-                ) : (
-                  ""
+                {currentRef && currentRef !== defaultBranch?.name && (
+                  <Box mr={2} pb={0.5} alignSelf="center">
+                    <Code
+                      fontSize="xs"
+                      cursor="pointer"
+                      title="Click to reset to default branch"
+                      onClick={() => setRef(undefined)}
+                      px={2}
+                      py={0.5}
+                      borderRadius="md"
+                      colorScheme="orange"
+                    >
+                      {currentRef} ✕
+                    </Code>
+                  </Box>
                 )}
-              </Box>
-              {/* Status badge */}
-              <Box mr={2} pb={0.5}>
-                <Link>
+                {/* Public/private badge */}
+                <Box mr={2} pb={0.5}>
                   <Badge
-                    color={
-                      project?.status === "in-progress"
-                        ? "green.500"
-                        : project?.status === "completed"
-                          ? "blue.500"
-                          : "gray.500"
-                    }
-                    onClick={projectStatusModal.onOpen}
+                    color={project?.is_public ? "green.500" : "yellow.500"}
+                    onClick={() => {
+                      !project?.is_public ? projectPublicModal.onOpen() : null
+                    }}
+                    cursor={!project?.is_public ? "pointer" : "default"}
                   >
-                    {project?.status
-                      ? project.status.replaceAll("-", " ")
-                      : "no status"}
+                    {project?.is_public ? "Public" : "Private"}
                   </Badge>
-                </Link>
-                {project ? (
-                  <ProjectStatus
-                    project={project}
-                    isOpen={projectStatusModal.isOpen}
-                    onClose={projectStatusModal.onClose}
-                  />
-                ) : (
-                  ""
-                )}
-              </Box>
-              {/* GitHub link */}
-              {project?.git_repo_url ? (
-                <Box mr={2}>
-                  <Link href={project?.git_repo_url} isExternal>
-                    <Flex alignItems="center">
-                      <Icon as={FaGithub} pt={0.5} />
-                      <Icon as={ExternalLinkIcon} />
-                    </Flex>
-                  </Link>
-                </Box>
-              ) : (
-                ""
-              )}
-              <Box mr={2}>
-                <Flex>
-                  {project ? (
-                    <ProjectMenu
+                  {project && !project?.is_public ? (
+                    <MakeProjectPublic
                       project={project}
-                      userHasWriteAccess={userHasWriteAccess}
-                      branches={branches}
-                      currentRef={currentRef}
-                      defaultBranchName={defaultBranch?.name}
-                      onSetRef={setRef}
-                      accountName={accountName}
-                      projectName={projectName}
+                      isOpen={projectPublicModal.isOpen}
+                      onClose={projectPublicModal.onClose}
                     />
                   ) : (
                     ""
                   )}
-                  <IconButton
-                    isRound
-                    aria-label="Open help"
-                    size={"xs"}
-                    onClick={onClickHelp}
-                    icon={<FaQuestion />}
-                  />
-                </Flex>
-              </Box>
-              <Box>
-                {project?.description ? (
-                  <Text fontSize="small">→ {project.description}</Text>
+                </Box>
+                {/* Status badge */}
+                <Box mr={2} pb={0.5}>
+                  <Link>
+                    <Badge
+                      color={
+                        project?.status === "in-progress"
+                          ? "green.500"
+                          : project?.status === "completed"
+                            ? "blue.500"
+                            : "gray.500"
+                      }
+                      onClick={projectStatusModal.onOpen}
+                    >
+                      {project?.status
+                        ? project.status.replaceAll("-", " ")
+                        : "no status"}
+                    </Badge>
+                  </Link>
+                  {project ? (
+                    <ProjectStatus
+                      project={project}
+                      isOpen={projectStatusModal.isOpen}
+                      onClose={projectStatusModal.onClose}
+                    />
+                  ) : (
+                    ""
+                  )}
+                </Box>
+                {/* GitHub link */}
+                {project?.git_repo_url ? (
+                  <Box mr={2}>
+                    <Link href={project?.git_repo_url} isExternal>
+                      <Flex alignItems="center">
+                        <Icon as={FaGithub} pt={0.5} />
+                        <Icon as={ExternalLinkIcon} />
+                      </Flex>
+                    </Link>
+                  </Box>
                 ) : (
                   ""
                 )}
-              </Box>
-            </Container>
-            <Box flex={1} overflowY="auto" minH={0}>
-              <Outlet />
-            </Box>
+                <Box mr={2}>
+                  <Flex>
+                    {project ? (
+                      <ProjectMenu
+                        project={project}
+                        userHasWriteAccess={userHasWriteAccess}
+                        branches={branches}
+                        currentRef={currentRef}
+                        defaultBranchName={defaultBranch?.name}
+                        onSetRef={setRef}
+                        accountName={accountName}
+                        projectName={projectName}
+                      />
+                    ) : (
+                      ""
+                    )}
+                    <IconButton
+                      isRound
+                      aria-label="Open help"
+                      size={"xs"}
+                      onClick={onClickHelp}
+                      icon={<FaQuestion />}
+                    />
+                  </Flex>
+                </Box>
+                <Box>
+                  {project?.description ? (
+                    <Text fontSize="small">→ {project.description}</Text>
+                  ) : (
+                    ""
+                  )}
+                </Box>
+              </>
+            )}
           </Container>
-          <Drawer
-            isOpen={helpDrawer.isOpen}
-            onClose={helpDrawer.onClose}
-            placement="right"
-            size="sm"
-          >
-            <DrawerOverlay />
-            <DrawerContent>
-              <DrawerCloseButton />
-              <DrawerHeader>Help</DrawerHeader>
-              <DrawerBody>
-                <HelpContent userHasWriteAccess={userHasWriteAccess} />
-              </DrawerBody>
-            </DrawerContent>
-          </Drawer>
-        </Flex>
-      )}
+          <Box flex={1} overflowY="auto" minH={0}>
+            <Outlet />
+          </Box>
+        </Container>
+        <Drawer
+          isOpen={helpDrawer.isOpen}
+          onClose={helpDrawer.onClose}
+          placement="right"
+          size="sm"
+        >
+          <DrawerOverlay />
+          <DrawerContent>
+            <DrawerCloseButton />
+            <DrawerHeader>Help</DrawerHeader>
+            <DrawerBody>
+              <HelpContent userHasWriteAccess={userHasWriteAccess} />
+            </DrawerBody>
+          </DrawerContent>
+        </Drawer>
+      </Flex>
     </>
   )
 }

@@ -2179,6 +2179,183 @@ export type ItemLock = {
 }
 
 /**
+ * LatexCommentMessage
+ */
+export type LatexCommentMessage = {
+  /**
+   * Author
+   */
+  author: string
+  /**
+   * Email
+   */
+  email?: string | null
+  /**
+   * Date
+   */
+  date?: string | null
+  /**
+   * Text
+   */
+  text: string
+}
+
+/**
+ * LatexCommentPatch
+ */
+export type LatexCommentPatch = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Ref
+   */
+  ref?: string | null
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Resolved
+   */
+  resolved: boolean
+}
+
+/**
+ * LatexCommentPost
+ */
+export type LatexCommentPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Ref
+   */
+  ref?: string | null
+  /**
+   * Comment
+   */
+  comment: string
+  highlight?: CommentHighlight | null
+  /**
+   * Create Github Issue
+   */
+  create_github_issue?: boolean
+}
+
+/**
+ * LatexCommentReplyPost
+ */
+export type LatexCommentReplyPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Ref
+   */
+  ref?: string | null
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Body
+   */
+  body: string
+}
+
+/**
+ * LatexCommentThread
+ */
+export type LatexCommentThread = {
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Id
+   */
+  id?: string | null
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Line
+   */
+  line: number
+  /**
+   * Resolved
+   */
+  resolved: boolean
+  /**
+   * Issue
+   */
+  issue?: string | null
+  /**
+   * Highlight
+   */
+  highlight?: string | null
+  /**
+   * Position
+   */
+  position?: {
+    [key: string]: unknown
+  } | null
+  /**
+   * Messages
+   */
+  messages: Array<LatexCommentMessage>
+}
+
+/**
+ * LatexComments
+ */
+export type LatexComments = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Source
+   */
+  source: string
+  /**
+   * Rev
+   */
+  rev: string
+  /**
+   * Branch
+   */
+  branch: string | null
+  /**
+   * Can Comment
+   */
+  can_comment: boolean
+  /**
+   * Threads
+   */
+  threads: Array<LatexCommentThread>
+}
+
+/**
+ * LatexCommentsMove
+ */
+export type LatexCommentsMove = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Ref
+   */
+  ref?: string | null
+}
+
+/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -3269,6 +3446,10 @@ export type ProjectComment = {
    * Git Rev
    */
   git_rev?: string | null
+  /**
+   * Moved To Source
+   */
+  moved_to_source?: string | null
   /**
    * User Github Username
    */
@@ -6542,6 +6723,10 @@ export type ProjectCommentWritable = {
    * Git Rev
    */
   git_rev?: string | null
+  /**
+   * Moved To Source
+   */
+  moved_to_source?: string | null
 }
 
 /**
@@ -13243,6 +13428,244 @@ export type GetProjectActivityResponses = {
 
 export type GetProjectActivityResponse =
   GetProjectActivityResponses[keyof GetProjectActivityResponses]
+
+export type DeleteProjectLatexCommentData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Key
+     */
+    key: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/latex-comments"
+}
+
+export type DeleteProjectLatexCommentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteProjectLatexCommentError =
+  DeleteProjectLatexCommentErrors[keyof DeleteProjectLatexCommentErrors]
+
+export type DeleteProjectLatexCommentResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type DeleteProjectLatexCommentResponse =
+  DeleteProjectLatexCommentResponses[keyof DeleteProjectLatexCommentResponses]
+
+export type GetProjectLatexCommentsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/latex-comments"
+}
+
+export type GetProjectLatexCommentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectLatexCommentsError =
+  GetProjectLatexCommentsErrors[keyof GetProjectLatexCommentsErrors]
+
+export type GetProjectLatexCommentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type GetProjectLatexCommentsResponse =
+  GetProjectLatexCommentsResponses[keyof GetProjectLatexCommentsResponses]
+
+export type PatchProjectLatexCommentData = {
+  body: LatexCommentPatch
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-comments"
+}
+
+export type PatchProjectLatexCommentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PatchProjectLatexCommentError =
+  PatchProjectLatexCommentErrors[keyof PatchProjectLatexCommentErrors]
+
+export type PatchProjectLatexCommentResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type PatchProjectLatexCommentResponse =
+  PatchProjectLatexCommentResponses[keyof PatchProjectLatexCommentResponses]
+
+export type PostProjectLatexCommentData = {
+  body: LatexCommentPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-comments"
+}
+
+export type PostProjectLatexCommentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexCommentError =
+  PostProjectLatexCommentErrors[keyof PostProjectLatexCommentErrors]
+
+export type PostProjectLatexCommentResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type PostProjectLatexCommentResponse =
+  PostProjectLatexCommentResponses[keyof PostProjectLatexCommentResponses]
+
+export type PostProjectLatexCommentReplyData = {
+  body: LatexCommentReplyPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-comments/replies"
+}
+
+export type PostProjectLatexCommentReplyErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexCommentReplyError =
+  PostProjectLatexCommentReplyErrors[keyof PostProjectLatexCommentReplyErrors]
+
+export type PostProjectLatexCommentReplyResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type PostProjectLatexCommentReplyResponse =
+  PostProjectLatexCommentReplyResponses[keyof PostProjectLatexCommentReplyResponses]
+
+export type PostProjectLatexCommentsMoveData = {
+  body: LatexCommentsMove
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-comments/move"
+}
+
+export type PostProjectLatexCommentsMoveErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexCommentsMoveError =
+  PostProjectLatexCommentsMoveErrors[keyof PostProjectLatexCommentsMoveErrors]
+
+export type PostProjectLatexCommentsMoveResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type PostProjectLatexCommentsMoveResponse =
+  PostProjectLatexCommentsMoveResponses[keyof PostProjectLatexCommentsMoveResponses]
 
 export type GetReferencesData = {
   body?: never

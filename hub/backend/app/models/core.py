@@ -626,8 +626,8 @@ class NewPassword(SQLModel):
 
 
 class ProjectBase(SQLModel):
-    name: str = Field(min_length=4, max_length=255)
-    title: str = Field(min_length=4, max_length=255)
+    name: str = Field(min_length=3, max_length=255)
+    title: str = Field(min_length=3, max_length=255)
     description: str | None = Field(
         default=None, min_length=0, max_length=2048
     )
@@ -761,10 +761,10 @@ class ProjectsPublic(SQLModel):
 
 
 class ProjectPost(ProjectBase):
-    name: str = Field(min_length=4, max_length=255)
+    name: str = Field(min_length=3, max_length=255)
     # Optional only when an Overleaf project is named below, since the title
     # is then read from its main document
-    title: str | None = Field(default=None, min_length=4, max_length=255)
+    title: str | None = Field(default=None, min_length=3, max_length=255)
     description: str | None = Field(
         default=None, min_length=0, max_length=2048
     )
@@ -1231,6 +1231,9 @@ class ProjectComment(SQLModel, table=True):
     # Git context at the time the comment was posted
     git_ref: str | None = Field(default=None, max_length=256)
     git_rev: str | None = Field(default=None, max_length=40)
+    # When the thread was moved into the source of the LaTeX document it's
+    # on, after which it's kept there rather than here
+    moved_to_source: datetime | None = Field(default=None)
     # Relationships
     user: User = Relationship(back_populates="project_comments")
     project: Project = Relationship(back_populates="project_comments")

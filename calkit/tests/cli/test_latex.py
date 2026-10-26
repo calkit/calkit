@@ -233,6 +233,33 @@ def test_build_output_and_aux_dirs(tmp_dir):
     assert os.path.isfile("paper/aux/main.aux")
 
 
+def test_build_localizes_synctex(tmp_dir, monkeypatch):
+    import gzip
+
+    from calkit.cli import latex as cli_latex
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    with open("paper/latexmkrc", "w") as f:
+        f.write("$out_dir = 'build';\n")
+
+    # Stands in for a container build whose rc sends output to paper/build
+    def run_latexmk(*args, **kwargs):
+        os.makedirs("paper/build", exist_ok=True)
+        with gzip.open("paper/build/main.synctex.gz", "wt") as f:
+            f.write("SyncTeX Version:1\nInput:1:/work/paper/main.tex\n")
+        return 0
+
+    monkeypatch.setattr(cli_latex, "_tex_cmd", lambda cmd, **kwargs: cmd)
+    monkeypatch.setattr(cli_latex, "_run_latexmk", run_latexmk)
+    cli_latex.build("paper/main.tex", latexmk_rc_path="paper/latexmkrc")
+    with gzip.open("paper/build/main.synctex.gz", "rt") as f:
+        text = f.read()
+    here = os.path.realpath("paper/main.tex").replace(os.sep, "/")
+    assert f"Input:1:{here}" in text
+
+
 def _commit(message: str) -> None:
     subprocess.check_call(["git", "add", "-A"])
     subprocess.check_call(
@@ -963,3 +990,324 @@ def test_from_questions(tmp_dir):
     ck_info["pipeline"]["stages"]["qa"]["wdir"] = "paper"
     with pytest.raises(Exception, match="wdir"):
         calkit.pipeline.to_dvc(ck_info=ck_info)
+
+
+def test_comments(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", "latex", "comments", *args],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\begin{document}\n"
+            "\\input{intro}\n"
+            "\n"
+            "First paragraph,\n"
+            "over two lines.\n"
+            "\n"
+            "Second paragraph.\n"
+            "\\begin{equation}\n"
+            "  E = \\alpha m c^2\n"
+            "\\end{equation}\n"
+            "\\end{document}\n"
+        )
+    with open("paper/intro.tex", "w") as f:
+        f.write(
+            "% COMMENT\n"
+            "%   T. Author:\n"
+            "%     A thread without an ID.\n"
+            "Intro text.\n"
+        )
+    # Listing follows inputs, and anchors each thread to the paragraph
+    # below it
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    assert len(listed) == 1 and listed[0]["path"] == "paper/intro.tex"
+    assert listed[0]["id"] is None and listed[0]["line"] == 1
+    assert listed[0]["anchor"]["text"] == "Intro text."
+    # Adding at any line in a paragraph puts the thread above it, with an
+    # ID and the author from Git
+    subprocess.run(["git", "init", "-q"], check=True)
+    subprocess.run(["git", "config", "user.name", "Ann Author"], check=True)
+    subprocess.run(["git", "config", "user.email", "ann@x.org"], check=True)
+    added = json.loads(
+        ck(
+            "add",
+            "paper/main.tex",
+            "--line",
+            "5",
+            "-m",
+            "Clarify.",
+            "--highlight",
+            "two lines",
+            "--json",
+        )
+    )
+    id_ = added["id"]
+    assert re.fullmatch(r"[0-9a-f]{8}", id_)
+    assert added["anchor"]["line"] == added["line"] + added["nlines"]
+    assert added["anchor"]["text"] == "First paragraph, over two lines."
+    assert added["messages"][0]["author"] == "Ann Author"
+    assert added["messages"][0]["email"] == "ann@x.org"
+    with open("paper/main.tex") as f:
+        lines = f.read().split("\n")
+    assert lines[3] == (f'% COMMENT id={id_} highlight={{text: "two lines"}}')
+    assert lines[4].startswith("%   Ann Author <ann@x.org> (")
+    # A second thread on the same paragraph goes below the first
+    id2 = ck("add", "paper/main.tex", "-l", "8", "-m", "Also.")
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    assert [c["id"] for c in listed[1:]] == [id_, id2]
+    assert listed[1]["anchor"] == listed[2]["anchor"]
+    assert listed[0]["path"] == "paper/intro.tex"
+    # Replying and resolving by ID
+    ck("reply", "paper/main.tex", "--id", id_, "-m", "Done.", "--author", "B")
+    ck("resolve", "paper/main.tex", "--id", id_)
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    thread = next(c for c in listed if c["id"] == id_)
+    assert thread["resolved"]
+    assert [m["text"] for m in thread["messages"]] == ["Clarify.", "Done."]
+    assert thread["highlight"] == {"text": "two lines", "occ": 0}
+    unresolved = json.loads(ck("list", "paper/main.tex", "-u", "--json"))
+    assert id_ not in [c["id"] for c in unresolved]
+    ck("reopen", "paper/main.tex", "--id", id_)
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    assert not next(c for c in listed if c["id"] == id_)["resolved"]
+    # A thread without an ID gets one when it's first edited by line
+    new_id = ck("resolve", "paper/intro.tex", "--line", "2")
+    with open("paper/intro.tex") as f:
+        assert f.read().startswith(f"% COMMENT id={new_id} resolved=true\n")
+    # Deleting removes the whole thread and nothing else
+    ck("delete", "paper/main.tex", "--id", id2)
+    listed = json.loads(ck("list", "paper/main.tex", "--json"))
+    assert id2 not in [c["id"] for c in listed]
+    with open("paper/main.tex") as f:
+        assert "Also." not in f.read()
+    # A paragraph is found from rendered text, e.g., a line of the PDF, or
+    # from a line in its source
+    found = json.loads(
+        ck(
+            "locate",
+            "paper/main.tex",
+            "--text",
+            "First paragraph, over two",
+            "--json",
+        )
+    )
+    assert found["path"] == "paper/main.tex"
+    assert found["text"] == "First paragraph, over two lines."
+    assert (found["end_line"] - found["line"]) == 1
+    found = json.loads(
+        ck(
+            "locate",
+            "paper/main.tex",
+            "--path",
+            "paper/intro.tex",
+            "--line",
+            "1",
+            "--json",
+        )
+    )
+    assert found["text"] == "Intro text."
+    assert ck("locate", "paper/main.tex", "--text", "Intro text").startswith(
+        "paper/intro.tex:"
+    )
+    # An equation has few words or none, so it's found by its symbols, as
+    # typeset, with its number
+    found = json.loads(
+        ck("locate", "paper/main.tex", "--text", "E = \u03b1mc2 (1)", "--json")
+    )
+    assert found["text"] == "E = \u03b1 m c 2"
+    with open("paper/main.tex") as f:
+        assert f.read().split("\n")[found["line"] - 1] == "\\begin{equation}"
+    # Bad references fail
+    for args in [
+        ["resolve", "paper/main.tex", "--id", "nope"],
+        ["resolve", "paper/main.tex"],
+        ["add", "paper/main.tex", "-l", "99", "-m", "x"],
+        ["locate", "paper/main.tex", "--text", "Nothing like this anywhere"],
+    ]:
+        res = subprocess.run(
+            ["calkit", "latex", "comments", *args], capture_output=True
+        )
+        assert res.returncode != 0
+    # In Markdown, threads are HTML comments, which Pandoc leaves out
+    with open("main.md", "w") as f:
+        f.write(
+            "# _A_ title\n"
+            "\n"
+            "<!-- calkit values path=r.json -->\n"
+            "\n"
+            "Some **bold** text with a [link](https://x.org),\n"
+            "it's <!-- calkit value key=a -->2<!-- /calkit value -->x.\n"
+            "\n"
+            "<!-- calkit stage name=s -->\n"
+            "```python\n"
+            "print('a')\n"
+            "\n"
+            "print('b')\n"
+            "```\n"
+        )
+
+    md_id = ck(
+        "add",
+        "main.md",
+        "-l",
+        "6",
+        "-m",
+        "Is --> this right?",
+        "--author",
+        "A",
+    )
+    # On code, it goes above the directive, which must stay just above it
+    code_id = ck("add", "main.md", "-l", "16", "-m", "Code.", "--author", "B")
+    with open("main.md") as f:
+        md = f.read().split("\n")
+    assert md[4:9] == [
+        f"<!-- COMMENT id={md_id}",
+        md[5],
+        "    Is -- > this right?",
+        "-->",
+        "Some **bold** text with a [link](https://x.org),",
+    ]
+    assert md[5].startswith("  A (")
+    assert md[11] == f"<!-- COMMENT id={code_id}"
+    assert md[15] == "<!-- calkit stage name=s -->"
+    listed = json.loads(ck("list", "main.md", "--json"))
+    assert [c["id"] for c in listed] == [md_id, code_id]
+    assert listed[0]["anchor"]["text"] == (
+        "Some bold text with a link, it's 2x."
+    )
+    ck("reply", "main.md", "--id", md_id, "-m", "Yes.", "--author", "C")
+    ck("resolve", "main.md", "--line", "5")
+    thread = json.loads(ck("list", "main.md", "--json"))[0]
+    assert thread["resolved"]
+    assert [m["text"] for m in thread["messages"]] == [
+        "Is -- > this right?",
+        "Yes.",
+    ]
+    found = json.loads(ck("locate", "main.md", "--text", "A title", "--json"))
+    assert found["line"] == 1
+    ck("delete", "main.md", "--id", code_id)
+    with open("main.md") as f:
+        assert "Code." not in f.read()
+    # Hand-written threads can close on a message's last line
+    with open("main.md", "a") as f:
+        f.write("<!-- COMMENT\n  D:\n    Short. -->\nEnd.\n")
+    listed = json.loads(ck("list", "main.md", "--json"))
+    assert listed[-1]["messages"][0]["text"] == "Short."
+    assert listed[-1]["anchor"]["text"] == "End."
+    # A thread shown in a fence, e.g., as an example, is code, not a thread
+    example = "````md\n<!-- COMMENT\n  E:\n    Example.\n-->\n```\n````\n"
+    with open("main.md", "a") as f:
+        f.write("\n" + example)
+    assert len(json.loads(ck("list", "main.md", "--json"))) == len(listed)
+    with open("main.md") as f:
+        n = f.read().split("\n").index("    Example.") + 1
+    res = subprocess.run(
+        ["calkit", "latex", "comments", "delete", "main.md", "-l", str(n)],
+        capture_output=True,
+    )
+    assert res.returncode != 0
+    with open("main.md") as f:
+        assert f.read().endswith(example)
+
+
+def test_from_markdown(tmp_dir):
+    import calkit.docx
+
+    if calkit.docx.find_pandoc() is None:
+        pytest.skip("Pandoc isn't available")
+    os.makedirs("results")
+    with open("results/r.json", "w") as f:
+        json.dump({"gain": 2.0, "other": 3}, f)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "owner": "someone",
+                "name": "proj",
+                "questions": [
+                    {
+                        "question": "Other?",
+                        "answer": "{o}",
+                        "evidence": [
+                            {
+                                "kind": "value",
+                                "path": "results/r.json",
+                                "key": "other",
+                                "name": "o",
+                            }
+                        ],
+                    },
+                    {
+                        "question": "Faster?",
+                        "answer": "{g}",
+                        "evidence": [
+                            {
+                                "kind": "value",
+                                "path": "results/r.json",
+                                "key": "gain",
+                                "name": "g",
+                            }
+                        ],
+                    },
+                ],
+            },
+            f,
+        )
+    with open("main.md", "w") as f:
+        f.write(
+            "<!-- calkit values path=results/r.json -->\n"
+            "It's <!-- calkit value key=gain -->1.0<!-- /calkit value -->x"
+            " faster.\n"
+        )
+    with open("template.tex", "w") as f:
+        f.write("$body$\nBuilt by $calkit-version$ from $project$.\n")
+    os.makedirs("img")
+    with open("img/p.png", "wb") as f:
+        f.write(b"")
+    with open("main.md", "a") as f:
+        f.write("\n![A plot](img/p.png)\n")
+    # Both LaTeX, with images pointed at from where it's written, and a
+    # second copy of it
+    subprocess.check_call(
+        [
+            "calkit",
+            "latex",
+            "from-markdown",
+            os.path.abspath("main.md"),
+            "-o",
+            "build/main.tex",
+            "-o",
+            "other/main.tex",
+            "--template",
+            "template.tex",
+        ]
+    )
+    assert "{../img/p.png}" in open("other/main.tex").read()
+    tex = open("build/main.tex").read()
+    # The value is current and links to the question citing it, not just
+    # the first to cite its file
+    assert r"\href{https://calkit.io/someone/proj/questions/2}{2.0}" in tex
+    assert "from calkit.io/someone/proj." in tex
+    # Without what changes from one development commit to the next
+    version = re.sub(r"\.dev\d+$", ".dev", calkit.__version__.split("+")[0])
+    assert f"Built by {version} from" in tex
+    # The Markdown itself is kept current too
+    assert "-->2.0<!--" in open("main.md").read()
+    # Only PDFs and LaTeX can be written
+    result = subprocess.run(
+        ["calkit", "latex", "from-markdown", "main.md", "-o", "main.html"],
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    # Nor from outside the project
+    result = subprocess.run(
+        ["calkit", "latex", "from-markdown", "../x.md", "-o", "x.pdf"],
+        capture_output=True,
+        text=True,
+    )
+    assert "isn't in this project" in result.stderr + result.stdout

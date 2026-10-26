@@ -1,0 +1,7 @@
+item,category,basis,quantity,unit,unit_cost
+Curriculum development,fellow,Adapting workshop material,40,hour,75
+Running workshops,fellow,2 Boston workshops × 40 hours,80,hour,75
+Project support,fellow,About 20 researchers × 7 hours,140,hour,75
+Workshop costs,workshops,"4 workshops, with rooms from host institutions",4,workshop,750
+Travel,workshops,One trip to co-run a Boston workshop,1,trip,1500
+Cloud hosting,hosting,If Google Cloud credits aren't renewed,1,year,5000

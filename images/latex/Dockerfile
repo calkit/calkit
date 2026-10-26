@@ -164,6 +164,26 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Pandoc, for documents written in Markdown, e.g., a Markdown stage's PDF,
+# so its version is pinned with the image rather than being whatever a
+# machine happens to have. The release publishes no checksums, so these are
+# the tarballs' as first downloaded. About 35 MB to download. Only pandoc
+# itself, not pandoc-server.
+ARG PANDOC_VERSION=3.12
+ARG TARGETARCH
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" && \
+    case "${arch}" in \
+        amd64) sum=67d7d011fed8c8543306022b985b9b2499ab9b74818df91d8727c7e9ebc5ba06 ;; \
+        arm64) sum=6cefcf7100e23a99447c26f89d1ff5b253f3407fcef99a9e27ae06f3ed16cb82 ;; \
+        *) echo "No pandoc build for ${arch}" >&2; exit 1 ;; \
+    esac && \
+    wget -qO /tmp/pandoc.tar.gz \
+        "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-${arch}.tar.gz" && \
+    echo "${sum}  /tmp/pandoc.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/pandoc.tar.gz -C /tmp && \
+    mv "/tmp/pandoc-${PANDOC_VERSION}/bin/pandoc" /usr/local/bin/pandoc && \
+    rm -rf /tmp/pandoc.tar.gz "/tmp/pandoc-${PANDOC_VERSION}"
+
 # The user tree is initialized at run time, not here: a mounted cache
 # starts empty and would hide anything this layer created.
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

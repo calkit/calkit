@@ -23,7 +23,7 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Literal
+from typing import Any, Literal
 
 import ruamel.yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -97,6 +97,26 @@ def _get_uncached_out_paths(dvc_stage: dict | None) -> set[str]:
             for out_path, opts in out.items():
                 if isinstance(opts, dict) and opts.get("cache") is False:
                     paths.add(out_path)
+    return paths
+
+
+def _declared_paths(dvc_stage: dict[str, Any] | None, key: str) -> set[str]:
+    """Literal paths a dvc.yaml stage declares under ``deps`` or ``outs``.
+
+    A ``foreach`` stage keeps its definition under ``do``. Paths that are
+    still templated, e.g., ``runs/${item.date}/out.log``, are left out, since
+    they can't be compared with the lock without resolving the template.
+    """
+    paths: set[str] = set()
+    if not isinstance(dvc_stage, dict):
+        return paths
+    definition = dvc_stage.get("do", dvc_stage)
+    if not isinstance(definition, dict):
+        return paths
+    for item in definition.get(key) or []:
+        for name in list(item) if isinstance(item, dict) else [item]:
+            if isinstance(name, str) and "${" not in name:
+                paths.add(name.rstrip("/"))
     return paths
 
 
@@ -697,6 +717,20 @@ def compute_stage_statuses(
                     missing_md5s.add(lock_md5)
             elif lock_md5 is not None and available_md5 != lock_md5:
                 modified_outputs.append(out_path)
+        # A dep or out declared in dvc.yaml since the last run has no locked
+        # hash, so like DVC count it as changed even when every locked hash
+        # still matches. One dropped from dvc.yaml is ignored, as DVC does.
+        for key, modified in (
+            ("deps", modified_inputs),
+            ("outs", modified_outputs),
+        ):
+            locked = {
+                item["path"].rstrip("/")
+                for item in lock_stage.get(key) or []
+                if isinstance(item, dict) and item.get("path")
+            }
+            added = _declared_paths(yaml_stage, key) - locked
+            modified.extend(sorted(p for p in added if p not in modified))
         is_stale = bool(
             modified_command
             or modified_inputs
@@ -744,7 +778,11 @@ def compute_stage_statuses(
     return result
 
 
-def find_frozen_tainted_stages(dvc_yaml: dict, dvc_lock: dict) -> set[str]:
+def find_frozen_tainted_stages(
+    dvc_yaml: dict[str, Any],
+    dvc_lock: dict[str, Any],
+    stage_statuses: dict[str, StageStatus] | None = None,
+) -> set[str]:
     """Stages that are frozen, plus everything downstream of one.
 
     A frozen stage (``dvc freeze``) is never stale, because DVC won't re-run
@@ -752,6 +790,10 @@ def find_frozen_tainted_stages(dvc_yaml: dict, dvc_lock: dict) -> set[str]:
     can't be taken at face value, and why neither can anything computed from
     them. Staleness detection has nothing to say about either, so name them
     here and let callers decide what to do about it.
+
+    Given ``stage_statuses``, a frozen stage whose command, deps, and outs
+    still match ``dvc.lock`` is left out, since it's as current as if it
+    weren't frozen, matching the CLI's ``frozen_tainted_stage_names``.
 
     Returns stage names as they appear in ``dvc.lock``, matching the keys of
     ``compute_stage_statuses``.
@@ -792,12 +834,26 @@ def find_frozen_tainted_stages(dvc_yaml: dict, dvc_lock: dict) -> set[str]:
                             consumers.setdefault(producer, set()).add(
                                 stage_name
                             )
+
+    def _changed(stage_name: str) -> bool:
+        if stage_statuses is None:
+            return True
+        status = stage_statuses.get(stage_name)
+        # Outputs missing from storage aren't counted: that says they weren't
+        # pushed, not that the stage's inputs moved.
+        return status is None or bool(
+            status.modified_command
+            or status.modified_inputs
+            or status.modified_outputs
+        )
+
     tainted = {
         stage_name
         for stage_name in live
         if (yaml_stages.get(_get_base_stage_name(stage_name)) or {}).get(
             "frozen"
         )
+        and _changed(stage_name)
     }
     queue = list(tainted)
     while queue:

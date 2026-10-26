@@ -23,7 +23,7 @@ def test_update_project_config(tmp_dir, monkeypatch):
 
     import requests
 
-    monkeypatch.setattr(requests, "get", fail)
+    monkeypatch.setattr(requests.Session, "request", fail)
     subprocess.check_call(["calkit", "init"])
     result = runner.invoke(update_app, ["devcontainer"])
     assert result.exit_code == 0
@@ -561,16 +561,31 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     posted: list[dict] = []
     remote = {"url": ""}
 
+    posted_resp: dict = {}
+
     def post(path, json=None, **kwargs):
         posted.append(json)
-        return {"git_repo_url": remote["url"]}
+        return {"git_repo_url": remote["url"]} | posted_resp
 
     existing: set[str] = set()
+    on_hub: dict[str, dict] = {}
 
-    def get(path, **kwargs):
+    def get(path, params=None, **kwargs):
+        if path == "/projects":
+            found = on_hub.get(params["github_repo"].lower())
+            return {
+                "data": [found] if found else [],
+                "count": int(bool(found)),
+            }
         if path not in existing:
             raise RuntimeError("404: Not found")
         return {}
+
+    remote_names: list[str] = []
+
+    def configure_remote() -> str:
+        remote_names.append(calkit.detect_project_name())
+        return "calkit"
 
     monkeypatch.setattr(calkit.hub, "post", post)
     monkeypatch.setattr(calkit.hub, "get", get)
@@ -578,7 +593,7 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
         calkit.hub, "get_current_user", lambda: {"github_username": "someone"}
     )
     monkeypatch.setattr(calkit.hub, "get_hub_url", lambda: "https://hub.test")
-    monkeypatch.setattr(calkit.dvc, "configure_remote", lambda: "calkit")
+    monkeypatch.setattr(calkit.dvc, "configure_remote", configure_remote)
     monkeypatch.setattr(
         calkit.dvc, "set_remote_auth", lambda remote_name: None
     )
@@ -626,6 +641,369 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert "already exists" in result.output
     assert len(posted) == n_posted
     assert calkit.load_calkit_info()["hub"] == "https://hub.test"
+    # An org's repo already on the hub is found by its URL, and the remote
+    # is named for the account that owns it there, which is lowercase
+    on_hub["acme-lab/widget"] = {
+        "owner_account_name": "acme-lab",
+        "name": "widget",
+    }
+    git("remote", "set-url", "origin", "git@github.com:Acme-Lab/widget.git")
+    with open("calkit.yaml", "w") as f:
+        f.write("title: Widget\n")
+    result = runner.invoke(
+        update_app, ["hub", "https://hub.test", "--no-commit"]
+    )
+    assert result.exit_code == 0, result.output
+    assert len(posted) == n_posted
+    assert remote_names[-1] == "acme-lab/widget"
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["owner"] == "acme-lab"
+    assert ck_info["name"] == "widget"
+    assert "https://hub.test/acme-lab/widget" in result.output
+    # One the client creates takes the owner the hub gave it
+    on_hub.clear()
+    with open("calkit.yaml", "w") as f:
+        f.write("name: widget\ntitle: Widget\n")
+    posted_resp["owner_account_name"] = "acme-lab"
+    result = runner.invoke(
+        update_app, ["hub", "https://hub.test", "--no-commit"]
+    )
+    assert result.exit_code == 0, result.output
+    assert posted[-1]["git_repo_url"] == "https://github.com/Acme-Lab/widget"
+    assert remote_names[-1] == "acme-lab/widget"
+    assert calkit.load_calkit_info()["owner"] == "acme-lab"
+
+
+def test_update_env_lock(tmp_dir, monkeypatch):
+    import calkit.environments as envs
+    import calkit.workspace
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "bench": {"kind": "system", "lock": ["os", "cpu-count"]},
+        "far": {
+            "kind": "system",
+            "host": "bigbox.invalid",
+            "wdir": "/work",
+            "lock": ["os", "cpu-count"],
+        },
+        "plain": {"kind": "system"},
+        "pick": {
+            "kind": "switch",
+            "switch": [{"use": "plain"}],
+            "lock": ["os"],
+        },
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = ck_info["environments"]["bench"]
+    lock_fpath = os.path.join(".calkit", "env-locks", "bench", "info.json")
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    locked = envs.read_system_env_lock(env_name="bench", env=env)
+    assert locked == envs.get_system_lock_data(["os", "cpu-count"])
+    # Running it again changes nothing, and says so
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "already locked" in result.output
+    # A lock from another machine is replaced, and the change reported
+    with open(lock_fpath, "w") as f:
+        json.dump({"os": "SomeOtherOS", "cpu-count": 1}, f)
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert "SomeOtherOS" in result.output
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])
+    # A remote env is locked to the far end, not this machine
+    monkeypatch.setattr(
+        calkit.workspace,
+        "remote_system_info",
+        lambda ws, apps=None: {"os": "FarOS", "cpu_count": 128},
+    )
+    result = runner.invoke(update_app, ["env", "-n", "far", "--lock"])
+    assert result.exit_code == 0, result.output
+    assert "bigbox.invalid" in result.output
+    assert envs.read_system_env_lock(
+        env_name="far", env=ck_info["environments"]["far"]
+    ) == {"os": "FarOS", "cpu-count": 128}
+    # A switch is locked to the machine its pick runs on
+    result = runner.invoke(update_app, ["env", "-n", "pick", "--lock"])
+    assert result.exit_code == 0, result.output
+    with open(os.path.join(".calkit", "env-locks", "pick", "info.json")) as f:
+        assert json.load(f) == envs.get_system_lock_data(["os"])
+    # Nothing to relock without machine properties or a machine
+    result = runner.invoke(update_app, ["env", "-n", "plain", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(update_app, ["env", "-n", "nope", "--lock"])
+    assert result.exit_code != 0
+    result = runner.invoke(
+        update_app, ["env", "-n", "bench", "--lock", "--add", "numpy"]
+    )
+    assert result.exit_code != 0
+    assert "not both" in result.output
+    # An unreadable lock doesn't stop a relock
+    with open(lock_fpath, "w") as f:
+        f.write("{not json")
+    result = runner.invoke(update_app, ["env", "-n", "bench", "--lock"])
+    assert result.exit_code == 0
+    assert envs.read_system_env_lock(
+        env_name="bench", env=env
+    ) == envs.get_system_lock_data(["os", "cpu-count"])
+
+
+def test_update_path_storage(tmp_dir, tmp_path_factory):
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def update(*args: str):
+        return runner.invoke(update_app, ["path-storage", *args])
+
+    def outputs() -> list:
+        stage = calkit.load_calkit_info()["pipeline"]["stages"]["make"]
+        return list(stage["outputs"])
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt && echo yo > other.txt",
+                "outputs": [
+                    {"path": "out.txt", "storage": "git"},
+                    "other.txt",
+                ],
+            },
+            "paper": {
+                "kind": "latex",
+                "environment": "_system",
+                "target_path": "paper/main.tex",
+            },
+            "sub": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "wdir": "sub",
+                "command": "echo s > out.txt",
+                "outputs": [{"path": "out.txt", "storage": "git"}],
+            },
+            "zipped": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo z > z.txt",
+                "outputs": [{"path": "z.txt", "storage": "dvc-zip"}],
+            },
+            "figs": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p figs && echo f > figs/a.txt",
+                "outputs": ["figs"],
+            },
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    os.makedirs("paper")
+    os.makedirs("sub")
+    for path in ["paper/main.tex", "paper/main.pdf", "z.txt", "notes.txt"]:
+        with open(path, "w") as f:
+            f.write("x")
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
+    subprocess.check_call(["calkit", "run", "make", "sub", "figs"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    # Nothing that isn't here, only Git or DVC, and nothing zipped yet
+    assert update("missing.txt", "--to", "dvc").exit_code != 0
+    assert update("out.txt", "--to", "s3").exit_code != 0
+    result = update("z.txt", "--to", "git")
+    assert result.exit_code != 0
+    assert "zipped" in result.output
+    # Nor part of something DVC tracks as a whole, which would leave it in
+    # both
+    result = update("figs/a.txt", "--to", "git")
+    assert result.exit_code != 0
+    assert "overlaps" in result.output
+    assert not git("ls-files", "--", "figs").strip()
+    # A Git-stored output moves to DVC without its stage rerunning, and its
+    # storage goes back to the default rather than being spelled out
+    result = update("out.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert outputs() == ["out.txt", "other.txt"]
+    assert not git("ls-files", "--", "out.txt").strip()
+    assert git("check-ignore", "out.txt").strip() == "out.txt"
+    assert "up to date" in subprocess.check_output(
+        ["dvc", "status", "make"], text=True
+    )
+    git("add", "-A")
+    git("commit", "-qm", "To DVC")
+    # A stage's outputs are relative to its working directory
+    result = update("sub/out.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["sub"]
+    assert list(stage["outputs"]) == ["out.txt"]
+    assert not git("ls-files", "--", "sub/out.txt").strip()
+    git("add", "-A")
+    git("commit", "-qm", "Sub to DVC")
+    # Back to Git, with outputs and a file added on its own, which leaves
+    # none of them ignored or still tracked by DVC
+    result = update("out.txt", "other.txt", "data.csv", "--to", "git")
+    assert result.exit_code == 0, result.output
+    assert [o["storage"] for o in outputs()] == ["git", "git"]
+    for path in ["out.txt", "other.txt", "data.csv"]:
+        assert git("ls-files", "--", path).strip() == path
+    assert not os.path.isfile("data.csv.dvc")
+    git("commit", "-qam", "To Git")
+    # And the file on its own back to DVC
+    result = update("data.csv", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert os.path.isfile("data.csv.dvc")
+    assert not git("ls-files", "--", "data.csv").strip()
+    git("commit", "-qam", "To DVC again")
+    # A file tracked by both is repaired rather than skipped
+    git("add", "-f", "data.csv")
+    git("commit", "-qm", "Track it twice")
+    result = update("data.csv", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert not git("ls-files", "--", "data.csv").strip()
+    git("commit", "-qm", "Repair")
+    # A .gitignore with changes of its own isn't staged, since that would
+    # commit them too, and when DVC's autostage, which 'calkit add' turned
+    # on, stages it anyway, that's said
+    with open(".gitignore", "a") as f:
+        f.write("# Mine\n")
+    result = update("notes.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert "check them before committing" in result.output
+    assert "/notes.txt" in open(".gitignore").read()
+    # A path a stage's kind implies, here a LaTeX PDF, is set where that
+    # stage declares it; recording it in DVC is refused while the stage is
+    # out of date, since that would pass it off as current
+    result = update("paper/main.pdf", "--to", "git")
+    assert result.exit_code == 0, result.output
+    stage = calkit.load_calkit_info()["pipeline"]["stages"]["paper"]
+    assert stage["pdf_storage"] == "git"
+    result = update("paper/main.pdf", "--to", "dvc")
+    assert result.exit_code != 0
+    assert "out of date" in result.output
+    # A project in a subdirectory of its repo, where Git runs from above it
+    os.chdir(tmp_path_factory.mktemp("parent"))
+    git("init", "-q")
+    os.makedirs("proj")
+    subprocess.check_call(["calkit", "-C", "proj", "init"])
+    os.chdir("proj")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt",
+                "outputs": [{"path": "out.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("notes.txt", "w") as f:
+        f.write("x")
+    subprocess.check_call(["calkit", "run"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    result = update("out.txt", "notes.txt", "--to", "dvc")
+    assert result.exit_code == 0, result.output
+    assert not git("ls-files", "--", "out.txt", "notes.txt").strip()
+    assert git("ls-files", "--", "notes.txt.dvc").strip() == "notes.txt.dvc"
+    result = update("out.txt", "notes.txt", "--to", "git")
+    assert result.exit_code == 0, result.output
+    assert git("ls-files", "--", "out.txt", "notes.txt").split() == [
+        "notes.txt",
+        "out.txt",
+    ]
+
+
+def test_update_comment(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\input{intro}\n\nA paragraph.\n")
+    with open("paper/intro.tex", "w") as f:
+        f.write("% COMMENT id=aaaa0001\n%   A:\n%     Why?\nIntro text.\n")
+    with open("note.md", "w") as f:
+        f.write("<!-- COMMENT id=bbbb0002\n  B:\n    Hm.\n-->\nSome text.\n")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "paper": {
+                            "kind": "latex",
+                            "target_path": "main.tex",
+                            "wdir": "paper",
+                            "environment": "_system",
+                        },
+                        "note": {
+                            "kind": "markdown",
+                            "target_path": "note.md",
+                            "pdf": {"environment": "_system"},
+                        },
+                    }
+                }
+            },
+            f,
+        )
+
+    def thread(id_: str) -> dict:
+        listed = json.loads(ck("list", "comments", "--json"))
+        return next(c for c in listed if c["id"] == id_)
+
+    # An ID finds its thread in any of the project's documents, including
+    # what they input, to reply and resolve at once
+    assert (
+        ck(
+            "update",
+            "comment",
+            "--id",
+            "aaaa0001",
+            "-r",
+            "Because.",
+            "--resolve",
+            "--author",
+            "C",
+        )
+        == "aaaa0001"
+    )
+    t = thread("aaaa0001")
+    assert t["resolved"]
+    assert [m["text"] for m in t["messages"]] == ["Why?", "Because."]
+    # A line needs its file, and a thread without an ID gets one
+    ck("update", "comment", "paper/intro.tex", "-l", "1", "--reopen")
+    assert not thread("aaaa0001")["resolved"]
+    with open("note.md", "w") as f:
+        f.write("<!-- COMMENT\n  B:\n    Hm.\n-->\nSome text.\n")
+    new_id = ck("update", "comment", "note.md", "-l", "2", "--resolve")
+    with open("note.md") as f:
+        assert f.read().startswith(f"<!-- COMMENT id={new_id} resolved=true\n")
+    for args in [
+        ["update", "comment", "--id", "nope", "--resolve"],
+        ["update", "comment", "-l", "1", "--resolve"],
+        ["update", "comment", "--id", "aaaa0001"],
+        ["update", "comment", "--id", "aaaa0001", "--resolve", "--reopen"],
+    ]:
+        res = subprocess.run(["calkit", *args], capture_output=True)
+        assert res.returncode != 0, args
 
 
 def test_update_question(tmp_dir):

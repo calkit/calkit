@@ -25,6 +25,9 @@ To run tests, use `uv run pytest`.
 
 To sync the docs and format all the code, run `make format`.
 
+Before pushing a pull request, run `make pr`, which also runs the project's
+pipeline and pushes its outputs, so the pipeline check passes.
+
 Before finishing a change, type-check it. The CLI gate is mypy
 (`uv run mypy <changed files>`, or `make check` for the full suite), and the
 VS Code editor uses Pylance (Pyright). Keep new code clean under both, and do

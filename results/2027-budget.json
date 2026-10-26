@@ -1,0 +1,71 @@
+{
+  "items": [
+    {
+      "item": "Curriculum development",
+      "category": "fellow",
+      "basis": "Adapting workshop material",
+      "quantity": 40.0,
+      "unit": "hour",
+      "unit_cost": 75.0,
+      "cost": 3000.0
+    },
+    {
+      "item": "Running workshops",
+      "category": "fellow",
+      "basis": "2 Boston workshops \u00d7 40 hours",
+      "quantity": 80.0,
+      "unit": "hour",
+      "unit_cost": 75.0,
+      "cost": 6000.0
+    },
+    {
+      "item": "Project support",
+      "category": "fellow",
+      "basis": "About 20 researchers \u00d7 7 hours",
+      "quantity": 140.0,
+      "unit": "hour",
+      "unit_cost": 75.0,
+      "cost": 10500.0
+    },
+    {
+      "item": "Workshop costs",
+      "category": "workshops",
+      "basis": "4 workshops, with rooms from host institutions",
+      "quantity": 4.0,
+      "unit": "workshop",
+      "unit_cost": 750.0,
+      "cost": 3000.0
+    },
+    {
+      "item": "Travel",
+      "category": "workshops",
+      "basis": "One trip to co-run a Boston workshop",
+      "quantity": 1.0,
+      "unit": "trip",
+      "unit_cost": 1500.0,
+      "cost": 1500.0
+    },
+    {
+      "item": "Cloud hosting",
+      "category": "hosting",
+      "basis": "If Google Cloud credits aren't renewed",
+      "quantity": 1.0,
+      "unit": "year",
+      "unit_cost": 5000.0,
+      "cost": 5000.0
+    }
+  ],
+  "by_category": {
+    "fellow": 19500.0,
+    "workshops": 4500.0,
+    "hosting": 5000.0
+  },
+  "direct_total": 29000.0,
+  "indirect_rate": 0.0,
+  "indirect": 0.0,
+  "total": 29000.0,
+  "workshops": 4,
+  "researchers_trained": 100,
+  "projects_supported": 20,
+  "cost_per_researcher": 290.0
+}

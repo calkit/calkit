@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import warnings
@@ -956,8 +957,7 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
 
 
 def test_env_inputs_become_stage_inputs(tmp_dir):
-    # Covers env-level 'inputs' on the kinds that run setup commands, and
-    # the 'deps' alias
+    # Covers env-level 'inputs' and the 'deps' alias
     envs = {
         "gpu": {
             "kind": "system",
@@ -981,9 +981,19 @@ def test_env_inputs_become_stage_inputs(tmp_dir):
             "image": "some-image",
             "deps": ["Dockerfile.extra"],
         },
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "inputs": ["pkg/setup.py"],
+        },
     }
     pipeline = {
         "stages": {
+            "in-venv": {
+                "kind": "shell-command",
+                "command": "make venv",
+                "environment": "py",
+            },
             "build": {
                 "kind": "shell-command",
                 "command": "make",
@@ -1028,6 +1038,9 @@ def test_env_inputs_become_stage_inputs(tmp_dir):
     assert "--dep scripts/cluster_setup.sh" in stages["job"]["cmd"]
     # Docker deps are the image's, not the stage's
     assert "Dockerfile.extra" not in stages["containerized"]["deps"]
+    # Any other kind's inputs are what it's built from, so stages depend
+    # on them too
+    assert "pkg/setup.py" in stages["in-venv"]["deps"]
 
 
 def test_slurm_env_validation_rules(tmp_dir):
@@ -1713,7 +1726,16 @@ def test_get_status(tmp_dir):
             "with open('my-output.out', 'w') as f:\n"
             "    f.write('Hello, world!')\n"
         )
-    status = calkit.pipeline.get_status(ck_info=ck_info)
+    # Each step is reported as it starts, with each environment checked
+    steps: list[str] = []
+    status = calkit.pipeline.get_status(ck_info=ck_info, progress=steps.append)
+    assert steps == [
+        "Checking environments",
+        "Checking environment 'py'",
+        "Compiling pipeline",
+        "Cleaning notebooks",
+        "Finding stale stages",
+    ]
     assert not status.failed_environment_checks
     assert status.is_stale
     assert "get-data" in status.stale_stage_names
@@ -1755,6 +1777,16 @@ def test_get_status(tmp_dir):
     ]
     assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
     assert status.stale_stages["get-data"].modified_outputs == []
+    # Paths tracked where they shouldn't be are found only when asked for,
+    # with the DVC index the status already built
+    assert status.storage_problems is None
+    subprocess.check_call(["git", "add", "-f", "my-output.out"])
+    status = calkit.pipeline.get_status(
+        ck_info=ck_info, with_storage_problems=True
+    )
+    assert status.storage_problems is not None
+    assert [p["path"] for p in status.storage_problems] == ["my-output.out"]
+    assert "storage_problems" not in status.model_dump()
 
 
 def test_get_status_excludes_frozen_stage(tmp_dir):
@@ -2334,9 +2366,15 @@ def test_translate_run_targets(tmp_dir):
     subprocess.check_call(["git", "init"])
     os.makedirs("inline-sp/calkit", exist_ok=True)
     os.makedirs("isolated-sp/.dvc", exist_ok=True)
+    # Each has an inline subproject of its own
+    for sp in ["inline-sp", "isolated-sp"]:
+        os.makedirs(f"{sp}/nested")
+        with open(f"{sp}/nested/calkit.yaml", "w") as f:
+            calkit.ryaml.dump({"name": "nested"}, f)
     with open("inline-sp/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
+                "subprojects": [{"path": "nested"}],
                 "pipeline": {
                     "stages": {
                         "stage-a": {
@@ -2350,14 +2388,21 @@ def test_translate_run_targets(tmp_dir):
                             "target_path": "main.tex",
                             "diffs": ["v1"],
                         },
+                        "report": {
+                            "kind": "markdown",
+                            "target_path": "report.md",
+                        },
                     }
-                }
+                },
             },
             f,
         )
+    with open("inline-sp/report.md", "w") as f:
+        f.write("```python calkit stage name=plot environment=env\n1\n```\n")
     with open("isolated-sp/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
+                "subprojects": [{"path": "nested"}],
                 "pipeline": {
                     "stages": {
                         "stage-b": {
@@ -2372,7 +2417,7 @@ def test_translate_run_targets(tmp_dir):
                             "diffs": ["v1"],
                         },
                     }
-                }
+                },
             },
             f,
         )
@@ -2412,6 +2457,11 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:paper-diff-v1"]
     assert isolated == [("isolated-sp", "paper-diff-v1")]
+    # As can a subproject's markdown stage, read from its own directory
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp:report"], ck_info=ck_info
+    )
+    assert parent == ["inline-sp/dvc.yaml:report/plot"]
     # Unrecognized targets pass through unchanged
     parent, isolated = calkit.pipeline.translate_run_targets(
         ["my-parent-stage"], ck_info=ck_info
@@ -2425,6 +2475,37 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:stage-a", "my-parent-stage"]
     assert isolated == [("isolated-sp", "stage-b")]
+    # A nested subproject is named by its path, and run by the nearest
+    # project with its own DVC repo
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp/nested:s", "inline-sp/nested", "isolated-sp/nested:s"],
+        ck_info=ck_info,
+    )
+    assert parent == [
+        "inline-sp/nested/dvc.yaml:s",
+        "inline-sp/nested/dvc.yaml",
+    ]
+    assert isolated == [("isolated-sp", "nested/dvc.yaml:s")]
+    # A nested one's directory name works too, unless it's ambiguous, as
+    # here, where both subprojects have one called 'nested'
+    with pytest.raises(
+        ValueError, match="inline-sp/nested, isolated-sp/nested"
+    ):
+        calkit.pipeline.translate_run_targets(["nested:s"], ck_info=ck_info)
+    os.rename("isolated-sp/nested", "isolated-sp/other")
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["nested:s", "nested"], ck_info=ck_info
+    )
+    assert parent == [
+        "inline-sp/nested/dvc.yaml:s",
+        "inline-sp/nested/dvc.yaml",
+    ]
+    # But a bare name is this project's stage first
+    ck_info["pipeline"] = {"stages": {"nested": {}}}
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["nested"], ck_info=ck_info
+    )
+    assert parent == ["nested"]
 
 
 def test_get_concurrent_scheduler_stages():
@@ -3662,6 +3743,65 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
         assert f.read().count("/.calkit/** text eol=lf") == 1
 
 
+def test_get_stage_for_output_reads_map_paths_destinations():
+    from calkit.pipeline import get_stage_for_output
+
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/a.png",
+                            "dest": "paper/figures/a.png",
+                        },
+                        {
+                            "kind": "file-to-dir",
+                            "src": "figures/b.png",
+                            "dest": "paper/figures",
+                        },
+                        {
+                            "kind": "dir-to-dir-merge",
+                            "src": "shared",
+                            "dest": "paper/shared",
+                        },
+                    ],
+                },
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "py",
+                    "outputs": ["figures/a.png"],
+                },
+            }
+        }
+    }
+    assert get_stage_for_output("paper/figures/a.png", ck_info) == "copy"
+    # file-to-dir writes dest/<name>, not dest
+    assert get_stage_for_output("paper/figures/b.png", ck_info) == "copy"
+    # A directory mapping produces everything it writes into
+    assert get_stage_for_output("paper/shared/x/y.tex", ck_info) == "copy"
+    assert get_stage_for_output("paper/shared", ck_info) == "copy"
+    # The original is still the plotting stage's
+    assert get_stage_for_output("figures/a.png", ck_info) == "plot"
+    assert get_stage_for_output("paper/figures/nope.png", ck_info) is None
+    # Paths in a stage are relative to its wdir
+    stages = ck_info["pipeline"]["stages"]
+    stages["copy"]["wdir"] = "sub"
+    stages["plot"]["wdir"] = "analysis"
+    assert get_stage_for_output("sub/paper/figures/a.png", ck_info) == "copy"
+    assert get_stage_for_output("paper/figures/a.png", ck_info) is None
+    assert get_stage_for_output("analysis/figures/a.png", ck_info) == "plot"
+    # A merge into the project root doesn't claim every path
+    stages["copy"]["wdir"] = None
+    stages["copy"]["paths"][2]["dest"] = "."
+    assert get_stage_for_output("data/raw.csv", ck_info) is None
+    # A pipeline can be null
+    assert get_stage_for_output("figures/a.png", {"pipeline": None}) is None
+
+
 def test_table_iteration_names(tmp_dir):
     subprocess.check_call(["git", "init", "-q"])
     subprocess.check_call(["dvc", "init", "-q"])
@@ -3753,3 +3893,434 @@ def test_table_iteration_names(tmp_dir):
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open("dvc.yaml") as f:
         assert "matrix" in calkit.ryaml.load(f)["stages"]["ev"]
+
+
+def test_switch_env_compiles(tmp_dir):
+    environments = {
+        "cluster": {
+            "kind": "switch",
+            "switch": [
+                {
+                    "when": [{"app_exists": "sbatch"}],
+                    "use": "slurm-env",
+                },
+                {"use": "here"},
+            ],
+        },
+        "slurm-env": {"kind": "slurm"},
+        "here": {"kind": "system", "default_setup": ["export A=1"]},
+        "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        "py-a": {"kind": "uv-venv", "path": "a/requirements.txt"},
+        "rt": {
+            "kind": "switch",
+            "switch": [
+                {
+                    "when": [{"os_is": "windows"}],
+                    "use": "py-a",
+                },
+                {"use": "py"},
+            ],
+        },
+    }
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    # A switch of machines compiles like a scheduler stage, resolving where
+    # it runs, and stages depend on its lock directory, not its options'
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": environments,
+            "pipeline": {
+                "stages": {
+                    "train": {
+                        "kind": "python-script",
+                        "script_path": "train.py",
+                        "environment": "cluster:py",
+                        "setup": ["export B=2"],
+                    },
+                    "plain": {
+                        "kind": "shell-command",
+                        "command": "echo hi",
+                        "environment": "cluster",
+                    },
+                    "per-os": {
+                        "kind": "python-script",
+                        "script_path": "s.py",
+                        "environment": "rt",
+                    },
+                }
+            },
+        },
+        write=True,
+    )
+    train = stages["train"]
+    assert train["cmd"].startswith("calkit scheduler batch --name train")
+    assert "--environment cluster" in train["cmd"]
+    # In a file, since a pick of this machine may run it through cmd.exe
+    assert "--setup-file .calkit/stage-setup/train.json" in train["cmd"]
+    assert "calkit xenv -n py --no-check --" in train["cmd"]
+    assert ".calkit/env-locks/cluster" in train["deps"]
+    assert ".calkit/env-locks/slurm-env" not in train["deps"]
+    assert ".calkit/env-locks/py" in train["deps"]
+    assert os.path.isfile(".calkit/env-locks/cluster/switch.json")
+    assert any(
+        ".calkit/scheduler/logs/train.out" in o
+        for o in train["outs"]
+        if isinstance(o, dict)
+    )
+    assert "--environment cluster" in stages["plain"]["cmd"]
+    # A switch of runtimes is resolved by 'calkit xenv'
+    per_os = stages["per-os"]
+    assert per_os["cmd"].startswith("calkit xenv -n rt --no-check --")
+    assert ".calkit/env-locks/rt" in per_os["deps"]
+    assert ".calkit/env-locks/py" not in per_os["deps"]
+    # ...and so can't wrap another env
+    for env_name, match in [
+        ("rt:py", "switch between runtimes"),
+        ("cluster:here", "must not be a job scheduler"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            calkit.pipeline.to_dvc(
+                ck_info={
+                    "environments": environments,
+                    "pipeline": {
+                        "stages": {
+                            "s": {
+                                "kind": "python-script",
+                                "script_path": "s.py",
+                                "environment": env_name,
+                            }
+                        }
+                    },
+                },
+                write=False,
+            )
+
+
+def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
+    import calkit.install
+
+    monkeypatch.delenv("CK_TEST_TOKEN", raising=False)
+    monkeypatch.setattr(calkit, "get_machine_id", lambda: "ab-cd")
+    # An app with an installer, which a check would offer to install
+    monkeypatch.setitem(
+        calkit.install.INSTALLERS,
+        "calkit-test-no-such-app",
+        calkit.install.INSTALLERS["uv"],
+    )
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "system",
+                "requirements": [{"kind": "hostname", "matches": "*"}],
+            },
+            "cluster-only": {
+                "kind": "system",
+                "requirements": [
+                    {"kind": "hostname", "matches": "*.calkit-test.invalid"}
+                ],
+            },
+            "lab": {
+                "kind": "system",
+                "requirements": [{"kind": "env-var", "name": "CK_TEST_TOKEN"}],
+            },
+            "far": {
+                "kind": "system",
+                "host": "calkit-test.invalid",
+                "requirements": ["git"],
+            },
+            "far-free": {"kind": "system", "host": "calkit-test.invalid"},
+            "by-id": {"kind": "system", "machine_id": "ef-01"},
+            "needs-app": {
+                "kind": "system",
+                "requirements": ["calkit-test-no-such-app"],
+            },
+            "nowhere": {
+                "kind": "switch",
+                "switch": [
+                    {
+                        "when": [{"app_exists": "calkit-test-no-such-app"}],
+                        "use": "lab",
+                    }
+                ],
+            },
+            "typo": {
+                "kind": "switch",
+                "switch": [
+                    {
+                        "when": [{"hostname_match": "x"}],
+                        "use": "lab",
+                    },
+                    {"use": "far"},
+                ],
+            },
+            "here": {"kind": "system"},
+            "queue-here": {"kind": "slurm"},
+            "pinned": {"kind": "system", "lock": ["hostname"]},
+            "follows": {
+                "kind": "system",
+                "lock": ["hostname"],
+                "relock": "auto",
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "ok": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "py",
+                },
+                "needs-token": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "_system",
+                    "requirements": [
+                        {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+                    ],
+                },
+                "on-cluster": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "cluster-only",
+                    "outputs": ["cluster.txt", "made"],
+                },
+                "uses-cluster": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": ["cluster.txt"],
+                    "outputs": [{"path": "used.txt"}],
+                },
+                "after-that": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": [{"from_stage_outputs": "uses-cluster"}],
+                },
+                "uses-made": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": ["made/x.txt"],
+                },
+                "queued": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "queue-here",
+                },
+                "in-lab": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "lab",
+                },
+                "far-away": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "far",
+                    "outputs": ["far.txt"],
+                },
+                "uses-far": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": ["far.txt"],
+                },
+                "far-free": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "far-free",
+                },
+                "by-id": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "by-id",
+                },
+                "no-app": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "needs-app",
+                },
+                "no-pick": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "nowhere",
+                },
+                "frozen": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "lab",
+                    "frozen": True,
+                },
+                "bad-switch": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "typo",
+                },
+                "here-token": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "requirements": [
+                        {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+                    ],
+                },
+                "elsewhere": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "pinned",
+                },
+                "anywhere": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "follows",
+                },
+            }
+        },
+    }
+    # Locked to another machine
+    for name in ["pinned", "follows"]:
+        lock_fpath = calkit.environments.get_env_lock_fpath(
+            env=ck_info["environments"][name], env_name=name
+        )
+        assert lock_fpath is not None
+        os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
+        with open(lock_fpath, "w") as f:
+            json.dump({"hostname": "calkit-test.invalid"}, f)
+    # One of a skipped stage's outputs is already here, e.g., pulled
+    os.makedirs("made")
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, interactive=False
+    )
+    no_sbatch = shutil.which("sbatch") is None
+    assert set(gated) - {"queued"} == {
+        "needs-token",
+        "on-cluster",
+        "uses-cluster",
+        "after-that",
+        "in-lab",
+        "no-pick",
+        "here-token",
+        "elsewhere",
+        "by-id",
+        "no-app",
+    }
+    # A scheduler with no host is this machine's, which needs it installed
+    if no_sbatch:
+        assert "app 'sbatch' not found" in gated["queued"]
+        assert "giving environment 'queue-here' a 'host'" in gated["queued"]
+    # A stage needing an output a skipped stage hasn't made is skipped
+    # too, as are those after it, but not one whose input is already here
+    assert "'cluster.txt' from stage 'on-cluster'" in gated["uses-cluster"]
+    assert "'used.txt' from stage 'uses-cluster'" in gated["after-that"]
+    # A machine named by ID alone isn't one that can be reached, and one
+    # with nothing to check isn't connected to
+    assert "has no 'host' to reach it" in gated["by-id"]
+    # Checks never print to stdout, which, e.g., 'status --json' writes to
+    assert capsys.readouterr().out == ""
+    # Something being wrong isn't the project saying the stage can't run
+    assert set(errors) == {"far-away", "uses-far", "bad-switch"}
+    assert "hostname_match" in errors["bad-switch"]
+    assert "locked to another machine" in gated["elsewhere"]
+    assert "update env -n pinned --lock" in gated["elsewhere"]
+    # A stage's own requirement isn't one a host would help with
+    assert "'host'" not in gated["here-token"]
+    assert "CK_TEST_TOKEN" in gated["needs-token"]
+    assert "*.calkit-test.invalid" in gated["on-cluster"]
+    # A local system env that can't run here could from here with a host
+    assert "giving environment 'lab' a 'host'" in gated["in-lab"]
+    assert "can't reach host 'calkit-test.invalid'" in errors["far-away"]
+    assert "picks no environment" in gated["no-pick"]
+    # Meeting the requirement lets the stages run
+    monkeypatch.setenv("CK_TEST_TOKEN", "x")
+    monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info,
+        stage_names=["needs-token", "in-lab", "queued"],
+        interactive=False,
+    )
+    assert gated == {} and errors == {}
+
+
+def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(
+    tmp_dir,
+):
+    subprocess.check_call(["calkit", "init"])
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "pipeline": {
+                "stages": {
+                    "plain": {
+                        "kind": "shell-command",
+                        "command": "echo hi > a.txt",
+                        "environment": "_system",
+                    },
+                    "var": {
+                        "kind": "shell-command",
+                        "command": 'X=1; echo "$X" `date` > b.txt',
+                        "environment": "_system",
+                    },
+                }
+            }
+        },
+        write=True,
+    )
+    # Nothing to expand, so nothing changes
+    assert (
+        stages["plain"]["cmd"]
+        == 'bash --noprofile --norc -c "echo hi > a.txt"'
+    )
+    # Otherwise the command is read only by the shell meant to run it
+    assert stages["var"]["cmd"] == (
+        "bash --noprofile --norc .calkit/stage-commands/var.sh"
+    )
+    assert ".calkit/stage-commands/var.sh" in stages["var"]["deps"]
+    with open(".calkit/stage-commands/var.sh") as f:
+        assert f.read() == 'X=1; echo "$X" `date` > b.txt\n'
+    with open(".gitattributes") as f:
+        assert ".calkit" in f.read()
+    subprocess.run(stages["var"]["cmd"], shell=True, check=True)
+    with open("b.txt") as f:
+        assert f.read().startswith("1 ")
+    # A stage with a working directory reaches the file from there, names
+    # that sanitize alike get their own files, and a file no stage needs
+    # any more is removed
+    os.makedirs("sub")
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "pipeline": {
+                "stages": {
+                    "in-sub": {
+                        "kind": "shell-command",
+                        "command": 'echo "$HOME" > home.txt',
+                        "environment": "_system",
+                        "wdir": "sub",
+                    },
+                    "a b": {
+                        "kind": "shell-command",
+                        "command": "echo $A",
+                        "environment": "_system",
+                    },
+                    "a_b": {
+                        "kind": "shell-command",
+                        "command": "echo $B",
+                        "environment": "_system",
+                    },
+                }
+            }
+        },
+        write=True,
+    )
+    assert stages["in-sub"]["cmd"] == (
+        "bash --noprofile --norc ../.calkit/stage-commands/in-sub.sh"
+    )
+    assert "../.calkit/stage-commands/in-sub.sh" in stages["in-sub"]["deps"]
+    subprocess.run(stages["in-sub"]["cmd"], shell=True, check=True, cwd="sub")
+    assert os.path.isfile(os.path.join("sub", "home.txt"))
+    assert stages["a b"]["cmd"] != stages["a_b"]["cmd"]
+    assert sorted(os.listdir(".calkit/stage-commands")) == sorted(
+        [
+            "in-sub.sh",
+            "a_b.sh",
+            os.path.basename(stages["a b"]["cmd"].split()[-1]),
+        ]
+    )

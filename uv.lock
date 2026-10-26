@@ -705,7 +705,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.2.0" },
     { name = "requests-oauthlib", specifier = ">=2.0.0" },
     { name = "rq", specifier = ">=2.0.0" },
-    { name = "ruamel-yaml", specifier = "==0.18.6" },
+    { name = "ruamel-yaml", specifier = "==0.19.1" },
     { name = "s3fs", specifier = "==2026.4.0" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=1.40.6,<2.0.0" },
     { name = "sqlmodel", specifier = ">=0.0.21,<1.0.0" },
@@ -1273,6 +1273,7 @@ dependencies = [
     { name = "dulwich" },
     { name = "dvc", extra = ["all"] },
     { name = "fastapi" },
+    { name = "filelock" },
     { name = "fsspec" },
     { name = "gitpython" },
     { name = "json2latex" },
@@ -1291,6 +1292,8 @@ dependencies = [
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "requests" },
     { name = "rich" },
+    { name = "ruamel-yaml" },
+    { name = "ruamel-yaml-clib", marker = "(python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and platform_machine == 'i686' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and platform_machine == 'AMD64' and platform_python_implementation == 'CPython' and sys_platform == 'win32') or (python_full_version < '3.15' and platform_machine == 'x86' and platform_python_implementation == 'CPython' and sys_platform == 'win32') or (python_full_version < '3.15' and platform_python_implementation == 'CPython' and sys_platform == 'darwin')" },
     { name = "sqlitedict" },
     { name = "texsoup" },
     { name = "toml" },
@@ -1342,6 +1345,7 @@ dev = [
     { name = "ruff" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "simpy" },
     { name = "types-jsonschema" },
 ]
 
@@ -1354,6 +1358,7 @@ requires-dist = [
     { name = "dulwich", specifier = ">=1.2.5" },
     { name = "dvc", extras = ["all"], specifier = "==3.67.1" },
     { name = "fastapi" },
+    { name = "filelock" },
     { name = "fsspec", specifier = ">=2026.4.0" },
     { name = "gitpython" },
     { name = "json2latex", specifier = ">=0.0.3" },
@@ -1374,11 +1379,13 @@ requires-dist = [
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "requests" },
     { name = "rich" },
+    { name = "ruamel-yaml", specifier = ">=0.19.1,<0.20" },
+    { name = "ruamel-yaml-clib", marker = "(python_full_version < '3.15' and platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and platform_machine == 'i686' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version < '3.15' and platform_machine == 'AMD64' and platform_python_implementation == 'CPython' and sys_platform == 'win32') or (python_full_version < '3.15' and platform_machine == 'x86' and platform_python_implementation == 'CPython' and sys_platform == 'win32') or (python_full_version < '3.15' and platform_python_implementation == 'CPython' and sys_platform == 'darwin')", specifier = ">=0.2.15" },
     { name = "sqlitedict", specifier = ">=2.1.0" },
     { name = "texsoup", specifier = ">=0.3.3" },
     { name = "toml", specifier = ">=0.10.2" },
     { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "typer", specifier = "==0.27.2" },
+    { name = "typer", specifier = "==0.27.3" },
     { name = "uvicorn" },
     { name = "xet", marker = "extra == 'xet'", specifier = ">=0.0.1" },
 ]
@@ -1414,6 +1421,7 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff" },
     { name = "scipy", specifier = ">=1.15.3" },
+    { name = "simpy", specifier = ">=4.1.1" },
     { name = "types-jsonschema" },
 ]
 
@@ -8019,14 +8027,11 @@ wheels = [
 
 [[package]]
 name = "ruamel-yaml"
-version = "0.18.6"
+version = "0.19.1"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "ruamel-yaml-clib", marker = "python_full_version < '3.13' and platform_python_implementation == 'CPython'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/29/81/4dfc17eb6ebb1aac314a3eb863c1325b907863a1b8b1382cdffcb6ac0ed9/ruamel.yaml-0.18.6.tar.gz", hash = "sha256:8b27e6a217e786c6fbe5634d8f3f11bc63e0f80f6a5890f28863d9c45aac311b", size = 143362, upload-time = "2024-02-07T06:47:20.283Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/3b/ebda527b56beb90cb7652cb1c7e4f91f48649fbcd8d2eb2fb6e77cd3329b/ruamel_yaml-0.19.1.tar.gz", hash = "sha256:53eb66cd27849eff968ebf8f0bf61f46cdac2da1d1f3576dd4ccee9b25c31993", size = 142709, upload-time = "2026-01-02T16:50:31.84Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/67/8ece580cc363331d9a53055130f86b096bf16e38156e33b1d3014fffda6b/ruamel.yaml-0.18.6-py3-none-any.whl", hash = "sha256:57b53ba33def16c4f3d807c0ccbc00f8a6081827e81ba2491691b76882d0c636", size = 117761, upload-time = "2024-02-07T06:47:14.898Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/0c/51f6841f1d84f404f92463fc2b1ba0da357ca1e3db6b7fbda26956c3b82a/ruamel_yaml-0.19.1-py3-none-any.whl", hash = "sha256:27592957fedf6e0b62f281e96effd28043345e0e66001f97683aa9a40c667c93", size = 118102, upload-time = "2026-01-02T16:50:29.201Z" },
 ]
 
 [[package]]
@@ -8489,6 +8494,15 @@ wheels = [
 ]
 
 [[package]]
+name = "simpy"
+version = "4.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4a/38/fb393d1a5c2f35b65609e8d3c39d1508ada6a767c7e624ffa16ed3e84ffd/simpy-4.1.2.tar.gz", hash = "sha256:76ef36b71e0436ba94e55febc001c78879e493a323f045bbcfbb0b216e9b1fbc", size = 410129, upload-time = "2026-05-24T04:37:12.834Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ee/ed/07a1e054922c16b2c18ca3598771936c344d52337b8aaf0f1e3ed8b223dc/simpy-4.1.2-py3-none-any.whl", hash = "sha256:43071f84b6512c9b4fcb33ef057f240ccb1d1f3b263f9b4f9229d072e310b372", size = 27375, upload-time = "2026-05-24T04:37:11.74Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -8854,7 +8868,7 @@ wheels = [
 
 [[package]]
 name = "typer"
-version = "0.27.2"
+version = "0.27.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -8862,9 +8876,9 @@ dependencies = [
     { name = "rich" },
     { name = "shellingham" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/16/f7/57713ba479fd405eb76de31404b2c744c289e336b2d999511ebf51e496f7/typer-0.27.2.tar.gz", hash = "sha256:269b7eb9d3c202ca84b4bc9618cb04ebb43d3d4d1e567e4c768607232c05f945", size = 204045, upload-time = "2026-08-28T10:26:55.046Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/51/d33db42cc72ffd8c30777547b42d01f0cbf9d95a770457698d0174b3ed71/typer-0.27.3.tar.gz", hash = "sha256:d0396f770a560ab1b0a8504e13b5f254b728cedb05c61cf0359e944e50ce8901", size = 205303, upload-time = "2026-10-06T17:24:16.61Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/bf/205d0004930ede8f542fb58f601526fccf4ae7626075ca1e6c4de5d3d652/typer-0.27.2-py3-none-any.whl", hash = "sha256:b3a5fc4342d5fc8fda8fc3010b1cf117e9249aab7fae800c2eff62fd3842d97d", size = 123130, upload-time = "2026-08-28T10:26:53.752Z" },
+    { url = "https://files.pythonhosted.org/packages/07/ea/2e31b67051e91a133189e9c000c222502ddc6969856416de0d095de4c0b0/typer-0.27.3-py3-none-any.whl", hash = "sha256:e50022f28b82a86313e54501317a1db64bf8f8d036ff8cfe5ca7e47675454aff", size = 123312, upload-time = "2026-10-06T17:24:15.054Z" },
 ]
 
 [[package]]

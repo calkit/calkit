@@ -17,6 +17,7 @@ from pydantic.fields import PydanticUndefined
 from typer.core import TyperArgument, TyperCommand, TyperGroup, TyperOption
 
 from calkit.cli.main.core import app
+from calkit.models.base import Model
 from calkit.models.core import (
     Environment,
 )
@@ -47,18 +48,26 @@ def rst_to_markdown(text: str) -> str:
     the RST spellings are what belongs in them; normalizing here keeps
     authors from having to write markdown by hand in a docstring.
     """
-    # ``double backticks`` are RST inline code; markdown uses one
-    text = text.replace("``", "`")
-    # *emphasis* is RST (and the natural thing to type); prettier
-    # normalizes single-asterisk emphasis to underscores, but leaves
-    # **strong** alone. Bounded to one line, and the delimiters exclude
-    # '*' and whitespace on both sides so '**strong**' isn't mangled into
-    # '_*strong*_' and a '* ' bullet isn't read as an opening delimiter.
-    return re.sub(
-        r"(?<![\w*])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?![\w*])",
-        r"_\1_",
-        text,
+    # Fenced code is left exactly as written; the split puts each fence
+    # at an odd index
+    parts = re.split(
+        r"(^[ \t]*```.*?^[ \t]*```[ \t]*$)", text, flags=re.M | re.S
     )
+    for i in range(0, len(parts), 2):
+        # ``double backticks`` are RST inline code; markdown uses one
+        part = re.sub(r"(?<!`)``(?!`)", "`", parts[i])
+        # *emphasis* is RST (and the natural thing to type); prettier
+        # normalizes single-asterisk emphasis to underscores, but leaves
+        # **strong** alone. Bounded to one line, and the delimiters
+        # exclude '*' and whitespace on both sides so '**strong**' isn't
+        # mangled into '_*strong*_' and a '* ' bullet isn't read as an
+        # opening delimiter.
+        parts[i] = re.sub(
+            r"(?<![\w*])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?![\w*])",
+            r"_\1_",
+            part,
+        )
+    return "".join(parts)
 
 
 def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
@@ -555,8 +564,8 @@ _MAX_UNION_MEMBERS = 4
 def _shared_model_base(types_: list[Any]) -> type[BaseModel] | None:
     """Return the model base every one of ``types_`` derives from, if any.
 
-    ``BaseModel`` itself doesn't count: it's shared by everything, so it
-    would summarize a union as nothing at all.
+    ``BaseModel`` itself doesn't count, nor Calkit's ``Model``: they're
+    shared by everything, so would summarize a union as nothing at all.
     """
     if not all(
         isinstance(t, type) and issubclass(t, BaseModel) for t in types_
@@ -565,7 +574,7 @@ def _shared_model_base(types_: list[Any]) -> type[BaseModel] | None:
     # Walk the first member's bases from most to least specific, so the
     # narrowest shared base wins
     for base in types_[0].__mro__[1:]:
-        if base is BaseModel:
+        if base in (BaseModel, Model):
             break
         if all(issubclass(t, base) for t in types_):
             return cast(type[BaseModel], base)
@@ -789,8 +798,11 @@ def _nested_type_markdown(
 def generate_stage_kinds_markdown() -> str:
     base_fields = Stage.model_fields
 
+    # Kinds Calkit generates rather than anyone writing them are left out
     stage_classes = [
-        cls for cls in Stage.__subclasses__() if _kind_for_model_class(cls)
+        cls
+        for cls in Stage.__subclasses__()
+        if _kind_for_model_class(cls) and not getattr(cls, "internal", False)
     ]
     stage_classes = sorted(stage_classes, key=_kind_for_model_class)
 
@@ -986,7 +998,20 @@ def generate_system_lock_properties_markdown() -> str:
     return (
         "The properties that can be locked are:\n\n"
         + make_table(rows, ["Property", "Description"]).rstrip()
-        + "\n\nRun `calkit describe system` to see what these are on the "
+        + "\n\nAny app's version can be locked too, as `<app>-version`, "
+        "e.g., `gcc-version`.\n"
+        "A version is recorded as its number up to the patch part,\n"
+        "e.g., `27.3.1` from `Docker version 27.3.1, build ce12230`,\n"
+        "or `6.8.0` from a Linux kernel release `6.8.0-45-generic`.\n"
+        "Any version can end in `-major` or `-minor` to lock only those "
+        "parts,\n"
+        "e.g., `python-version-minor` records `3.12` for Python 3.12.8,\n"
+        "so only a move to another minor version counts as a change.\n"
+        "`-patch` is the same as no ending, and `-full` keeps a suffix "
+        "attached to\n"
+        "the number, e.g., `11.4.0-1ubuntu1~22.04` for Ubuntu's GCC "
+        "11.4.0.\n"
+        "\nRun `calkit describe system` to see what these are on the "
         "machine you're on.\n"
     )
 

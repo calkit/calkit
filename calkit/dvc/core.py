@@ -7,6 +7,8 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
+import re
 import sys
 import threading
 from collections.abc import Iterator
@@ -29,6 +31,9 @@ logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
 USE_CK_REMOTE_BY_DEFAULT = True
+# Whether projects have what Calkit and DVC write staged in Git as it's
+# written, e.g., dvc.lock and env locks, so they're committed together
+AUTOSTAGE = True
 
 
 class _FrozenStageWarningFilter(logging.Filter):
@@ -211,6 +216,106 @@ def dvc_lock_timeout(seconds: float):
         dvc.lock.DEFAULT_TIMEOUT = previous
 
 
+@contextlib.contextmanager
+def skip_stages(
+    reasons: dict[str, str], skipped: dict[str, str] | None = None
+) -> Iterator[None]:
+    """Skip these stages in ``dvc repro`` while active, keeping their outputs.
+
+    Keyed by Calkit stage name, which also covers the ``<name>@<item>``
+    stages DVC makes from an iterated one and the stages generated from
+    one, e.g., a LaTeX stage's diffs. Only stages in the root ``dvc.yaml``
+    match, so a subproject's stage of the same name isn't skipped. A
+    skipped stage is frozen, so its own inputs aren't reproduced on its
+    account, and isn't run or recorded in ``dvc.lock``, so it stays out of
+    date rather than looking current. Each skipped stage that was out of
+    date is added to ``skipped`` with its reason, including one that only
+    went out of date when a stage it depends on ran after it was visited,
+    since a frozen stage has no edges to order it after them.
+    """
+    from dvc.stage import Stage
+    from dvc.stage.loader import StageLoader
+
+    def reason_for(stage: Any) -> str | None:
+        name = getattr(stage, "name", None)
+        dvcfile = getattr(stage, "dvcfile", None)
+        if not name or dvcfile is None:
+            return None
+        if os.path.normpath(os.path.relpath(dvcfile.path)) != "dvc.yaml":
+            return None
+        reason = reasons.get(name, reasons.get(name.split("@")[0]))
+        if reason is None:
+            # A stage Calkit generated from another says which one
+            match = re.match(
+                r"Automatically generated from the '([^']+)' stage",
+                getattr(stage, "desc", None) or "",
+            )
+            if match:
+                reason = reasons.get(match.group(1))
+        return reason
+
+    original_load = StageLoader.__dict__["load_stage"]
+    original_reproduce = Stage.reproduce
+    # Visited while up to date, so checked again whenever a stage runs,
+    # while DVC holds the repo lock that checking needs
+    unchanged: list[tuple[Any, bool]] = []
+
+    def is_stale(stage: Any, **kwargs: Any) -> bool:
+        # Frozen stages never report changed deps, so ask without it
+        stage.frozen = False
+        try:
+            return bool(
+                kwargs.get("force")
+                or stage.changed(
+                    kwargs.get("allow_missing", False), kwargs.get("upstream")
+                )
+            )
+        finally:
+            stage.frozen = True
+
+    def load_stage(cls: Any, *args: Any, **kwargs: Any) -> Any:
+        stage = original_load.__func__(cls, *args, **kwargs)
+        if reason_for(stage) is not None:
+            stage.frozen = True
+        return stage
+
+    def reproduce(self: Any, *args: Any, **kwargs: Any) -> Any:
+        reason = reason_for(self)
+        if reason is None:
+            result = original_reproduce(self, *args, **kwargs)
+            if result is not None and skipped is not None:
+                for stage, allow_missing in list(unchanged):
+                    if is_stale(stage, allow_missing=allow_missing):
+                        skipped[stage.addressing] = reason_for(stage) or ""
+                        unchanged.remove((stage, allow_missing))
+            return result
+        if not is_stale(self, **kwargs):
+            logging.getLogger("dvc").info(
+                "Stage '%s' didn't change, skipping", self.addressing
+            )
+            unchanged.append((self, kwargs.get("allow_missing", False)))
+            return None
+        logging.getLogger("dvc").info(
+            "Stage '%s' can't run on this machine, skipping: %s",
+            self.addressing,
+            reason,
+        )
+        if skipped is not None:
+            skipped[self.addressing] = reason
+        return None
+
+    if not reasons:
+        yield
+        return
+    setattr(StageLoader, "load_stage", classmethod(load_stage))
+    setattr(Stage, "reproduce", reproduce)
+    try:
+        yield
+    finally:
+        setattr(StageLoader, "load_stage", original_load)
+        setattr(Stage, "reproduce", original_reproduce)
+
+
 _memoized_hashes_lock = threading.RLock()
 
 
@@ -367,6 +472,16 @@ class CalkitDVCFileSystem(ObjectFileSystem):
         fs.info = cached_info  # type: ignore[method-assign]
         return fs
 
+    def _info_many(self, paths: list[str], **kwargs: Any) -> dict:
+        # Only a .dir is read once it's found, so any other object's content
+        # would be downloaded just to say it exists
+        dirs = [p for p in paths if p.endswith(".dir")]
+        others = [p for p in paths if not p.endswith(".dir")]
+        infos = self.fs.info_many(dirs, **kwargs) if dirs else {}
+        if others:
+            infos |= self.fs.info_many(others, content=False, **kwargs)
+        return infos
+
     def _extract_owner_project(self) -> tuple[str, str] | None:
         """Extract owner and project from the path_info."""
         try:
@@ -432,7 +547,7 @@ class CalkitDVCFileSystem(ObjectFileSystem):
                     uncached_paths.append(p)
             # Only fetch info for uncached paths
             if uncached_paths:
-                infos = self.fs.info_many(uncached_paths, **kwargs)
+                infos = self._info_many(uncached_paths, **kwargs)
                 # Cache the newly fetched info
                 for p in uncached_paths:
                     exists = p in infos and isinstance(infos[p], dict)
@@ -490,7 +605,7 @@ class CalkitDVCFileSystem(ObjectFileSystem):
             # Only fetch info for uncached paths
             # Use info_many to get and cache both info and existence
             if uncached_paths:
-                infos = self.fs.info_many(uncached_paths, **kwargs)
+                infos = self._info_many(uncached_paths, **kwargs)
                 for p in uncached_paths:
                     exists = p in infos and isinstance(infos[p], dict)
                     if p not in self._cache:
@@ -526,11 +641,40 @@ def register_ck_scheme() -> None:
 
 
 def run_dvc_cli(argv: list[str] | None = None) -> int:
-    """Run DVC CLI with ``ck://`` scheme pre-registered."""
+    """Run DVC CLI with ``ck://`` scheme pre-registered.
+
+    The help DVC adds to its errors, which points to DVC's support and docs
+    rather than Calkit's, is left out, but not the errors themselves.
+    """
+    import logging
+
+    import dvc.cli
     from dvc.cli import main as dvc_main
 
+    def log_unknown_exceptions() -> None:
+        dvc.cli.logger.exception("unexpected error")
+
+    class DropLinks(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            args = record.args
+            if (
+                isinstance(record.msg, str)
+                and isinstance(args, tuple)
+                and record.msg.startswith(
+                    "%s\nLearn more about configuration settings"
+                )
+            ):
+                record.msg, record.args = "%s", args[:1]
+            return True
+
     register_ck_scheme()
-    return dvc_main(argv)
+    dvc.cli._log_unknown_exceptions = log_unknown_exceptions
+    links = DropLinks()
+    dvc.cli.logger.addFilter(links)
+    try:
+        return dvc_main(argv)
+    finally:
+        dvc.cli.logger.removeFilter(links)
 
 
 def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
@@ -540,7 +684,10 @@ def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
 
 
 def commit_path(
-    dvc_repo: dvc.repo.Repo, path: str, allow_missing: bool = True
+    dvc_repo: dvc.repo.Repo,
+    path: str,
+    allow_missing: bool = True,
+    outs_only: bool = False,
 ) -> None:
     """Commit a path to DVC, skipping the run cache.
 
@@ -548,6 +695,9 @@ def commit_path(
     saved to the run cache, since doing so requires hashing all of their
     dependencies, which will fail if any are missing from the workspace, e.g.,
     if their data has never been pulled.
+
+    With ``outs_only``, dependencies keep their recorded hashes, so a stage
+    that was out of date stays that way.
     """
     with dvc.repo.lock_repo(dvc_repo):
         groups = groupby(
@@ -558,7 +708,10 @@ def commit_path(
             to_dump = []
             for stage_info in stages_info_group:
                 stage = stage_info.stage
-                stage.save(allow_missing=allow_missing, run_cache=False)
+                if outs_only:
+                    stage.save_outs(allow_missing=allow_missing)
+                else:
+                    stage.save(allow_missing=allow_missing, run_cache=False)
                 stage.commit(
                     filter_info=stage_info.filter_info,
                     allow_missing=allow_missing,
@@ -770,6 +923,83 @@ def init(
     if quiet:
         args.append("--quiet")
     return run_dvc_command(args, cwd=wdir)
+
+
+def read_lock_stages(wdir: str | None = None) -> dict:
+    """The stages a ``dvc.lock`` records, or none if there isn't one."""
+    fpath = os.path.join(wdir or ".", "dvc.lock")
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            data = calkit.core._load_yaml_readonly(f) or {}
+    except OSError:
+        return {}
+    stages = data.get("stages") if isinstance(data, dict) else None
+    return stages if isinstance(stages, dict) else {}
+
+
+def split_lock_stage_name(stage_name: str) -> tuple[str | None, str]:
+    """The directory of the ``dvc.lock`` recording a stage, and its name there.
+
+    A subproject's stage run from its parent is named, e.g.,
+    'sub/dvc.yaml:stage'.
+    """
+    dvc_yaml, sep, name = stage_name.rpartition(":")
+    if sep and posixpath.basename(dvc_yaml) == "dvc.yaml":
+        return posixpath.dirname(dvc_yaml) or None, name
+    return None, stage_name
+
+
+def stage_lock_hash(entry: dict) -> str:
+    """A checksum of what a stage's ``dvc.lock`` entry says it ran and made.
+
+    Built from its command, params, and each dep's and out's path and hash,
+    rather than the entry as written, so a change in how DVC writes the
+    file doesn't change it.
+    """
+
+    def files(key: str) -> list:
+        return sorted(
+            (
+                {k: v for k, v in f.items() if k not in ("size", "nfiles")}
+                for f in entry.get(key) or []
+                if isinstance(f, dict)
+            ),
+            key=lambda f: str(f.get("path")),
+        )
+
+    data = {
+        "cmd": entry.get("cmd"),
+        "params": entry.get("params") or {},
+        "deps": files("deps"),
+        "outs": files("outs"),
+    }
+    content = json.dumps(data, sort_keys=True, default=str).encode()
+    return "sha256:" + hashlib.sha256(content).hexdigest()
+
+
+def configure_autostage(wdir: str | None = None) -> int:
+    """Turn on DVC's autostage, if Calkit does, returning the exit code."""
+    if not AUTOSTAGE:
+        return 0
+    return run_dvc_command(["config", "core.autostage", "true"], cwd=wdir)
+
+
+def autostage_enabled(wdir: str | None = None) -> bool:
+    """Whether what Calkit writes for the project is staged in Git.
+
+    The same switch as DVC's own, so a commit gets ``dvc.lock`` and the
+    files it records hashes of together, or neither.
+    """
+    from dvc.config import Config
+
+    if not AUTOSTAGE:
+        return False
+    dvc_dir = os.path.join(wdir or "", ".dvc")
+    if not os.path.isdir(dvc_dir):
+        return False
+    # Unvalidated, since the 'ck' remote scheme may not be registered
+    value = Config(dvc_dir=dvc_dir, validate=False)["core"].get("autostage")
+    return str(value).lower() in ("true", "yes", "1")
 
 
 def run_dvc_command(
@@ -1068,6 +1298,18 @@ def get_lock_out_paths(wdir: str | None = None) -> list[str]:
     return paths
 
 
+def get_cached_out_paths(wdir: str | None = None) -> set[str]:
+    """Paths of the pipeline outputs DVC caches, and so ignores, as POSIX
+    paths relative to the project root.
+    """
+    repo = get_dvc_repo(wdir)
+    return {
+        Path(os.path.relpath(out.fs_path, repo.root_dir)).as_posix()
+        for out in repo.index.outs
+        if out.use_scm_ignore
+    }
+
+
 def restore_output_ignores(wdir: str | None = None) -> list[str]:
     """Re-ignore the pipeline's cached outputs that exist but aren't ignored.
 
@@ -1086,6 +1328,204 @@ def restore_output_ignores(wdir: str | None = None) -> list[str]:
         if gitignore:
             written.append(gitignore)
     return written
+
+
+def get_storage_problems(  # type: ignore[no-any-unimported]
+    wdir: str | None = None,
+    large_mb: float | None = 50,
+    dvc_repo: dvc.repo.Repo | None = None,
+    ck_info: dict | None = None,
+) -> list[dict]:
+    """Find paths whose tracking disagrees with where they're declared to be
+    stored.
+
+    Each has the ``path``, relative to ``wdir``, its ``kind``, the pipeline
+    ``stage`` or ``dvc_file`` that declares it, if any, ``store_in``, the
+    system it belongs in, or None if that can't be told, and a ``message``.
+    The kinds are:
+
+    - ``both``: tracked by Git and cached by DVC, so it belongs in DVC,
+      unless it was added on its own and differs from its ``.dvc`` file.
+    - ``ignored``: a pipeline output stored in Git that Git ignores.
+    - ``zipped``: stored zipped with DVC, but tracked by Git too.
+    - ``large``: tracked by Git, and larger than ``large_mb``, which is only
+      advice; None skips this check.
+
+    Building DVC's index is most of the cost, and loading calkit.yaml much
+    of the rest, so a ``dvc_repo`` that has built it, and ``ck_info``, can
+    be passed in.
+    """
+    import bisect
+
+    import calkit.dvc.zip
+    import calkit.git
+    from calkit.models.pipeline import (
+        JsonToLatexStage,
+        JupyterNotebookStage,
+        LatexStage,
+        MarimoHtmlWasmStage,
+        PathOutput,
+        Pipeline,
+        QuestionsToLatexStage,
+    )
+
+    base = Path(wdir or ".").resolve()
+    repo = calkit.git.get_repo(wdir)
+    root = Path(repo.working_dir).resolve()
+    # Every file Git tracks, sorted so a directory's can be found by prefix
+    tracked = sorted(
+        (root / p).as_posix() for p in repo.git.ls_files("-z").split("\0") if p
+    )
+
+    def in_git(path: Path) -> bool:
+        posix = path.as_posix()
+        n = bisect.bisect_left(tracked, posix)
+        if n < len(tracked) and tracked[n] == posix:
+            return True
+        n = bisect.bisect_left(tracked, posix + "/")
+        return n < len(tracked) and tracked[n].startswith(posix + "/")
+
+    def rel(path: Path) -> str:
+        return Path(os.path.relpath(path, base)).as_posix()
+
+    problems: list[dict] = []
+    # Cached by DVC, so not to be tracked by Git
+    repo_given = dvc_repo is not None
+    if dvc_repo is None:
+        dvc_repo = get_dvc_repo(wdir)
+    try:
+        for out in dvc_repo.index.outs:
+            path = Path(out.fs_path).resolve()
+            # A project in a subdirectory can share its DVC repo with others
+            if not path.is_relative_to(base):
+                continue
+            if not out.use_cache or not in_git(path):
+                continue
+            message = f"{rel(path)} is tracked by both Git and DVC"
+            problem = dict(
+                path=rel(path),
+                kind="both",
+                stage=None,
+                dvc_file=None,
+                store_in="dvc",
+                message=message,
+            )
+            if out.stage.is_data_source:
+                problem["dvc_file"] = rel(Path(out.stage.path).resolve())
+                # Without a stage to say which is right, differing content
+                # leaves it to the user
+                if out.workspace_status():
+                    problem["store_in"] = None
+                    problem["message"] = (
+                        f"{message}, which differ; move it with 'calkit "
+                        f"update path-storage {rel(path)} --to git' or "
+                        "'--to dvc'"
+                    )
+            else:
+                problem["stage"] = out.stage.addressing
+            problems.append(problem)
+    finally:
+        if not repo_given:
+            dvc_repo.close()
+    # Declared to be stored in Git, so not to be ignored by it
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    try:
+        stages = Pipeline.model_validate(ck_info["pipeline"]).stages
+    except Exception:
+        stages = {}
+    in_git_declared: list[tuple[Path, str]] = []
+    for name, stage in stages.items():
+        # An iterated stage's paths are templates
+        if stage.iterate_over:
+            continue
+        outs = [o for o in stage.outputs or [] if isinstance(o, PathOutput)]
+        if isinstance(stage, JupyterNotebookStage):
+            outs += stage.notebook_outputs
+        elif isinstance(stage, MarimoHtmlWasmStage):
+            outs += stage.app_outputs
+        if stage.scheduler_log_output is not None:
+            outs.append(stage.scheduler_log_output)
+        paths = [out.path for out in outs if out.storage == "git"]
+        # Generated LaTeX is stored in Git unless it says otherwise
+        if isinstance(stage, (JsonToLatexStage, QuestionsToLatexStage)):
+            paths += [
+                out for out in stage.outputs or [] if isinstance(out, str)
+            ]
+        if isinstance(stage, LatexStage) and stage.pdf_storage == "git":
+            paths.append(stage.pdf_path)
+        for p in paths:
+            path = Path(os.path.normpath(base / (stage.wdir or "") / p))
+            if path.exists() and not in_git(path):
+                in_git_declared.append((path, name))
+    if in_git_declared:
+        ignored = set(
+            repo.ignored(
+                *[p.relative_to(root).as_posix() for p, _ in in_git_declared]
+            )
+        )
+        for path, name in in_git_declared:
+            if path.relative_to(root).as_posix() in ignored:
+                problems.append(
+                    dict(
+                        path=rel(path),
+                        kind="ignored",
+                        stage=name,
+                        dvc_file=None,
+                        store_in="git",
+                        message=f"{rel(path)} is stored in Git, but Git "
+                        "ignores it",
+                    )
+                )
+    # Zipped, so tracked by DVC as an archive and not by Git
+    for workspace_path in calkit.dvc.zip.get_zip_path_map(wdir):
+        path = base / workspace_path
+        if in_git(path):
+            problems.append(
+                dict(
+                    path=rel(path),
+                    kind="zipped",
+                    stage=None,
+                    dvc_file=None,
+                    store_in="dvc",
+                    message=f"{rel(path)} is stored zipped with DVC, but "
+                    "Git tracks it too",
+                )
+            )
+    if large_mb is None:
+        return problems
+    # Large files in Git, leaving out those Git LFS stores
+    large = {}
+    for posix in tracked:
+        path = Path(posix)
+        if not path.is_relative_to(base):
+            continue
+        try:
+            size = os.lstat(path).st_size
+        except OSError:
+            continue
+        if size > large_mb * 1024**2:
+            large[path.relative_to(root).as_posix()] = (path, size)
+    if large:
+        attrs = repo.git.check_attr("filter", "--", *large)
+        for line in attrs.splitlines():
+            git_path, _, value = line.rsplit(": ", 2)
+            if value == "lfs":
+                large.pop(git_path, None)
+    for path, size in large.values():
+        problems.append(
+            dict(
+                path=rel(path),
+                kind="large",
+                stage=None,
+                dvc_file=None,
+                store_in=None,
+                message=f"{rel(path)} is {size / 1024**2:.0f} MB and tracked "
+                f"by Git; consider 'calkit update path-storage {rel(path)} "
+                "--to dvc'",
+            )
+        )
+    return problems
 
 
 def hash_file(path: str) -> dict:

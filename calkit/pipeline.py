@@ -3279,3 +3279,243 @@ def get_stages_to_gate(targets: list[str] | None) -> set[str] | None:
         # E.g., a stage that isn't compiled yet
         return None
     return names
+
+
+def stages_by_output(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> dict[str, list[str]]:
+    """Map each pipeline output path to the stages that write it.
+
+    Keyed the way the paths are written in ``calkit.yaml``, relative to the
+    project, with each stage's own ``wdir`` folded in. Subprojects' stages
+    are included under their qualified names, as ``calkit status`` names
+    them.
+    """
+    out: dict[str, list[str]] = {}
+    for project_wdir, info in calkit.iter_projects(ck_info=ck_info, wdir=wdir):
+        stages = ((info.get("pipeline") or {}).get("stages") or {}).items()
+        for name, stage in stages:
+            if not isinstance(stage, dict):
+                continue
+            paths = [
+                o.get("path") if isinstance(o, dict) else o
+                for o in stage.get("outputs") or []
+            ]
+            paths += get_map_paths_outputs(stage)
+            prefix = posixpath.join(
+                "" if project_wdir == "." else project_wdir,
+                stage.get("wdir") or "",
+            )
+            for path in paths:
+                if not isinstance(path, str) or not path:
+                    continue
+                full = posixpath.normpath(posixpath.join(prefix, path))
+                qualified = calkit.qualify_with_project(project_wdir, name)
+                out.setdefault(full, []).append(qualified)
+    return out
+
+
+# A pipeline artifact's status, worst first, so one written by more than
+# one stage reports the one worth acting on
+ARTIFACT_STATUSES = ["not built", "stale", "up to date"]
+
+
+def annotate_artifacts(
+    artifacts: list[dict],
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    status: bool = False,
+) -> list[dict]:
+    """Add each artifact's producing stages, and whether they're current.
+
+    Mutates and returns ``artifacts``, which are entries carrying a
+    ``path``. Asking for ``status`` queries DVC, which costs the same prep
+    ``calkit status`` does, so it's left to the caller to ask for.
+    """
+    root = wdir or os.getcwd()
+    by_output = stages_by_output(ck_info=ck_info, wdir=wdir)
+    stale: set[str] = set()
+    if status:
+        # The same prep 'calkit status' does, since compiling the pipeline
+        # and cleaning notebooks both change whether a stage is stale
+        state = get_status(ck_info=ck_info, wdir=wdir)
+        if state.errors:
+            raise RuntimeError("; ".join(state.errors))
+        stale = set(state.stale_stage_names)
+    for artifact in artifacts:
+        path = artifact.get("path") or ""
+        artifact["exists"] = os.path.isfile(os.path.join(root, path))
+        stages = by_output.get(path, [])
+        if stages:
+            artifact["stages"] = stages
+        if not status:
+            continue
+        if not stages:
+            artifact["status"] = "not from the pipeline"
+            continue
+        worst = "up to date"
+        for stage in stages:
+            if not artifact["exists"]:
+                current = "not built"
+            elif stage in stale:
+                current = "stale"
+            else:
+                current = "up to date"
+            if ARTIFACT_STATUSES.index(current) < ARTIFACT_STATUSES.index(
+                worst
+            ):
+                worst = current
+        artifact["status"] = worst
+    return artifacts
+
+
+def read_artifact_at_ref(
+    path: str, ref: str, wdir: str | None = None
+) -> bytes:
+    """A pipeline artifact's contents at a Git ref.
+
+    Read from the Git blob where Git holds the artifact, and from the DVC
+    cache, by the hash ``dvc.lock`` recorded at that ref, where it doesn't.
+    """
+    import calkit.dvc
+    import calkit.git
+
+    repo = calkit.git.get_repo()
+    rel = _repo_relpath(repo, path, wdir)
+    blob = calkit.git.read_at_ref(repo, ref, rel)
+    if blob is not None:
+        return blob
+    recorded = {
+        out.get("md5")
+        for stage in calkit.dvc.read_lock_stages_at_ref(ref, wdir).values()
+        for out in stage.get("outs") or []
+        if isinstance(out, dict) and out.get("path") == rel and out.get("md5")
+    }
+    if not recorded:
+        raise FileNotFoundError(
+            f"{rel} is neither in Git at {ref} nor an output in its dvc.lock"
+        )
+    root = str(repo.working_dir)
+    cached = next(
+        (
+            c
+            for c in (calkit.dvc.cache_path(md5, root) for md5 in recorded)
+            if c
+        ),
+        None,
+    )
+    if cached is None:
+        raise FileNotFoundError(
+            f"{rel} at {ref} is tracked by DVC and isn't in the local "
+            f"cache; fetch it with 'calkit dvc fetch --rev {ref} {rel}'"
+        )
+    with open(cached, "rb") as f:
+        return f.read()
+
+
+def artifact_status_at_ref(
+    path: str, ref: str, wdir: str | None = None
+) -> dict[str, Any]:
+    """Whether a pipeline artifact was up to date at a Git ref.
+
+    DVC answers this for the working tree by hashing what's on disk, and at
+    an old commit there is nothing on disk to hash, so this reconstructs it
+    from the record that ref does carry. A stage's ``dvc.lock`` entry
+    stores the hash of every dependency as of its last run, so comparing
+    those against that commit's own contents says whether the stage had
+    been run since its inputs last changed. Dependencies written by another
+    stage are compared against that stage's recorded output hashes, which
+    covers the ones Git does not hold.
+
+    What can't be checked is counted in ``unverifiable`` rather than
+    assumed current: a directory hash, or a file that is neither in Git at
+    that ref nor produced by another stage.
+    """
+    import hashlib
+    import io
+
+    import calkit.dvc
+    import calkit.git
+
+    repo = calkit.git.get_repo()
+    rel = _repo_relpath(repo, path, wdir)
+    lock = calkit.dvc.read_lock_stages_at_ref(ref, wdir)
+    produced: dict[str, set[str]] = {}
+    for stage in lock.values():
+        for out in stage.get("outs") or []:
+            if isinstance(out, dict) and out.get("path") and out.get("md5"):
+                produced.setdefault(out["path"], set()).add(out["md5"])
+    stages = [
+        name
+        for name, stage in lock.items()
+        if rel in {o.get("path") for o in stage.get("outs") or []}
+    ]
+    if not stages:
+        return {
+            "status": "not from the pipeline",
+            "reasons": [f"no dvc.lock stage at {ref} writes {rel}"],
+            "unverifiable": 0,
+        }
+    # What dvc.yaml declares there, so a stage whose definition moved on
+    # without being re-run is stale even with every input untouched
+    declared: dict[str, Any] = {}
+    yaml_blob = calkit.git.read_at_ref(
+        repo, ref, _repo_relpath(repo, "dvc.yaml", wdir)
+    )
+    if yaml_blob is not None:
+        compiled = calkit.ryaml.load(io.StringIO(yaml_blob.decode())) or {}
+        declared = {
+            name: stage.get("cmd")
+            for name, stage in (compiled.get("stages") or {}).items()
+            if isinstance(stage, dict)
+        }
+
+    def blob_md5(dep_path: str) -> str | None:
+        blob = calkit.git.read_at_ref(repo, ref, dep_path)
+        return None if blob is None else hashlib.md5(blob).hexdigest()
+
+    reasons: list[str] = []
+    unverifiable = 0
+    for name in stages:
+        stage = lock[name]
+        for dep in stage.get("deps") or []:
+            recorded, dep_path = dep.get("md5"), dep.get("path")
+            if not dep_path:
+                continue
+            if produced.get(dep_path):
+                if recorded not in produced[dep_path]:
+                    reasons.append(
+                        f"{name}: {dep_path} was rewritten by the stage "
+                        "that produces it after this one last ran"
+                    )
+                continue
+            if not recorded or recorded.endswith(".dir"):
+                unverifiable += 1
+                continue
+            committed = blob_md5(dep_path)
+            if committed is None:
+                unverifiable += 1
+            elif committed != recorded:
+                reasons.append(f"{name}: {dep_path} changed after it ran")
+        if name in declared and declared[name] != stage.get("cmd"):
+            reasons.append(f"{name}: dvc.yaml defines a different command")
+        for out in stage.get("outs") or []:
+            if out.get("path") != rel:
+                continue
+            committed = blob_md5(rel)
+            if committed is not None and committed != out.get("md5"):
+                reasons.append(
+                    f"{name}: {rel} was committed with different contents "
+                    "than the run produced"
+                )
+    return {
+        "status": "stale" if reasons else "up to date",
+        "stages": stages,
+        "reasons": reasons,
+        "unverifiable": unverifiable,
+    }
+
+
+def _repo_relpath(repo: Any, path: str, wdir: str | None) -> str:
+    full = os.path.join(wdir or os.getcwd(), path)
+    return os.path.relpath(full, str(repo.working_dir)).replace(os.sep, "/")

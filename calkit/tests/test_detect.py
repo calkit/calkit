@@ -1384,6 +1384,51 @@ def test_detect_project_artifacts_includes_results_and_presentations(tmp_dir):
     assert "slides/deck.pdf" in out["presentations"]
 
 
+def test_detect_tables(tmp_dir):
+    import subprocess
+
+    import calkit.detect
+    from calkit.detect import detect_tables, is_table_path
+
+    # Tabular by extension, wherever it's kept
+    assert is_table_path("results/kernels.csv")
+    assert is_table_path("data/runs.parquet")
+    assert is_table_path("summary.TSV")
+    assert not is_table_path("results/metrics.json")
+    assert not is_table_path("figures/plot.png")
+    candidates = [
+        "results/kernels.csv",
+        "results/metrics.json",
+        "data/runs.parquet",
+        ".hidden/table.csv",
+        "declared/table.csv",
+    ]
+    assert detect_tables(candidates, reserved_paths=["declared"]) == [
+        "data/runs.parquet",
+        "results/kernels.csv",
+    ]
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results")
+    for name, text in [
+        ("kernels.csv", "a,b\n1,2\n"),
+        ("metrics.json", "{}"),
+        ("stats.toml", "a = 1\n"),
+    ]:
+        with open(os.path.join("results", name), "w") as f:
+            f.write(text)
+    out = calkit.detect.detect_project_artifacts(ck_info={})
+    # A tabular result is both a result and a table, and TOML is a result
+    assert out["tables"] == ["results/kernels.csv"]
+    assert "results/kernels.csv" in out["results"]
+    assert "results/stats.toml" in out["results"]
+    # Declaring a table reserves it from being detected again
+    out = calkit.detect.detect_project_artifacts(
+        ck_info={"tables": [{"path": "results/kernels.csv"}]}
+    )
+    assert out["tables"] == []
+    assert "results/kernels.csv" not in out["results"]
+
+
 def test_detection_ignore(tmp_dir):
     from calkit.detect import (
         detect_artifact_kind,

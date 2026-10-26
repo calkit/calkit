@@ -63,14 +63,18 @@ def _list_artifacts(
     kind: Literal["figures", "datasets", "results", "presentations"],
     json_output: bool,
     declared_only: bool,
+    status: bool = False,
 ):
     """List figures or datasets, optionally including auto-detected ones.
 
     By default, artifacts declared in ``calkit.yaml`` are merged with any
     auto-detected from the project's files; ``--declared-only`` returns just the
     declared ones. Each entry carries a ``detected`` flag so callers can tell
-    declared and auto-detected artifacts apart.
+    declared and auto-detected artifacts apart, and with ``status``, the
+    stage that writes it and whether that stage is up to date.
     """
+    import calkit.pipeline
+
     ck_info = calkit.load_calkit_info()
     declared = [o for o in ck_info.get(kind) or [] if isinstance(o, dict)]
     declared_paths = {o.get("path") for o in declared}
@@ -80,17 +84,21 @@ def _list_artifacts(
         for path in found.get(kind, []):
             if path not in declared_paths:
                 detected.append({"path": path})
+    result = [{**o, "detected": False} for o in declared]
+    result += [{**o, "detected": True} for o in detected]
+    # Which stage writes each one is read from calkit.yaml and costs
+    # nothing; whether it's current needs DVC, so it's asked for
+    try:
+        calkit.pipeline.annotate_artifacts(
+            result, ck_info=ck_info, status=status
+        )
+    except RuntimeError as e:
+        raise_error(f"Failed to determine status: {e}")
     if json_output:
-        result = [
-            {**o, "detected": False} for o in declared if isinstance(o, dict)
-        ]
-        result += [{**o, "detected": True} for o in detected]
         echo_json(result)
         return
-    for obj in declared:
+    for obj in result:
         _echo_object(obj)
-    for obj in detected:
-        _echo_object({**obj, "detected": True})
 
 
 @list_app.command(name="notebooks|nb")
@@ -158,9 +166,21 @@ def list_results(
             ),
         ),
     ] = False,
+    status: Annotated[
+        bool,
+        typer.Option(
+            "--status",
+            "-s",
+            help="Also say whether each result's stage is up to date.",
+        ),
+    ] = False,
 ):
-    """List results in the project."""
-    _list_artifacts("results", json_output, declared_only)
+    """List results in the project.
+
+    Shown with the stage that writes each one, which is what
+    'calkit run' would use to bring it up to date.
+    """
+    _list_artifacts("results", json_output, declared_only, status)
 
 
 @list_app.command(name="presentations|pres")
@@ -181,6 +201,69 @@ def list_presentations(
 ):
     """List presentations in the project."""
     _list_artifacts("presentations", json_output, declared_only)
+
+
+@list_app.command(name="tables|tbls")
+def list_tables(
+    columns: Annotated[
+        bool,
+        typer.Option(
+            "--columns",
+            help="Also read each table's column names from its header.",
+        ),
+    ] = False,
+    status: Annotated[
+        bool,
+        typer.Option(
+            "--status",
+            "-s",
+            help="Also say whether each table's stage is up to date.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+    declared_only: Annotated[
+        bool,
+        typer.Option(
+            "--declared-only",
+            help=(
+                "Only list tables declared in calkit.yaml; "
+                "skip auto-detection."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """List tables in the project.
+
+    Tabular files are detected wherever they're kept, so a table that is
+    also a dataset or a result is listed here too. Each is shown with the
+    stage that writes it, if any, which is the one 'calkit run' would use
+    to bring it up to date.
+    """
+    import calkit.tables
+
+    try:
+        tables = calkit.tables.list_tables(
+            declared_only=declared_only, status=status
+        )
+    except RuntimeError as e:
+        raise_error(f"Failed to determine table status: {e}")
+    if columns:
+        for table in tables:
+            try:
+                table["columns"] = calkit.tables.read_table(
+                    table["path"], head=0
+                )["columns"]
+            except Exception as e:
+                # A table that can't be read is still a table; say why
+                # here rather than failing the listing
+                table["columns_error"] = str(e)
+    if json_output:
+        echo_json(tables)
+        return
+    for table in tables:
+        _echo_object(table)
 
 
 def _echo_question(n: int, question: str | dict, project: str = "") -> None:

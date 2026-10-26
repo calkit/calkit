@@ -199,17 +199,52 @@ def test_build(tmp_dir):
         )
     subprocess.check_call(["calkit", "latex", "build", "paper/main.tex"])
     assert os.path.isfile("paper/main.pdf")
+    # The same source dated differently, e.g., after a squash merge, builds
+    # the same bytes, with no date and an ID taken from the content
+    for engine in ["-pdf", "-lualatex"]:
+        built = []
+        for epoch in ["1700000000", "1800000000"]:
+            os.remove("paper/main.pdf")
+            subprocess.check_call(
+                [
+                    "calkit",
+                    "latex",
+                    "build",
+                    "--force",
+                    f"--latexmk-arg={engine}",
+                    "paper/main.tex",
+                ],
+                env=os.environ | {"SOURCE_DATE_EPOCH": epoch},
+            )
+            with open("paper/main.pdf", "rb") as f:
+                built.append(f.read())
+        assert built[0] == built[1], engine
+        assert b"/CreationDate" not in built[0]
+        assert built[0].count(b"/ID [<") == 1
 
 
 @skipif_windows_docker
-def test_build_cited_content(tmp_dir):
+def test_build_ck_components(tmp_dir):
     import struct
     import zlib
+
+    import pypdfium2
+
+    from calkit.cli import latex as cli_latex
 
     subprocess.check_call(["calkit", "init"])
     os.makedirs("results")
     with open("results/metrics.json", "w") as f:
-        json.dump({"rmse": 0.123456}, f)
+        json.dump(
+            {
+                "rmse": 0.123456,
+                "big": 1234567,
+                "label": "run_a",
+                "tiny": 1.234e-05,
+                "half": 0.5,
+            },
+            f,
+        )
     # The smallest PNG TeX will read: one white pixel
     raw = zlib.compress(b"\x00\xff\xff\xff")
     png = b"\x89PNG\r\n\x1a\n" + b"".join(
@@ -231,12 +266,38 @@ def test_build_cited_content(tmp_dir):
         f.write(
             "\\documentclass{article}\n"
             "\\usepackage{calkit}\n"
+            # Options of the document's own don't clash with calkit's
+            "\\usepackage[final]{graphicx}\n"
+            "\\usepackage{hyperref}\n"
             "\\begin{document}\n"
             "Error: \\ckvalue[.2f]{results/metrics.json}{rmse}.\n"
-            "\\ckfigure[width=1cm]{figures/plot.png}\n"
+            "Figures: \\ckvalue[.3g]{results/metrics.json}{rmse}.\n"
+            "Options: \\ckvalue[round-mode=places,round-precision=1]"
+            "{results/metrics.json}{rmse}.\n"
+            "Grouped: \\ckvalue[,d]{results/metrics.json}{big}.\n"
+            "Ungrouped: \\ckvalue[.1f]{results/metrics.json}{big}.\n"
+            "Half: \\ckvalue[.3g]{results/metrics.json}{half}.\n"
+            "Large: \\ckvalue[.3g]{results/metrics.json}{big}.\n"
+            "Label: \\ckvalue[.2f]{results/metrics.json}{label}.\n"
+            "Tiny: \\ckvalue[.2f]{results/metrics.json}{tiny}.\n"
+            "\\section{RMSE of \\ckvalue[.2f]{results/metrics.json}{rmse}}\n"
+            "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/not-yet.png}\n"
             "\\end{document}\n"
         )
+    # Components can be mapped in without building
+    out = subprocess.run(
+        ["calkit", "latex", "map-components", "paper/main.tex"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "figures/not-yet.png is not in the project yet" in out.stdout
+    assert os.path.isfile("paper/_calkit/figures/plot.png")
+    assert os.path.isfile("paper/calkit.sty")
+    # Written whenever it's needed, so kept out of Git, even outside a run
+    ignored = subprocess.run(["git", "check-ignore", "-q", "paper/calkit.sty"])
+    assert ignored.returncode == 0
     out = subprocess.run(
         ["calkit", "latex", "build", "paper/main.tex"],
         capture_output=True,
@@ -250,6 +311,85 @@ def test_build_cited_content(tmp_dir):
         log = f.read()
     assert "figures/not-yet.png hasn't been brought in yet" in log
     assert "_calkit/figures/plot.png" in log
+
+    def pdf_text() -> str:
+        pdf = pypdfium2.PdfDocument("paper/main.pdf")
+        try:
+            return " ".join(pdf[0].get_textpage().get_text_range().split())
+        finally:
+            pdf.close()
+
+    # calkit.sty formats numbers, from Python specs or siunitx options, and
+    # leaves text alone
+    text = pdf_text()
+    assert "Error: 0.12." in text
+    assert "Figures: 0.123." in text
+    assert "Options: 0.1." in text
+    assert "Grouped: 1,234,567." in text
+    # As in Python, only grouped with a comma, and g neither pads nor
+    # writes a large number in full
+    assert "Ungrouped: 1234567.0." in text
+    assert "Half: 0.5." in text
+    assert "Large: 1.23 × 106" in text
+    # An underscore comes back from the PDF as a space
+    assert "Label: run a." in text
+    # Fixed notation, though the value is written in exponent form
+    assert "Tiny: 0.00." in text
+    # A bookmark shows the value as it is, rather than the command
+    pdf = pypdfium2.PdfDocument("paper/main.pdf")
+    try:
+        titles = [item.get_title() for item in pdf.get_toc()]
+    finally:
+        pdf.close()
+    assert titles == ["RMSE of 0.123456"]
+    # A changed format applies without the values changing
+    with open("paper/_calkit/values.tex") as f:
+        values = f.read()
+    with open("paper/main.tex") as f:
+        main = f.read()
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            main.replace(
+                "[.2f]{results/metrics.json}{rmse}",
+                "[.4f]{results/metrics.json}{rmse}",
+            )
+        )
+    out = subprocess.run(
+        ["calkit", "latex", "build", "paper/main.tex"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "Error: 0.1235." in pdf_text()
+    with open("paper/_calkit/values.tex") as f:
+        assert f.read() == values
+    # A file found for one named without an extension, but not copied, e.g.,
+    # stored with DVC and not pulled, prints as ?? too
+    with open("paper/_calkit/values.tex", "a") as f:
+        f.write("\\cksetfile{figures/gone}{figures/gone.png}\n")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            main.replace(
+                "\\end{document}", "\\ckfigure{figures/gone}\n\\end{document}"
+            )
+        )
+    # Compiled without mapping again, wherever TeX is, e.g., in a container
+    out = subprocess.run(
+        cli_latex._tex_cmd(
+            ["latexmk", "-pdf", "-cd", "-interaction=nonstopmode"]
+            + ["paper/main.tex"],
+            environment=None,
+            no_check=True,
+            verbose=False,
+            dep="latexmk",
+        ),
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    assert out.returncode == 0, out.stdout
+    with open("paper/main.log", errors="replace") as f:
+        assert "figures/gone hasn't been brought in yet" in f.read()
 
 
 @skipif_windows_docker
@@ -282,6 +422,19 @@ def test_build_output_and_aux_dirs(tmp_dir):
     assert os.path.isfile("paper/build/main.pdf")
     assert not os.path.isfile("paper/main.pdf")
     assert os.path.isfile("paper/aux/main.aux")
+    # Wherever a latexmkrc, as a pipeline stage passes one, or a
+    # pass-through -outdir puts the PDF, it gets an ID
+    with open("paper/latexmkrc", "w") as f:
+        f.write("$out_dir = 'rc-out';\n")
+    for args, pdf in [
+        (["--latexmk-rc", "paper/latexmkrc"], "paper/rc-out/main.pdf"),
+        (["--latexmk-arg=-outdir=arg-out"], "paper/arg-out/main.pdf"),
+    ]:
+        subprocess.check_call(
+            ["calkit", "latex", "build", *args, "paper/main.tex"]
+        )
+        with open(pdf, "rb") as f:
+            assert f.read().count(b"/ID [<") == 1, pdf
 
 
 def test_build_localizes_synctex(tmp_dir, monkeypatch):
@@ -774,6 +927,49 @@ def test_latex_diff_dvc_inputs(tmp_dir, tmp_path_factory):
     assert result.returncode == 0, result.stderr
     old_md5 = hashlib.md5(b"old\n").hexdigest()
     assert os.path.isfile(f".dvc/cache/files/md5/{old_md5[:2]}/{old_md5[2:]}")
+    # What each revision's calkit.sty commands include is fetched as it was
+    # then, even with no stage depending on it, at the paths TeX would try
+    os.makedirs("results", exist_ok=True)
+    os.makedirs("notes")
+    with open("notes/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\nX: \\ckvalue{results/m.json}{x}.\n"
+            "\\cktable{tables/t}\n\\end{document}\n"
+        )
+    os.makedirs("tables", exist_ok=True)
+    for x in [1, 2]:
+        with open("results/m.json", "w") as f:
+            json.dump({"x": x}, f)
+        with open("tables/t.tex", "w") as f:
+            f.write(f"Table {x}\n")
+        subprocess.check_call(
+            ["calkit", "dvc", "add", "-q", "results/m.json", "tables/t.tex"]
+        )
+        _commit(f"notes {x}")
+        if x == 1:
+            subprocess.check_call(["git", "tag", "notes-v1"])
+    os.remove("results/m.json")
+    os.remove("tables/t.tex")
+    result = subprocess.run(
+        ["calkit", "latex", "diff", "notes/main.tex", "--from", "notes-v1"]
+        + ["--to", "HEAD", "--keep-tex", "--force"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    kept_stem = get_diff_path(
+        "notes/main.tex", "notes-v1", "HEAD"
+    ).removesuffix(".pdf")
+    with open(f"{kept_stem}-old.tex", encoding="utf-8") as f:
+        old_tex = f.read()
+    with open(f"{kept_stem}-new.tex", encoding="utf-8") as f:
+        new_tex = f.read()
+    assert "X: \\cknum[]{1}." in old_tex
+    assert "Table 1" in old_tex
+    assert "X: \\cknum[]{2}." in new_tex
+    assert "Table 2" in new_tex
 
 
 def test_marked_up_digest_ignores_the_header():

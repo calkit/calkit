@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 
 import git
@@ -64,10 +65,12 @@ def test_get_sync_status(tmp_dir):
     # The TeX file matches on both sides, so it isn't pending a push, and
     # wouldn't be flagged as a figure regardless
     assert "main.tex" not in pushes
-    # Push the figure by hand to represent a completed sync
-    os.makedirs(os.path.join(overleaf_dir, "figures"))
-    with open(os.path.join(overleaf_dir, "figures", "fig.png"), "wb") as fb:
-        fb.write(b"figure version 1")
+    # Calkit's own files don't, since the document doesn't load calkit.sty
+    assert set(pushes) == {"figures/fig.png"}
+    # Push by hand to represent a completed sync
+    for rel in pushes:
+        os.makedirs(os.path.dirname(overleaf_dir / rel), exist_ok=True)
+        shutil.copy(os.path.join("paper", rel), overleaf_dir / rel)
     _commit_all(overleaf_repo, "Add figure")
     sync_info["last_sync_commit"] = overleaf_repo.head.commit.hexsha
     status = calkit.overleaf.get_sync_status(
@@ -136,9 +139,7 @@ def test_get_sync_status(tmp_dir):
     assert status["files_to_delete"][0]["figure"]
 
 
-def test_sync_cited_content(tmp_dir):
-    import shutil
-
+def test_sync_ck_components(tmp_dir):
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     os.makedirs("figures")
@@ -147,27 +148,28 @@ def test_sync_cited_content(tmp_dir):
     os.makedirs("results")
     with open(os.path.join("results", "m.json"), "w") as f:
         f.write('{"x": 1.5}')
+    # Linked to Overleaf before anything is included
     os.makedirs("paper")
-    main_tex = (
-        "\\documentclass{article}\n\\usepackage{calkit}\n"
-        "\\begin{document}\n\\ckfigure{figures/plot.png}\n"
-        "\\ckvalue{results/m.json}{x}\n\\end{document}\n"
+    plain_tex = (
+        "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n"
     )
     with open(os.path.join("paper", "main.tex"), "w") as f:
-        f.write(main_tex)
+        f.write(plain_tex)
     ck_info = calkit.load_calkit_info()
     ck_info["overleaf_sync"] = {
         "paper": {"url": "https://www.overleaf.com/project/abc123"}
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    _commit_all(repo, "Link paper")
     overleaf_dir = tmp_dir / "overleaf"
     os.makedirs(overleaf_dir)
     overleaf_repo = git.Repo.init(path=overleaf_dir)
     with open(os.path.join(overleaf_dir, "main.tex"), "w") as f:
-        f.write(main_tex)
+        f.write(plain_tex)
     _commit_all(overleaf_repo, "Initial commit")
     sync_info = calkit.overleaf.get_sync_info()["paper"]
+    sync_info["last_sync_commit"] = overleaf_repo.head.commit.hexsha
 
     def status() -> dict:
         return calkit.overleaf.get_sync_status(
@@ -177,40 +179,76 @@ def test_sync_cited_content(tmp_dir):
             sync_info_for_path=sync_info,
         )
 
-    # Checking brings in what's cited, including calkit.sty, which is
-    # committed with the document like any other file
-    status()
-    _commit_all(repo, "Add paper")
-    pushes = {f["path"] for f in status()["files_to_push"]}
-    assert pushes == {
+    def sync() -> dict:
+        res = calkit.overleaf.sync(
+            main_repo=repo,
+            overleaf_repo=overleaf_repo,
+            path_in_project="paper",
+            sync_info_for_path=sync_info,
+            push=lambda _: None,
+        )
+        sync_info.update(calkit.overleaf.get_sync_info()["paper"])
+        return res
+
+    def on_overleaf() -> set[str]:
+        return set(calkit.git.ls_files(overleaf_repo))
+
+    # Nothing of Calkit's goes to Overleaf for a document that doesn't load
+    # calkit.sty
+    assert status()["files_to_push"] == []
+    sync()
+    assert not os.path.exists(os.path.join("paper", "calkit.sty"))
+    assert on_overleaf() == {"main.tex"}
+    # Loading it and including something on Overleaf brings both in after
+    # one sync
+    main_tex = (
+        "\\documentclass{article}\n\\usepackage{calkit}\n"
+        "\\begin{document}\n\\ckfigure{figures/plot.png}\n"
+        "\\ckvalue{results/m.json}{x}\n\\end{document}\n"
+    )
+    with open(os.path.join(overleaf_dir, "main.tex"), "w") as f:
+        f.write(main_tex)
+    _commit_all(overleaf_repo, "Update on Overleaf.")
+    assert sync()["component_problems"] == []
+    assert {
         "calkit.sty",
-        "_calkit/figures/plot.png",
+        "_calkit/README.md",
         "_calkit/values.tex",
-    }
-    # Nothing under _calkit is committed to the project
-    assert not repo.ignored("paper/calkit.sty")
-    assert repo.ignored("paper/_calkit/values.tex")
-    # Represent a completed sync
-    for rel in pushes:
-        os.makedirs(os.path.dirname(overleaf_dir / rel) or ".", exist_ok=True)
-        shutil.copy(os.path.join("paper", rel), overleaf_dir / rel)
-    _commit_all(overleaf_repo, "Sync")
-    sync_info["last_sync_commit"] = overleaf_repo.head.commit.hexsha
+        "_calkit/figures/plot.png",
+    } <= on_overleaf()
+    with open(overleaf_dir / "_calkit" / "values.tex") as f:
+        assert "{1.5}" in f.read()
     assert status()["in_sync"]
-    # An edit made on Overleaf to a copy isn't pulled back
+    # What Calkit writes is pushed, but kept out of the project's Git
+    assert "paper/calkit.sty" not in calkit.git.ls_files(repo)
+    assert repo.ignored("paper/calkit.sty")
+    assert repo.ignored("paper/_calkit/values.tex")
+    # Edits made on Overleaf to what Calkit writes aren't pulled back, even
+    # where nothing ignores them, as in a fresh clone on the hub
+    shutil.rmtree(os.path.join("paper", "_calkit"))
+    calkit.git.ensure_path_is_not_ignored(repo, "paper/calkit.sty")
+    assert not repo.ignored("paper/calkit.sty")
+    assert not repo.ignored("paper/_calkit/values.tex")
     paths = calkit.overleaf.OverleafSyncPaths(
         main_repo=repo,
         overleaf_repo=overleaf_repo,
         path_in_project="paper",
         sync_info_for_path=sync_info,
     )
-    assert "_calkit/values.tex" not in paths.files_to_copy_from_overleaf
+    assert not {"calkit.sty", "_calkit/values.tex"} & set(
+        paths.files_to_copy_from_overleaf
+    )
     # A new result is waiting to be pushed
     with open(os.path.join("results", "m.json"), "w") as f:
         f.write('{"x": 2.5}')
     pushes = {f["path"] for f in status()["files_to_push"]}
     assert pushes == {"_calkit/values.tex"}
-    # A figure no longer cited is deleted from Overleaf
+    # One still included but not here, e.g., stored with DVC and not pulled,
+    # as on the hub, stays on Overleaf rather than being deleted
+    os.rename(os.path.join("figures", "plot.png"), "plot.png.bak")
+    assert status()["files_to_delete"] == []
+    os.rename("plot.png.bak", os.path.join("figures", "plot.png"))
+    # A figure no longer included is deleted from Overleaf
     with open(os.path.join("paper", "main.tex"), "w") as f:
         f.write(main_tex.replace("\\ckfigure{figures/plot.png}\n", ""))
     _commit_all(repo, "Drop figure")
@@ -308,3 +346,227 @@ def test_lock(tmp_dir):
     other = FileLock(lock_path)
     other.acquire(timeout=0)
     other.release()
+
+
+def test_web_client():
+    import io
+    import zipfile
+    from types import SimpleNamespace
+
+    def response(text="", status=200, url="https://www.overleaf.com/x", **kw):
+        return SimpleNamespace(
+            ok=status < 400,
+            status_code=status,
+            url=url,
+            text=text,
+            content=kw.get("content", text.encode()),
+            json=lambda: kw.get("json"),
+        )
+
+    class Http:
+        def __init__(self, responses):
+            self.responses = responses
+            self.requests = []
+
+        def request(self, method, url, **kwargs):
+            self.requests.append((method, url, kwargs))
+            for (m, part), resp in self.responses.items():
+                if m == method and part in url:
+                    return resp() if callable(resp) else resp
+            return response()
+
+        def get(self, url, **kwargs):
+            return self.request("GET", url, **kwargs)
+
+        def post(self, url, **kwargs):
+            return self.request("POST", url, **kwargs)
+
+        def delete(self, url, **kwargs):
+            return self.request("DELETE", url, **kwargs)
+
+    client = calkit.overleaf.WebClient("overleaf_session2=abc ")
+    assert client.http.cookies["overleaf_session2"] == "abc"
+    # The CSRF token comes from the project dashboard
+    page = '<meta name="ol-csrfToken" content="tok123">'
+    client.http = Http({("GET", "/project"): response(page)})
+    assert client.csrf_token == "tok123"
+    # A session Overleaf doesn't accept is sent to the login page
+    client = calkit.overleaf.WebClient("expired")
+    client.http = Http(
+        {("GET", "/project"): response(url="https://www.overleaf.com/login")}
+    )
+    with pytest.raises(calkit.overleaf.AuthError):
+        client.csrf_token
+    # Downloads must actually be zip archives
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("main.tex", "Hi")
+    client.http = Http(
+        {("GET", "/download/zip"): response(content=buf.getvalue())}
+    )
+    assert client.download("p1") == buf.getvalue()
+    client.http = Http({("GET", "/download/zip"): response("<html>")})
+    with pytest.raises(calkit.overleaf.AuthError):
+        client.download("p1")
+    # The file tree arrives over socket.io long polling, possibly after
+    # other messages, framed together, including a heartbeat to answer
+    root = {"_id": "root", "docs": [], "fileRefs": [], "folders": []}
+    join = json.dumps(
+        {
+            "name": "joinProjectResponse",
+            "args": [{"project": {"rootFolder": [root]}}],
+        }
+    )
+    accepted = '5:::{"name":"connectionAccepted"}'
+    frames = [
+        "1::",
+        f"�{len(accepted)}�{accepted}�3�2::",
+        f"5:::{join}",
+    ]
+    client.http = Http(
+        {
+            ("GET", "/socket.io/1/xhr-polling/sid9"): lambda: response(
+                frames.pop(0)
+            ),
+            ("GET", "/socket.io/1/"): response("sid9:60:60:xhr-polling"),
+        }
+    )
+    assert client.get_root_folder("p1") == root
+    sent = [
+        (m, kw.get("data")) for m, _, kw in client.http.requests if m == "POST"
+    ]
+    assert sent == [("POST", "2::"), ("POST", "0::")]
+    assert all(
+        kw["params"]["projectId"] == "p1"
+        for m, _, kw in client.http.requests
+        if m == "GET"
+    )
+    rejected = '5:::{"name":"connectionRejected","args":["not authorized"]}'
+    client.http = Http(
+        {
+            ("GET", "/socket.io/1/xhr-polling/"): response(rejected),
+            ("GET", "/socket.io/1/"): response("sid9:60:60:xhr-polling"),
+        }
+    )
+    with pytest.raises(calkit.overleaf.AuthError):
+        client.get_root_folder("p1")
+    # Uploads go to the root folder, with Overleaf creating any folders on
+    # the way to the file
+    client.csrf_token = "tok123"
+    client.http = Http({("POST", "/upload"): response(json={"success": True})})
+    client.upload("p1", "root", "figs/a.png", b"png")
+    _, url, kw = client.http.requests[0]
+    assert url.endswith("/project/p1/upload")
+    assert kw["params"] == {"folder_id": "root"}
+    assert kw["data"] == {"name": "a.png", "relativePath": "figs/a.png"}
+    assert kw["files"]["qqfile"][1] == b"png"
+    assert kw["headers"]["X-CSRF-Token"] == "tok123"
+    client.upload("p1", "root", "main.tex", b"Hi")
+    assert client.http.requests[1][2]["data"] == {"name": "main.tex"}
+    client.http = Http(
+        {
+            ("POST", "/upload"): response(
+                json={"success": False, "error": "invalid_filename"}
+            )
+        }
+    )
+    with pytest.raises(RuntimeError, match="invalid_filename"):
+        client.upload("p1", "root", "bad", b"")
+    # Entities are found by path for deleting
+    tree = {
+        "docs": [{"name": "main.tex", "_id": "d1"}],
+        "fileRefs": [],
+        "folders": [
+            {
+                "name": "figs",
+                "docs": [],
+                "fileRefs": [{"name": "a.png", "_id": "f1"}],
+                "folders": [],
+            }
+        ],
+    }
+    assert calkit.overleaf._find_entity(tree, "main.tex") == ("doc", "d1")
+    assert calkit.overleaf._find_entity(tree, "figs/a.png") == ("file", "f1")
+    assert calkit.overleaf._find_entity(tree, "figs/b.png") is None
+    assert calkit.overleaf._find_entity(tree, "other/a.png") is None
+
+
+def test_ensure_sync_base(tmp_dir: str) -> None:
+    import io
+    import tempfile
+    import zipfile
+
+    class Overleaf:
+        def download(self, project_id: str) -> bytes:
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                z.writestr("main.tex", "On Overleaf now\n")
+                # Put there by Calkit, though the project can't make it,
+                # e.g., the copy of a figure stored with DVC
+                z.writestr("_calkit/figures/fit.png", "png")
+            return buf.getvalue()
+
+    def ensure(last_sync_commit: str, missing_ok: bool = False) -> str | None:
+        return calkit.overleaf.ensure_sync_base(
+            mirror,
+            main_repo=repo,
+            path_in_project=".",
+            last_sync_commit=last_sync_commit,
+            print_info=lambda _: None,
+            missing_ok=missing_ok,
+        )
+
+    def record(path: str, last_sync_commit: str, message: str) -> None:
+        calkit.overleaf.write_sync_info(
+            path, {"project_id": "p1", "last_sync_commit": last_sync_commit}
+        )
+        repo.git.add(".")
+        repo.git.commit(["-m", message])
+
+    repo = git.Repo.init()
+    with open("main.tex", "w") as f:
+        f.write("Synced\n")
+    # A folder synced at the project root
+    record(".", "a" * 40, "Sync . with Overleaf project")
+    # Later commits mentioning the same checkpoint, e.g., for another folder
+    # synced with the same Overleaf project, aren't where it was set
+    with open("main.tex", "w") as f:
+        f.write("Edited in the project\n")
+    record("other", "a" * 40, "Sync other with Overleaf project")
+    mirror = calkit.overleaf.get_mirror(
+        "p1", dest=os.path.join(tempfile.mkdtemp(), "mirror")
+    )
+    calkit.overleaf.pull_mirror(mirror, Overleaf(), "p1")  # type: ignore
+    base = ensure("a" * 40)
+    assert base is not None
+    assert mirror.git.show(f"{base}:main.tex") == "Synced"
+    assert mirror.head.commit.parents[0].hexsha == base
+    assert mirror.head.commit.tree["main.tex"].data_stream.read() == (
+        b"On Overleaf now\n"
+    )
+    # Built once, so checking again doesn't add to the history
+    n_commits = len(list(mirror.iter_commits()))
+    assert ensure("a" * 40) == base
+    assert len(list(mirror.iter_commits())) == n_commits
+    # What Calkit puts on Overleaf is taken as unchanged there, and a change
+    # only to it doesn't come back into the project
+    assert mirror.git.show(f"{base}:_calkit/figures/fit.png") == "png"
+
+    def n_changes() -> int:
+        return len(calkit.overleaf.get_commits_since_last_sync(mirror, base))
+
+    assert n_changes() == 1
+    os.makedirs(os.path.join(mirror.working_dir, "_calkit"), exist_ok=True)
+    with open(
+        os.path.join(mirror.working_dir, "_calkit", "values.tex"), "w"
+    ) as f:
+        f.write("values\n")
+    mirror.git.add("-f", "_calkit/values.tex")
+    mirror.git.commit("-m", "Update on Overleaf.")
+    assert n_changes() == 1
+    # A checkpoint saved in a commit made by hand may hold edits that were
+    # never on Overleaf
+    record(".", "b" * 40, "Save the sync")
+    with pytest.raises(RuntimeError, match="Calkit didn't make"):
+        ensure("b" * 40)
+    assert ensure("b" * 40, missing_ok=True) is None

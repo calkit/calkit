@@ -94,6 +94,9 @@ This gives you these action skills:
   [writing first](tutorials/writing-first.md).
 - `/calkit:check-questions` — reviews whether the project's answers still
   follow from their evidence
+- `/calkit:resolve-merge-conflicts` — resolves merge conflicts, choosing
+  for each pipeline stage which run's results to keep. See
+  [merging branches](version-control.md#merging-branches).
 
 Calkit conventions are loaded automatically whenever you work in a Calkit
 project.

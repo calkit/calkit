@@ -5,6 +5,16 @@ Calkit will first compile the pipeline into a DVC pipeline
 with its dependencies set based on [environment](../environments.md)
 lock files, such that a change in an environment causes a rerun.
 
+Before running, and before `calkit status` checks the pipeline,
+Calkit also prepares files the stages depend on that aren't stored in the
+project.
+It checks environments and writes their lock files,
+and cleans the outputs out of notebooks.
+While turning each `latex` stage into a DVC stage, it also copies the
+components the document includes with
+[Calkit's commands](../latex.md#including-project-components) beside it.
+These steps are quick when nothing has changed, so they run every time.
+
 Each successfully completed stage is recorded in
 `.calkit/stage-runs.json`, which is intended to be committed
 to the project's Git repository.

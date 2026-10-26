@@ -230,6 +230,9 @@ export function setAnalyticsConsent(consent: AnalyticsConsent): void {
 function watchForInteraction(): () => void {
   const markInteracted = () => {
     interacted = true
+    // Sent with every event from here on, for this page load only, so the
+    // hub can tell events a person caused from ones that fire on their own
+    mixpanel.register({ interacted: true }, { persistent: false })
   }
   const events = ["pointerdown", "keydown", "touchstart", "scroll"]
   for (const event of events) {
@@ -263,6 +266,7 @@ export function initAnalytics(appRouter: AnyRouter): void {
   if (navigator.webdriver) {
     mixpanel.register({ bot: true })
   }
+  mixpanel.register({ interacted }, { persistent: false })
   const stopWatching = watchForInteraction()
   const onHidden = () => {
     if (document.visibilityState === "hidden") flushPageViews()

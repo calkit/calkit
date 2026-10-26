@@ -7,15 +7,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const getProjectContents = vi.fn()
 const getProjectPipeline = vi.fn()
+const postProjectLatexComponents = vi.fn()
 
 vi.mock("../client", () => ({
   ProjectsService: {
     getProjectContents: (...args: unknown[]) => getProjectContents(...args),
     getProjectPipeline: (...args: unknown[]) => getProjectPipeline(...args),
+    postProjectLatexComponents: (...args: unknown[]) =>
+      postProjectLatexComponents(...args),
   },
 }))
 
-const { loadLatexProject } = await import("./latexProject")
+const { loadCalkitComponents, loadLatexProject, loadsCalkit } = await import(
+  "./latexProject"
+)
 
 // The `pipeline` section as the pipeline endpoint returns it.
 const CALKIT_YAML = `pipeline:
@@ -152,5 +157,96 @@ describe("loadLatexProject with a map-paths stage (issue #1084)", () => {
     )
     expect(files.map((f) => f.path)).toContain("paper/paper.tex")
     expect(files.map((f) => f.path)).not.toContain("paper/figures/x-vs-y.png")
+  })
+})
+
+// calkit.sty's commands name project files by path, and Calkit brings them
+// into _calkit/ beside the document, none of which is committed, so the
+// editor asks the hub for it, then fetches each copy like any project file.
+describe("loadCalkitComponents", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    postProjectLatexComponents.mockResolvedValue({
+      data: {
+        loads_calkit: true,
+        style: "% calkit.sty",
+        values: "\\cksetvalue{results/m.json}{x}{n}{1.5}\n",
+        copies: ["figures/x-vs-y.png"],
+        problems: ["figures/later.png is not in the project yet"],
+      },
+    })
+    getProjectContents.mockImplementation(
+      async ({ path }: { path?: string }) => {
+        const entry = FILES[path ?? ""]
+        if (!entry) {
+          throw new Error(`404 ${path}`)
+        }
+        return { data: entry }
+      },
+    )
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        arrayBuffer: async () => new TextEncoder().encode("PNGDATA").buffer,
+        text: async () => "PNGDATA",
+      })),
+    )
+  })
+
+  it("only asks when a document loads calkit.sty", () => {
+    expect(loadsCalkit(["\\usepackage{amsmath, calkit}\n"])).toBe(true)
+    expect(loadsCalkit(["\\RequirePackage[final]{calkit}"])).toBe(true)
+    expect(loadsCalkit(["% \\usepackage{calkit}\n\\usepackage{amsmath}"])).toBe(
+      false,
+    )
+  })
+
+  it("puts calkit.sty, values.tex, and the copies beside the document", async () => {
+    const fetched = new Map()
+    const sources = { "paper/paper.tex": "\\usepackage{calkit}" }
+    const { files, problems } = await loadCalkitComponents(
+      "calkit",
+      "example-basic",
+      "paper/paper.tex",
+      sources,
+      fetched,
+    )
+    // The editor's text goes along, so a new command works before saving
+    expect(postProjectLatexComponents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        latexComponentsRequest: { path: "paper/paper.tex", sources },
+      }),
+    )
+    const byPath = Object.fromEntries(files.map((f) => [f.path, f]))
+    expect(byPath["paper/calkit.sty"]?.text).toBe("% calkit.sty")
+    expect(byPath["paper/_calkit/values.tex"]?.text).toContain("{1.5}")
+    // Read from the figure's own path, and not editable
+    const copy = byPath["paper/_calkit/figures/x-vs-y.png"]
+    expect(copy?.kind).toBe("binary")
+    expect(copy?.generated).toBe(true)
+    expect(problems).toEqual(["figures/later.png is not in the project yet"])
+    // Fetched once, however many times the document compiles
+    await loadCalkitComponents(
+      "calkit",
+      "example-basic",
+      "paper/paper.tex",
+      sources,
+      fetched,
+    )
+    expect(getProjectContents).toHaveBeenCalledTimes(1)
+  })
+
+  it("adds nothing for a document that doesn't load calkit.sty", async () => {
+    postProjectLatexComponents.mockResolvedValue({
+      data: { loads_calkit: false, copies: [], problems: [] },
+    })
+    const result = await loadCalkitComponents(
+      "calkit",
+      "example-basic",
+      "paper/paper.tex",
+      {},
+      new Map(),
+    )
+    expect(result).toEqual({ files: [], problems: [] })
   })
 })

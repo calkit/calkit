@@ -364,10 +364,9 @@ function OriginCell({ item }: { item: PublicationComponent }) {
         </Link>
       </>
     )
-  if (item.kind === "authored")
-    return item.source === "overleaf"
-      ? "Written in Overleaf"
-      : "Written in this repo"
+  // Where it's edited, e.g., Overleaf, is where work happens, not where it
+  // came from
+  if (item.kind === "authored") return "Created in the project"
   if (item.kind === "attested") return "Made by hand or with AI"
   if (item.kind === "imported") return "Imported from elsewhere"
   return (
@@ -426,15 +425,15 @@ function ComponentsModal({
       <ModalOverlay />
       <ModalContent>
         <ModalHeader pb={1}>
-          Components of {publication.title || publication.path}
+          Components in '{publication.title || publication.path}'
         </ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={4}>
           <Text fontSize="sm" color="ui.dim" mb={3}>
             Everything in <Code fontSize="xs">{folder}</Code>, plus what its
-            build stage reads from elsewhere in the project, and where each came
-            from. A reader can only trust a figure or table whose origin is
-            recorded.
+            build stage reads or its document includes from elsewhere in the
+            project, and where each came from. A reader can only trust a figure
+            or table whose origin is recorded.
           </Text>
           {sorted.length === 0 ? (
             <Text fontSize="sm">
@@ -476,9 +475,9 @@ function ComponentsModal({
                               {relativeComponentPath(item.path, folder)}
                             </Code>
                           </Link>
-                          {item.via === "input" ? (
+                          {item.via !== "folder" ? (
                             <Text as="span" fontSize="xs" color="ui.dim" ml={1}>
-                              input
+                              {item.via}
                             </Text>
                           ) : null}
                         </Td>
@@ -617,28 +616,22 @@ export default function PublicationComponents({
     })
   return (
     <Box fontSize="sm" mb={1} wordBreak="break-word">
-      <Text as="span" fontWeight="semibold">
-        Components:
-      </Text>{" "}
-      <Link onClick={openModal}>
-        {nItems} {nItems === 1 ? "file" : "files"} in{" "}
-        <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
-          {data.folder}
-        </Code>
-        {data.items.some((item) => item.via === "input")
-          ? " and its inputs"
-          : ""}
+      <Link
+        onClick={openModal}
+        title={raise ? `${nUnknown} of unknown origin` : undefined}
+      >
+        <Text as="span" fontWeight="semibold">
+          Components:
+        </Text>{" "}
+        {/* Red when something, e.g., a figure, has no recorded origin */}
+        <Text
+          as="span"
+          color={raise ? "red.400" : undefined}
+          fontWeight={raise ? "semibold" : undefined}
+        >
+          {nItems}
+        </Text>
       </Link>
-      {raise ? (
-        <Badge colorScheme="orange" ml={1}>
-          {nUnknown} of unknown origin
-        </Badge>
-      ) : null}
-      {raise && canResolve ? (
-        <Button size="xs" variant="outline" ml={1} onClick={openModal}>
-          Fix
-        </Button>
-      ) : null}
       <ComponentsModal
         isOpen={Boolean(componentsOpen)}
         onClose={closeModal}

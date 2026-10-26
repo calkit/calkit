@@ -60,6 +60,9 @@ jobs:
             libreoffice-writer libreoffice-math
       - name: Run Calkit
         uses: ./actions/run
+        env:
+          # For the gh CLI, which stages search GitHub with
+          GH_TOKEN: ${{ github.token }}
         with:
           # Its Docker environments only pull public images
           login_ghcr: "false"

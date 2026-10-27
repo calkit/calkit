@@ -534,7 +534,9 @@ async function renderPicker(
         ]),
       );
     } catch (e) {
-      clear(message).append(renderOverleafFailure(e, reload));
+      clear(message).append(
+        renderOverleafFailure(e, () => void chooseProject(project)),
+      );
     }
   };
   const runSearch = async () => {
@@ -840,7 +842,8 @@ async function renderAttachForm(
       reload();
     } catch (e) {
       attach.disabled = false;
-      clear(message).append(renderOverleafFailure(e, reload));
+      // Retried in place, so connecting Overleaf here doesn't start over
+      clear(message).append(renderOverleafFailure(e, () => attach.click()));
       // What the hub says when the app can't reach the account or repo
       if (String(e instanceof Error ? e.message : e).includes("App not")) {
         message.append(
@@ -956,7 +959,9 @@ function renderImportForm(
       reload();
     } catch (e) {
       importButton.disabled = false;
-      clear(message).append(renderOverleafFailure(e, reload));
+      clear(message).append(
+        renderOverleafFailure(e, () => importButton.click()),
+      );
     }
   });
   return [

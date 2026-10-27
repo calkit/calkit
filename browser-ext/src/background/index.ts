@@ -174,6 +174,10 @@ async function handle(message: Request): Promise<unknown> {
       return request<GithubRepo[]>("/user/github/repos", {
         query: { per_page: message.perPage ?? 100 },
       });
+    case "github.installations":
+      // Where the Calkit GitHub app is installed, without which the hub can't
+      // create or update a project's repo
+      return request<{ total_count: number }>("/user/github-app-installations");
     case "github.pullRequest":
       // Through the hub, which holds a GitHub token, so a private repo
       // resolves where an unauthenticated request would not

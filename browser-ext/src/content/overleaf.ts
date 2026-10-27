@@ -820,6 +820,13 @@ async function renderAttachForm(
           input.disabled = true;
         }
         titleInput.disabled = true;
+        // The project this paper now belongs to is the one to work in
+        await send({
+          type: "settings.set",
+          update: {
+            activeProject: `${created.owner_account_name}/${created.name}`,
+          },
+        });
       }
       clear(message).append(loading("Bringing in the document from Overleaf"));
       await send({
@@ -939,6 +946,12 @@ function renderImportForm(
         overleafProjectUrl: `https://www.overleaf.com/project/${overleafProjectId}`,
         path: doc.folder(),
         kind: doc.kind.value,
+      });
+      await send({
+        type: "settings.set",
+        update: {
+          activeProject: `${project.owner_account_name}/${project.name}`,
+        },
       });
       reload();
     } catch (e) {

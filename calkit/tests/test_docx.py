@@ -21,6 +21,7 @@ import pytest
 import typer
 
 import calkit.cli.latex
+import calkit.core
 import calkit.docx
 import calkit.latex
 from calkit.models.docx import LatexDocxExport, LatexDocxMerge
@@ -271,6 +272,16 @@ def test_latex_source_helpers(project: Path) -> None:
         "\\begin{array}{r} K\\text{\\&}\\text{=}\\frac{a}{b},^{i}ln x "
         "\\end{array}"
     )
+    # Nor is Word joining symbols beside a math alphabet's letters into it,
+    # but a different letter is
+    assert calkit.latex.math_tokens(
+        "\\mathcal{L}(x), z \\in \\mathcal{E}, \\boldsymbol{\\alpha}+1"
+    ) == calkit.latex.math_tokens(
+        "\\mathcal{L(}x), z\\mathcal{\\in E,} \\boldsymbol{\\alpha+}1"
+    )
+    assert calkit.latex.math_tokens(
+        "z \\in \\mathcal{E}"
+    ) != calkit.latex.math_tokens("z\\mathcal{\\in F}")
 
 
 def test_docx_round_trip(
@@ -419,6 +430,7 @@ def test_docx_round_trip(
         [first.id, original.id, original.id]
     )
     assert not os.path.exists(calkit.latex.DOCX_EXPORTS_DIR)
+    assert Path(calkit.core.LOCAL_DIR, ".gitignore").read_text() == "*\n"
     export = LatexDocxExport.model_validate_json(
         Path(calkit.latex.LOCAL_DOCX_EXPORTS_DIR, records[0]).read_text()
     )
@@ -720,6 +732,35 @@ def test_docx_round_trip(
         assert "Applied 0 edits" in res.stdout
         assert Path("paper/main.tex").read_text(encoding="utf-8") == main
         assert Path("paper/methods.tex").read_text(encoding="utf-8") == methods
+    # A hyphen Word's import drops at a line's end goes back, as sent too,
+    # where the source spells the word with it
+    for name in ["main.tex", "methods.tex"]:
+        shutil.copy(FIXTURES / name, f"paper/{name}")
+    joined = calkit.docx.Document(str(FIXTURES / "word-import.docx"))
+    t = next(
+        t
+        for t in joined.doc.iter(calkit.docx._tag(calkit.docx.W, "t"))
+        if "two-component" in (t.text or "")
+    )
+    t.text = (t.text or "").replace("two-component", "twocomponent")
+    joined.save("joined.docx")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            calkit.docx,
+            "pdf_to_docx",
+            lambda pdf, out: shutil.copy("joined.docx", out),
+        )
+        calkit.cli.latex.to_docx(
+            "paper/main.pdf", output="reviews/joined.docx", engine="word"
+        )
+    rejoined = calkit.docx.Document("reviews/joined.docx")
+    sent = rejoined.read_original()
+    assert sent is not None
+    for text in [
+        "\n".join(p.text for p in rejoined.paragraphs),
+        "\n".join(sent.paragraphs.values()),
+    ]:
+        assert "a two-component laser" in text and "twocomponent" not in text
 
 
 def test_equation_links() -> None:
@@ -767,7 +808,16 @@ def test_equation_links() -> None:
     assert names == [["ck_a"], ["ck_a_r2", "x13-3004r5"]]
 
 
-def test_flatten_heavy_figures(tmp_path: Path) -> None:
+def test_flatten_heavy_figures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def word(cmd: list[str], **kw: object) -> subprocess.CompletedProcess:
+        # Word's import, writing a .docx where it's asked to save
+        saved = re.search(r'file name "([^"]+)"', cmd[-1])
+        assert saved is not None
+        Path(saved.group(1)).write_bytes(b"docx")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
     import matplotlib
 
     matplotlib.use("Agg")
@@ -790,9 +840,12 @@ def test_flatten_heavy_figures(tmp_path: Path) -> None:
     assert not out.exists()
     # A dense one is left alone where the page's text is in a Type 3 font,
     # which pdfium can't write back
-    rng = np.random.default_rng(0)
-    ax.plot(rng.normal(size=60_000) * 10, rng.normal(size=60_000) * 10)
-    ax.set(xlim=(-5, 5), ylim=(-5, 5), title="Dense")
+    x = np.linspace(-5, 5, 60_000)
+    ax.plot(x, 10 * np.sin(3 * x), color="white")
+    # Over a filled background, which an image of it mustn't hide
+    ax.set(xlim=(-5, 5), ylim=(-5, 5), title="Dense", facecolor="#3366cc")
+    # Every point drawn, as a scatter's would be
+    matplotlib.rcParams["path.simplify"] = False
     fig.savefig(tmp_path / "heavy.pdf")
     assert (
         calkit.docx.flatten_heavy_figures(
@@ -841,6 +894,20 @@ def test_flatten_heavy_figures(tmp_path: Path) -> None:
     a = np.asarray(before.render(scale=1).to_pil().convert("L"), float)
     b = np.asarray(after.render(scale=1).to_pil().convert("L"), float)
     assert np.abs(a - b).mean() < 2
+    # The copy Word gets is a file of its own, never the PDF itself, even
+    # one named as it would be, and it's gone after
+    blank = pdfium.PdfDocument.new()
+    blank.new_page(72, 72)
+    blank.save(tmp_path / "paper.tmp.pdf")
+    monkeypatch.setattr(calkit.docx.subprocess, "run", word)
+    monkeypatch.setattr(calkit.docx.sys, "platform", "darwin")
+    calkit.docx.pdf_to_docx(
+        str(tmp_path / "paper.tmp.pdf"), str(tmp_path / "paper.docx")
+    )
+    assert sorted(p.name for p in tmp_path.iterdir() if "paper" in p.name) == [
+        "paper.docx",
+        "paper.tmp.pdf",
+    ]
 
 
 def test_latex_to_omml() -> None:

@@ -781,8 +781,9 @@ _IFDEFINED_MARKUP_RE = re.compile(
 )
 # A one-argument macro's definition, up to its body's opening brace
 _ONE_ARG_MACRO_DEF_RE = re.compile(
-    r"\\(?:(?:re|provide)?newcommand\*?\s*(?:\{\s*\\([A-Za-z@]+)\s*\}"
-    r"|\\([A-Za-z@]+))\s*\[1\]|def\s*\\([A-Za-z@]+)#1)\s*(?=\{)"
+    r"\\(?:(?:(?:re)?newcommand|providecommand)\*?\s*"
+    r"(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))\s*\[1\]"
+    r"|def\s*\\([A-Za-z@]+)#1)\s*(?=\{)"
 )
 get_diff_path = calkit.latex.get_diff_path
 _default_base_ref = calkit.latex.default_base_ref
@@ -2080,6 +2081,8 @@ def to_docx(
         job = Path(source).stem + "-calkit-docx"
         build = os.path.join(calkit.latex.DOCX_BUILD_DIR, Path(source).stem)
         shutil.rmtree(build, ignore_errors=True)
+        # Under .calkit/local, which keeps itself out of Git
+        calkit.ensure_local_dir()
         os.makedirs(build)
         # The PDF build's bibliography, since TeX4ht doesn't run BibTeX
         bbl = Path(source).with_suffix(".bbl")
@@ -2217,6 +2220,32 @@ def to_docx(
     blks = calkit.latex.blocks(lines)
     paras = doc.paragraphs
     matched = calkit.latex.align([p.text for p in paras], blks)
+    # Word's PDF import drops a hyphen ending a line even when the word has
+    # it, e.g., "two-dimensional" as "twodimensional", so it goes back where
+    # the paragraph's source spells the word with it and never without
+    if engine == "word":
+        for para, blk in zip(paras, matched):
+            if blk is None or para.element is None:
+                continue
+            words = re.findall(
+                r"(?<![\w-])[^\W\d_]\w*(?:-\w+)+(?![\w-])", blk.text
+            )
+            for word in dict.fromkeys(words):
+                pattern = re.compile(
+                    r"(?<![\w-])"
+                    + "(-?)".join(re.escape(w) for w in word.split("-"))
+                    + r"(?![\w-])",
+                    re.IGNORECASE,
+                )
+                if any("" in m.groups() for m in pattern.finditer(blk.text)):
+                    continue
+                text = doc.linear_text(para.element)
+                # From the end, so earlier offsets still hold
+                for m in reversed(list(pattern.finditer(text))):
+                    for k in reversed(range(1, len(m.groups()) + 1)):
+                        if not m.group(k):
+                            doc.insert_text(para.element, m.start(k), "-")
+        paras = doc.paragraphs
     # Bookmark each anchored paragraph; a block rendering as several
     # paragraphs gets numbered suffixes
     original: dict[str, str] = {}
@@ -2299,6 +2328,26 @@ def to_docx(
         # Word lays some displays out in tables of its own, which go too
         # if all else they hold is the prose on either side, moved out.
         emu_limit = int(1.5 * 914400)
+        # A figure without a caption, in a float or not, could be any tall
+        # picture, so then none go
+        captionless, depth, captioned = False, 0, False
+        for ln in lines:
+            code = calkit.latex._strip_comments(ln.text)
+            for m in re.finditer(
+                r"\\(begin|end)\{(figure|wrapfigure|sidewaysfigure)\*?\}"
+                r"|\\(caption|includegraphics)\b",
+                code,
+            ):
+                if m.group(1) == "begin":
+                    depth, captioned = depth + 1, captioned and depth > 0
+                elif m.group(1) == "end":
+                    depth = max(0, depth - 1)
+                    if depth == 0 and not captioned:
+                        captionless = True
+                elif m.group(3) == "caption":
+                    captioned = True
+                elif depth == 0:
+                    captionless = True
         w_body = doc.doc.find(calkit.docx._tag(calkit.docx.W, "body"))
         assert w_body is not None
         w_p = calkit.docx._tag(calkit.docx.W, "p")
@@ -2342,6 +2391,8 @@ def to_docx(
             )
             if not tall:
                 return True
+            if captionless:
+                return False
             # A tall picture is a figure where there's a caption beside it,
             # past any other pictures, else a display drawn as one
             children = list(w_body)
@@ -2763,6 +2814,7 @@ def to_docx(
         .isoformat(timespec="seconds")
         .replace(":", "-")
     )
+    calkit.ensure_local_dir()
     dirs = [calkit.latex.LOCAL_DOCX_EXPORTS_DIR]
     if log:
         dirs.append(calkit.latex.DOCX_EXPORTS_DIR)
@@ -3157,6 +3209,7 @@ def merge_docx(
         .isoformat(timespec="seconds")
         .replace(":", "-")
     )
+    calkit.ensure_local_dir()
     dirs = [calkit.latex.LOCAL_DOCX_MERGES_DIR]
     if log:
         dirs.append(calkit.latex.DOCX_MERGES_DIR)

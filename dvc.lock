@@ -10,16 +10,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 7bb5114c27ea2131f086b28443b2039d
-      size: 132556
+      md5: 022878b79bed10f3a6fa1a4a5ca77fd4
+      size: 134959
     - path: calkit/docx.py
       hash: md5
-      md5: a4f283b5300e058b567a3ff4a5f2d029
-      size: 63493
+      md5: d31fe0b252929d2f3462b8a9537c5b17
+      size: 64524
     - path: calkit/latex.py
       hash: md5
-      md5: 443d1fd7120ddbd4b0d2ec3ad7f30333
-      size: 93953
+      md5: 40d945a8769b9fed87da1c184e55f96f
+      size: 96016
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -75,8 +75,8 @@ stages:
       size: 5
     - path: calkit/docx.py
       hash: md5
-      md5: a4f283b5300e058b567a3ff4a5f2d029
-      size: 63493
+      md5: d31fe0b252929d2f3462b8a9537c5b17
+      size: 64524
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: 6a04754199f6a394429ca0c07e4ecda6
@@ -116,8 +116,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: 443d1fd7120ddbd4b0d2ec3ad7f30333
-      size: 93953
+      md5: 40d945a8769b9fed87da1c184e55f96f
+      size: 96016
     - path: uv.lock
       hash: md5
       md5: b5d0e9511259dec7553283d5727fe0c1

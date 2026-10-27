@@ -1156,7 +1156,7 @@ _HEADING_RE = re.compile(
 )
 # A macro defined without arguments, through its body's opening brace
 _MACRO_DEF_RE = re.compile(
-    r"\\(?:(?:re|provide)?newcommand\*?|DeclareRobustCommand\*?)\s*"
+    r"\\(?:(?:re)?newcommand|providecommand|DeclareRobustCommand)\*?\s*"
     r"(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))\s*\{"
     r"|\\def\s*\\([A-Za-z@]+)\s*\{"
 )
@@ -1201,6 +1201,8 @@ class Block:
     # The document's macros without arguments, by name, which render as
     # their text
     macros: dict[str, str] = field(default_factory=dict)
+    # Before \begin{document}, so not rendered
+    preamble: bool = False
 
     @property
     def path(self) -> str:
@@ -1381,6 +1383,9 @@ def macro_definitions(lines: list[SourceLine]) -> dict[str, str]:
     out: dict[str, str] = {}
     for m in _MACRO_DEF_RE.finditer(src):
         name = m.group(1) or m.group(2) or m.group(3)
+        # A later definition replaces an earlier one, but \providecommand
+        # only defines what isn't yet
+        provide = m.group(0).startswith("\\providecommand")
         # The body, through its matching brace
         depth, start = 0, m.end() - 1
         for i in range(start, len(src)):
@@ -1389,7 +1394,8 @@ def macro_definitions(lines: list[SourceLine]) -> dict[str, str]:
             elif src[i] == "}" and src[i - 1] != "\\":
                 depth -= 1
                 if depth == 0:
-                    out.setdefault(name, src[start + 1 : i])
+                    if not provide or name not in out:
+                        out[name] = src[start + 1 : i]
                     break
     return out
 
@@ -1404,7 +1410,7 @@ def expand_macros(
     pattern = re.compile(
         r"\\("
         + "|".join(re.escape(n) for n in sorted(macros, key=len, reverse=True))
-        + r")(?![A-Za-z@])(\{\})?"
+        + r")(?![A-Za-z@])"
     )
     parts = [text] if math else re.split(r"(\$[^$]*\$)", text)
     for i in range(0, len(parts), 2):
@@ -1569,6 +1575,15 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
     if cur:
         out.append(Block(cur))
     macros = macro_definitions(lines)
+    begin = next(
+        (
+            i
+            for i, ln in enumerate(lines)
+            if re.match(r"\s*\\begin\{document\}", ln.text)
+        ),
+        0,
+    )
+    before = {id(ln) for ln in lines[:begin]}
     in_float: set[tuple[str, int]] = set()
     depth = 0
     for ln in lines:
@@ -1581,6 +1596,7 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
     for b in out:
         b.floating = (b.path, b.lineno) in in_float
         b.macros = macros
+        b.preamble = id(b.lines[0]) in before
     return [b for b in out if b.text or b.display]
 
 
@@ -1630,6 +1646,11 @@ def align(
             len(_words(text) & _words(b.text)) < 4
         ):
             return (0.0, False, 0, j)
+        # Of the preamble, only the title and authors render
+        if b.preamble and not any(
+            re.match(r"\s*\\(title|author|date)\b", ln.text) for ln in b.lines
+        ):
+            return (0.0, False, 0, j)
         # On a tie, a block the paragraph is the whole of, e.g., a
         # heading over a caption using its words, then the nearest, so
         # a short heading can't jump ahead to a later paragraph, nor a
@@ -1646,22 +1667,29 @@ def align(
     # a figure or table
     last = recent = 0
     floats = [j for j, b in enumerate(blks) if b.floating]
-    # Prose blocks, by index, for how far a match jumps ahead
-    prose = [j for j, b in enumerate(blks) if not b.floating and b.text]
+    # Prose blocks, by index, for how far a match jumps ahead, not counting
+    # the preamble's, of which only the title and authors render
+    prose = [
+        j
+        for j, b in enumerate(blks)
+        if not b.floating and not b.preamble and b.text
+    ]
     for text in texts:
-        # Even when it shares a word with the prose around it
-        if equation_fragment(text):
-            out.append(None)
-            continue
+        fragment = equation_fragment(text)
         # Author-year citations render as names the source doesn't have
         text = _CITATION_RE.sub(" ", text)
-
         # A figure or table can be anywhere, since it floats, and doesn't
         # move the place in the source the prose has reached
         candidates = sorted(set(range(last, len(blks))) | set(floats))
         best = max(
             (score(text, j) for j in candidates), default=(0.0, False, 0, 0)
         )
+        # A display's fragment, even when it shares a word with the prose
+        # around it, unless it's the whole of a block, e.g., a heading with
+        # math
+        if fragment and not (best[1] and best[0] >= threshold):
+            out.append(None)
+            continue
         # A table's rows or a caption's lines stay with it on a tie, e.g.,
         # a row "Growth rate k 0.05" beside prose about the growth rate,
         # unless the paragraph is the whole of the other, e.g., a heading
@@ -1827,6 +1855,11 @@ _MATH_FUNCTIONS = (
     "arccos arcsin arctan arg cos cosh cot coth det exp lg lim ln log max "
     "min sec sin sinh sup tan tanh"
 ).split()
+# A math alphabet command and the group it styles, without nested groups
+_MATH_ALPHABET_RE = re.compile(
+    r"\\(mathcal|mathbf|mathit|mathsf|mathtt|mathbb|mathfrak|mathscr|"
+    r"boldsymbol|bm)\s*\{([^{}]*)\}"
+)
 # Grouping and wrappers that the source and a converter may disagree on
 _MATH_NOISE = frozenset(
     ["{", "}", "\\mathrm", "\\text", "\\operatorname", "\\left", "\\right"]
@@ -1847,6 +1880,26 @@ def normalize_math(tex: str) -> str:
         r"\\(" + "|".join(_MATH_FUNCTIONS) + r")(?![a-zA-Z])", r"\1 ", tex
     )
     tex = tex.replace("{}", "")
+
+    def letters_only(m: re.Match[str]) -> str:
+        # A math alphabet styles letters, so symbols at the ends of its
+        # group, which Word joins it to on saving, e.g., \mathcal{\in E,},
+        # go outside
+        tokens = _MATH_TOKEN_RE.findall(m.group(2))
+        letter = [
+            bool(re.fullmatch(r"[A-Za-z0-9]", t))
+            or t.lstrip("\\").lower().removeprefix("var") in _GREEK
+            for t in tokens
+        ]
+        if not any(letter):
+            return m.group(0)
+        i, j = letter.index(True), len(letter) - letter[::-1].index(True)
+        core = " ".join(tokens[i:j])
+        return " ".join(
+            tokens[:i] + [f"\\{m.group(1)}{{{core}}}"] + tokens[j:]
+        )
+
+    tex = _MATH_ALPHABET_RE.sub(letters_only, tex)
     return " ".join(tex.split())
 
 

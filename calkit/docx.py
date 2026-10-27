@@ -788,6 +788,26 @@ class Document:
         offsets into it can say where a range of runs starts and ends."""
         return "".join(self._run_text(r) for r in self._runs(para))
 
+    def insert_text(self, para: ET.Element, offset: int, text: str) -> bool:
+        """Insert text at a linear text offset, in the run before it; False
+        if no text run ends or spans there."""
+        pos = 0
+        for run in self._runs(para):
+            for c in run:
+                if c.tag == _tag(W, "t"):
+                    n = len(c.text or "")
+                else:
+                    n = int(
+                        c.tag in (_tag(W, "tab"), _tag(W, "br"), _tag(W, "cr"))
+                        or c.tag in self._OBJECT_TAGS
+                    )
+                if c.tag == _tag(W, "t") and pos < offset <= pos + n:
+                    cut = offset - pos
+                    c.text = (c.text or "")[:cut] + text + (c.text or "")[cut:]
+                    return True
+                pos += n
+        return False
+
     def _split_at(self, para: ET.Element, offset: int) -> None:
         """Split the run spanning a linear text offset, so a run boundary
         falls there."""
@@ -1231,7 +1251,6 @@ def flatten_heavy_figures(
     """
     import pypdfium2 as pdfium
     import pypdfium2.raw as pdfium_c
-    from PIL import Image, ImageChops
 
     def segments(obj: Any) -> int:
         kind = pdfium_c.FPDFPageObj_GetType(obj)
@@ -1277,16 +1296,17 @@ def flatten_heavy_figures(
                         o.close()
                 spage.gen_content()
                 spage.set_rotation(0)
+                # On a transparent background, so what's under it still
+                # shows
                 image = spage.render(
                     scale=scale,  # pyright: ignore[reportArgumentType]
                     may_draw_forms=False,
+                    fill_color=(255, 255, 255, 0),
                 ).to_pil()
                 scratch.close()
                 # Cropped to what's drawn, since a figure's bounds can reach
                 # far past its clipping
-                box = ImageChops.difference(
-                    image.convert("RGB"), Image.new("RGB", image.size, "white")
-                ).getbbox()
+                box = image.getchannel("A").getbbox()
                 if box is None:
                     continue
                 image = image.crop(box)
@@ -1341,16 +1361,25 @@ def flatten_heavy_figures(
 
 def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     """Convert a PDF to .docx with Word's own importer."""
+    import tempfile
+    from pathlib import Path
+
     pdf_path, docx_path = os.path.abspath(pdf_path), os.path.abspath(docx_path)
     # Word won't save over a document it has open, so write beside the
     # target and move into place
     tmp_path = docx_path.removesuffix(".docx") + ".tmp.docx"
     # Word's import on macOS fails on figures drawn with very many points,
-    # so it gets a copy with those as images, as it would make them anyway
-    light_path = docx_path.removesuffix(".docx") + ".tmp.pdf"
-    if flatten_heavy_figures(pdf_path, light_path):
-        pdf_path = light_path
+    # so it gets a copy with those as images, as it would make them anyway,
+    # in a file of its own, so it's never the PDF itself
+    fd, light_path = tempfile.mkstemp(
+        prefix=Path(docx_path).stem + "-",
+        suffix=".pdf",
+        dir=os.path.dirname(docx_path),
+    )
+    os.close(fd)
     try:
+        if flatten_heavy_figures(pdf_path, light_path):
+            pdf_path = light_path
         if sys.platform == "darwin":
             name = os.path.basename(pdf_path)
             script = (
@@ -1422,8 +1451,7 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                 "Converting PDF to Word requires Word on macOS or Windows"
             )
     finally:
-        if pdf_path == light_path:
-            os.remove(light_path)
+        os.remove(light_path)
     os.replace(tmp_path, docx_path)
 
 

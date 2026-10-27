@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import os
 import re
 import subprocess
 import sys
 import zipfile
 from dataclasses import dataclass, field
+from typing import Any
 from xml.etree import ElementTree as ET
 
 # XML namespaces, named by the prefixes Word gives them: w is the main
@@ -1220,72 +1222,208 @@ def odt_to_docx(odt_path: str, docx_path: str) -> None:
         shutil.move(out, docx_path)
 
 
+def flatten_heavy_figures(
+    pdf_path: str, out_path: str, max_segments: int = 50_000, dpi: int = 200
+) -> int:
+    """Write a copy of a PDF with each figure drawn with more than
+    ``max_segments`` path segments, e.g., a dense scatter plot, replaced by
+    an image of it, unless there are none, returning how many there were.
+    """
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as pdfium_c
+    from PIL import Image, ImageChops
+
+    def segments(obj: Any) -> int:
+        kind = pdfium_c.FPDFPageObj_GetType(obj)
+        if kind == pdfium_c.FPDF_PAGEOBJ_PATH:
+            return max(int(pdfium_c.FPDFPath_CountSegments(obj)), 0)
+        if kind == pdfium_c.FPDF_PAGEOBJ_FORM:
+            return sum(
+                segments(pdfium_c.FPDFFormObj_GetObject(obj, i))
+                for i in range(pdfium_c.FPDFFormObj_CountObjects(obj))
+            )
+        return 0
+
+    src = pdfium.PdfDocument(pdf_path)
+    # Where each page of the copy comes from
+    sources: list[tuple[Any, int]] = []
+    edited_docs = []
+    count = 0
+    scale = dpi / 72
+    try:
+        for page_index in range(len(src)):
+            sources.append((src, page_index))
+            objs = list(src[page_index].get_objects(max_depth=1))
+            heavy = [
+                i for i, o in enumerate(objs) if segments(o.raw) > max_segments
+            ]
+            if not heavy:
+                continue
+            kinds = [pdfium_c.FPDFPageObj_GetType(o.raw) for o in objs]
+            edit = pdfium.PdfDocument.new()
+            edit.import_pages(src, pages=[page_index])
+            page = edit[0]
+            page_objs = list(page.get_objects(max_depth=1))
+            replaced = 0
+            for i in heavy:
+                # Drawn alone on an unrotated copy of the page, so nothing
+                # overlapping it ends up in its image
+                scratch = pdfium.PdfDocument.new()
+                scratch.import_pages(src, pages=[page_index])
+                spage = scratch[0]
+                for j, o in enumerate(list(spage.get_objects(max_depth=1))):
+                    if j != i:
+                        spage.remove_obj(o)
+                        o.close()
+                spage.gen_content()
+                spage.set_rotation(0)
+                image = spage.render(
+                    scale=scale,  # pyright: ignore[reportArgumentType]
+                    may_draw_forms=False,
+                ).to_pil()
+                scratch.close()
+                # Cropped to what's drawn, since a figure's bounds can reach
+                # far past its clipping
+                box = ImageChops.difference(
+                    image.convert("RGB"), Image.new("RGB", image.size, "white")
+                ).getbbox()
+                if box is None:
+                    continue
+                image = image.crop(box)
+                crop = page.get_cropbox()
+                assert crop is not None
+                cl, _, _, ct = crop
+                left, top = cl + box[0] / scale, ct - box[1] / scale
+                width, height = image.width / scale, image.height / scale
+                # Put where the figure was in the page's drawing order, which
+                # Word may read it in
+                img = pdfium_c.FPDFPageObj_NewImageObj(edit)
+                bitmap = pdfium.PdfBitmap.from_pil(image)
+                pdfium_c.FPDFImageObj_SetBitmap(None, 0, img, bitmap)
+                pdfium_c.FPDFImageObj_SetMatrix(
+                    img, width, 0, 0, height, left, top - height
+                )
+                page.remove_obj(page_objs[i])
+                page_objs[i].close()
+                pdfium_c.FPDFPage_InsertObjectAtIndex(page, img, i)
+                kinds[i] = pdfium_c.FPDF_PAGEOBJ_IMAGE
+                replaced += 1
+            if not replaced:
+                edit.close()
+                continue
+            page.gen_content()
+            data = io.BytesIO()
+            edit.save(data)
+            edit.close()
+            edited = pdfium.PdfDocument(data.getvalue())
+            edited_docs.append(edited)
+            # pdfium can't write some text back, e.g., in Type 3 fonts, so a
+            # page that loses any is left as it was
+            if [
+                pdfium_c.FPDFPageObj_GetType(o.raw)
+                for o in edited[0].get_objects(max_depth=1)
+            ] != kinds:
+                continue
+            sources[-1] = (edited, 0)
+            count += replaced
+        if count:
+            out = pdfium.PdfDocument.new()
+            for doc, i in sources:
+                out.import_pages(doc, pages=[i])
+            out.save(out_path)
+            out.close()
+    finally:
+        for doc in edited_docs:
+            doc.close()
+        src.close()
+    return count
+
+
 def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     """Convert a PDF to .docx with Word's own importer."""
     pdf_path, docx_path = os.path.abspath(pdf_path), os.path.abspath(docx_path)
     # Word won't save over a document it has open, so write beside the
     # target and move into place
     tmp_path = docx_path.removesuffix(".docx") + ".tmp.docx"
-    if sys.platform == "darwin":
-        script = (
-            # A long paper can take Word longer than AppleScript's default
-            # two minutes to import
-            "with timeout of 600 seconds\n"
-            'tell application "Microsoft Word"\n'
-            "set display alerts to alerts none\n"
-            f'open (POSIX file "{pdf_path}")\n'
-            # The import runs after open returns; wait for the document
-            "repeat 1200 times\n"
-            f'if exists document "{os.path.basename(pdf_path)}" then '
-            "exit repeat\n"
-            "delay 0.1\n"
-            "end repeat\n"
-            f'set doc to document "{os.path.basename(pdf_path)}"\n'
-            f'save as doc file name "{tmp_path}" file format format document\n'
-            # By reference, since Word may not find the saved copy by name
-            "close active document saving no\n"
-            "end tell\n"
-            "end timeout"
-        )
-        res = subprocess.run(
-            ["osascript", "-e", script], capture_output=True, text=True
-        )
-        if res.returncode != 0:
-            raise RuntimeError(
-                "Word could not convert the PDF: "
-                + res.stderr.strip().split(": ", 1)[-1]
+    # Word's import on macOS fails on figures drawn with very many points,
+    # so it gets a copy with those as images, as it would make them anyway
+    light_path = docx_path.removesuffix(".docx") + ".tmp.pdf"
+    if flatten_heavy_figures(pdf_path, light_path):
+        pdf_path = light_path
+    try:
+        if sys.platform == "darwin":
+            name = os.path.basename(pdf_path)
+            script = (
+                # A long paper can take Word longer than AppleScript's default
+                # two minutes to import
+                "with timeout of 600 seconds\n"
+                'tell application "Microsoft Word"\n'
+                "set display alerts to alerts none\n"
+                f'open (POSIX file "{pdf_path}")\n'
+                # The import runs after open returns; wait for the document
+                "repeat 1200 times\n"
+                f'if exists document "{name}" then exit repeat\n'
+                "delay 0.1\n"
+                "end repeat\n"
+                f'if not (exists document "{name}") then '
+                'error "calkit: not opened"\n'
+                f'set doc to document "{name}"\n'
+                f'save as doc file name "{tmp_path}" file format format document\n'
+                # By reference, since Word may not find the saved copy by name
+                "close active document saving no\n"
+                "end tell\n"
+                "end timeout"
             )
-    elif sys.platform == "win32":
-        import win32com.client  # type: ignore[import-not-found]
+            res = subprocess.run(
+                ["osascript", "-e", script], capture_output=True, text=True
+            )
+            if "calkit: not opened" in res.stderr:
+                raise RuntimeError(
+                    "Word could not import the PDF. Its PDF import on macOS "
+                    "goes through an online service, so it needs an internet "
+                    "connection, and that service can fail on a large or "
+                    "complex PDF. Dismiss any dialog Word is showing before "
+                    "trying again."
+                )
+            if res.returncode != 0:
+                raise RuntimeError(
+                    "Word could not convert the PDF: "
+                    + res.stderr.strip().split(": ", 1)[-1]
+                )
+        elif sys.platform == "win32":
+            import win32com.client  # type: ignore[import-not-found]
 
-        # Reuse a running Word rather than quitting one the user has open
-        try:
-            word = win32com.client.GetActiveObject("Word.Application")
-            started = False
-        except Exception:
-            word = win32com.client.Dispatch("Word.Application")
-            started = True
-        word.DisplayAlerts = 0
-        doc = None
-        try:
-            doc = word.Documents.Open(pdf_path, ConfirmConversions=False)
-            # Word's PDF reconstruction leaves the doc protected/marked
-            # final, which blocks editing and commenting; macOS's import
-            # doesn't.
-            if doc.ProtectionType != -1:  # wdNoProtection
-                doc.Unprotect()
-            doc.Final = False
-            doc.ReadOnlyRecommended = False
-            doc.SaveAs2(tmp_path, FileFormat=12)
-        finally:
-            if doc is not None:
-                doc.Close(False)
-            if started:
-                word.Quit()
-    else:
-        raise RuntimeError(
-            "Converting PDF to Word requires Word on macOS or Windows"
-        )
+            # Reuse a running Word rather than quitting one the user has open
+            try:
+                word = win32com.client.GetActiveObject("Word.Application")
+                started = False
+            except Exception:
+                word = win32com.client.Dispatch("Word.Application")
+                started = True
+            word.DisplayAlerts = 0
+            doc = None
+            try:
+                doc = word.Documents.Open(pdf_path, ConfirmConversions=False)
+                # Word's PDF reconstruction leaves the doc protected/marked
+                # final, which blocks editing and commenting; macOS's import
+                # doesn't.
+                if doc.ProtectionType != -1:  # wdNoProtection
+                    doc.Unprotect()
+                doc.Final = False
+                doc.ReadOnlyRecommended = False
+                doc.SaveAs2(tmp_path, FileFormat=12)
+            finally:
+                if doc is not None:
+                    doc.Close(False)
+                if started:
+                    word.Quit()
+        else:
+            raise RuntimeError(
+                "Converting PDF to Word requires Word on macOS or Windows"
+            )
+    finally:
+        if pdf_path == light_path:
+            os.remove(light_path)
     os.replace(tmp_path, docx_path)
 
 
@@ -1317,6 +1455,29 @@ def _pandoc(args: list[str], data: bytes) -> bytes:
     return res.stdout
 
 
+# Text-mode symbol commands, by name, and the characters they print
+_TEXT_SYMBOLS = {
+    "textperthousand": "\u2030",
+    "textdegree": "\u00b0",
+    "textcelsius": "\u2103",
+    "textmu": "\u00b5",
+    "textpm": "\u00b1",
+    "texttimes": "\u00d7",
+    "textdiv": "\u00f7",
+    "textendash": "\u2013",
+    "textemdash": "\u2014",
+    "textasciitilde": "~",
+    "textbullet": "\u2022",
+    "textsection": "\u00a7",
+}
+
+
+# A command setting its argument as text, through its opening brace
+_TEXT_COMMAND_RE = re.compile(
+    r"\\(text|textrm|textit|textbf|textsf|texttt|mbox)\s*\{"
+)
+
+
 def latex_to_omml(
     equations: list[str], preamble: str = ""
 ) -> list[ET.Element | None]:
@@ -1326,12 +1487,53 @@ def latex_to_omml(
     paragraph so its output can be picked out; ``preamble`` carries the
     document's macro definitions.
     """
+    import calkit.latex
+
+    def unnest_text(tex: str) -> str:
+        # Text inside text, without its command, e.g., \text{(\text{x})}
+        out, groups, depth, i = [], [], 0, 0
+        while i < len(tex):
+            m = _TEXT_COMMAND_RE.match(tex, i)
+            if m is not None:
+                out.append("{" if depth else m.group(0))
+                groups.append(True)
+                depth += 1
+                i = m.end()
+            elif tex[i] == "\\":
+                out.append(tex[i : i + 2])
+                i += 2
+            else:
+                if tex[i] == "{":
+                    groups.append(False)
+                elif tex[i] == "}" and groups and groups.pop():
+                    depth -= 1
+                out.append(tex[i])
+                i += 1
+        return "".join(out)
+
     if not equations:
         return []
+    # Pandoc can't convert math with text in text, e.g., \text{(\degC)}
+    # where \degC is \text{\textdegree C}, nor text symbols, so the
+    # document's macros are expanded first and the symbols put in as
+    # characters
+    macros = calkit.latex.macro_definitions(
+        [calkit.latex.SourceLine("", 0, ln) for ln in preamble.split("\n")]
+    )
+    equations = [
+        unnest_text(calkit.latex.expand_macros(eq, macros, math=True))
+        for eq in equations
+    ]
     src = (
         preamble
         + "\n\n"
         + "".join(f"CKEQ{i}\n\n{eq}\n\n" for i, eq in enumerate(equations))
+    )
+    # TeX skips spaces after a command word, as in \textdegree C
+    src = re.sub(
+        r"\\(" + "|".join(_TEXT_SYMBOLS) + r")(?![A-Za-z])\s*(\{\})?",
+        lambda m: _TEXT_SYMBOLS[m.group(1)],
+        src,
     )
     out = _pandoc(["-f", "latex", "-t", "docx", "-o", "-"], src.encode())
     import io

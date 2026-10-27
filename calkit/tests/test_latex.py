@@ -455,3 +455,82 @@ def test_expand_ck_components(tmp_dir):
     # What can't be found is left to print as ??, and comments alone
     assert "\\ckvalue{results/m.json}{nope}" in text
     assert "% \\ckvalue{results/m.json}{rmse}" in text
+
+
+def test_align_rendered_paragraphs() -> None:
+    src = [
+        r"\newcommand{\tool}{Wake\textendash Sim\xspace}",
+        r"\newcommand{\rate}[1]{#1 per second}",
+        r"\section{Methods}",
+        r"\label{sec:methods}",
+        r"We simulate the wake with \tool, which resolves 95\% of the "
+        r"turbulent kinetic energy \citep{lee2018, park2016, smith2020}.",
+        "",
+        r"\begin{equation}",
+        r"  L = a \text{ if } x < \tau, \text{ otherwise } b",
+        r"\end{equation}",
+        "",
+        r"\begin{table}",
+        r"\caption{Errors by method.}",
+        r"\begin{tabular}{ll}",
+        r"Model Type & \makecell{Time per\\molecule} \\",
+        r"\end{tabular}",
+        r"\end{table}",
+        "",
+        "Errors are small for every model tested here.",
+        "",
+        "Training took longer for the largest model.",
+        "",
+        "Inference was fast for all models we compared.",
+        "",
+        r"\section{Appendix}",
+        r"Unless otherwise stated, rates are \rate{3}.",
+    ]
+    lines = [
+        calkit.latex.SourceLine("main.tex", i + 1, t)
+        for i, t in enumerate(src)
+    ]
+    blks = calkit.latex.blocks(lines)
+    by_line = {b.lineno: b for b in blks}
+    # A heading is a block of its own with its label, macros without
+    # arguments read as their text, an escaped percent sign doesn't start a
+    # comment, and a line break doesn't run into the next word
+    assert [ln.lineno for ln in by_line[3].lines] == [3, 4]
+    assert by_line[5].text.startswith("We simulate the wake with Wake Sim")
+    assert by_line[5].text.endswith("of the turbulent kinetic energy .")
+    assert "Time per molecule" in by_line[13].text
+    texts = [
+        "1. Methods",
+        "We simulate the wake with Wake–Sim, which resolves 95% of the "
+        "turbulent kinetic energy (Lee, 2018; Park et al., 2016; Smith and "
+        "Jones, 2020).",
+        # Pieces of the display, numbered mid-line or sharing one word with
+        # prose further on
+        "L = a if x < τ (1) otherwise b",
+        ", otherwise,",
+        "Table 1: Errors by method.",
+        "Errors are small for every model tested here.",
+        "Training took longer for the largest model.",
+        "Inference was fast for all models we compared.",
+        "2. Appendix",
+        "Unless otherwise stated, rates are 3 per second.",
+    ]
+    matched = calkit.latex.align(texts, blks)
+    assert [b.lineno if b else None for b in matched] == [
+        3,
+        5,
+        None,
+        None,
+        12,
+        18,
+        20,
+        22,
+        24,
+        25,
+    ]
+    assert calkit.latex.equation_fragment("f(")
+    assert calkit.latex.equation_fragment(", (4)")
+    assert not calkit.latex.equation_fragment(
+        "Combining (A.5) and (A.6), we get:"
+    )
+    assert not calkit.latex.equation_fragment("Actuator disk model (k=0.04)")

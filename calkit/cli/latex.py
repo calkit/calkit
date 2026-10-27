@@ -2058,7 +2058,10 @@ def to_docx(
         try:
             calkit.docx.pdf_to_docx(pdf_path, output)
         except RuntimeError as e:
-            raise_error(str(e))
+            raise_error(
+                f"{e}\nTo convert from the source instead, use "
+                "--engine libreoffice"
+            )
     elif engine == "libreoffice":
         import shlex
 
@@ -2308,6 +2311,11 @@ def to_docx(
             )
 
         anchored = {p.element for p, b in zip(paras, matched) if b is not None}
+        captions = {
+            p.element
+            for p, b in zip(paras, matched)
+            if b is not None and b.floating
+        }
 
         def fragment(el: Any, context: str) -> bool:
             # Never prose: anything anchored to the source, e.g., a caption
@@ -2321,7 +2329,7 @@ def to_docx(
             prose_like = (
                 len(words) >= 2
                 and calkit.latex.similarity(text, context) >= 0.5
-                and not re.search(eq_num + r"\s*$", text)
+                and not calkit.latex.equation_fragment(text)
             )
             if el in anchored or len(words) > 3 or prose_like:
                 return False
@@ -2332,7 +2340,27 @@ def to_docx(
                     "wordprocessingDrawing}extent"
                 )
             )
-            return not tall
+            if not tall:
+                return True
+            # A tall picture is a figure where there's a caption beside it,
+            # past any other pictures, else a display drawn as one
+            children = list(w_body)
+            i = children.index(unit_of(el))
+            for step in (-1, 1):
+                k = i + step
+                while (
+                    0 <= k < len(children) and not text_of(children[k]).strip()
+                ):
+                    k += step
+                if not 0 <= k < len(children):
+                    continue
+                near = children[k]
+                if any(q in captions for q in near.iter(w_p)) or re.match(
+                    r"\s*(Figure|Fig\.|Table|Scheme|Chart)\s+[A-Z]?\.?\d",
+                    text_of(near),
+                ):
+                    return False
+            return True
 
         def unit_of(el: Any) -> Any:
             while doc._parents.get(el) is not w_body:

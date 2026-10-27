@@ -765,3 +765,106 @@ def test_equation_links() -> None:
         for tr in tbl.iter(calkit.docx._tag(w, "tr"))
     ]
     assert names == [["ck_a"], ["ck_a_r2", "x13-3004r5"]]
+
+
+def test_flatten_heavy_figures(tmp_path: Path) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as pdfium_c
+
+    # A light figure is left alone, with nothing written
+    fig, ax = plt.subplots(figsize=(4, 3))
+    ax.plot([0, 1], [0, 1])
+    fig.savefig(tmp_path / "light.pdf")
+    out = tmp_path / "out.pdf"
+    assert (
+        calkit.docx.flatten_heavy_figures(
+            str(tmp_path / "light.pdf"), str(out)
+        )
+        == 0
+    )
+    assert not out.exists()
+    # A dense one is left alone where the page's text is in a Type 3 font,
+    # which pdfium can't write back
+    rng = np.random.default_rng(0)
+    ax.plot(rng.normal(size=60_000) * 10, rng.normal(size=60_000) * 10)
+    ax.set(xlim=(-5, 5), ylim=(-5, 5), title="Dense")
+    fig.savefig(tmp_path / "heavy.pdf")
+    assert (
+        calkit.docx.flatten_heavy_figures(
+            str(tmp_path / "heavy.pdf"), str(out), max_segments=10_000
+        )
+        == 0
+    )
+    assert not out.exists()
+    # Otherwise, clipped to its axes, it becomes an image of what's drawn,
+    # in its place among the page's other objects
+    with matplotlib.rc_context({"pdf.fonttype": 42}):
+        fig.savefig(tmp_path / "heavy.pdf")
+    plt.close(fig)
+    assert (
+        calkit.docx.flatten_heavy_figures(
+            str(tmp_path / "heavy.pdf"), str(out), max_segments=10_000
+        )
+        == 1
+    )
+    before = pdfium.PdfDocument(tmp_path / "heavy.pdf")[0]
+    after = pdfium.PdfDocument(out)[0]
+    kinds_before = [
+        pdfium_c.FPDFPageObj_GetType(o.raw)
+        for o in before.get_objects(max_depth=1)
+    ]
+    kinds_after = [
+        pdfium_c.FPDFPageObj_GetType(o.raw)
+        for o in after.get_objects(max_depth=1)
+    ]
+    i = next(
+        j
+        for j, o in enumerate(before.get_objects(max_depth=1))
+        if pdfium_c.FPDFPageObj_GetType(o.raw) == pdfium_c.FPDF_PAGEOBJ_PATH
+        and pdfium_c.FPDFPath_CountSegments(o.raw) > 10_000
+    )
+    assert kinds_after == (
+        kinds_before[:i]
+        + [pdfium_c.FPDF_PAGEOBJ_IMAGE]
+        + kinds_before[i + 1 :]
+    )
+    img = list(after.get_objects(max_depth=1))[i]
+    left, bottom, right, top = img.get_bounds()
+    width, height = before.get_size()
+    assert 0 <= left < right <= width and 0 <= bottom < top <= height
+    # The page looks the same
+    a = np.asarray(before.render(scale=1).to_pil().convert("L"), float)
+    b = np.asarray(after.render(scale=1).to_pil().convert("L"), float)
+    assert np.abs(a - b).mean() < 2
+
+
+def test_latex_to_omml() -> None:
+    # Text symbols, and text in text from the document's macros, which
+    # Pandoc can't convert as written
+    preamble = (
+        "\\def\\xspace{}%\n"
+        "\\newcommand{\\degC}{\\text{\\textdegree C}\\xspace}\n"
+        "\\newcommand{\\note}[1]{}"
+    )
+    maths = calkit.docx.latex_to_omml(
+        [
+            "\\[\\text{T (\\degC)} = \\frac{1}{N}\\sum_A x_A\\]",
+            "$20\\degC$",
+            "$\\text{a \\textperthousand{} \\textbf{b}}$",
+            "\\[x = y\\]",
+        ],
+        preamble,
+    )
+    assert all(m is not None for m in maths)
+    text = "".join(
+        t.text or ""
+        for m in maths
+        if m is not None
+        for t in m.iter(calkit.docx._tag(calkit.docx.M, "t"))
+    )
+    assert "T (°C)" in text and "‰" in text

@@ -662,6 +662,20 @@ async function renderAttachForm(
       return;
     }
   } catch (e) {
+    // The hub's GitHub token can be expired or revoked even with a GitHub
+    // username on the account, which reconnecting fixes
+    if (
+      e instanceof RequestFailed &&
+      e.status === 401 &&
+      /github/i.test(e.message)
+    ) {
+      blocked(
+        "Calkit's connection to GitHub has expired. Reconnect it to " +
+          "continue.",
+        "Reconnect GitHub",
+      );
+      return;
+    }
     clear(container).append(renderOverleafFailure(e, retry));
     return;
   }

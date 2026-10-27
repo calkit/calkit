@@ -775,6 +775,8 @@ def test_docx_round_trip(
         encoding="utf-8",
     )
     w_t = calkit.docx._tag(calkit.docx.W, "t")
+    w_ppr = calkit.docx._tag(calkit.docx.W, "pPr")
+    w_val = calkit.docx._tag(calkit.docx.W, "val")
     para = next(
         p
         for p in joined.paragraphs
@@ -792,6 +794,10 @@ def test_docx_round_trip(
         split.append(r)
     holder = joined._parents[para]
     holder.insert(list(holder).index(para) + 1, split)
+    # Word's import taking the first piece for right-aligned
+    ET.SubElement(
+        para[0], calkit.docx._tag(calkit.docx.W, "jc"), {w_val: "right"}
+    )
     where = next(t for t in joined.doc.iter(w_t) if t.text == "where ")
     where.text = "where"
     # With the math after it as a picture
@@ -822,6 +828,10 @@ def test_docx_round_trip(
     )
     assert intro.element is not None
     assert intro.text.endswith("like this one.")
+    assert (
+        intro.element.find(f"{w_ppr}/{calkit.docx._tag(calkit.docx.W, 'jc')}")
+        is None
+    )
     assert "inline equation ‰ and a hyphenated" in intro.text
     assert intro.element.find(f"{{{calkit.docx.M}}}oMath") is not None
     assert not any(p.text.startswith("‰") for p in rejoined.paragraphs)

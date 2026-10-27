@@ -2226,6 +2226,7 @@ def to_docx(
     # paragraph are joined, and what floated in between, e.g., a figure,
     # goes after
     if engine == "word":
+        from collections import Counter
         from xml.etree import ElementTree as ET
 
         body = doc.doc.find(calkit.docx._tag(calkit.docx.W, "body"))
@@ -2236,6 +2237,34 @@ def to_docx(
         floats = {
             p.element for p, b in zip(paras, matched) if b and b.floating
         }
+        w_jc_path = f"{w_ppr}/{calkit.docx._tag(calkit.docx.W, 'jc')}"
+        w_val = calkit.docx._tag(calkit.docx.W, "val")
+        after_jc = {
+            calkit.docx._tag(calkit.docx.W, t)
+            for t in (
+                "textDirection",
+                "textAlignment",
+                "textboxTightWrap",
+                "outlineLvl",
+                "divId",
+                "cnfStyle",
+                "rPr",
+                "sectPr",
+                "pPrChange",
+            )
+        }
+
+        def jc_of(el: Any) -> str | None:
+            jc = el.find(w_jc_path)
+            return None if jc is None else jc.get(w_val)
+
+        # How the body text is aligned: as most long paragraphs are
+        counts = Counter(
+            jc_of(p.element)
+            for p in paras
+            if p.element is not None and len(p.text) > 200
+        )
+        usual_jc = counts.most_common(1)[0][0] if counts else None
         for i in range(len(paras) - 1, 0, -1):
             part1, part2, blk = paras[i - 1], paras[i], matched[i]
             # Not a table's rows, lines broken in the source, what the
@@ -2311,6 +2340,32 @@ def to_docx(
                 sep_t.set(
                     "{http://www.w3.org/XML/1998/namespace}space", "preserve"
                 )
+            # Where the pieces' alignment differs, as the document's body
+            # text usually is if either is, else as the piece with more
+            # text is, since Word's import can take a piece of one full
+            # line for right-aligned, or the end of a page for left
+            jc1 = part1.element.find(w_jc_path)
+            jc2 = part2.element.find(w_jc_path)
+            v1, v2 = jc_of(part1.element), jc_of(part2.element)
+            longer = len(doc.linear_text(part2.element)) > len(
+                doc.linear_text(part1.element)
+            )
+            if v1 != v2 and (v2 == usual_jc or (longer and v1 != usual_jc)):
+                ppr1 = part1.element.find(w_ppr)
+                if ppr1 is None:
+                    ppr1 = ET.Element(w_ppr)
+                    part1.element.insert(0, ppr1)
+                if jc1 is not None:
+                    at = list(ppr1).index(jc1)
+                    ppr1.remove(jc1)
+                else:
+                    # In schema order, before what follows alignment
+                    at = next(
+                        (k for k, c in enumerate(ppr1) if c.tag in after_jc),
+                        len(ppr1),
+                    )
+                if jc2 is not None:
+                    ppr1.insert(at, deepcopy(jc2))
             for child in list(part2.element):
                 if child.tag != w_ppr:
                     part2.element.remove(child)

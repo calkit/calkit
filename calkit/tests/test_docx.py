@@ -1005,3 +1005,54 @@ def test_latex_to_omml() -> None:
         for t in m.iter(calkit.docx._tag(calkit.docx.M, "t"))
     )
     assert "T (°C)" in text and "‰" in text
+    # The same whatever Pandoc's version: primes a superscript with the
+    # subscript, apostrophes in text left alone, \mathbf upright bold,
+    # \boldsymbol of letters bold italic, and bold text in math bold
+    m_ns = calkit.docx.M
+
+    def look(math: ET.Element | None) -> str:
+        assert math is not None
+        out = []
+        for el in math.iter():
+            name = el.tag.split("}")[1]
+            if name in ("sSub", "sSup", "sSubSup", "sub", "sup"):
+                out.append(name)
+            elif name == "r":
+                sty = el.find(f"{{{m_ns}}}rPr/{{{m_ns}}}sty")
+                scr = el.find(f"{{{m_ns}}}rPr/{{{m_ns}}}scr")
+                nor = el.find(f"{{{m_ns}}}rPr/{{{m_ns}}}nor")
+                text = "".join(t.text or "" for t in el.iter(f"{{{m_ns}}}t"))
+                # The style only counts on letters, which it slants
+                style = (
+                    sty.get(f"{{{m_ns}}}val") if sty is not None else ""
+                ) or ""
+                if scr is not None:
+                    style += "/" + (scr.get(f"{{{m_ns}}}val") or "")
+                if nor is not None:
+                    style = "text"
+                elif not any(c.isalpha() for c in text):
+                    style = ""
+                out.append(f"{style}:{text}")
+        return " ".join(out)
+
+    cases = {
+        "$\\omega_j'$": "sSubSup :ω sub :j sup :′",
+        "$L'_{\\mathrm{C}}$": "sSubSup :L sub p:C sup :′",
+        "$u'^2$": "sSup :u sup :′ :2",
+        "$\\text{model's}$": "text:model’s",
+        "$\\mathbf{F}$": "b:F",
+        "$\\boldsymbol{F} + \\bm{\\nabla}$": "bi:F :+ :∇",
+        "$\\textbf{h}$": "b:h",
+    }
+    maths = calkit.docx.latex_to_omml(list(cases))
+    for (tex, want), math in zip(cases.items(), maths):
+        assert look(math) == want, tex
+    # Sans serif math of the document's own keeps its look
+    sans = calkit.docx.latex_to_omml(["$\\mathsf{A}\\mathbf{F}$"])[0]
+    assert (
+        "/sans-serif:A" in look(sans)
+        and "/sans-serif" not in look(sans).split("A", 1)[1]
+    )
+    # Its version, which the export warns about when old
+    version = calkit.docx.pandoc_version()
+    assert version is not None and len(version) >= 2 and version >= (2,)

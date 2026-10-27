@@ -2384,6 +2384,13 @@ def to_docx(
     elif has_display or has_inline:
         from xml.etree import ElementTree as ET
 
+        version = calkit.docx.pandoc_version()
+        if version is not None and version < (3, 8):
+            warn(
+                f"Pandoc {'.'.join(map(str, version))} lays out some "
+                "equations, e.g., aligned ones, unlike newer versions; "
+                "update it to 3.8 or newer for them to match"
+            )
         eq_num = r"\(([A-Z]?\.?\d+(?:\.\d+)*[a-z]?)\)"
         first: dict[int, int] = {}
         last: dict[int, int] = {}

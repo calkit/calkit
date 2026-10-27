@@ -1476,6 +1476,21 @@ def find_pandoc() -> str | None:
     return shutil.which("pandoc")
 
 
+def pandoc_version() -> tuple[int, ...] | None:
+    """The version of the Pandoc ``find_pandoc`` finds, if any."""
+    pandoc = find_pandoc()
+    if pandoc is None:
+        return None
+    try:
+        res = subprocess.run(
+            [pandoc, "--version"], capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.match(r"pandoc(?:\.exe)?\s+(\d+(?:\.\d+)*)", res.stdout)
+    return tuple(int(n) for n in m.group(1).split(".")) if m else None
+
+
 def _pandoc(args: list[str], data: bytes) -> bytes:
     pandoc = find_pandoc()
     if pandoc is None:
@@ -1527,6 +1542,106 @@ def latex_to_omml(
                 i += 1
         return "".join(out)
 
+    def script(tex: str, k: int) -> tuple[str, int] | None:
+        # A sub- or superscript's argument from k, and where it ends
+        while k < len(tex) and tex[k].isspace():
+            k += 1
+        if k >= len(tex):
+            return None
+        if tex[k] == "{":
+            depth = 0
+            for j in range(k, len(tex)):
+                if tex[j] == "\\":
+                    continue
+                if tex[j] == "{" and tex[j - 1] != "\\":
+                    depth += 1
+                elif tex[j] == "}" and tex[j - 1] != "\\":
+                    depth -= 1
+                    if depth == 0:
+                        return tex[k + 1 : j], j + 1
+            return None
+        m = re.compile(r"\\[A-Za-z]+|\\.|.").match(tex, k)
+        assert m is not None
+        return m.group(0), m.end()
+
+    def primes(tex: str) -> str:
+        # Primes as the superscript they are, e.g., \omega_j' as
+        # \omega_j^{\prime}, which Pandoc versions convert alike, outside
+        # text, where ' is an apostrophe
+        out, groups, depth, i = [], [], 0, 0
+        while i < len(tex):
+            m = _TEXT_COMMAND_RE.match(tex, i)
+            if m is not None:
+                out.append(m.group(0))
+                groups.append(True)
+                depth += 1
+                i = m.end()
+            elif tex[i] == "\\":
+                out.append(tex[i : i + 2])
+                i += 2
+            elif tex[i] == "'" and not depth:
+                j = i
+                while j < len(tex) and tex[j] == "'":
+                    j += 1
+                sup = "\\prime" * (j - i)
+                # With a superscript after, e.g., u'^2 as u^{\prime 2}
+                k = j
+                while k < len(tex) and tex[k].isspace():
+                    k += 1
+                arg = script(tex, k + 1) if tex[k : k + 1] == "^" else None
+                if arg is not None:
+                    sup, j = f"{sup} {arg[0]}", arg[1]
+                out.append(f"^{{{sup}}}")
+                i = j
+            else:
+                if tex[i] == "{":
+                    groups.append(False)
+                elif tex[i] == "}" and groups and groups.pop():
+                    depth -= 1
+                out.append(tex[i])
+                i += 1
+        return "".join(out)
+
+    def plain_brackets(tex: str) -> str:
+        # Brackets and bars without \left or \right their own groups, as
+        # LaTeX sets them, which Pandoc before 3.8 makes stretch to what's
+        # between them; an optional argument's brackets, e.g., \sqrt[3],
+        # and \\[2pt], kept as they are, and text left alone
+        out, groups, depth, i = [], [], 0, 0
+        sized = re.compile(
+            r"\\(left|right|middle|[bB]igg?[lrm]?)(?![A-Za-z])\s*"
+            r"(\\[A-Za-z]+|\\.|.)"
+        )
+        optional = re.compile(
+            r"(\\\\|\\sqrt|\\begin\s*\{[^}]*\})\s*(\[[^\]]*\])?"
+        )
+        while i < len(tex):
+            m = _TEXT_COMMAND_RE.match(tex, i)
+            if m is not None:
+                out.append(m.group(0))
+                groups.append(True)
+                depth += 1
+                i = m.end()
+                continue
+            m = sized.match(tex, i) or optional.match(tex, i)
+            if m is not None:
+                out.append(m.group(0))
+                i = m.end()
+            elif tex[i] == "\\":
+                out.append(tex[i : i + 2])
+                i += 2
+            elif tex[i] in "()[]|" and not depth:
+                out.append(f"{{{tex[i]}}}")
+                i += 1
+            else:
+                if tex[i] == "{":
+                    groups.append(False)
+                elif tex[i] == "}" and groups and groups.pop():
+                    depth -= 1
+                out.append(tex[i])
+                i += 1
+        return "".join(out)
+
     if not equations:
         return []
     # Pandoc can't convert math with text in text, e.g., \text{(\degC)}
@@ -1537,13 +1652,35 @@ def latex_to_omml(
         [calkit.latex.SourceLine("", 0, ln) for ln in preamble.split("\n")]
     )
     equations = [
-        unnest_text(calkit.latex.expand_macros(eq, macros, math=True))
+        plain_brackets(
+            primes(
+                unnest_text(calkit.latex.expand_macros(eq, macros, math=True))
+            )
+        )
         for eq in equations
     ]
     src = (
         preamble
         + "\n\n"
         + "".join(f"CKEQ{i}\n\n{eq}\n\n" for i, eq in enumerate(equations))
+    )
+    # Bold the same whatever the Pandoc version, which since 3.9 sets
+    # \mathbf italic and before it \boldsymbol upright: \mathbf goes
+    # through bold sans serif, which every version keeps apart, made
+    # plain after, unless the document has sans serif math of its own,
+    # and \boldsymbol of letters through \mathbfit
+    carrier = not re.search(r"\\(mathsf|mathbfsf|symsf|symbfsf)", src)
+    if carrier:
+        src = re.sub(r"\\mathbf(?![A-Za-z])", r"\\mathbfsfup", src)
+    greek = "|".join(calkit.latex._GREEK)
+    src = re.sub(
+        r"\\(?:boldsymbol|bm)\s*\{((?:\s*(?:[A-Za-z]|\\(?:var)?(?:"
+        + greek
+        + r"|"
+        + greek.title()
+        + r")(?![A-Za-z])))+\s*)\}",
+        r"\\mathbfit{\1}",
+        src,
     )
     # TeX skips spaces after a command word, as in \textdegree C
     src = re.sub(
@@ -1569,6 +1706,42 @@ def latex_to_omml(
         math = p.find(f".//{_tag(M, 'oMath')}")
         if current is not None and math is not None and maths[current] is None:
             maths[current] = math
+    for math in maths:
+        for run in math.iter(_tag(M, "r")) if math is not None else []:
+            rpr = run.find(_tag(M, "rPr"))
+            sty = rpr.find(_tag(M, "sty")) if rpr is not None else None
+            if rpr is None or sty is None:
+                continue
+            style = sty.get(_tag(M, "val"), "")
+            scr = rpr.find(_tag(M, "scr"))
+            if (
+                carrier
+                and scr is not None
+                and scr.get(_tag(M, "val")) == "sans-serif"
+                and style == "b"
+            ):
+                rpr.remove(scr)
+            # Bold text in math, e.g., \textbf{h}, a bold letter as newer
+            # Pandoc versions have it, else with Word's bold, which older
+            # ones leave out
+            nor = rpr.find(_tag(M, "nor"))
+            text = "".join(t.text or "" for t in run.iter(_tag(M, "t")))
+            if nor is not None and style in ("b", "bi") and text.isalnum():
+                rpr.remove(nor)
+            elif nor is not None and style in ("b", "bi"):
+                wpr = run.find(_tag(W, "rPr"))
+                if wpr is None:
+                    wpr = ET.Element(_tag(W, "rPr"))
+                    run.insert(list(run).index(rpr) + 1, wpr)
+                # In schema order, after the style and fonts
+                at = sum(
+                    c.tag in (_tag(W, "rStyle"), _tag(W, "rFonts"))
+                    for c in wpr
+                )
+                for flag in ("b", "i") if style == "bi" else ("b",):
+                    if wpr.find(_tag(W, flag)) is None:
+                        wpr.insert(at, ET.Element(_tag(W, flag)))
+                    at += 1
     return maths
 
 

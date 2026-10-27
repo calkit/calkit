@@ -9,6 +9,7 @@ The ``libreoffice-*.docx`` fixtures are made by
 ``make-libreoffice-fixtures.py``; see the README there.
 """
 
+import copy
 import json
 import os
 import re
@@ -27,6 +28,7 @@ import calkit.latex
 from calkit.models.docx import LatexDocxExport, LatexDocxMerge
 
 FIXTURES = Path(__file__).parent.parent.parent / "test" / "docx"
+XML_NS = "http://www.w3.org/XML/1998/namespace"
 
 
 @pytest.fixture
@@ -124,6 +126,23 @@ def test_latex_source_helpers(project: Path) -> None:
     assert calkit.latex.already_applied(intro, sent, sent) is True
     assert not calkit.latex.already_applied(
         intro, sent, sent.replace("discussed", "shown")
+    )
+    # A common word inserted isn't there just for being in the paragraph
+    # elsewhere, though once inserted it is
+    assert not calkit.latex.already_applied(
+        intro, sent, sent.replace("for wind", "for a wind")
+    )
+    applied = calkit.latex.Block(
+        [
+            calkit.latex.SourceLine(ln.path, ln.lineno, ln.text)
+            for ln in intro.lines
+        ]
+    )
+    applied.lines[0].text = applied.lines[0].text.replace(
+        "for wind", "for a wind"
+    )
+    assert calkit.latex.already_applied(
+        applied, sent, sent.replace("for wind", "for a wind")
     )
     # Comment blocks parse and render back to the same lines
     src = Path("paper/methods.tex").read_text(encoding="utf-8").split("\n")
@@ -282,6 +301,10 @@ def test_latex_source_helpers(project: Path) -> None:
     assert calkit.latex.math_tokens(
         "z \\in \\mathcal{E}"
     ) != calkit.latex.math_tokens("z\\mathcal{\\in F}")
+    # Nor Word saving a function name after a command as letters
+    assert calkit.latex.math_tokens(
+        "e^{\\Delta\\ln x}"
+    ) == calkit.latex.math_tokens("e^{\\Delta ln x}")
 
 
 def test_docx_round_trip(
@@ -743,6 +766,39 @@ def test_docx_round_trip(
         if "two-component" in (t.text or "")
     )
     t.text = (t.text or "").replace("two-component", "twocomponent")
+    # A paragraph Word's import split, here right after inline math with a
+    # symbol after it, is one again, and a space it dropped before math goes
+    # back
+    intro_src = Path("paper/main.tex").read_text(encoding="utf-8")
+    Path("paper/main.tex").write_text(
+        intro_src.replace("10^5$\n", "10^5$\\textperthousand{}\n"),
+        encoding="utf-8",
+    )
+    w_t = calkit.docx._tag(calkit.docx.W, "t")
+    para = next(
+        p
+        for p in joined.paragraphs
+        if p.element is not None and "inline equation" in p.text
+    ).element
+    assert para is not None
+    rest = next(r for r in para if "and a hyphenated" in joined._run_text(r))
+    rest_t = rest.find(w_t)
+    assert rest_t is not None
+    rest_t.text = "‰ " + (rest_t.text or "")
+    split = ET.Element(calkit.docx._tag(calkit.docx.W, "p"))
+    split.extend(copy.deepcopy(para[:1]))
+    for r in list(para)[list(para).index(rest) :]:
+        para.remove(r)
+        split.append(r)
+    holder = joined._parents[para]
+    holder.insert(list(holder).index(para) + 1, split)
+    where = next(t for t in joined.doc.iter(w_t) if t.text == "where ")
+    where.text = "where"
+    # With the math after it as a picture
+    symbol = next(t for t in joined.doc.iter(w_t) if t.text == "C")
+    symbol_run = joined._parents[symbol]
+    symbol_run.remove(symbol)
+    ET.SubElement(symbol_run, calkit.docx._tag(calkit.docx.W, "drawing"))
     joined.save("joined.docx")
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
@@ -761,6 +817,20 @@ def test_docx_round_trip(
         "\n".join(sent.paragraphs.values()),
     ]:
         assert "a two-component laser" in text and "twocomponent" not in text
+    intro = next(
+        p for p in rejoined.paragraphs if p.text.startswith("Wakes matter")
+    )
+    assert intro.element is not None
+    assert intro.text.endswith("like this one.")
+    assert "inline equation ‰ and a hyphenated" in intro.text
+    assert intro.element.find(f"{{{calkit.docx.M}}}oMath") is not None
+    assert not any(p.text.startswith("‰") for p in rejoined.paragraphs)
+    model = next(p for p in rejoined.paragraphs if p.text.startswith("where"))
+    assert model.text.startswith("where is the thrust coefficient")
+    assert model.element is not None
+    lead = next(t for t in model.element.iter(w_t) if t.text)
+    assert lead.text == "where "
+    assert lead.get(f"{{{XML_NS}}}space") == "preserve"
 
 
 def test_equation_links() -> None:

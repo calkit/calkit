@@ -804,6 +804,11 @@ class Document:
                 if c.tag == _tag(W, "t") and pos < offset <= pos + n:
                     cut = offset - pos
                     c.text = (c.text or "")[:cut] + text + (c.text or "")[cut:]
+                    # Else Word drops a space at either end on reading it
+                    c.set(
+                        "{http://www.w3.org/XML/1998/namespace}space",
+                        "preserve",
+                    )
                     return True
                 pos += n
         return False
@@ -1483,23 +1488,6 @@ def _pandoc(args: list[str], data: bytes) -> bytes:
     return res.stdout
 
 
-# Text-mode symbol commands, by name, and the characters they print
-_TEXT_SYMBOLS = {
-    "textperthousand": "\u2030",
-    "textdegree": "\u00b0",
-    "textcelsius": "\u2103",
-    "textmu": "\u00b5",
-    "textpm": "\u00b1",
-    "texttimes": "\u00d7",
-    "textdiv": "\u00f7",
-    "textendash": "\u2013",
-    "textemdash": "\u2014",
-    "textasciitilde": "~",
-    "textbullet": "\u2022",
-    "textsection": "\u00a7",
-}
-
-
 # A command setting its argument as text, through its opening brace
 _TEXT_COMMAND_RE = re.compile(
     r"\\(text|textrm|textit|textbf|textsf|texttt|mbox)\s*\{"
@@ -1559,8 +1547,10 @@ def latex_to_omml(
     )
     # TeX skips spaces after a command word, as in \textdegree C
     src = re.sub(
-        r"\\(" + "|".join(_TEXT_SYMBOLS) + r")(?![A-Za-z])\s*(\{\})?",
-        lambda m: _TEXT_SYMBOLS[m.group(1)],
+        r"\\("
+        + "|".join(calkit.latex.TEXT_SYMBOLS)
+        + r")(?![A-Za-z])\s*(\{\})?",
+        lambda m: calkit.latex.TEXT_SYMBOLS[m.group(1)],
         src,
     )
     out = _pandoc(["-f", "latex", "-t", "docx", "-o", "-"], src.encode())

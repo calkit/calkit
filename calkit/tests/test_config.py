@@ -232,15 +232,18 @@ class _FakeKeyring(keyring.backend.KeyringBackend):
     def __init__(self):
         self.store: dict[tuple[str, str], str] = {}
         self.reads: list[tuple[str, str]] = []
+        self.writes: list[str] = []
 
     def get_password(self, service, username):
         self.reads.append((service, username))
         return self.store.get((service, username))
 
     def set_password(self, service, username, password):
+        self.writes.append(username)
         self.store[(service, username)] = password
 
     def delete_password(self, service, username):
+        self.writes.append(username)
         if (service, username) not in self.store:
             raise keyring.errors.PasswordDeleteError(service)
         del self.store[(service, username)]
@@ -321,6 +324,12 @@ def test_write_keeps_secrets_it_never_read(
     cfg = config.read()
     cfg.email = "someone@example.com"
     cfg.write()
+    # Nor does it rewrite one that didn't change: on macOS, rewriting an
+    # item forgets which apps the user chose to always allow to read it
+    assert fake_keyring.writes == []
+    cfg.access_token = "refreshed"
+    cfg.write()
+    assert fake_keyring.writes == ["access_token"]
     monkeypatch.setattr(config, "_secret_cache", {})
     # Through get_secret rather than the store, since what's stored is
     # bytes on Linux
@@ -329,9 +338,11 @@ def test_write_keeps_secrets_it_never_read(
     assert reread.email == "someone@example.com"
     assert reread.github_token == "gh-secret"
     # Clearing one really does remove it
+    fake_keyring.writes.clear()
     reread.github_token = None
     reread.write()
     assert (app, "github_token") not in fake_keyring.store
+    assert fake_keyring.writes == ["github_token"]
 
 
 def test_secrets_round_trip_on_linux(fake_keyring, monkeypatch, tmp_path):

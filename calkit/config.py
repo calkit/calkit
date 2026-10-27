@@ -306,11 +306,38 @@ def set_secret(key: str, value: str) -> None:
     """Sets a secret using keyring, handling byte conversion for Linux."""
     service_name = get_app_name()
     username = _keyring_username(key)
+
+    def update_macos_item() -> bool:
+        # keyring replaces the item, which forgets every app the user chose
+        # to always allow, so they'd be asked again after each token refresh
+        from ctypes import c_long, c_void_p
+
+        import keyring.backends.macOS
+        from keyring.backends.macOS import api
+
+        if not isinstance(
+            keyring.get_keyring(), keyring.backends.macOS.Keyring
+        ):
+            return False
+        api._found.CFDataCreate.restype = c_void_p
+        api._found.CFDataCreate.argtypes = (c_void_p, c_void_p, c_long)
+        api._sec.SecItemUpdate.restype = api.OS_status
+        api._sec.SecItemUpdate.argtypes = (c_void_p, c_void_p)
+        data = value.encode("utf-8")
+        query = api.create_query(
+            kSecClass=api.k_("kSecClassGenericPassword"),
+            kSecAttrService=service_name,
+            kSecAttrAccount=username,
+        )
+        cf_data = c_void_p(api._found.CFDataCreate(None, data, len(data)))
+        attrs = api.create_query(kSecValueData=cf_data)
+        return bool(api._sec.SecItemUpdate(query, attrs) == 0)
+
     with _keyring_home():
         if platform.system() == "Linux":
             value_bytes = value.encode("utf-8")
             keyring.set_password(service_name, username, value_bytes)  # type: ignore
-        else:
+        elif platform.system() != "Darwin" or not update_macos_item():
             keyring.set_password(service_name, username, value)
     _secret_cache[(service_name, username)] = value
 
@@ -526,6 +553,11 @@ class Settings(BaseSettings):
                     KeyringOptionalSecret in get_type_args(value.annotation)
                 ) and key in cfg:
                     secret_val = cfg.pop(key)
+                    # Only what changed, so a token refresh leaves the
+                    # others, and who may read them, alone
+                    stored = (get_app_name(), _keyring_username(key))
+                    if _secret_cache.get(stored, ...) == secret_val:
+                        continue
                     if secret_val is not None:
                         set_secret(key, secret_val)
                     else:

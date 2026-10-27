@@ -144,6 +144,43 @@ def test_latex_source_helpers(project: Path) -> None:
     assert calkit.latex.already_applied(
         applied, sent, sent.replace("for wind", "for a wind")
     )
+    # An insertion where the words before it repeat goes after a longer
+    # run of them, across braces, else before the words after it, e.g.,
+    # past a citation
+    styled = calkit.latex.Block(
+        [
+            calkit.latex.SourceLine(
+                "x.tex",
+                1,
+                r"A \textit{fast model} for wind, and a \textit{slow model} "
+                r"for wind too.",
+            )
+        ]
+    )
+    sent_s = "A fast model for wind, and a slow model for wind too."
+    assert calkit.latex.apply_edit(
+        styled, sent_s, sent_s.replace("wind too", "wind farms too")
+    ) == [
+        r"A \textit{fast model} for wind, and a \textit{slow model} for wind "
+        r"farms too."
+    ]
+    cited = calkit.latex.Block(
+        [
+            calkit.latex.SourceLine(
+                "x.tex",
+                1,
+                r"See \cite{a} for wind farms, and see \cite{b} for wind farms "
+                r"too.",
+            )
+        ]
+    )
+    sent_c = "See [1] for wind farms, and see [2] for wind farms too."
+    assert calkit.latex.apply_edit(
+        cited, sent_c, sent_c.replace("farms too", "small farms too")
+    ) == [
+        r"See \cite{a} for wind farms, and see \cite{b} for wind small farms "
+        r"too."
+    ]
     # Comment blocks parse and render back to the same lines
     src = Path("paper/methods.tex").read_text(encoding="utf-8").split("\n")
     comments = calkit.latex.parse_comments(src)
@@ -301,6 +338,10 @@ def test_latex_source_helpers(project: Path) -> None:
     assert calkit.latex.math_tokens(
         "z \\in \\mathcal{E}"
     ) != calkit.latex.math_tokens("z\\mathcal{\\in F}")
+    # Nor an accent another Pandoc version reads back another way
+    assert calkit.latex.math_tokens(
+        "\\widehat{y} + \\widetilde{x} + \\overrightarrow{v}"
+    ) == calkit.latex.math_tokens("\\hat{y} + \\tilde{x} + \\vec{v}")
     # Nor Word saving a function name after a command as letters
     assert calkit.latex.math_tokens(
         "e^{\\Delta\\ln x}"

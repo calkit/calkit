@@ -2062,27 +2062,37 @@ def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
             # Anchor on the preceding word(s), widening the phrase until
             # it's unique -- a single preceding word is often repeated
             # elsewhere in the block even when the insertion point isn't
-            # anywhere near markup.
-            if i1 == 0:
-                return None
-            hits = None
-            for k in range(1, i1 + 1):
-                phrase = ow[i1 - k : i1]
-                pattern = (
-                    r"(?<![A-Za-z])"
-                    + r"[\s~]+".join(re.escape(w) for w in phrase)
-                    + r"(?![A-Za-z])"
-                )
-                found = list(re.finditer(pattern, src))
-                if len(found) == 1:
-                    hits = found
+            # anywhere near markup -- else on the following ones, e.g.,
+            # where markup sits between the preceding words. Braces can,
+            # e.g., \textit{H model} for.
+            hits, after = None, True
+            for phrases in (
+                [ow[i1 - k : i1] for k in range(1, i1 + 1)],
+                [ow[i1 : i1 + k] for k in range(1, len(ow) - i1 + 1)],
+            ):
+                for phrase in phrases:
+                    pattern = (
+                        r"(?<![A-Za-z])"
+                        + r"[\s~{}]+".join(re.escape(w) for w in phrase)
+                        + r"(?![A-Za-z])"
+                    )
+                    found = list(re.finditer(pattern, src))
+                    if len(found) == 1:
+                        hits = found
+                        break
+                    if not found:
+                        break
+                if hits is not None:
                     break
-                if not found:
-                    break
+                after = False
             if hits is None:
                 return None
-            at = hits[0].end()
-            src = src[:at] + " " + new_span + src[at:]
+            if after:
+                at = hits[0].end()
+                src = src[:at] + " " + new_span + src[at:]
+            else:
+                at = hits[0].start()
+                src = src[:at] + new_span + " " + src[at:]
             continue
         span = _find_span(src, ow[i1:i2])
         if span is None:
@@ -2123,6 +2133,13 @@ def normalize_math(tex: str) -> str:
         r"\\(" + "|".join(_MATH_FUNCTIONS) + r")(?![a-zA-Z])", r" \1 ", tex
     )
     tex = tex.replace("{}", "")
+    # Pandoc versions read the same accent back differently
+    for wide, accent in (
+        ("widehat", "hat"),
+        ("widetilde", "tilde"),
+        ("overrightarrow", "vec"),
+    ):
+        tex = re.sub(rf"\\{wide}(?![a-zA-Z])", rf"\\{accent}", tex)
 
     def letters_only(m: re.Match[str]) -> str:
         # A math alphabet styles letters, so symbols at the ends of its

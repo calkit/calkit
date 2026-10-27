@@ -863,6 +863,7 @@ async function renderAttachForm(
           input.disabled = true;
         }
         titleInput.disabled = true;
+        clear(repoResults);
         // The project this paper now belongs to is the one to work in
         await send({
           type: "settings.set",

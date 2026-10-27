@@ -232,15 +232,18 @@ class _FakeKeyring(keyring.backend.KeyringBackend):
     def __init__(self):
         self.store: dict[tuple[str, str], str] = {}
         self.reads: list[tuple[str, str]] = []
+        self.writes: list[str] = []
 
     def get_password(self, service, username):
         self.reads.append((service, username))
         return self.store.get((service, username))
 
     def set_password(self, service, username, password):
+        self.writes.append(username)
         self.store[(service, username)] = password
 
     def delete_password(self, service, username):
+        self.writes.append(username)
         if (service, username) not in self.store:
             raise keyring.errors.PasswordDeleteError(service)
         del self.store[(service, username)]
@@ -321,6 +324,12 @@ def test_write_keeps_secrets_it_never_read(
     cfg = config.read()
     cfg.email = "someone@example.com"
     cfg.write()
+    # Nor does it rewrite one that didn't change: on macOS, rewriting an
+    # item forgets which apps the user chose to always allow to read it
+    assert fake_keyring.writes == []
+    cfg.access_token = "refreshed"
+    cfg.write()
+    assert fake_keyring.writes == ["access_token"]
     monkeypatch.setattr(config, "_secret_cache", {})
     # Through get_secret rather than the store, since what's stored is
     # bytes on Linux
@@ -329,9 +338,66 @@ def test_write_keeps_secrets_it_never_read(
     assert reread.email == "someone@example.com"
     assert reread.github_token == "gh-secret"
     # Clearing one really does remove it
+    fake_keyring.writes.clear()
     reread.github_token = None
     reread.write()
     assert (app, "github_token") not in fake_keyring.store
+    assert fake_keyring.writes == ["github_token"]
+
+
+def test_set_secret_updates_macos_items_in_place(monkeypatch):
+    import ctypes
+    import itertools
+    from unittest import mock
+
+    import keyring.backends.macOS
+
+    class MacKeyring(keyring.backends.macOS.Keyring):
+        priority = 0
+
+        def __init__(self):
+            self.added: list[str] = []
+
+        def set_password(self, service, username, password):
+            self.added.append(username)
+
+    # Stand-ins for the Security and Foundation frameworks, so this runs
+    # anywhere, with integers for the Core Foundation objects created
+    lib = mock.MagicMock()
+    lib.CFDataCreate.return_value = 1
+    refs = itertools.count(2)
+    api = SimpleNamespace(k_=str, create_query=lambda **kwargs: next(refs))
+    monkeypatch.setattr(keyring.backends.macOS, "api", api, raising=False)
+    monkeypatch.setattr(ctypes, "CDLL", lambda name: lib)
+    monkeypatch.setattr(config.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(config, "_secret_cache", {})
+    backend = MacKeyring()
+    monkeypatch.setattr(keyring.core, "_keyring_backend", backend)
+    app = config.get_app_name()
+    cases = [
+        (0, None, []),
+        (-25300, None, ["github_token"]),
+        (-128, keyring.errors.KeyringLocked, []),
+        (-25293, keyring.errors.PasswordSetError, []),
+    ]
+    for status, error, added in cases:
+        lib.reset_mock()
+        lib.SecItemUpdate.return_value = status
+        backend.added.clear()
+        config._secret_cache.clear()
+        if error is None:
+            config.set_secret("github_token", "secret")
+            assert config._secret_cache[(app, "github_token")] == "secret"
+        else:
+            # Denied, say, so replacing the item would lose who may read it
+            with pytest.raises(error):
+                config.set_secret("github_token", "secret")
+            assert (app, "github_token") not in config._secret_cache
+        assert backend.added == added
+        lib.CFDataCreate.assert_called_once_with(None, b"secret", 6)
+        # Everything created is released, whatever the outcome
+        created = [c.args[0] for c in lib.CFRelease.call_args_list]
+        assert len(created) == 3 and 1 in created
 
 
 def test_secrets_round_trip_on_linux(fake_keyring, monkeypatch, tmp_path):

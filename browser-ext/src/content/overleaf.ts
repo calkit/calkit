@@ -969,6 +969,7 @@ async function load(overleafProjectId: string): Promise<void> {
       return;
     }
     const links = lookup.links;
+    lastUnlinked = !links.length && lookup.projects_remaining === 0;
     if (!links.length) {
       clear(body).append(pickers);
       if (lookup.projects_remaining > 0) {
@@ -1090,9 +1091,10 @@ async function load(overleafProjectId: string): Promise<void> {
  *
  * Its tone carries the one thing worth interrupting for: amber means a
  * sync would do something, which is how a stale figure gets noticed
- * without the panel opening on top of the document uninvited.
+ * without the panel opening on top of the document uninvited. A paper
+ * not in any project gets it too, since linking it is the first step.
  */
-type LauncherTone = "idle" | "attention" | "reconnect";
+type LauncherTone = "idle" | "attention" | "reconnect" | "unlinked";
 
 function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
   document.getElementById(LAUNCHER_ID)?.remove();
@@ -1126,6 +1128,7 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
       idle: "Calkit",
       attention: "Calkit: sync needed",
       reconnect: "Calkit: reconnect Overleaf",
+      unlinked: "Calkit: not linked",
     }[tone],
     class: tone === "idle" ? "" : "attention",
   });
@@ -1137,6 +1140,7 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
 // Remembered so a closed panel can still show that something is waiting
 let lastSyncNeeded = false;
 let lastTokenProblem = false;
+let lastUnlinked = false;
 
 function openPanel(overleafProjectId: string): void {
   document.getElementById(LAUNCHER_ID)?.remove();
@@ -1147,7 +1151,13 @@ function openPanel(overleafProjectId: string): void {
       panel = null;
       mountLauncher(
         () => openPanel(overleafProjectId),
-        lastTokenProblem ? "reconnect" : lastSyncNeeded ? "attention" : "idle",
+        lastTokenProblem
+          ? "reconnect"
+          : lastUnlinked
+          ? "unlinked"
+          : lastSyncNeeded
+          ? "attention"
+          : "idle",
       );
     },
   });
@@ -1210,6 +1220,14 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     });
     const link = lookup.links[0];
     if (!link) {
+      if (!(await current())) {
+        return;
+      }
+      // Only when every project was checked, since the rest might link it
+      lastUnlinked = lookup.projects_remaining === 0;
+      if (lastUnlinked && !panel && currentProjectId === overleafProjectId) {
+        mountLauncher(() => openPanel(overleafProjectId), "unlinked");
+      }
       return;
     }
     const statuses = await send({
@@ -1223,6 +1241,7 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       return;
     }
     lastTokenProblem = false;
+    lastUnlinked = false;
     lastSyncNeeded = Boolean(statuses.length) && !statuses[0].in_sync;
     lastCheck = statuses.length
       ? { overleafProjectId, hubWebUrl: hub, link, status: statuses[0] }
@@ -1299,6 +1318,7 @@ runContentScript({
     loadGeneration++;
     lastSyncNeeded = false;
     lastTokenProblem = false;
+    lastUnlinked = false;
     lastCheck = null;
     if (panel) {
       void load(overleafProjectId);

@@ -18,8 +18,8 @@ stages:
       size: 55475
     - path: calkit/latex.py
       hash: md5
-      md5: 101733ef8853517febf823e33ea23435
-      size: 89346
+      md5: 162c317057cb57c3ac1615e821548f65
+      size: 88713
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -116,8 +116,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: 101733ef8853517febf823e33ea23435
-      size: 89346
+      md5: 162c317057cb57c3ac1615e821548f65
+      size: 88713
     - path: uv.lock
       hash: md5
       md5: 78cff1621fa9cb37be1d99412ed26e0f
@@ -400,7 +400,7 @@ stages:
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 2a5baf9f4f721cd4cbbaff092ffeff98
+      md5: 6c863fad843feaf7a5278576de14a5d5
       size: 11725
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
@@ -415,7 +415,7 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 2a5baf9f4f721cd4cbbaff092ffeff98
+      md5: 6c863fad843feaf7a5278576de14a5d5
       size: 11725
     - path: scripts/find-calkit-papers.py
       hash: md5

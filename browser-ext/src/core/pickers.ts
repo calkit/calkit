@@ -248,7 +248,21 @@ export function renderFailure(
       );
     }
   });
-  container.append(el("div", { class: "actions" }, [button]), message);
+  container.append(
+    el("div", { class: "actions" }, [button]),
+    // The approval page is also where an account gets made, which nothing
+    // here said, so someone new had no reason to click
+    el("div", { class: "dim small" }, [
+      document.createTextNode(
+        "New to Calkit? Sign in with GitHub to create an account. ",
+      ),
+      el("a", {
+        text: "Need a GitHub account?",
+        href: "https://github.com/signup",
+      }),
+    ]),
+    message,
+  );
   // Signing in is per hub, so a signed-out panel is also a panel with no
   // way back: picking the wrong hub used to mean opening the options
   // page to get out of it. Appended once it loads, so nothing waits.

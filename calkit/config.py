@@ -310,28 +310,57 @@ def set_secret(key: str, value: str) -> None:
     def update_macos_item() -> bool:
         # keyring replaces the item, which forgets every app the user chose
         # to always allow, so they'd be asked again after each token refresh
-        from ctypes import c_long, c_void_p
+        import ctypes
+        import ctypes.util
 
         import keyring.backends.macOS
-        from keyring.backends.macOS import api
 
         if not isinstance(
             keyring.get_keyring(), keyring.backends.macOS.Keyring
         ):
             return False
-        api._found.CFDataCreate.restype = c_void_p
-        api._found.CFDataCreate.argtypes = (c_void_p, c_void_p, c_long)
-        api._sec.SecItemUpdate.restype = api.OS_status
-        api._sec.SecItemUpdate.argtypes = (c_void_p, c_void_p)
+        from keyring.backends.macOS import api
+
+        # Our own handles, so keyring's private ones are left alone
+        found = ctypes.CDLL(ctypes.util.find_library("Foundation"))
+        sec = ctypes.CDLL(ctypes.util.find_library("Security"))
+        found.CFDataCreate.restype = ctypes.c_void_p
+        found.CFDataCreate.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_long,
+        )
+        found.CFRelease.restype = None
+        found.CFRelease.argtypes = (ctypes.c_void_p,)
+        sec.SecItemUpdate.restype = ctypes.c_int32
+        sec.SecItemUpdate.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
         data = value.encode("utf-8")
+        cf_data = found.CFDataCreate(None, data, len(data))
         query = api.create_query(
             kSecClass=api.k_("kSecClassGenericPassword"),
             kSecAttrService=service_name,
             kSecAttrAccount=username,
         )
-        cf_data = c_void_p(api._found.CFDataCreate(None, data, len(data)))
-        attrs = api.create_query(kSecValueData=cf_data)
-        return bool(api._sec.SecItemUpdate(query, attrs) == 0)
+        attrs = api.create_query(kSecValueData=ctypes.c_void_p(cf_data))
+        try:
+            status = sec.SecItemUpdate(query, attrs)
+        finally:
+            for ref in (cf_data, query, attrs):
+                if ref:
+                    found.CFRelease(ref)
+        # Only a missing item may be added through keyring, since that
+        # replaces any item there, e.g., after the user denied the update
+        if status == -25300:  # errSecItemNotFound
+            return False
+        if status == -128:  # errSecUserCanceled
+            raise keyring.errors.KeyringLocked(
+                f"Can't store password on keychain: OSStatus {status}"
+            )
+        if status != 0:
+            raise keyring.errors.PasswordSetError(
+                f"Can't store password on keychain: OSStatus {status}"
+            )
+        return True
 
     with _keyring_home():
         if platform.system() == "Linux":

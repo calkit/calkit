@@ -345,6 +345,61 @@ def test_write_keeps_secrets_it_never_read(
     assert fake_keyring.writes == ["github_token"]
 
 
+def test_set_secret_updates_macos_items_in_place(monkeypatch):
+    import ctypes
+    import itertools
+    from unittest import mock
+
+    import keyring.backends.macOS
+
+    class MacKeyring(keyring.backends.macOS.Keyring):
+        priority = 0
+
+        def __init__(self):
+            self.added: list[str] = []
+
+        def set_password(self, service, username, password):
+            self.added.append(username)
+
+    # Stand-ins for the Security and Foundation frameworks, so this runs
+    # anywhere, with integers for the Core Foundation objects created
+    lib = mock.MagicMock()
+    lib.CFDataCreate.return_value = 1
+    refs = itertools.count(2)
+    api = SimpleNamespace(k_=str, create_query=lambda **kwargs: next(refs))
+    monkeypatch.setattr(keyring.backends.macOS, "api", api, raising=False)
+    monkeypatch.setattr(ctypes, "CDLL", lambda name: lib)
+    monkeypatch.setattr(config.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(config, "_secret_cache", {})
+    backend = MacKeyring()
+    monkeypatch.setattr(keyring.core, "_keyring_backend", backend)
+    app = config.get_app_name()
+    cases = [
+        (0, None, []),
+        (-25300, None, ["github_token"]),
+        (-128, keyring.errors.KeyringLocked, []),
+        (-25293, keyring.errors.PasswordSetError, []),
+    ]
+    for status, error, added in cases:
+        lib.reset_mock()
+        lib.SecItemUpdate.return_value = status
+        backend.added.clear()
+        config._secret_cache.clear()
+        if error is None:
+            config.set_secret("github_token", "secret")
+            assert config._secret_cache[(app, "github_token")] == "secret"
+        else:
+            # Denied, say, so replacing the item would lose who may read it
+            with pytest.raises(error):
+                config.set_secret("github_token", "secret")
+            assert (app, "github_token") not in config._secret_cache
+        assert backend.added == added
+        lib.CFDataCreate.assert_called_once_with(None, b"secret", 6)
+        # Everything created is released, whatever the outcome
+        created = [c.args[0] for c in lib.CFRelease.call_args_list]
+        assert len(created) == 3 and 1 in created
+
+
 def test_secrets_round_trip_on_linux(fake_keyring, monkeypatch, tmp_path):
     # Linux stores the value as bytes, so what comes back out of the
     # keyring -- and out of the cache -- has to be the string either way.

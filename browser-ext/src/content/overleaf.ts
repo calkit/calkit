@@ -622,6 +622,15 @@ async function renderAttachForm(
   clear(container);
   const existsOnGithub = el("input", { type: "checkbox" });
   existsOnGithub.style.width = "auto";
+  // Only for a new repo, since the hub matches an existing one's visibility
+  const isPublic = el("input", { type: "checkbox" });
+  isPublic.style.width = "auto";
+  isPublic.addEventListener("change", () => describe());
+  const publicField = el(
+    "label",
+    { class: "row", style: { fontWeight: "400" } },
+    [isPublic, el("div", { class: "grow small", text: "Make it public" })],
+  );
   const repoInput = textInput({
     placeholder: "Start typing your GitHub repo name",
   });
@@ -637,11 +646,11 @@ async function renderAttachForm(
   ]);
   const titleInput = textInput({
     value: overleafProjectTitle(),
-    placeholder: "My paper",
+    placeholder: "My project",
   });
   const nameInput = textInput({
     value: projectSlug(titleInput.value),
-    placeholder: "my-paper",
+    placeholder: "my-project",
   });
   // The name follows the title until it's edited itself
   let nameEdited = false;
@@ -655,35 +664,23 @@ async function renderAttachForm(
     }
     describe();
   });
-  const pathInput = textInput({ value: "paper" });
-  pathInput.addEventListener("input", () => describe());
-  const kind = el("select");
-  for (const [value, label] of [
-    ["journal-article", "Journal article"],
-    ["conference-paper", "Conference paper"],
-    ["report", "Report"],
-    ["book", "Book"],
-    ["masters-thesis", "Master's thesis"],
-    ["phd-thesis", "PhD thesis"],
-    ["other", "Other"],
-  ]) {
-    kind.append(el("option", { value, text: label }));
-  }
-  // Where the paper's files will go, since committing into an existing
+  const doc = documentFields(() => describe());
+  // Where the document's files will go, since committing into an existing
   // repo is the part worth knowing before clicking
   const where = el("div", { class: "dim small" });
   const message = el("div", { class: "small" });
   let repos: GithubRepo[] | null = null;
   let chosenRepo: GithubRepo | null = null;
   const describe = () => {
-    const folder = pathInput.value.trim() || "paper";
+    const folder = doc.folder();
     where.textContent = existsOnGithub.checked
       ? chosenRepo
-        ? `Calkit will commit this paper's files to ${folder}/ in ` +
+        ? `Calkit will commit this document's files to ${folder}/ in ` +
           `${chosenRepo.full_name}, and keep them in sync with Overleaf.`
         : ""
-      : `Calkit will create a private repo, ${githubName}/` +
-        `${nameInput.value.trim() || "..."}, with this paper's files in ` +
+      : `Calkit will create a ${isPublic.checked ? "public" : "private"} ` +
+        `repo, ${githubName}/` +
+        `${nameInput.value.trim() || "..."}, with this document's files in ` +
         `${folder}/, and keep them in sync with Overleaf.`;
   };
   const renderRepoResults = () => {
@@ -741,6 +738,7 @@ async function renderAttachForm(
   repoInput.addEventListener("input", renderRepoResults);
   const syncGithubFields = () => {
     repoFields.style.display = existsOnGithub.checked ? "" : "none";
+    publicField.style.display = existsOnGithub.checked ? "none" : "";
     if (existsOnGithub.checked && repos === null) {
       void loadRepos();
     }
@@ -771,22 +769,22 @@ async function renderAttachForm(
           gitRepoUrl: chosenRepo
             ? `https://github.com/${chosenRepo.full_name}`
             : undefined,
-          isPublic: false,
+          isPublic: !chosenRepo && isPublic.checked,
         });
         // Nothing above can change what was made
-        for (const input of [existsOnGithub, repoInput, nameInput]) {
+        for (const input of [existsOnGithub, isPublic, repoInput, nameInput]) {
           input.disabled = true;
         }
         titleInput.disabled = true;
       }
-      clear(message).append(loading("Bringing in the paper from Overleaf"));
+      clear(message).append(loading("Bringing in the document from Overleaf"));
       await send({
         type: "overleaf.import",
         owner: created.owner_account_name,
         project: created.name,
         overleafProjectUrl: `https://www.overleaf.com/project/${overleafProjectId}`,
-        path: pathInput.value.trim() || "paper",
-        kind: kind.value,
+        path: doc.folder(),
+        kind: doc.kind.value,
       });
       reload();
     } catch (e) {
@@ -807,7 +805,7 @@ async function renderAttachForm(
     }
   });
   container.append(
-    el("label", { text: "Title" }),
+    el("label", { text: "Project title" }),
     titleInput,
     el("label", { text: "Project name" }),
     nameInput,
@@ -815,18 +813,64 @@ async function renderAttachForm(
       existsOnGithub,
       el("div", {
         class: "grow small",
-        text: "The code behind this paper is already in a GitHub repo",
+        text: "This project already has a GitHub repo",
       }),
     ]),
     repoFields,
-    el("label", { text: "Folder for the paper" }),
-    pathInput,
-    el("label", { text: "Type" }),
-    kind,
+    publicField,
+    ...doc.fields,
     where,
     el("div", { class: "actions" }, [attach]),
     message,
   );
+}
+
+/**
+ * Type and folder fields for an Overleaf document going into a project,
+ * the folder following the type until it's edited.
+ */
+function documentFields(onChange: () => void = () => {}): {
+  kind: HTMLSelectElement;
+  folder: () => string;
+  fields: HTMLElement[];
+} {
+  const types: [string, string, string][] = [
+    ["journal-article", "Journal article", "paper"],
+    ["conference-paper", "Conference paper", "paper"],
+    ["report", "Report", "report"],
+    ["book", "Book", "book"],
+    ["masters-thesis", "Master's thesis", "thesis"],
+    ["phd-thesis", "PhD thesis", "thesis"],
+    ["other", "Other", "document"],
+  ];
+  const kind = el("select");
+  for (const [value, label] of types) {
+    kind.append(el("option", { value, text: label }));
+  }
+  const defaultFolder = () =>
+    types.find(([value]) => value === kind.value)?.[2] ?? "document";
+  const path = textInput({ value: defaultFolder() });
+  let pathEdited = false;
+  path.addEventListener("input", () => {
+    pathEdited = true;
+    onChange();
+  });
+  kind.addEventListener("change", () => {
+    if (!pathEdited) {
+      path.value = defaultFolder();
+    }
+    onChange();
+  });
+  return {
+    kind,
+    folder: () => path.value.trim() || defaultFolder(),
+    fields: [
+      el("label", { text: "Type" }),
+      kind,
+      el("label", { text: "Folder for this document" }),
+      path,
+    ],
+  };
 }
 
 function renderImportForm(
@@ -834,21 +878,7 @@ function renderImportForm(
   overleafProjectId: string,
   reload: () => void,
 ): HTMLElement[] {
-  const path = textInput({
-    value: "paper",
-  });
-  const kind = el("select");
-  for (const [value, label] of [
-    ["journal-article", "Journal article"],
-    ["conference-paper", "Conference paper"],
-    ["report", "Report"],
-    ["book", "Book"],
-    ["masters-thesis", "Master's thesis"],
-    ["phd-thesis", "PhD thesis"],
-    ["other", "Other"],
-  ]) {
-    kind.append(el("option", { value, text: label }));
-  }
+  const doc = documentFields();
   const importButton = el("button", {
     class: "action",
     text: "Import and link",
@@ -856,15 +886,15 @@ function renderImportForm(
   const message = el("div", { class: "small" });
   importButton.addEventListener("click", async () => {
     importButton.disabled = true;
-    clear(message).append(loading("Importing"));
+    clear(message).append(loading("Bringing in the document from Overleaf"));
     try {
       await send({
         type: "overleaf.import",
         owner: project.owner_account_name,
         project: project.name,
         overleafProjectUrl: `https://www.overleaf.com/project/${overleafProjectId}`,
-        path: path.value.trim(),
-        kind: kind.value,
+        path: doc.folder(),
+        kind: doc.kind.value,
       });
       reload();
     } catch (e) {
@@ -873,10 +903,7 @@ function renderImportForm(
     }
   });
   return [
-    el("label", { text: "Folder in the project" }),
-    path,
-    el("label", { text: "Type" }),
-    kind,
+    ...doc.fields,
     el("div", { class: "actions" }, [importButton]),
     message,
   ];

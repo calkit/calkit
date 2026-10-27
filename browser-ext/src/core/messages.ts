@@ -58,6 +58,8 @@ export type Request =
        * would then fail.
        */
       minAccessLevel?: "read" | "write";
+      /** Only the project for this GitHub repo, e.g., "owner/repo". */
+      githubRepo?: string;
     }
   | ({ type: "projects.byGithubRepo"; githubRepo: string } & HubScoped)
   | ({
@@ -73,6 +75,7 @@ export type Request =
     } & HubScoped)
   | { type: "github.calkitInfo"; githubRepo: string }
   | { type: "github.repos"; perPage?: number }
+  | { type: "github.installations" }
   | ({
       type: "github.pullRequest";
       owner: string;
@@ -186,6 +189,7 @@ export interface ResponseMap {
   "projects.create": ProjectPublic;
   "github.calkitInfo": CalkitYamlInfo;
   "github.repos": GithubRepo[];
+  "github.installations": { total_count: number };
   "github.pullRequest": PullRequestRefs;
   "project.contents": ContentsItem;
   "project.dvcOutputs": DvcOutput[];

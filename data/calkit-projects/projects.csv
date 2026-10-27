@@ -3,7 +3,7 @@ https://github.com/abachant/example-calkit-basic,abachant,example-calkit-basic,B
 https://github.com/abachant/poetry-metering,abachant,poetry-metering,,owner-scan,main,False,False,2024-02-04,2024-10-08,False,False
 https://github.com/alexlib/test-calkit-latex,alexlib,test-calkit-latex,test-calkit-latex,github-search+hub,main,True,False,2024-12-15,2026-10-24,False,True
 https://github.com/boom-astro/boom-paper,boom-astro,boom-paper,"BOOM and Babamul: a real-time, multi-survey, optical alert broker system operating at scale",datacite+github-search+hub,main,True,False,2025-06-23,2026-10-08,True,False
-https://github.com/calkit/calkit,calkit,calkit,Calkit,datacite+github-search+hub,main,True,False,2024-08-21,2026-10-26,True,True
+https://github.com/calkit/calkit,calkit,calkit,Calkit,datacite+github-search+hub,main,True,False,2024-08-21,2026-10-27,True,True
 https://github.com/calkit/example-analytics,calkit,example-analytics,Analytics example,github-search+hub,main,True,False,2025-11-12,2026-05-23,True,True
 https://github.com/calkit/example-basic,calkit,example-basic,Basic Calkit example,github-search+hub,main,True,False,2024-09-24,2026-09-21,True,True
 https://github.com/calkit/example-julia,calkit,example-julia,Calkit Julia example,github-search+hub,main,True,False,2025-08-07,2026-04-18,True,True
@@ -18,7 +18,7 @@ https://github.com/GrigorySadovskiyxyz/data_allsectors_fi,grigorysadovskiyxyz,da
 https://github.com/meganandd/matlab-test,meganandd,matlab-test,MATLAB test,owner-scan,main,False,False,2025-01-13,2025-01-13,True,True
 https://github.com/meganandd/unh-mhkf1,meganandd,unh-mhkf1,unh-mhkf1,hub,main,True,False,2025-01-14,2025-01-31,False,False
 https://github.com/papakringle-netizen/coffe,papakringle-netizen,coffe,coffe,hub,main,True,False,2025-11-29,2025-11-29,False,False
-https://github.com/petebachant/ai-agent-behavior,petebachant,ai-agent-behavior,AI agent behavior,github-search+hub,main,True,False,2026-10-15,2026-10-23,True,True
+https://github.com/petebachant/ai-agent-behavior,petebachant,ai-agent-behavior,AI agent behavior,github-search+hub,main,True,False,2026-10-15,2026-10-26,True,True
 https://github.com/petebachant/asteroids_atlas_of_space,petebachant,asteroids_atlas_of_space,Asteroids atlas of space,hub,calkit,True,True,2025-06-13,2025-06-15,True,False
 https://github.com/petebachant/boom,petebachant,boom,BOOM,hub,,True,False,2025-06-23,2025-08-13,True,False
 https://github.com/petebachant/boom-benchmarking,petebachant,boom-benchmarking,Benchmarking BOOM database options,github-search+hub,main,True,False,2025-06-16,2025-07-03,True,False
@@ -31,7 +31,7 @@ https://github.com/petebachant/calkit-test-4,petebachant,calkit-test-4,Calkit te
 https://github.com/petebachant/calkit-xr-demo,petebachant,calkit-xr-demo,Calkit xr demo,github-search+hub,main,True,False,2026-02-21,2026-02-25,True,True
 https://github.com/petebachant/citation-impact-open-science,petebachant,citation-impact-open-science,Reproducing 'A study on the citation impact of Open Science Indicators in the French Open Science Monitor',github-search+hub,main,True,False,2025-09-16,2025-09-16,True,False
 https://github.com/petebachant/clima-coupled-land-slowdown,petebachant,clima-coupled-land-slowdown,CliMA coupled land slowdown,github-search+hub,main,True,False,2025-11-11,2025-12-02,True,False
-https://github.com/petebachant/clima-gpu-profiling,petebachant,clima-gpu-profiling,CliMA GPU profiling,github-search+hub,main,True,False,2025-09-09,2026-10-26,True,False
+https://github.com/petebachant/clima-gpu-profiling,petebachant,clima-gpu-profiling,CliMA GPU profiling,github-search+hub,main,True,False,2025-09-09,2026-10-27,True,False
 https://github.com/petebachant/clima-horizontal-diffusion,petebachant,clima-horizontal-diffusion,CliMA horizontal diffusion,github-search+hub,main,True,False,2025-12-16,2026-02-05,True,False
 https://github.com/petebachant/clima-local-geometry,petebachant,clima-local-geometry,CliMA LocalGeometry,github-search+hub,main,True,False,2026-02-10,2026-03-16,True,False
 https://github.com/petebachant/clima-perf,petebachant,clima-perf,CliMA performance,github-search+hub,main,True,False,2026-01-13,2026-10-26,True,False
@@ -61,7 +61,7 @@ https://github.com/petebachant/wind-up-smarteole,petebachant,wind-up-smarteole,A
 https://github.com/pwbachant/my-analysis,pwbachant,my-analysis,My analysis,hub,main,True,False,2025-11-22,2026-09-19,True,False
 https://github.com/pwbachant/some-cool-thing,pwbachant,some-cool-thing,Some cool thing,owner-scan,main,False,False,2026-09-18,2026-09-20,True,False
 https://github.com/symbiotic-engineering/MDOcean,symbiotic-engineering,MDOcean,MDOcean,datacite+github-search+hub,main,True,False,2021-09-25,2026-10-24,False,False
-https://github.com/symbiotic-engineering/OpenFLASH,symbiotic-engineering,OpenFLASH,OpenFLASH,datacite+github-search+hub,main,True,False,2024-03-10,2026-10-21,False,False
+https://github.com/symbiotic-engineering/OpenFLASH,symbiotic-engineering,OpenFLASH,OpenFLASH,datacite+github-search+hub,main,True,False,2024-03-10,2026-10-26,False,False
 https://github.com/symbiotic-engineering/WEC-DECIDER,symbiotic-engineering,WEC-DECIDER,WEC DECIDER,github-search+hub,main,True,False,2023-03-13,2026-05-13,False,False
 https://github.com/tai03102004/project-final,tai03102004,project-final,project-final,github-search+hub,main,True,False,2026-05-18,2026-05-18,True,False
 https://github.com/UNH-CORE/RVAT-Re-dep,UNH-CORE,RVAT-Re-dep,UNH-RVAT Reynolds number dependence experiment,github-search+hub,master,True,False,2014-12-02,2024-12-06,True,False

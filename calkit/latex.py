@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import difflib
 import hashlib
 import os
@@ -1145,6 +1146,20 @@ _BLOCK_START_RE = re.compile(
     r"^\s*\\(begin|end|section|subsection|subsubsection|chapter|part|item|"
     r"caption|maketitle|documentclass)\b"
 )
+# An author-year citation as rendered, e.g., "(Smith et al., 2020; Lee,
+# 2021a)", or the year of a textual one
+_CITATION_RE = re.compile(r"\((?=[^()]*\b(?:1[5-9]|20)\d\d[a-z]?\b)[^()]*\)")
+# A sectioning command, which renders as a paragraph of its own
+_HEADING_RE = re.compile(
+    r"^\s*\\(part|chapter|section|subsection|subsubsection)\*?"
+    r"(\[[^\]]*\])?\{"
+)
+# A macro defined without arguments, through its body's opening brace
+_MACRO_DEF_RE = re.compile(
+    r"\\(?:(?:re)?newcommand|providecommand|DeclareRobustCommand)\*?\s*"
+    r"(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))\s*\{"
+    r"|\\def\s*\\([A-Za-z@]+)\s*\{"
+)
 # Display math, which Word gets as equations rather than paragraphs
 _DISPLAY_RE = re.compile(
     r"^\s*(?:\\begin\{(equation|align|gather|multline|eqnarray|flalign)"
@@ -1183,6 +1198,11 @@ class Block:
     # it in the rendered document
     floating: bool = False
     markdown: bool = False
+    # The document's macros without arguments, by name, which render as
+    # their text
+    macros: dict[str, str] = field(default_factory=dict)
+    # Before \begin{document}, so not rendered
+    preamble: bool = False
 
     @property
     def path(self) -> str:
@@ -1197,7 +1217,9 @@ class Block:
         if self.display:
             return ""
         src = "\n".join(ln.text for ln in self.lines)
-        return demarkdown(src) if self.markdown else detex(src)
+        if self.markdown:
+            return demarkdown(src)
+        return detex(expand_macros(src, self.macros))
 
     @property
     def inline_math(self) -> list[tuple[str, str, str]]:
@@ -1205,7 +1227,7 @@ class Block:
         rendered: (before, LaTeX, after)."""
         if self.display:
             return []
-        src = "\n".join(ln.text.split("%")[0] for ln in self.lines)
+        src = "\n".join(_strip_comments(ln.text) for ln in self.lines)
         found = list(_INLINE_MATH_RE.finditer(src))
         out = []
         for i, m in enumerate(found):
@@ -1213,9 +1235,9 @@ class Block:
             end = found[i + 1].start() if i + 1 < len(found) else len(src)
             out.append(
                 (
-                    detex(src[start : m.start()]),
+                    detex(expand_macros(src[start : m.start()], self.macros)),
                     m.group(1) or m.group(2),
-                    detex(src[m.end() : end]),
+                    detex(expand_macros(src[m.end() : end], self.macros)),
                 )
             )
         return out
@@ -1239,7 +1261,7 @@ class Block:
         env = self.display
         if env is None:
             return []
-        src = "\n".join(ln.text.split("%")[0] for ln in self.lines)
+        src = "\n".join(_strip_comments(ln.text) for ln in self.lines)
         src = re.sub(r"\\(label|tag\*?)\{[^}]*\}", "", src)
         body = re.sub(
             r"^\s*(\\begin\{[^}]*\}|\\\[|\$\$)|(\\end\{[^}]*\}|\\\]|\$\$)\s*$",
@@ -1317,7 +1339,7 @@ def flatten(
             return
         seen.add(key)
         for i, line in enumerate(text.split("\n"), 1):
-            m = None if markdown else _INCLUDE_RE.match(line.split("%")[0])
+            m = None if markdown else _INCLUDE_RE.match(_strip_comments(line))
             if m:
                 cmd, a, b = m.groups()
                 target = Path(b) if cmd == "import" and b else Path(a)
@@ -1354,9 +1376,58 @@ def from_word_text(text: str) -> str:
     return text.translate(_WORD_TO_TEX)
 
 
+def macro_definitions(lines: list[SourceLine]) -> dict[str, str]:
+    """The bodies of macros defined without arguments, by name, e.g.,
+    ``{"tool": "Wake\\textendash Sim\\xspace"}``."""
+    src = "\n".join(_strip_comments(ln.text) for ln in lines)
+    out: dict[str, str] = {}
+    for m in _MACRO_DEF_RE.finditer(src):
+        name = m.group(1) or m.group(2) or m.group(3)
+        # A later definition replaces an earlier one, but \providecommand
+        # only defines what isn't yet
+        provide = m.group(0).startswith("\\providecommand")
+        # The body, through its matching brace
+        depth, start = 0, m.end() - 1
+        for i in range(start, len(src)):
+            if src[i] == "{" and src[i - 1] != "\\":
+                depth += 1
+            elif src[i] == "}" and src[i - 1] != "\\":
+                depth -= 1
+                if depth == 0:
+                    if not provide or name not in out:
+                        out[name] = src[start + 1 : i]
+                    break
+    return out
+
+
+def expand_macros(
+    text: str, macros: dict[str, str], math: bool = False
+) -> str:
+    """``text`` with the macros in ``macros`` replaced by their bodies,
+    outside math, which a converter expands itself, unless ``math``."""
+    if not macros:
+        return text
+    pattern = re.compile(
+        r"\\("
+        + "|".join(re.escape(n) for n in sorted(macros, key=len, reverse=True))
+        + r")(?![A-Za-z@])"
+    )
+    parts = [text] if math else re.split(r"(\$[^$]*\$)", text)
+    for i in range(0, len(parts), 2):
+        # Bodies can use other macros
+        for _ in range(5):
+            new = pattern.sub(lambda m: macros[m.group(1)], parts[i])
+            if new == parts[i]:
+                break
+            parts[i] = new
+    return "".join(parts)
+
+
 def detex(text: str) -> str:
     """Roughly what LaTeX would print for a bit of source."""
-    text = "\n".join(ln.split("%")[0] for ln in text.split("\n"))
+    text = "\n".join(_strip_comments(ln) for ln in text.split("\n"))
+    # Line breaks first, so the word after one isn't taken for a command
+    text = text.replace("\\\\", " ")
     text = re.sub(r"\$[^$]*\$", " ", text)
     text = re.sub(
         r"\\(cite[pt]?|ref|eqref|label|includegraphics|usepackage|"
@@ -1451,8 +1522,17 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
     cur: list[SourceLine] = []
     # The text that closes the display math being read, if any
     closing: str | None = None
+    # Whether cur is a heading, which ends after it and any labels
+    heading = False
     for ln in lines:
         stripped, rest = ln.text.strip(), ln.text
+        if heading and not (
+            stripped
+            and re.fullmatch(r"(\\label\{[^}]*\}\s*)*(%.*)?", stripped)
+        ):
+            if cur:
+                out.append(Block(cur))
+            cur, heading = [], False
         # Display math is a block of its own, through its closing line
         m = _DISPLAY_RE.match(ln.text) if closing is None else None
         if m is not None:
@@ -1486,12 +1566,28 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
             out.append(Block(cur))
             cur = []
         cur.append(ln)
+        # Through its closing brace, so prose right after it is its own
+        if (
+            _HEADING_RE.match(ln.text)
+            and _brace_depth(_strip_comments(ln.text)) == 0
+        ):
+            heading = True
     if cur:
         out.append(Block(cur))
+    macros = macro_definitions(lines)
+    begin = next(
+        (
+            i
+            for i, ln in enumerate(lines)
+            if re.match(r"\s*\\begin\{document\}", ln.text)
+        ),
+        0,
+    )
+    before = {id(ln) for ln in lines[:begin]}
     in_float: set[tuple[str, int]] = set()
     depth = 0
     for ln in lines:
-        for m in _FLOAT_RE.finditer(ln.text.split("%")[0]):
+        for m in _FLOAT_RE.finditer(_strip_comments(ln.text)):
             depth = max(0, depth + (1 if m.group(1) == "begin" else -1))
             if m.group(1) == "begin":
                 in_float.add((ln.path, ln.lineno))
@@ -1499,7 +1595,16 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
             in_float.add((ln.path, ln.lineno))
     for b in out:
         b.floating = (b.path, b.lineno) in in_float
+        b.macros = macros
+        b.preamble = id(b.lines[0]) in before
     return [b for b in out if b.text or b.display]
+
+
+def _brace_depth(text: str) -> int:
+    """How many more braces ``text`` opens than closes."""
+    return len(re.findall(r"(?<!\\)\{", text)) - len(
+        re.findall(r"(?<!\\)\}", text)
+    )
 
 
 def _words(text: str) -> set[str]:
@@ -1511,43 +1616,98 @@ def similarity(a: str, b: str) -> float:
     return len(wa & wb) / len(wa) if wa else 0.0
 
 
+def equation_fragment(text: str) -> bool:
+    """Whether rendered text is a short piece of a display: with its
+    number ending it, or anywhere in it with math, e.g.,
+    "L = a, if x < τ (6) otherwise,", else with hardly any words and math
+    or an unclosed parenthesis, e.g., "f("."""
+    words = _words(text)
+    math = re.search(r"[=≈<>≤≥∈∑∫|≪≫]", text) is not None
+    number = re.search(r"\(([A-Z]\.?)?\d+(\.\d+)*[a-z]?\)(\s*$)?", text)
+    if number is not None and len(words) < 4:
+        return number.group(3) is not None or math
+    return len(words) < 3 and (math or text.count("(") != text.count(")"))
+
+
 def align(
     texts: list[str], blks: list[Block], threshold: float = 0.5
 ) -> list[Block | None]:
     """Match rendered paragraphs to source blocks, in order."""
-    out: list[Block | None] = []
-    last = 0
-    floats = [j for j, b in enumerate(blks) if b.floating]
-    for text in texts:
-        # A short line ending in an equation number is a display's
-        # fragment, even when it shares a word with the prose around it
-        if re.search(r"\(([A-Z]\.)?\d+(\.\d+)*\)\s*$", text) and (
-            len(_words(text)) < 4
+
+    def score(text: str, j: int) -> tuple[float, bool, int, int]:
+        b = blks[j]
+        # A match on a few words can't skip ahead past prose, e.g., an
+        # equation's "otherwise" to a later paragraph saying it, nor
+        # reach a figure or table more than a few pages off
+        skipped = abs(
+            bisect.bisect_left(prose, j) - bisect.bisect_left(prose, last)
+        )
+        if skipped > (8 if b.floating else 2) and (
+            len(_words(text) & _words(b.text)) < 4
         ):
+            return (0.0, False, 0, j)
+        # Of the preamble, only the title and authors render
+        if b.preamble and not any(
+            re.match(r"\s*\\(title|author|date)\b", ln.text) for ln in b.lines
+        ):
+            return (0.0, False, 0, j)
+        # On a tie, a block the paragraph is the whole of, e.g., a
+        # heading over a caption using its words, then the nearest, so
+        # a short heading can't jump ahead to a later paragraph, nor a
+        # table's cell to another table
+        return (
+            similarity(text, b.text),
+            similarity(b.text, text) >= 0.8,
+            -min(abs(j - last), abs(j - recent)),
+            j,
+        )
+
+    out: list[Block | None] = []
+    # The block the prose has reached, and the last matched, which can be
+    # a figure or table
+    last = recent = 0
+    floats = [j for j, b in enumerate(blks) if b.floating]
+    # Prose blocks, by index, for how far a match jumps ahead, not counting
+    # the preamble's, of which only the title and authors render
+    prose = [
+        j
+        for j, b in enumerate(blks)
+        if not b.floating and not b.preamble and b.text
+    ]
+    for text in texts:
+        fragment = equation_fragment(text)
+        # Author-year citations render as names the source doesn't have
+        text = _CITATION_RE.sub(" ", text)
+        # A figure or table can be anywhere, since it floats, and doesn't
+        # move the place in the source the prose has reached
+        candidates = sorted(set(range(last, len(blks))) | set(floats))
+        best = max(
+            (score(text, j) for j in candidates), default=(0.0, False, 0, 0)
+        )
+        # A display's fragment, even when it shares a word with the prose
+        # around it, unless it's the whole of a block, e.g., a heading with
+        # math
+        if fragment and not (best[1] and best[0] >= threshold):
             out.append(None)
             continue
-        # On a tie the nearest block wins, so a short heading can't jump
-        # ahead to a later paragraph sharing its words. A figure or table
-        # can be anywhere, since it floats, and doesn't move the place in
-        # the source the prose has reached.
-        candidates = sorted(set(range(last, len(blks))) | set(floats))
-        scores = [(similarity(text, blks[j].text), -j) for j in candidates]
-        best = max(scores, default=(0.0, 1))
         # A table's rows or a caption's lines stay with it on a tie, e.g.,
-        # a row "Growth rate k 0.05" beside prose about the growth rate
+        # a row "Growth rate k 0.05" beside prose about the growth rate,
+        # unless the paragraph is the whole of the other, e.g., a heading
         prev = next((b for b in reversed(out) if b is not None), None)
         if (
             prev is not None
             and prev.floating
             and best[0] >= threshold
             and similarity(text, prev.text) >= best[0]
+            and (not best[1] or similarity(prev.text, text) >= 0.8)
         ):
             out.append(prev)
             continue
         if best[0] >= threshold:
-            out.append(blks[-best[1]])
-            if not blks[-best[1]].floating:
-                last = -best[1]
+            out.append(blks[best[3]])
+            recent = best[3]
+            if not blks[best[3]].floating:
+                last = best[3]
         else:
             out.append(None)
     return out
@@ -1695,6 +1855,11 @@ _MATH_FUNCTIONS = (
     "arccos arcsin arctan arg cos cosh cot coth det exp lg lim ln log max "
     "min sec sin sinh sup tan tanh"
 ).split()
+# A math alphabet command and the group it styles, without nested groups
+_MATH_ALPHABET_RE = re.compile(
+    r"\\(mathcal|mathbf|mathit|mathsf|mathtt|mathbb|mathfrak|mathscr|"
+    r"boldsymbol|bm)\s*\{([^{}]*)\}"
+)
 # Grouping and wrappers that the source and a converter may disagree on
 _MATH_NOISE = frozenset(
     ["{", "}", "\\mathrm", "\\text", "\\operatorname", "\\left", "\\right"]
@@ -1715,6 +1880,26 @@ def normalize_math(tex: str) -> str:
         r"\\(" + "|".join(_MATH_FUNCTIONS) + r")(?![a-zA-Z])", r"\1 ", tex
     )
     tex = tex.replace("{}", "")
+
+    def letters_only(m: re.Match[str]) -> str:
+        # A math alphabet styles letters, so symbols at the ends of its
+        # group, which Word joins it to on saving, e.g., \mathcal{\in E,},
+        # go outside
+        tokens = _MATH_TOKEN_RE.findall(m.group(2))
+        letter = [
+            bool(re.fullmatch(r"[A-Za-z0-9]", t))
+            or t.lstrip("\\").lower().removeprefix("var") in _GREEK
+            for t in tokens
+        ]
+        if not any(letter):
+            return m.group(0)
+        i, j = letter.index(True), len(letter) - letter[::-1].index(True)
+        core = " ".join(tokens[i:j])
+        return " ".join(
+            tokens[:i] + [f"\\{m.group(1)}{{{core}}}"] + tokens[j:]
+        )
+
+    tex = _MATH_ALPHABET_RE.sub(letters_only, tex)
     return " ".join(tex.split())
 
 
@@ -2090,7 +2275,7 @@ def file_blocks(path: str, lines: list[str]) -> list[Block]:
         [
             SourceLine(path, i, text)
             for i, text in enumerate(lines, 1)
-            if not _INCLUDE_RE.match(text.split("%")[0])
+            if not _INCLUDE_RE.match(_strip_comments(text))
         ]
     )
 
@@ -2113,7 +2298,7 @@ def display_text(block: Block) -> str:
     wrappers, and Greek letters as themselves."""
     import unicodedata
 
-    src = "\n".join(ln.text.split("%")[0] for ln in block.lines)
+    src = "\n".join(_strip_comments(ln.text) for ln in block.lines)
     src = re.sub(r"\\(label|tag\*?|begin|end)\{[^}]*\}", " ", src)
 
     def greek(m: re.Match) -> str:

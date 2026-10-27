@@ -785,6 +785,16 @@ async function renderAttachForm(
   const syncGithubFields = () => {
     repoFields.style.display = existsOnGithub.checked ? "" : "none";
     publicField.style.display = existsOnGithub.checked ? "none" : "";
+    // A repo picked before switching to a new one would otherwise still be
+    // where the paper goes
+    if (!existsOnGithub.checked && chosenRepo) {
+      chosenRepo = null;
+      repoInput.value = "";
+      if (!nameEdited) {
+        nameInput.value = projectSlug(titleInput.value);
+      }
+      renderRepoResults();
+    }
     if (existsOnGithub.checked && repos === null) {
       void loadRepos();
     }

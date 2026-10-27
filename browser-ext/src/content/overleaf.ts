@@ -808,15 +808,34 @@ async function renderAttachForm(
       }
       if (!created) {
         clear(message).append(loading("Creating the project"));
-        created = await send({
-          type: "projects.create",
-          name,
-          title: titleInput.value.trim() || name,
-          gitRepoUrl: chosenRepo
-            ? `https://github.com/${chosenRepo.full_name}`
-            : undefined,
-          isPublic: !chosenRepo && isPublic.checked,
-        });
+        try {
+          created = await send({
+            type: "projects.create",
+            name,
+            title: titleInput.value.trim() || name,
+            gitRepoUrl: chosenRepo
+              ? `https://github.com/${chosenRepo.full_name}`
+              : undefined,
+            isPublic: !chosenRepo && isPublic.checked,
+          });
+        } catch (e) {
+          // An earlier try that stopped partway, e.g., when the panel was
+          // reloaded, already made the project, so carry on with that one
+          if (!(e instanceof RequestFailed && e.status === 409)) {
+            throw e;
+          }
+          const existing = await send({
+            type: "projects.byGithubRepo",
+            githubRepo: chosenRepo?.full_name ?? `${githubName}/${name}`,
+          });
+          const mine = existing.data.find((p) =>
+            ["write", "admin", "owner"].includes(p.current_user_access ?? ""),
+          );
+          if (!mine) {
+            throw e;
+          }
+          created = mine;
+        }
         // Nothing above can change what was made
         for (const input of [existsOnGithub, isPublic, repoInput, nameInput]) {
           input.disabled = true;

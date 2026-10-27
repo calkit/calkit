@@ -429,42 +429,86 @@ function renderStatus(
   );
 }
 
-/** Let the user point this Overleaf project at one of their Calkit projects. */
+/**
+ * Let the user make a new Calkit project for this Overleaf project, or
+ * pick one they already have.
+ *
+ * Starting down either path hides the other, so a half-filled form never
+ * sits next to a list of unrelated projects.
+ */
 async function renderPicker(
   body: HTMLElement,
   overleafProjectId: string,
   reload: () => void,
 ): Promise<void> {
   clear(body);
+  const back = (text: string) =>
+    el("div", { class: "actions" }, [
+      el("button", {
+        class: "action secondary",
+        text,
+        onClick: () => void renderPicker(body, overleafProjectId, reload),
+      }),
+    ]);
   const attachContainer = el("div");
-  const attachButton = el("button", {
-    class: "action",
-    text: "Make this paper reproducible",
-    onClick: () => {
-      attachButton.remove();
-      void renderAttachForm(attachContainer, overleafProjectId, reload);
-    },
-  });
-  body.append(
+  const start = el("div", {}, [
     el("div", {
       class: "dim small",
       text: "This paper isn't part of a Calkit project yet.",
     }),
-    el("div", { class: "actions" }, [attachButton]),
-    attachContainer,
-    el("div", {
-      class: "dim small",
-      style: { marginTop: "12px" },
-      text: "Or link it to a project you already have:",
-    }),
-  );
+    el("div", { class: "actions" }, [
+      el("button", {
+        class: "action",
+        text: "Make this paper reproducible",
+        onClick: () => {
+          start.remove();
+          existing.remove();
+          const form = el("div");
+          clear(attachContainer).append(
+            form,
+            back("Use a project I already have"),
+          );
+          void renderAttachForm(form, overleafProjectId, reload);
+        },
+      }),
+    ]),
+  ]);
   const search = textInput({
     placeholder: "Search your projects",
   });
   const results = el("div", { class: "stack", style: { marginTop: "6px" } });
-  const message = el("div", { class: "small" });
-  const checkProject = async (project: ProjectPublic) => {
-    clear(message).append(loading("Checking"));
+  const existing = el("div", {}, [
+    el("div", {
+      class: "dim small",
+      style: { marginTop: "12px" },
+      text: "Or add it to a project you already have:",
+    }),
+    search,
+    results,
+  ]);
+  const chosen = el("div", { class: "stack" });
+  const chooseProject = async (project: ProjectPublic) => {
+    start.remove();
+    existing.remove();
+    const message = el("div", { class: "small" }, [loading("Checking")]);
+    clear(chosen).append(
+      el(
+        "div",
+        {
+          class: "muted-box",
+          style: { borderLeft: "3px solid var(--ck-main)" },
+        },
+        [
+          el("div", { class: "dim small", text: "Adding this paper to" }),
+          el("div", {
+            text: `${project.owner_account_name}/${project.name}`,
+          }),
+          el("div", { class: "dim small", text: project.title }),
+        ],
+      ),
+      message,
+      back("Pick a different project"),
+    );
     try {
       const statuses = await send({
         type: "overleaf.status",
@@ -483,8 +527,8 @@ async function renderPicker(
           el("div", {
             class: "dim small",
             text:
-              `${project.name} doesn't sync with this Overleaf project. ` +
-              "Import it as a new publication?",
+              "Calkit will copy this paper's files into the project and " +
+              "keep them in sync with Overleaf.",
           }),
           ...renderImportForm(project, overleafProjectId, reload),
         ]),
@@ -517,8 +561,8 @@ async function renderPicker(
             ]),
             el("button", {
               class: "action secondary",
-              text: "Check",
-              onClick: () => void checkProject(project),
+              text: "Choose",
+              onClick: () => void chooseProject(project),
             }),
           ]),
         );
@@ -534,7 +578,7 @@ async function renderPicker(
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => void runSearch(), 300);
   });
-  body.append(search, results, message);
+  body.append(start, attachContainer, existing, chosen);
   await runSearch();
 }
 
@@ -881,7 +925,7 @@ function renderImportForm(
   const doc = documentFields();
   const importButton = el("button", {
     class: "action",
-    text: "Import and link",
+    text: `Add to ${project.name}`,
   });
   const message = el("div", { class: "small" });
   importButton.addEventListener("click", async () => {

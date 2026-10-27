@@ -94,14 +94,14 @@
     }
   },
   "latex-word-round-trip": {
-    "start_time": "2026-10-27T22:32:40.015000",
-    "end_time": "2026-10-27T22:32:58.174000",
+    "start_time": "2026-10-27T22:44:57.759000",
+    "end_time": "2026-10-27T22:45:11.154000",
     "environment": "dev",
-    "git_rev": "4a74174d70084abef4df1b851eef02b70e9919e1",
-    "git_dirty": false,
-    "dvc_lock_hash": "sha256:90618f3f29a64d1744e44cffe3ad187a1b15c50d86530baa2e51e6f9e66adfda",
-    "calkit_version": "0.50.1.dev2+g4a74174d",
-    "calkit_git_rev": "4a74174d70084abef4df1b851eef02b70e9919e1",
+    "git_rev": "c7326e10fd9a4b45416bd9877e0e17a43a3a6913",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:83644175d79f4a5d791bbf546af500a90d35bdc2f7772c702dc54f0ba5127421",
+    "calkit_version": "0.50.1.dev3+gc7326e10",
+    "calkit_git_rev": "c7326e10fd9a4b45416bd9877e0e17a43a3a6913",
     "system": {
       "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
       "os": "Darwin",
@@ -132,21 +132,21 @@
     }
   },
   "one-pager/pdf": {
-    "start_time": "2026-10-27T01:00:13.549000",
-    "end_time": "2026-10-27T01:00:18.359000",
-    "git_rev": "c637dbe2896767928e40cf68f89ec4ca7b43f955",
-    "git_dirty": false,
-    "dvc_lock_hash": "sha256:1a2a0887701875f6308d20785084c805196aabeabec2b149a4f12c2c19fd71e2",
-    "calkit_version": "0.49.6.dev8+gc637dbe2",
-    "calkit_git_rev": "c637dbe2896767928e40cf68f89ec4ca7b43f955",
+    "start_time": "2026-10-27T22:45:11.182000",
+    "end_time": "2026-10-27T22:45:14.157000",
+    "git_rev": "c7326e10fd9a4b45416bd9877e0e17a43a3a6913",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:6804922fa38799561be745b8d6b3c978f2564ee6924e30b95cdc8fa5f15e3cfa",
+    "calkit_version": "0.50.1.dev3+gc7326e10",
+    "calkit_git_rev": "c7326e10fd9a4b45416bd9877e0e17a43a3a6913",
     "system": {
-      "machine_id": "2d791d5cce6240faa3c626058b1ffc7d",
-      "os": "Linux",
-      "os_version": "6.17.0-1022-azure",
-      "machine": "x86_64",
-      "processor": "x86_64",
-      "cpu_count": 4,
-      "memory_gb": 15.6
+      "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
+      "os": "Darwin",
+      "os_version": "25.6.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 14,
+      "memory_gb": 24.0
     }
   },
   "research-flow": {

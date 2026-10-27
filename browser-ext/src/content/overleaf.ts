@@ -849,16 +849,14 @@ async function renderAttachForm(
             throw e;
           }
           const existing = await send({
-            type: "projects.byGithubRepo",
+            type: "projects.list",
             githubRepo: chosenRepo?.full_name ?? `${githubName}/${name}`,
+            limit: 1,
           });
-          const mine = existing.data.find((p) =>
-            ["write", "admin", "owner"].includes(p.current_user_access ?? ""),
-          );
-          if (!mine) {
+          if (!existing.data.length) {
             throw e;
           }
-          created = mine;
+          created = existing.data[0];
         }
         // Nothing above can change what was made
         for (const input of [existsOnGithub, isPublic, repoInput, nameInput]) {

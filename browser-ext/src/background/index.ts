@@ -152,6 +152,7 @@ async function handle(message: Request): Promise<unknown> {
           search_for: message.searchFor,
           limit: message.limit ?? 100,
           min_access_level: message.minAccessLevel ?? "write",
+          github_repo: message.githubRepo,
         },
       });
     case "projects.create":

@@ -55,6 +55,8 @@ export type Request =
        * would then fail.
        */
       minAccessLevel?: "read" | "write";
+      /** Only the project for this GitHub repo, e.g., "owner/repo". */
+      githubRepo?: string;
     }
   | ({ type: "projects.byGithubRepo"; githubRepo: string } & HubScoped)
   | ({

@@ -203,6 +203,23 @@ def test_latex_source_helpers(project: Path) -> None:
         r"See \cite{a} for wind farms, and see \cite{b} for wind small farms "
         r"too."
     ]
+    # A word changed inside markup changes there, where what changed sits
+    # together in the source, else it's left to do by hand
+    labeled = calkit.latex.Block(
+        [
+            calkit.latex.SourceLine(
+                "x.tex", 1, r"For \ce{^{2}H} and \ce{^{15}N} labels."
+            )
+        ]
+    )
+    sent_l = "For 2H and 15N labels."
+    assert calkit.latex.apply_edit(
+        labeled, sent_l, sent_l.replace("15N", "16N")
+    ) == [r"For \ce{^{2}H} and \ce{^{16}N} labels."]
+    assert (
+        calkit.latex.apply_edit(labeled, sent_l, sent_l.replace("15N", "1X"))
+        is None
+    )
     # Comment blocks parse and render back to the same lines
     src = Path("paper/methods.tex").read_text(encoding="utf-8").split("\n")
     comments = calkit.latex.parse_comments(src)

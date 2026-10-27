@@ -2138,12 +2138,56 @@ def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
                 src = src[:at] + new_span + " " + src[at:]
             continue
         span = _find_span(src, ow[i1:i2])
-        if span is None:
+        if span is not None:
+            src = src[: span[0]] + new_span + src[span[1] :]
+            continue
+        through = _edit_through_markup(src, " ".join(ow[i1:i2]), new_span)
+        if through is None:
             return None
-        src = src[: span[0]] + new_span + src[span[1] :]
+        src = through
     # A line emptied by a deletion goes, since a blank line would split
     # the paragraph
     return [ln.rstrip() for ln in src.split("\n") if ln.strip()]
+
+
+def _edit_through_markup(src: str, old: str, new: str) -> str | None:
+    """``src`` with the one place reading as ``old`` once its markup is
+    left out, e.g., \\ce{^{15}N} for "15N", changed to read as ``new``, where
+    the changed characters sit together in the source, and not in math,
+    which is edited as an equation."""
+    markup = r"(?:\\[A-Za-z]+\*?\s*|[{}^_])*"
+    pattern = "".join(
+        r"[\s~]+" if c == " " else f"({re.escape(c)})" + markup
+        for c in old.rstrip()
+    )
+    found = list(
+        re.finditer(rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])", src)
+    )
+    if len(found) != 1 or old != old.rstrip():
+        return None
+    m, chars = found[0], [c for c in old if c != " "]
+    if any(
+        x.start() < m.end() and m.start() < x.end()
+        for x in _INLINE_MATH_RE.finditer(src)
+    ):
+        return None
+    at = [m.start(k + 1) for k in range(len(chars))]
+    old_c, new_c = "".join(chars), new.replace(" ", "")
+    if new.count(" ") != old.count(" "):
+        return None
+    ops = difflib.SequenceMatcher(None, old_c, new_c, autojunk=False)
+    for tag, i1, i2, j1, j2 in reversed(ops.get_opcodes()):
+        if tag == "equal":
+            continue
+        if tag == "insert":
+            pos = at[i1 - 1] + 1 if i1 else at[0]
+            src = src[:pos] + new_c[j1:j2] + src[pos:]
+            continue
+        # Only characters next to each other in the source
+        if any(at[k + 1] != at[k] + 1 for k in range(i1, i2 - 1)):
+            return None
+        src = src[: at[i1]] + new_c[j1:j2] + src[at[i2 - 1] + 1 :]
+    return src
 
 
 _MATH_TOKEN_RE = re.compile(r"\\[a-zA-Z]+|\\.|\S")

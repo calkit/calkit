@@ -5473,6 +5473,10 @@ export type ReproCheck = {
    */
   misc_needing_provenance?: Array<string>
   /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
+  /**
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
@@ -7014,6 +7018,10 @@ export type ReproCheckWritable = {
    * Misc Needing Provenance
    */
   misc_needing_provenance?: Array<string>
+  /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
   /**
    * Scripts Not In Pipeline
    */

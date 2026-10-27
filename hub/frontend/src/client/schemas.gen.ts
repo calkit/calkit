@@ -9594,6 +9594,14 @@ export const ReproCheckSchema = {
       title: "Misc Needing Provenance",
       default: [],
     },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
@@ -12163,6 +12171,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Misc Needing Provenance",
+      default: [],
+    },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
       default: [],
     },
     scripts_not_in_pipeline: {

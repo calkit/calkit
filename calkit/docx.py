@@ -27,6 +27,8 @@ PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 DC = "http://purl.org/dc/elements/1.1/"
 # Office Math, Word's equation markup
 M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+# The attribute keeping a run of text's spaces at its ends
+XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
 # Namespace of the custom XML part in which Calkit records where a
 # document came from
 CALKIT_NS = "https://calkit.org/latex-export"
@@ -806,7 +808,7 @@ class Document:
                     c.text = (c.text or "")[:cut] + text + (c.text or "")[cut:]
                     # Else Word drops a space at either end on reading it
                     c.set(
-                        "{http://www.w3.org/XML/1998/namespace}space",
+                        XML_SPACE,
                         "preserve",
                     )
                     return True
@@ -837,7 +839,7 @@ class Document:
                         if c.tag == _tag(W, "t") and 0 < cut < n:
                             c.text = text[:cut] if keep_left else text[cut:]
                             c.set(
-                                "{http://www.w3.org/XML/1998/namespace}space",
+                                XML_SPACE,
                                 "preserve",
                             )
                         elif (at + n <= offset) != keep_left:
@@ -952,14 +954,10 @@ class Document:
             first = copy.deepcopy(run)
             for t in first.iter(_tag(W, "t")):
                 t.text = (t.text or "")[:cut]
-                t.set(
-                    "{http://www.w3.org/XML/1998/namespace}space", "preserve"
-                )
+                t.set(XML_SPACE, "preserve")
             for t in run.iter(_tag(W, "t")):
                 t.text = (t.text or "")[cut:]
-                t.set(
-                    "{http://www.w3.org/XML/1998/namespace}space", "preserve"
-                )
+                t.set(XML_SPACE, "preserve")
             para.insert(i, first)
             return i + 1
         return len(para)
@@ -1505,7 +1503,8 @@ def _pandoc(args: list[str], data: bytes) -> bytes:
 
 # A command setting its argument as text, through its opening brace
 _TEXT_COMMAND_RE = re.compile(
-    r"\\(text|textrm|textit|textbf|textsf|texttt|mbox)\s*\{"
+    r"\\(text|textrm|textit|textbf|textsf|texttt|textnormal|textup|textmd|"
+    r"textsc|textsl|mbox|intertext)\s*\{"
 )
 
 
@@ -1542,32 +1541,30 @@ def latex_to_omml(
                 i += 1
         return "".join(out)
 
-    def script(tex: str, k: int) -> tuple[str, int] | None:
-        # A sub- or superscript's argument from k, and where it ends
-        while k < len(tex) and tex[k].isspace():
-            k += 1
-        if k >= len(tex):
-            return None
-        if tex[k] == "{":
-            depth = 0
-            for j in range(k, len(tex)):
-                if tex[j] == "\\":
-                    continue
-                if tex[j] == "{" and tex[j - 1] != "\\":
-                    depth += 1
-                elif tex[j] == "}" and tex[j - 1] != "\\":
-                    depth -= 1
-                    if depth == 0:
-                        return tex[k + 1 : j], j + 1
-            return None
-        m = re.compile(r"\\[A-Za-z]+|\\.|.").match(tex, k)
-        assert m is not None
-        return m.group(0), m.end()
-
     def primes(tex: str) -> str:
-        # Primes as the superscript they are, e.g., \omega_j' as
-        # \omega_j^{\prime}, which Pandoc versions convert alike, outside
-        # text, where ' is an apostrophe
+        # Primes as superscripts, e.g., \omega_j' as \omega_j^{\prime},
+        # which every Pandoc converts alike, but not apostrophes in text
+
+        def script(tex: str, k: int) -> tuple[str, int] | None:
+            # A superscript's argument from k, and where it ends
+            while k < len(tex) and tex[k].isspace():
+                k += 1
+            if k >= len(tex):
+                return None
+            if tex[k] == "{":
+                depth = 0
+                for j in range(k, len(tex)):
+                    if tex[j] == "{" and tex[j - 1] != "\\":
+                        depth += 1
+                    elif tex[j] == "}" and tex[j - 1] != "\\":
+                        depth -= 1
+                        if depth == 0:
+                            return tex[k + 1 : j], j + 1
+                return None
+            m = re.compile(r"\\[A-Za-z]+|\\.|.").match(tex, k)
+            assert m is not None
+            return m.group(0), m.end()
+
         out, groups, depth, i = [], [], 0, 0
         while i < len(tex):
             m = _TEXT_COMMAND_RE.match(tex, i)
@@ -1603,17 +1600,21 @@ def latex_to_omml(
         return "".join(out)
 
     def plain_brackets(tex: str) -> str:
-        # Brackets and bars without \left or \right their own groups, as
-        # LaTeX sets them, which Pandoc before 3.8 makes stretch to what's
-        # between them; an optional argument's brackets, e.g., \sqrt[3],
-        # and \\[2pt], kept as they are, and text left alone
+        # Plain brackets and bars as groups, so Pandoc before 3.8 doesn't
+        # stretch them, but not sized ones, arguments, e.g., \sqrt[3], or text
         out, groups, depth, i = [], [], 0, 0
         sized = re.compile(
             r"\\(left|right|middle|[bB]igg?[lrm]?)(?![A-Za-z])\s*"
             r"(\\[A-Za-z]+|\\.|.)"
         )
         optional = re.compile(
-            r"(\\\\|\\sqrt|\\begin\s*\{[^}]*\})\s*(\[[^\]]*\])?"
+            r"(?:\\\\\*?|\\(?:sqrt|x[A-Za-z]*(?:arrow|harpoon[a-z]*|mapsto)|"
+            r"xlongequal|cfrac|smash|makebox|framebox)(?![A-Za-z]))\s*"
+            r"\[[^\]]*\]"
+            r"|\\begin\s*\{(?:array|subarray|alignedat|alignat\*?)\}\s*"
+            r"(?:\[[^\]]*\])?\s*\{[^{}]*\}"
+            r"|\\begin\s*\{[^}]*\}\s*(?:\[[^\]]*\])?"
+            r"|\\genfrac\s*\{[^{}]*\}\s*\{[^{}]*\}"
         )
         while i < len(tex):
             m = _TEXT_COMMAND_RE.match(tex, i)
@@ -1664,12 +1665,18 @@ def latex_to_omml(
         + "\n\n"
         + "".join(f"CKEQ{i}\n\n{eq}\n\n" for i, eq in enumerate(equations))
     )
-    # Bold the same whatever the Pandoc version, which since 3.9 sets
-    # \mathbf italic and before it \boldsymbol upright: \mathbf goes
-    # through bold sans serif, which every version keeps apart, made
-    # plain after, unless the document has sans serif math of its own,
-    # and \boldsymbol of letters through \mathbfit
-    carrier = not re.search(r"\\(mathsf|mathbfsf|symsf|symbfsf)", src)
+    # Text and fraction commands Pandoc doesn't know, as ones it does
+    src = re.sub(r"\\text(normal|up|md|sc)(?=\s*\{)", r"\\text", src)
+    src = re.sub(r"\\textsl(?=\s*\{)", r"\\textit", src)
+    src = re.sub(r"\\cfrac(\s*\[[^\]]*\])?(?![A-Za-z])", r"\\dfrac", src)
+    # Bold alike in every Pandoc: \mathbf via bold sans serif, made plain
+    # after, and \boldsymbol of letters via \mathbfit
+    carrier = not re.search(
+        r"\\(?:math|sym)bfsf|\\mathsfbf"
+        r"|\\(?:mathsf|textsf)\s*\{\s*\\(?:mathbf|boldsymbol|bm|textbf)"
+        r"|\\(?:mathbf|boldsymbol|bm)\s*\{\s*\\(?:mathsf|textsf)",
+        src,
+    )
     if carrier:
         src = re.sub(r"\\mathbf(?![A-Za-z])", r"\\mathbfsfup", src)
     greek = "|".join(calkit.latex._GREEK)
@@ -1721,9 +1728,8 @@ def latex_to_omml(
                 and style == "b"
             ):
                 rpr.remove(scr)
-            # Bold text in math, e.g., \textbf{h}, a bold letter as newer
-            # Pandoc versions have it, else with Word's bold, which older
-            # ones leave out
+            # Bold text in math, e.g., \textbf{h}: a bold letter, as newer
+            # Pandoc has it, else with Word's bold, which older Pandoc drops
             nor = rpr.find(_tag(M, "nor"))
             text = "".join(t.text or "" for t in run.iter(_tag(M, "t")))
             if nor is not None and style in ("b", "bi") and text.isalnum():
@@ -1733,15 +1739,19 @@ def latex_to_omml(
                 if wpr is None:
                     wpr = ET.Element(_tag(W, "rPr"))
                     run.insert(list(run).index(rpr) + 1, wpr)
-                # In schema order, after the style and fonts
-                at = sum(
-                    c.tag in (_tag(W, "rStyle"), _tag(W, "rFonts"))
-                    for c in wpr
-                )
+                order = [
+                    _tag(W, t) for t in ("rStyle", "rFonts", "b", "bCs", "i")
+                ]
                 for flag in ("b", "i") if style == "bi" else ("b",):
-                    if wpr.find(_tag(W, flag)) is None:
-                        wpr.insert(at, ET.Element(_tag(W, flag)))
-                    at += 1
+                    if wpr.find(_tag(W, flag)) is not None:
+                        continue
+                    # In schema order, after what comes before it
+                    before = order[: order.index(_tag(W, flag))]
+                    at = max(
+                        (k + 1 for k, c in enumerate(wpr) if c.tag in before),
+                        default=0,
+                    )
+                    wpr.insert(at, ET.Element(_tag(W, flag)))
     return maths
 
 

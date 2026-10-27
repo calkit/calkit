@@ -589,7 +589,8 @@ def test_detex() -> None:
         r"error (\ppt) of 3 \ppt": "error (‰) of 3 ‰",
         r"4\textperthousand of": "4‰of",
         r"95\% of \$5 \& more": "95% of $5 & more",
-        r"Born--Oppenheimer, 1--2, and---so": "Born–Oppenheimer, 1–2, and—so",
+        r"Born--Oppenheimer and---so": "Born–Oppenheimer and—so",
+        r"1--2": "1–2",
         r"``quoted''": "“quoted”",
         # Chemistry, quantities, and styled text without spaces around it
         r"\ce{^{2}H}-labeled \ce{CO2}": "2H-labeled CO2",
@@ -611,9 +612,19 @@ def test_detex() -> None:
         f"Eq. ({ref}) in {ref}, as before {cite}."
     )
     assert calkit.latex.detex(src) == "Eq. in , as before ."
+    # A textual citation is marked apart, other citation commands too, and
+    # a comment takes its line's end with it
+    text_cite = calkit.latex.TEXT_CITE_MARK
+    assert calkit.latex.detex(
+        r"\citet{a} and \textcite{b} with \parencite[p.~2]{c}", marks=True
+    ) == (f"{text_cite} and {text_cite} with {cite}")
+    assert calkit.latex.detex("the ratio%\n  ed%\n, so") == "the ratioed, so"
     # Math reads with Greek letters and operator names as themselves
     assert calkit.latex.math_text(r"\mathbf{u}_\text{ref}") == "u ref"
     assert calkit.latex.math_text(r"\Delta\ln p + \hbar\omega_k") == (
         "Δ ln p + ℏω k"
     )
     assert calkit.latex.math_text(r"\lambda L_{\max}") == "λ L max"
+    assert calkit.latex.math_text(r"\arccos x + \liminf_n a") == (
+        "arccos x + liminf n a"
+    )

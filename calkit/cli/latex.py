@@ -11,7 +11,6 @@ import shutil
 import string
 import subprocess
 import sys
-import unicodedata
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
@@ -2221,10 +2220,8 @@ def to_docx(
     blks = calkit.latex.blocks(lines)
     paras = doc.paragraphs
     matched = calkit.latex.align([p.text for p in paras], blks)
-    # Word's PDF import starts a new paragraph at a page break or a line
-    # starting with, e.g., "(" or a number, so pieces of one source
-    # paragraph are joined, and what floated in between, e.g., a figure,
-    # goes after
+    # Pieces of a paragraph Word's import split, e.g., at a page break,
+    # join again, with anything floated between them after
     if engine == "word":
         from collections import Counter
         from xml.etree import ElementTree as ET
@@ -2265,11 +2262,14 @@ def to_docx(
             if p.element is not None and len(p.text) > 200
         )
         usual_jc = counts.most_common(1)[0][0] if counts else None
+
+        def usual(jc: str | None) -> bool:
+            return bool(counts) and jc == usual_jc
+
         for i in range(len(paras) - 1, 0, -1):
             part1, part2, blk = paras[i - 1], paras[i], matched[i]
-            # Not a table's rows, lines broken in the source, what the
-            # preamble sets apart, e.g., title and authors, or an
-            # environment's heading, e.g., "Abstract"
+            # Not table rows, broken lines, the title and authors, or a
+            # heading like "Abstract"
             if (
                 blk is None
                 or matched[i - 1] is not blk
@@ -2290,6 +2290,7 @@ def to_docx(
                 or part2.element is None
                 or doc._parents.get(part1.element) is not body
                 or doc._parents.get(part2.element) is not body
+                or part1.element.find(w_sect) is not None
                 or part2.element.find(w_sect) is not None
             ):
                 continue
@@ -2337,20 +2338,16 @@ def to_docx(
                     sep_run, calkit.docx._tag(calkit.docx.W, "t")
                 )
                 sep_t.text = sep
-                sep_t.set(
-                    "{http://www.w3.org/XML/1998/namespace}space", "preserve"
-                )
-            # Where the pieces' alignment differs, as the document's body
-            # text usually is if either is, else as the piece with more
-            # text is, since Word's import can take a piece of one full
-            # line for right-aligned, or the end of a page for left
+                sep_t.set(calkit.docx.XML_SPACE, "preserve")
+            # Aligned as body text usually is, else as the longer piece,
+            # since Word's import can align a one-line piece right
             jc1 = part1.element.find(w_jc_path)
             jc2 = part2.element.find(w_jc_path)
             v1, v2 = jc_of(part1.element), jc_of(part2.element)
             longer = len(doc.linear_text(part2.element)) > len(
                 doc.linear_text(part1.element)
             )
-            if v1 != v2 and (v2 == usual_jc or (longer and v1 != usual_jc)):
+            if v1 != v2 and (usual(v2) or (longer and not usual(v1))):
                 ppr1 = part1.element.find(w_ppr)
                 if ppr1 is None:
                     ppr1 = ET.Element(w_ppr)
@@ -2440,7 +2437,18 @@ def to_docx(
         from xml.etree import ElementTree as ET
 
         version = calkit.docx.pandoc_version()
-        if version is not None and version < (3, 8):
+        aligned = any(
+            b.display
+            and (
+                b.display.rstrip("*") in calkit.latex._MULTIROW_ENVS
+                or re.search(
+                    r"\\begin\{(aligned|gathered|split)",
+                    "\n".join(ln.text for ln in b.lines),
+                )
+            )
+            for b in blks
+        )
+        if aligned and version is not None and version < (3, 8):
             warn(
                 f"Pandoc {'.'.join(map(str, version))} lays out some "
                 "equations, e.g., aligned ones, unlike newer versions; "
@@ -2728,41 +2736,51 @@ def to_docx(
         # of prose on either side of it in the source, which may be text,
         # pictures or both, goes in as an equation
 
-        marks = calkit.latex.REF_MARK + calkit.latex.CITE_MARK
+        marks = (
+            calkit.latex.REF_MARK
+            + calkit.latex.CITE_MARK
+            + calkit.latex.TEXT_CITE_MARK
+        )
         # What a reference renders as, e.g., "2", "A.4", or "Appendix A",
         # and a parenthetical citation, e.g., "(Lee, 2020)" or "[3]"
         ref_re = (
             r"(?:(?:Appendix|Section|Sec\.|Chapter|Figure|Fig\.|Table|"
             r"Equation|Eq\.)\s*)?[\w.]*\w"
         )
-        cite_re = r"\([^()]*\)|\[[^\]]*\]"
+        cite = r"\([^()]*\)|\[[^\]]*\]"
+        # What each mark renders as; a textual citation with its authors
+        # outside, e.g., "Lee and Kim (2020)"
+        mark_res = {
+            calkit.latex.REF_MARK: ref_re,
+            calkit.latex.CITE_MARK: cite,
+            calkit.latex.TEXT_CITE_MARK: (
+                r"[A-Z][^\s()\[\]]*"
+                r"(?:\s+(?:et\s+al\.?|and|&|[A-Z][^\s()\[\]]*))*\s*"
+                rf"(?:{cite})"
+            ),
+        }
 
         def tokens(prose: str) -> list[str]:
             # Numbers count, e.g., a table cell "0.05" after the math
             return re.findall(r"[A-Za-z0-9]+", prose)
 
-        def words_re(ws: list[str]) -> re.Pattern[str]:
+        def words_re(
+            ws: list[str], head: bool = True, tail: bool = True
+        ) -> re.Pattern[str]:
             # Bounded by what the ends aren't, since Word's import can drop
-            # a space between a number and a unit, e.g., "20K"
+            # a space between a number and a unit, e.g., "20K", where the
+            # source doesn't run the math into them
             head_cls = "0-9" if ws[0][0].isdigit() else "A-Za-z"
             tail_cls = "0-9" if ws[-1][-1].isdigit() else "A-Za-z"
             return re.compile(
-                rf"(?<![{head_cls}])"
+                (rf"(?<![{head_cls}])" if head else "")
                 + r"[^A-Za-z0-9]*".join(map(re.escape, ws))
-                + rf"(?![{tail_cls}])"
-            )
-
-        def alnum_key(text: str) -> str:
-            return "".join(
-                c
-                for c in unicodedata.normalize("NFKC", text).lower()
-                if c.isalnum()
+                + (rf"(?![{tail_cls}])" if tail else "")
             )
 
         def find_starts(text: str, cursor: int, before: str) -> list[int]:
-            # Where the math could start: after each place the words nearest
-            # it are, not past a reference or citation, more of them first,
-            # and those the punctuation after them matches before others
+            # Where the math could start: after each place the words before it
+            # are, those the punctuation after them matches first
             near = tokens(re.split(f"[{marks}]", before)[-1])
             near = near or tokens(before)
             out: list[tuple[bool, int]] = []
@@ -2773,7 +2791,10 @@ def to_docx(
                 if bw:
                     tail = before[before.rfind(bw[-1]) + len(bw[-1]) :]
                     spots = [
-                        m.end() for m in words_re(bw).finditer(text, cursor)
+                        m.end()
+                        for m in words_re(bw, tail=bool(tail)).finditer(
+                            text, cursor
+                        )
                     ]
                 for start in spots:
                     # Past the prose's own punctuation, e.g., "(" before the
@@ -2784,11 +2805,7 @@ def to_docx(
                             start += 1
                         m = None
                         if ch in marks:
-                            m = re.compile(
-                                ref_re
-                                if ch == calkit.latex.REF_MARK
-                                else cite_re
-                            ).match(text, start)
+                            m = re.compile(mark_res[ch]).match(text, start)
                         if m is not None:
                             start = m.end()
                         elif text[start : start + 1] == ch:
@@ -2813,16 +2830,25 @@ def to_docx(
             )
             end = len(text)
             if aw:
-                m = words_re(aw).search(text, start)
+                m = words_re(
+                    aw, head=bool(head) or after[:1].isspace()
+                ).search(text, start)
                 if m is None:
                     return None
                 end = m.start()
             elif head and not is_last:
                 # Only punctuation before more math, e.g., the dash in
                 # $1$--$2$, so where the math reads as its source
-                want = alnum_key(calkit.latex.math_text(tex))
+                want = calkit.latex.letters_and_digits(
+                    calkit.latex.math_text(tex)
+                )
                 for m in re.finditer(re.escape(head[0]), text[start:]):
-                    if alnum_key(text[start : start + m.start()]) == want:
+                    if (
+                        calkit.latex.letters_and_digits(
+                            text[start : start + m.start()]
+                        )
+                        == want
+                    ):
                         return start + len(
                             text[start : start + m.start()].rstrip()
                         )
@@ -2832,9 +2858,9 @@ def to_docx(
                 while end > start and text[end - 1].isspace():
                     end -= 1
                 if ch in marks:
-                    m = re.compile(
-                        f"(?:{ref_re if ch == calkit.latex.REF_MARK else cite_re})$"
-                    ).search(text, start, end)
+                    m = re.compile(f"(?:{mark_res[ch]})$").search(
+                        text, start, end
+                    )
                     if m is None:
                         break
                     end = m.start()
@@ -2854,10 +2880,15 @@ def to_docx(
             # Math as Word renders it has no prose words in it, nor digits
             # its source doesn't, e.g., "x ≠ 1, 2" isn't $x=1$
             words = re.findall(r"[A-Za-z]{4,}", region)
-            rendered = alnum_key(calkit.latex.math_text(tex))
+            rendered = calkit.latex.letters_and_digits(
+                calkit.latex.math_text(tex)
+            )
             return (
                 bool(region.strip())
-                and all(alnum_key(w) in rendered for w in words)
+                and all(
+                    calkit.latex.letters_and_digits(w) in rendered
+                    for w in words
+                )
                 and set(re.findall(r"\d", region))
                 <= set(re.findall(r"\d", tex))
             )
@@ -2873,14 +2904,14 @@ def to_docx(
         pi, cursor = 0, 0
 
         def place(
-            k: int, pre: str, tex: str, post: str, is_last: bool
+            k: int, pre: str, tex: str, shown: str, post: str, is_last: bool
         ) -> bool:
-            # The math in paragraph k, or starting there and running on
-            # into the next, from where the last one ended
+            # The math in paragraph k, or from there into the next; shown is
+            # it with the document's macros expanded
             nonlocal pi, cursor
             for s0 in find_starts(texts[k], cursor if k == pi else 0, pre):
-                e0 = find_end(texts[k], s0, post, tex, is_last)
-                if e0 is not None and mathlike(texts[k][s0:e0], tex):
+                e0 = find_end(texts[k], s0, post, shown, is_last)
+                if e0 is not None and mathlike(texts[k][s0:e0], shown):
                     inline.append((els[k], s0, e0, tex))
                     pads.append(
                         (
@@ -2891,14 +2922,14 @@ def to_docx(
                     pi, cursor = k, e0
                     return True
                 e1 = (
-                    find_end(texts[k + 1], 0, post, tex, is_last)
+                    find_end(texts[k + 1], 0, post, shown, is_last)
                     if e0 is None and k + 1 < len(els)
                     else None
                 )
                 if (
                     e1 is not None
-                    and mathlike(texts[k][s0:], tex)
-                    and mathlike(texts[k + 1][:e1], tex)
+                    and mathlike(texts[k][s0:], shown)
+                    and mathlike(texts[k + 1][:e1], shown)
                 ):
                     inline.append((els[k], s0, len(texts[k]), tex))
                     inline.append((els[k + 1], 0, e1, None))
@@ -2930,10 +2961,13 @@ def to_docx(
                     ):
                         continue
                     is_last = n == len(found) - 1
+                    shown = calkit.latex.expand_macros(
+                        tex, b.macros, math=True
+                    )
                     # In the paragraph where the last one was, or a later
                     # one when the block continues past a page or float
                     for k in range(pi, len(els)):
-                        if place(k, pre, tex, post, is_last):
+                        if place(k, pre, tex, shown, post, is_last):
                             break
             inline_maths = iter(
                 calkit.docx.latex_to_omml(
@@ -2979,7 +3013,7 @@ def to_docx(
                         if next_t is not None and next_t.text:
                             next_t.text = " " + next_t.text.lstrip()
                             next_t.set(
-                                "{http://www.w3.org/XML/1998/namespace}space",
+                                calkit.docx.XML_SPACE,
                                 "preserve",
                             )
             # A paragraph Word broke inside the math is whole again, under
@@ -3245,6 +3279,15 @@ def merge_docx(
             )
             continue
         new_lines = calkit.latex.apply_edit(blk, sent_tex, new_tex)
+        if new_lines == [
+            ln.text.rstrip() for ln in blk.lines if ln.text.strip()
+        ]:
+            changes.append(
+                LatexDocxMergeChange(
+                    path=blk.path, lineno=blk.lineno, status="already-applied"
+                )
+            )
+            continue
         if new_lines is None:
             warn(
                 f"Edit at {loc} touches markup; apply it by hand: {para.text[:60]}"

@@ -28,7 +28,6 @@ import calkit.latex
 from calkit.models.docx import LatexDocxExport, LatexDocxMerge
 
 FIXTURES = Path(__file__).parent.parent.parent / "test" / "docx"
-XML_NS = "http://www.w3.org/XML/1998/namespace"
 
 
 @pytest.fixture
@@ -138,6 +137,29 @@ def test_latex_source_helpers(project: Path) -> None:
             for ln in intro.lines
         ]
     )
+    # An edit inside a parenthetical with a year isn't taken for a
+    # citation that didn't change, nor an insertion beside a textual
+    # citation for missing once merged
+    dated = calkit.latex.Block(
+        [calkit.latex.SourceLine("x.tex", 1, "The campaign (June 2019) ran.")]
+    )
+    assert not calkit.latex.already_applied(
+        dated, "The campaign (June 2019) ran.", "The campaign (July 2019) ran."
+    )
+    textual = calkit.latex.Block(
+        [
+            calkit.latex.SourceLine(
+                "x.tex", 1, r"As \citet{lee} showed, it works."
+            )
+        ]
+    )
+    sent_t = calkit.latex.from_word_text("As Lee (2018) showed, it works.")
+    edit_t = sent_t.replace("showed", "clearly showed")
+    once = calkit.latex.apply_edit(textual, sent_t, edit_t)
+    assert once == [r"As \citet{lee} clearly showed, it works."]
+    assert once is not None
+    textual.lines[0].text = once[0]
+    assert calkit.latex.apply_edit(textual, sent_t, edit_t) == once
     applied.lines[0].text = applied.lines[0].text.replace(
         "for wind", "for a wind"
     )
@@ -169,8 +191,8 @@ def test_latex_source_helpers(project: Path) -> None:
             calkit.latex.SourceLine(
                 "x.tex",
                 1,
-                r"See \cite{a} for wind farms, and see \cite{b} for wind farms "
-                r"too.",
+                r"See \cite{a} for wind farms, and see \cite{b} for wind "
+                r"farms too.",
             )
         ]
     )
@@ -881,7 +903,186 @@ def test_docx_round_trip(
     assert model.element is not None
     lead = next(t for t in model.element.iter(w_t) if t.text)
     assert lead.text == "where "
-    assert lead.get(f"{{{XML_NS}}}space") == "preserve"
+    assert lead.get(calkit.docx.XML_SPACE) == "preserve"
+
+
+def test_word_export_placement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    w_ns = calkit.docx.W
+
+    def word_import(paras: list[tuple[str, str | None]], path: str) -> None:
+        # Paragraphs as Word's PDF import might give them, with alignment
+        Path(path).write_bytes(
+            calkit.docx._pandoc(
+                ["-f", "markdown", "-t", "docx", "-o", "-"], b"x"
+            )
+        )
+        doc = calkit.docx.Document(path)
+        body = doc.doc.find(calkit.docx._tag(w_ns, "body"))
+        assert body is not None
+        for child in list(body)[:-1]:
+            body.remove(child)
+        for i, (text, jc) in enumerate(paras):
+            ppr = f'<w:pPr><w:jc w:val="{jc}"/></w:pPr>' if jc else ""
+            body.insert(
+                i,
+                ET.fromstring(
+                    f'<w:p xmlns:w="{w_ns}">{ppr}<w:r>'
+                    f'<w:t xml:space="preserve">{text}</w:t></w:r></w:p>'
+                ),
+            )
+        doc.save()
+
+    def math_and_text(doc: calkit.docx.Document, start: str) -> tuple:
+        para = next(p for p in doc.paragraphs if p.text.startswith(start))
+        assert para.element is not None
+        maths = [
+            "".join(t.text or "" for t in m.iter(f"{{{calkit.docx.M}}}t"))
+            for m in para.element.iter(f"{{{calkit.docx.M}}}oMath")
+        ]
+        return para, maths
+
+    monkeypatch.chdir(tmp_path)
+    Path("calkit.yaml").write_text("")
+    subprocess.run(["git", "init", "-q"], check=True)
+    Path("main.tex").write_text(
+        "\n".join(
+            [
+                r"\documentclass{article}",
+                r"\newcommand{\cotwo}{\mathrm{CO_2}}",
+                r"\begin{document}",
+                r"\section{Results}",
+                "",
+                r"The rate is $k=2$ \citep{lee} and the gain $g$ "
+                r"(Appendix~\ref{sec:a}) holds.",
+                "",
+                r"We fit the model to data. Then we fit the model $f(x)$ well.",
+                "",
+                r"At \SI{20}{\kelvin} the value $T_c$ drops, from $1$--$2$ "
+                "units.",
+                "",
+                r"Only the $^{2}$H label, the $\cotwo$ flux, and the "
+                r"$\arccos x$ term.",
+                "",
+                r"As \citet{lee} showed, the ratio%",
+                r"$x$%",
+                ", so it holds.",
+                "",
+                "The campaign (June 2019) ran long.",
+                "",
+                "A paragraph Word split at the end of a page, which carries",
+                "on here with more words than its first piece has.",
+                "",
+                "One more split paragraph, longer before its break than after",
+                "it, ending with a well-known effect.",
+                "",
+                r"Line one\\",
+                "Line two",
+                "",
+                r"\begin{abstract}",
+                "Short abstract text here.",
+                r"\end{abstract}",
+                r"\end{document}",
+            ]
+        )
+    )
+    Path("main.pdf").write_bytes(b"")
+    word_import(
+        [
+            ("1 Results", None),
+            (
+                "The rate is k=2 (Lee, 2018) and the gain g (Appendix A) holds.",
+                None,
+            ),
+            (
+                "We fit the model to data. Then we fit the model f(x) well.",
+                None,
+            ),
+            ("At 20K the value Tc drops, from 1–2 units.", None),
+            ("Only the 2H label, the CO2 flux, and the arccos x term.", None),
+            ("As Lee (2018) showed, the ratiox, so it holds.", None),
+            ("The campaign (June 2019) ran long.", None),
+            ("A paragraph Word split at the end of a page, which", "right"),
+            (
+                "carries on here with more words than its first piece has.",
+                None,
+            ),
+            (
+                "One more split paragraph, longer before its break than after it,"
+                " ending with a well",
+                "both",
+            ),
+            ("known effect.", None),
+            ("Line one", None),
+            ("Line two", None),
+            ("Abstract", None),
+            ("Short abstract text here.", None),
+        ],
+        "word.docx",
+    )
+    monkeypatch.setattr(
+        calkit.docx,
+        "pdf_to_docx",
+        lambda pdf, out: shutil.copy("word.docx", out),
+    )
+    calkit.cli.latex.to_docx("main.pdf", source="main.tex", engine="word")
+    doc = calkit.docx.Document("main-for-review.docx")
+    # Inline math goes in past a citation and a reference beside it, after
+    # the right one of repeated words, by a unit Word ran into a number,
+    # between dashes, with the document's macros and operator names, and
+    # with no space where a comment ended the line, but a superscript
+    # alone stays text
+    cases = {
+        "The rate is": (["k=2", "g"], "The rate is (Lee, 2018) and the gain"),
+        "We fit": (
+            ["f(x)"],
+            "We fit the model to data. Then we fit the model well.",
+        ),
+        "At 20K": (["Tc", "1", "2"], "At 20K the value drops, from – units."),
+        "Only the": (
+            ["CO2", "arccosx"],
+            "Only the 2H label, the flux, and the term.",
+        ),
+        "As Lee": (["x"], "As Lee (2018) showed, the ratio, so it holds."),
+    }
+    for start, (maths, text) in cases.items():
+        para, found = math_and_text(doc, start)
+        assert found == maths, start
+        assert para.text.startswith(text), start
+    # A split paragraph is whole again, aligned as its longer piece is,
+    # with a hyphen Word dropped at the break back; lines broken in the
+    # source and an environment's heading stay apart
+    texts = [p.text for p in doc.paragraphs]
+    w_jc = f"{calkit.docx._tag(w_ns, 'pPr')}/{calkit.docx._tag(w_ns, 'jc')}"
+    split, _ = math_and_text(doc, "A paragraph Word split")
+    assert split.text.endswith("than its first piece has.")
+    assert split.element is not None and split.element.find(w_jc) is None
+    longer, _ = math_and_text(doc, "One more split")
+    assert longer.text.endswith("ending with a well-known effect.")
+    assert longer.element is not None
+    jc = longer.element.find(w_jc)
+    assert jc is not None and jc.get(calkit.docx._tag(w_ns, "val")) == "both"
+    assert "Line one" in texts and "Line two" in texts
+    assert "Abstract" in texts and "Short abstract text here." in texts
+    # An insertion beside a textual citation and an edit inside a
+    # parenthetical with a year merge back, once however often merged
+    para, _ = math_and_text(doc, "As Lee")
+    assert para.element is not None
+    doc.insert_text(
+        para.element, doc.linear_text(para.element).index("showed"), "clearly "
+    )
+    campaign, _ = math_and_text(doc, "The campaign")
+    assert campaign.element is not None
+    t = next(t for t in campaign.element.iter(calkit.docx._tag(w_ns, "t")))
+    t.text = (t.text or "").replace("June", "July")
+    doc.save("returned.docx")
+    for _ in range(2):
+        calkit.cli.latex.merge_docx("returned.docx")
+    src = Path("main.tex").read_text()
+    assert src.count("clearly") == 1
+    assert r"As \citet{lee} clearly showed" in src
+    assert "The campaign (July 2019) ran long." in src
 
 
 def test_equation_links() -> None:
@@ -1031,7 +1232,9 @@ def test_flatten_heavy_figures(
     ]
 
 
-def test_latex_to_omml() -> None:
+def test_latex_to_omml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Text symbols, and text in text from the document's macros, which
     # Pandoc can't convert as written
     preamble = (
@@ -1104,6 +1307,32 @@ def test_latex_to_omml() -> None:
         "/sans-serif:A" in look(sans)
         and "/sans-serif" not in look(sans).split("A", 1)[1]
     )
+    # Brackets that are part of the syntax stay so: an array's column
+    # rules, an arrow's label, \genfrac's delimiters; and commands Pandoc
+    # doesn't know go in as ones it does
+    m_t = f"{{{m_ns}}}t"
+    syntax = {
+        "$\\left(\\begin{array}{c|c} a & b \\\\ c & d \\end{array}\\right)$": (
+            "abcd"
+        ),
+        "$A \\xrightarrow[k]{f} B$": "A→fkB",
+        "$\\genfrac{(}{)}{0pt}{}{n}{k}$": "nk",
+        "$\\cfrac[l]{1}{x}$": "1x",
+        "$\\textnormal{it's}$": "it’s",
+    }
+    for (tex, want), math in zip(
+        syntax.items(), calkit.docx.latex_to_omml(list(syntax))
+    ):
+        assert math is not None, tex
+        assert "".join(t.text or "" for t in math.iter(m_t)) == want, tex
+    # Plain sans serif beside bold keeps both
+    both = look(calkit.docx.latex_to_omml(["$\\mathsf{A} + \\mathbf{F}$"])[0])
+    assert "/sans-serif:A" in both and "b:F" in both
     # Its version, which the export warns about when old
     version = calkit.docx.pandoc_version()
-    assert version is not None and len(version) >= 2 and version >= (2,)
+    assert version is not None and len(version) >= 2
+    fake = tmp_path / "pandoc"
+    fake.write_text("#!/bin/sh\necho 'pandoc 3.6.1'\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(calkit.docx, "find_pandoc", lambda: str(fake))
+    assert calkit.docx.pandoc_version() == (3, 6, 1)

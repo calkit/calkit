@@ -440,6 +440,22 @@ def _strip_comments(tex: str) -> str:
     return "\n".join(out)
 
 
+def _strip_comments_joined(tex: str) -> str:
+    """Remove TeX comments as TeX reads them: a comment takes its line's
+    end, so the next line joins on, without its leading spaces."""
+    lines = tex.split("\n")
+    out, joined = [], False
+    for i, line in enumerate(lines):
+        if joined:
+            line = line.lstrip()
+        m = re.search(r"(?<!\\)%", line)
+        joined = m is not None
+        out.append(line[: m.start()] if m else line)
+        if i < len(lines) - 1 and not joined:
+            out.append("\n")
+    return "".join(out)
+
+
 def _project_has(base: Path, rel: str) -> bool:
     """Whether the project contains this file.
 
@@ -1298,6 +1314,8 @@ _SI_UNITS = _SI_PREFIXES | {
 # 2020)", in prose from ``detex``
 REF_MARK = "\ue010"
 CITE_MARK = "\ue011"
+# And a textual citation, e.g., "Lee (2020)"
+TEXT_CITE_MARK = "\ue012"
 # Environments whose rows are numbered one by one
 _MULTIROW_ENVS = frozenset({"align", "gather", "eqnarray", "flalign"})
 
@@ -1349,7 +1367,7 @@ class Block:
         citations marked."""
         if self.display:
             return []
-        src = "\n".join(_strip_comments(ln.text) for ln in self.lines)
+        src = _strip_comments_joined("\n".join(ln.text for ln in self.lines))
         found = list(_INLINE_MATH_RE.finditer(src))
         out = []
         for i, m in enumerate(found):
@@ -1550,8 +1568,9 @@ def expand_macros(
 
 def detex(text: str, marks: bool = False) -> str:
     """Roughly what LaTeX would print for a bit of source, with, if
-    ``marks``, a reference as ``REF_MARK`` and a parenthetical citation as
-    ``CITE_MARK``, since their text isn't known."""
+    ``marks``, a reference as ``REF_MARK`` and a citation as ``CITE_MARK``,
+    or ``TEXT_CITE_MARK`` for a textual one, since their text isn't
+    known."""
 
     def units(tex: str) -> str:
         # Prefixes join the unit after them, e.g., \milli\second as "ms"
@@ -1565,7 +1584,7 @@ def detex(text: str, marks: bool = False) -> str:
         )
         return re.sub(r"[{}^~]", "", out).strip()
 
-    text = "\n".join(_strip_comments(ln) for ln in text.split("\n"))
+    text = _strip_comments_joined(text)
     # Line breaks first, so the word after one isn't taken for a command
     text = text.replace("\\\\", " ")
     # Escaped characters print as themselves, held aside from the math and
@@ -1582,10 +1601,22 @@ def detex(text: str, marks: bool = False) -> str:
             r"\\(?:auto|c|C|page|name)?ref\*?\s*\{[^}]*\}", REF_MARK, text
         )
         text = re.sub(
-            r"\\cite[p]?\*?\s*(\[[^\]]*\]\s*){0,2}\{[^}]*\}", CITE_MARK, text
+            r"\\(?:[Cc]ite(?:t|alt|author)|[Tt]extcite)\*?\s*"
+            r"(\[[^\]]*\]\s*){0,2}\{[^}]*\}",
+            TEXT_CITE_MARK,
+            text,
+        )
+        # Any other citation, e.g., biblatex's \parencite, but \nocite,
+        # which prints nothing
+        text = re.sub(
+            r"\\(?!nocite)[A-Za-z]*[Cc]ite[A-Za-z]*\*?\s*(\[[^\]]*\]\s*){0,2}"
+            r"\{[^}]*\}",
+            CITE_MARK,
+            text,
         )
     text = re.sub(
-        r"\\(cite[pt]?|ref|eqref|label|includegraphics|usepackage|"
+        r"\\([A-Za-z]*[Cc]ite[A-Za-z]*|ref|eqref|label|includegraphics|"
+        r"usepackage|"
         r"documentclass|bibliography\w*|begin|end)\*?(\[[^\]]*\]){0,2}"
         r"\{[^}]*\}",
         " ",
@@ -1974,40 +2005,50 @@ def find_display(
     return best[2] if best and best[0] >= 0.6 else None
 
 
+def letters_and_digits(text: str) -> str:
+    """Text without anything but its letters and digits, lowercased, to
+    compare however words split, e.g., "300K" and "300 K"."""
+    text = unicodedata.normalize("NFKC", text).lower()
+    return "".join(c for c in text if c.isalnum())
+
+
+# A citation as rendered in brackets, e.g., "[Lee, 2018]" or "[3, 4]"
+_BRACKET_CITATION_RE = re.compile(
+    r"\[(?:[^\[\]]*\b(?:1[5-9]|20)\d\d[a-z]?\b[^\[\]]*|"
+    r"\d+(?:\s*[,\u2013-]\s*\d+)*)\]"
+)
+
+
 def already_applied(block: Block, old: str, new: str) -> bool:
     """Whether the block already reads as ``new`` rather than ``old``: each
     change, with a word or two either side, reads as new and not as old,
     since a common word, e.g., "the", is anywhere."""
 
-    def words(text: str) -> list[str]:
-        # Without rendered citations, which the source has as commands,
-        # e.g., "(Lee, 2018)", "[Lee, 2018]", or "[3, 4]"
-        text = _CITATION_RE.sub(" ", text)
-        text = re.sub(
-            r"\[(?:[^\[\]]*\b(?:1[5-9]|20)\d\d[a-z]?\b[^\[\]]*|"
-            r"\d+(?:\s*[,\u2013-]\s*\d+)*)\]",
-            " ",
-            text,
-        )
-        return re.findall(r"[A-Za-z0-9][\w.]*", text)
-
-    def key(text: str) -> str:
-        # Letters and digits only, so how words split doesn't matter
-        text = unicodedata.normalize("NFKC", text).lower()
-        return "".join(c for c in text if c.isalnum())
-
     def holds(seq: list[str]) -> bool:
-        return any(key(" ".join(seq)) in h for h in have)
+        return any(letters_and_digits(" ".join(seq)) in h for h in have)
 
+    # Without the rendered citations both have, which the source has as
+    # commands, but with any that changed, e.g., "(June 2019)"
+    cites = [
+        c
+        for r in (_CITATION_RE, _BRACKET_CITATION_RE)
+        for c in r.findall(old)
+        if c in new
+    ]
+    for c in cites:
+        old, new = old.replace(c, " "), new.replace(c, " ")
     # As rendered, with its inline math as text or not, as Word may have it
-    have = [key(block.text)]
+    have = [letters_and_digits(block.text)]
     if not block.markdown:
-        src = "\n".join(_strip_comments(ln.text) for ln in block.lines)
+        src = _strip_comments_joined("\n".join(ln.text for ln in block.lines))
         src = _INLINE_MATH_RE.sub(
             lambda m: f" {math_text(m.group(1) or m.group(2))} ", src
         )
-        have.append(key(detex(expand_macros(src, block.macros))))
-    ow, nw = words(old), words(new)
+        have.append(
+            letters_and_digits(detex(expand_macros(src, block.macros)))
+        )
+    ow = re.findall(r"[A-Za-z0-9][\w.]*", old)
+    nw = re.findall(r"[A-Za-z0-9][\w.]*", new)
     ops = difflib.SequenceMatcher(None, ow, nw, autojunk=False).get_opcodes()
     for tag, i1, i2, j1, j2 in ops:
         if tag == "equal":
@@ -2059,12 +2100,8 @@ def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
             continue
         new_span = " ".join(nw[j1:j2])
         if tag == "insert":
-            # Anchor on the preceding word(s), widening the phrase until
-            # it's unique -- a single preceding word is often repeated
-            # elsewhere in the block even when the insertion point isn't
-            # anywhere near markup -- else on the following ones, e.g.,
-            # where markup sits between the preceding words. Braces can,
-            # e.g., \textit{H model} for.
+            # Anchor on the words before, widened until unique, braces
+            # allowed between them, else on the words after
             hits, after = None, True
             for phrases in (
                 [ow[i1 - k : i1] for k in range(1, i1 + 1)],
@@ -2087,11 +2124,17 @@ def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
                 after = False
             if hits is None:
                 return None
+            # Already there, as from merging this before
+            there = r"[\s~{}]+".join(re.escape(w) for w in nw[j1:j2])
             if after:
                 at = hits[0].end()
+                if re.match(rf"[\s~{{}}]*{there}(?![A-Za-z])", src[at:]):
+                    continue
                 src = src[:at] + " " + new_span + src[at:]
             else:
                 at = hits[0].start()
+                if re.search(rf"(?<![A-Za-z]){there}[\s~{{}}]*$", src[:at]):
+                    continue
                 src = src[:at] + new_span + " " + src[at:]
             continue
         span = _find_span(src, ow[i1:i2])
@@ -2577,9 +2620,21 @@ def math_text(tex: str) -> str:
         greek,
         tex,
     )
+    names = set(_MATH_FUNCTIONS) | {
+        "inf",
+        "liminf",
+        "limsup",
+        "deg",
+        "dim",
+        "ker",
+        "gcd",
+        "hom",
+        "Pr",
+    }
     tex = re.sub(
-        r"\\(ln|log|lg|exp|sin|cos|tan|sinh|cosh|tanh|max|min|lim|sup|inf|"
-        r"det|arg|deg|dim|ker|gcd|Pr)(?![A-Za-z])",
+        r"\\("
+        + "|".join(sorted(names, key=len, reverse=True))
+        + r")(?![A-Za-z])",
         r" \1 ",
         tex,
     )

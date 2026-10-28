@@ -988,15 +988,18 @@ def map_ck_components(
             root = os.path.abspath(folder or ".")
             break
         root = parent
-    # Components link to the project on its hub, when it's known whose it is
+    # Components link to the project on its hub, when calkit.yaml says whose
+    # it is, since a Git remote differs between clones
     link_base = None
     try:
         import calkit.config
 
-        hub = calkit.load_calkit_info(wdir=root, read_only=True).get("hub")
-        hub = hub or "calkit.io"
-        project = calkit.detect_project_name(wdir=root)
-        link_base = f"{calkit.config.normalize_hub_url(hub)}/{project}"
+        ck_info = calkit.load_calkit_info(wdir=root, read_only=True)
+        if ck_info.get("owner") and ck_info.get("name"):
+            hub = calkit.config.normalize_hub_url(
+                str(ck_info.get("hub") or "calkit.io")
+            )
+            link_base = f"{hub}/{ck_info['owner']}/{ck_info['name']}"
     except Exception:
         pass
     if previous_values is None:

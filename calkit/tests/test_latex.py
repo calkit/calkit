@@ -4,6 +4,7 @@ import gzip
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -160,8 +161,17 @@ def test_ck_components(tmp_dir):
     assert calkit.latex.tex_value(float("nan")) == ("t", "nan")
     assert calkit.latex.tex_value([3]) == ("n", "3")
     assert calkit.latex.tex_value(1e-05) == ("n", "1e-05")
-    # No link base without knowing whose project it is
+    # No link base without knowing whose project it is, even from a remote,
+    # which differs between clones
     assert "cklinkbase" not in values
+    subprocess.run(["git", "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/fork/test.git"],
+        check=True,
+    )
+    calkit.latex.map_ck_components("paper")
+    with open("paper/_calkit/values.tex") as f:
+        assert "cklinkbase" not in f.read()
     with open("calkit.yaml", "w") as f:
         f.write("name: test\nowner: someone\n")
     calkit.latex.map_ck_components("paper")

@@ -1,8 +1,8 @@
-import base64
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.pipeline import PipelineAtRef
@@ -21,6 +21,8 @@ def test_get_project_provenance(client: TestClient) -> None:
         "paper/drawn.png": "",
         "paper/pasted.png": "",
     }
+    # In object storage, inside a directory a stage outputs
+    stored = {"results/sweep/summary.json": json.dumps({"best": 7})}
     tree = SimpleNamespace(
         is_file=lambda path: path in files,
         is_dir=lambda path: path == "data/downloaded",
@@ -87,8 +89,10 @@ def test_get_project_provenance(client: TestClient) -> None:
         frozen=set(),
     )
 
-    def contents(project, repo, path, ref):
-        return SimpleNamespace(content=base64.b64encode(files[path].encode()))
+    def read(project, tree, path, max_bytes, session, current_user):
+        if path not in files | stored:
+            raise HTTPException(404, f"'{path}' is not a file in this project")
+        return (files | stored)[path].encode()
 
     def get(params: str) -> dict:
         with (
@@ -101,8 +105,11 @@ def test_get_project_provenance(client: TestClient) -> None:
             patch(f"{MODULE}.get_repo_tree_for_ref", return_value=tree),
             patch(f"{MODULE}.pipeline_at_ref", return_value=pipeline),
             patch(
-                f"{MODULE}.app.projects.get_contents_from_repo",
-                side_effect=contents,
+                f"{MODULE}.app.projects.read_project_file", side_effect=read
+            ),
+            patch(
+                f"{MODULE}.app.projects.dvc_outputs_from_tree",
+                return_value={p: {"md5": "x"} for p in stored},
             ),
         ):
             response = client.get(f"/projects/o/p/provenance?{params}")
@@ -144,6 +151,15 @@ def test_get_project_provenance(client: TestClient) -> None:
     body = get("path=results/metrics.json&key=nope")
     assert body["value"] is None
     assert "nope" in body["value_error"]
+    # A file inside a directory output is read from storage
+    body = get("path=results/sweep/summary.json&key=best")
+    assert body["exists"]
+    assert body["value"] == 7
+    # A file that isn't there says so, rather than having no value
+    body = get("path=results/gone.json&key=rmse")
+    assert not body["exists"]
+    assert body["value"] is None
+    assert "results/gone.json" in body["value_error"]
     # A stage never run is still found from calkit.yaml, relative to its
     # wdir, though nothing has produced the file yet
     body = get("path=figs/out.png")

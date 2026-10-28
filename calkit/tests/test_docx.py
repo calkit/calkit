@@ -427,6 +427,18 @@ def test_docx_round_trip(
         calkit.cli.latex.to_docx("paper/main.pdf", engine="word", force=True)
         exports.append(Path("paper/main-for-review.docx").read_bytes())
     assert exports[0] == exports[1]
+    # Failing after the conversion, it leaves the last export, not the bare
+    # conversion, and nothing beside it
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(calkit.latex, "align", lambda *a: 1 / 0)
+        with pytest.raises(ZeroDivisionError):
+            calkit.cli.latex.to_docx(
+                "paper/main.pdf", engine="word", force=True
+            )
+    assert Path("paper/main-for-review.docx").read_bytes() == exports[0]
+    assert [p.name for p in Path("paper").glob("*.docx")] == [
+        "main-for-review.docx"
+    ]
     # TeX4ht gets the same date, so \today in the Word copy matches the PDF,
     # run directly or in the stage's environment; it makes no ODT here
     dated = {"SOURCE_DATE_EPOCH": "1790000000", "FORCE_SOURCE_DATE": "1"}

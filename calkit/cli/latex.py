@@ -2054,10 +2054,13 @@ def to_docx(
         raise_error(f"{output} already exists; use --force to overwrite it")
     if engine is None:
         engine = "word" if calkit.docx.word_installed() else "libreoffice"
+    # Converted beside the output, then read in and removed, so a failed
+    # export doesn't leave the bare conversion where the export goes
+    bare = Path(output).with_suffix(".bare.docx").as_posix()
     if engine == "word":
         typer.echo("Converting the PDF with Word")
         try:
-            calkit.docx.pdf_to_docx(pdf_path, output)
+            calkit.docx.pdf_to_docx(pdf_path, bare)
         except RuntimeError as e:
             raise_error(
                 f"{e}\nTo convert from the source instead, use "
@@ -2210,12 +2213,16 @@ def to_docx(
                 f"{build}. Its make4ht comes with TeX Live's tex4ht package."
             )
         try:
-            calkit.docx.odt_to_docx(odt, output)
+            calkit.docx.odt_to_docx(odt, bare)
         except RuntimeError as e:
             raise_error(f"{e}\nTeX4ht's logs are in {build}")
     else:
         raise_error("--engine must be 'word' or 'libreoffice'")
-    doc = calkit.docx.Document(output)
+    try:
+        doc = calkit.docx.Document(bare)
+    finally:
+        os.remove(bare)
+    doc.path = output
     lines = calkit.latex.flatten(source)
     blks = calkit.latex.blocks(lines)
     paras = doc.paragraphs

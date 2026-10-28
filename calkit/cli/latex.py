@@ -2019,6 +2019,236 @@ def to_docx(
     from calkit.models.docx import LatexDocxExport
     from calkit.models.pipeline import LatexStage
 
+    def rebuild_tables(
+        doc: calkit.docx.Document,
+        paras: list[calkit.docx.Paragraph],
+        matched: list[calkit.latex.Block | None],
+        table_blks: list[calkit.latex.Block],
+        preamble: str,
+    ) -> tuple[dict[Any, calkit.latex.Block | None], set[int]]:
+        # Word's tables replaced by ones converted from the source, giving
+        # the block each paragraph is anchored to after and the ids of the
+        # blocks whose tables were replaced
+        rebuilt: set[int] = set()
+        from collections import Counter
+        from xml.etree import ElementTree as ET
+
+        w_body = doc.doc.find(calkit.docx._tag(calkit.docx.W, "body"))
+        assert w_body is not None
+        w_p = calkit.docx._tag(calkit.docx.W, "p")
+        w_tbl = calkit.docx._tag(calkit.docx.W, "tbl")
+        w_ppr = calkit.docx._tag(calkit.docx.W, "pPr")
+        w_sect_tag = calkit.docx._tag(calkit.docx.W, "sectPr")
+        w_sect = f"{w_ppr}/{w_sect_tag}"
+        block_of = {p.element: b for p, b in zip(paras, matched)}
+
+        def top_of(el: Any) -> Any:
+            while doc._parents.get(el) is not w_body:
+                el = doc._parents[el]
+            return el
+
+        def number(el: Any, attr: str, default: int) -> int:
+            value = el.get(attr) if el is not None else None
+            try:
+                return int(float(value)) if value else default
+            except ValueError:
+                return default
+
+        def is_prose(q: Any, blk: calkit.latex.Block) -> bool:
+            # Anchored elsewhere, and more than a cell's few words, which
+            # can match, e.g., a caption by chance
+            return (
+                block_of.get(q) not in (None, blk)
+                and len(doc.linear_text(q).split()) >= 4
+            )
+
+        def tokens(text: str) -> list[str]:
+            return re.findall(
+                r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+(?:\.\d+)?", text
+            )
+
+        # Each table's Word table to replace, and the width of the text
+        # where it is, as its section sets it
+        anchors: list[Any] = []
+        widths: list[int] = []
+        sizes: list[int | None] = []
+        for blk in table_blks:
+            mine = Counter(
+                top_of(p.element)
+                for p, b in zip(paras, matched)
+                if b is blk and p.element is not None
+            )
+            anchor = mine.most_common(1)[0][0] if mine else None
+            others = (
+                [q for q in anchor.iter(w_p) if is_prose(q, blk)]
+                if anchor is not None
+                else []
+            )
+            if (
+                anchor is None
+                or anchor.tag != w_tbl
+                or 3 * len(others) > mine[anchor]
+            ):
+                anchors.append(None)
+                widths.append(0)
+                sizes.append(None)
+                continue
+            anchors.append(anchor)
+            # In the size the PDF has it, as most of Word's runs in it are
+            sz = Counter(
+                el.get(calkit.docx._tag(calkit.docx.W, "val"))
+                for el in anchor.iter(calkit.docx._tag(calkit.docx.W, "sz"))
+            ).most_common(1)
+            sizes.append(
+                int(sz[0][0]) if sz and (sz[0][0] or "").isdigit() else None
+            )
+            children = list(w_body)
+            sect = next(
+                (
+                    c if c.tag == w_sect_tag else c.find(w_sect)
+                    for c in children[children.index(anchor) :]
+                    if c.tag == w_sect_tag or c.find(w_sect) is not None
+                ),
+                None,
+            )
+            width = 9360
+            if sect is not None:
+                size = sect.find(calkit.docx._tag(calkit.docx.W, "pgSz"))
+                margin = sect.find(calkit.docx._tag(calkit.docx.W, "pgMar"))
+                columns = sect.find(calkit.docx._tag(calkit.docx.W, "cols"))
+                w_attr = calkit.docx._tag(calkit.docx.W, "w")
+                n_cols = number(
+                    columns, calkit.docx._tag(calkit.docx.W, "num"), 1
+                )
+                width = (
+                    number(size, w_attr, 12240)
+                    - number(
+                        margin, calkit.docx._tag(calkit.docx.W, "left"), 1440
+                    )
+                    - number(
+                        margin, calkit.docx._tag(calkit.docx.W, "right"), 1440
+                    )
+                    - (n_cols - 1)
+                    * number(
+                        columns, calkit.docx._tag(calkit.docx.W, "space"), 720
+                    )
+                ) // max(1, n_cols)
+            widths.append(width)
+        tables = calkit.docx.latex_to_tables(
+            [
+                "\n".join(ln.text for ln in b.lines) if a is not None else ""
+                for b, a in zip(table_blks, anchors)
+            ],
+            preamble,
+            widths,
+            sizes,
+        )
+        for blk, table, anchor in zip(table_blks, tables, anchors):
+            if table is None or anchor is None:
+                continue
+            # Beside it, what's anchored to the table or reads only as its
+            # words, e.g., "Deuterium Heavier elements" from a header row
+            words = set(tokens(calkit.latex.detex(blk.text)))
+            children = list(w_body)
+            at = children.index(anchor)
+            going = [anchor]
+            for step in (-1, 1):
+                k = at + step
+                while 0 <= k < len(children):
+                    unit = children[k]
+                    # Its text runs, since a rule Word drew as a picture
+                    # can sit in the same paragraph
+                    text = "".join(
+                        t.text or ""
+                        for t in unit.iter(
+                            calkit.docx._tag(calkit.docx.W, "t")
+                        )
+                    )
+                    if unit.tag != w_p or unit.find(w_sect) is not None:
+                        break
+                    held = block_of.get(unit)
+                    if not (
+                        held is blk
+                        or (
+                            held is None
+                            and tokens(text)
+                            and set(tokens(text)) <= words
+                        )
+                    ):
+                        break
+                    going.append(unit)
+                    k += step
+            # Anchored prose inside Word's table moves out of it, before the
+            # table if it came first
+            inside = list(anchor.iter(w_p))
+            first_mine = next(
+                (i for i, q in enumerate(inside) if block_of.get(q) is blk), 0
+            )
+            moved = [
+                (i > first_mine, q)
+                for i, q in enumerate(inside)
+                if is_prose(q, blk)
+            ]
+            for _, q in moved:
+                doc._parents[q].remove(q)
+            at = list(w_body).index(anchor)
+            pieces = (
+                [q for after, q in moved if not after]
+                + [table]
+                + [q for after, q in moved if after]
+            )
+            for k, piece in enumerate(pieces):
+                w_body.insert(at + k, piece)
+            for unit in going:
+                w_body.remove(unit)
+            # Set off from the text after, as LaTeX sets a table
+            children = list(w_body)
+            after_tbl = children[children.index(table) + 1 :][:1]
+            if after_tbl and after_tbl[0].tag == w_p:
+                ppr = after_tbl[0].find(w_ppr)
+                if ppr is None:
+                    ppr = ET.Element(w_ppr)
+                    after_tbl[0].insert(0, ppr)
+                spacing = ppr.find(calkit.docx._tag(calkit.docx.W, "spacing"))
+                if spacing is None:
+                    spacing = ET.Element(
+                        calkit.docx._tag(calkit.docx.W, "spacing")
+                    )
+                    # In schema order, before what follows spacing
+                    later = {
+                        calkit.docx._tag(calkit.docx.W, t)
+                        for t in (
+                            "ind",
+                            "contextualSpacing",
+                            "mirrorIndents",
+                            "suppressOverlap",
+                            "jc",
+                            "textDirection",
+                            "textAlignment",
+                            "textboxTightWrap",
+                            "outlineLvl",
+                            "divId",
+                            "cnfStyle",
+                            "rPr",
+                            "sectPr",
+                            "pPrChange",
+                        )
+                    }
+                    ppr.insert(
+                        next(
+                            (k for k, c in enumerate(ppr) if c.tag in later),
+                            len(ppr),
+                        ),
+                        spacing,
+                    )
+                before_attr = calkit.docx._tag(calkit.docx.W, "before")
+                if int(spacing.get(before_attr, "0") or 0) < 240:
+                    spacing.set(before_attr, "240")
+            rebuilt.add(id(blk))
+            for q in table.iter(w_p):
+                block_of[q] = blk
+        return block_of, rebuilt
+
     ck_info = calkit.load_calkit_info()
     stages = ck_info.get("pipeline", {}).get("stages", {})
     stage_name = calkit.pipeline.get_stage_for_output(pdf_path, ck_info)
@@ -2225,8 +2455,47 @@ def to_docx(
     doc.path = output
     lines = calkit.latex.flatten(source)
     blks = calkit.latex.blocks(lines)
+    # The document's macro definitions, for converting math and tables
+    preamble = "\n".join(
+        ln.text
+        for ln in lines
+        if re.match(
+            r"\s*\\(newcommand|renewcommand|providecommand|"
+            r"DeclareMathOperator|def)\b",
+            ln.text,
+        )
+    )
     paras = doc.paragraphs
     matched = calkit.latex.align([p.text for p in paras], blks)
+    # Tables come from the source too, converted by Pandoc, since Word's
+    # import can merge their rows, drop a header, or leave math as text.
+    # Each replaces the Word table holding most of its cells, with what
+    # Word put beside it from the table, e.g., a header row, and nothing
+    # anchored elsewhere.
+    rebuilt: set[int] = set()
+    table_blks = [
+        b
+        for b in blks
+        if b.display is None
+        and re.search(
+            r"\\begin\s*\{("
+            + "|".join(re.escape(e) for e in calkit.docx.TABLE_ENVS)
+            + r")\}",
+            "\n".join(ln.text for ln in b.lines),
+        )
+    ]
+    if (
+        engine == "word"
+        and table_blks
+        and calkit.docx.find_pandoc() is not None
+    ):
+        block_of, rebuilt = rebuild_tables(
+            doc, paras, matched, table_blks, preamble
+        )
+        if rebuilt:
+            doc._parents = {c: p for p in doc.doc.iter() for c in p}
+            paras = doc.paragraphs
+            matched = [block_of.get(p.element) for p in paras]
     # Pieces of a paragraph Word's import split, e.g., at a page break,
     # join again, with anything floated between them after
     if engine == "word":
@@ -2653,15 +2922,6 @@ def to_docx(
             for blk in group
             for k, (tex, numbered) in enumerate(blk.rows)
         ]
-        preamble = "\n".join(
-            ln.text
-            for ln in lines
-            if re.match(
-                r"\s*\\(newcommand|renewcommand|providecommand|"
-                r"DeclareMathOperator|def)\b",
-                ln.text,
-            )
-        )
         maths = calkit.docx.latex_to_omml([p[2] for p in pieces], preamble)
         converted = dict(zip([(id(p[0]), p[1]) for p in pieces], maths))
         # What each link within the document shows, e.g., an equation's
@@ -2967,7 +3227,7 @@ def to_docx(
                 els = by_block.get(id(b), [])
                 texts = [doc.linear_text(el) for el in els]
                 pi, cursor = 0, 0
-                found = b.inline_math if els else []
+                found = b.inline_math if els and id(b) not in rebuilt else []
                 for n, (pre, tex, post) in enumerate(found):
                     # Only a superscript or subscript, e.g., $^{13}$C, stays
                     # as Word's formatted text, easier to edit

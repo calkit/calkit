@@ -1988,9 +1988,13 @@ def find_block(
 ) -> Block | None:
     """The block a bookmark points at, by line first and text second."""
     same_file = [b for b in blks if b.path == path]
+    # A part of the block reads as in it, e.g., a table's cell
+    part = keep_letters_and_digits(text)
     for b in same_file:
         if b.lineno == lineno and (
-            b.display or similarity(text, b.text) >= 0.5
+            b.display
+            or similarity(text, b.text) >= 0.5
+            or (part and part in keep_letters_and_digits(b.text))
         ):
             return b
     scored = [
@@ -2047,8 +2051,17 @@ def already_applied(block: Block, old: str, new: str) -> bool:
     change, with a word or two either side, reads as new and not as old,
     since a common word, e.g., "the", is anywhere."""
 
-    def holds(seq: list[str]) -> bool:
-        return any(keep_letters_and_digits(" ".join(seq)) in h for h in have)
+    def squash(text: str, exact: bool) -> str:
+        # Letters and digits only, in their case if exact
+        text = unicodedata.normalize("NFKC", text)
+        return (
+            "".join(c for c in text if c.isalnum())
+            if exact
+            else (keep_letters_and_digits(text))
+        )
+
+    def holds(seq: list[str], exact: bool) -> bool:
+        return any(squash(" ".join(seq), exact) in h for h in have[exact])
 
     # Without the rendered citations both have, which the source has as
     # commands, but with any that changed, e.g., "(June 2019)"
@@ -2060,25 +2073,28 @@ def already_applied(block: Block, old: str, new: str) -> bool:
     ]
     for c in cites:
         old, new = old.replace(c, " "), new.replace(c, " ")
-    # As rendered, with its inline math as text or not, as Word may have it
-    have = [keep_letters_and_digits(block.text)]
+    # As rendered, with its inline math as text or not, as Word may have it,
+    # and in its case, for a change only of case, e.g., "Chemprop"
+    rendered = [block.text]
     if not block.markdown:
         src = _strip_comments_joined("\n".join(ln.text for ln in block.lines))
         src = _INLINE_MATH_RE.sub(
             lambda m: f" {get_math_text(m.group(1) or m.group(2))} ", src
         )
-        have.append(
-            keep_letters_and_digits(detex(expand_macros(src, block.macros)))
-        )
+        rendered.append(detex(expand_macros(src, block.macros)))
+    have = {e: [squash(t, e) for t in rendered] for e in (False, True)}
     ow = re.findall(r"[A-Za-z0-9][\w.]*", old)
     nw = re.findall(r"[A-Za-z0-9][\w.]*", new)
     ops = difflib.SequenceMatcher(None, ow, nw, autojunk=False).get_opcodes()
     for tag, i1, i2, j1, j2 in ops:
         if tag == "equal":
             continue
+        exact = [w.lower() for w in ow[i1:i2]] == [
+            w.lower() for w in nw[j1:j2]
+        ]
         if not any(
-            holds(nw[max(0, j1 - n) : j2 + n])
-            and not holds(ow[max(0, i1 - n) : i2 + n])
+            holds(nw[max(0, j1 - n) : j2 + n], exact)
+            and not holds(ow[max(0, i1 - n) : i2 + n], exact)
             for n in (2, 1)
         ):
             return False

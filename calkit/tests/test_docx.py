@@ -166,6 +166,18 @@ def test_latex_source_helpers(project: Path) -> None:
     assert calkit.latex.already_applied(
         applied, sent, sent.replace("for wind", "for a wind")
     )
+    # A change only of case is there once the source has that case
+    cased = calkit.latex.Block(
+        [calkit.latex.SourceLine("x.tex", 1, "A graph (Gnet) model.")]
+    )
+    sent_g = "A graph (Gnet) model."
+    assert not calkit.latex.already_applied(
+        cased, sent_g, sent_g.replace("Gnet", "GNet")
+    )
+    cased.lines[0].text = "A graph (GNet) model."
+    assert calkit.latex.already_applied(
+        cased, sent_g, sent_g.replace("Gnet", "GNet")
+    )
     # An insertion where the words before it repeat goes after a longer
     # run of them, across braces, else before the words after it, e.g.,
     # past a citation
@@ -943,7 +955,8 @@ def test_word_export_placement(
     def make_word_import(
         paras: list[tuple[str, str | None]], path: str
     ) -> None:
-        # Paragraphs as Word's PDF import might give them, with alignment
+        # Paragraphs as Word's PDF import might give them, with alignment,
+        # or a table's rows of cells, each cell's paragraphs split at "|"
         Path(path).write_bytes(
             calkit.docx._pandoc(
                 ["-f", "markdown", "-t", "docx", "-o", "-"], b"x"
@@ -955,6 +968,25 @@ def test_word_export_placement(
         for child in list(body)[:-1]:
             body.remove(child)
         for i, (text, jc) in enumerate(paras):
+            if jc == "table":
+                rows = "".join(
+                    "<w:tr>"
+                    + "".join(
+                        "<w:tc>"
+                        + "".join(
+                            f"<w:p><w:r><w:t>{q}</w:t></w:r></w:p>"
+                            for q in cell.split("|")
+                        )
+                        + "</w:tc>"
+                        for cell in row.split(" ; ")
+                    )
+                    + "</w:tr>"
+                    for row in text.split("\n")
+                )
+                body.insert(
+                    i, ET.fromstring(f'<w:tbl xmlns:w="{w_ns}">{rows}</w:tbl>')
+                )
+                continue
             ppr = f'<w:pPr><w:jc w:val="{jc}"/></w:pPr>' if jc else ""
             body.insert(
                 i,
@@ -1011,6 +1043,20 @@ def test_word_export_placement(
                 r"Line one\\",
                 "Line two",
                 "",
+                r"\begin{table}",
+                r"\caption{Fits by model.}",
+                r"\begin{tabular}{l r}",
+                r"\toprule",
+                r" & Error \\",
+                r"\cmidrule(lr){2-2}",
+                r"Model & \makecell{Rate\\(\%)} \\",
+                r"\midrule",
+                r"Kernel ($\sigma_k$) & 1.0 \\",
+                r"Spline (cubic) & 0.5 \\ % the best",
+                r"\bottomrule",
+                r"\end{tabular}",
+                r"\end{table}",
+                "",
                 r"\begin{abstract}",
                 "Short abstract text here.",
                 r"\end{abstract}",
@@ -1047,6 +1093,12 @@ def test_word_export_placement(
             ("known effect.", None),
             ("Line one", None),
             ("Line two", None),
+            ("Table 1: Fits by model.", None),
+            ("ErrorError", None),
+            (
+                "Model ; Rate (%)\nKernel (Spline (cubicσk)) ; 1.0|0.5",
+                "table",
+            ),
             ("Abstract", None),
             ("Short abstract text here.", None),
         ],
@@ -1096,6 +1148,68 @@ def test_word_export_placement(
     assert jc is not None and jc.get(calkit.docx._tag(w_ns, "val")) == "both"
     assert "Line one" in texts and "Line two" in texts
     assert "Abstract" in texts and "Short abstract text here." in texts
+    # A table comes from the source, rows Word merged apart and the header
+    # it dropped beside the table back, with its math, line breaks, and
+    # rules, and its cells anchored, after the caption
+    tbls = list(doc.doc.iter(calkit.docx._tag(w_ns, "tbl")))
+    assert len(tbls) == 1
+    rows = [
+        [
+            (
+                "".join(
+                    "/"
+                    if el.tag == calkit.docx._tag(w_ns, "br")
+                    else (el.text or "")
+                    for el in tc.iter()
+                    if el.tag
+                    in (
+                        calkit.docx._tag(w_ns, "t"),
+                        calkit.docx._tag(w_ns, "br"),
+                    )
+                ),
+                [
+                    "".join(
+                        t.text or ""
+                        for t in m.iter(calkit.docx._tag(calkit.docx.M, "t"))
+                    )
+                    for m in tc.iter(calkit.docx._tag(calkit.docx.M, "oMath"))
+                ],
+            )
+            for tc in tr.iter(calkit.docx._tag(w_ns, "tc"))
+        ]
+        for tr in tbls[0].iter(calkit.docx._tag(w_ns, "tr"))
+    ]
+    assert rows == [
+        [("", []), ("Error", [])],
+        [("Model", []), ("Rate/(%)", [])],
+        [("Kernel ()", ["σk"]), ("1.0", [])],
+        [("Spline (cubic)", []), ("0.5", [])],
+    ]
+    assert "ErrorError" not in texts
+    assert texts.index("Table 1: Fits by model.") < texts.index("Model")
+    borders = [
+        [
+            "".join(
+                f"{b.tag.split('}')[1]}{b.get(calkit.docx._tag(w_ns, 'sz'))}"
+                for b in tc.iter()
+                if b.tag
+                in (
+                    calkit.docx._tag(w_ns, "top"),
+                    calkit.docx._tag(w_ns, "bottom"),
+                )
+            )
+            for tc in tr.iter(calkit.docx._tag(w_ns, "tc"))
+        ]
+        for tr in tbls[0].iter(calkit.docx._tag(w_ns, "tr"))
+    ]
+    assert borders == [
+        ["top8", "top8"],
+        ["", "top4"],
+        ["top4", "top4"],
+        ["bottom8", "bottom8"],
+    ]
+    cells = [p for p in doc.paragraphs if p.text in ("Model", "0.5")]
+    assert all(p.bookmark for p in cells)
     # An insertion beside a textual citation and an edit inside a
     # parenthetical with a year merge back, once however often merged
     para, _ = get_math_and_text(doc, "As Lee")
@@ -1107,6 +1221,10 @@ def test_word_export_placement(
     assert campaign.element is not None
     t = next(t for t in campaign.element.iter(calkit.docx._tag(w_ns, "t")))
     t.text = (t.text or "").replace("June", "July")
+    cell = next(p for p in doc.paragraphs if p.text == "0.5")
+    assert cell.element is not None
+    t = next(t for t in cell.element.iter(calkit.docx._tag(w_ns, "t")))
+    t.text = "0.6"
     doc.save("returned.docx")
     for _ in range(2):
         calkit.cli.latex.merge_docx("returned.docx")
@@ -1114,6 +1232,7 @@ def test_word_export_placement(
     assert src.count("clearly") == 1
     assert r"As \citet{lee} clearly showed" in src
     assert "The campaign (July 2019) ran long." in src
+    assert r"Spline (cubic) & 0.6 \\ % the best" in src
 
 
 def test_equation_links() -> None:
@@ -1261,6 +1380,65 @@ def test_flatten_heavy_figures(
         "paper.docx",
         "paper.tmp.pdf",
     ]
+
+
+def test_latex_to_tables() -> None:
+    w, m = calkit.docx.W, calkit.docx.M
+
+    def get_cells(tbl: ET.Element) -> list[list[str]]:
+        return [
+            [
+                "".join(
+                    el.text or ""
+                    for el in tc.iter()
+                    if el.tag in (f"{{{w}}}t", f"{{{m}}}t")
+                )
+                for tc in tr.iter(f"{{{w}}}tc")
+            ]
+            for tr in tbl.iter(f"{{{w}}}tr")
+        ]
+
+    def get_sizes(tbl: ET.Element) -> set[str | None]:
+        return {sz.get(f"{{{w}}}val") for sz in tbl.iter(f"{{{w}}}sz")}
+
+    wide = (
+        r"\begin{tabular}{lll}" + "\n"
+        r"\hline" + "\n"
+        r"A long first heading & A long second heading & "
+        r"A long third heading \\" + "\n"
+        r"\hline" + "\n"
+        r"x & \ab{} & $y$ % a note" + "\n"
+    )
+    tables = calkit.docx.latex_to_tables(
+        [
+            wide,
+            wide + r"\end{tabular}",
+            r"\begin{tabular}{l} \href{https://a.b}{link} \\ \end{tabular}",
+            "Just prose.",
+        ],
+        preamble=r"\newcommand{\ab}{AB}",
+        widths=[3000, 30000, 3000, 3000],
+        sizes=[22, 22, None, None],
+    )
+    narrow, roomy, link, prose = tables
+    assert narrow is not None and roomy is not None
+    # The source's own macros, math, and a block stopping short of its end,
+    # with its comments dropped
+    assert get_cells(narrow) == get_cells(roomy)
+    assert get_cells(narrow)[1] == ["x", "AB", "y"]
+    # Where it doesn't fit, it gets smaller, but no smaller than 9 points,
+    # then narrower; where it does, it keeps its size and natural widths
+    assert get_sizes(narrow) == {"18"} and get_sizes(roomy) == {"22"}
+    grid = [
+        sum(int(c.get(f"{{{w}}}w", "0")) for c in t.iter(f"{{{w}}}gridCol"))
+        for t in (narrow, roomy)
+    ]
+    assert grid[0] < grid[1] < 30000
+    # Links and anything not a table aren't converted
+    assert link is None and prose is None
+    # Without sizes, the document's own size is kept
+    plain = calkit.docx.latex_to_tables([wide])[0]
+    assert plain is not None and get_sizes(plain) == set()
 
 
 def test_latex_to_omml(monkeypatch: pytest.MonkeyPatch) -> None:

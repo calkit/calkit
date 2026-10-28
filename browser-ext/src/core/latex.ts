@@ -48,7 +48,8 @@ export interface Citation {
 // second brace group
 const CK_VALUE_RE =
   /\\ck(value)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}\s*\{([^}]*)\}/g;
-const CK_FILE_RE = /\\ck(figure|table)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}/g;
+const CK_FILE_RE =
+  /\\ck(figure|table|include)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}/g;
 // The plain commands among _INPUT_COMMANDS in calkit/latex.py that show
 // something from the project
 const INCLUDE_RE =
@@ -88,7 +89,8 @@ export function citationAt(line: string, offset: number): Citation | null {
       };
     }
     return {
-      kind: kind as Citation["kind"],
+      // \ckinclude inputs any TeX, like a plain \input
+      kind: kind === "include" ? "file" : (kind as Citation["kind"]),
       path: first.trim(),
       key: kind === "value" ? second?.trim() : undefined,
       options: (options ?? "").trim(),
@@ -140,5 +142,6 @@ export function citationText(citation: Citation): string {
   if (citation.kind === "value") {
     return `\\ckvalue${options}{${citation.path}}{${citation.key ?? ""}}`;
   }
-  return `\\ck${citation.kind}${options}{${citation.path}}`;
+  const command = citation.kind === "file" ? "include" : citation.kind;
+  return `\\ck${command}${options}{${citation.path}}`;
 }

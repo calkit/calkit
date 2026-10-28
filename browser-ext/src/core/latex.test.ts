@@ -57,6 +57,13 @@ describe("citationAt", () => {
       key: undefined,
       options: "",
     });
+    // Any other TeX a stage writes is a file, as a plain \input is
+    expect(citationAt("\\ckinclude{results/n}", 3)).toEqual({
+      kind: "file",
+      path: "results/n",
+      key: undefined,
+      options: "",
+    });
   });
 
   test("ignores text between commands and commands in comments", () => {
@@ -101,6 +108,9 @@ describe("citationAt", () => {
     expect(
       citationText({ kind: "table", path: "tables/t.tex", options: "" }),
     ).toBe("\\cktable{tables/t.tex}");
+    expect(
+      citationText({ kind: "file", path: "results/n.tex", options: "" }),
+    ).toBe("\\ckinclude{results/n.tex}");
   });
 });
 

@@ -2049,6 +2049,7 @@ DATA_DIRS = {"data", "datasets", "dataset"}
 RESULT_DIRS = {"results", "result"}
 RESULT_EXTENSIONS = {
     ".json",
+    ".toml",
     ".csv",
     ".tsv",
     ".yaml",
@@ -2058,6 +2059,15 @@ RESULT_EXTENSIONS = {
     ".hdf5",
     ".txt",
     ".html",
+}
+TABLE_EXTENSIONS = {
+    ".csv",
+    ".tsv",
+    ".parquet",
+    ".xlsx",
+    ".xls",
+    ".feather",
+    ".arrow",
 }
 PRESENTATION_DIRS = {"presentations", "presentation", "slides", "talks"}
 PRESENTATION_EXTENSIONS = {".pdf", ".pptx", ".key"}
@@ -2339,6 +2349,44 @@ def detect_results(
     )
 
 
+def is_table_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable table.
+
+    Only the extension, since a table is tabular wherever it's kept: the
+    same file can be the project's data, its result, and the table a
+    reader is shown, and which it is isn't a fact about its directory.
+    """
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
+    return _path_ext(rel_path) in TABLE_EXTENSIONS
+
+
+def detect_tables(
+    candidate_paths: list[str],
+    reserved_paths: list[str] | tuple[str, ...] = (),
+    ignore: pathspec.PathSpec | None = None,
+) -> list[str]:
+    """Auto-detected table paths among ``candidate_paths``.
+
+    Tables deliberately overlap the other kinds rather than consuming
+    them: a detected dataset or result that happens to be tabular is
+    listed here as well, so it can be read as a table without being
+    declared as one.
+    """
+    reserved = list(reserved_paths)
+    return sorted(
+        {
+            p
+            for p in candidate_paths
+            if not _is_hidden_path(p)
+            and not _is_under_any_dir(p, reserved)
+            and is_table_path(p, ignore=ignore)
+        }
+    )
+
+
 def detect_presentations(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
@@ -2407,7 +2455,14 @@ def list_dvc_tracked_files(wdir: str | None = None) -> list[str]:
 
 
 def _reserved_artifact_paths(
-    wdir: str | None = None, ck_info: dict | None = None
+    wdir: str | None = None,
+    ck_info: dict | None = None,
+    kinds: tuple[str, ...] = (
+        "figures",
+        "datasets",
+        "results",
+        "presentations",
+    ),
 ) -> list[str]:
     """Paths of artifacts declared in ``calkit.yaml``.
 
@@ -2422,7 +2477,7 @@ def _reserved_artifact_paths(
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     paths: list[str] = []
-    for kind in ("figures", "datasets", "results", "presentations"):
+    for kind in kinds:
         for obj in ck_info.get(kind) or []:
             if isinstance(obj, dict) and isinstance(obj.get("path"), str):
                 paths.append(obj["path"])
@@ -2510,9 +2565,19 @@ def detect_project_artifacts(
     presentations = detect_presentations(
         candidates, reserved_paths=reserved, ignore=ignore
     )
+    # Tables overlap the other kinds, so only a declared table is reserved
+    # from them, and a declared table is still a dataset or result
+    tables = detect_tables(
+        candidates,
+        reserved_paths=_reserved_artifact_paths(
+            wdir=wdir, ck_info=ck_info, kinds=("tables",)
+        ),
+        ignore=ignore,
+    )
     return {
         "figures": figures,
         "datasets": datasets,
         "results": results,
         "presentations": presentations,
+        "tables": tables,
     }

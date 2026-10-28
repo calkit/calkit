@@ -202,7 +202,7 @@
 \newcommand\ckfigure[2][]{%
   \ck@if@file{#2}%
     {\IfFileExists{\ck@dir/\ck@file{#2}}%
-      {\ck@link{figures?path=#2}{\includegraphics[#1]{\ck@dir/\ck@file{#2}}}}%
+      {\ck@link{figures?path=\ck@file{#2}}{\includegraphics[#1]{\ck@dir/\ck@file{#2}}}}%
       {\ck@missing{#2}}}%
     {\IfFileExists{\ck@dir/#2}%
       {\ck@link{figures?path=#2}{\includegraphics[#1]{\ck@dir/#2}}}%

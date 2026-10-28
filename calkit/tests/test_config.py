@@ -138,6 +138,7 @@ def test_user_home(monkeypatch, tmp_path):
     # call sees the user's home, and HOME is put back afterwards
     seen: list[str] = []
     monkeypatch.setattr(config, "_secret_cache", {})
+    monkeypatch.setattr(config, "_uses_security_tool", lambda: False)
     monkeypatch.setattr(
         keyring,
         "get_password",
@@ -145,6 +146,20 @@ def test_user_home(monkeypatch, tmp_path):
     )
     assert config.get_secret("token") is None
     assert seen == [user_home]
+    assert os.environ["HOME"] == project_home
+    # Likewise for the security tool, which reads the macOS keychain
+    config._secret_cache.clear()
+    monkeypatch.setattr(config, "_uses_security_tool", lambda: True)
+
+    def run_security(
+        args: list[str], input: str | None = None
+    ) -> SimpleNamespace:
+        seen.append(os.environ["HOME"])
+        return SimpleNamespace(returncode=44, stdout="", stderr="")
+
+    monkeypatch.setattr(config, "_run_security", run_security)
+    assert config.get_secret("token") is None
+    assert seen == [user_home, user_home]
     assert os.environ["HOME"] == project_home
 
 
@@ -345,10 +360,10 @@ def test_write_keeps_secrets_it_never_read(
     assert fake_keyring.writes == ["github_token"]
 
 
-def test_set_secret_updates_macos_items_in_place(monkeypatch):
-    import ctypes
-    import itertools
-    from unittest import mock
+def test_macos_secrets_go_through_the_security_tool(monkeypatch, tmp_path):
+    import shlex
+    import subprocess
+    from contextlib import contextmanager
 
     import keyring.backends.macOS
 
@@ -356,48 +371,135 @@ def test_set_secret_updates_macos_items_in_place(monkeypatch):
         priority = 0
 
         def __init__(self):
-            self.added: list[str] = []
+            self.store: dict[str, str] = {}
+            self.error: Exception | None = None
+
+        def get_password(self, service, username):
+            if self.error is not None:
+                raise self.error
+            return self.store.get(username)
 
         def set_password(self, service, username, password):
-            self.added.append(username)
+            self.store[username] = password
 
-    # Stand-ins for the Security and Foundation frameworks, so this runs
-    # anywhere, with integers for the Core Foundation objects created
-    lib = mock.MagicMock()
-    lib.CFDataCreate.return_value = 1
-    refs = itertools.count(2)
-    api = SimpleNamespace(k_=str, create_query=lambda **kwargs: next(refs))
-    monkeypatch.setattr(keyring.backends.macOS, "api", api, raising=False)
-    monkeypatch.setattr(ctypes, "CDLL", lambda name: lib)
-    monkeypatch.setattr(config.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(config, "_secret_cache", {})
+    # The keychain as the security tool sees it, by account: each item's
+    # value and whether Calkit wrote it through the tool
+    items: dict[str, tuple[str, bool]] = {}
+    calls: list[list[str]] = []
+    timeout_after: list[bool] = []
+
+    def run_security(args, input=None):
+        calls.append(args)
+        if args == ["-i"]:
+            argv = shlex.split(input)
+            assert argv[:4] == ["add-generic-password", "-U", "-c", "ckit"]
+            opts = dict(zip(argv[4::2], argv[5::2]))
+            items[opts["-a"]] = (opts["-w"], True)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        account = args[args.index("-a") + 1]
+        if account not in items:
+            return SimpleNamespace(returncode=44, stdout="", stderr="")
+        value, ours = items[account]
+        if args[0] == "delete-generic-password":
+            del items[account]
+            out = ""
+        elif "-w" in args:
+            if timeout_after:
+                raise keyring.errors.KeyringLocked("dialog")
+            out = value + "\n"
+        else:
+            crtr = '"ckit"' if ours else "<NULL>"
+            out = f'attributes:\n    "crtr"<uint32>={crtr}\n'
+        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+
+    ui: list[bool] = []
+
+    @contextmanager
+    def keychain_ui(allowed):
+        ui.append(allowed)
+        yield
+
+    terminal = [False]
     backend = MacKeyring()
     monkeypatch.setattr(keyring.core, "_keyring_backend", backend)
-    app = config.get_app_name()
-    cases = [
-        (0, None, []),
-        (-25300, None, ["github_token"]),
-        (-128, keyring.errors.KeyringLocked, []),
-        (-25293, keyring.errors.PasswordSetError, []),
-    ]
-    for status, error, added in cases:
-        lib.reset_mock()
-        lib.SecItemUpdate.return_value = status
-        backend.added.clear()
-        config._secret_cache.clear()
-        if error is None:
-            config.set_secret("github_token", "secret")
-            assert config._secret_cache[(app, "github_token")] == "secret"
-        else:
-            # Denied, say, so replacing the item would lose who may read it
-            with pytest.raises(error):
-                config.set_secret("github_token", "secret")
-            assert (app, "github_token") not in config._secret_cache
-        assert backend.added == added
-        lib.CFDataCreate.assert_called_once_with(None, b"secret", 6)
-        # Everything created is released, whatever the outcome
-        created = [c.args[0] for c in lib.CFRelease.call_args_list]
-        assert len(created) == 3 and 1 in created
+    monkeypatch.setattr(config.platform, "system", lambda: "Darwin")
+    (tmp_path / "security").touch()
+    monkeypatch.setattr(config, "_SECURITY", str(tmp_path / "security"))
+    monkeypatch.setattr(config, "_run_security", run_security)
+    monkeypatch.setattr(config, "_keychain_ui", keychain_ui)
+    monkeypatch.setattr(config, "_has_terminal", lambda: terminal[0])
+    monkeypatch.setattr(config, "_secret_cache", {})
+    assert config._uses_security_tool()
+    # A new secret goes in through the tool, on stdin rather than in the
+    # arguments, which other users can see
+    secret = 'eyJ "quoted" \\ $not-expanded'
+    config.set_secret("github_token", secret)
+    assert items["github_token"] == (secret, True)
+    assert not any(secret in arg for call in calls for arg in call)
+    config._secret_cache.clear()
+    assert config.get_secret("github_token") == secret
+    assert calls[-1][-1] == "-w"
+    assert backend.store == {} and ui == []
+    # Calkit's own item is updated in place, keeping who may read it
+    calls.clear()
+    config.set_secret("github_token", "refreshed")
+    assert items["github_token"] == ("refreshed", True)
+    assert [c[0] for c in calls] == ["find-generic-password", "-i"]
+    # An older Calkit's item is read in-process, without a dialog when
+    # no one can answer it, then replaced with one the tool owns
+    items["access_token"] = ("unused", False)
+    backend.store["access_token"] = "old-token"
+    calls.clear()
+    assert config.get_secret("access_token") == "old-token"
+    assert ui == [False]
+    assert items["access_token"] == ("old-token", True)
+    assert "delete-generic-password" in [c[0] for c in calls]
+    # One this interpreter can't read without a dialog fails at once with
+    # no terminal, and asks as before with one
+    ui.clear()
+    items["refresh_token"] = ("unused", False)
+    backend.error = keyring.errors.KeyringError("OSStatus -25293")
+    config._secret_cache.clear()
+    with pytest.raises(keyring.errors.KeyringLocked, match="terminal"):
+        config.get_secret("refresh_token")
+    terminal[0] = True
+    with pytest.raises(keyring.errors.KeyringError, match="-25293"):
+        config.get_secret("refresh_token")
+    assert ui == [False, True]
+    assert items["refresh_token"] == ("unused", False)
+    backend.error = None
+    # A value the tool would read back as hex stays with keyring
+    config.set_secret("overleaf_session", "naïve")
+    assert backend.store["overleaf_session"] == "naïve"
+    assert "overleaf_session" not in items
+    # Deleting goes through the tool too
+    config.delete_secret("github_token")
+    assert "github_token" not in items
+    with pytest.raises(keyring.errors.PasswordDeleteError):
+        config.delete_secret("github_token")
+    # A read that waits on a dialog gives up when no one can answer it
+    config._secret_cache.clear()
+    timeout_after.append(True)
+    with pytest.raises(keyring.errors.KeyringLocked):
+        config.get_secret("access_token")
+    timeouts: list[float | None] = []
+
+    def fake_run(*args, timeout=None, **kwargs):
+        # As if a dialog were up
+        timeouts.append(timeout)
+        if timeout is not None:
+            raise subprocess.TimeoutExpired(args[0], timeout)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.undo()
+    monkeypatch.setattr(config.subprocess, "run", fake_run)
+    monkeypatch.setattr(config, "_has_terminal", lambda: False)
+    with pytest.raises(keyring.errors.KeyringLocked, match="terminal"):
+        config._run_security(["find-generic-password"])
+    # With a terminal, someone may be there to answer it
+    monkeypatch.setattr(config, "_has_terminal", lambda: True)
+    assert config._run_security(["find-generic-password"]).returncode == 0
+    assert timeouts == [config._SECURITY_TIMEOUT, None]
 
 
 def test_secrets_round_trip_on_linux(fake_keyring, monkeypatch, tmp_path):

@@ -391,6 +391,56 @@ def test_build_ck_components(tmp_dir):
     with open("paper/main.log", errors="replace") as f:
         assert "figures/gone hasn't been brought in yet" in f.read()
 
+    def link_urls(pdf_path: str) -> list[str]:
+        # hyperref's link targets, from wherever pdfTeX put them
+        with open(pdf_path, "rb") as f:
+            data = f.read()
+        chunks = [data]
+        for m in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.S):
+            try:
+                chunks.append(zlib.decompress(m.group(1)))
+            except zlib.error:
+                pass
+        return sorted(
+            u.decode()
+            for chunk in chunks
+            for u in re.findall(rb"/URI\s*\((.*?)\)", chunk)
+        )
+
+    # Components link to the project on its hub only when asked, whether or
+    # not the document loads hyperref itself
+    with open("calkit.yaml", "a") as f:
+        f.write("owner: someone\nname: test\n")
+    body = (
+        "\\begin{document}\n"
+        "\\ckvalue[.2f]{results/metrics.json}{rmse}\n"
+        "\\ckfigure[width=1cm]{figures/plot}\n"
+        "\\end{document}\n"
+    )
+    preambles = {
+        "unasked": "\\usepackage{calkit}\n\\usepackage{hyperref}\n",
+        "asked": "\\usepackage[links]{calkit}\n",
+        "own": "\\usepackage[links]{calkit}\n\\usepackage[colorlinks]{hyperref}\n",
+    }
+    urls = {}
+    for name, preamble in preambles.items():
+        with open(f"paper/{name}.tex", "w") as f:
+            f.write("\\documentclass{article}\n" + preamble + body)
+        out = subprocess.run(
+            ["calkit", "latex", "build", f"paper/{name}.tex"],
+            capture_output=True,
+            text=True,
+        )
+        assert out.returncode == 0, out.stderr
+        urls[name] = link_urls(f"paper/{name}.pdf")
+    base = "https://calkit.io/someone/test"
+    assert urls["unasked"] == []
+    assert urls["asked"] == [
+        f"{base}/figures?path=figures/plot.png",
+        f"{base}/results?path=results/metrics.json&key=rmse",
+    ]
+    assert urls["own"] == urls["asked"]
+
 
 @skipif_windows_docker
 def test_build_output_and_aux_dirs(tmp_dir):

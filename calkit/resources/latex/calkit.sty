@@ -5,17 +5,25 @@
 %% Calkit writes it again before running or checking the pipeline.
 \NeedsTeXFormat{LaTeX2e}
 \ProvidesPackage{calkit}[2026/10/25 v0.2 Calkit project components]
-\newif\ifck@links \ck@linkstrue
-% Without links, e.g., for a journal that shouldn't see the project
+% Components link to the project on its hub only when asked, since a PDF can
+% go where the project shouldn't be seen, e.g., to a journal
+\newif\ifck@links \ck@linksfalse
+\DeclareOption{links}{\ck@linkstrue}
 \DeclareOption{nolinks}{\ck@linksfalse}
 \ProcessOptions\relax
 \RequirePackage{siunitx}
 % Loaded at the end of the preamble, so options the document gives graphicx
-% itself, before or after loading calkit, don't clash
+% or hyperref itself, before or after loading calkit, don't clash, and
+% hyperref comes after the packages that need it to
 \ifdefined\AddToHook
   \AddToHook{begindocument/before}{\RequirePackage{graphicx}}
+  \ifck@links
+    \AddToHook{begindocument/before}{%
+      \@ifpackageloaded{hyperref}{}{\RequirePackage[hidelinks]{hyperref}}}
+  \fi
 \else
   \RequirePackage{graphicx}
+  \ifck@links\RequirePackage[hidelinks]{hyperref}\fi
 \fi
 \def\ck@dir{_calkit}
 \let\ck@linkbase\@empty
@@ -24,8 +32,7 @@
 \newcommand\ck@missing[1]{%
   \PackageWarning{calkit}{#1 hasn't been brought in yet; sync with Calkit}%
   \textbf{??}}
-% Links to the project on its hub, if hyperref is loaded and Calkit wrote
-% where that is
+% Links to the project on its hub, if asked for and Calkit wrote where that is
 \newcommand\ck@link[2]{%
   \ifck@links\ifx\ck@linkbase\@empty #2%
   \else\ifdefined\href \href{\ck@linkbase/#1}{#2}\else #2\fi\fi

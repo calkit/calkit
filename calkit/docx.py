@@ -1463,6 +1463,86 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     os.replace(tmp_path, docx_path)
 
 
+def pdf_to_png(pdf_path: str, png_path: str, dpi: int = 200) -> bool:
+    """Draw a PDF's first page as a PNG, which Word can show, with whatever
+    can draw it here, returning whether one could.
+    """
+    import shutil
+
+    try:
+        import importlib
+
+        # Optional, so not a dependency
+        pypdfium2 = importlib.import_module("pypdfium2")
+        page = pypdfium2.PdfDocument(pdf_path)[0]
+        page.render(scale=dpi / 72).to_pil().save(png_path)
+        return True
+    except Exception:
+        pass
+    if shutil.which("pdftoppm"):
+        res = subprocess.run(
+            [
+                "pdftoppm",
+                "-png",
+                "-singlefile",
+                "-r",
+                str(dpi),
+                pdf_path,
+                png_path.removesuffix(".png"),
+            ],
+            capture_output=True,
+        )
+        if res.returncode == 0 and os.path.isfile(png_path):
+            return True
+    if sys.platform == "darwin" and shutil.which("sips"):
+        res = subprocess.run(
+            ["sips", "-s", "format", "png", pdf_path, "--out", png_path],
+            capture_output=True,
+        )
+        if res.returncode == 0 and os.path.isfile(png_path):
+            return True
+    return False
+
+
+def make_reference_doc() -> bytes:
+    """Pandoc's reference document for Word, styled more as LaTeX sets a
+    paper: a serif font throughout at 11 points, with black headings.
+    """
+    import io
+
+    default = _pandoc(["--print-default-data-file", "reference.docx"], b"")
+    fonts = (
+        '<w:rFonts w:ascii="Cambria" w:hAnsi="Cambria" w:cs="Cambria" '
+        'w:eastAsiaTheme="minorEastAsia" />'
+    )
+    out = io.BytesIO()
+    with (
+        zipfile.ZipFile(io.BytesIO(default)) as src,
+        zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst,
+    ):
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename == "word/styles.xml":
+                styles = data.decode("utf-8")
+                styles = re.sub(r"<w:rFonts [^>]*/>", fonts, styles)
+                styles = re.sub(r"<w:color [^>]*/>", "", styles)
+                # Body text at 11 points, headings bold
+                styles = styles.replace(
+                    '<w:sz w:val="24" />\n        <w:szCs w:val="24" />',
+                    '<w:sz w:val="22" />\n        <w:szCs w:val="22" />',
+                    1,
+                )
+                styles = re.sub(
+                    r'(<w:style [^>]*w:styleId="Heading\d"[^>]*>.*?<w:rPr>)',
+                    r"\1<w:b />",
+                    styles,
+                    flags=re.S,
+                )
+                data = styles.encode("utf-8")
+            dst.writestr(item, data)
+    return out.getvalue()
+
+
 def find_pandoc() -> str | None:
     """Pandoc from the pypandoc-binary package, if it's installed, else one
     on ``PATH``."""

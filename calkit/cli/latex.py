@@ -1982,9 +1982,11 @@ def to_docx(
             "--engine",
             help=(
                 "What makes the Word copy: 'word', which imports the "
-                "compiled PDF so the copy looks like it, or 'libreoffice', "
+                "compiled PDF so the copy looks like it, 'libreoffice', "
                 "which converts the source with TeX4ht's make4ht and then "
-                "LibreOffice. Defaults to Word where it's installed."
+                "LibreOffice, or 'pandoc', experimental, which converts the "
+                "source with Pandoc, with numbers and citations from the "
+                "build. Defaults to Word where it's installed."
             ),
         ),
     ] = None,
@@ -2446,8 +2448,84 @@ def to_docx(
             calkit.docx.odt_to_docx(odt, bare)
         except RuntimeError as e:
             raise_error(f"{e}\nTeX4ht's logs are in {build}")
+    elif engine == "pandoc":
+        import tempfile
+
+        if calkit.docx.find_pandoc() is None:
+            raise_error(
+                "Converting with Pandoc requires Pandoc; run "
+                "'calkit install pandoc'"
+            )
+        typer.echo("Converting the source with Pandoc")
+        # What TeX worked out, e.g., numbers and citations, comes from the
+        # build beside the PDF or the source
+        found_aux: dict[str, str] = {}
+        for ext in (".aux", ".bbl"):
+            for base in (Path(pdf_path), Path(source)):
+                picture = base.with_suffix(ext)
+                if picture.is_file():
+                    found_aux[ext] = picture.read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                    break
+        if ".aux" not in found_aux:
+            warn(
+                "No .aux beside the PDF or source, so references and "
+                "citations show as ??; build the document first"
+            )
+        tex_dir = Path(source).parent
+        drawn = tempfile.mkdtemp()
+
+        def find_image(path: str) -> str | None:
+            # A picture in the source as one Word can show, drawing a PDF
+            for picture in [tex_dir / path] + [
+                tex_dir / (path + ext)
+                for ext in (".pdf", ".png", ".jpg", ".jpeg")
+            ]:
+                if not picture.is_file():
+                    continue
+                if picture.suffix.lower() != ".pdf":
+                    return picture.resolve().as_posix()
+                png = os.path.join(
+                    drawn, f"{len(os.listdir(drawn))}-{picture.stem}.png"
+                )
+                if calkit.docx.pdf_to_png(str(picture), png):
+                    return png
+                warn(f"Couldn't draw {picture} for Word")
+                return None
+            return None
+
+        try:
+            text = calkit.latex.prepare_for_pandoc(
+                calkit.latex.flatten(source),
+                found_aux.get(".aux", ""),
+                found_aux.get(".bbl", ""),
+                find_image,
+            )
+            reference = os.path.join(drawn, "reference.docx")
+            Path(reference).write_bytes(calkit.docx.make_reference_doc())
+            pandoc_docx = calkit.docx._pandoc(
+                [
+                    "-f",
+                    "latex",
+                    "-t",
+                    "docx",
+                    "-o",
+                    "-",
+                    "--resource-path",
+                    tex_dir.as_posix() or ".",
+                    "--reference-doc",
+                    reference,
+                ],
+                text.encode(),
+            )
+        except RuntimeError as e:
+            raise_error(str(e))
+        finally:
+            shutil.rmtree(drawn, ignore_errors=True)
+        Path(bare).write_bytes(pandoc_docx)
     else:
-        raise_error("--engine must be 'word' or 'libreoffice'")
+        raise_error("--engine must be 'word', 'libreoffice', or 'pandoc'")
     try:
         doc = calkit.docx.Document(bare)
     finally:
@@ -2485,7 +2563,7 @@ def to_docx(
         )
     ]
     if (
-        engine == "word"
+        engine in ("word", "pandoc")
         and table_blks
         and calkit.docx.find_pandoc() is not None
     ):

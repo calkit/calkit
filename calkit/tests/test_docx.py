@@ -451,6 +451,71 @@ def test_docx_round_trip(
     assert [p.name for p in Path("paper").glob("*.docx")] == [
         "main-for-review.docx"
     ]
+    # Converted with Pandoc instead, numbers and citations come from the
+    # build, displays become numbered equations, the table is laid out as
+    # the source's, and every paragraph is anchored, so an edit merges
+    Path("paper/main.aux").write_text(
+        "\\newlabel{eq:wake}{{1}{1}{}{equation.1}{}}\n"
+        "\\newlabel{sec:methods}{{2}{1}{}{section.2}{}}\n"
+        "\\@writefile{toc}{\\contentsline {section}{\\numberline {1}"
+        "Introduction}{1}{}}\n"
+        "\\bibcite{smith2020}{{2}{2020}{{Smith and Jones}}{{}}}\n"
+        "\\bibcite{lee2018}{{1}{2018}{{Lee}}{{}}}\n",
+        encoding="utf-8",
+    )
+    Path("paper/main.bbl").write_text(
+        "\\begin{thebibliography}{2}\n\\providecommand{\\url}[1]{#1}\n"
+        "\\bibitem[Lee(2018)]{lee2018}\nK.~Lee. A model.\n"
+        "\\end{thebibliography}\n",
+        encoding="utf-8",
+    )
+    calkit.cli.latex.to_docx(
+        "paper/main.pdf", output="paper/pandoc.docx", engine="pandoc"
+    )
+    converted = calkit.docx.Document("paper/pandoc.docx")
+    texts = [p.text for p in converted.paragraphs]
+    assert "1 Introduction" in texts and "K. Lee. A model." in texts
+    assert any(
+        t.startswith(
+            "Wakes matter for wind farm layout, as discussed by "
+            "Smith and Jones [2020] and Lee [2018]."
+        )
+        for t in texts
+    )
+    assert any("Eq. (1) fits the data in Sec. 2" in t for t in texts)
+    sent = converted.read_original()
+    assert sent is not None and len(sent.equations) == 1
+    assert len(list(converted.doc.iter(f"{{{calkit.docx.W}}}tcBorders")))
+    unanchored = [
+        p.text
+        for p in converted.paragraphs
+        if not p.bookmark and len(p.text.split()) > 3
+    ]
+    assert unanchored == []
+    para = next(p for p in converted.paragraphs if "Wakes matter" in p.text)
+    assert para.element is not None
+    converted.insert_text(
+        para.element,
+        converted.linear_text(para.element).index("layout"),
+        "turbine ",
+    )
+    converted.save("paper/pandoc-edited.docx")
+    before = Path("paper/main.tex").read_text(encoding="utf-8")
+    calkit.cli.latex.merge_docx("paper/pandoc-edited.docx")
+    after = Path("paper/main.tex").read_text(encoding="utf-8")
+    assert "wind farm turbine layout" in after
+    Path("paper/main.tex").write_text(before, encoding="utf-8")
+    for name in ("main.aux", "main.bbl", "pandoc.docx", "pandoc-edited.docx"):
+        Path("paper", name).unlink()
+    for folder in (
+        calkit.latex.LOCAL_DOCX_EXPORTS_DIR,
+        calkit.latex.LOCAL_DOCX_MERGES_DIR,
+        calkit.latex.DOCX_EXPORTS_DIR,
+        calkit.latex.DOCX_MERGES_DIR,
+    ):
+        for record in Path(folder).glob("*.json"):
+            if "paper/pandoc" in record.read_text(encoding="utf-8"):
+                record.unlink()
     # TeX4ht gets the same date, so \today in the Word copy matches the PDF,
     # run directly or in the stage's environment; it makes no ODT here
     dated = {"SOURCE_DATE_EPOCH": "1790000000", "FORCE_SOURCE_DATE": "1"}

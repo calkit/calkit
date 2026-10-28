@@ -1963,6 +1963,7 @@ List Calkit objects.
 | [`datasets`](#subcommand-list-ls-datasets)                      | List datasets in the project.                                                                  |
 | [`results`](#subcommand-list-ls-results)                        | List results in the project.                                                                   |
 | [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.                                                             |
+| [`tables\|tbls`](#subcommand-list-ls-tables-tbls)               | List tables in the project.                                                                    |
 | [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).                                                      |
 | [`comments`](#subcommand-list-ls-comments)                      | List review comment threads in LaTeX and Markdown documents.                                   |
 | [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.                                                              |
@@ -2042,6 +2043,8 @@ Options:
 
 List results in the project.
 
+Shown with the stage that writes each one, which is what 'calkit run' would use to bring it up to date.
+
 Usage:
 
 ```text
@@ -2054,6 +2057,7 @@ Options:
 | ----------------- | ------- | -------- | ------- | --------------------------------------------------------------- |
 | `--json`          | boolean | no       | False   | Output result as JSON.                                          |
 | `--declared-only` | boolean | no       | False   | Only list results declared in calkit.yaml; skip auto-detection. |
+| `--status`, `-s`  | boolean | no       | False   | Also say whether each result's stage is up to date.             |
 
 <a id="subcommand-list-ls-presentations-pres"></a>
 
@@ -2073,6 +2077,29 @@ Options:
 | ----------------- | ------- | -------- | ------- | --------------------------------------------------------------------- |
 | `--json`          | boolean | no       | False   | Output result as JSON.                                                |
 | `--declared-only` | boolean | no       | False   | Only list presentations declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-tables-tbls"></a>
+
+#### `calkit list|ls tables|tbls`
+
+List tables in the project.
+
+Tabular files are detected wherever they're kept, so a table that is also a dataset or a result is listed here too. Each is shown with the stage that writes it, if any, which is the one 'calkit run' would use to bring it up to date.
+
+Usage:
+
+```text
+calkit list|ls tables|tbls [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                    |
+| ----------------- | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `--columns`       | boolean | no       | False   | Also read each table's column names from its header.           |
+| `--status`, `-s`  | boolean | no       | False   | Also say whether each table's stage is up to date.             |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                         |
+| `--declared-only` | boolean | no       | False   | Only list tables declared in calkit.yaml; skip auto-detection. |
 
 <a id="subcommand-list-ls-questions"></a>
 
@@ -2391,9 +2418,11 @@ Options:
 
 Show Calkit objects.
 
-| Command                                     | Description                           |
-| ------------------------------------------- | ------------------------------------- |
-| [`latex-diff`](#subcommand-show-latex-diff) | Open a LaTeX diff the pipeline keeps. |
+| Command                                      | Description                           |
+| -------------------------------------------- | ------------------------------------- |
+| [`latex-diff`](#subcommand-show-latex-diff)  | Open a LaTeX diff the pipeline keeps. |
+| [`table\|tbl`](#subcommand-show-table-tbl)   | Show a table, or part of one.         |
+| [`result\|res`](#subcommand-show-result-res) | Show a result's keys and values.      |
 
 <a id="subcommand-show-latex-diff"></a>
 
@@ -2420,6 +2449,71 @@ Options:
 | Option  | Type    | Required | Default | Description                                      |
 | ------- | ------- | -------- | ------- | ------------------------------------------------ |
 | `--run` | boolean | no       | False   | Build the diff first if it's stale or not built. |
+
+<a id="subcommand-show-table-tbl"></a>
+
+#### `calkit show table|tbl`
+
+Show a table, or part of one.
+
+With --status, says whether the stage that writes the table has been run since its inputs last changed. At a --git-ref that's reconstructed from the dvc.lock committed there, since there is nothing on disk at an old commit for DVC to hash, and what it couldn't check is reported rather than assumed current.
+
+Usage:
+
+```text
+calkit show table|tbl [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description        |
+| -------- | ---- | -------- | ------- | ------------------ |
+| `path`   | str  | yes      |         | Path to the table. |
+
+Options:
+
+| Option           | Type      | Required | Default | Description                                                                                                                                     |
+| ---------------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--column`, `-c` | str       | no       |         | Only show these columns, in this order. Can be a glob, e.g., `*_mod`, and can be given more than once.                                          |
+| `--filter`, `-f` | str       | no       |         | Only show rows matching COLUMN=VALUE, COLUMN~TEXT (contains, ignoring case), or COLUMN>NUMBER. Can be given more than once, and all must match. |
+| `--rows`, `-r`   | str       | no       |         | Only show these rows, 1-based, e.g., '1-20', '5,9', '40-'.                                                                                      |
+| `--head`, `-n`   | int range | no       |         | Only show the first N rows.                                                                                                                     |
+| `--tail`         | int range | no       |         | Only show the last N rows.                                                                                                                      |
+| `--git-ref`      | str       | no       |         | Show the table as of this Git branch, tag, or commit instead of the working tree.                                                               |
+| `--status`, `-s` | boolean   | no       | False   | Also say whether the table is up to date.                                                                                                       |
+| `--vscode`       | boolean   | no       | False   | Open the table in VS Code instead of printing it.                                                                                               |
+| `--engine`       | str       | no       |         | Dataframe engine for formats the standard library can't read, e.g., Parquet. Defaults to the configured one.                                    |
+
+<a id="subcommand-show-result-res"></a>
+
+#### `calkit show result|res`
+
+Show a result's keys and values.
+
+Keys are shown dotted, the way a question's value evidence names them, so what's printed is what an answer can cite. With --status, says whether the stage that writes the result has been run since its inputs last changed.
+
+Usage:
+
+```text
+calkit show result|res [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description         |
+| -------- | ---- | -------- | ------- | ------------------- |
+| `path`   | str  | yes      |         | Path to the result. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                     |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--key`, `-k`    | str     | no       |         | Only show these keys, dotted as a question's evidence writes them, e.g., `steady_state.saved_pct`. Can be given more than once. |
+| `--depth`, `-d`  | int     | no       |         | Stop flattening this many levels in and show the rest of each value as JSON.                                                    |
+| `--git-ref`      | str     | no       |         | Show the result as of this Git branch, tag, or commit instead of the working tree.                                              |
+| `--status`, `-s` | boolean | no       | False   | Also say whether the result is up to date.                                                                                      |
+| `--vscode`       | boolean | no       | False   | Open the result in VS Code instead of printing it.                                                                              |
+| `--json`         | boolean | no       | False   | Output result as JSON.                                                                                                          |
 
 <a id="command-group-describe-desc"></a>
 

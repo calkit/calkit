@@ -14,8 +14,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: 4271e71be608614156320d27a1d07edd
-      size: 122132
+      md5: a9284671fc113c79992feb38459b0925
+      size: 122270
     - path: uv.lock
       hash: md5
       md5: b5d0e9511259dec7553283d5727fe0c1
@@ -338,16 +338,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: 98c8dc6a5bea3dab57e6399e3b616583
-      size: 172130
+      md5: 303053d3e0b4ae78526fccd9475a5bca
+      size: 183252
     - path: calkit/docx.py
       hash: md5
-      md5: 4b9e2e83e1b46261ee6baa4c5303fb60
-      size: 95828
+      md5: 939b48c6fe4e64f5ae2d4aff0d56749b
+      size: 96829
     - path: calkit/latex.py
       hash: md5
-      md5: 4271e71be608614156320d27a1d07edd
-      size: 122132
+      md5: a9284671fc113c79992feb38459b0925
+      size: 122270
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -391,8 +391,8 @@ stages:
       size: 173896
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: bfcb54dde172c809c24a777941dcface
-      size: 36224
+      md5: b0063e1c1dee1a53592e5331dc33e756
+      size: 36443
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/plot-latex-word-round-trip.py
@@ -403,8 +403,8 @@ stages:
       size: 5
     - path: calkit/docx.py
       hash: md5
-      md5: 4b9e2e83e1b46261ee6baa4c5303fb60
-      size: 95828
+      md5: 939b48c6fe4e64f5ae2d4aff0d56749b
+      size: 96829
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: 6a04754199f6a394429ca0c07e4ecda6
@@ -415,8 +415,8 @@ stages:
       size: 173896
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: bfcb54dde172c809c24a777941dcface
-      size: 36224
+      md5: b0063e1c1dee1a53592e5331dc33e756
+      size: 36443
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: 53cbdd1fe8da4d6897b3b0856b749857

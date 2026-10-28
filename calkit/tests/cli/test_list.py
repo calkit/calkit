@@ -609,3 +609,54 @@ def test_list_objects_json(tmp_dir):
     assert "uv" in by_name
     assert "unix" in by_name["uv"]["scripts"]
     assert "rustup" in by_name["cargo"]["aliases"]
+
+
+def test_list_tables(tmp_dir):
+    import git
+
+    git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    with open("results/kernels.csv", "w") as f:
+        f.write(
+            "kernel,registers_baseline,registers_mod\nmicrophysics,255,153\n"
+        )
+    with open("results/summary.json", "w") as f:
+        f.write("{}")
+    ck_info = {
+        "tables": [
+            {"path": "results/kernels.csv", "title": "Kernel resources"}
+        ],
+        "pipeline": {
+            "stages": {
+                "export": {
+                    "kind": "shell-command",
+                    "command": "echo hi",
+                    "outputs": ["results/kernels.csv"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(
+        ["calkit", "list", "tables", "--json"], text=True
+    )
+    tables = {t["path"]: t for t in json.loads(out)}
+    assert tables["results/kernels.csv"]["title"] == "Kernel resources"
+    assert tables["results/kernels.csv"]["stages"] == ["export"]
+    assert "results/summary.json" not in tables
+    # The column names can be read from the header, which is how a
+    # listing shows which table holds what
+    out = subprocess.check_output(
+        ["calkit", "list", "tables", "--columns", "--json"], text=True
+    )
+    tables = {t["path"]: t for t in json.loads(out)}
+    assert tables["results/kernels.csv"]["columns"] == [
+        "kernel",
+        "registers_baseline",
+        "registers_mod",
+    ]
+    # Human-readable output names the path and its title
+    out = subprocess.check_output(["calkit", "list", "tables"], text=True)
+    assert "results/kernels.csv" in out
+    assert "Kernel resources" in out

@@ -200,7 +200,9 @@ def list_questions(
     """
     from calkit.questions import check_questions, format_letters
 
-    status = check_questions(check_pipeline=False)
+    # Sign-offs are checked for their letters, but evidence isn't compared
+    # with its history, which nothing here shows
+    status = check_questions(check_pipeline=False, check_changes=False)
     if json_output:
         echo_json(
             [

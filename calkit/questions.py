@@ -772,20 +772,39 @@ class CalkitYamlHistory:
             os.path.join(wdir, CALKIT_YAML), str(repo.working_dir)
         ).replace(os.sep, "/")
         self._shas: list[str] | None = None
+        self._parents: dict[str, list[str]] = {}
         self._parsed: dict[str, dict | None] = {}
 
     @property
     def shas(self) -> list[str]:
         """Commits that touched the file, newest first."""
         if self._shas is None:
+            self._shas = []
             try:
-                args = ["--format=%H", *([self.ref] if self.ref else [])]
-                self._shas = str(
-                    self.repo.git.log(*args, "--", self.rel)
-                ).split()
+                # With --parents, each commit's parents are the nearest
+                # ones that also touched the file
+                args = ["--parents", "--format=%H %P"]
+                lines = str(
+                    self.repo.git.log(
+                        *args,
+                        *([self.ref] if self.ref else []),
+                        "--",
+                        self.rel,
+                    )
+                ).splitlines()
             except Exception:
-                self._shas = []
+                lines = []
+            for line in lines:
+                sha, *parents = line.split()
+                self._shas.append(sha)
+                self._parents[sha] = parents
         return self._shas
+
+    def parents(self, sha: str) -> list[str]:
+        """The commits before ``sha`` that touched the file, nearest first."""
+        if self._shas is None:
+            self.shas
+        return self._parents.get(sha, [])
 
     def at(self, sha: str) -> dict | None:
         """The file as of one commit, or None if it can't be read.
@@ -862,72 +881,38 @@ SIGN_OFF_FIELDS = ("verifications", "validations")
 _NOT_VALIDATED = ("name", "notes", *SIGN_OFF_FIELDS)
 
 
-def _validated_part(question: dict) -> dict:
+def _stage_wdirs(ck_info: dict) -> dict[str, str]:
+    """Each stage's ``wdir``, which ``dvc.lock`` paths are relative to but
+    which it doesn't record."""
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     return {
-        k: v for k, v in _plain(question).items() if k not in _NOT_VALIDATED
+        str(name): str(st.get("wdir") or "")
+        for name, st in stages.items()
+        if isinstance(st, dict)
     }
 
 
-def sign_off_commit(
-    sign_off: dict, field: str, history: CalkitYamlHistory, question: dict
-) -> tuple[str | None, dict | None, dict | None]:
-    """The commit that added ``sign_off`` under ``field`` on ``question``,
-    with the question and the whole ``calkit.yaml`` as they were then.
-
-    The question is found by the sign-off it carries rather than by its
-    text, so an edit to the question afterward still finds the version that
-    was signed off on. Where several carry an identical sign-off, the one
-    with the same name, then the same text, is taken. None means the
-    sign-off isn't committed yet.
-    """
-    target = _plain(sign_off)
-    found: tuple[str | None, dict | None, dict | None] = (None, None, None)
-    for sha in history.shas:
-        old = history.at(sha)
-        candidates = [
-            q
-            for q in (old or {}).get("questions") or []
-            if isinstance(q, dict) and target in _plain(q.get(field) or [])
-        ]
-        if not candidates:
-            break
-        signed = next(
-            (
-                q
-                for key in ("name", "question")
-                if question.get(key)
-                for q in candidates
-                if q.get(key) == question.get(key)
-            ),
-            candidates[0],
-        )
-        found = (sha, signed, old)
-    return found
-
-
-def _lock_stages(lock_text: str | None, names: list[str]) -> dict[str, dict]:
-    """``dvc.lock``'s entries for stages, including each ``name@item`` of
-    one that iterates."""
-    try:
-        lock = _load_calkit_yaml_text(lock_text or "")
-    except Exception:
-        return {}
-    return {
-        k: v
-        for k, v in (lock.get("stages") or {}).items()
-        if isinstance(v, dict) and str(k).split("@")[0] in names
-    }
-
-
-def _lock_hash(lock_text: str, path: str) -> str | None:
-    """The hash ``dvc.lock`` records for an output path, if any."""
+def _lock_hash(
+    lock_text: str, path: str, stage_wdirs: dict[str, str] | None = None
+) -> str | None:
+    """The hash ``dvc.lock`` records for an output path, relative to the
+    project, if any."""
     try:
         lock = _load_calkit_yaml_text(lock_text)
     except Exception:
         return None
-    for stage in (lock.get("stages") or {}).values():
+    target = posixpath.normpath(Path(path).as_posix())
+    for name, stage in (lock.get("stages") or {}).items():
+        stage_wdir = (stage_wdirs or {}).get(str(name).split("@")[0], "")
         for out in (stage or {}).get("outs") or []:
-            if isinstance(out, dict) and out.get("path") == path:
+            if (
+                isinstance(out, dict)
+                and out.get("path")
+                and target
+                == (
+                    posixpath.normpath(posixpath.join(stage_wdir, out["path"]))
+                )
+            ):
                 return str(out.get("md5") or out.get("hash") or "") or None
     return None
 
@@ -975,12 +960,15 @@ def evidence_change(
     key: str | None = None,
     current: Any = None,
     ref: str | None = None,
+    stage_wdirs: dict[str, str] | None = None,
 ) -> str | None:
     """How ``path`` has changed since commit ``since``, or None if it has
     not.
 
     Changed as of ``ref``, or of the working tree if None, in which case a
     ``key``'s ``current`` value is passed in rather than read.
+    ``stage_wdirs`` locates ``dvc.lock``'s paths, as from
+    :func:`_stage_wdirs`.
 
     For a value in a Git-tracked results file the comparison is made on
     the value itself, read from the file as it was at ``since``: a results
@@ -1061,11 +1049,17 @@ def evidence_change(
         os.sep, "/"
     )
     try:
-        old = _lock_hash(str(repo.git.show(f"{since}:{lock_rel}")), rel)
+        old = _lock_hash(
+            str(repo.git.show(f"{since}:{lock_rel}")), path, stage_wdirs
+        )
     except Exception:
         old = None
     new_lock = _read_lock(repo, wdir, ref)
-    new = _lock_hash(new_lock, rel) if new_lock is not None else None
+    new = (
+        _lock_hash(new_lock, path, stage_wdirs)
+        if new_lock is not None
+        else None
+    )
     if old != new and (old or new):
         return f"hash in dvc.lock changed since {short}"
     return None
@@ -1141,7 +1135,7 @@ def _is_attributed(
         return True
     try:
         with open(os.path.join(wdir, "dvc.lock"), encoding="utf-8") as f:
-            if _lock_hash(f.read(), path) is not None:
+            if _lock_hash(f.read(), path, _stage_wdirs(ck_info)) is not None:
                 return True
     except OSError:
         pass
@@ -1190,7 +1184,11 @@ def _read_at_ref(
 
 
 def check_pinned_evidence(
-    out: EvidenceCheck, ev: dict, repo: Any, wdir: str
+    out: EvidenceCheck,
+    ev: dict,
+    repo: Any,
+    wdir: str,
+    stage_wdirs: dict[str, str] | None = None,
 ) -> EvidenceCheck:
     """Check evidence pinned to a Git ref, at that ref.
 
@@ -1214,7 +1212,10 @@ def check_pinned_evidence(
     text = _read_at_ref(repo, git_ref, out.path, wdir)
     if text is None:
         lock = _read_at_ref(repo, git_ref, "dvc.lock", wdir)
-        if lock is not None and _lock_hash(lock, out.path) is not None:
+        if (
+            lock is not None
+            and _lock_hash(lock, out.path, stage_wdirs) is not None
+        ):
             # Tracked by DVC at that commit: present, but its content lives
             # in storage, so a cited value can't be read from here.
             if named_keys(ev):
@@ -1267,34 +1268,6 @@ def check_pinned_evidence(
     return out
 
 
-def change_since(
-    ev: dict, check: EvidenceCheck, since: str, repo: Any, wdir: str
-) -> str | None:
-    """How a checked evidence entry has changed since commit ``since``."""
-    if check.values is not None:
-        # Each value is compared on its own, as a value entry would be
-        changes = [
-            evidence_change(
-                check.path,
-                since,
-                repo,
-                wdir,
-                key=value_key,
-                current=check.values[name],
-            )
-            for name, value_key in named_keys(ev).items()
-        ]
-        return "; ".join(dict.fromkeys(c for c in changes if c)) or None
-    return evidence_change(
-        check.path,
-        since,
-        repo,
-        wdir,
-        key=check.key if is_value_evidence(ev) else None,
-        current=check.current,
-    )
-
-
 def check_evidence(
     ev: dict,
     ck_info: dict,
@@ -1310,6 +1283,34 @@ def check_evidence(
     pipeline: the ones DVC would re-run, and the ones it never will because
     they're frozen or downstream of a freeze.
     """
+
+    def change_since(check: EvidenceCheck, since: str) -> str | None:
+        if check.values is not None:
+            # Each value is compared on its own, as a value entry would be
+            changes = [
+                evidence_change(
+                    check.path,
+                    since,
+                    repo,
+                    wdir,
+                    key=value_key,
+                    current=check.values[name],
+                    stage_wdirs=stage_wdirs,
+                )
+                for name, value_key in named_keys(ev).items()
+            ]
+            return "; ".join(dict.fromkeys(c for c in changes if c)) or None
+        return evidence_change(
+            check.path,
+            since,
+            repo,
+            wdir,
+            key=check.key if is_value_evidence(ev) else None,
+            current=check.current,
+            stage_wdirs=stage_wdirs,
+        )
+
+    stage_wdirs = _stage_wdirs(ck_info)
     kind = ev.get("kind", "result")
     path = ev.get("path", "")
     key = ev.get("key")
@@ -1328,7 +1329,7 @@ def check_evidence(
         out.message = "evidence has no path"
         return out
     if out.git_ref is not None:
-        return check_pinned_evidence(out, ev, repo, wdir)
+        return check_pinned_evidence(out, ev, repo, wdir, stage_wdirs)
     if not os.path.exists(os.path.join(wdir, path)):
         out.status = "missing"
         out.message = "path does not exist; run the pipeline or pull"
@@ -1384,7 +1385,7 @@ def check_evidence(
             )
             return out
     if since is not None and repo is not None:
-        change = change_since(ev, out, since, repo, wdir)
+        change = change_since(out, since)
         if change:
             out.status = "changed"
             # Not overwritten: a deprecated entry that also changed is
@@ -1489,10 +1490,77 @@ def check_sign_offs(
     to ``ref``, or the working tree if None, where ``question`` and
     ``ck_info`` are read from. Without a repo they're left unchecked.
     """
+    from calkit.models.pipeline import Pipeline
+
+    def validated_part(q: dict) -> dict:
+        return {k: v for k, v in _plain(q).items() if k not in _NOT_VALIDATED}
+
+    def lock_stages(lock_text: str | None) -> dict[str, dict]:
+        # Including each 'name@item' of a stage that iterates
+        assert stages is not None
+        try:
+            lock = _load_calkit_yaml_text(lock_text or "")
+        except Exception:
+            return {}
+        return {
+            str(k): v
+            for k, v in (lock.get("stages") or {}).items()
+            if isinstance(v, dict) and str(k).split("@")[0] in stages
+        }
+
+    def sign_off_commit(
+        sign_off: dict, field: str
+    ) -> tuple[str | None, dict | None, dict | None]:
+        # The commit that added the sign-off, with the question and the
+        # whole calkit.yaml as they were then. The question is found by the
+        # sign-off it carries rather than its text, so an edit afterward
+        # still finds what was signed off on; among several carrying an
+        # identical one, the same name, then the same text, wins.
+        hist = history
+        assert hist is not None
+        target = _plain(sign_off)
+
+        def signed_at(sha: str) -> tuple[dict, dict] | None:
+            old = hist.at(sha)
+            candidates = [
+                q
+                for q in (old or {}).get("questions") or []
+                if isinstance(q, dict) and target in _plain(q.get(field) or [])
+            ]
+            if old is None or not candidates:
+                return None
+            signed = next(
+                (
+                    q
+                    for key in ("name", "question")
+                    if question.get(key)
+                    for q in candidates
+                    if q.get(key) == question.get(key)
+                ),
+                candidates[0],
+            )
+            return signed, old
+
+        # Back through parents rather than by date, so one added on a
+        # branch is found where it was added, not at the merge, and what
+        # the branch hadn't seen counts as changed since
+        found: tuple[str | None, dict | None, dict | None] = (None, None, None)
+        sha = hist.shas[0] if hist.shas else None
+        hit = signed_at(sha) if sha is not None else None
+        while sha is not None and hit is not None:
+            found = (sha, *hit)
+            parent_hits = ((p, signed_at(p)) for p in hist.parents(sha))
+            sha, hit = next(
+                ((p, h) for p, h in parent_hits if h is not None),
+                (None, None),
+            )
+        return found
+
     if stages is None:
         stages = question_stages(question, ck_info)
     if repo is not None and history is None:
         history = CalkitYamlHistory(repo, wdir, ref)
+    stage_wdirs = _stage_wdirs(ck_info)
 
     def evidence_changes(since: str) -> list[str]:
         reasons = []
@@ -1557,6 +1625,7 @@ def check_sign_offs(
                         key=key,
                         current=current,
                         ref=ev_ref,
+                        stage_wdirs=stage_wdirs,
                     )
                 )
             change = "; ".join(dict.fromkeys(c for c in changes if c))
@@ -1580,20 +1649,44 @@ def check_sign_offs(
                 defs.get(name)
             ):
                 reasons.append(f"stage {name} was redefined")
-        # The code and inputs each stage ran, as dvc.lock lists them
-        old_lock = _read_lock(repo, wdir, since)
-        entries = [
-            *_lock_stages(old_lock, stages).values(),
-            *_lock_stages(_read_lock(repo, wdir, ref), stages).values(),
-        ]
-        deps = dict.fromkeys(
-            str(d["path"])
-            for e in entries
-            for d in e.get("deps") or []
-            if isinstance(d, dict) and d.get("path")
-        )
+        # The code and inputs each stage reads, as its definition declares
+        # them, so one that hasn't run is covered, and as dvc.lock recorded
+        # them, both relative to the stage's wdir
+        deps: dict[str, None] = {}
+        for info, wdirs in [
+            (old_info, _stage_wdirs(old_info)),
+            (ck_info, stage_wdirs),
+        ]:
+            info_defs = (info.get("pipeline") or {}).get("stages") or {}
+            for name in stages:
+                if not isinstance(info_defs.get(name), dict):
+                    continue
+                try:
+                    model = Pipeline.model_validate(
+                        {"stages": {name: info_defs[name]}}
+                    ).stages[name]
+                    declared = list(model.dvc_deps)
+                except Exception:
+                    declared = []
+                for dep in declared:
+                    deps[posixpath.join(wdirs[name], dep)] = None
+        for lock_ref in (since, ref):
+            for name, entry in lock_stages(
+                _read_lock(repo, wdir, lock_ref)
+            ).items():
+                for d in entry.get("deps") or []:
+                    if isinstance(d, dict) and d.get("path"):
+                        base = name.split("@")[0]
+                        stage_wdir = stage_wdirs.get(base, "")
+                        deps[posixpath.join(stage_wdir, str(d["path"]))] = None
+        # Every sign-off is written into calkit.yaml, and what a stage reads
+        # from it, its definition and the approach, is compared above
+        deps = {posixpath.normpath(p): None for p in deps}
+        deps.pop(CALKIT_YAML, None)
         for path in deps:
-            change = evidence_change(path, since, repo, wdir, ref=ref)
+            change = evidence_change(
+                path, since, repo, wdir, ref=ref, stage_wdirs=stage_wdirs
+            )
             if change:
                 reasons.append(f"{path}: {change}")
         return reasons
@@ -1610,9 +1703,7 @@ def check_sign_offs(
         )
         if repo is None or history is None:
             return out
-        sha, old_q, old_info = sign_off_commit(
-            sign_off, field, history, question
-        )
+        sha, old_q, old_info = sign_off_commit(sign_off, field)
         out.status = "current"
         out.commit = sha
         if sha is None or old_q is None or old_info is None:
@@ -1624,7 +1715,7 @@ def check_sign_offs(
             return out
         if field == "validations":
             reasons = evidence_changes(sha)
-            if _validated_part(old_q) != _validated_part(question):
+            if validated_part(old_q) != validated_part(question):
                 reasons.insert(0, "the question was edited after it")
         else:
             reasons = stage_changes(sha, old_q, old_info)
@@ -1658,9 +1749,9 @@ def check_question(
     stale_stages: set[str] | None = None,
     frozen_stages: set[str] | None = None,
     check_history: bool = True,
+    check_changes: bool = True,
 ) -> QuestionCheck:
     """Check one question, as it appears in ``calkit.yaml``."""
-
     if isinstance(question, str):
         return QuestionCheck(
             index=index, question=question, answered=False, status="unanswered"
@@ -1690,7 +1781,7 @@ def check_question(
         return out
     since = (
         question_commit(question, repo, wdir, history)
-        if repo is not None and check_history
+        if repo is not None and check_history and check_changes
         else None
     )
     checks = [
@@ -1744,7 +1835,7 @@ def check_question(
             "evidence changed since the answer was last edited; worth "
             "re-reading, then editing the answer or validating it"
         )
-    if since is None and repo is not None and check_history:
+    if since is None and repo is not None and check_history and check_changes:
         messages.append("not yet committed, so history cannot be checked")
     out.status = status
     out.commit = since
@@ -1801,6 +1892,8 @@ def check_questions(
     stale_stages: set[str] | None = None,
     frozen_stages: set[str] | None = None,
     check_history: bool = True,
+    check_changes: bool = True,
+    only: int | None = None,
 ) -> QuestionsStatus:
     """Check every question in a project against its evidence.
 
@@ -1812,7 +1905,11 @@ def check_questions(
     ``check_history`` reads ``calkit.yaml``'s history to find evidence that
     changed after an answer was last edited, which is most of what the
     check costs once the pipeline is known; turning it off leaves every
-    other check as it is.
+    other check as it is. ``check_changes`` turns off just that comparison,
+    still checking sign-offs, which is all listing needs.
+
+    ``only`` checks just the question at that 1-based position, without
+    subprojects.
     """
     wdir = wdir or os.getcwd()
     if ck_info is None:
@@ -1844,9 +1941,13 @@ def check_questions(
             stale_stages=stale_stages,
             frozen_stages=frozen_stages,
             check_history=check_history,
+            check_changes=check_changes,
         )
         for n, q in enumerate(questions, start=1)
+        if only is None or n == only
     ]
+    if only is not None:
+        return QuestionsStatus(questions=checks)
     # A subproject's questions are part of what the project answers
     for subproject in ck_info.get("subprojects") or []:
         path = subproject.get("path") if isinstance(subproject, dict) else None
@@ -1858,6 +1959,7 @@ def check_questions(
             wdir=os.path.join(wdir, path),
             check_pipeline=check_pipeline,
             check_history=check_history,
+            check_changes=check_changes,
         )
         for q in sp_status.questions:
             q.project = Path(path, q.project or "").as_posix()

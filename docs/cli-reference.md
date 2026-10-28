@@ -2411,9 +2411,9 @@ calkit show question|q [OPTIONS] QUESTION
 
 Arguments:
 
-| Argument   | Type | Required | Default | Description                                                                          |
-| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
-| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name. |
+| Argument   | Type | Required | Default | Description                                                                                                                              |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name; prefix a subproject's with its path, e.g., 'sub:1'. |
 
 Options:
 

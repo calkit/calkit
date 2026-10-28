@@ -23,7 +23,8 @@ def show_question(
         typer.Argument(
             help=(
                 "The question's 1-based position, as 'calkit list questions' "
-                "numbers it, or its name."
+                "numbers it, or its name; prefix a subproject's with its "
+                "path, e.g., 'sub:1'."
             )
         ),
     ],
@@ -62,11 +63,13 @@ def show_question(
         kind = ev.get("kind", "result")
         line = f"- {kind.capitalize()} `{ev.get('path', '')}`"
         sub = []
-        if kind == "value" or (kind == "result" and ev.get("key")):
+        key = ev.get("key")
+        # A value without a key is an error the check reports
+        if key and kind in ("value", "result"):
             name = ev.get("name")
-            if name and name != ev["key"]:
+            if name and name != key:
                 line += f" as `{name}`"
-            line += f" at `{ev['key']}`"
+            line += f" at `{key}`"
             if c is not None and c.current is not None:
                 line += f" = {c.current}"
         for name, key in (ev.get("values") or {}).items():
@@ -109,20 +112,29 @@ def show_question(
             lines.append(f"- **{word}**{cond}: {branch}")
         return "\n".join(lines)
 
-    ck_info = calkit.load_calkit_info()
+    # A subproject's question is addressed as 'calkit list questions' shows
+    # it, e.g., 'sub:1'
+    wdir, ref = ".", question
+    prefix, sep, rest = question.rpartition(":")
+    projects = (
+        {Path(w).as_posix(): info for w, info in calkit.iter_projects()}
+        if sep
+        else {}
+    )
+    if sep and Path(prefix).as_posix() in set(projects) - {"."}:
+        wdir, ref = Path(prefix).as_posix(), rest
+    ck_info = projects.get(wdir) or calkit.load_calkit_info()
     questions = ck_info.get("questions") or []
     try:
-        index = question_index(questions, question)
+        index = question_index(questions, ref)
     except ValueError as e:
         raise_error(str(e))
     entry = questions[index]
-    shown = entry if raw else render_question(entry, ck_info)
+    shown = entry if raw else render_question(entry, ck_info, wdir=wdir)
     fields = dict(shown) if isinstance(shown, dict) else {"question": shown}
-    check = next(
-        c
-        for c in check_questions(ck_info, check_pipeline=False).questions
-        if c.project is None and c.index == index + 1
-    )
+    check = check_questions(
+        ck_info, wdir=wdir, check_pipeline=False, only=index + 1
+    ).questions[0]
     # A placeholder left as written looks exactly like text somebody meant
     # literally, so say when one couldn't be filled. A conditional answer
     # still in clauses is one whose conditions couldn't be read.
@@ -149,8 +161,9 @@ def show_question(
     if json_output:
         echo_json({**out, "check": check.model_dump(mode="json")})
         return
+    where = f"{wdir}: " if wdir != "." else ""
     lines = [
-        f"# {index + 1}. {out['question']}",
+        f"# {where}{index + 1}. {out['question']}",
         f"`{format_letters(check)}`",
     ]
     for k, v in out.items():

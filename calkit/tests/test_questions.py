@@ -1109,6 +1109,88 @@ def test_sign_offs_and_stages(tmp_dir):
     assert "plot.png" not in message
     ck_info["questions"].pop()
     _write_yaml(ck_info)
+    # A stage's script counts even if it has never run, so dvc.lock has
+    # nothing for it
+    with open("summarize.py", "w") as f:
+        f.write("summarize()\n")
+    sign_off(date="2026-10-13")
+    with open("summarize.py", "w") as f:
+        f.write("summarize(again=True)\n")
+    _commit("Edit a stage that hasn't run")
+    q = check().questions[0]
+    assert q.verification_status == "stale"
+    assert "summarize.py: changed in 1 commit(s)" in (
+        q.verifications[0].message or ""
+    )
+    # A stage reading calkit.yaml, as questions-to-latex does, doesn't make
+    # a verification stale when someone else signs off in it
+    lock = calkit.ryaml.load(open("dvc.lock"))
+    lock["stages"]["fit"]["deps"].append({"path": "calkit.yaml"})
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    sign_off(date="2026-10-14")
+    question["verifications"].append(
+        {
+            "by": {"name": "Bob", "email": "bob@example.org"},
+            "date": "2026-10-14",
+        }
+    )
+    _write_yaml(ck_info)
+    _commit("Bob verifies")
+    q = check().questions[0]
+    assert [v.status for v in q.verifications] == ["current", "current"]
+    # One made on a branch is checked from where it was added, so a change
+    # on main it never saw counts, though main's commits are newer
+    main = repo.active_branch.name
+    repo.git.checkout("-q", "-b", "side")
+    sign_off(date="2026-10-15")
+    repo.git.checkout("-q", main)
+    with open("fit.py", "w") as f:
+        f.write("fit(differently=True)\n")
+    with open("calkit.yaml", "a") as f:
+        f.write("description: Changed on main.\n")
+    _commit("Change main", date="2099-02-01T00:00:00+00:00")
+    subprocess.check_call(
+        ["git", "merge", "-q", "--no-edit", "side"],
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+            "GIT_COMMITTER_DATE": "2099-02-02T00:00:00+00:00",
+        },
+    )
+    q = check().questions[0]
+    assert q.verification_status == "stale"
+    assert "fit.py: changed in 1 commit(s)" in (
+        q.verifications[0].message or ""
+    )
+    # dvc.lock's paths are relative to the stage's wdir
+    ck_info["pipeline"]["stages"]["fit"]["wdir"] = "analysis"
+    ck_info["pipeline"]["stages"]["fit"]["outputs"] = ["../results/fit.json"]
+    os.makedirs("analysis")
+    with open("analysis/fit.py", "w") as f:
+        f.write("fit()\n")
+    sign_off(date="2026-10-16")
+    with open("analysis/fit.py", "w") as f:
+        f.write("fit(in_analysis=True)\n")
+    _commit("Edit the stage in its wdir")
+    q = check().questions[0]
+    assert "fit" in q.stages
+    assert q.verification_status == "stale"
+    message = q.verifications[0].message or ""
+    assert "analysis/fit.py: changed in 1 commit(s)" in message
+    assert " fit.py" not in message
+    lock_text = (
+        "stages:\n  fit:\n    outs:\n    - path: out.txt\n      md5: abc\n"
+    )
+    for path, wdirs, expected in [
+        ("analysis/out.txt", {"fit": "analysis"}, "abc"),
+        ("out.txt", {"fit": "analysis"}, None),
+        ("out.txt", None, "abc"),
+    ]:
+        assert calkit.questions._lock_hash(lock_text, path, wdirs) == expected
     # Without history, a sign-off can't be checked either way
     q = check(check_history=False).questions[0]
     assert q.verifications[0].status == "unchecked"

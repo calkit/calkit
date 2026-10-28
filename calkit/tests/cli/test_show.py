@@ -198,8 +198,28 @@ def test_show_question(tmp_dir):
     assert (
         "**Answer:**\n\n- **if** `acc > 0.5`: Yes.\n- **else**: No.\n"
     ) in show("2", "--raw")
+    # A value without a key is shown with its error rather than crashing
+    ck_info["questions"][1]["evidence"].append(
+        {"kind": "value", "path": "results/metrics.json"}
+    )
+    # A subproject's question is addressed as it's listed
+    os.makedirs("sub")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"questions": ["Does the sub work?"]}, f)
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert (
+        "- Value `results/metrics.json` *(error: value evidence needs a key)*"
+    ) in show("2")
+    assert show("sub:1") == "# sub: 1. Does the sub work?\n\n`- - - -`\n"
     # A question that isn't there is an error
-    for ref, message in [("3", "There is no question 3"), ("x", "named 'x'")]:
+    for ref, message in [
+        ("3", "There is no question 3"),
+        ("x", "named 'x'"),
+        ("sub:2", "There is no question 2"),
+        ("nope:1", "named 'nope:1'"),
+    ]:
         result = subprocess.run(
             ["calkit", "show", "q", ref], capture_output=True, text=True
         )

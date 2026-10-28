@@ -2618,7 +2618,7 @@ async function refreshPipelineOutputContext(
   // forces it.
   if (force || isAutoRefreshStatusEnabled()) {
     ensureRunStatusPolling(context);
-    void refreshQuestionChecks(workspaceRoot);
+    void refreshQuestionChecks(workspaceRoot, force);
   }
 }
 
@@ -2847,11 +2847,18 @@ async function pollPipelineRunStatus(
 
 // Each question's status from `calkit check questions`, shown in the sidebar.
 // It reads Git history, so it runs in the background, one at a time, with a
-// request made while one runs queued to run after it.
+// request made while one runs queued to run after it, and only when what it
+// reads has changed, unless forced.
 let questionChecksRunning = false;
 let questionChecksQueued = false;
+let questionChecksForced = false;
+let questionChecksInputs: string | undefined;
 
-async function refreshQuestionChecks(workspaceRoot: string): Promise<void> {
+async function refreshQuestionChecks(
+  workspaceRoot: string,
+  force = false,
+): Promise<void> {
+  questionChecksForced ||= force;
   if (questionChecksRunning) {
     questionChecksQueued = true;
     return;
@@ -2860,10 +2867,48 @@ async function refreshQuestionChecks(workspaceRoot: string): Promise<void> {
   try {
     do {
       questionChecksQueued = false;
-      if (!(currentCalkitConfig?.questions ?? []).length) {
+      const questions = currentCalkitConfig?.questions ?? [];
+      if (!questions.length) {
         sidebarProvider?.setQuestionChecks([]);
         continue;
       }
+      // What the check reads: the commit, and each project's calkit.yaml,
+      // dvc.lock, and evidence
+      let head = "";
+      try {
+        ({ stdout: head } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+          cwd: workspaceRoot,
+        }));
+      } catch {
+        // No commits yet
+      }
+      const paths = [
+        ...new Set(currentQuestionOrigins.map((o) => o.dir)),
+      ].flatMap((dir) =>
+        ["calkit.yaml", "dvc.lock"].map((f) => path.join(dir, f)),
+      );
+      questions.forEach((q, n) => {
+        const dir = currentQuestionOrigins[n]?.dir ?? ".";
+        for (const ev of typeof q === "string" ? [] : q.evidence ?? []) {
+          if (ev.path) {
+            paths.push(path.join(dir, ev.path));
+          }
+        }
+      });
+      const mtimes = await Promise.all(
+        paths.map((p) =>
+          fs.promises.stat(path.join(workspaceRoot, p)).then(
+            (stat) => stat.mtimeMs,
+            () => 0,
+          ),
+        ),
+      );
+      const inputs = JSON.stringify([head.trim(), paths, mtimes]);
+      if (!questionChecksForced && inputs === questionChecksInputs) {
+        continue;
+      }
+      questionChecksForced = false;
+      questionChecksInputs = inputs;
       let stdout = "";
       try {
         suppressRwlockUntil = Date.now() + 5000;

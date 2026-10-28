@@ -3499,9 +3499,17 @@ def artifact_status_at_ref(
 
     import calkit.git
 
-    def blob_md5(dep_path: str) -> str | None:
+    def blob_md5s(dep_path: str) -> set[str] | None:
+        # DVC hashed the working tree, which can have CRLF where Git holds
+        # LF, e.g., with core.autocrlf on Windows, so either ending counts
         blob = calkit.git.read_at_ref(repo, ref, dep_path)
-        return None if blob is None else hashlib.md5(blob).hexdigest()
+        if blob is None:
+            return None
+        variants = {blob}
+        if b"\0" not in blob:
+            lf = blob.replace(b"\r\n", b"\n")
+            variants |= {lf, lf.replace(b"\n", b"\r\n")}
+        return {hashlib.md5(v).hexdigest() for v in variants}
 
     repo = calkit.git.get_repo()
     rel = _repo_relpath(repo, path, wdir)
@@ -3547,18 +3555,18 @@ def artifact_status_at_ref(
             if not recorded or recorded.endswith(".dir"):
                 unverifiable += 1
                 continue
-            committed = blob_md5(dep_path)
+            committed = blob_md5s(dep_path)
             if committed is None:
                 unverifiable += 1
-            elif committed != recorded:
+            elif recorded not in committed:
                 reasons.append(f"{name}: {dep_path} changed after it ran")
         if name in declared and declared[name] != stage.get("cmd"):
             reasons.append(f"{name}: dvc.yaml defines a different command")
         for out in stage.get("outs") or []:
             if out.get("path") != rel:
                 continue
-            committed = blob_md5(rel)
-            if committed is not None and committed != out.get("md5"):
+            committed = blob_md5s(rel)
+            if committed is not None and out.get("md5") not in committed:
                 reasons.append(
                     f"{name}: {rel} was committed with different contents "
                     "than the run produced"

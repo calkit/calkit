@@ -4766,6 +4766,19 @@ def test_artifact_status_at_ref(tmp_dir):
         "results/kernels.csv", "HEAD"
     )
     assert state["status"] == "up to date"
+    # DVC hashing a CRLF checkout of what Git holds with LF, as on Windows,
+    # isn't a change
+    lock["stages"]["export"]["deps"][0]["md5"] = md5(
+        files["scripts/export.py"].replace("\n", "\r\n")
+    )
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Record a CRLF hash")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "up to date"
 
 
 def test_read_artifact_at_ref(tmp_dir):
@@ -4800,8 +4813,8 @@ def test_read_artifact_at_ref(tmp_dir):
         calkit.pipeline.read_artifact_at_ref("results/big.csv", "HEAD")
     obj = os.path.join(".dvc", "cache", "files", "md5", md5[:2])
     os.makedirs(obj, exist_ok=True)
-    with open(os.path.join(obj, md5[2:]), "w") as f:
-        f.write(cached)
+    with open(os.path.join(obj, md5[2:]), "wb") as f:
+        f.write(cached.encode())
     assert calkit.pipeline.read_artifact_at_ref("results/big.csv", "HEAD") == (
         cached.encode()
     )
@@ -4826,7 +4839,7 @@ def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
     # and whose output is in DVC's cache rather than Git
     os.makedirs("analysis", exist_ok=True)
     with open("analysis/make.py", "w") as f:
-        f.write("with open('out.csv', 'w') as f:\n    f.write('a\\n1\\n')\n")
+        f.write("with open('out.csv', 'wb') as f:\n    f.write(b'a\\n1\\n')\n")
     ck_info = {
         "pipeline": {
             "stages": {

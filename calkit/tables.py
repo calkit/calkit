@@ -50,7 +50,7 @@ def read_columns(
     if suffix in DELIMITERS:
         with open(path, newline="", encoding="utf-8-sig") as f:
             return next(csv.reader(f, delimiter=DELIMITERS[suffix]), [])
-    return read_table(path, head=0, engine=engine)["columns"]
+    return list(read_table(path, head=0, engine=engine)["columns"])
 
 
 def read_table(

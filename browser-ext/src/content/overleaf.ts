@@ -389,12 +389,7 @@ function renderInsert(
   const insert = async (citation: Citation) => {
     try {
       const how = await insertIntoEditor(citationText(citation));
-      const syncButton = el("button", {
-        class: "action secondary",
-        text: "Sync now",
-      });
-      syncButton.addEventListener("click", async () => {
-        syncButton.disabled = true;
+      const sync = async () => {
         clear(message).append(loading("Syncing"));
         // Overleaf saves an edit a moment after it's made, and a sync
         // started first would miss it
@@ -407,18 +402,30 @@ function renderInsert(
             errorMessage(e instanceof Error ? e.message : String(e)),
           );
         }
-      });
+      };
+      // Synced right away so it shows up, unless it still has to be pasted
+      if (how === "inserted") {
+        await sync();
+        return;
+      }
       clear(message).append(
         el("div", {
           class: "dim small",
           text:
-            (how === "inserted"
-              ? "Inserted."
-              : "Copied; paste it where it should go.") +
-            " It shows as ?? until a sync brings it into the paper. The " +
-            "document needs \\usepackage{calkit} in its preamble.",
+            "Copied; paste it where it should go, then sync to bring it " +
+            "into the paper. The document needs \\usepackage{calkit} in " +
+            "its preamble.",
         }),
-        el("div", { class: "actions" }, [syncButton]),
+        el("div", { class: "actions" }, [
+          el("button", {
+            class: "action secondary",
+            text: "Sync now",
+            onClick: (e: Event) => {
+              (e.currentTarget as HTMLButtonElement).disabled = true;
+              void sync();
+            },
+          }),
+        ]),
       );
     } catch (e) {
       clear(message).append(

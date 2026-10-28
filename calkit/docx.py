@@ -1401,8 +1401,13 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                 'error "calkit: not opened"\n'
                 f'set doc to document "{name}"\n'
                 f'save as doc file name "{tmp_path}" file format format document\n'
-                # By reference, since Word may not find the saved copy by name
-                "close active document saving no\n"
+                # Found by name among the open documents, since saving breaks
+                # the reference, Word may not find it by name directly, and
+                # the active document may be another the user switched to
+                "repeat with d in (get documents)\n"
+                f'if name of d is "{os.path.basename(tmp_path)}" then '
+                "close d saving no\n"
+                "end repeat\n"
                 "end tell\n"
                 "end timeout"
             )

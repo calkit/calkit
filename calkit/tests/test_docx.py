@@ -1053,12 +1053,14 @@ def test_word_export_placement(
                 )
                 continue
             ppr = f'<w:pPr><w:jc w:val="{jc}"/></w:pPr>' if jc else ""
+            # A picture where the text has U+FFFC
+            runs = "<w:r><w:drawing/></w:r>".join(
+                f'<w:r><w:t xml:space="preserve">{piece}</w:t></w:r>'
+                for piece in text.split("\ufffc")
+            )
             body.insert(
                 i,
-                ET.fromstring(
-                    f'<w:p xmlns:w="{w_ns}">{ppr}<w:r>'
-                    f'<w:t xml:space="preserve">{text}</w:t></w:r></w:p>'
-                ),
+                ET.fromstring(f'<w:p xmlns:w="{w_ns}">{ppr}{runs}</w:p>'),
             )
         doc.save()
 
@@ -1092,6 +1094,10 @@ def test_word_export_placement(
                 "",
                 r"Only the $^{2}$H label, the $\cotwo$ flux, and the "
                 r"$\arccos x$ term.",
+                "",
+                r"The fuel (\ce{C3H8}) burns in \ce{O2} at \SI{300}{kelvin}.",
+                "",
+                r"Their total $\sum_k w_k$ is fixed.",
                 "",
                 r"As \citet{lee} showed, the ratio%",
                 r"$x$%",
@@ -1143,6 +1149,8 @@ def test_word_export_placement(
             ),
             ("At 20K the value Tc drops, from 1–2 units.", None),
             ("Only the 2H label, the CO2 flux, and the arccos x term.", None),
+            ("The fuel (C\ufffc ) burns in O2 at 300kelvin.", None),
+            ("Their total Pkwk is fixed.", None),
             ("As Lee (2018) showed, the ratiox, so it holds.", None),
             ("The campaign (June 2019) ran long.", None),
             ("A paragraph Word split at the end of a page, which", "right"),
@@ -1187,7 +1195,10 @@ def test_word_export_placement(
             ["f(x)"],
             "We fit the model to data. Then we fit the model well.",
         ),
-        "At 20K": (["Tc", "1", "2"], "At 20K the value drops, from – units."),
+        "At 20 K": (
+            ["Tc", "1", "2"],
+            "At 20 K the value drops, from – units.",
+        ),
         "Only the": (
             ["CO2", "arccosx"],
             "Only the 2H label, the flux, and the term.",
@@ -1212,6 +1223,22 @@ def test_word_export_placement(
     jc = longer.element.find(w_jc)
     assert jc is not None and jc.get(calkit.docx._tag(w_ns, "val")) == "both"
     assert "Line one" in texts and "Line two" in texts
+    # A formula Word drew partly as a picture is text again, with its
+    # subscripts lowered, while one it kept as text stays, and a unit Word
+    # ran into its number is apart again
+    fuel, _ = get_math_and_text(doc, "The fuel")
+    assert fuel.text == "The fuel (C3H8) burns in O2 at 300 kelvin."
+    assert fuel.element is not None
+    assert not list(fuel.element.iter(calkit.docx._tag(w_ns, "drawing")))
+    lowered = [
+        "".join(t.text or "" for t in r.iter(calkit.docx._tag(w_ns, "t")))
+        for r in fuel.element.iter(calkit.docx._tag(w_ns, "r"))
+        if r.find(f".//{calkit.docx._tag(w_ns, 'vertAlign')}") is not None
+    ]
+    assert lowered == ["3", "8"]
+    # A sum Word read in TeX's own font, as P, is still math
+    total, found = get_math_and_text(doc, "Their total")
+    assert total.text == "Their total is fixed." and len(found) == 1
     assert "Abstract" in texts and "Short abstract text here." in texts
     # A table comes from the source, rows Word merged apart and the header
     # it dropped beside the table back, with its math, line breaks, and

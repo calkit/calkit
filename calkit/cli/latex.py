@@ -2021,6 +2021,175 @@ def to_docx(
     from calkit.models.docx import LatexDocxExport
     from calkit.models.pipeline import LatexStage
 
+    def restore_formulas(
+        doc: calkit.docx.Document, blks: list[calkit.latex.Block]
+    ) -> None:
+        # A chemical formula, e.g., \ce{C3H8}, that Word's import drew
+        # partly as a picture, e.g., its subscripts, goes back as text
+        # formatted from the source
+        from xml.etree import ElementTree as ET
+
+        w_r = calkit.docx._tag(calkit.docx.W, "r")
+        w_t = calkit.docx._tag(calkit.docx.W, "t")
+        w_rpr = calkit.docx._tag(calkit.docx.W, "rPr")
+        w_vert = calkit.docx._tag(calkit.docx.W, "vertAlign")
+        by_name = {
+            calkit.latex.make_bookmark_name(b.path, b.lineno): b for b in blks
+        }
+        for p in doc.paragraphs:
+            # Without a numbered piece's suffix, e.g., ck_ab12_7_2
+            name = "_".join((p.bookmark or "").split("_")[:3])
+            fblk = by_name.get(name)
+            if fblk is None or p.element is None:
+                continue
+            src = calkit.latex._strip_comments_joined(
+                "\n".join(ln.text for ln in fblk.lines)
+            )
+            for fm in re.finditer(r"\\ce\s*\{((?:[^{}]|\{[^{}]*\})*)\}", src):
+                text = doc.linear_text(p.element)
+                if "\ufffc" not in text:
+                    break
+                formula = fm.group(1)
+                shown = calkit.latex.detex(f"\\ce{{{formula}}}")
+                before = calkit.latex.keep_letters_and_digits(
+                    calkit.latex.detex(src[: fm.start()])
+                )[-12:]
+                # The formula with some of it as the picture, after the
+                # prose before it
+                spot = None
+                for i in range(len(shown) + 1):
+                    for j in range(i, len(shown) + 1):
+                        pattern = (
+                            re.escape(shown[:i])
+                            + r"\s*\ufffc\s*"
+                            + re.escape(shown[j:])
+                        )
+                        for sm in re.finditer(pattern, text):
+                            if calkit.latex.keep_letters_and_digits(
+                                text[: sm.start()]
+                            ).endswith(before):
+                                spot = sm
+                                break
+                        if spot:
+                            break
+                    if spot:
+                        break
+                if spot is None:
+                    continue
+                # Its runs, as the text before it is set, with numbers
+                # after a symbol lowered and charges raised
+                pieces: list[tuple[str, str | None]] = []
+                k = 0
+                while k < len(formula):
+                    ch = formula[k]
+                    if ch in "^_" and k + 1 < len(formula):
+                        if formula[k + 1] == "{":
+                            close = formula.find("}", k + 2)
+                            close = len(formula) if close < 0 else close
+                            arg, k = formula[k + 2 : close], close + 1
+                        else:
+                            arg, k = formula[k + 1], k + 2
+                        pieces.append(
+                            (
+                                arg,
+                                "superscript" if ch == "^" else "subscript",
+                            )
+                        )
+                        continue
+                    if (
+                        ch.isdigit()
+                        and k
+                        and (
+                            formula[k - 1].isalpha() or formula[k - 1] in ")]"
+                        )
+                    ):
+                        end = k
+                        while end < len(formula) and formula[end].isdigit():
+                            end += 1
+                        pieces.append((formula[k:end], "subscript"))
+                        k = end
+                        continue
+                    if (
+                        ch in "+-"
+                        and k
+                        and formula[k - 1] not in " "
+                        and (k + 1 == len(formula) or formula[k + 1] == " ")
+                    ):
+                        pieces.append((ch, "superscript"))
+                        k += 1
+                        continue
+                    pieces.append((ch, None))
+                    k += 1
+                prior = [
+                    r for r in p.element.iter(w_r) if r.find(w_t) is not None
+                ]
+                offset = len(text[: spot.start()])
+                style = None
+                pos = 0
+                for r in prior:
+                    pos += len(doc._run_text(r))
+                    if pos >= offset:
+                        style = r.find(w_rpr)
+                        break
+                runs: list[tuple[str, str | None]] = []
+                for chunk, vert in pieces:
+                    if runs and runs[-1][1] == vert:
+                        runs[-1] = (runs[-1][0] + chunk, vert)
+                    else:
+                        runs.append((chunk, vert))
+                elements = []
+                for chunk, vert in runs:
+                    run = ET.Element(w_r)
+                    if style is not None:
+                        rpr = deepcopy(style)
+                        for old in rpr.findall(w_vert):
+                            rpr.remove(old)
+                        run.append(rpr)
+                    if vert is not None:
+                        has_rpr = run.find(w_rpr)
+                        rpr = (
+                            has_rpr
+                            if has_rpr is not None
+                            else ET.SubElement(run, w_rpr)
+                        )
+                        v = ET.Element(w_vert)
+                        v.set(calkit.docx._tag(calkit.docx.W, "val"), vert)
+                        # In schema order, before what follows it
+                        later = {
+                            calkit.docx._tag(calkit.docx.W, n)
+                            for n in (
+                                "rtl",
+                                "cs",
+                                "em",
+                                "lang",
+                                "eastAsianLayout",
+                                "specVanish",
+                                "oMath",
+                            )
+                        }
+                        rpr.insert(
+                            next(
+                                (
+                                    i
+                                    for i, c in enumerate(rpr)
+                                    if c.tag in later
+                                ),
+                                len(rpr),
+                            ),
+                            v,
+                        )
+                    t = ET.SubElement(run, w_t)
+                    t.text = chunk
+                    t.set(calkit.docx.XML_SPACE, "preserve")
+                    elements.append(run)
+                if elements and doc.replace_range(
+                    p.element, spot.start(), spot.end(), elements[0]
+                ):
+                    at = list(p.element).index(elements[0])
+                    for k, run in enumerate(elements[1:], 1):
+                        p.element.insert(at + k, run)
+                    doc._parents = {c: q for q in doc.doc.iter() for c in q}
+
     def rebuild_tables(
         doc: calkit.docx.Document,
         paras: list[calkit.docx.Paragraph],
@@ -2750,6 +2919,21 @@ def to_docx(
                     for k in reversed(range(1, len(m.groups()) + 1)):
                         if not m.group(k):
                             doc.insert_text(para.element, m.start(k), "-")
+            # Likewise the space between a number and a word after it, e.g.,
+            # a unit, "20 K" as "20K", where the source never
+            # joins them
+            pairs = re.findall(
+                r"(?<![\w.])(\d+(?:[.,]\d+)*) ([^\W\d_]\w*)", blk.text
+            )
+            for num, word in dict.fromkeys(pairs):
+                joined = (
+                    rf"(?<![\w.]){re.escape(num)}(?={re.escape(word)}(?!\w))"
+                )
+                if re.search(joined, blk.text):
+                    continue
+                text = doc.linear_text(para.element)
+                for m in reversed(list(re.finditer(joined, text))):
+                    doc.insert_text(para.element, m.end(), " ")
         paras = doc.paragraphs
     # Bookmark each anchored paragraph; a block rendering as several
     # paragraphs gets numbered suffixes
@@ -3228,10 +3412,26 @@ def to_docx(
             rendered = calkit.latex.keep_letters_and_digits(
                 calkit.latex.get_math_text(tex)
             )
+            # Or with big operators as the letters TeX's math extension
+            # font has them at, which Word's import can read, e.g., \sum as P
+            drawn = calkit.latex.keep_letters_and_digits(
+                calkit.latex.get_math_text(
+                    re.sub(
+                        r"\\(sum|prod|int|oint)(?![A-Za-z])",
+                        lambda m: {
+                            "sum": " P ",
+                            "prod": " Q ",
+                            "int": " R ",
+                        }.get(str(m.group(1)), " H "),
+                        tex,
+                    )
+                )
+            )
             return (
                 bool(region.strip())
                 and all(
                     calkit.latex.keep_letters_and_digits(w) in rendered
+                    or calkit.latex.keep_letters_and_digits(w) in drawn
                     for w in words
                 )
                 and set(re.findall(r"\d", region))
@@ -3400,6 +3600,14 @@ def to_docx(
         )
         equations = {n: t for n, t in zip(names, read_back) if t is not None}
         # Trimming a stray number changed a paragraph's text
+        original = {
+            p.bookmark: p.text
+            for p in doc.paragraphs
+            if p.bookmark and p.bookmark in original
+        }
+    if engine == "word":
+        restore_formulas(doc, blks)
+        doc.prune_media()
         original = {
             p.bookmark: p.text
             for p in doc.paragraphs

@@ -9,8 +9,8 @@
   "texlive_full": {
     "image": "texlive/texlive:latest-full",
     "unpacked_mb": 6300.0,
-    "download_mb": 2800.0,
+    "download_mb": 2700.0,
     "unpacked_gb": 6.3,
-    "download_gb": 2.8
+    "download_gb": 2.7
   }
 }

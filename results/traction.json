@@ -1,5 +1,5 @@
 {
-  "date": "2026-10-27",
+  "date": "2026-10-28",
   "hub_users": 138,
   "hub_projects": 52,
   "hub_projects_worked_on": 17,
@@ -16,7 +16,7 @@
   "github_stars": 60,
   "github_forks": 17,
   "pypi_downloads_last_month": 3616,
-  "releases": 331,
-  "releases_per_week_last_90_days": 8.0,
+  "releases": 332,
+  "releases_per_week_last_90_days": 8.1,
   "papers_shipped": 5
 }

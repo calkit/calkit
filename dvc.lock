@@ -14,8 +14,8 @@ stages:
       size: 149534
     - path: calkit/docx.py
       hash: md5
-      md5: ec4f4a43335e10307e78453c1d47772d
-      size: 71807
+      md5: 0307d131dd5d8fd28c543e0e8718fc95
+      size: 72098
     - path: calkit/latex.py
       hash: md5
       md5: e60e7b89914c55d3f6bea79303fef1cd
@@ -75,8 +75,8 @@ stages:
       size: 5
     - path: calkit/docx.py
       hash: md5
-      md5: ec4f4a43335e10307e78453c1d47772d
-      size: 71807
+      md5: 0307d131dd5d8fd28c543e0e8718fc95
+      size: 72098
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: 6a04754199f6a394429ca0c07e4ecda6

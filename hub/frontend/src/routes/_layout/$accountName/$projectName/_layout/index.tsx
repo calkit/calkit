@@ -691,7 +691,7 @@ function ProjectView() {
           </Box>
         </Box>
       </Flex>
-      {editorOpen && editorTexPath && (
+      {editorOpen && editorTexPath && userHasWriteAccess && !ref && (
         <LatexEditor
           isOpen={Boolean(editorOpen)}
           onClose={closeLatexEditor}

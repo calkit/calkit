@@ -1514,6 +1514,169 @@ def update_figure(
     calkit.save_calkit_info(ck_info)
 
 
+@update_app.command(name="question")
+def update_question(
+    question: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The question's 1-based position, as 'calkit list questions' "
+                "numbers it, or its name."
+            )
+        ),
+    ],
+    hypothesis: Annotated[
+        str | None, typer.Option("--hypothesis", help="New hypothesis.")
+    ] = None,
+    approach: Annotated[
+        str | None,
+        typer.Option(
+            "--approach",
+            help="One sentence on how the question is answered.",
+        ),
+    ] = None,
+    answer: Annotated[
+        str | None,
+        typer.Option(
+            "--answer",
+            help=(
+                "New answer. One that picks its wording from the evidence is "
+                "written in calkit.yaml."
+            ),
+        ),
+    ] = None,
+    notes: Annotated[
+        str | None, typer.Option("--notes", help="New notes on the question.")
+    ] = None,
+    verify: Annotated[
+        str | None,
+        typer.Option(
+            "--verify",
+            help=(
+                "Sign off that the pipeline stages behind the evidence "
+                "implement the approach correctly, with what you checked, "
+                "e.g., 'fit.py fits both models as stated.'"
+            ),
+        ),
+    ] = None,
+    validate: Annotated[
+        str | None,
+        typer.Option(
+            "--validate",
+            help=(
+                "Sign off that the approach suits the question and the "
+                "evidence justifies the answer, with what you checked, e.g., "
+                "'The linear fit's residuals curve.'"
+            ),
+        ),
+    ] = None,
+    with_ai: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--with-ai",
+            help=(
+                "A generative AI tool used in verifying or validating, e.g., "
+                "'Claude Opus 5'. Can be given more than once."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Update a question in calkit.yaml, or verify or validate it.
+
+    A sign-off is recorded with your Git name and email and the time,
+    replaces any earlier one of yours of the same kind, and applies to the
+    question as updated by this command.
+    """
+    import git
+    from ruamel.yaml.comments import CommentedMap
+
+    from calkit.questions import question_index
+
+    def git_config(key: str) -> str | None:
+        try:
+            return git.Git().config("--get", key).strip() or None
+        except git.GitCommandError:
+            return None
+
+    sign_offs = {
+        k: v
+        for k, v in [("verifications", verify), ("validations", validate)]
+        if v is not None
+    }
+    if with_ai and not sign_offs:
+        raise_error(
+            "--with-ai discloses tools used in signing off; add --verify or "
+            "--validate."
+        )
+    updates = {
+        k: v
+        for k, v in [
+            ("hypothesis", hypothesis),
+            ("approach", approach),
+            ("answer", answer),
+            ("notes", notes),
+        ]
+        if v is not None
+    }
+    if not updates and not sign_offs:
+        raise_error("No updates specified.")
+    ck_info = calkit.load_calkit_info()
+    questions = ck_info.get("questions") or []
+    try:
+        index = question_index(questions, question)
+    except ValueError as e:
+        raise_error(str(e))
+    entry = questions[index]
+    if isinstance(entry, str):
+        entry = CommentedMap(question=entry)
+        questions[index] = entry
+    # New fields go where they'd be written by hand, not at the end
+    order = ["question", "name", "hypothesis", "approach", "answer", "notes"]
+    for key, value in updates.items():
+        if key not in entry:
+            later = [
+                n
+                for n, k in enumerate(entry)
+                if k not in order or order.index(k) > order.index(key)
+            ]
+            entry.insert(later[0] if later else len(entry), key, value)
+        else:
+            entry[key] = value
+    # Each needs the thing it signs off on
+    if "verifications" in sign_offs and not entry.get("approach"):
+        raise_error(
+            "A verification checks the code against the approach; "
+            "add one with --approach."
+        )
+    if "validations" in sign_offs and not entry.get("answer"):
+        raise_error("A validation checks the answer; add one with --answer.")
+    email = git_config("user.email") if sign_offs else None
+    if sign_offs and email is None:
+        raise_error(
+            "A sign-off is recorded with your Git email; set it with "
+            "'git config user.email'."
+        )
+    for field, sign_off_notes in sign_offs.items():
+        by = CommentedMap()
+        if name := git_config("user.name"):
+            by["name"] = name
+        by["email"] = email
+        if with_ai:
+            by["with_ai"] = with_ai[0] if len(with_ai) == 1 else with_ai
+        now = datetime.now().astimezone().replace(microsecond=0)
+        new = CommentedMap(by=by, date=now)
+        if sign_off_notes:
+            new["notes"] = sign_off_notes
+        # One per person: signing off again replaces their earlier one
+        entry[field] = [
+            r
+            for r in entry.get(field) or []
+            if (r.get("by") or {}).get("email") != email
+        ] + [new]
+    ck_info["questions"] = questions
+    calkit.save_calkit_info(ck_info)
+
+
 @update_app.command(name="path-storage")
 def update_path_storage(
     paths: Annotated[

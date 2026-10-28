@@ -728,9 +728,21 @@ The stage's other inputs, e.g., figures, come from the DVC cache or remote
 rather than being recomputed, and nothing is committed.
 The workspace is reused rather than created per build, so its
 environment, DVC cache, and Git objects stay warm, but nothing from one
-build carries into the next.
+build carries into the next, except LaTeX's intermediate files, e.g.,
+`.aux` and `.bbl`, kept per stage outside the checkout so `latexmk` only
+redoes what changed, and cleared when the stage's environment changes.
 One build runs per workspace at a time, and a newer request replaces a
-queued one.
+queued one, while requests for the same sources, e.g., from two tabs,
+share one build.
+
+Each request carries a hash of the editor's sources, and the result
+comes back with it, so when edits arrived during the build the editor
+shows the PDF labeled as from an earlier version rather than hiding it.
+LaTeX builds run with SyncTeX, and its file comes back with the PDF so the
+editor can jump between source and output, and errors come back parsed
+from the log with their files and lines, to show in the editor.
+[TexLite](https://github.com/SWUFE-DB-Group/TexLite) does all of these
+in its compile loop.
 
 A preview build stops there, and the editor shows the result next to the
 current one, so the change can be judged before it's kept; discarding it
@@ -929,6 +941,14 @@ so it follows the pipeline integration phase.
   one, but conflicts with agents and concurrent runs would be silent and
   unrecoverable, where Git makes them explicit.
   Following upstream gets most of the benefit through Git.
+- **Run the editor on the machine, as
+  [TexLite](https://github.com/SWUFE-DB-Group/TexLite) does.** A whole
+  Overleaf-like app on the user's machine, reached through a tunnel to its
+  port, with live co-editing.
+  The tunnel exposes the entire app behind only its own login, its
+  database becomes a record beside Git, and the editor goes wherever the
+  machine does, where with the link the editor stays on the hub and
+  machines only do work it asks for.
 - **Name a machine in project environments.** Machine names are per
   user, so the project would only work for its author.
 - **Declare machines in `calkit.yaml`, as sketched in #90.** Ties a

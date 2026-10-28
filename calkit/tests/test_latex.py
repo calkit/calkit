@@ -620,11 +620,11 @@ def test_detex() -> None:
     ) == (f"{text_cite} and {text_cite} with {cite}")
     assert calkit.latex.detex("the ratio%\n  ed%\n, so") == "the ratioed, so"
     # Math reads with Greek letters and operator names as themselves
-    assert calkit.latex.math_text(r"\mathbf{u}_\text{ref}") == "u ref"
-    assert calkit.latex.math_text(r"\Delta\ln p + \hbar\omega_k") == (
+    assert calkit.latex.get_math_text(r"\mathbf{u}_\text{ref}") == "u ref"
+    assert calkit.latex.get_math_text(r"\Delta\ln p + \hbar\omega_k") == (
         "Δ ln p + ℏω k"
     )
-    assert calkit.latex.math_text(r"\lambda L_{\max}") == "λ L max"
-    assert calkit.latex.math_text(r"\arccos x + \liminf_n a") == (
+    assert calkit.latex.get_math_text(r"\lambda L_{\max}") == "λ L max"
+    assert calkit.latex.get_math_text(r"\arccos x + \liminf_n a") == (
         "arccos x + liminf n a"
     )

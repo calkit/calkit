@@ -2251,19 +2251,19 @@ def to_docx(
             )
         }
 
-        def jc_of(el: Any) -> str | None:
+        def get_jc(el: Any) -> str | None:
             jc = el.find(w_jc_path)
             return None if jc is None else jc.get(w_val)
 
         # How the body text is aligned: as most long paragraphs are
         counts = Counter(
-            jc_of(p.element)
+            get_jc(p.element)
             for p in paras
             if p.element is not None and len(p.text) > 200
         )
         usual_jc = counts.most_common(1)[0][0] if counts else None
 
-        def usual(jc: str | None) -> bool:
+        def is_usual(jc: str | None) -> bool:
             return bool(counts) and jc == usual_jc
 
         for i in range(len(paras) - 1, 0, -1):
@@ -2343,11 +2343,11 @@ def to_docx(
             # since Word's import can align a one-line piece right
             jc1 = part1.element.find(w_jc_path)
             jc2 = part2.element.find(w_jc_path)
-            v1, v2 = jc_of(part1.element), jc_of(part2.element)
+            v1, v2 = get_jc(part1.element), get_jc(part2.element)
             longer = len(doc.linear_text(part2.element)) > len(
                 doc.linear_text(part1.element)
             )
-            if v1 != v2 and (usual(v2) or (longer and not usual(v1))):
+            if v1 != v2 and (is_usual(v2) or (longer and not is_usual(v1))):
                 ppr1 = part1.element.find(w_ppr)
                 if ppr1 is None:
                     ppr1 = ET.Element(w_ppr)
@@ -2436,7 +2436,7 @@ def to_docx(
     elif has_display or has_inline:
         from xml.etree import ElementTree as ET
 
-        version = calkit.docx.pandoc_version()
+        version = calkit.docx.get_pandoc_version()
         aligned = any(
             b.display
             and (
@@ -2764,7 +2764,7 @@ def to_docx(
             # Numbers count, e.g., a table cell "0.05" after the math
             return re.findall(r"[A-Za-z0-9]+", prose)
 
-        def words_re(
+        def make_words_re(
             ws: list[str], head: bool = True, tail: bool = True
         ) -> re.Pattern[str]:
             # Bounded by what the ends aren't, since Word's import can drop
@@ -2792,7 +2792,7 @@ def to_docx(
                     tail = before[before.rfind(bw[-1]) + len(bw[-1]) :]
                     spots = [
                         m.end()
-                        for m in words_re(bw, tail=bool(tail)).finditer(
+                        for m in make_words_re(bw, tail=bool(tail)).finditer(
                             text, cursor
                         )
                     ]
@@ -2830,7 +2830,7 @@ def to_docx(
             )
             end = len(text)
             if aw:
-                m = words_re(
+                m = make_words_re(
                     aw, head=bool(head) or after[:1].isspace()
                 ).search(text, start)
                 if m is None:
@@ -2839,12 +2839,12 @@ def to_docx(
             elif head and not is_last:
                 # Only punctuation before more math, e.g., the dash in
                 # $1$--$2$, so where the math reads as its source
-                want = calkit.latex.letters_and_digits(
-                    calkit.latex.math_text(tex)
+                want = calkit.latex.keep_letters_and_digits(
+                    calkit.latex.get_math_text(tex)
                 )
                 for m in re.finditer(re.escape(head[0]), text[start:]):
                     if (
-                        calkit.latex.letters_and_digits(
+                        calkit.latex.keep_letters_and_digits(
                             text[start : start + m.start()]
                         )
                         == want
@@ -2872,7 +2872,7 @@ def to_docx(
                 end -= 1
             return end
 
-        def pad(spaced: bool, text: str, at: int) -> bool:
+        def needs_space(spaced: bool, text: str, at: int) -> bool:
             # The source has a space there and the paragraph has prose
             return spaced and 0 <= at < len(text) and not text[at].isspace()
 
@@ -2880,13 +2880,13 @@ def to_docx(
             # Math as Word renders it has no prose words in it, nor digits
             # its source doesn't, e.g., "x ≠ 1, 2" isn't $x=1$
             words = re.findall(r"[A-Za-z]{4,}", region)
-            rendered = calkit.latex.letters_and_digits(
-                calkit.latex.math_text(tex)
+            rendered = calkit.latex.keep_letters_and_digits(
+                calkit.latex.get_math_text(tex)
             )
             return (
                 bool(region.strip())
                 and all(
-                    calkit.latex.letters_and_digits(w) in rendered
+                    calkit.latex.keep_letters_and_digits(w) in rendered
                     for w in words
                 )
                 and set(re.findall(r"\d", region))
@@ -2915,8 +2915,8 @@ def to_docx(
                     inline.append((els[k], s0, e0, tex))
                     pads.append(
                         (
-                            pad(pre.endswith(" "), texts[k], s0 - 1),
-                            pad(post.startswith(" "), texts[k], e0),
+                            needs_space(pre.endswith(" "), texts[k], s0 - 1),
+                            needs_space(post.startswith(" "), texts[k], e0),
                         )
                     )
                     pi, cursor = k, e0
@@ -2934,10 +2934,18 @@ def to_docx(
                     inline.append((els[k], s0, len(texts[k]), tex))
                     inline.append((els[k + 1], 0, e1, None))
                     pads.append(
-                        (pad(pre.endswith(" "), texts[k], s0 - 1), False)
+                        (
+                            needs_space(pre.endswith(" "), texts[k], s0 - 1),
+                            False,
+                        )
                     )
                     pads.append(
-                        (False, pad(post.startswith(" "), texts[k + 1], e1))
+                        (
+                            False,
+                            needs_space(
+                                post.startswith(" "), texts[k + 1], e1
+                            ),
+                        )
                     )
                     pi, cursor = k + 1, e1
                     return True

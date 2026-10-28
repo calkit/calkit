@@ -1474,7 +1474,7 @@ def find_pandoc() -> str | None:
     return shutil.which("pandoc")
 
 
-def pandoc_version() -> tuple[int, ...] | None:
+def get_pandoc_version() -> tuple[int, ...] | None:
     """The version of the Pandoc ``find_pandoc`` finds, if any."""
     pandoc = find_pandoc()
     if pandoc is None:
@@ -1541,11 +1541,11 @@ def latex_to_omml(
                 i += 1
         return "".join(out)
 
-    def primes(tex: str) -> str:
+    def raise_primes(tex: str) -> str:
         # Primes as superscripts, e.g., \omega_j' as \omega_j^{\prime},
         # which every Pandoc converts alike, but not apostrophes in text
 
-        def script(tex: str, k: int) -> tuple[str, int] | None:
+        def read_script(tex: str, k: int) -> tuple[str, int] | None:
             # A superscript's argument from k, and where it ends
             while k < len(tex) and tex[k].isspace():
                 k += 1
@@ -1585,7 +1585,9 @@ def latex_to_omml(
                 k = j
                 while k < len(tex) and tex[k].isspace():
                     k += 1
-                arg = script(tex, k + 1) if tex[k : k + 1] == "^" else None
+                arg = (
+                    read_script(tex, k + 1) if tex[k : k + 1] == "^" else None
+                )
                 if arg is not None:
                     sup, j = f"{sup} {arg[0]}", arg[1]
                 out.append(f"^{{{sup}}}")
@@ -1599,7 +1601,7 @@ def latex_to_omml(
                 i += 1
         return "".join(out)
 
-    def plain_brackets(tex: str) -> str:
+    def group_brackets(tex: str) -> str:
         # Plain brackets and bars as groups, so Pandoc before 3.8 doesn't
         # stretch them, but not sized ones, arguments, e.g., \sqrt[3], or text
         out, groups, depth, i = [], [], 0, 0
@@ -1653,8 +1655,8 @@ def latex_to_omml(
         [calkit.latex.SourceLine("", 0, ln) for ln in preamble.split("\n")]
     )
     equations = [
-        plain_brackets(
-            primes(
+        group_brackets(
+            raise_primes(
                 unnest_text(calkit.latex.expand_macros(eq, macros, math=True))
             )
         )

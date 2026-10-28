@@ -1572,7 +1572,7 @@ def detex(text: str, marks: bool = False) -> str:
     or ``TEXT_CITE_MARK`` for a textual one, since their text isn't
     known."""
 
-    def units(tex: str) -> str:
+    def render_units(tex: str) -> str:
         # Prefixes join the unit after them, e.g., \milli\second as "ms"
         out = re.sub(
             r"\\([A-Za-z]+)\s*",
@@ -1631,16 +1631,20 @@ def detex(text: str, marks: bool = False) -> str:
     )
     text = re.sub(
         r"\\(?:SIrange|qtyrange)" + opt + arg + r"\s*" + arg + r"\s*" + arg,
-        lambda m: f"{m[1]} {units(m[3])} to {m[2]} {units(m[3])}",
+        lambda m: (
+            f"{m[1]} {render_units(m[3])} to {m[2]} {render_units(m[3])}"
+        ),
         text,
     )
     text = re.sub(r"\\numrange" + opt + arg + r"\s*" + arg, r"\1 to \2", text)
     text = re.sub(
         r"\\(?:SI|qty)" + opt + arg + r"\s*" + arg,
-        lambda m: f"{m[1]} {units(m[2])}",
+        lambda m: f"{m[1]} {render_units(m[2])}",
         text,
     )
-    text = re.sub(r"\\(?:si|unit)" + opt + arg, lambda m: units(m[1]), text)
+    text = re.sub(
+        r"\\(?:si|unit)" + opt + arg, lambda m: render_units(m[1]), text
+    )
     text = re.sub(r"\\num" + opt + arg, r"\1", text)
     text = re.sub(r"\\href" + opt + arg + r"\s*" + arg, r"\2", text)
     # Accents, e.g., \'e or \"{o}, on the letter they go over
@@ -2005,7 +2009,7 @@ def find_display(
     return best[2] if best and best[0] >= 0.6 else None
 
 
-def letters_and_digits(text: str) -> str:
+def keep_letters_and_digits(text: str) -> str:
     """Text without anything but its letters and digits, lowercased, to
     compare however words split, e.g., "300K" and "300 K"."""
     text = unicodedata.normalize("NFKC", text).lower()
@@ -2025,7 +2029,7 @@ def already_applied(block: Block, old: str, new: str) -> bool:
     since a common word, e.g., "the", is anywhere."""
 
     def holds(seq: list[str]) -> bool:
-        return any(letters_and_digits(" ".join(seq)) in h for h in have)
+        return any(keep_letters_and_digits(" ".join(seq)) in h for h in have)
 
     # Without the rendered citations both have, which the source has as
     # commands, but with any that changed, e.g., "(June 2019)"
@@ -2038,14 +2042,14 @@ def already_applied(block: Block, old: str, new: str) -> bool:
     for c in cites:
         old, new = old.replace(c, " "), new.replace(c, " ")
     # As rendered, with its inline math as text or not, as Word may have it
-    have = [letters_and_digits(block.text)]
+    have = [keep_letters_and_digits(block.text)]
     if not block.markdown:
         src = _strip_comments_joined("\n".join(ln.text for ln in block.lines))
         src = _INLINE_MATH_RE.sub(
-            lambda m: f" {math_text(m.group(1) or m.group(2))} ", src
+            lambda m: f" {get_math_text(m.group(1) or m.group(2))} ", src
         )
         have.append(
-            letters_and_digits(detex(expand_macros(src, block.macros)))
+            keep_letters_and_digits(detex(expand_macros(src, block.macros)))
         )
     ow = re.findall(r"[A-Za-z0-9][\w.]*", old)
     nw = re.findall(r"[A-Za-z0-9][\w.]*", new)
@@ -2643,10 +2647,12 @@ def display_text(block: Block) -> str:
     """A display's math roughly as it reads in a PDF, e.g., to find it by
     what was selected there."""
     src = "\n".join(_strip_comments(ln.text) for ln in block.lines)
-    return math_text(re.sub(r"\\(label|tag\*?|begin|end)\{[^}]*\}", " ", src))
+    return get_math_text(
+        re.sub(r"\\(label|tag\*?|begin|end)\{[^}]*\}", " ", src)
+    )
 
 
-def math_text(tex: str) -> str:
+def get_math_text(tex: str) -> str:
     """Math roughly as it reads rendered: its symbols, without commands,
     grouping, or wrappers, and Greek letters and operator names, e.g.,
     \\ln, as themselves."""

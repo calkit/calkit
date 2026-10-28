@@ -928,7 +928,9 @@ def test_word_export_placement(
 ) -> None:
     w_ns = calkit.docx.W
 
-    def word_import(paras: list[tuple[str, str | None]], path: str) -> None:
+    def make_word_import(
+        paras: list[tuple[str, str | None]], path: str
+    ) -> None:
         # Paragraphs as Word's PDF import might give them, with alignment
         Path(path).write_bytes(
             calkit.docx._pandoc(
@@ -951,7 +953,7 @@ def test_word_export_placement(
             )
         doc.save()
 
-    def math_and_text(doc: calkit.docx.Document, start: str) -> tuple:
+    def get_math_and_text(doc: calkit.docx.Document, start: str) -> tuple:
         para = next(p for p in doc.paragraphs if p.text.startswith(start))
         assert para.element is not None
         maths = [
@@ -1005,7 +1007,7 @@ def test_word_export_placement(
         )
     )
     Path("main.pdf").write_bytes(b"")
-    word_import(
+    make_word_import(
         [
             ("1 Results", None),
             (
@@ -1064,7 +1066,7 @@ def test_word_export_placement(
         "As Lee": (["x"], "As Lee (2018) showed, the ratio, so it holds."),
     }
     for start, (maths, text) in cases.items():
-        para, found = math_and_text(doc, start)
+        para, found = get_math_and_text(doc, start)
         assert found == maths, start
         assert para.text.startswith(text), start
     # A split paragraph is whole again, aligned as its longer piece is,
@@ -1072,10 +1074,10 @@ def test_word_export_placement(
     # source and an environment's heading stay apart
     texts = [p.text for p in doc.paragraphs]
     w_jc = f"{calkit.docx._tag(w_ns, 'pPr')}/{calkit.docx._tag(w_ns, 'jc')}"
-    split, _ = math_and_text(doc, "A paragraph Word split")
+    split, _ = get_math_and_text(doc, "A paragraph Word split")
     assert split.text.endswith("than its first piece has.")
     assert split.element is not None and split.element.find(w_jc) is None
-    longer, _ = math_and_text(doc, "One more split")
+    longer, _ = get_math_and_text(doc, "One more split")
     assert longer.text.endswith("ending with a well-known effect.")
     assert longer.element is not None
     jc = longer.element.find(w_jc)
@@ -1084,12 +1086,12 @@ def test_word_export_placement(
     assert "Abstract" in texts and "Short abstract text here." in texts
     # An insertion beside a textual citation and an edit inside a
     # parenthetical with a year merge back, once however often merged
-    para, _ = math_and_text(doc, "As Lee")
+    para, _ = get_math_and_text(doc, "As Lee")
     assert para.element is not None
     doc.insert_text(
         para.element, doc.linear_text(para.element).index("showed"), "clearly "
     )
-    campaign, _ = math_and_text(doc, "The campaign")
+    campaign, _ = get_math_and_text(doc, "The campaign")
     assert campaign.element is not None
     t = next(t for t in campaign.element.iter(calkit.docx._tag(w_ns, "t")))
     t.text = (t.text or "").replace("June", "July")
@@ -1344,7 +1346,7 @@ def test_latex_to_omml(monkeypatch: pytest.MonkeyPatch) -> None:
     both = look(calkit.docx.latex_to_omml(["$\\mathsf{A} + \\mathbf{F}$"])[0])
     assert "/sans-serif:A" in both and "b:F" in both
     # Its version, which the export warns about when old
-    version = calkit.docx.pandoc_version()
+    version = calkit.docx.get_pandoc_version()
     assert version is not None and len(version) >= 2
     # As Windows names it too
     for printed in ("pandoc 3.6.1", "pandoc.exe 3.7.0.2"):
@@ -1355,5 +1357,5 @@ def test_latex_to_omml(monkeypatch: pytest.MonkeyPatch) -> None:
                 cmd, 0, stdout=f"{printed}\nFeatures: +server\n", stderr=""
             ),
         )
-        version = calkit.docx.pandoc_version()
+        version = calkit.docx.get_pandoc_version()
         assert version == tuple(int(n) for n in printed.split()[1].split("."))

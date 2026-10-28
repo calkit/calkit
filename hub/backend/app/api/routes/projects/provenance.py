@@ -5,20 +5,22 @@ all show: the value, the stage that produces it, what to open to change it,
 what it reads, and whether it's out of date.
 """
 
-import base64
 import json
 import posixpath
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 import app.projects
 import calkit.pipeline
 import calkit.questions
 from app.api.deps import CurrentUserOptional, SessionDep
-from app.api.routes.projects.core import DEFAULT_REPO_TTL
+from app.api.routes.projects.core import (
+    DEFAULT_REPO_TTL,
+    LATEX_COMPONENT_VALUES_MAX_BYTES,
+)
 from app.api.routes.projects.figures import _clean_rel_path
-from app.core import logger, ryaml
+from app.core import logger
 from app.git import get_repo, get_repo_tree_for_ref
 from app.models import Provenance, StageStatus
 from app.pipeline import find_stage_for_path, pipeline_at_ref
@@ -34,35 +36,38 @@ SOURCE_FIELDS = ("script_path", "notebook_path", "target_path")
 
 
 def _read_value(
-    project: Any, repo: Any, ref: str | None, path: str, key: str | None
+    project: Any,
+    tree: Any,
+    path: str,
+    key: str | None,
+    session: Any,
+    current_user: Any,
 ) -> tuple[Any, str | None]:
     """The value at ``key`` in a results file, or the whole file without
     one, or why it can't be read.
     """
     try:
-        item = app.projects.get_contents_from_repo(
-            project=project, repo=repo, path=path, ref=ref
+        data = app.projects.read_project_file(
+            project=project,
+            tree=tree,
+            path=path,
+            max_bytes=LATEX_COMPONENT_VALUES_MAX_BYTES,
+            session=session,
+            current_user=current_user,
         )
+    except HTTPException as e:
+        return None, str(e.detail)
     except Exception as e:
-        logger.info(f"Can't read {path} at {ref}: {e}")
+        logger.info(f"Can't read {path}: {e}")
         return None, f"{path} can't be read"
-    if item.content is None:
-        return None, f"{path} has no content to read"
-    text = base64.b64decode(item.content).decode("utf-8", "replace")
-    lower = path.lower()
     try:
-        if lower.endswith(".json"):
-            data = json.loads(text)
-        elif lower.endswith((".yaml", ".yml")):
-            data = ryaml.load(text)
-        elif lower.endswith(".toml"):
-            import tomllib
-
-            data = tomllib.loads(text)
-        else:
-            return None, f"{path} isn't JSON, YAML, or TOML"
+        parsed = calkit.questions.parse_evidence_text(
+            data.decode("utf-8", "replace"), path
+        )
         value = (
-            data if key is None else calkit.questions.resolve_key(data, key)
+            parsed
+            if key is None
+            else calkit.questions.resolve_key(parsed, key)
         )
     except KeyError:
         return None, f"{key} isn't in {path}"
@@ -150,10 +155,17 @@ def get_project_provenance(
             or tree.is_dir(path)
             or tree.is_file(path + ".dvc")
             or path in lock_outs
+            # e.g., a file inside a directory a stage outputs
+            or path
+            in app.projects.dvc_outputs_from_tree(project=project, tree=tree)
         ),
     )
-    if out.exists and (key is not None or path.lower().endswith(RESULTS_EXTS)):
-        out.value, out.value_error = _read_value(project, repo, ref, path, key)
+    if key is not None or path.lower().endswith(RESULTS_EXTS):
+        out.value, out.value_error = (
+            _read_value(project, tree, path, key, session, current_user)
+            if out.exists
+            else (None, f"{path} isn't in the project at this version")
+        )
     stage = stage_for(path)
     # A copy, e.g., a figure a map-paths stage put in the paper's folder, is
     # described by what made the original, and is stale if the copy is

@@ -947,7 +947,9 @@ def get_contents_from_tree(
         "datasets",
         "references",
         "notebooks",
+        "results",
     ]
+    kinds = CATEGORIES_PLURAL_TO_SINGULAR | {"results": "result"}
     ck_objects = {}
     for category, itemlist in ck_info.items():
         if category not in categories_with_path:
@@ -957,13 +959,10 @@ def get_contents_from_tree(
                 f"{owner_name}/{project_name} {category} is not a list"
             )
             continue
-        if category not in CATEGORIES_PLURAL_TO_SINGULAR:
-            logger.warning(
-                f"{owner_name}/{project_name} {category} not understood"
-            )
-            continue
         for item in itemlist:
-            item["kind"] = CATEGORIES_PLURAL_TO_SINGULAR[category]
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            item = item | {"kind": kinds[category]}
             ck_objects[item["path"]] = item
             # Handle files inside references objects
             if category == "references":

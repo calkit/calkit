@@ -1158,6 +1158,7 @@ export type {
   QuestionPost,
   QuestionPublic,
   QuestionPut,
+  QuestionSignOff,
   ReadUserByIdData,
   ReadUserByIdError,
   ReadUserByIdErrors,

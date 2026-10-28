@@ -313,6 +313,8 @@ function renderProvenance(
             ? `${base}/figures?path=${encodeURIComponent(
                 provenance.copied_from ?? path,
               )}`
+            : citation.kind === "table"
+            ? `${base}/tables?path=${encodeURIComponent(path)}`
             : fileUrl(path),
         attrs: { target: "_blank" },
       }),

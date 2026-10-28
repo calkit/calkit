@@ -1963,7 +1963,8 @@ List Calkit objects.
 | [`datasets`](#subcommand-list-ls-datasets)                      | List datasets in the project.                                                                  |
 | [`results`](#subcommand-list-ls-results)                        | List results in the project.                                                                   |
 | [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.                                                             |
-| [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).                                                      |
+| [`tables\|tbls`](#subcommand-list-ls-tables-tbls)               | List tables in the project.                                                                    |
+| [`questions\|q`](#subcommand-list-ls-questions-q)               | List the project's questions (1-indexed).                                                      |
 | [`comments`](#subcommand-list-ls-comments)                      | List review comment threads in LaTeX and Markdown documents.                                   |
 | [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.                                                              |
 | [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
@@ -2042,6 +2043,8 @@ Options:
 
 List results in the project.
 
+Shown with the stage that writes each one, which is what 'calkit run' would use to bring it up to date.
+
 Usage:
 
 ```text
@@ -2054,6 +2057,7 @@ Options:
 | ----------------- | ------- | -------- | ------- | --------------------------------------------------------------- |
 | `--json`          | boolean | no       | False   | Output result as JSON.                                          |
 | `--declared-only` | boolean | no       | False   | Only list results declared in calkit.yaml; skip auto-detection. |
+| `--status`, `-s`  | boolean | no       | False   | Also say whether each result's stage is up to date.             |
 
 <a id="subcommand-list-ls-presentations-pres"></a>
 
@@ -2074,26 +2078,48 @@ Options:
 | `--json`          | boolean | no       | False   | Output result as JSON.                                                |
 | `--declared-only` | boolean | no       | False   | Only list presentations declared in calkit.yaml; skip auto-detection. |
 
-<a id="subcommand-list-ls-questions"></a>
+<a id="subcommand-list-ls-tables-tbls"></a>
 
-#### `calkit list|ls questions`
+#### `calkit list|ls tables|tbls`
 
-List the project's questions (1-indexed).
+List tables in the project.
 
-Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. Subprojects' questions are listed too, numbered within each, and in the JSON output each has a `project` key with the subproject's path.
+Tabular files are detected wherever they're kept, so a table that is also a dataset or a result is listed here too. Each is shown with the stage that writes it, if any, which is the one 'calkit run' would use to bring it up to date.
 
 Usage:
 
 ```text
-calkit list|ls questions [OPTIONS]
+calkit list|ls tables|tbls [OPTIONS]
 ```
 
 Options:
 
-| Option   | Type    | Required | Default | Description                                                                                    |
-| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
-| `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
+| Option            | Type    | Required | Default | Description                                                    |
+| ----------------- | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `--columns`       | boolean | no       | False   | Also read each table's column names from its header.           |
+| `--status`, `-s`  | boolean | no       | False   | Also say whether each table's stage is up to date.             |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                         |
+| `--declared-only` | boolean | no       | False   | Only list tables declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-questions-q"></a>
+
+#### `calkit list|ls questions|q`
+
+List the project's questions (1-indexed).
+
+Each has a row of letters: H if it has a hypothesis, A if it's answered, then V if it's verified and V if it's validated, colored as in the hub, with a dash for each it doesn't have yet. Evidence isn't checked against the pipeline here; 'calkit check questions' does that. Subprojects' questions are listed too, numbered within each. Use 'calkit show question' to see one in full.
+
+Usage:
+
+```text
+calkit list|ls questions|q [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-comments"></a>
 
@@ -2391,9 +2417,39 @@ Options:
 
 Show Calkit objects.
 
-| Command                                     | Description                           |
-| ------------------------------------------- | ------------------------------------- |
-| [`latex-diff`](#subcommand-show-latex-diff) | Open a LaTeX diff the pipeline keeps. |
+| Command                                      | Description                                                           |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| [`question\|q`](#subcommand-show-question-q) | Show a question in full as Markdown, with its evidence and sign-offs. |
+| [`latex-diff`](#subcommand-show-latex-diff)  | Open a LaTeX diff the pipeline keeps.                                 |
+| [`table\|tbl`](#subcommand-show-table-tbl)   | Show a table, or part of one.                                         |
+| [`result\|res`](#subcommand-show-result-res) | Show a result's keys and values.                                      |
+
+<a id="subcommand-show-question-q"></a>
+
+#### `calkit show question|q`
+
+Show a question in full as Markdown, with its evidence and sign-offs.
+
+Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. The pipeline stages behind its evidence are shown too, upstream first.
+
+Usage:
+
+```text
+calkit show question|q [OPTIONS] QUESTION
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                                                                              |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name; prefix a subproject's with its path, e.g., 'sub:1'. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description                                                                                    |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
+| `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
 
 <a id="subcommand-show-latex-diff"></a>
 
@@ -2420,6 +2476,71 @@ Options:
 | Option  | Type    | Required | Default | Description                                      |
 | ------- | ------- | -------- | ------- | ------------------------------------------------ |
 | `--run` | boolean | no       | False   | Build the diff first if it's stale or not built. |
+
+<a id="subcommand-show-table-tbl"></a>
+
+#### `calkit show table|tbl`
+
+Show a table, or part of one.
+
+With --status, says whether the stage that writes the table has been run since its inputs last changed. At a --git-ref that's reconstructed from the dvc.lock committed there, since there is nothing on disk at an old commit for DVC to hash, and what it couldn't check is reported rather than assumed current.
+
+Usage:
+
+```text
+calkit show table|tbl [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description        |
+| -------- | ---- | -------- | ------- | ------------------ |
+| `path`   | str  | yes      |         | Path to the table. |
+
+Options:
+
+| Option           | Type      | Required | Default | Description                                                                                                                                     |
+| ---------------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--column`, `-c` | str       | no       |         | Only show these columns, in this order. Can be a glob, e.g., `*_mod`, and can be given more than once.                                          |
+| `--filter`, `-f` | str       | no       |         | Only show rows matching COLUMN=VALUE, COLUMN~TEXT (contains, ignoring case), or COLUMN>NUMBER. Can be given more than once, and all must match. |
+| `--rows`, `-r`   | str       | no       |         | Only show these rows, 1-based, e.g., '1-20', '5,9', '40-'.                                                                                      |
+| `--head`, `-n`   | int range | no       |         | Only show the first N rows.                                                                                                                     |
+| `--tail`         | int range | no       |         | Only show the last N rows.                                                                                                                      |
+| `--git-ref`      | str       | no       |         | Show the table as of this Git branch, tag, or commit instead of the working tree.                                                               |
+| `--status`, `-s` | boolean   | no       | False   | Also say whether the table is up to date.                                                                                                       |
+| `--vscode`       | boolean   | no       | False   | Open the table in VS Code instead of printing it.                                                                                               |
+| `--engine`       | str       | no       |         | Dataframe engine for formats the standard library can't read, e.g., Parquet. Defaults to the configured one.                                    |
+
+<a id="subcommand-show-result-res"></a>
+
+#### `calkit show result|res`
+
+Show a result's keys and values.
+
+Keys are shown dotted, the way a question's value evidence names them, so what's printed is what an answer can cite. With --status, says whether the stage that writes the result has been run since its inputs last changed.
+
+Usage:
+
+```text
+calkit show result|res [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description         |
+| -------- | ---- | -------- | ------- | ------------------- |
+| `path`   | str  | yes      |         | Path to the result. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                     |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--key`, `-k`    | str     | no       |         | Only show these keys, dotted as a question's evidence writes them, e.g., `steady_state.saved_pct`. Can be given more than once. |
+| `--depth`, `-d`  | int     | no       |         | Stop flattening this many levels in and show the rest of each value as JSON.                                                    |
+| `--git-ref`      | str     | no       |         | Show the result as of this Git branch, tag, or commit instead of the working tree.                                              |
+| `--status`, `-s` | boolean | no       | False   | Also say whether the result is up to date.                                                                                      |
+| `--vscode`       | boolean | no       | False   | Open the result in VS Code instead of printing it.                                                                              |
+| `--json`         | boolean | no       | False   | Output result as JSON.                                                                                                          |
 
 <a id="command-group-describe-desc"></a>
 
@@ -2751,6 +2872,7 @@ Update objects.
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
+| [`question`](#subcommand-update-question)             | Update a question in calkit.yaml, or verify or validate it.                          |
 | [`path-storage`](#subcommand-update-path-storage)     | Move paths between Git and DVC storage without rerunning anything.                   |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
 | [`hub`](#subcommand-update-hub)                       | Connect this project to a Calkit hub.                                                |
@@ -3152,6 +3274,38 @@ Options:
 | `--imported-from`     | str  | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
 | `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
 | `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
+
+<a id="subcommand-update-question"></a>
+
+#### `calkit update question`
+
+Update a question in calkit.yaml, or verify or validate it.
+
+A sign-off is recorded with your Git name and email and the time, replaces any earlier one of yours of the same kind, and applies to the question as updated by this command.
+
+Usage:
+
+```text
+calkit update question [OPTIONS] QUESTION
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                          |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name. |
+
+Options:
+
+| Option         | Type | Required | Default | Description                                                                                                                                               |
+| -------------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hypothesis` | str  | no       |         | New hypothesis.                                                                                                                                           |
+| `--approach`   | str  | no       |         | One sentence on how the question is answered.                                                                                                             |
+| `--answer`     | str  | no       |         | New answer. One that picks its wording from the evidence is written in calkit.yaml.                                                                       |
+| `--notes`      | str  | no       |         | New notes on the question.                                                                                                                                |
+| `--verify`     | str  | no       |         | Sign off that the pipeline stages behind the evidence implement the approach correctly, with what you checked, e.g., 'fit.py fits both models as stated.' |
+| `--validate`   | str  | no       |         | Sign off that the approach suits the question and the evidence justifies the answer, with what you checked, e.g., 'The linear fit's residuals curve.'     |
+| `--with-ai`    | str  | no       |         | A generative AI tool used in verifying or validating, e.g., 'Claude Opus 5'. Can be given more than once.                                                 |
 
 <a id="subcommand-update-path-storage"></a>
 

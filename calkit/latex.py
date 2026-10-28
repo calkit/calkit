@@ -546,7 +546,7 @@ _CALKIT_OWN_FILES = (".gitignore", "README.md", VALUES_FNAME)
 # calkit.sty's commands, each with an optional [...] and its {...} args, of
 # which only \ckvalue has two, so a brace group after another is left alone
 _CK_COMMAND_RE = re.compile(
-    r"\\ck(?P<kind>(?P<value>v)alue|figure|table)"
+    r"\\ck(?P<kind>(?P<value>v)alue|figure|table|include)"
     r"\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
     r"(?(value)\s*\{(?P<second>[^}]*)\})"
 )
@@ -1052,10 +1052,10 @@ def map_ck_components(
         os.path.join(out, "README.md"),
         "# Don't edit anything here\n\n"
         "Calkit writes this folder from the project, for the documents\n"
-        "beside it to include with `\\ckvalue`, `\\ckfigure`, and\n"
-        "`\\cktable`. It's rewritten whenever the pipeline runs or is\n"
-        "checked and on every Overleaf sync, so edits here are lost and\n"
-        "never reach the project.\n"
+        "beside it to include with `\\ckvalue`, `\\ckfigure`,\n"
+        "`\\cktable`, and `\\ckinclude`. It's rewritten whenever the\n"
+        "pipeline runs or is checked and on every Overleaf sync, so edits\n"
+        "here are lost and never reach the project.\n"
         "To change a value, figure, or table, change where it comes from.\n",
     )
     for rel, here in plan.files.items():
@@ -1138,7 +1138,7 @@ def expand_ck_components(
         if kind == "figure":
             name = posixpath.relpath(rel, doc_dir or ".")
             return f"\\includegraphics[{option or ''}]{{{name}}}"
-        if kind == "table":
+        if kind in ("table", "include"):
             return _read_leniently(os.path.join(data_root, rel)) or ""
         try:
             value = resolve_key(

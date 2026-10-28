@@ -1,5 +1,6 @@
 """Tests for ``calkit.pipeline``."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -4658,4 +4659,261 @@ def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(
             "a_b.sh",
             os.path.basename(stages["a b"]["cmd"].split()[-1]),
         ]
+    )
+
+
+TABLE = "kernel,registers_baseline,registers_mod\nset_microphysics,255,153\n"
+
+
+def test_artifact_status_at_ref(tmp_dir):
+    repo = git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    # The script ends in a newline, which is the case that matters: read
+    # with 'git show' its trailing byte is dropped and its hash never
+    # matches what DVC recorded
+    files = {
+        "scripts/export.py": "print('hi')\n",
+        "results/kernels.csv": TABLE,
+        "results/intermediate.csv": "a,b\n1,2\n",
+    }
+    os.makedirs("scripts", exist_ok=True)
+    for path, text in files.items():
+        with open(path, "w") as f:
+            f.write(text)
+
+    def md5(text):
+        return hashlib.md5(text.encode()).hexdigest()
+
+    lock = {
+        "stages": {
+            "make-intermediate": {
+                "cmd": "python scripts/make.py",
+                "outs": [
+                    {
+                        "path": "results/intermediate.csv",
+                        "md5": md5(files["results/intermediate.csv"]),
+                    }
+                ],
+            },
+            "export": {
+                "cmd": "python scripts/export.py",
+                "deps": [
+                    {
+                        "path": "scripts/export.py",
+                        "md5": md5(files["scripts/export.py"]),
+                    },
+                    {
+                        "path": "results/intermediate.csv",
+                        "md5": md5(files["results/intermediate.csv"]),
+                    },
+                    {"path": "env", "md5": "abc123.dir"},
+                ],
+                "outs": [
+                    {
+                        "path": "results/kernels.csv",
+                        "md5": md5(files["results/kernels.csv"]),
+                    }
+                ],
+            },
+        }
+    }
+    pipeline = {
+        "stages": {
+            "export": {"cmd": "python scripts/export.py"},
+            "make-intermediate": {"cmd": "python scripts/make.py"},
+        }
+    }
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Up to date")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "up to date"
+    assert state["stages"] == ["export"]
+    # The directory hash is the one thing that couldn't be checked
+    assert state["unverifiable"] == 1
+    # Editing an input without re-running the stage is what stale means
+    with open("scripts/export.py", "w") as f:
+        f.write("print('bye')\n")
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Change the script")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "stale"
+    assert any("export.py changed" in r for r in state["reasons"])
+    # So is redefining the stage, even with every input untouched
+    repo.git.checkout("HEAD~1", "--", "scripts/export.py")
+    pipeline["stages"]["export"]["cmd"] = "python scripts/export.py --new"
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Redefine the stage")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "stale"
+    assert any("different command" in r for r in state["reasons"])
+    # A table no stage writes isn't the pipeline's to be stale
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/intermediate.csv", "HEAD~2"
+    )
+    assert state["status"] == "up to date"
+    state = calkit.pipeline.artifact_status_at_ref("notes.csv", "HEAD")
+    assert state["status"] == "not from the pipeline"
+    # A path two stages record as an output is current if it matches
+    # either of them, since only one of them is its producer here
+    pipeline["stages"]["export"]["cmd"] = "python scripts/export.py"
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    lock["stages"]["copy"] = {
+        "cmd": "cp results/intermediate.csv results/copy.csv",
+        "outs": [{"path": "results/intermediate.csv", "md5": md5("other")}],
+    }
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Add a second producer")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "up to date"
+    # DVC hashing a CRLF checkout of what Git holds with LF, as on Windows,
+    # isn't a change
+    lock["stages"]["export"]["deps"][0]["md5"] = md5(
+        files["scripts/export.py"].replace("\n", "\r\n")
+    )
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Record a CRLF hash")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "up to date"
+
+
+def test_read_artifact_at_ref(tmp_dir):
+    repo = git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    with open("results/kernels.csv", "w") as f:
+        f.write(TABLE)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Add the table")
+    with open("results/kernels.csv", "a") as f:
+        f.write("new_kernel,1,1,1.0\n")
+    assert calkit.pipeline.read_artifact_at_ref(
+        "results/kernels.csv", "HEAD"
+    ) == (TABLE.encode())
+    # A DVC-tracked table isn't in Git, so it's read from the cache by the
+    # hash dvc.lock recorded at that ref
+    cached = "a,b\n9,9\n"
+    md5 = hashlib.md5(cached.encode()).hexdigest()
+    lock = {
+        "stages": {
+            "export": {
+                "cmd": "echo hi",
+                "outs": [{"path": "results/big.csv", "md5": md5}],
+            }
+        }
+    }
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Track a table with DVC")
+    with pytest.raises(FileNotFoundError, match="local"):
+        calkit.pipeline.read_artifact_at_ref("results/big.csv", "HEAD")
+    obj = os.path.join(".dvc", "cache", "files", "md5", md5[:2])
+    os.makedirs(obj, exist_ok=True)
+    with open(os.path.join(obj, md5[2:]), "wb") as f:
+        f.write(cached.encode())
+    assert calkit.pipeline.read_artifact_at_ref("results/big.csv", "HEAD") == (
+        cached.encode()
+    )
+    with pytest.raises(FileNotFoundError, match="neither in Git"):
+        calkit.pipeline.read_artifact_at_ref("results/absent.csv", "HEAD")
+
+
+def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
+    import git
+
+    repo = git.Repo.init()
+    repo.git.config("user.email", "test@example.com")
+    repo.git.config("user.name", "Test")
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("scripts", exist_ok=True)
+    with open("scripts/make.py", "w") as f:
+        f.write(
+            "with open('results.csv', 'w') as f:\n"
+            "    f.write('kernel,registers\\nmicrophysics,255\\n')\n"
+        )
+    # A stage with its own wdir, whose dvc.lock paths are relative to it,
+    # and whose output is in DVC's cache rather than Git
+    os.makedirs("analysis", exist_ok=True)
+    with open("analysis/make.py", "w") as f:
+        f.write("with open('out.csv', 'wb') as f:\n    f.write(b'a\\n1\\n')\n")
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "make": {
+                    "kind": "shell-command",
+                    "command": "python scripts/make.py",
+                    "environment": "_system",
+                    "inputs": ["scripts/make.py"],
+                    "outputs": [{"path": "results.csv", "storage": "git"}],
+                },
+                "analyze": {
+                    "kind": "shell-command",
+                    "command": "python make.py",
+                    "environment": "_system",
+                    "wdir": "analysis",
+                    "inputs": ["make.py"],
+                    "outputs": ["out.csv"],
+                },
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Run the pipeline")
+
+    def live():
+        return calkit.pipeline.annotate_artifacts(
+            [{"path": "results.csv"}], status=True
+        )[0]["status"]
+
+    # The reconstruction from dvc.lock has to agree with what DVC says by
+    # hashing the working tree, or it isn't measuring staleness
+    at_ref = calkit.pipeline.artifact_status_at_ref("results.csv", "HEAD")
+    assert live() == "up to date"
+    assert at_ref["status"] == "up to date"
+    assert at_ref["stages"] == ["make"]
+    at_ref = calkit.pipeline.artifact_status_at_ref("analysis/out.csv", "HEAD")
+    assert at_ref["status"] == "up to date"
+    assert at_ref["stages"] == ["analyze"]
+    assert at_ref["unverifiable"] == 0
+    assert calkit.pipeline.read_artifact_at_ref(
+        "analysis/out.csv", "HEAD"
+    ) == (b"a\n1\n")
+    # Committing an input edit without re-running is stale either way
+    with open("scripts/make.py", "a") as f:
+        f.write("# touch\n")
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Edit the script without rerunning")
+    at_ref = calkit.pipeline.artifact_status_at_ref("results.csv", "HEAD")
+    assert live() == "stale"
+    assert at_ref["status"] == "stale"
+    assert any("make.py changed" in r for r in at_ref["reasons"])
+    # The earlier commit still reads as it did when it was made
+    assert (
+        calkit.pipeline.artifact_status_at_ref("results.csv", "HEAD~1")[
+            "status"
+        ]
+        == "up to date"
     )

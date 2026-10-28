@@ -329,7 +329,9 @@ function Results() {
           </Box>
           <Box flex="1" minW={0}>
             {!selectedPath ? (
-              <Text color={subtle}>Pick a results file to browse it.</Text>
+              <Text color={subtle}>
+                Select a results file to view its contents.
+              </Text>
             ) : fileRequest.isPending ? (
               <LoadingSpinner />
             ) : fileRequest.data ? (

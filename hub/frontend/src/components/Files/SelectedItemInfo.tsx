@@ -35,6 +35,21 @@ const FIGURE_EXTS = new Set([
 ])
 const PUBLICATION_EXTS = new Set([".pdf", ".html"])
 const NOTEBOOK_EXTS = new Set([".ipynb"])
+// As the Results page detects them
+const RESULT_EXTS = new Set([
+  ".json",
+  ".csv",
+  ".tsv",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".parquet",
+  ".h5",
+  ".hdf5",
+  ".txt",
+  ".html",
+])
+const RESULT_DIRS = new Set(["results", "result"])
 
 // Path segments that hint at figure or publication directories
 const FIGURE_DIRS = new Set([
@@ -56,7 +71,9 @@ const PUBLICATION_DIRS = new Set([
   "article",
 ])
 
-export function inferKindFromPath(path: string): ArtifactKind | undefined {
+export type FileKind = ArtifactKind | "result"
+
+export function inferKindFromPath(path: string): FileKind | undefined {
   const lower = path.toLowerCase()
   const parts = lower.split("/")
   const ext = parts[parts.length - 1].includes(".")
@@ -72,6 +89,13 @@ export function inferKindFromPath(path: string): ArtifactKind | undefined {
   if (PUBLICATION_DIRS.has(parentDir) && PUBLICATION_EXTS.has(ext))
     return "publication"
   if (FIGURE_DIRS.has(parentDir) && FIGURE_EXTS.has(ext)) return "figure"
+  if (
+    RESULT_EXTS.has(ext) &&
+    !parts.some((p) => p.startsWith(".")) &&
+    (parts.slice(0, -1).some((p) => RESULT_DIRS.has(p)) ||
+      parts[parts.length - 1].replace(/\.[^.]*$/, "") === "results")
+  )
+    return "result"
 
   // Fall back to extension only; exclude .json since it's too ambiguous (configs, etc.)
   if (FIGURE_EXTS.has(ext) && ext !== ".json") return "figure"
@@ -183,8 +207,8 @@ function SelectedItemInfo({
   const fileInfoModal = useDisclosure()
   const uploadNewVersionModal = useDisclosure()
 
-  const artifactKind: ArtifactKind | undefined =
-    (selectedItem.calkit_object?.kind as ArtifactKind | undefined) ??
+  const artifactKind: FileKind | undefined =
+    (selectedItem.calkit_object?.kind as FileKind | undefined) ??
     (selectedItem.type === "file"
       ? inferKindFromPath(selectedItem.path)
       : undefined)

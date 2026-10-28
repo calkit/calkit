@@ -168,6 +168,7 @@ from app.models import (
     QuestionEvidenceValue,
     QuestionPublic,
     QuestionPut,
+    QuestionSignOff,
     Result,
     StageStatus,
     Table,
@@ -2692,6 +2693,73 @@ def _build_questions_public(
     def _evidence_of(q: str | dict) -> list:
         return q.get("evidence") or [] if isinstance(q, dict) else []
 
+    def check_sign_offs() -> list[tuple[list[Any], list[Any]]]:
+        """Each question's verifications and validations, checked against
+        the history up to ``ref``, cached by the commit it resolves to."""
+        empty: list[tuple[list[Any], list[Any]]] = [
+            ([], []) for _ in questions_ck
+        ]
+        if not any(
+            isinstance(q, dict)
+            and (q.get("verifications") or q.get("validations"))
+            for q in questions_ck
+        ):
+            return empty
+        try:
+            sha = repo.git.rev_parse(f"{ref or 'HEAD'}^{{commit}}")
+        except Exception:
+            return empty
+        # A branch or tag cited by evidence can move without the project's
+        # commit changing, so where each points now is part of the key
+        cited = sorted(
+            {
+                str(ev["git_ref"])
+                for q in questions_ck
+                for ev in _evidence_of(q)
+                if isinstance(ev, dict) and ev.get("git_ref")
+            }
+        )
+        resolved = []
+        for cited_ref in cited:
+            try:
+                resolved.append(repo.git.rev_parse(f"{cited_ref}^{{commit}}"))
+            except Exception:
+                resolved.append("-")
+        key = cache.make_key(
+            "question-sign-offs", str(project.id), sha, *resolved
+        )
+        cached = cache.get_json(key)
+        if isinstance(cached, list) and len(cached) == len(questions_ck):
+            return [(v, a) for v, a in cached]
+        wdir = str(repo.working_dir)
+        history = calkit.questions.CalkitYamlHistory(repo, wdir, sha)
+        # As committed, not as normalized for display, so it compares
+        # cleanly with the history it's checked against
+        raw = history.at(sha) or {}
+        out: list[tuple[list[Any], list[Any]]] = []
+        for q in raw.get("questions") or []:
+            if not isinstance(q, dict):
+                out.append(([], []))
+                continue
+            try:
+                ver, val = calkit.questions.check_sign_offs(
+                    q, raw, wdir, repo, history, ref=sha
+                )
+            except Exception as e:
+                # Best-effort, like evidence staleness
+                logger.warning(f"Could not check question sign-offs: {e}")
+                ver, val = [], []
+            out.append(
+                (
+                    [c.model_dump(mode="json") for c in ver],
+                    [c.model_dump(mode="json") for c in val],
+                )
+            )
+        if len(out) != len(questions_ck):
+            return empty
+        cache.set_json(key, out)
+        return out
+
     def _build_lookups(
         ev_ref: str | None, entries: list[dict]
     ) -> _EvidenceLookups:
@@ -2844,9 +2912,11 @@ def _build_questions_public(
     # wherever the shorter list ended.
     db_by_number = {q.number: q for q in project.questions}
     result_value_cache: dict[tuple[str | None, str], dict | None] = {}
+    sign_offs = check_sign_offs()
     questions_public = []
     for number, q_ck in enumerate(questions_ck, start=1):
         hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
+        approach = q_ck.get("approach") if isinstance(q_ck, dict) else None
         answer = q_ck.get("answer") if isinstance(q_ck, dict) else None
         # Templates are filled from the question's own value evidence, so a
         # number in an answer is read out of the results file rather than
@@ -2860,6 +2930,7 @@ def _build_questions_public(
             cache=result_value_cache,
         )
         hypothesis = _render_template(hypothesis, values)
+        approach = _render_template(approach, values)
         answer = _render_template(answer, values)
         evidence = _build_question_evidence(
             project=project,
@@ -2883,8 +2954,17 @@ def _build_questions_public(
                 number=number,
                 question=app.index.extract_question_text(q_ck),
                 hypothesis=hypothesis,
+                approach=approach,
                 answer=answer,
                 evidence=evidence,
+                verifications=[
+                    QuestionSignOff.model_validate(c)
+                    for c in sign_offs[number - 1][0]
+                ],
+                validations=[
+                    QuestionSignOff.model_validate(c)
+                    for c in sign_offs[number - 1][1]
+                ],
             )
         )
     return questions_public
@@ -3027,6 +3107,11 @@ def _apply_question_update(
         question["hypothesis"] = req.hypothesis
     else:
         question.pop("hypothesis", None)
+    if "approach" in req.model_fields_set:
+        if req.approach:
+            question["approach"] = req.approach
+        else:
+            question.pop("approach", None)
     unchanged = calkit.questions.is_conditional(question.get("answer")) and (
         req.answer == rendered_answer
     )

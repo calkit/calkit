@@ -48,7 +48,7 @@ import ProjectChecklist from "../../../../../components/Onboarding/ProjectCheckl
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
 import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
-import { questionMark } from "../../../../../components/Projects/QuestionModal"
+import QuestionStatusLetters from "../../../../../components/Projects/QuestionStatus"
 import RecentChanges from "../../../../../components/Projects/RecentChanges"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewRelease from "../../../../../components/Releases/NewRelease"
@@ -358,7 +358,6 @@ function ProjectView() {
             ) : questions.length ? (
               <Box>
                 {questions.map((question) => {
-                  const mark = questionMark(question)
                   return (
                     // The whole row opens the question, mark included, since
                     // the answer and its evidence are the point of listing it
@@ -405,11 +404,7 @@ function ProjectView() {
                           {`${question.number}. ${question.question}`}
                         </Markdown>
                       </Box>
-                      <Tooltip label={mark.label}>
-                        <Flex ml={2} flexShrink={0} align="center">
-                          <Icon as={mark.icon} color={mark.color} />
-                        </Flex>
-                      </Tooltip>
+                      <QuestionStatusLetters question={question} ml={2} />
                     </Flex>
                   )
                 })}

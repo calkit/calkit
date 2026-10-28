@@ -1,8 +1,8 @@
 schema: '2.0'
 stages:
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
-      --engine=libreoffice
+    cmd: calkit xenv -n dev --no-check -- python 
+      scripts/latex-word-round-trip.py --engine=libreoffice
     deps:
     - path: .python-version
       hash: md5
@@ -10,16 +10,16 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: b104cf505fdedda6a079792899515d87
-      size: 149797
+      md5: f0c571b6997660a075aed1df2ae93690
+      size: 149265
     - path: calkit/docx.py
       hash: md5
       md5: ec4f4a43335e10307e78453c1d47772d
       size: 71807
     - path: calkit/latex.py
       hash: md5
-      md5: d73ba59bbf5b6681b2dd0fa95c8e87d5
-      size: 108890
+      md5: e60e7b89914c55d3f6bea79303fef1cd
+      size: 109078
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -116,8 +116,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: d73ba59bbf5b6681b2dd0fa95c8e87d5
-      size: 108890
+      md5: e60e7b89914c55d3f6bea79303fef1cd
+      size: 109078
     - path: uv.lock
       hash: md5
       md5: b5d0e9511259dec7553283d5727fe0c1
@@ -253,7 +253,7 @@ stages:
       md5: 4960953114330139033d7281122861de
       size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8 
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8
       --attendees=25 --supported=60 --indirect-rate=0
     deps:
     - path: .python-version
@@ -400,7 +400,7 @@ stages:
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 2e47576a4fce3343541e32a907d0201b
+      md5: 69cdc8f47710527117c9a9042cd3aded
       size: 11725
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
@@ -415,7 +415,7 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 2e47576a4fce3343541e32a907d0201b
+      md5: 69cdc8f47710527117c9a9042cd3aded
       size: 11725
     - path: scripts/find-calkit-papers.py
       hash: md5

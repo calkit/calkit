@@ -1,5 +1,6 @@
 import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
+  Badge,
   Box,
   Checkbox,
   Flex,
@@ -55,6 +56,7 @@ import useProject, {
   useProjectIssues,
   useProjectQuestions,
   useProjectReadme,
+  useProjectResults,
 } from "../../../../../hooks/useProject"
 import {
   formatReleaseDate,
@@ -125,6 +127,13 @@ function ProjectView() {
     accountName,
     projectName,
     ref,
+  )
+  const { resultsRequest } = useProjectResults(accountName, projectName, ref)
+  // One row per file, since several results can be keys into the same one
+  const HOME_RESULTS_LIMIT = 5
+  const resultFiles = (resultsRequest.data ?? []).filter(
+    (result, index, all) =>
+      all.findIndex((other) => other.path === result.path) === index,
   )
   // Shares its cache with the History page's Releases tab (same query key), so
   // creating a release refreshes both.
@@ -403,6 +412,52 @@ function ProjectView() {
             ) : (
               <Text fontSize="sm" color="gray.500">
                 No research questions defined yet.
+              </Text>
+            )}
+          </Box>
+          {/* Results, with whether each is out of date */}
+          <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+            <Heading size="md" mb={2}>
+              <Link
+                as={RouterLink}
+                to={`/${accountName}/${projectName}/results`}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                search={{ ref } as any}
+              >
+                Results
+              </Link>
+            </Heading>
+            {resultsRequest.isPending ? (
+              <SkeletonText noOfLines={3} spacing={2} skeletonHeight="14px" />
+            ) : resultFiles.length ? (
+              <Box>
+                {resultFiles.slice(0, HOME_RESULTS_LIMIT).map((result) => (
+                  <Flex key={result.path} align="center" py={1} gap={2}>
+                    <Link
+                      as={RouterLink}
+                      to={`/${accountName}/${projectName}/results`}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      search={{ ref, path: result.path } as any}
+                      noOfLines={1}
+                    >
+                      {result.title}
+                    </Link>
+                    {result.stage_status?.status === "stale" ? (
+                      <Badge colorScheme="orange" fontSize="2xs">
+                        Stale
+                      </Badge>
+                    ) : null}
+                  </Flex>
+                ))}
+                {resultFiles.length > HOME_RESULTS_LIMIT ? (
+                  <Text fontSize="sm" color="gray.500">
+                    and {resultFiles.length - HOME_RESULTS_LIMIT} more
+                  </Text>
+                ) : null}
+              </Box>
+            ) : (
+              <Text fontSize="sm" color="gray.500">
+                No results yet.
               </Text>
             )}
           </Box>

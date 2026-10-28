@@ -188,6 +188,8 @@ import type {
   GetProjectPipelineStageResponses,
   GetProjectPresentationsErrors,
   GetProjectPresentationsResponses,
+  GetProjectProvenanceErrors,
+  GetProjectProvenanceResponses,
   GetProjectPublicationComponentsErrors,
   GetProjectPublicationComponentsResponses,
   GetProjectPublicationsErrors,
@@ -7650,6 +7652,50 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Project Provenance
+   */
+  public static getProjectProvenance<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      key?: string | null
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectProvenanceResponses,
+    GetProjectProvenanceErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "key" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectProvenanceResponses,
+      GetProjectProvenanceErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/provenance",
+      ...options,
+      ...params,
     })
   }
 

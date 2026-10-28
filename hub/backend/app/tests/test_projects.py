@@ -537,7 +537,12 @@ def test_declared_paths_with_leading_dot_slash(
         "    title: A figure\n"
         "showcase:\n"
         "  - figure: ./figures/plot.png\n"
+        "results:\n"
+        "  - path: results/fit.json\n"
+        "    name: slope\n"
     )
+    (repo_dir / "results").mkdir()
+    (repo_dir / "results" / "fit.json").write_text('{"slope": 1.2}')
     (repo_dir / "dvc.lock").write_text(
         "schema: '2.0'\n"
         "stages:\n"
@@ -562,6 +567,13 @@ def test_declared_paths_with_leading_dot_slash(
         assert item.stage == "build-paper"
         assert item.calkit_object is not None
         assert item.calkit_object["title"] == "A paper"
+        assert item.calkit_object["kind"] == "publication"
+    # A declared result is one too
+    item = app.projects.get_contents_from_repo(
+        project=project, repo=repo, path="results/fit.json"
+    )
+    assert item.calkit_object is not None
+    assert item.calkit_object["kind"] == "result"
     # Declared metadata comes back with normalized paths, so everything
     # downstream keys artifacts the same way DVC and Git do
     ck_info = app.projects.get_ck_info_for_ref(project=project, repo=repo)

@@ -390,6 +390,8 @@ import type {
   PostProjectReleaseErrors,
   PostProjectReleaseResponses,
   PostProjectResponses,
+  PostProjectStageFromScriptErrors,
+  PostProjectStageFromScriptResponses,
   PostProjectStatusErrors,
   PostProjectStatusResponses,
   PostProjectSyncErrors,
@@ -487,6 +489,7 @@ import type {
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
+  StageFromScriptPost,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -7645,6 +7648,60 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/pipeline/map-paths",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Stage From Script
+   *
+   * Make a stage from a script, uploaded or already in the project.
+   *
+   * The script is read, not run, as ``calkit xr --dry-run`` reads it: its
+   * environment from what it imports, and its inputs and outputs from the
+   * paths it opens. That happens in a checkout of its own, so an uploaded
+   * script isn't left in the project's clone before it's saved. With
+   * ``save``, the script, its environment, and the stage are committed,
+   * with a map-paths copy when the document shows the output elsewhere.
+   */
+  public static postProjectStageFromScript<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stageFromScriptPost: StageFromScriptPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectStageFromScriptResponses,
+    PostProjectStageFromScriptErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "stageFromScriptPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectStageFromScriptResponses,
+      PostProjectStageFromScriptErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script",
       ...options,
       ...params,
       headers: {

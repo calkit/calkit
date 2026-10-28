@@ -10396,6 +10396,171 @@ export const SoftwareItemSchema = {
   title: "SoftwareItem",
 } as const
 
+export const StageFromScriptSchema = {
+  properties: {
+    stage_name: {
+      type: "string",
+      title: "Stage Name",
+    },
+    stage_yaml: {
+      type: "string",
+      title: "Stage Yaml",
+    },
+    environment: {
+      type: "string",
+      title: "Environment",
+    },
+    environment_is_new: {
+      type: "boolean",
+      title: "Environment Is New",
+    },
+    environment_spec_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Path",
+    },
+    environment_spec_content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Content",
+    },
+    dependencies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Dependencies",
+      default: [],
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+      default: [],
+    },
+    outputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Outputs",
+      default: [],
+    },
+    missing_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Missing Inputs",
+      default: [],
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    copy_stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copy Stage",
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+    git_repo_url: {
+      type: "string",
+      title: "Git Repo Url",
+    },
+  },
+  type: "object",
+  required: [
+    "stage_name",
+    "stage_yaml",
+    "environment",
+    "environment_is_new",
+    "git_repo_url",
+  ],
+  title: "StageFromScript",
+} as const
+
+export const StageFromScriptPostSchema = {
+  properties: {
+    script_path: {
+      type: "string",
+      title: "Script Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    shows: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Shows",
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["script_path"],
+  title: "StageFromScriptPost",
+} as const
+
 export const StageStatusSchema = {
   properties: {
     status: {

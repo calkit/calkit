@@ -5909,6 +5909,94 @@ export type SoftwareItem = {
 }
 
 /**
+ * StageFromScript
+ */
+export type StageFromScript = {
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Stage Yaml
+   */
+  stage_yaml: string
+  /**
+   * Environment
+   */
+  environment: string
+  /**
+   * Environment Is New
+   */
+  environment_is_new: boolean
+  /**
+   * Environment Spec Path
+   */
+  environment_spec_path?: string | null
+  /**
+   * Environment Spec Content
+   */
+  environment_spec_content?: string | null
+  /**
+   * Dependencies
+   */
+  dependencies?: Array<string>
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Outputs
+   */
+  outputs?: Array<string>
+  /**
+   * Missing Inputs
+   */
+  missing_inputs?: Array<string>
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Copy Stage
+   */
+  copy_stage?: string | null
+  /**
+   * Saved
+   */
+  saved?: boolean
+  /**
+   * Git Repo Url
+   */
+  git_repo_url: string
+}
+
+/**
+ * StageFromScriptPost
+ */
+export type StageFromScriptPost = {
+  /**
+   * Script Path
+   */
+  script_path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Shows
+   */
+  shows?: string | null
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
  * StageStatus
  */
 export type StageStatus = {
@@ -13698,6 +13786,42 @@ export type PostProjectMapPathsResponses = {
 
 export type PostProjectMapPathsResponse =
   PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
+
+export type PostProjectStageFromScriptData = {
+  body: StageFromScriptPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script"
+}
+
+export type PostProjectStageFromScriptErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectStageFromScriptError =
+  PostProjectStageFromScriptErrors[keyof PostProjectStageFromScriptErrors]
+
+export type PostProjectStageFromScriptResponses = {
+  /**
+   * Successful Response
+   */
+  200: StageFromScript
+}
+
+export type PostProjectStageFromScriptResponse =
+  PostProjectStageFromScriptResponses[keyof PostProjectStageFromScriptResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

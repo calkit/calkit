@@ -1249,9 +1249,7 @@ def test_flatten_heavy_figures(
     ]
 
 
-def test_latex_to_omml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_latex_to_omml(monkeypatch: pytest.MonkeyPatch) -> None:
     # Text symbols, and text in text from the document's macros, which
     # Pandoc can't convert as written
     preamble = (
@@ -1348,8 +1346,14 @@ def test_latex_to_omml(
     # Its version, which the export warns about when old
     version = calkit.docx.pandoc_version()
     assert version is not None and len(version) >= 2
-    fake = tmp_path / "pandoc"
-    fake.write_text("#!/bin/sh\necho 'pandoc 3.6.1'\n")
-    fake.chmod(0o755)
-    monkeypatch.setattr(calkit.docx, "find_pandoc", lambda: str(fake))
-    assert calkit.docx.pandoc_version() == (3, 6, 1)
+    # As Windows names it too
+    for printed in ("pandoc 3.6.1", "pandoc.exe 3.7.0.2"):
+        monkeypatch.setattr(
+            calkit.docx.subprocess,
+            "run",
+            lambda cmd, printed=printed, **kw: subprocess.CompletedProcess(
+                cmd, 0, stdout=f"{printed}\nFeatures: +server\n", stderr=""
+            ),
+        )
+        version = calkit.docx.pandoc_version()
+        assert version == tuple(int(n) for n in printed.split()[1].split("."))

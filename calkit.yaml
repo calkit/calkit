@@ -68,7 +68,8 @@ questions:
       Can Calkit convert LaTeX to docx and back again without losing
       information, e.g., in math, or comments?
     answer:
-      if same and pdf_same and eq_docx == eq_src and inline_docx == inline_src and threads_docx == threads_src: >-
+      if same and pdf_same and eq_docx == eq_src and inline_docx == inline_src and threads_docx == threads_src:
+        >-
         Yes, for the LaTeX/Word example: exported to Word and merged back
         with no edits, its source comes back byte for byte and builds the
         same PDF, and all {eq_src} display equation rows, {inline_src}
@@ -129,6 +130,8 @@ pipeline:
     latex-word-round-trip:
       kind: python-script
       script_path: scripts/latex-word-round-trip.py
+      args:
+        - --engine=libreoffice
       environment: dev
       description: >-
         Export the LaTeX/Word example to Word and merge it back, with no
@@ -354,7 +357,6 @@ releases:
     kind: publication
     path: docs/one-pager/main.pdf
     git_rev: 327d056144f1976b7df80901e15836a93e2a3f1a
-    date: '2026-10-21'
+    date: "2026-10-21"
     internal: true
-    stored_path:
-      .calkit/releases/one-pager-2026-v1/calkit-main-one-pager-2026-v1.pdf
+    stored_path: .calkit/releases/one-pager-2026-v1/calkit-main-one-pager-2026-v1.pdf

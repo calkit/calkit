@@ -18,7 +18,7 @@ that produced them, for fast iteration and full transparency.**
 - **<!-- calkit value key=releases_per_week_last_90_days -->8.0<!-- /calkit value -->**
   releases per week
 
-as of <!-- calkit value key=date -->2026-10-26<!-- /calkit value -->
+as of <!-- calkit value key=date -->2026-10-27<!-- /calkit value -->
 
 ## The problem
 

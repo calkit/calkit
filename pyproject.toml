@@ -42,6 +42,8 @@ dependencies = [
   "pillow",
   "pydantic[email]",
   "pydantic-settings",
+  # Renders figures too detailed for Word's PDF import as images
+  "pypdfium2>=5.13.0",
   # pygtrie 2.6.0 moved _NONE_STEP off the Trie class, but sqltrie (via
   # DVC) still reads Trie._NONE_STEP in longest_prefix, so every DVC index
   # diff raises AttributeError; see treeverse/sqltrie#97
@@ -113,7 +115,6 @@ dev = [
   "scipy>=1.15.3",
   "pypandoc-binary>=1.13",
   "matplotlib>=3.10.8",
-  "pypdfium2>=5.13.0",
   "simpy>=4.1.1",
 ]
 
@@ -209,6 +210,7 @@ module = [
     "dvc.*",
     "requests",
     "pypdfium2",
+    "pypdfium2.*",
     "psutil",
     "simpy",
     "pypandoc",

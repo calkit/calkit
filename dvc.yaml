@@ -1,7 +1,7 @@
 stages:
   latex-word-round-trip:
     cmd: calkit xenv -n dev --no-check -- python
-      scripts/latex-word-round-trip.py
+      scripts/latex-word-round-trip.py --engine=libreoffice
     deps:
       - scripts/latex-word-round-trip.py
       - calkit/cli/latex.py

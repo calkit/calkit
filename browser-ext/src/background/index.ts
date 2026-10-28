@@ -32,6 +32,7 @@ import type {
   ReferenceSearchMatch,
   References,
   Result,
+  StageFromScript,
   Table,
 } from "../core/types";
 
@@ -241,6 +242,21 @@ async function handle(message: Request): Promise<unknown> {
       return request<Provenance>(
         `${projectPath(message.owner, message.project)}/provenance`,
         { query: { path: message.path, key: message.key } },
+      );
+    case "project.stageFromScript":
+      return request<StageFromScript>(
+        `${projectPath(message.owner, message.project)}` +
+          "/pipeline/stages/from-script",
+        {
+          method: "POST",
+          body: {
+            script_path: message.scriptPath,
+            content: message.content,
+            shows: message.shows,
+            produces: message.produces,
+            save: message.save ?? false,
+          },
+        },
       );
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });

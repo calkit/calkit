@@ -19,6 +19,7 @@ import type {
   ReferenceSearchMatch,
   References,
   Result,
+  StageFromScript,
   Table,
 } from "./types";
 
@@ -116,6 +117,19 @@ export type Request =
       /** A value in a results file; without one, the file comes back whole. */
       key?: string;
     }
+  | {
+      type: "project.stageFromScript";
+      owner: string;
+      project: string;
+      scriptPath: string;
+      /** An uploaded script, base64-encoded. */
+      content?: string;
+      /** What the document shows, e.g., the figure at the cursor. */
+      shows?: string;
+      /** Which of the script's outputs that is. */
+      produces?: string;
+      save?: boolean;
+    }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
   | {
@@ -198,6 +212,7 @@ export interface ResponseMap {
   "project.tables": Table[];
   "project.results": Result[];
   "project.provenance": Provenance;
+  "project.stageFromScript": StageFromScript;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

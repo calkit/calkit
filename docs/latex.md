@@ -139,8 +139,9 @@ With `\usepackage[links]{calkit}`, values and figures in the PDF
 link (with `hyperref`)
 to the project's page on Calkit to allow inspection of its origin
 or provenance, e.g., the pipeline stage that produced it.
-Tables and other included LaTeX aren't linked,
-since a link can't go around a float or span paragraphs.
+Captions link too, in a `figure` or `table` environment around a
+`\ckfigure` or `\cktable`, or in the LaTeX that `\cktable` or `\ckinclude`
+brings in.
 
 The document's stage depends on everything it includes this way,
 without any of it being listed as an input,

@@ -107,7 +107,7 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -187,7 +187,7 @@ jobs:
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
       - name: Setup uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run

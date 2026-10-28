@@ -155,6 +155,12 @@ class Original:
     media: dict[str, str] = field(default_factory=dict)
     # Each equation's LaTeX as the converter reads it back, by bookmark
     equations: dict[str, str] = field(default_factory=dict)
+    # Each paragraph's inline math placed from the source, by bookmark: its
+    # place among the source paragraph's inline math and its LaTeX as the
+    # converter reads it back
+    inline: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
+    # Whether the export kept its inline math, which older ones didn't
+    kept_inline: bool = True
 
 
 def normalize(text: str) -> str:
@@ -250,6 +256,8 @@ class Document:
         root.set("source", original.source)
         if original.rev:
             root.set("rev", original.rev)
+        if original.kept_inline:
+            root.set("inline", "kept")
         for name, text in original.paragraphs.items():
             p = ET.SubElement(root, _tag(CALKIT_NS, "p"))
             p.set("id", name)
@@ -262,6 +270,12 @@ class Document:
             eq = ET.SubElement(root, _tag(CALKIT_NS, "eq"))
             eq.set("id", name)
             eq.text = tex
+        for name, maths in original.inline.items():
+            for index, tex in maths:
+                im = ET.SubElement(root, _tag(CALKIT_NS, "im"))
+                im.set("id", name)
+                im.set("k", str(index))
+                im.text = tex
         self.parts["customXml/item1.xml"] = ET.tostring(
             root, xml_declaration=True, encoding="UTF-8"
         )
@@ -288,6 +302,11 @@ class Document:
         root = ET.fromstring(data)
         if root.tag != _tag(CALKIT_NS, "review"):
             return None
+        inline: dict[str, list[tuple[int, str]]] = {}
+        for im in root.iter(_tag(CALKIT_NS, "im")):
+            inline.setdefault(im.get("id", ""), []).append(
+                (int(im.get("k", "0")), im.text or "")
+            )
         return Original(
             id=root.get("id", ""),
             rev=root.get("rev"),
@@ -304,6 +323,8 @@ class Document:
                 eq.get("id", ""): eq.text or ""
                 for eq in root.iter(_tag(CALKIT_NS, "eq"))
             },
+            inline=inline,
+            kept_inline=root.get("inline") == "kept",
         )
 
     @property

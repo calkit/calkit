@@ -2592,6 +2592,8 @@ def normalize_math(tex: str) -> str:
         r"\\(" + "|".join(_MATH_FUNCTIONS) + r")(?![a-zA-Z])", r" \1 ", tex
     )
     tex = tex.replace("{}", "")
+    # Italic letters are math's own, which Word keeps without saying so
+    tex = re.sub(r"\\mathit\s*\{\s*([A-Za-z]+)\s*\}", r"\1", tex)
     # Pandoc versions read the same accent back differently
     for wide, accent in (
         ("widehat", "hat"),

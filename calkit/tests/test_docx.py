@@ -10,6 +10,7 @@ The ``libreoffice-*.docx`` fixtures are made by
 """
 
 import copy
+import dataclasses
 import json
 import os
 import re
@@ -393,6 +394,10 @@ def test_latex_source_helpers(project: Path) -> None:
     assert calkit.latex.math_tokens(
         "\\widehat{y} + \\widetilde{x} + \\overrightarrow{v}"
     ) == calkit.latex.math_tokens("\\hat{y} + \\tilde{x} + \\vec{v}")
+    # Nor Word saving an italic letter without saying it's italic
+    assert calkit.latex.math_tokens(
+        "\\mathit{A} + b"
+    ) == calkit.latex.math_tokens("A + b")
     # Nor Word saving a function name after a command as letters
     assert calkit.latex.math_tokens(
         "e^{\\Delta\\ln x}"
@@ -1167,7 +1172,7 @@ def test_word_export_placement(
             ("Line one", None),
             ("Line two", None),
             ("Table 1: Fits by model.", None),
-            ("ErrorError", None),
+            ("ErrorError\ufffc", None),
             (
                 "Model ; Rate (%)\nKernel (Spline (cubicσk)) ; 1.0|0.5",
                 "table",
@@ -1313,18 +1318,49 @@ def test_word_export_placement(
     assert campaign.element is not None
     t = next(t for t in campaign.element.iter(calkit.docx._tag(w_ns, "t")))
     t.text = (t.text or "").replace("June", "July")
-    cell = next(p for p in doc.paragraphs if p.text == "0.5")
-    assert cell.element is not None
-    t = next(t for t in cell.element.iter(calkit.docx._tag(w_ns, "t")))
-    t.text = "0.6"
+    # Two cells of one table, each its own paragraph of the same source
+    for old, new in (("0.5", "0.6"), ("1.0", "1.5")):
+        cell = next(p for p in doc.paragraphs if p.text == old)
+        assert cell.element is not None
+        t = next(t for t in cell.element.iter(calkit.docx._tag(w_ns, "t")))
+        t.text = new
+
+    def edit_math(start: str, old: str, new: str) -> None:
+        # A letter of a paragraph's inline math changed in Word
+        para, _ = get_math_and_text(doc, start)
+        assert para.element is not None
+        t = next(
+            t
+            for t in para.element.iter(calkit.docx._tag(calkit.docx.M, "t"))
+            if t.text == old
+        )
+        t.text = new
+
+    # Inline math, beside a text edit in the same paragraph
+    edit_math("At 20 K", "T", "U")
     doc.save("returned.docx")
-    for _ in range(2):
-        calkit.cli.latex.merge_docx("returned.docx")
+    # All at once, and merging again changes nothing
+    calkit.cli.latex.merge_docx("returned.docx")
     src = Path("main.tex").read_text()
+    calkit.cli.latex.merge_docx("returned.docx")
+    assert Path("main.tex").read_text() == src
     assert src.count("clearly") == 1
     assert r"As \citet{lee} clearly showed" in src
     assert "The campaign (July 2019) ran long." in src
+    assert r"Kernel ($\sigma_k$) & 1.5 \\" in src
     assert r"Spline (cubic) & 0.6 \\ % the best" in src
+    assert r"At \SI{20}{\kelvin} the value $U_c$ drops" in src
+    # An export that didn't keep its inline math, as before, has each
+    # lined up with the source's by order, so only what changed merges
+    sent = doc.read_original()
+    assert sent is not None and sent.inline
+    doc.write_original(dataclasses.replace(sent, inline={}, kept_inline=False))
+    edit_math("We fit", "f", "g")
+    doc.save("returned.docx")
+    calkit.cli.latex.merge_docx("returned.docx")
+    src = Path("main.tex").read_text()
+    assert "Then we fit the model $g(x)$ well." in src
+    assert "$U_c$" in src and r"$\arccos x$" in src
 
 
 def test_equation_links() -> None:
@@ -1375,8 +1411,11 @@ def test_equation_links() -> None:
 def test_flatten_heavy_figures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    scripts: list[str] = []
+
     def word(cmd: list[str], **kw: object) -> subprocess.CompletedProcess:
         # Word's import, writing a .docx where it's asked to save
+        scripts.append(cmd[-1])
         saved = re.search(r'file name "([^"]+)"', cmd[-1])
         assert saved is not None
         Path(saved.group(1)).write_bytes(b"docx")
@@ -1472,6 +1511,13 @@ def test_flatten_heavy_figures(
         "paper.docx",
         "paper.tmp.pdf",
     ]
+    # Word's copy is closed by its name, since another document may be the
+    # active one by the time it's saved, e.g., one the user switched to
+    assert "active document" not in scripts[-1]
+    assert (
+        'if name of d is "paper.tmp.docx" then close d saving no'
+        in (scripts[-1])
+    )
 
 
 def test_latex_to_tables() -> None:

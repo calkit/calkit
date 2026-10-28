@@ -11,7 +11,7 @@ import shutil
 import string
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from copy import deepcopy
 from pathlib import Path
 
@@ -2953,6 +2953,9 @@ def to_docx(
     # Display math goes in as Word equations converted from the source,
     # replacing what Word's PDF import or TeX4ht made of it
     equations: dict[str, str] = {}
+    # Inline math placed from the source, by element, with which of its
+    # block's inline math it is
+    placed_math: dict[int, tuple[Any, int]] = {}
     left_as_imported = 0
     has_display = any(b.display for b in blks)
     # Word's PDF import leaves inline math as text and pictures, which
@@ -3501,6 +3504,7 @@ def to_docx(
             for p, b in zip(paras, matched):
                 if b is not None and p.element is not None:
                     by_block.setdefault(id(b), []).append(p.element)
+            math_index: dict[int, int] = {}
             for b in blks:
                 els = by_block.get(id(b), [])
                 texts = [doc.linear_text(el) for el in els]
@@ -3519,8 +3523,13 @@ def to_docx(
                     )
                     # In the paragraph where the last one was, or a later
                     # one when the block continues past a page or float
+                    start_len = len(inline)
                     for k in range(pi, len(els)):
                         if place(k, pre, tex, shown, post, is_last):
+                            # Which of the block's inline math it is
+                            for j in range(start_len, len(inline)):
+                                if inline[j][3] is not None:
+                                    math_index[j] = n
                             break
             inline_maths = iter(
                 calkit.docx.latex_to_omml(
@@ -3547,6 +3556,8 @@ def to_docx(
                     s0, e0 = s0 + 1, e0 + 1
                 if doc.replace_range(el, s0, e0, math) and itex is not None:
                     inline_count += 1
+                    if math is not None and i in math_index:
+                        placed_math[id(math)] = (math, math_index[i])
                     # After a picture there was no text to put it in, so
                     # it starts the text after
                     if pad_trail and not trailed and math is not None:
@@ -3613,6 +3624,41 @@ def to_docx(
             for p in doc.paragraphs
             if p.bookmark and p.bookmark in original
         }
+    # The inline math placed, as the converter reads it back, by paragraph,
+    # so a merge can tell what a reviewer changed in it
+    inline_eqs: dict[str, list[tuple[int, str]]] = {}
+    held_math: list[tuple[str | None, tuple[Any, int]]] = [
+        (p.bookmark, placed_math[id(child)])
+        for p in doc.paragraphs
+        if p.bookmark and p.element is not None
+        for child in p.element
+        if id(child) in placed_math
+    ]
+    # Converted with the document, a paragraph's inline math is its
+    # source's in order, where there are as many
+    if engine != "word":
+        by_mark = {
+            calkit.latex.make_bookmark_name(b.path, b.lineno): b
+            for b in blks
+            if not b.display
+        }
+        m_omath = calkit.docx._tag(calkit.docx.M, "oMath")
+        for p in doc.paragraphs:
+            mblk = by_mark.get(p.bookmark or "")
+            if mblk is None or p.element is None:
+                continue
+            found_math = [c for c in p.element if c.tag == m_omath]
+            if found_math and len(found_math) == len(mblk.inline_math):
+                held_math += [
+                    (p.bookmark, (el, k)) for k, el in enumerate(found_math)
+                ]
+    if held_math:
+        read_back_inline = calkit.docx.omml_to_latex(
+            [el for _, (el, _) in held_math]
+        )
+        for (mark, (_, index)), mtex in zip(held_math, read_back_inline):
+            if mtex is not None and mark is not None:
+                inline_eqs.setdefault(mark, []).append((index, mtex))
     doc.even_margins()
     # Existing comment blocks in the source go out as Word comments
     threads, anchors, highlights, resolved = [], [], [], []
@@ -3665,6 +3711,7 @@ def to_docx(
             original,
             doc.media_hashes,
             equations=equations,
+            inline=inline_eqs,
         )
     )
     doc.set_identifier(f"calkit-latex-export:{export_id}:{rev or ''}:{source}")
@@ -3762,7 +3809,10 @@ def merge_docx(
     comment blocks above the paragraph; threads resolved in Word are
     marked resolved.
     """
+    import dataclasses
     import datetime
+    import difflib
+    from typing import Any
 
     import calkit.docx
     import calkit.git
@@ -3799,6 +3849,19 @@ def merge_docx(
     }
     edits: dict[str, list[tuple[int, int, list[str]]]] = {}
     changes: list[LatexDocxMergeChange] = []
+    # Each block as edited so far, so edits to its pieces, e.g., a table's
+    # cells, or its text and its math, all apply
+    working: dict[int, calkit.latex.Block] = {}
+
+    def update(blk: calkit.latex.Block, new_lines: list[str]) -> None:
+        working[id(blk)] = dataclasses.replace(
+            blk,
+            lines=[
+                calkit.latex.SourceLine(blk.path, blk.lineno + i, text)
+                for i, text in enumerate(new_lines)
+            ],
+        )
+
     for para in doc.paragraphs:
         if para.bookmark is None or para.bookmark not in original.paragraphs:
             continue
@@ -3832,16 +3895,17 @@ def merge_docx(
             continue
         sent_tex = calkit.latex.from_word_text(sent)
         new_tex = calkit.latex.from_word_text(para.text)
-        if calkit.latex.already_applied(blk, sent_tex, new_tex):
+        current = working.get(id(blk), blk)
+        if calkit.latex.already_applied(current, sent_tex, new_tex):
             changes.append(
                 LatexDocxMergeChange(
                     path=blk.path, lineno=blk.lineno, status="already-applied"
                 )
             )
             continue
-        new_lines = calkit.latex.apply_edit(blk, sent_tex, new_tex)
+        new_lines = calkit.latex.apply_edit(current, sent_tex, new_tex)
         if new_lines == [
-            ln.text.rstrip() for ln in blk.lines if ln.text.strip()
+            ln.text.rstrip() for ln in current.lines if ln.text.strip()
         ]:
             changes.append(
                 LatexDocxMergeChange(
@@ -3859,15 +3923,226 @@ def merge_docx(
                 )
             )
             continue
-        edits.setdefault(blk.path, []).append(
-            (blk.lineno, len(blk.lines), new_lines)
-        )
+        update(blk, new_lines)
         changes.append(
             LatexDocxMergeChange(
                 path=blk.path, lineno=blk.lineno, status="applied"
             )
         )
         typer.echo(f"Applied edit at {loc}")
+    # Inline math edited in Word goes back through the LaTeX the converter
+    # reads it as, to the same piece of the paragraph's math in the source.
+    # An export from before that was kept has each lined up with the
+    # source's math by order instead.
+    m_omath = calkit.docx._tag(calkit.docx.M, "oMath")
+    # Lined up by order only for Word's import, which converts the math as
+    # this does, going by the export's record on this machine
+    older_word_export = False
+    if not original.kept_inline:
+        for folder in (
+            calkit.latex.LOCAL_DOCX_EXPORTS_DIR,
+            calkit.latex.DOCX_EXPORTS_DIR,
+        ):
+            for record_path in glob.glob(
+                os.path.join(folder, f"*-{original.id}.json")
+            ):
+                try:
+                    with open(record_path, encoding="utf-8") as f:
+                        exported = json.load(f)
+                except (OSError, ValueError):
+                    continue
+                older_word_export |= exported.get("engine") == "word"
+    with_math: list[
+        tuple[calkit.docx.Paragraph, list[tuple[int, str]] | None, list[Any]]
+    ] = [
+        (
+            para,
+            original.inline.get(para.bookmark or ""),
+            [c for c in para.element if c.tag == m_omath],
+        )
+        for para in doc.paragraphs
+        if para.element is not None
+        and (
+            para.bookmark in original.inline
+            or (older_word_export and para.bookmark in original.paragraphs)
+        )
+    ]
+    with_math = [w for w in with_math if w[2]]
+    all_math = [m for *_, math_els in with_math for m in math_els]
+    if all_math and calkit.docx.find_pandoc() is None:
+        warn(
+            "Pandoc isn't installed, so edits to inline math aren't "
+            "merged; run 'calkit install pandoc'"
+        )
+        with_math = []
+    converted_source: dict[int, list[str | None]] = {}
+    preamble = "\n".join(
+        ln.text
+        for ln in lines
+        if re.match(
+            r"\s*\\(newcommand|renewcommand|providecommand|"
+            r"DeclareMathOperator|def)\b",
+            ln.text,
+        )
+    )
+    math_back: Iterator[str | None] = iter(
+        calkit.docx.omml_to_latex(all_math) if with_math else []
+    )
+    for para, sent_maths, math_els in with_math:
+        math_now = [next(math_back) for _ in math_els]
+        assert para.bookmark is not None
+        parts = para.bookmark.split("_")
+        path, lineno = path_for_hash.get(parts[1], ""), int(parts[2])
+        if sent_maths is None:
+            sent = original.paragraphs.get(para.bookmark, "")
+            blk = calkit.latex.find_block(
+                blks, path, lineno, sent
+            ) or calkit.latex.find_block(blks, path, lineno, para.text)
+            if blk is None or blk.display:
+                continue
+            # The source's math as the converter reads it back, as the
+            # export would have kept it
+            if id(blk) not in converted_source:
+                texs = [t for _, t, _ in blk.inline_math]
+                converted_source[id(blk)] = (
+                    calkit.docx.omml_to_latex(
+                        [
+                            m
+                            for m in calkit.docx.latex_to_omml(
+                                [f"${t}$" for t in texs], preamble
+                            )
+                            if m is not None
+                        ]
+                    )
+                    if texs
+                    else []
+                )
+            source_back = converted_source[id(blk)]
+            matcher = difflib.SequenceMatcher(
+                a=[
+                    tuple(calkit.latex.math_tokens(t)) if t else None
+                    for t in source_back
+                ],
+                b=[
+                    tuple(calkit.latex.math_tokens(t)) if t else None
+                    for t in math_now
+                ],
+                autojunk=False,
+            )
+            lined_up: dict[int, int] = {}
+            for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+                if tag == "equal" or (tag == "replace" and i2 - i1 == j2 - j1):
+                    lined_up.update(zip(range(j1, j2), range(i1, i2)))
+            keep = [j for j in range(len(math_now)) if j in lined_up]
+            sent_maths = [
+                (lined_up[j], source_back[lined_up[j]] or "") for j in keep
+            ]
+            math_now = [math_now[j] for j in keep]
+            math_els = [math_els[j] for j in keep]
+        edited_maths = [
+            (k, sent_m, edited_m)
+            for (k, sent_m), edited_m in zip(sent_maths, math_now)
+            if edited_m is None
+            or calkit.latex.math_tokens(edited_m)
+            != calkit.latex.math_tokens(sent_m)
+        ]
+        if not edited_maths and len(math_els) == len(sent_maths):
+            continue
+        sent = original.paragraphs.get(para.bookmark, "")
+        blk = calkit.latex.find_block(
+            blks, path, lineno, sent
+        ) or calkit.latex.find_block(blks, path, lineno, para.text)
+        loc = f"{path}:{lineno}" if blk is None else f"{blk.path}:{blk.lineno}"
+        if blk is None or len(math_els) != len(sent_maths):
+            warn(
+                f"Inline math was added or removed at {loc}; apply it by hand"
+            )
+            changes.append(
+                LatexDocxMergeChange(
+                    path=path, lineno=lineno, status="unplaced"
+                )
+            )
+            continue
+        if any(
+            e.tag
+            in (
+                calkit.docx._tag(calkit.docx.W, "ins"),
+                calkit.docx._tag(calkit.docx.W, "del"),
+            )
+            for m in math_els
+            for e in m.iter()
+        ):
+            warn(f"Tracked change at {loc} not yet accepted or rejected")
+            changes.append(
+                LatexDocxMergeChange(
+                    path=blk.path, lineno=blk.lineno, status="pending"
+                )
+            )
+            continue
+        current = working.get(id(blk), blk)
+        src = "\n".join(ln.text for ln in current.lines)
+        # The source's inline math in order, not counting any in comments
+        math_spans = [
+            m.span(1) if m.group(1) is not None else m.span(2)
+            for m in calkit.latex._INLINE_MATH_RE.finditer(src)
+            if not re.search(
+                r"(?<!\\)%", src[src.rfind("\n", 0, m.start()) + 1 : m.start()]
+            )
+        ]
+        for k, sent_m, edited_m in edited_maths:
+            if edited_m is None or k >= len(math_spans):
+                warn(f"Can't place an inline math edit at {loc}")
+                changes.append(
+                    LatexDocxMergeChange(
+                        path=blk.path, lineno=blk.lineno, status="unplaced"
+                    )
+                )
+                continue
+            start, end = math_spans[k]
+            math_piece = calkit.latex.Block(
+                [calkit.latex.SourceLine(blk.path, blk.lineno, src[start:end])]
+            )
+            if calkit.latex.math_similarity(
+                math_piece, edited_m
+            ) > calkit.latex.math_similarity(math_piece, sent_m):
+                changes.append(
+                    LatexDocxMergeChange(
+                        path=blk.path,
+                        lineno=blk.lineno,
+                        status="already-applied",
+                    )
+                )
+                continue
+            edited_piece = calkit.latex.apply_math_edit(
+                math_piece, sent_m, edited_m
+            )
+            if edited_piece is None:
+                warn(
+                    f"Inline math edit at {loc} doesn't fit the source; "
+                    f"apply it by hand: {' '.join(edited_m.split())}"
+                )
+                changes.append(
+                    LatexDocxMergeChange(
+                        path=blk.path, lineno=blk.lineno, status="unplaced"
+                    )
+                )
+                continue
+            edited_text = "\n".join(edited_piece)
+            src = src[:start] + edited_text + src[end:]
+            # Later pieces moved by the change in length
+            shift = len(edited_text) - (end - start)
+            math_spans = [
+                (a + shift, b + shift) if a >= end else (a, b)
+                for a, b in math_spans
+            ]
+            update(blk, src.split("\n"))
+            current = working[id(blk)]
+            changes.append(
+                LatexDocxMergeChange(
+                    path=blk.path, lineno=blk.lineno, status="applied"
+                )
+            )
+            typer.echo(f"Applied inline math edit at {loc}")
     # Equations edited in Word go back through the LaTeX the converter
     # reads them as, applied to the source's own spelling; one that can't
     # be placed that way goes in as a comment on the equation
@@ -3885,7 +4160,6 @@ def merge_docx(
             n: (next(it) if m is not None else None, authors)
             for n, (m, authors) in found.items()
         }
-        working: dict[int, calkit.latex.Block] = {}
         for name, (eq_tex, pending) in now.items():
             sent_eq = original.equations[name]
             if eq_tex is not None and calkit.latex.math_tokens(
@@ -3959,27 +4233,22 @@ def merge_docx(
                     )
                 )
                 continue
-            working[id(blk)] = calkit.latex.Block(
-                [
-                    calkit.latex.SourceLine(blk.path, blk.lineno + i, text)
-                    for i, text in enumerate(new_lines)
-                ]
-            )
+            update(blk, new_lines)
             changes.append(
                 LatexDocxMergeChange(
                     path=blk.path, lineno=blk.lineno, status="applied"
                 )
             )
             typer.echo(f"Applied equation edit at {loc}")
-        for blk in blks:
-            if id(blk) in working:
-                edits.setdefault(blk.path, []).append(
-                    (
-                        blk.lineno,
-                        len(blk.lines),
-                        [ln.text for ln in working[id(blk)].lines],
-                    )
+    for blk in blks:
+        if id(blk) in working:
+            edits.setdefault(blk.path, []).append(
+                (
+                    blk.lineno,
+                    len(blk.lines),
+                    [ln.text for ln in working[id(blk)].lines],
                 )
+            )
     files = {
         p: Path(p).read_text(encoding="utf-8").split("\n")
         for p in {ln.path for ln in lines}

@@ -245,6 +245,8 @@ def test_build_ck_components(tmp_dir):
             },
             f,
         )
+    with open("results/count.tex", "w") as f:
+        f.write("Trials: 42.\n")
     # The smallest PNG TeX will read: one white pixel
     raw = zlib.compress(b"\x00\xff\xff\xff")
     png = b"\x89PNG\r\n\x1a\n" + b"".join(
@@ -283,6 +285,7 @@ def test_build_ck_components(tmp_dir):
             "\\section{RMSE of \\ckvalue[.2f]{results/metrics.json}{rmse}}\n"
             "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/not-yet.png}\n"
+            "\\ckinclude{results/count}\n"
             "\\end{document}\n"
         )
     # Components can be mapped in without building
@@ -335,6 +338,7 @@ def test_build_ck_components(tmp_dir):
     assert "Label: run a." in text
     # Fixed notation, though the value is written in exponent form
     assert "Tiny: 0.00." in text
+    assert "Trials: 42." in text
     # A bookmark shows the value as it is, rather than the command
     pdf = pypdfium2.PdfDocument("paper/main.pdf")
     try:

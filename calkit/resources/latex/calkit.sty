@@ -214,9 +214,12 @@
     {\IfFileExists{\ck@dir/#2}%
       {\ck@link{figures?path=#2}{\includegraphics[#1]{\ck@dir/#2}}}%
       {\ck@missing{#2}}}}
-% \cktable{path}: a table or other TeX a stage generated
-\newcommand\cktable[1]{%
+% \ckinclude{path}: any TeX a stage generated, and \cktable{path}, a table.
+% Neither links to the hub, since TeX can't put a link around a float or
+% across paragraphs.
+\newcommand\ckinclude[1]{%
   \ck@if@file{#1}%
     {\IfFileExists{\ck@dir/\ck@file{#1}}%
       {\input{\ck@dir/\ck@file{#1}}}{\ck@missing{#1}}}%
     {\IfFileExists{\ck@dir/#1}{\input{\ck@dir/#1}}{\ck@missing{#1}}}}
+\let\cktable\ckinclude

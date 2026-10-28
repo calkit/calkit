@@ -4,6 +4,7 @@ import gzip
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -103,6 +104,8 @@ def test_ck_components(tmp_dir):
     os.makedirs("tables")
     with open("tables/summary.tex", "w") as f:
         f.write("\\begin{tabular}{l}\\end{tabular}\n")
+    with open("results/sentence.tex", "w") as f:
+        f.write("We ran 42 trials.\n")
     os.makedirs("paper/sections")
     with open("paper/sections/results.tex", "w") as f:
         f.write("Error: \\ckvalue[.2f]{results/metrics.json}{rmse}.\n")
@@ -114,6 +117,7 @@ def test_ck_components(tmp_dir):
             "\\input{sections/results}\n"
             "\\ckfigure[width=0.5\\textwidth]{figures/plot.png}\n"
             "\\cktable{tables/summary.tex}\n"
+            "\\ckinclude{results/sentence}\n"
             "Slope: \\ckvalue{results/metrics.json}{fit.slope},\n"
             "runs: \\ckvalue{results/metrics.json}{n_runs}.\n"
             "% \\ckfigure{figures/commented.png}\n"
@@ -128,6 +132,7 @@ def test_ck_components(tmp_dir):
         ("value", "results/metrics.json", "rmse", ".2f"),
         ("figure", "figures/plot.png", None, ""),
         ("table", "tables/summary.tex", None, ""),
+        ("include", "results/sentence", None, ""),
         ("value", "results/metrics.json", "fit.slope", ""),
         ("value", "results/metrics.json", "n_runs", ""),
         ("value", "results/metrics.json", "nope", ""),
@@ -143,6 +148,8 @@ def test_ck_components(tmp_dir):
     with open("paper/_calkit/figures/plot.png", "rb") as f:
         assert f.read() == b"png"
     assert os.path.isfile("paper/_calkit/tables/summary.tex")
+    # Any TeX a stage writes, found like a table without its extension
+    assert os.path.isfile("paper/_calkit/results/sentence.tex")
     with open("paper/_calkit/values.tex") as f:
         values = f.read()
     # Numbers are written in full, since calkit.sty formats them, so a format
@@ -153,13 +160,36 @@ def test_ck_components(tmp_dir):
     assert ".2f" not in values
     # Where TeX finds a file is only written for one named without an
     # extension
-    assert "cksetfile" not in values
+    assert values.count("cksetfile") == 1
+    assert "\\cksetfile{results/sentence}{results/sentence.tex}" in values
     # Text is escaped, and only numbers are formatted
     assert calkit.latex.tex_value("run_a") == ("t", "run\\_a")
     assert calkit.latex.tex_value(True) == ("t", "True")
     assert calkit.latex.tex_value(float("nan")) == ("t", "nan")
     assert calkit.latex.tex_value([3]) == ("n", "3")
     assert calkit.latex.tex_value(1e-05) == ("n", "1e-05")
+    # No link base without knowing whose project it is, even from a remote,
+    # which differs between clones
+    assert "cklinkbase" not in values
+    subprocess.run(["git", "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/fork/test.git"],
+        check=True,
+    )
+    calkit.latex.map_ck_components("paper")
+    with open("paper/_calkit/values.tex") as f:
+        assert "cklinkbase" not in f.read()
+    with open("calkit.yaml", "w") as f:
+        f.write("name: test\nowner: someone\n")
+    calkit.latex.map_ck_components("paper")
+    with open("paper/_calkit/values.tex") as f:
+        assert "\\cklinkbase{https://calkit.io/someone/test}" in f.read()
+    with open("calkit.yaml", "a") as f:
+        f.write("hub: calkit.example.edu\n")
+    calkit.latex.map_ck_components("paper")
+    with open("paper/_calkit/values.tex") as f:
+        values = f.read()
+    assert "\\cklinkbase{https://calkit.example.edu/someone/test}" in values
     # Kept out of Git without touching the project's own .gitignore
     with open("paper/_calkit/.gitignore") as f:
         assert f.read().strip().endswith("*")
@@ -421,6 +451,8 @@ def test_expand_ck_components(tmp_dir):
     os.makedirs("data/tables")
     with open("data/tables/t.tex", "w") as f:
         f.write("\\begin{tabular}{l}B\\end{tabular}")
+    with open("data/tables/n.tex", "w") as f:
+        f.write("We ran 42 trials.")
     os.makedirs("data/figures")
     with open("data/figures/plot.png", "wb") as fb:
         fb.write(b"png")
@@ -433,6 +465,7 @@ def test_expand_ck_components(tmp_dir):
             "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/plot} {\\small (a) left}\n"
             "\\cktable{tables/t}\n"
+            "\\ckinclude{tables/n.tex}\n"
             "Split: \\ckvalue{results/m.json}\n  {rmse}.\n"
             "Missing: \\ckvalue{results/m.json}{nope}.\n"
             "% \\ckvalue{results/m.json}{rmse}\n"
@@ -452,6 +485,7 @@ def test_expand_ck_components(tmp_dir):
         "\\includegraphics[]{../figures/plot.png} {\\small (a) left}" in text
     )
     assert "\\begin{tabular}{l}B\\end{tabular}" in text
+    assert "We ran 42 trials." in text
     # What can't be found is left to print as ??, and comments alone
     assert "\\ckvalue{results/m.json}{nope}" in text
     assert "% \\ckvalue{results/m.json}{rmse}" in text

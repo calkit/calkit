@@ -21,6 +21,8 @@ from app.config import settings
 from app.core import ryaml
 from app.models import Project, UserCreate
 from app.models.core import Account, ContentsItem, UserProjectAccess
+from app.pipeline import PipelineAtRef
+from app.pipeline import StageStatus as PipelineStageStatus
 from app.projects import CkInfoAndOuts
 from app.tests import authentication_token_from_email, create_random_user
 
@@ -1371,7 +1373,11 @@ def test_get_project_results_autodetects_and_reads_ref(
 ) -> None:
     """Results under a results-style dir are auto-detected, and declared
     results plus the tree are read at the requested ref."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000002")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000002",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     detected_paths = [
         "results/summary.json",
         "results/data.csv",
@@ -1425,6 +1431,22 @@ def test_get_project_results_autodetects_and_reads_ref(
             ".get_ck_info_and_dvc_outs_from_tree",
             return_value=CkInfoAndOuts({}, {}, {}, {}),
         ),
+        # The stage that writes a result, and whether it's out of date
+        patch(
+            "app.api.routes.projects.core.pipeline_at_ref",
+            return_value=PipelineAtRef(
+                dvc_yaml={},
+                dvc_lock={
+                    "stages": {
+                        "summarize": {
+                            "outs": [{"path": "results/summary.json"}]
+                        }
+                    }
+                },
+                statuses={"summarize": PipelineStageStatus(status="stale")},
+                frozen=set(),
+            ),
+        ),
     ):
         response = client.get(
             "/projects/test-owner/test-project/results?ref=some-branch"
@@ -1445,6 +1467,10 @@ def test_get_project_results_autodetects_and_reads_ref(
     assert titles["results/data.csv"] == "Data"
     assert mock_get_repo.call_args.kwargs["ref"] == "some-branch"
     assert mock_ck_for_ref.call_args.kwargs["ref"] == "some-branch"
+    by_path = {res["path"]: res for res in body}
+    assert by_path["results/summary.json"]["stage"] == "summarize"
+    assert by_path["results/summary.json"]["stage_status"]["status"] == "stale"
+    assert by_path["results/data.csv"]["stage_status"] is None
 
 
 def test_get_project_questions_without_an_index(

@@ -546,7 +546,7 @@ _CALKIT_OWN_FILES = (".gitignore", "README.md", VALUES_FNAME)
 # calkit.sty's commands, each with an optional [...] and its {...} args, of
 # which only \ckvalue has two, so a brace group after another is left alone
 _CK_COMMAND_RE = re.compile(
-    r"\\ck(?P<kind>(?P<value>v)alue|figure|table)"
+    r"\\ck(?P<kind>(?P<value>v)alue|figure|table|include)"
     r"\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
     r"(?(value)\s*\{(?P<second>[^}]*)\})"
 )
@@ -800,6 +800,7 @@ def plan_ck_components(
     is_tracked: Callable[[str], bool] | None = None,
     is_outside: Callable[[str], bool] | None = None,
     previous_values: str = "",
+    link_base: str | None = None,
 ) -> CkMapping:
     """Work out what goes in ``_calkit`` for some components, reading the
     project only through the functions given, so it works wherever its
@@ -808,7 +809,8 @@ def plan_ck_components(
     ``is_file`` says whether a project path is there, ``read_data`` reads a
     results file's data, and ``is_outside`` whether a path is reached
     through a link out of the project. ``is_tracked`` and
-    ``previous_values`` are as for ``map_ck_components``.
+    ``previous_values`` are as for ``map_ck_components``. ``link_base`` is
+    the project's URL on its hub, which components link to in the PDF.
     """
     from calkit.questions import resolve_key
 
@@ -831,6 +833,8 @@ def plan_ck_components(
     files: dict[str, bool] = {}
     problems: list[str] = []
     lines = ["%% Written by Calkit from what the documents here include.\n"]
+    if link_base:
+        lines.append(f"\\cklinkbase{{{link_base}}}\n")
     for c in components:
         if c.kind == "value":
             continue
@@ -987,6 +991,20 @@ def map_ck_components(
             root = os.path.abspath(folder or ".")
             break
         root = parent
+    # Components link to the project on its hub, when calkit.yaml says whose
+    # it is, since a Git remote differs between clones
+    link_base = None
+    try:
+        import calkit.config
+
+        ck_info = calkit.load_calkit_info(wdir=root, read_only=True)
+        if ck_info.get("owner") and ck_info.get("name"):
+            hub = calkit.config.normalize_hub_url(
+                str(ck_info.get("hub") or "calkit.io")
+            )
+            link_base = f"{hub}/{ck_info['owner']}/{ck_info['name']}"
+    except Exception:
+        pass
     if previous_values is None:
         try:
             with open(os.path.join(out, VALUES_FNAME), encoding="utf-8") as f:
@@ -1002,6 +1020,7 @@ def map_ck_components(
             not _within_project(os.path.join(root, rel), root)
         ),
         previous_values=previous_values,
+        link_base=link_base,
     )
     problems = list(plan.problems)
     kept = set(_CALKIT_OWN_FILES) | set(plan.files)
@@ -1018,10 +1037,10 @@ def map_ck_components(
         os.path.join(out, "README.md"),
         "# Don't edit anything here\n\n"
         "Calkit writes this folder from the project, for the documents\n"
-        "beside it to include with `\\ckvalue`, `\\ckfigure`, and\n"
-        "`\\cktable`. It's rewritten whenever the pipeline runs or is\n"
-        "checked and on every Overleaf sync, so edits here are lost and\n"
-        "never reach the project.\n"
+        "beside it to include with `\\ckvalue`, `\\ckfigure`,\n"
+        "`\\cktable`, and `\\ckinclude`. It's rewritten whenever the\n"
+        "pipeline runs or is checked and on every Overleaf sync, so edits\n"
+        "here are lost and never reach the project.\n"
         "To change a value, figure, or table, change where it comes from.\n",
     )
     for rel, here in plan.files.items():
@@ -1104,7 +1123,7 @@ def expand_ck_components(
         if kind == "figure":
             name = posixpath.relpath(rel, doc_dir or ".")
             return f"\\includegraphics[{option or ''}]{{{name}}}"
-        if kind == "table":
+        if kind in ("table", "include"):
             return _read_leniently(os.path.join(data_root, rel)) or ""
         try:
             value = resolve_key(

@@ -245,6 +245,8 @@ def test_build_ck_components(tmp_dir):
             },
             f,
         )
+    with open("results/count.tex", "w") as f:
+        f.write("Trials: 42.\n")
     # The smallest PNG TeX will read: one white pixel
     raw = zlib.compress(b"\x00\xff\xff\xff")
     png = b"\x89PNG\r\n\x1a\n" + b"".join(
@@ -283,6 +285,7 @@ def test_build_ck_components(tmp_dir):
             "\\section{RMSE of \\ckvalue[.2f]{results/metrics.json}{rmse}}\n"
             "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/not-yet.png}\n"
+            "\\ckinclude{results/count}\n"
             "\\end{document}\n"
         )
     # Components can be mapped in without building
@@ -335,6 +338,7 @@ def test_build_ck_components(tmp_dir):
     assert "Label: run a." in text
     # Fixed notation, though the value is written in exponent form
     assert "Tiny: 0.00." in text
+    assert "Trials: 42." in text
     # A bookmark shows the value as it is, rather than the command
     pdf = pypdfium2.PdfDocument("paper/main.pdf")
     try:
@@ -390,6 +394,77 @@ def test_build_ck_components(tmp_dir):
     assert out.returncode == 0, out.stdout
     with open("paper/main.log", errors="replace") as f:
         assert "figures/gone hasn't been brought in yet" in f.read()
+
+    def link_urls(pdf_path: str) -> list[str]:
+        # hyperref's link targets, from wherever pdfTeX put them
+        with open(pdf_path, "rb") as f:
+            data = f.read()
+        chunks = [data]
+        for m in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.S):
+            try:
+                chunks.append(zlib.decompress(m.group(1)))
+            except zlib.error:
+                pass
+        return sorted(
+            u.decode()
+            for chunk in chunks
+            for u in re.findall(rb"/URI\s*\((.*?)\)", chunk)
+        )
+
+    # Components link to the project on its hub only when asked, whether or
+    # not the document loads hyperref itself
+    with open("calkit.yaml", "a") as f:
+        f.write("owner: someone\nname: test\n")
+    with open("figures/other.png", "wb") as f:
+        f.write(png)
+    os.makedirs("tables")
+    with open("tables/float.tex", "w") as f:
+        f.write(
+            "\\begin{table}\\caption{Generated}"
+            "\\begin{tabular}{l}a\\end{tabular}\\end{table}\n"
+        )
+    # So do captions: one in a float with a figure, unless it has several,
+    # and one in a generated table, but not one that's for neither
+    body = (
+        "\\begin{document}\n"
+        "\\ckvalue[.2f]{results/metrics.json}{rmse}\n"
+        "\\begin{figure}\\ckfigure[width=1cm]{figures/plot}"
+        "\\caption{Plot}\\end{figure}\n"
+        "\\begin{figure}\\ckfigure[width=1cm]{figures/plot}"
+        "\\ckfigure{figures/other.png}\\caption{Both}\\end{figure}\n"
+        "\\cktable{tables/float}\n"
+        "\\begin{figure}\\rule{1cm}{1cm}\\caption{Other}\\end{figure}\n"
+        "\\end{document}\n"
+    )
+    preambles = {
+        "unasked": "\\usepackage{calkit}\n\\usepackage{hyperref}\n",
+        "asked": "\\usepackage[links]{calkit}\n",
+        "own": "\\usepackage[links]{calkit}\n\\usepackage[colorlinks]{hyperref}\n",
+        "captions": "\\usepackage[links]{calkit}\n\\usepackage{caption}\n",
+    }
+    urls = {}
+    for name, preamble in preambles.items():
+        with open(f"paper/{name}.tex", "w") as f:
+            f.write("\\documentclass{article}\n" + preamble + body)
+        out = subprocess.run(
+            ["calkit", "latex", "build", f"paper/{name}.tex"],
+            capture_output=True,
+            text=True,
+        )
+        assert out.returncode == 0, out.stderr
+        urls[name] = link_urls(f"paper/{name}.pdf")
+    base = "https://calkit.io/someone/test"
+    assert urls["unasked"] == []
+    assert urls["asked"] == [
+        f"{base}/figures?path=figures/other.png",
+        f"{base}/figures?path=figures/plot.png",
+        f"{base}/figures?path=figures/plot.png",
+        f"{base}/figures?path=figures/plot.png",
+        f"{base}/results?path=results/metrics.json&key=rmse",
+        f"{base}/tables?path=tables/float.tex",
+    ]
+    assert urls["own"] == urls["asked"]
+    assert urls["captions"] == urls["asked"]
 
 
 @skipif_windows_docker

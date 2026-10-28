@@ -632,6 +632,9 @@ def test_post_project_latex_components(
         assert "Calkit project components" in body["style"]
         assert "\\cksetvalue{results/m.json}{x}{n}{1.5}" in body["values"]
         assert "\\cksetfile{figures/plot}{figures/plot.png}" in body["values"]
+        # Components link back to the project here
+        assert "/o/p}" in body["values"]
+        assert "\\cklinkbase{" in body["values"]
         assert body["copies"] == ["figures/plot.png", "figures/stored.png"]
         assert body["problems"] == [
             "figures/missing.png is not in the project yet"

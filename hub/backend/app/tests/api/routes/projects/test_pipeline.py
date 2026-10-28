@@ -276,3 +276,110 @@ def test_map_paths_on_dvc_only_pipeline_and_removal(
         params=dict(stage_name="map-paths-paper", src="x", dest="y"),
     )
     assert resp.status_code == 404
+
+
+def test_post_project_stage_from_script(
+    client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
+) -> None:
+    import base64
+
+    repo, origin = _make_repo(
+        tmp_path,
+        {"name": "p"},
+        files={
+            "paper/paper.tex": "\\documentclass{article}\n",
+            "paper/figures/fit.png": "png",
+            "scripts/old.py": "print(1)\n",
+        },
+    )
+    script = (
+        "import matplotlib.pyplot as plt\n"
+        "import pandas as pd\n"
+        "df = pd.read_csv('data/raw.csv')\n"
+        "fig, ax = plt.subplots()\n"
+        "fig.savefig('figures/fit.png')\n"
+    )
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
+
+    def post(**body):
+        with (
+            patch(
+                "app.api.routes.projects.pipeline.app.projects.get_project",
+                return_value=fake_project,
+            ),
+            patch(
+                "app.api.routes.projects.pipeline.get_repo", return_value=repo
+            ),
+            patch(
+                "app.api.routes.projects.pipeline.app.projects"
+                ".dvc_outputs_from_tree",
+                return_value={},
+            ),
+        ):
+            return client.post(
+                "/projects/o/p/pipeline/stages/from-script",
+                json=body,
+                headers=normal_user_token_headers,
+            )
+
+    upload = dict(
+        script_path="scripts/plot.py",
+        content=base64.b64encode(script.encode()).decode(),
+        shows="paper/figures/fit.png",
+    )
+    # Read, not saved: what it imports, opens, and writes, and that the
+    # paper shows its figure from a copy, with nothing left in the clone
+    resp = post(**upload)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert not data["saved"]
+    assert data["stage_name"] == "plot"
+    assert data["environment_is_new"]
+    assert set(data["dependencies"]) == {"matplotlib", "pandas"}
+    assert data["inputs"] == ["data/raw.csv"]
+    assert data["outputs"] == ["figures/fit.png"]
+    # Nothing has the data the script reads
+    assert data["missing_inputs"] == ["data/raw.csv"]
+    assert data["produces"] == "figures/fit.png"
+    assert data["copy_stage"] == "map-paths-paper"
+    assert data["git_repo_url"] == "https://github.com/o/p"
+    wdir = tmp_path / "repo"
+    assert not (wdir / "scripts" / "plot.py").exists()
+    assert not repo.is_dirty(untracked_files=True)
+    assert repo.git.worktree("list").count("\n") == 0
+    # Saved: the script, its environment, the stage, and the copy, pushed
+    resp = post(**upload, save=True)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["saved"]
+    ck = yaml.safe_load((wdir / "calkit.yaml").read_text())
+    stage = ck["pipeline"]["stages"]["plot"]
+    assert stage["script_path"] == "scripts/plot.py"
+    assert stage["environment"] in ck["environments"]
+    assert ck["pipeline"]["stages"]["map-paths-paper"]["paths"] == [
+        {
+            "kind": "file-to-file",
+            "src": "figures/fit.png",
+            "dest": "paper/figures/fit.png",
+        }
+    ]
+    assert (wdir / "scripts" / "plot.py").read_text() == script
+    assert (wdir / data["environment_spec_path"]).is_file()
+    assert "plot" in yaml.safe_load((wdir / "dvc.yaml").read_text())["stages"]
+    assert not repo.is_dirty(untracked_files=True)
+    assert origin.head.commit.hexsha == repo.head.commit.hexsha
+    # A script already in the project is read where it is, and an output
+    # can be named for what the paper shows
+    resp = post(script_path="scripts/old.py", shows="paper/figures/fit.png")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["produces"] is None
+    resp = post(script_path="scripts/old.py", produces="figures/x.png")
+    assert resp.status_code == 422
+    # Not a script, or not there to read
+    assert post(script_path="paper/paper.tex").status_code == 422
+    assert post(script_path="scripts/gone.py").status_code == 404
+    assert post(script_path="../x.py").status_code == 422

@@ -95,7 +95,7 @@ building a pipeline from scratch.
    number in it that is not traceable to a pipeline output. A finding there
    is a hole you closed by typing rather than by building, so go back to
    step 3 for it. Show the user the rendered sentences
-   (`calkit list questions`) and the built document. Never commit a derived
+   (`calkit show question <n>`) and the built document. Never commit a derived
    output yourself, and never edit a results file by hand.
 
 ## Data a person has to collect

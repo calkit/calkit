@@ -376,110 +376,50 @@ def test_list_presentations(tmp_dir):
 
 
 def test_list_questions(tmp_dir):
+    def ls(*args: str) -> str:
+        return subprocess.check_output(["calkit", "ls", "q", *args], text=True)
+
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(["calkit", "new", "question", "Does it work?"])
     ck_info = calkit.load_calkit_info()
+    ada = {"name": "Ada", "email": "ada@example.org"}
     ck_info["questions"].append(
         {
             "question": "What is the effect?",
             "hypothesis": "It improves performance.",
             "answer": "It improves performance by 10%.",
-            "evidence": [
-                {"kind": "figure", "path": "figures/performance.png"},
-                {
-                    "kind": "result",
-                    "path": "results/metrics.json",
-                    "key": "accuracy",
-                },
-                {
-                    "kind": "publication",
-                    "path": "paper/paper.pdf",
-                    "explanation": "See the results section.",
-                },
-                {
-                    "kind": "result",
-                    "path": "results/metrics.json",
-                    "values": {"acc": "accuracy", "f1": "scores.f1"},
-                },
-            ],
+            "evidence": [{"kind": "figure", "path": "figures/p.png"}],
+            "validations": [{"by": ada, "date": "2026-10-04"}],
         }
     )
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(
-        ["calkit", "list", "questions", "--json"], text=True
-    )
-    questions = json.loads(out)
-    assert questions[0] == "Does it work?"
-    assert questions[1]["question"] == "What is the effect?"
-    assert questions[1]["hypothesis"] == "It improves performance."
-    assert questions[1]["evidence"][2]["kind"] == "publication"
-    assert questions[1]["evidence"][2]["path"] == "paper/paper.pdf"
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "1. Does it work?" in out
-    assert "2. question: What is the effect?" in out
-    assert "hypothesis: It improves performance." in out
-    assert "answer: It improves performance by 10%." in out
-    assert "evidence:" in out
-    assert "- kind: figure" in out
-    assert "path: figures/performance.png" in out
-    assert "- kind: result" in out
-    assert "path: results/metrics.json" in out
-    assert "key: accuracy" in out
-    assert "- kind: publication" in out
-    assert "path: paper/paper.pdf" in out
-    assert "explanation: See the results section." in out
-    # A result's values are listed one per line under it
-    assert (
-        "        values:\n          acc: accuracy\n          f1: scores.f1"
-        in out
-    )
-    # Fields that aren't set aren't listed
-    assert "None" not in out
-    # Subprojects' are listed too, numbered within each, with evidence
-    # read from where they're declared
-    os.makedirs("sub/nested/results")
-    with open("sub/nested/results/m.json", "w") as f:
-        json.dump({"accuracy": 0.9}, f)
+    # One line each, with a dash for what each doesn't have yet
+    assert ls().splitlines() == [
+        "1. - - - -  Does it work?",
+        "2. H A - V  What is the effect?",
+    ]
+    rows = json.loads(ls("--json"))
+    assert rows[0]["question"] == "Does it work?"
+    assert not rows[0]["answered"] and rows[0]["project"] is None
+    assert rows[1]["hypothesis"] and rows[1]["status"] == "missing"
+    assert rows[1]["verification_status"] == "none"
+    assert rows[1]["validation_status"] == "current"
+    # Subprojects' are listed too, numbered within each
+    os.makedirs("sub/nested")
     with open("sub/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {"questions": ["Sub?"], "subprojects": [{"path": "nested"}]}, f
         )
     with open("sub/nested/calkit.yaml", "w") as f:
-        calkit.ryaml.dump(
-            {
-                "questions": [
-                    {
-                        "question": "How accurate?",
-                        "answer": "{acc}",
-                        "evidence": [
-                            {
-                                "kind": "result",
-                                "path": "results/m.json",
-                                "values": {"acc": "accuracy"},
-                            }
-                        ],
-                    }
-                ]
-            },
-            f,
-        )
+        calkit.ryaml.dump({"questions": ["How accurate?"]}, f)
     ck_info["subprojects"] = [{"path": "sub"}]
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "1. Does it work?" in out
-    assert "sub: 1. Sub?" in out
-    assert "sub/nested: 1. question: How accurate?" in out
-    assert "answer: 0.9" in out
-    out = subprocess.check_output(
-        ["calkit", "list", "questions", "--json"], text=True
-    )
-    questions = json.loads(out)
-    assert questions[0] == "Does it work?"
-    assert questions[2] == {"project": "sub", "question": "Sub?"}
-    assert questions[3]["project"] == "sub/nested"
-    assert questions[3]["answer"] == "0.9"
+    lines = ls().splitlines()
+    assert "sub: 1. - - - -  Sub?" in lines
+    assert "sub/nested: 1. - - - -  How accurate?" in lines
+    assert json.loads(ls("--json"))[-1]["project"] == "sub/nested"
 
 
 def test_list_comments(tmp_dir):
@@ -609,3 +549,54 @@ def test_list_objects_json(tmp_dir):
     assert "uv" in by_name
     assert "unix" in by_name["uv"]["scripts"]
     assert "rustup" in by_name["cargo"]["aliases"]
+
+
+def test_list_tables(tmp_dir):
+    import git
+
+    git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    with open("results/kernels.csv", "w") as f:
+        f.write(
+            "kernel,registers_baseline,registers_mod\nmicrophysics,255,153\n"
+        )
+    with open("results/summary.json", "w") as f:
+        f.write("{}")
+    ck_info = {
+        "tables": [
+            {"path": "results/kernels.csv", "title": "Kernel resources"}
+        ],
+        "pipeline": {
+            "stages": {
+                "export": {
+                    "kind": "shell-command",
+                    "command": "echo hi",
+                    "outputs": ["results/kernels.csv"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(
+        ["calkit", "list", "tables", "--json"], text=True
+    )
+    tables = {t["path"]: t for t in json.loads(out)}
+    assert tables["results/kernels.csv"]["title"] == "Kernel resources"
+    assert tables["results/kernels.csv"]["stages"] == ["export"]
+    assert "results/summary.json" not in tables
+    # The column names can be read from the header, which is how a
+    # listing shows which table holds what
+    out = subprocess.check_output(
+        ["calkit", "list", "tables", "--columns", "--json"], text=True
+    )
+    tables = {t["path"]: t for t in json.loads(out)}
+    assert tables["results/kernels.csv"]["columns"] == [
+        "kernel",
+        "registers_baseline",
+        "registers_mod",
+    ]
+    # Human-readable output names the path and its title
+    out = subprocess.check_output(["calkit", "list", "tables"], text=True)
+    assert "results/kernels.csv" in out
+    assert "Kernel resources" in out

@@ -520,8 +520,10 @@ def test_align_rendered_paragraphs() -> None:
         methods + 1,
     ]
     prose = by_line[at("We simulate")].text
-    assert prose.startswith("We simulate the wake with Wake Sim")
-    assert prose.endswith("of the turbulent kinetic energy .")
+    assert prose == (
+        "We simulate the wake with Wake–Sim, which resolves 95% of the "
+        "turbulent kinetic energy ."
+    )
     assert "Time per molecule" in by_line[at(r"\begin{tabular}")].text
     # A later definition wins, except by \providecommand, and expanding
     # keeps an empty group ending a command
@@ -576,3 +578,53 @@ def test_align_rendered_paragraphs() -> None:
         "Combining (A.5) and (A.6), we get:"
     )
     assert not calkit.latex.equation_fragment("Actuator disk model (k=0.04)")
+
+
+def test_detex() -> None:
+    macros = {"ppt": r"\text{\textperthousand}\xspace"}
+    # Symbols print as themselves, a command word skipping the space after
+    # it, and \xspace adding none before punctuation
+    cases = {
+        r"a 5\ppt shift and 2\ppt.": "a 5‰ shift and 2‰.",
+        r"error (\ppt) of 3 \ppt": "error (‰) of 3 ‰",
+        r"4\textperthousand of": "4‰of",
+        r"95\% of \$5 \& more": "95% of $5 & more",
+        r"Born--Oppenheimer and---so": "Born–Oppenheimer and—so",
+        r"1--2": "1–2",
+        r"``quoted''": "“quoted”",
+        # Chemistry, quantities, and styled text without spaces around it
+        r"\ce{^{2}H}-labeled \ce{CO2}": "2H-labeled CO2",
+        r"at \SI{20}{\kelvin}, \si{\milli\second}": "at 20 K, ms",
+        r"\SIrange{10}{50}{\kelvin}": "10 K to 50 K",
+        r"an \textit{ad}-hoc fit": "an ad-hoc fit",
+        r"\emph{\textbf{bold}}-ish": "bold-ish",
+        r"Schr\"odinger and Erd\H{o}s": "Schrödinger and Erdős",
+        r"see \href{https://x.org}{the site}": "see the site",
+    }
+    for src, text in cases.items():
+        assert (
+            calkit.latex.detex(calkit.latex.expand_macros(src, macros)) == text
+        )
+    # References and citations, whose text isn't known, can be marked
+    ref, cite = calkit.latex.REF_MARK, calkit.latex.CITE_MARK
+    src = r"Eq.~\eqref{eq:a} in \ref{sec:b}, as before \citep[e.g.,][]{x}."
+    assert calkit.latex.detex(src, marks=True) == (
+        f"Eq. ({ref}) in {ref}, as before {cite}."
+    )
+    assert calkit.latex.detex(src) == "Eq. in , as before ."
+    # A textual citation is marked apart, other citation commands too, and
+    # a comment takes its line's end with it
+    text_cite = calkit.latex.TEXT_CITE_MARK
+    assert calkit.latex.detex(
+        r"\citet{a} and \textcite{b} with \parencite[p.~2]{c}", marks=True
+    ) == (f"{text_cite} and {text_cite} with {cite}")
+    assert calkit.latex.detex("the ratio%\n  ed%\n, so") == "the ratioed, so"
+    # Math reads with Greek letters and operator names as themselves
+    assert calkit.latex.get_math_text(r"\mathbf{u}_\text{ref}") == "u ref"
+    assert calkit.latex.get_math_text(r"\Delta\ln p + \hbar\omega_k") == (
+        "Δ ln p + ℏω k"
+    )
+    assert calkit.latex.get_math_text(r"\lambda L_{\max}") == "λ L max"
+    assert calkit.latex.get_math_text(r"\arccos x + \liminf_n a") == (
+        "arccos x + liminf n a"
+    )

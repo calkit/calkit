@@ -303,19 +303,15 @@ def get_config_yaml_fpath() -> str:
 _secret_cache: dict[tuple[str, str], str | None] = {}
 
 
-# On macOS, the keychain trusts whichever program reads or writes an
-# item, and for Calkit that was the Python interpreter, which differs
-# between installs, Python versions, and patch releases. Each write also
-# resets an item's partition list to the writer alone, so a token refresh
-# by one install made every other one ask again, or hang waiting on a
-# dialog when nobody was there to answer it. Apple's own security tool
-# does the reading and writing instead, so the program the keychain
-# trusts stays the same. The cost is that any program running as the
-# user can read these items without asking by running that tool, which
-# it already could by running a trusted Python interpreter.
+# On macOS, Apple's security tool reads and writes Calkit's items, since
+# the keychain trusts only the program that last wrote one, and Python
+# differs between installs and versions; any program running as the user
+# can read them through the tool, as through a trusted Python before
 _SECURITY = "/usr/bin/security"
-# Marks the items Calkit wrote through the security tool
+# Mark the items Calkit wrote through the security tool, the second for
+# values stored as hex, since the tool reads others back as hex anyway
 _SECURITY_CREATOR = "ckit"
+_SECURITY_HEX_CREATOR = "ckhx"
 # A keychain call takes milliseconds, so one still running after this is
 # waiting on a dialog
 _SECURITY_TIMEOUT = 15
@@ -378,37 +374,63 @@ def _security_item(service: str, username: str) -> str | None:
     return found.stdout
 
 
-def _is_calkit_item(attrs: str) -> bool:
-    return f'"crtr"<uint32>="{_SECURITY_CREATOR}"' in attrs
+def _get_creator(attrs: str) -> str | None:
+    """Return which of Calkit's creator codes an item has, if any."""
+    for creator in (_SECURITY_CREATOR, _SECURITY_HEX_CREATOR):
+        if f'"crtr"<uint32>="{creator}"' in attrs:
+            return creator
+    return None
+
+
+def _delete_old_macos_secret(service: str, username: str) -> None:
+    """Delete an item an older Calkit wrote, in-process first, since this
+    Python may be trusted with it and the security tool isn't.
+    """
+    try:
+        with _keychain_ui(False):
+            keyring.delete_password(service, username)
+        return
+    except keyring.errors.KeyringError:
+        pass
+    if not _has_terminal():
+        raise keyring.errors.KeyringLocked(
+            f"Changing '{username}' in the macOS keychain needs a dialog to "
+            "allow access, and with no terminal attached, nobody may be "
+            "there to answer it; run 'calkit config list' in a terminal "
+            "and allow access"
+        )
+    deleted = _run_security(
+        ["delete-generic-password", "-s", service, "-a", username]
+    )
+    if deleted.returncode not in (0, _SECURITY_ITEM_NOT_FOUND):
+        raise keyring.errors.PasswordDeleteError(
+            f"Can't delete old password in keychain: {deleted.stderr.strip()}"
+        )
 
 
 def _set_macos_secret(service: str, username: str, value: str) -> bool:
-    """Store a secret through the security tool, returning ``False`` if it
-    can't hold this value, which it would read back as hex if it isn't
-    printable ASCII, or reject if its command line is over 4 KiB.
+    """Store a secret through the security tool, returning ``False`` if its
+    command line would be over the 4 KiB it reads.
     """
 
     def quote(s: str) -> str:
         return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
+    creator, stored = _SECURITY_CREATOR, value
+    if not (value.isascii() and value.isprintable()):
+        creator, stored = _SECURITY_HEX_CREATOR, value.encode("utf-8").hex()
     # On stdin rather than in the arguments, which other users can see
     command = (
-        f"add-generic-password -U -c {_SECURITY_CREATOR} "
-        f"-s {quote(service)} -a {quote(username)} -w {quote(value)}\n"
+        f"add-generic-password -U -c {creator} "
+        f"-s {quote(service)} -a {quote(username)} -w {quote(stored)}\n"
     )
-    if not (value.isascii() and value.isprintable()) or len(command) > 4000:
+    if len(command) > 4000:
         return False
     attrs = _security_item(service, username)
-    if attrs is not None and not _is_calkit_item(attrs):
+    if attrs is not None and _get_creator(attrs) is None:
         # Updating an item keeps who may read it, which doesn't include
         # the security tool, so replace it instead
-        deleted = _run_security(
-            ["delete-generic-password", "-s", service, "-a", username]
-        )
-        if deleted.returncode not in (0, _SECURITY_ITEM_NOT_FOUND):
-            raise keyring.errors.PasswordSetError(
-                f"Can't replace password on keychain: {deleted.stderr.strip()}"
-            )
+        _delete_old_macos_secret(service, username)
     added = _run_security(["-i"], input=command)
     if added.returncode != 0:
         raise keyring.errors.PasswordSetError(
@@ -439,11 +461,39 @@ def _keychain_ui(allowed: bool) -> Iterator[None]:
         sec.SecKeychainSetUserInteractionAllowed(before.value)
 
 
+# Whether the user agreed to macOS asking to read older Calkit items,
+# asked once per process
+_old_items_allowed: bool | None = None
+
+
+def _allow_old_items() -> bool:
+    """Ask, in Calkit's words, before macOS asks to let this Python read
+    items an older Calkit wrote, since its dialog names Python.
+    """
+    global _old_items_allowed
+    if _old_items_allowed is None:
+        import sys
+
+        import typer
+
+        python = os.path.basename(os.path.realpath(sys.executable))
+        _old_items_allowed = typer.confirm(
+            "Calkit needs to open your keychain to move logins an older "
+            "version saved there, after which no Calkit install asks "
+            f"again. macOS will ask whether '{python}', which runs Calkit, "
+            "may use your keychain. Continue?",
+            default=True,
+            err=True,
+        )
+    return _old_items_allowed
+
+
 def _get_macos_secret(service: str, username: str) -> str | None:
     attrs = _security_item(service, username)
     if attrs is None:
         return None
-    if _is_calkit_item(attrs):
+    creator = _get_creator(attrs)
+    if creator is not None:
         found = _run_security(
             ["find-generic-password", "-s", service, "-a", username, "-w"]
         )
@@ -453,24 +503,30 @@ def _get_macos_secret(service: str, username: str) -> str | None:
             raise keyring.errors.KeyringError(
                 f"Can't get password from keychain: {found.stderr.strip()}"
             )
-        return found.stdout.removesuffix("\n")
+        stored = found.stdout.removesuffix("\n")
+        if creator == _SECURITY_HEX_CREATOR:
+            return bytes.fromhex(stored).decode("utf-8")
+        return stored
     # Written by an older Calkit, so only the interpreters it trusts can
-    # read it without asking, and with no one to ask, fail rather than
-    # wait on a dialog
-    interactive = _has_terminal()
+    # read it without a dialog, which is tried first
     try:
-        with _keychain_ui(interactive):
+        with _keychain_ui(False):
             value = keyring.get_password(service, username)
     except keyring.errors.KeyringError as e:
-        if interactive:
-            raise
-        raise keyring.errors.KeyringLocked(
-            f"Reading '{username}' from the macOS keychain needs a dialog "
-            "to allow access, and with no terminal attached, nobody may be "
-            "there to answer it; run the command again from a terminal and "
-            "allow access, after which every Calkit install can read it "
-            "without asking"
-        ) from e
+        if not _has_terminal():
+            raise keyring.errors.KeyringLocked(
+                f"Reading '{username}' from the macOS keychain needs a "
+                "dialog to allow access, and with no terminal attached, "
+                "nobody may be there to answer it; run 'calkit config list' "
+                "in a terminal and allow access, after which every Calkit "
+                "install can read it without asking"
+            ) from e
+        if not _allow_old_items():
+            raise keyring.errors.KeyringLocked(
+                f"Not allowed to read '{username}' from the macOS keychain"
+            ) from e
+        with _keychain_ui(True):
+            value = keyring.get_password(service, username)
     if value is not None:
         # Move it over so other installs can read it too
         try:
@@ -521,6 +577,10 @@ def delete_secret(key: str) -> None:
     with _keyring_home():
         if not _uses_security_tool():
             keyring.delete_password(service_name, username)
+            return
+        attrs = _security_item(service_name, username)
+        if attrs is not None and _get_creator(attrs) is None:
+            _delete_old_macos_secret(service_name, username)
             return
         deleted = _run_security(
             ["delete-generic-password", "-s", service_name, "-a", username]
@@ -711,7 +771,9 @@ class Settings(BaseSettings):
         fpath = get_config_yaml_fpath()
         base_dir = os.path.dirname(fpath)
         os.makedirs(base_dir, exist_ok=True)
-        cfg = self.model_dump()
+        # Without reading secrets nothing asked for, which can mean a
+        # keychain dialog, since an unread one hasn't changed
+        cfg = super().model_dump()
         # Remove anything that should be in the keyring; hub-scoped
         # credentials get hub-namespaced usernames via set/delete_secret
         if supports_keyring():
@@ -720,6 +782,11 @@ class Settings(BaseSettings):
                     KeyringOptionalSecret in get_type_args(value.annotation)
                 ) and key in cfg:
                     secret_val = cfg.pop(key)
+                    if (
+                        secret_val is None
+                        and key not in self._resolved_secrets
+                    ):
+                        continue
                     # Only what changed, so a token refresh leaves the
                     # others, and who may read them, alone
                     stored = (get_app_name(), _keyring_username(key))

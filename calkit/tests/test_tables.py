@@ -74,6 +74,18 @@ def test_read_table(tmp_dir):
         "rows"
     ][:1] + [["set_cloud_fraction", "38", "38", "75.0"]]
     assert len(calkit.tables.read_table("kernels.csv", tail=1)["rows"]) == 1
+    assert calkit.tables.read_table("kernels.csv", tail=0)["rows"] == []
+    table = calkit.tables.read_table("kernels.csv", rows="-2")
+    assert [row[0] for row in table["rows"]] == [
+        "set_microphysics",
+        "set_cloud_fraction",
+    ]
+    # A blank cell doesn't match a numeric filter rather than failing it
+    with open("gaps.csv", "w") as f:
+        f.write("kernel,speed\na,10\nb,\nc,2\n")
+    table = calkit.tables.read_table("gaps.csv", filters=["speed>5"])
+    assert [row[0] for row in table["rows"]] == ["a"]
+    assert calkit.tables.read_columns("gaps.csv") == ["kernel", "speed"]
     # Tab-separated text is read the same way, and a short row is padded
     # rather than dropped
     with open("kernels.tsv", "w") as f:
@@ -97,6 +109,8 @@ def test_list_tables(tmp_dir):
         f.write("{}")
     with open("notes.txt", "w") as f:
         f.write("not a table\n")
+    with open("results/case-a.csv", "w") as f:
+        f.write("a,b\n1,2\n")
     ck_info = {
         "tables": [
             {
@@ -117,6 +131,14 @@ def test_list_tables(tmp_dir):
                     "command": "echo hi",
                     "outputs": ["results/missing.csv"],
                 },
+                "per-case": {
+                    "kind": "shell-command",
+                    "command": "echo {case}",
+                    "iterate_over": [
+                        {"arg_name": "case", "values": ["a", "b"]}
+                    ],
+                    "outputs": ["results/case-{case}.csv"],
+                },
             }
         },
     }
@@ -133,6 +155,10 @@ def test_list_tables(tmp_dir):
     assert tables["results/missing.csv"]["exists"] is False
     assert "results/summary.json" not in tables
     assert "notes.txt" not in tables
+    # An iterated stage's output is matched to what each iteration writes
+    # rather than listed as its template
+    assert tables["results/case-a.csv"]["stages"] == ["per-case"]
+    assert not any("{" in path for path in tables)
     declared = calkit.tables.list_tables(declared_only=True)
     assert [t["path"] for t in declared] == ["results/kernels.csv"]
     # A tabular file that isn't declared anywhere is still detected

@@ -5,7 +5,7 @@ import os
 import posixpath
 import re
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -3289,10 +3289,13 @@ def stages_by_output(
     Keyed the way the paths are written in ``calkit.yaml``, relative to the
     project, with each stage's own ``wdir`` folded in. Subprojects' stages
     are included under their qualified names, as ``calkit status`` names
-    them.
+    them. An iterated stage's outputs are keyed by their templates, e.g.,
+    ``results/{case}.csv``.
     """
+    base = os.path.normpath(wdir) if wdir else "."
     out: dict[str, list[str]] = {}
     for project_wdir, info in calkit.iter_projects(ck_info=ck_info, wdir=wdir):
+        project = Path(os.path.relpath(project_wdir, base)).as_posix()
         stages = ((info.get("pipeline") or {}).get("stages") or {}).items()
         for name, stage in stages:
             if not isinstance(stage, dict):
@@ -3303,16 +3306,59 @@ def stages_by_output(
             ]
             paths += get_map_paths_outputs(stage)
             prefix = posixpath.join(
-                "" if project_wdir == "." else project_wdir,
-                stage.get("wdir") or "",
+                "" if project == "." else project, stage.get("wdir") or ""
             )
             for path in paths:
                 if not isinstance(path, str) or not path:
                     continue
                 full = posixpath.normpath(posixpath.join(prefix, path))
-                qualified = calkit.qualify_with_project(project_wdir, name)
+                qualified = calkit.qualify_with_project(project, name)
                 out.setdefault(full, []).append(qualified)
     return out
+
+
+def list_artifacts(
+    kind: str,
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    declared_only: bool = False,
+    status: bool = False,
+    pending_extensions: Iterable[str] | None = None,
+) -> list[dict]:
+    """The project's artifacts of one kind, declared then auto-detected.
+
+    Detection only finds files that exist, so with ``pending_extensions``,
+    pipeline outputs of those types that haven't been written yet are
+    listed too. Each entry is annotated as by ``annotate_artifacts``.
+    """
+    import calkit.detect
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    declared = [o for o in ck_info.get(kind) or [] if isinstance(o, dict)]
+    entries = [{**o, "detected": False} for o in declared]
+    if not declared_only:
+        listed = {o.get("path") for o in declared}
+        found = calkit.detect.detect_project_artifacts(
+            wdir=wdir, ck_info=ck_info
+        )
+        for path in found.get(kind, []):
+            if path not in listed:
+                entries.append({"path": path, "detected": True})
+                listed.add(path)
+        extensions = set(pending_extensions or [])
+        by_output = stages_by_output(ck_info=ck_info, wdir=wdir)
+        for path in sorted(by_output) if extensions else []:
+            # A template stands for files only the stage's run names
+            if (
+                path not in listed
+                and "{" not in path
+                and os.path.splitext(path)[1].lower() in extensions
+            ):
+                entries.append({"path": path, "detected": True})
+    return annotate_artifacts(
+        entries, ck_info=ck_info, wdir=wdir, status=status
+    )
 
 
 # A pipeline artifact's status, worst first, so one written by more than
@@ -3334,6 +3380,18 @@ def annotate_artifacts(
     """
     root = wdir or os.getcwd()
     by_output = stages_by_output(ck_info=ck_info, wdir=wdir)
+    # An iterated stage's output template matches what each iteration
+    # writes, the way preprocessing matches it
+    templates = [
+        (
+            re.compile(
+                re.sub(r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)) + r"\Z"
+            ),
+            stages,
+        )
+        for path, stages in by_output.items()
+        if "{" in path
+    ]
     stale: set[str] = set()
     if status:
         # The same prep 'calkit status' does, since compiling the pipeline
@@ -3341,11 +3399,16 @@ def annotate_artifacts(
         state = get_status(ck_info=ck_info, wdir=wdir)
         if state.errors:
             raise RuntimeError("; ".join(state.errors))
-        stale = set(state.stale_stage_names)
+        # Iterations are named 'stage@item', and an output is matched to
+        # its stage rather than to one iteration
+        stale = {n.split("@")[0] for n in state.stale_stage_names}
     for artifact in artifacts:
         path = artifact.get("path") or ""
-        artifact["exists"] = os.path.isfile(os.path.join(root, path))
-        stages = by_output.get(path, [])
+        artifact["exists"] = os.path.exists(os.path.join(root, path))
+        stages = list(by_output.get(path, []))
+        for pattern, names in templates:
+            if pattern.match(path):
+                stages += [n for n in names if n not in stages]
         if stages:
             artifact["stages"] = stages
         if not status:
@@ -3385,9 +3448,10 @@ def read_artifact_at_ref(
     blob = calkit.git.read_at_ref(repo, ref, rel)
     if blob is not None:
         return blob
+    lock, _ = _lock_stages_at_ref(repo, ref, wdir)
     recorded = {
         out.get("md5")
-        for stage in calkit.dvc.read_lock_stages_at_ref(ref, wdir).values()
+        for stage in lock.values()
         for out in stage.get("outs") or []
         if isinstance(out, dict) and out.get("path") == rel and out.get("md5")
     }
@@ -3432,14 +3496,16 @@ def artifact_status_at_ref(
     that ref nor produced by another stage.
     """
     import hashlib
-    import io
 
-    import calkit.dvc
     import calkit.git
+
+    def blob_md5(dep_path: str) -> str | None:
+        blob = calkit.git.read_at_ref(repo, ref, dep_path)
+        return None if blob is None else hashlib.md5(blob).hexdigest()
 
     repo = calkit.git.get_repo()
     rel = _repo_relpath(repo, path, wdir)
-    lock = calkit.dvc.read_lock_stages_at_ref(ref, wdir)
+    lock, defined = _lock_stages_at_ref(repo, ref, wdir)
     produced: dict[str, set[str]] = {}
     for stage in lock.values():
         for out in stage.get("outs") or []:
@@ -3458,22 +3524,11 @@ def artifact_status_at_ref(
         }
     # What dvc.yaml declares there, so a stage whose definition moved on
     # without being re-run is stale even with every input untouched
-    declared: dict[str, Any] = {}
-    yaml_blob = calkit.git.read_at_ref(
-        repo, ref, _repo_relpath(repo, "dvc.yaml", wdir)
-    )
-    if yaml_blob is not None:
-        compiled = calkit.ryaml.load(io.StringIO(yaml_blob.decode())) or {}
-        declared = {
-            name: stage.get("cmd")
-            for name, stage in (compiled.get("stages") or {}).items()
-            if isinstance(stage, dict)
-        }
-
-    def blob_md5(dep_path: str) -> str | None:
-        blob = calkit.git.read_at_ref(repo, ref, dep_path)
-        return None if blob is None else hashlib.md5(blob).hexdigest()
-
+    declared = {
+        name: stage.get("cmd")
+        for name, stage in defined.items()
+        if isinstance(stage, dict)
+    }
     reasons: list[str] = []
     unverifiable = 0
     for name in stages:
@@ -3514,6 +3569,59 @@ def artifact_status_at_ref(
         "reasons": reasons,
         "unverifiable": unverifiable,
     }
+
+
+def _lock_stages_at_ref(
+    repo: Any, ref: str, wdir: str | None
+) -> tuple[dict[str, dict], dict[str, Any]]:
+    """``dvc.lock``'s stages at a ref with repo-relative paths, and
+    ``dvc.yaml``'s.
+
+    A lock records paths relative to its stage's ``wdir``, which only
+    ``dvc.yaml`` says.
+    """
+    import io
+
+    import calkit.dvc
+    import calkit.git
+
+    def rebase(entries: Any, base: str) -> list:
+        return [
+            {**e, "path": posixpath.normpath(posixpath.join(base, e["path"]))}
+            if isinstance(e, dict) and isinstance(e.get("path"), str)
+            else e
+            for e in entries or []
+        ]
+
+    project = _repo_relpath(repo, ".", wdir)
+    defined: dict[str, Any] = {}
+    blob = calkit.git.read_at_ref(
+        repo, ref, _repo_relpath(repo, "dvc.yaml", wdir)
+    )
+    if blob is not None:
+        compiled = calkit.ryaml.load(io.StringIO(blob.decode())) or {}
+        if isinstance(compiled, dict):
+            defined = dict(compiled.get("stages") or {})
+    stages: dict[str, dict] = {}
+    for name, stage in calkit.dvc.read_lock_stages_at_ref(ref, wdir).items():
+        if not isinstance(stage, dict):
+            continue
+        # An iteration, 'stage@item', is defined under 'do' of its stage
+        definition = defined.get(str(name).split("@")[0])
+        if isinstance(definition, dict) and isinstance(
+            definition.get("do"), dict
+        ):
+            definition = definition["do"]
+        stage_wdir = (
+            definition.get("wdir") if isinstance(definition, dict) else None
+        )
+        base = posixpath.join(project, str(stage_wdir or ""))
+        stages[name] = {
+            **stage,
+            "deps": rebase(stage.get("deps"), base),
+            "outs": rebase(stage.get("outs"), base),
+        }
+    return stages, defined
 
 
 def _repo_relpath(repo: Any, path: str, wdir: str | None) -> str:

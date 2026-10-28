@@ -85,8 +85,12 @@ def test_list_results(tmp_dir):
         f.write("a = 1\n")
     with open("results/kernels.csv", "w") as f:
         f.write("a,b\n1,2\n")
+    os.makedirs("results/runs")
     ck_info = {
-        "results": [{"path": "results/summary.json", "title": "Run summary"}],
+        "results": [
+            {"path": "results/summary.json", "title": "Run summary"},
+            {"path": "results/runs"},
+        ],
         "pipeline": {
             "stages": {
                 "summarize": {
@@ -113,3 +117,5 @@ def test_list_results(tmp_dir):
     assert results["results/not-yet.json"]["exists"] is False
     # A tabular result is listed here as well as under tables
     assert results["results/kernels.csv"]["detected"] is True
+    # A directory result exists too
+    assert results["results/runs"]["exists"] is True

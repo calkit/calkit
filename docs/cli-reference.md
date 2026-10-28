@@ -2472,17 +2472,17 @@ Arguments:
 
 Options:
 
-| Option           | Type    | Required | Default | Description                                                                                                                                     |
-| ---------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--column`, `-c` | str     | no       |         | Only show these columns, in this order. Can be a glob, e.g., `*_mod`, and can be given more than once.                                          |
-| `--filter`, `-f` | str     | no       |         | Only show rows matching COLUMN=VALUE, COLUMN~TEXT (contains, ignoring case), or COLUMN>NUMBER. Can be given more than once, and all must match. |
-| `--rows`, `-r`   | str     | no       |         | Only show these rows, 1-based, e.g., '1-20', '5,9', '40-'.                                                                                      |
-| `--head`, `-n`   | int     | no       |         | Only show the first N rows.                                                                                                                     |
-| `--tail`         | int     | no       |         | Only show the last N rows.                                                                                                                      |
-| `--git-ref`      | str     | no       |         | Show the table as of this Git branch, tag, or commit instead of the working tree.                                                               |
-| `--status`, `-s` | boolean | no       | False   | Also say whether the table is up to date.                                                                                                       |
-| `--vscode`       | boolean | no       | False   | Open the table in VS Code instead of printing it.                                                                                               |
-| `--engine`       | str     | no       |         | Dataframe engine for formats the standard library can't read, e.g., Parquet. Defaults to the configured one.                                    |
+| Option           | Type      | Required | Default | Description                                                                                                                                     |
+| ---------------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--column`, `-c` | str       | no       |         | Only show these columns, in this order. Can be a glob, e.g., `*_mod`, and can be given more than once.                                          |
+| `--filter`, `-f` | str       | no       |         | Only show rows matching COLUMN=VALUE, COLUMN~TEXT (contains, ignoring case), or COLUMN>NUMBER. Can be given more than once, and all must match. |
+| `--rows`, `-r`   | str       | no       |         | Only show these rows, 1-based, e.g., '1-20', '5,9', '40-'.                                                                                      |
+| `--head`, `-n`   | int range | no       |         | Only show the first N rows.                                                                                                                     |
+| `--tail`         | int range | no       |         | Only show the last N rows.                                                                                                                      |
+| `--git-ref`      | str       | no       |         | Show the table as of this Git branch, tag, or commit instead of the working tree.                                                               |
+| `--status`, `-s` | boolean   | no       | False   | Also say whether the table is up to date.                                                                                                       |
+| `--vscode`       | boolean   | no       | False   | Open the table in VS Code instead of printing it.                                                                                               |
+| `--engine`       | str       | no       |         | Dataframe engine for formats the standard library can't read, e.g., Parquet. Defaults to the configured one.                                    |
 
 <a id="subcommand-show-result-res"></a>
 

@@ -130,11 +130,13 @@ def show_table(
     ] = None,
     head: Annotated[
         int | None,
-        typer.Option("--head", "-n", help="Only show the first N rows."),
+        typer.Option(
+            "--head", "-n", min=0, help="Only show the first N rows."
+        ),
     ] = None,
     tail: Annotated[
         int | None,
-        typer.Option("--tail", help="Only show the last N rows."),
+        typer.Option("--tail", min=0, help="Only show the last N rows."),
     ] = None,
     git_ref: Annotated[
         str | None,
@@ -214,24 +216,62 @@ def show_table(
         )
     except (ValueError, ImportError) as e:
         raise_error(str(e))
-    _echo_table(path, table, git_ref)
+    from rich import box
+    from rich.console import Console
+    from rich.markup import escape
+    from rich.table import Table
+
+    names, values = table["columns"], table["rows"]
+    # Named on its own line rather than as the table's title, which a
+    # narrow table wraps a character at a time
+    typer.echo(path + (f" @ {git_ref}" if git_ref else ""))
+    rendered = Table(header_style="bold", box=box.SIMPLE, pad_edge=False)
+    for i, name in enumerate(names):
+        # Right-align a column whose every value is a number, so figures
+        # line up on the decimal point
+        filled = [row[i] for row in values if row[i] != ""]
+        numeric = bool(filled) and all(_is_number(v) for v in filled)
+        # Escaped so text in brackets, e.g., units, isn't read as markup
+        rendered.add_column(
+            escape(name), justify="right" if numeric else "left"
+        )
+    for row in values:
+        rendered.add_row(*(escape(v) for v in row))
+    console = Console()
+    squeezed = console.measure(rendered).maximum > console.width
+    console.print(rendered)
+    shown = len(values)
+    matching, total = table["n_rows_matching"], table["n_rows"]
+    if shown != total:
+        line = f"{shown} of {total} rows"
+        if matching != total:
+            line += f", {matching} matching the filter"
+        typer.echo(line)
+    if squeezed:
+        typer.echo(
+            f"{len(names)} columns don't fit; name the ones you want with "
+            "-c, which takes globs, e.g., -c '*_mod'"
+        )
 
 
-def _echo_artifact_status(path: str, git_ref: str | None) -> None:
+def _echo_artifact_status(
+    path: str, git_ref: str | None, err: bool = False
+) -> None:
+    # Written to stderr when stdout is for machine-readable output
     import calkit.pipeline
 
     if git_ref is not None:
         try:
             state = calkit.pipeline.artifact_status_at_ref(path, git_ref)
         except FileNotFoundError as e:
-            warn(str(e))
+            warn(str(e), err=err)
             return
         line = f"{state['status']} at {git_ref}"
         if state["unverifiable"]:
             line += f" ({state['unverifiable']} input(s) not checkable)"
-        typer.echo(line)
+        typer.echo(line, err=err)
         for reason in state["reasons"]:
-            typer.echo(f"  {reason}")
+            typer.echo(f"  {reason}", err=err)
         return
     norm = Path(os.path.normpath(path)).as_posix()
     try:
@@ -239,10 +279,13 @@ def _echo_artifact_status(path: str, git_ref: str | None) -> None:
             [{"path": norm}], status=True
         )[0]
     except RuntimeError as e:
-        warn(f"Failed to determine status: {e}")
+        warn(f"Failed to determine status: {e}", err=err)
         return
     stages = ", ".join(annotated.get("stages") or [])
-    typer.echo(annotated["status"] + (f" (stage: {stages})" if stages else ""))
+    typer.echo(
+        annotated["status"] + (f" (stage: {stages})" if stages else ""),
+        err=err,
+    )
 
 
 def _open_in_vscode(
@@ -269,41 +312,6 @@ def _open_in_vscode(
         with open(target, "wb") as f:
             f.write(content)
     subprocess.call([code, target])
-
-
-def _echo_table(path: str, table: dict, git_ref: str | None) -> None:
-    from rich import box
-    from rich.console import Console
-    from rich.table import Table
-
-    columns, rows = table["columns"], table["rows"]
-    # Named on its own line rather than as the table's title, which a
-    # narrow table wraps a character at a time
-    typer.echo(path + (f" @ {git_ref}" if git_ref else ""))
-    rendered = Table(header_style="bold", box=box.SIMPLE, pad_edge=False)
-    for i, column in enumerate(columns):
-        # Right-align a column whose every value is a number, so figures
-        # line up on the decimal point
-        values = [row[i] for row in rows if row[i] != ""]
-        numeric = bool(values) and all(_is_number(v) for v in values)
-        rendered.add_column(column, justify="right" if numeric else "left")
-    for row in rows:
-        rendered.add_row(*row)
-    console = Console()
-    squeezed = console.measure(rendered).maximum > console.width
-    console.print(rendered)
-    shown = len(rows)
-    matching, total = table["n_rows_matching"], table["n_rows"]
-    if shown != total:
-        line = f"{shown} of {total} rows"
-        if matching != total:
-            line += f", {matching} matching the filter"
-        typer.echo(line)
-    if squeezed:
-        typer.echo(
-            f"{len(columns)} columns don't fit; name the ones you want with "
-            "-c, which takes globs, e.g., -c '*_mod'"
-        )
 
 
 def _is_number(value: str) -> bool:
@@ -385,7 +393,7 @@ def show_result(
             "project has"
         )
     if status:
-        _echo_artifact_status(path, git_ref)
+        _echo_artifact_status(path, git_ref, err=json_output)
     if vscode:
         _open_in_vscode(path, git_ref, content)
         return
@@ -404,27 +412,20 @@ def show_result(
     if json_output:
         echo_json(result["items"])
         return
-    _echo_result(path, result, git_ref)
-
-
-def _echo_result(path: str, result: dict, git_ref: str | None) -> None:
     from rich import box
     from rich.console import Console
+    from rich.markup import escape
     from rich.table import Table
 
     typer.echo(path + (f" @ {git_ref}" if git_ref else ""))
     rendered = Table(header_style="bold", box=box.SIMPLE, pad_edge=False)
     rendered.add_column("key")
-    rendered.add_column(
-        "value",
-        justify="right"
-        if all(
-            _is_number(item["value"])
-            for item in result["items"]
-            if item["value"] != ""
-        )
-        else "left",
+    numeric = all(
+        _is_number(item["value"])
+        for item in result["items"]
+        if item["value"] != ""
     )
+    rendered.add_column("value", justify="right" if numeric else "left")
     for item in result["items"]:
-        rendered.add_row(item["key"], item["value"])
+        rendered.add_row(escape(item["key"]), escape(item["value"]))
     Console().print(rendered)

@@ -2455,7 +2455,14 @@ def list_dvc_tracked_files(wdir: str | None = None) -> list[str]:
 
 
 def _reserved_artifact_paths(
-    wdir: str | None = None, ck_info: dict | None = None
+    wdir: str | None = None,
+    ck_info: dict | None = None,
+    kinds: tuple[str, ...] = (
+        "figures",
+        "datasets",
+        "results",
+        "presentations",
+    ),
 ) -> list[str]:
     """Paths of artifacts declared in ``calkit.yaml``.
 
@@ -2470,7 +2477,7 @@ def _reserved_artifact_paths(
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     paths: list[str] = []
-    for kind in ("figures", "datasets", "results", "presentations", "tables"):
+    for kind in kinds:
         for obj in ck_info.get(kind) or []:
             if isinstance(obj, dict) and isinstance(obj.get("path"), str):
                 paths.append(obj["path"])
@@ -2558,9 +2565,15 @@ def detect_project_artifacts(
     presentations = detect_presentations(
         candidates, reserved_paths=reserved, ignore=ignore
     )
-    # Reserved paths are honored but tables don't add to them, so a
-    # tabular dataset or result stays in its own list too
-    tables = detect_tables(candidates, reserved_paths=reserved, ignore=ignore)
+    # Tables overlap the other kinds, so only a declared table is reserved
+    # from them, and a declared table is still a dataset or result
+    tables = detect_tables(
+        candidates,
+        reserved_paths=_reserved_artifact_paths(
+            wdir=wdir, ck_info=ck_info, kinds=("tables",)
+        ),
+        ignore=ignore,
+    )
     return {
         "figures": figures,
         "datasets": datasets,

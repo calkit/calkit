@@ -4822,6 +4822,11 @@ def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
             "with open('results.csv', 'w') as f:\n"
             "    f.write('kernel,registers\\nmicrophysics,255\\n')\n"
         )
+    # A stage with its own wdir, whose dvc.lock paths are relative to it,
+    # and whose output is in DVC's cache rather than Git
+    os.makedirs("analysis", exist_ok=True)
+    with open("analysis/make.py", "w") as f:
+        f.write("with open('out.csv', 'w') as f:\n    f.write('a\\n1\\n')\n")
     ck_info = {
         "pipeline": {
             "stages": {
@@ -4831,7 +4836,15 @@ def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
                     "environment": "_system",
                     "inputs": ["scripts/make.py"],
                     "outputs": [{"path": "results.csv", "storage": "git"}],
-                }
+                },
+                "analyze": {
+                    "kind": "shell-command",
+                    "command": "python make.py",
+                    "environment": "_system",
+                    "wdir": "analysis",
+                    "inputs": ["make.py"],
+                    "outputs": ["out.csv"],
+                },
             }
         }
     }
@@ -4852,6 +4865,13 @@ def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
     assert live() == "up to date"
     assert at_ref["status"] == "up to date"
     assert at_ref["stages"] == ["make"]
+    at_ref = calkit.pipeline.artifact_status_at_ref("analysis/out.csv", "HEAD")
+    assert at_ref["status"] == "up to date"
+    assert at_ref["stages"] == ["analyze"]
+    assert at_ref["unverifiable"] == 0
+    assert calkit.pipeline.read_artifact_at_ref(
+        "analysis/out.csv", "HEAD"
+    ) == (b"a\n1\n")
     # Committing an input edit without re-running is stale either way
     with open("scripts/make.py", "a") as f:
         f.write("# touch\n")

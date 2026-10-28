@@ -74,23 +74,18 @@ def _list_artifacts(
     stage that writes it and whether that stage is up to date.
     """
     import calkit.pipeline
+    import calkit.results
 
-    ck_info = calkit.load_calkit_info()
-    declared = [o for o in ck_info.get(kind) or [] if isinstance(o, dict)]
-    declared_paths = {o.get("path") for o in declared}
-    detected: list[dict] = []
-    if not declared_only:
-        found = calkit.detect.detect_project_artifacts(ck_info=ck_info)
-        for path in found.get(kind, []):
-            if path not in declared_paths:
-                detected.append({"path": path})
-    result = [{**o, "detected": False} for o in declared]
-    result += [{**o, "detected": True} for o in detected]
     # Which stage writes each one is read from calkit.yaml and costs
     # nothing; whether it's current needs DVC, so it's asked for
     try:
-        calkit.pipeline.annotate_artifacts(
-            result, ck_info=ck_info, status=status
+        result = calkit.pipeline.list_artifacts(
+            kind,
+            declared_only=declared_only,
+            status=status,
+            pending_extensions=(
+                calkit.results.EXTENSIONS if kind == "results" else None
+            ),
         )
     except RuntimeError as e:
         raise_error(f"Failed to determine status: {e}")
@@ -252,9 +247,7 @@ def list_tables(
     if columns:
         for table in tables:
             try:
-                table["columns"] = calkit.tables.read_table(
-                    table["path"], head=0
-                )["columns"]
+                table["columns"] = calkit.tables.read_columns(table["path"])
             except Exception as e:
                 # A table that can't be read is still a table; say why
                 # here rather than failing the listing

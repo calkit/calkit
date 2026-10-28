@@ -1421,11 +1421,17 @@ def test_detect_tables(tmp_dir):
     assert out["tables"] == ["results/kernels.csv"]
     assert "results/kernels.csv" in out["results"]
     assert "results/stats.toml" in out["results"]
-    # Declaring a table reserves it from being detected again
+    # Declaring a table reserves it from being detected as a table again,
+    # but it's still a result, and a declared result is still a table
     out = calkit.detect.detect_project_artifacts(
         ck_info={"tables": [{"path": "results/kernels.csv"}]}
     )
     assert out["tables"] == []
+    assert "results/kernels.csv" in out["results"]
+    out = calkit.detect.detect_project_artifacts(
+        ck_info={"results": [{"path": "results/kernels.csv"}]}
+    )
+    assert out["tables"] == ["results/kernels.csv"]
     assert "results/kernels.csv" not in out["results"]
 
 

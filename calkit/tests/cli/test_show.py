@@ -111,8 +111,8 @@ def _project_with_a_result_and_a_table():
     os.makedirs("results", exist_ok=True)
     with open("results/kernels.csv", "w") as f:
         f.write(
-            "kernel,registers_baseline,registers_mod\n"
-            "microphysics,255,153\ncloud_fraction,38,38\n"
+            "kernel,registers_baseline,registers_mod,U [m/s]\n"
+            "microphysics,255,153,[b]1\ncloud_fraction,38,38,[/x]\n"
         )
     with open("results/summary.json", "w") as f:
         f.write('{"speedup_pct": 5.35, "device": {"change_pct": -6.25}}')
@@ -141,6 +141,10 @@ def test_show_table(tmp_dir):
     )
     assert "registers_baseline" in out
     assert "microphysics" in out
+    # Brackets, e.g., units, are shown as written rather than as markup
+    assert "U [m/s]" in out
+    assert "[b]1" in out
+    assert "[/x]" in out
     # Columns can be globbed and rows filtered, and the footer says what
     # was left out
     out = subprocess.check_output(
@@ -216,6 +220,21 @@ def test_show_result(tmp_dir):
     assert json.loads(out) == [
         {"key": "device.change_pct", "value": "-6.25", "type": "float"}
     ]
+    # The status line stays out of JSON output
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "show",
+            "result",
+            "results/summary.json",
+            "-k",
+            "speedup_pct",
+            "--json",
+            "--status",
+        ],
+        text=True,
+    )
+    assert json.loads(out)[0]["key"] == "speedup_pct"
     # A key that isn't there names the ones that are
     result = subprocess.run(
         [

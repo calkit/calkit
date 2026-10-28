@@ -197,23 +197,24 @@ DVC handles:
 
 ## Key CLI commands
 
-| Command                         | What it does                                         |
-| ------------------------------- | ---------------------------------------------------- |
-| `calkit run`                    | Run the pipeline (skips unchanged stages)            |
-| `calkit run --force`            | Force re-run all stages                              |
-| `calkit status`                 | Show which stages are stale                          |
-| `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline    |
-| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                 |
-| `calkit push`                   | Push Git commits and DVC-tracked files to remotes    |
-| `calkit pull`                   | Pull latest code and data                            |
-| `calkit save`                   | Auto-add, commit, and push (Git + DVC)               |
-| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)               |
-| `calkit add <file>`             | Add a file to version control                        |
-| `calkit check env --name <env>` | Verify an environment matches its spec               |
-| `calkit new`                    | Create new project objects (notebook, dataset, etc.) |
-| `calkit new question "<text>"`  | Record a research question                           |
-| `calkit list questions`         | Show questions with answers rendered from evidence   |
-| `calkit check questions`        | Check answers against current evidence               |
+| Command                         | What it does                                           |
+| ------------------------------- | ------------------------------------------------------ |
+| `calkit run`                    | Run the pipeline (skips unchanged stages)              |
+| `calkit run --force`            | Force re-run all stages                                |
+| `calkit status`                 | Show which stages are stale                            |
+| `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline      |
+| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                   |
+| `calkit push`                   | Push Git commits and DVC-tracked files to remotes      |
+| `calkit pull`                   | Pull latest code and data                              |
+| `calkit save`                   | Auto-add, commit, and push (Git + DVC)                 |
+| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)                 |
+| `calkit add <file>`             | Add a file to version control                          |
+| `calkit check env --name <env>` | Verify an environment matches its spec                 |
+| `calkit new`                    | Create new project objects (notebook, dataset, etc.)   |
+| `calkit new question "<text>"`  | Record a research question                             |
+| `calkit list questions`         | List questions with what each has and lacks            |
+| `calkit show question <n>`      | Show a question with its answer rendered from evidence |
+| `calkit check questions`        | Check answers against current evidence                 |
 
 ## `calkit xr`: The fastest path to a reproducible stage
 

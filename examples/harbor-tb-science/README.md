@@ -30,7 +30,7 @@ This requires Git, Docker, and uv.
 cd work/reactor-safety-control
 calkit run
 calkit check questions
-calkit list questions
+calkit ls q
 # Run the variant with Harbor's oracle agent
 cd ..
 uvx --from harbor==0.23.0 harbor run -p reactor-safety-control-calkit \

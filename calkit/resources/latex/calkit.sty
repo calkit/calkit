@@ -205,21 +205,57 @@
       \pdfstringdefDisableCommands{\let\ckvalue\ck@plainvalue}%
     \fi}
 \fi
+% Where a component is in _calkit, with the extension Calkit found for one
+% named without it
+\newcommand\ck@path[1]{\ck@if@file{#1}{\ck@file{#1}}{#1}}
+% A caption links to what it's for: the figure a float holds with \ckfigure,
+% unless it holds different ones, or the table or other TeX \cktable or
+% \ckinclude brings in. Set within the float, so it ends with it.
+\newcommand\ck@markcaption[1]{%
+  \ifx\ck@captionlink\@undefined\edef\ck@captionlink{#1}%
+  \else\edef\ck@next{#1}%
+    \ifx\ck@next\ck@captionlink\else\let\ck@captionlink\@empty\fi\fi}
+\DeclareRobustCommand\ck@captiontext[1]{%
+  \ifx\ck@captionurl\@empty #1\else\ck@link{\ck@captionurl}{#1}\fi}
+\ifdefined\NewDocumentCommand
+  \NewDocumentCommand\ck@linkedcaption{som}{%
+    \ifx\ck@captionlink\@undefined\let\ck@captionurl\@empty
+    \else\let\ck@captionurl\ck@captionlink\fi
+    \IfBooleanTF{#1}{\ck@caption*{\ck@captiontext{#3}}}%
+      {\IfNoValueTF{#2}{\ck@caption[#3]{\ck@captiontext{#3}}}%
+        {\ck@caption[#2]{\ck@captiontext{#3}}}}}
+\fi
+% After everything else has set \caption up, e.g., the caption package
+\ifck@links\ifdefined\RenewCommandCopy
+  \AddToHook{begindocument/end}{%
+    \ifdefined\href
+      \NewCommandCopy\ck@caption\caption
+      \RenewCommandCopy\caption\ck@linkedcaption
+    \fi}
+\fi\fi
 % \ckfigure[graphics options]{path}
 \newcommand\ckfigure[2][]{%
-  \ck@if@file{#2}%
-    {\IfFileExists{\ck@dir/\ck@file{#2}}%
-      {\ck@link{figures?path=\ck@file{#2}}{\includegraphics[#1]{\ck@dir/\ck@file{#2}}}}%
-      {\ck@missing{#2}}}%
-    {\IfFileExists{\ck@dir/#2}%
-      {\ck@link{figures?path=#2}{\includegraphics[#1]{\ck@dir/#2}}}%
-      {\ck@missing{#2}}}}
-% \ckinclude{path}: any TeX a stage generated, and \cktable{path}, a table.
-% Neither links to the hub, since TeX can't put a link around a float or
-% across paragraphs.
-\newcommand\ckinclude[1]{%
-  \ck@if@file{#1}%
-    {\IfFileExists{\ck@dir/\ck@file{#1}}%
-      {\input{\ck@dir/\ck@file{#1}}}{\ck@missing{#1}}}%
-    {\IfFileExists{\ck@dir/#1}{\input{\ck@dir/#1}}{\ck@missing{#1}}}}
-\let\cktable\ckinclude
+  \edef\ck@p{\ck@path{#2}}%
+  \IfFileExists{\ck@dir/\ck@p}%
+    {\ifdefined\@captype\ck@markcaption{figures?path=\ck@p}\fi
+      \ck@link{figures?path=\ck@p}{\includegraphics[#1]{\ck@dir/\ck@p}}}%
+    {\ck@missing{#2}}}
+% Inputs TeX a stage generated. Outside a float, what it marks a caption
+% with is put back after, since it isn't in a group of its own; one would
+% scope what the file defines, too.
+\newcommand\ck@include[2]{%
+  \edef\ck@p{\ck@path{#2}}%
+  \IfFileExists{\ck@dir/\ck@p}%
+    {\ifdefined\@captype
+      \ck@markcaption{#1?path=\ck@p}\input{\ck@dir/\ck@p}%
+    \else
+      \let\ck@savedcaptionlink\ck@captionlink
+      \edef\ck@captionlink{#1?path=\ck@p}%
+      \input{\ck@dir/\ck@p}%
+      \let\ck@captionlink\ck@savedcaptionlink
+    \fi}%
+    {\ck@missing{#2}}}
+% \cktable{path}: a table a stage generated
+\newcommand\cktable[1]{\ck@include{tables}{#1}}
+% \ckinclude{path}: any other TeX a stage generated
+\newcommand\ckinclude[1]{\ck@include{files}{#1}}

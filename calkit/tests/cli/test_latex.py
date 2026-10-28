@@ -415,16 +415,32 @@ def test_build_ck_components(tmp_dir):
     # not the document loads hyperref itself
     with open("calkit.yaml", "a") as f:
         f.write("owner: someone\nname: test\n")
+    with open("figures/other.png", "wb") as f:
+        f.write(png)
+    os.makedirs("tables")
+    with open("tables/float.tex", "w") as f:
+        f.write(
+            "\\begin{table}\\caption{Generated}"
+            "\\begin{tabular}{l}a\\end{tabular}\\end{table}\n"
+        )
+    # So do captions: one in a float with a figure, unless it has several,
+    # and one in a generated table, but not one that's for neither
     body = (
         "\\begin{document}\n"
         "\\ckvalue[.2f]{results/metrics.json}{rmse}\n"
-        "\\ckfigure[width=1cm]{figures/plot}\n"
+        "\\begin{figure}\\ckfigure[width=1cm]{figures/plot}"
+        "\\caption{Plot}\\end{figure}\n"
+        "\\begin{figure}\\ckfigure[width=1cm]{figures/plot}"
+        "\\ckfigure{figures/other.png}\\caption{Both}\\end{figure}\n"
+        "\\cktable{tables/float}\n"
+        "\\begin{figure}\\rule{1cm}{1cm}\\caption{Other}\\end{figure}\n"
         "\\end{document}\n"
     )
     preambles = {
         "unasked": "\\usepackage{calkit}\n\\usepackage{hyperref}\n",
         "asked": "\\usepackage[links]{calkit}\n",
         "own": "\\usepackage[links]{calkit}\n\\usepackage[colorlinks]{hyperref}\n",
+        "captions": "\\usepackage[links]{calkit}\n\\usepackage{caption}\n",
     }
     urls = {}
     for name, preamble in preambles.items():
@@ -440,10 +456,15 @@ def test_build_ck_components(tmp_dir):
     base = "https://calkit.io/someone/test"
     assert urls["unasked"] == []
     assert urls["asked"] == [
+        f"{base}/figures?path=figures/other.png",
+        f"{base}/figures?path=figures/plot.png",
+        f"{base}/figures?path=figures/plot.png",
         f"{base}/figures?path=figures/plot.png",
         f"{base}/results?path=results/metrics.json&key=rmse",
+        f"{base}/tables?path=tables/float.tex",
     ]
     assert urls["own"] == urls["asked"]
+    assert urls["captions"] == urls["asked"]
 
 
 @skipif_windows_docker

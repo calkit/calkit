@@ -120,9 +120,9 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
   `\includegraphics`.
 - `\cktable{path}` includes a table, or any other LaTeX a stage writes.
 
-Paths are relative to the project, wherever the document is,
+Paths are relative to the project, not the document's working directory,
 so nothing needs copying into the document's folder,
-and no `map-paths` or `json-to-latex` stage is needed.
+and no `map-paths` or `json-to-latex` stages are needed.
 A figure or table can be named without its extension, as with
 `\includegraphics` and `\input`.
 Paths outside the project, or with `..` in them, aren't read.
@@ -131,16 +131,12 @@ Before running or checking the pipeline, and before each
 includes into a `_calkit` folder beside it, writes the values it uses to
 `_calkit/values.tex`, and puts `calkit.sty` next to the document.
 A document that doesn't load it gets none of these.
-Neither is committed to Git, since Calkit writes them again whenever they're
-needed.
-
-With `\usepackage[links]{calkit}`, each value and figure in the PDF
-links to the project's page on Calkit,
-which shows the stage that produced it and what that stage reads.
-Links need the project's `owner` and `name` in `calkit.yaml`.
-They're off by default,
-since a PDF can go where the project shouldn't be seen,
-e.g., to a journal reviewing a private project.
+Neither is committed to Git, since Calkit writes them at pipeline
+compilation time.
+With `\usepackage[links]{calkit}`, values and figures in the PDF
+link (with `hyperref`)
+to the project's page on Calkit to allow inspection of its origin
+or provenance, e.g., the pipeline stage that produced it.
 
 The document's stage depends on everything it includes this way,
 without any of it being listed as an input,

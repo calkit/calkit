@@ -2147,7 +2147,7 @@ def to_docx(
             if table is None or anchor is None:
                 continue
             # Beside it, what's anchored to the table or reads only as its
-            # words, e.g., "Deuterium Heavier elements" from a header row
+            # words, e.g., "Error Rate" from a header row
             words = set(tokens(calkit.latex.detex(blk.text)))
             children = list(w_body)
             at = children.index(anchor)

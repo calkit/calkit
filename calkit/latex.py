@@ -2074,7 +2074,7 @@ def already_applied(block: Block, old: str, new: str) -> bool:
     for c in cites:
         old, new = old.replace(c, " "), new.replace(c, " ")
     # As rendered, with its inline math as text or not, as Word may have it,
-    # and in its case, for a change only of case, e.g., "Chemprop"
+    # and in its case, for a change only of case, e.g., "Gnet" to "GNet"
     rendered = [block.text]
     if not block.markdown:
         src = _strip_comments_joined("\n".join(ln.text for ln in block.lines))

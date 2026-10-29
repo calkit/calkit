@@ -38,41 +38,41 @@
     }
   },
   "find-calkit-papers": {
-    "start_time": "2026-10-28T01:16:37.790000",
-    "end_time": "2026-10-28T01:16:46.328000",
+    "start_time": "2026-10-29T00:06:24.482000",
+    "end_time": "2026-10-29T00:06:29.742000",
     "environment": "dev",
-    "git_rev": "29939214d8f5ab8dde092f6686259fc041494b37",
+    "git_rev": "d447c2968489d041aa3d719e08cc5f76393c299c",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:bc7c14502f38645fab88512e2e66138000dd75ee09880905b48eead89ccb5e89",
-    "calkit_version": "0.49.6.dev99+g77733373d",
-    "calkit_git_rev": "29939214d8f5ab8dde092f6686259fc041494b37",
+    "dvc_lock_hash": "sha256:c228accbc36a979341256e2317c3dac8c897ed1017023356ed4158f985d23d46",
+    "calkit_version": "0.50.3.dev111+gd447c296",
+    "calkit_git_rev": "d447c2968489d041aa3d719e08cc5f76393c299c",
     "system": {
-      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
-      "os": "Darwin",
-      "os_version": "27.0.0",
-      "machine": "arm64",
-      "processor": "arm",
-      "cpu_count": 10,
-      "memory_gb": 64.0
+      "machine_id": "dea6d6a5eb9548ec97f8b91c56f0bffa",
+      "os": "Linux",
+      "os_version": "7.0.0-1017-azure",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "cpu_count": 4,
+      "memory_gb": 15.6
     }
   },
   "find-calkit-projects": {
-    "start_time": "2026-10-28T01:15:16.346000",
-    "end_time": "2026-10-28T01:16:37.790000",
+    "start_time": "2026-10-29T00:01:15.364000",
+    "end_time": "2026-10-29T00:06:24.482000",
     "environment": "dev",
-    "git_rev": "29939214d8f5ab8dde092f6686259fc041494b37",
+    "git_rev": "d447c2968489d041aa3d719e08cc5f76393c299c",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:e9204957c0aeb33de9275a681550b94afec31b2c66d90fca368845421396a338",
-    "calkit_version": "0.49.6.dev99+g77733373d",
-    "calkit_git_rev": "29939214d8f5ab8dde092f6686259fc041494b37",
+    "dvc_lock_hash": "sha256:fb385434c98ac96dc50bc286783afaeedc1491927d90b40d35db6b8b9a4a87f0",
+    "calkit_version": "0.50.3.dev111+gd447c296",
+    "calkit_git_rev": "d447c2968489d041aa3d719e08cc5f76393c299c",
     "system": {
-      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
-      "os": "Darwin",
-      "os_version": "27.0.0",
-      "machine": "arm64",
-      "processor": "arm",
-      "cpu_count": 10,
-      "memory_gb": 64.0
+      "machine_id": "dea6d6a5eb9548ec97f8b91c56f0bffa",
+      "os": "Linux",
+      "os_version": "7.0.0-1017-azure",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "cpu_count": 4,
+      "memory_gb": 15.6
     }
   },
   "latex-image-readme/sizes": {
@@ -132,21 +132,21 @@
     }
   },
   "one-pager/pdf": {
-    "start_time": "2026-10-28T00:26:18.709000",
-    "end_time": "2026-10-28T00:26:21.115000",
-    "git_rev": "be56c66d622c5e78d3de3949bcefc3a812b53448",
+    "start_time": "2026-10-29T00:06:31.612000",
+    "end_time": "2026-10-29T00:06:35.629000",
+    "git_rev": "d447c2968489d041aa3d719e08cc5f76393c299c",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:4224bdaeeb448192976fd69a05d21f14d1b10bdf7681a010e8d57cc023e2281f",
-    "calkit_version": "0.50.1.dev13+gbe56c66d",
-    "calkit_git_rev": "be56c66d622c5e78d3de3949bcefc3a812b53448",
+    "dvc_lock_hash": "sha256:dfe011e85d88bc44d66c60af52adffbda9ac7be134fb8c3752d3a46334f2c171",
+    "calkit_version": "0.50.3.dev111+gd447c296",
+    "calkit_git_rev": "d447c2968489d041aa3d719e08cc5f76393c299c",
     "system": {
-      "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
-      "os": "Darwin",
-      "os_version": "25.6.0",
-      "machine": "arm64",
-      "processor": "arm",
-      "cpu_count": 14,
-      "memory_gb": 24.0
+      "machine_id": "dea6d6a5eb9548ec97f8b91c56f0bffa",
+      "os": "Linux",
+      "os_version": "7.0.0-1017-azure",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "cpu_count": 4,
+      "memory_gb": 15.6
     }
   },
   "research-flow": {
@@ -188,22 +188,22 @@
     }
   },
   "traction": {
-    "start_time": "2026-10-28T00:26:11.318000",
-    "end_time": "2026-10-28T00:26:18.709000",
+    "start_time": "2026-10-29T00:06:29.742000",
+    "end_time": "2026-10-29T00:06:31.612000",
     "environment": "dev",
-    "git_rev": "be56c66d622c5e78d3de3949bcefc3a812b53448",
+    "git_rev": "d447c2968489d041aa3d719e08cc5f76393c299c",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:dc5da458da737894206f5a137686db04be6464da6053ad475344a37d41deea89",
-    "calkit_version": "0.50.1.dev13+gbe56c66d",
-    "calkit_git_rev": "be56c66d622c5e78d3de3949bcefc3a812b53448",
+    "dvc_lock_hash": "sha256:00a0106641b037951481a9dc67fba232b819930065a17a667ea468b762352a2a",
+    "calkit_version": "0.50.3.dev111+gd447c296",
+    "calkit_git_rev": "d447c2968489d041aa3d719e08cc5f76393c299c",
     "system": {
-      "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
-      "os": "Darwin",
-      "os_version": "25.6.0",
-      "machine": "arm64",
-      "processor": "arm",
-      "cpu_count": 14,
-      "memory_gb": 24.0
+      "machine_id": "dea6d6a5eb9548ec97f8b91c56f0bffa",
+      "os": "Linux",
+      "os_version": "7.0.0-1017-azure",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "cpu_count": 4,
+      "memory_gb": 15.6
     }
   }
 }

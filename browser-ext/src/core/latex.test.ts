@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 
 import {
   citationAt,
+  citationProblems,
+  citationsIn,
   citationText,
   citationCandidates,
   isDiffableDocument,
@@ -73,6 +75,16 @@ describe("citationAt", () => {
     const after = "\\ckfigure{figures/a}{caption}";
     expect(citationAt(after, after.indexOf("caption"))).toBeNull();
     expect(citationAt("\\ckvalue{results/m.json}", 3)).toBeNull();
+  });
+
+  test("finds every command in a line, with where each is", () => {
+    const found = citationsIn(line);
+    expect(found.map((m) => line.slice(m.start, m.end))).toEqual([
+      "\\ckvalue[.2f]{results/m.json}{fit.rmse}",
+      "\\ckfigure{figures/a.png}",
+    ]);
+    expect(found[1].citation.path).toBe("figures/a.png");
+    expect(citationsIn("% \\ckfigure{a}")).toEqual([]);
   });
 
   test("finds plain includes too, by the path as written", () => {
@@ -180,5 +192,70 @@ describe("citationCandidates", () => {
         options: "",
       }),
     ).toEqual(["results/m.json"]);
+  });
+});
+
+describe("citationProblems", () => {
+  const figure = {
+    kind: "figure",
+    path: "figures/a.png",
+    options: "",
+  } as const;
+  const base = { path: "figures/a.png", exists: true, inputs: [] };
+  const self = { path: "figures/a.png", steps: [{ path: "figures/a.png" }] };
+
+  test("says what's wrong, worst first", () => {
+    // Fine: the pipeline makes it and it's current
+    expect(citationProblems(figure, { ...base, stage: "plot" })).toEqual([]);
+    // Nothing defines where it came from
+    expect(
+      citationProblems(figure, { ...base, gaps: [self] }).map((p) => p.message),
+    ).toEqual(["Origin not defined"]);
+    // Something it's made from has no origin, and it's out of date
+    const problems = citationProblems(figure, {
+      ...base,
+      stage: "plot",
+      stale_reason: "pipeline",
+      gaps: [
+        {
+          path: "data/raw.csv",
+          steps: [
+            { path: "figures/a.png", stage: "plot" },
+            { path: "data/raw.csv" },
+          ],
+        },
+      ],
+    });
+    expect(problems.map((p) => [p.severity, p.path])).toEqual([
+      ["error", "data/raw.csv"],
+      ["warning", "figures/a.png"],
+    ]);
+    expect(problems[0].message).toBe(
+      "Origin not defined for data/raw.csv, which it's made from (via plot)",
+    );
+  });
+
+  test("names what isn't in the project, except a plain include", () => {
+    const missing = { ...base, exists: false, gaps: [self] };
+    expect(citationProblems(figure, missing).map((p) => p.message)).toEqual([
+      "figures/a.png isn't in the project",
+    ]);
+    expect(citationProblems({ ...figure, included: true }, missing)).toEqual(
+      [],
+    );
+    // A value says what's wrong with reading it
+    const value = {
+      kind: "value",
+      path: "r.json",
+      key: "x",
+      options: "",
+    } as const;
+    expect(
+      citationProblems(value, {
+        ...base,
+        path: "r.json",
+        value_error: "r.json has no key x",
+      }).map((p) => p.message),
+    ).toEqual(["r.json has no key x"]);
   });
 });

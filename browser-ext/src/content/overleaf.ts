@@ -1013,8 +1013,15 @@ interface PdfBox {
 
 type SynctexBox = Omit<PdfBox, "message">;
 
-// The PDF Overleaf last built, which code-to-PDF lookups have to name
-let pdfBuild: { buildId: string; clsiServerId: string | null } | null = null;
+/** The PDF Overleaf last built, which synctex lookups have to name. */
+interface PdfBuild {
+  buildId: string;
+  /** Overleaf's lookups fail without it once its URLs carry one. */
+  editorId: string | null;
+  clsiServerId: string | null;
+}
+
+let pdfBuild: PdfBuild | null = null;
 let pdfBoxes: PdfBox[] = [];
 const synctexCache = new Map<string, Promise<SynctexBox[]>>();
 
@@ -1036,10 +1043,20 @@ function openDocPath(): string | null {
   return parts.join("/");
 }
 
+function setBuildParams(params: URLSearchParams, build: PdfBuild): void {
+  params.set("buildId", build.buildId);
+  if (build.editorId) {
+    params.set("editorId", build.editorId);
+  }
+  if (build.clsiServerId) {
+    params.set("clsiserverid", build.clsiServerId);
+  }
+}
+
 /** Where in the PDF a line of the open document landed, as Overleaf says. */
 function synctex(
   projectId: string,
-  build: { buildId: string; clsiServerId: string | null },
+  build: PdfBuild,
   file: string,
   line: number,
   column: number,
@@ -1048,11 +1065,8 @@ function synctex(
     file,
     line: String(line),
     column: String(column),
-    buildId: build.buildId,
   });
-  if (build.clsiServerId) {
-    params.set("clsiserverid", build.clsiServerId);
-  }
+  setBuildParams(params, build);
   const key = params.toString();
   let cached = synctexCache.get(key);
   if (!cached) {
@@ -1186,13 +1200,26 @@ function placePdfBoxes(): void {
 function watchPdf(): void {
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
+      // e.g., build/<editor id>-<build id>/output/output.pdf, where the
+      // editor ID, a UUID, isn't always there
       const match = entry.name.match(
-        /\/build\/([0-9a-f]+-[0-9a-f]+)\/output\/output\.pdf/,
+        /\/build\/(?:([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})-)?([0-9a-f]+-[0-9a-f]+)\/output\/output\.pdf/,
       );
-      if (match && match[1] !== pdfBuild?.buildId) {
+      if (!match) {
+        continue;
+      }
+      const [, editorId = null, buildId] = match;
+      if (
+        buildId !== pdfBuild?.buildId ||
+        (editorId && editorId !== pdfBuild.editorId)
+      ) {
         pdfBuild = {
-          buildId: match[1],
-          clsiServerId: new URL(entry.name).searchParams.get("clsiserverid"),
+          buildId,
+          editorId: editorId ?? pdfBuild?.editorId ?? null,
+          clsiServerId:
+            new URL(entry.name).searchParams.get("clsiserverid") ??
+            pdfBuild?.clsiServerId ??
+            null,
         };
         synctexCache.clear();
         void drawPdfBoxes();
@@ -1236,10 +1263,7 @@ function watchPdf(): void {
       v: v.toFixed(2),
     });
     if (build) {
-      params.set("buildId", build.buildId);
-      if (build.clsiServerId) {
-        params.set("clsiserverid", build.clsiServerId);
-      }
+      setBuildParams(params, build);
     }
     // Each pointer position is new, so there's nothing worth caching
     const code: { file: string; line: number; column?: number }[] = await fetch(

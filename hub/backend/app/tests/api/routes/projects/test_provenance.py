@@ -18,7 +18,8 @@ def test_get_project_provenance(client: TestClient) -> None:
         ),
         "scripts/analyze.py": "print()",
         "data/downloaded/a.csv": "x\n1\n",
-        "paper/drawn.png": "",
+        "paper/drawn.svg": "",
+        "paper/exported.png": "",
         "paper/pasted.png": "",
     }
     # In object storage, inside a directory a stage outputs
@@ -34,9 +35,11 @@ def test_get_project_provenance(client: TestClient) -> None:
         ],
         "figures": [
             {
-                "path": "paper/drawn.png",
+                "path": "paper/drawn.svg",
                 "created_by": {"name": "Ada", "with_ai": "Claude"},
-            }
+            },
+            # Exported from something, so a person can't be its origin
+            {"path": "paper/exported.png", "created_by": {"name": "Ada"}},
         ],
         "pipeline": {
             "stages": {
@@ -186,20 +189,18 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["origin_url"] == "https://x.org/d.zip"
     assert body["origin_path"] == "data/downloaded"
     assert body["gaps"] == []
-    body = get("path=paper/drawn.png")
+    body = get("path=paper/drawn.svg")
     assert body["origin"] == "Created by Ada with Claude"
     assert body["origin_url"] is None
     assert body["origin_path"] is None
     assert body["gaps"] == []
     # A figure nothing accounts for is a gap itself
-    body = get("path=paper/pasted.png")
-    assert body["origin"] is None
-    assert body["gaps"] == [
-        {
-            "path": "paper/pasted.png",
-            "steps": [{"path": "paper/pasted.png", "stage": None}],
-        }
-    ]
+    for path in ["paper/pasted.png", "paper/exported.png"]:
+        body = get(f"path={path}")
+        assert body["origin"] is None
+        assert body["gaps"] == [
+            {"path": path, "steps": [{"path": path, "stage": None}]}
+        ]
     # Nothing produces an authored file
     body = get("path=scripts/analyze.py")
     assert body["exists"]

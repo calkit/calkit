@@ -6273,8 +6273,10 @@ def get_project_publication_components(
             if not isinstance(entry, dict) or not entry.get("path"):
                 continue
             entry_path = normalize_artifact_path(str(entry["path"]))
+            # A person can't be the origin of an exported format, e.g., PNG
             if entry.get("created_by"):
-                declared.setdefault(entry_path, "attested")
+                if calkit.provenance.can_be_created_by_person(entry_path):
+                    declared.setdefault(entry_path, "attested")
             elif entry.get("imported_from"):
                 declared.setdefault(entry_path, "imported")
     overleaf_info = calkit.overleaf.get_sync_info(

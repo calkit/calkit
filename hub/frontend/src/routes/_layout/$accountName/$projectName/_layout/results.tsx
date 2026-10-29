@@ -188,14 +188,15 @@ function ProvenanceCard({
         )
         return (
           <Text key={gap.path}>
-            Nothing records where {fileLink(gap.path)} came from
+            Origin not defined for {fileLink(gap.path)}
             {via.length ? ` (via ${via.join(", ")})` : ""}.
           </Text>
         )
       })}
       <Text color={subtle}>
         Record it in calkit.yaml with imported_from or created_by, or add the
-        stage that makes it.
+        stage that makes it. A person can't create an exported format like PNG,
+        so it needs a stage or an import.
       </Text>
     </Box>
   ) : null

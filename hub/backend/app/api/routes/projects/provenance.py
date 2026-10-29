@@ -207,7 +207,8 @@ def get_project_provenance(
     if copy_stale:
         out.stale_reason = "pipeline"
     # Where calkit.yaml says it came from, if not from a stage, e.g., a
-    # download or a figure someone drew; a folder's entry covers its files
+    # download or a photo someone took; a folder's entry covers its files,
+    # and a person can't be the origin of an exported format like PNG
     entry = next(
         (
             e
@@ -218,7 +219,10 @@ def get_project_provenance(
             and isinstance(e.get("path"), str)
             and (
                 e.get("imported_from") is not None
-                or e.get("created_by") is not None
+                or (
+                    e.get("created_by") is not None
+                    and calkit.provenance.can_be_created_by_person(traced)
+                )
             )
             and (
                 traced == posixpath.normpath(e["path"])

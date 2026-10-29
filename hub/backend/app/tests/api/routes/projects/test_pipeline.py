@@ -289,6 +289,7 @@ def test_post_project_stage_from_script(
         files={
             "paper/paper.tex": "\\documentclass{article}\n",
             "paper/figures/fit.png": "png",
+            "paper/figures/drawn.png": "png",
             "scripts/old.py": "print(1)\n",
         },
     )
@@ -372,11 +373,38 @@ def test_post_project_stage_from_script(
     assert "plot" in yaml.safe_load((wdir / "dvc.yaml").read_text())["stages"]
     assert not repo.is_dirty(untracked_files=True)
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
-    # A script already in the project is read where it is, and an output
-    # can be named for what the paper shows
-    resp = post(script_path="scripts/old.py", shows="paper/figures/fit.png")
+    # A stage that already runs the script keeps what it declares
+    ck["pipeline"]["stages"]["plot"]["outputs"].append("figures/extra.png")
+    (wdir / "calkit.yaml").write_text(yaml.safe_dump(ck))
+    repo.git.add("calkit.yaml")
+    repo.git.commit("-m", "Declare another output")
+    resp = post(script_path="scripts/plot.py", shows="paper/figures/fit.png")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["produces"] is None
+    assert resp.json()["stage_name"] == "plot"
+    assert {"figures/fit.png", "figures/extra.png"} <= set(
+        resp.json()["outputs"]
+    )
+    # An upload never replaces a different file already there
+    resp = post(**{**upload, "script_path": "scripts/old.py"})
+    assert resp.status_code == 409, resp.text
+    assert (wdir / "scripts" / "old.py").read_text() == "print(1)\n"
+    # A script already in the project is read where it is, and when it
+    # isn't found writing what the paper shows, its stage writes it there
+    resp = post(script_path="scripts/old.py", shows="paper/figures/drawn.png")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["produces"] == "paper/figures/drawn.png"
+    assert "paper/figures/drawn.png" in resp.json()["outputs"]
+    assert resp.json()["copy_stage"] is None
+    resp = post(
+        script_path="scripts/old.py",
+        shows="paper/figures/drawn.png",
+        save=True,
+    )
+    assert resp.status_code == 200, resp.text
+    ck = yaml.safe_load((wdir / "calkit.yaml").read_text())
+    assert {"path": "paper/figures/drawn.png", "storage": "git"} in ck[
+        "pipeline"
+    ]["stages"][resp.json()["stage_name"]]["outputs"]
     resp = post(script_path="scripts/old.py", produces="figures/x.png")
     assert resp.status_code == 422
     # Not a script, or not there to read

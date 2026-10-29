@@ -396,6 +396,16 @@ def post_project_stage_from_script(
             raise HTTPException(413, "Script is too large")
     elif not os.path.isfile(os.path.join(wdir, script_path)):
         raise HTTPException(404, f"'{script_path}' is not in the project")
+    # An upload never replaces a different file already there
+    existing_path = os.path.join(wdir, script_path)
+    if content is not None and os.path.isfile(existing_path):
+        with open(existing_path, "rb") as fb:
+            if fb.read() != content:
+                raise HTTPException(
+                    409,
+                    f"'{script_path}' is already in the project; pick it "
+                    "without uploading, or upload under another name",
+                )
     # Read in a checkout of its own, discarded after
     scan_dir = tempfile.mkdtemp(prefix="calkit-xr-")
     os.rmdir(scan_dir)
@@ -433,12 +443,29 @@ def post_project_stage_from_script(
     env = detected["environment"]
     stage_name = detected["stage"]["name"]
     stage = detected["stage"]["stage"]
+    ck_info = get_ck_info_from_repo(repo=repo)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # A stage that already runs this script keeps what it declares, with
+    # anything newly found added
+    existing_stage = stages.get(stage_name)
+    if isinstance(existing_stage, dict):
+        merged = dict(existing_stage)
+        for field in ("outputs", "inputs"):
+            items = list(existing_stage.get(field) or [])
+            known = {i["path"] if isinstance(i, dict) else i for i in items}
+            items += [
+                i
+                for i in stage.get(field) or []
+                if (i["path"] if isinstance(i, dict) else i) not in known
+            ]
+            if items:
+                merged[field] = items
+        stage = merged
     outputs = [
         o["path"] if isinstance(o, dict) else o
         for o in stage.get("outputs") or []
     ]
     inputs = [i for i in stage.get("inputs") or [] if isinstance(i, str)]
-    ck_info = get_ck_info_from_repo(repo=repo)
     tree = get_repo_tree_for_ref(repo, None)
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
     missing = [
@@ -454,7 +481,7 @@ def post_project_stage_from_script(
     produces = None
     if req.produces is not None:
         produces = _clean_rel_path(req.produces, "output")
-        if produces not in outputs:
+        if produces not in outputs and produces != shows:
             raise HTTPException(
                 422, f"'{script_path}' doesn't write '{produces}'"
             )
@@ -468,7 +495,16 @@ def post_project_stage_from_script(
         ]
         if len(same_name) == 1:
             produces = same_name[0]
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # What the document shows is what the stage makes, so if the script
+    # isn't found writing it anywhere, it writes it there
+    if shows is not None and produces is None:
+        produces = shows
+    if produces is not None and produces not in outputs:
+        tracked = bool(repo.git.ls_files("--", produces).strip())
+        stage.setdefault("outputs", []).append(
+            {"path": produces, "storage": "git"} if tracked else produces
+        )
+        outputs.append(produces)
     copy_stage = None
     if shows is not None and produces is not None and produces != shows:
         copy_stage = _default_stage_name(None, shows)

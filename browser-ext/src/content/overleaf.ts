@@ -619,6 +619,111 @@ function renderProvenance(
   );
   const fileUrl = (path: string) =>
     `${base}/files?path=${encodeURIComponent(path)}`;
+  // Where each input came from, a level at a time, so the chain can be
+  // followed back to an import, a person, or a gap
+  const trace = (paths: string[], seen: Set<string>): HTMLElement => {
+    const list = el("div");
+    for (const input of paths) {
+      const toggle = el("button", {
+        class: "twisty",
+        type: "button",
+        text: "\u25b8",
+        title: `Where ${input} came from`,
+      });
+      const detail = el("div", { class: "trace-detail small" });
+      detail.hidden = true;
+      let loaded = false;
+      toggle.addEventListener("click", async () => {
+        detail.hidden = !detail.hidden;
+        toggle.textContent = detail.hidden ? "\u25b8" : "\u25be";
+        if (loaded || detail.hidden) {
+          return;
+        }
+        loaded = true;
+        clear(detail).append(loading());
+        try {
+          const p = await provenanceFor(link, input);
+          const original = p.copied_from ?? p.path;
+          const lines: HTMLElement[] = [];
+          if (p.copied_from) {
+            lines.push(
+              el("div", { class: "dim" }, [
+                document.createTextNode("Copied from "),
+                el("a", { text: p.copied_from, href: fileUrl(p.copied_from) }),
+              ]),
+            );
+          }
+          if (p.stage) {
+            lines.push(
+              el("div", {}, [
+                document.createTextNode("Stage "),
+                el("a", {
+                  text: p.stage,
+                  href: `${base}/pipeline?stage=${encodeURIComponent(p.stage)}`,
+                }),
+                p.stage_kind
+                  ? el("span", {
+                      class: "dim",
+                      text: ` \u00b7 ${p.stage_kind}`,
+                    })
+                  : null,
+                p.stale_reason
+                  ? el("span", { class: "badge warn", text: "stale" })
+                  : null,
+              ]),
+            );
+            if (p.source) {
+              lines.push(
+                el("div", { class: "dim" }, [
+                  document.createTextNode("Runs "),
+                  el("a", { text: p.source, href: fileUrl(p.source) }),
+                ]),
+              );
+            }
+          } else if (p.origin) {
+            lines.push(
+              p.origin_url
+                ? el("a", { text: p.origin, href: p.origin_url })
+                : el("div", { text: p.origin }),
+            );
+          } else if (p.gaps?.some((gap) => gap.path === original)) {
+            lines.push(
+              el("div", {
+                text: "Origin not defined",
+                style: { color: "var(--ck-danger)", fontWeight: "600" },
+              }),
+            );
+          } else if (!p.exists) {
+            lines.push(el("div", { class: "dim", text: "Not in the project" }));
+          } else {
+            lines.push(el("div", { class: "dim", text: "Source file" }));
+          }
+          const next = new Set([...seen, input, original]);
+          const upstream = p.inputs.filter((i) => !next.has(i));
+          if (upstream.length) {
+            lines.push(
+              el("div", { class: "dim", text: "Reads" }),
+              trace(upstream, next),
+            );
+          }
+          clear(detail).append(...lines);
+        } catch (e) {
+          loaded = false;
+          clear(detail).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+        }
+      });
+      list.append(
+        el("div", { class: "small" }, [
+          toggle,
+          el("a", { text: input, href: fileUrl(input) }),
+        ]),
+        detail,
+      );
+    }
+    return list;
+  };
   // A file is named as the project has it, not as written
   const path = citation.kind === "value" ? citation.path : provenance.path;
   const label = citation.key ? `${path}: ${citation.key}` : path;
@@ -714,21 +819,16 @@ function renderProvenance(
       );
     }
     if (provenance.inputs.length) {
-      const shown = provenance.inputs.slice(0, 4);
-      const more = provenance.inputs.length - shown.length;
       container.append(
-        el("div", { class: "dim small" }, [
-          document.createTextNode("Reads "),
-          ...shown.flatMap((input, i) => [
-            i ? document.createTextNode(", ") : null,
-            el("a", {
-              text: input,
-              href: fileUrl(input),
-              attrs: { target: "_blank" },
-            }),
-          ]),
-          more ? document.createTextNode(`, and ${more} more`) : null,
-        ]),
+        el("div", {
+          class: "dim small",
+          text: "Reads",
+          style: { marginTop: "4px" },
+        }),
+        trace(
+          provenance.inputs,
+          new Set([path, provenance.copied_from ?? path]),
+        ),
       );
     }
   }
@@ -832,6 +932,8 @@ const TOOLTIP_STYLES = `
   background: var(--ck-bg);
   padding: 8px 10px;
   max-width: 360px;
+  max-height: 50vh;
+  overflow-y: auto;
 }
 `;
 

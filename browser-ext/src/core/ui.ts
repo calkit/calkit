@@ -268,6 +268,18 @@ button.pick {
 }
 button.pick:last-child { border-bottom: 0; }
 button.pick:hover, button.pick:focus { background: var(--ck-subtle-bg); }
+.trace-detail {
+  margin-left: 5px;
+  padding-left: 9px;
+  border-left: 1px solid var(--ck-border);
+}
+button.twisty {
+  background: none;
+  border: 0;
+  padding: 0 4px 0 0;
+  color: var(--ck-dim);
+  cursor: pointer;
+}
 .actions { display: flex; gap: 6px; margin-top: 8px; }
 .spinner {
   width: 12px;

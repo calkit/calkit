@@ -6512,10 +6512,22 @@ def post_project_misc(
             "A misc artifact must say who created it or where it was "
             "imported from",
         )
+    if req.created_by is not None and not (
+        calkit.provenance.can_be_created_by_person(path)
+    ):
+        raise HTTPException(
+            422,
+            f"A person can't be the origin of '{path}', since something "
+            "else exports that format; add the stage that makes it, or "
+            "record where it was imported from",
+        )
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
     ck_info = get_ck_info_from_repo(repo)
+    # A declared artifact that doesn't say where it came from yet gets the
+    # origin added to its own entry
+    declared = None
     for section, label in [
         ("figures", "figure"),
         ("datasets", "dataset"),
@@ -6527,11 +6539,16 @@ def post_project_misc(
                 normalize_artifact_path(str(existing.get("path") or ""))
                 == path
             ):
-                raise HTTPException(
-                    400,
-                    f"'{path}' is already declared as a {label}; edit that "
-                    "entry instead",
-                )
+                if section == "publications" or any(
+                    existing.get(k) is not None
+                    for k in ("created_by", "imported_from", "stage")
+                ):
+                    raise HTTPException(
+                        400,
+                        f"'{path}' is already declared as a {label}; edit "
+                        "that entry instead",
+                    )
+                declared = existing
     # Whether tracked by Git or DVC, the path has to be here to attribute
     wdir = str(repo.working_dir)
     if not os.path.exists(os.path.join(wdir, path)) and not os.path.isfile(
@@ -6562,9 +6579,14 @@ def post_project_misc(
         )
     except ValidationError as e:
         raise HTTPException(422, f"Invalid misc artifact: {e}")
-    misc = ck_info.get("misc", [])
-    misc.append(entry)
-    ck_info["misc"] = misc
+    if declared is not None:
+        for k in ("created_by", "imported_from"):
+            if k in entry:
+                declared[k] = entry[k]
+    else:
+        misc = ck_info.get("misc", [])
+        misc.append(entry)
+        ck_info["misc"] = misc
     with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")

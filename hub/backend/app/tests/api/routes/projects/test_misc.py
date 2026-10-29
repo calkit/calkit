@@ -137,12 +137,39 @@ def test_post_project_misc(
             headers=normal_user_token_headers,
         )
         assert resp.status_code in (400, 422), resp.text
-        # Something already declared is edited as what it is
+        # A person can't be the origin of an exported format like PNG
         resp = client.post(
             URL,
             json={
                 "path": "figures/x.png",
                 "created_by": [{"email": "a@example.com"}],
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        # A declared figure without an origin gets one on its own entry,
+        # and after that is edited as what it is
+        resp = client.post(
+            URL,
+            json={
+                "path": "figures/x.png",
+                "imported_from": {"url": "https://example.org/x.png"},
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        with open(wdir / "calkit.yaml") as f:
+            assert ryaml.load(f)["figures"] == [
+                {
+                    "path": "figures/x.png",
+                    "imported_from": {"url": "https://example.org/x.png"},
+                }
+            ]
+        resp = client.post(
+            URL,
+            json={
+                "path": "figures/x.png",
+                "imported_from": {"url": "https://example.org/y.png"},
             },
             headers=normal_user_token_headers,
         )

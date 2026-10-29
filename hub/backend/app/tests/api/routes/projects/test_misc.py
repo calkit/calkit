@@ -189,7 +189,7 @@ def test_post_project_misc(
         resp = client.post(
             URL,
             json={
-                "path": "missing.png",
+                "path": "missing.jpg",
                 "created_by": [{"email": "a@example.com"}],
             },
             headers=normal_user_token_headers,

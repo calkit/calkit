@@ -2,18 +2,25 @@ import { getOverleafProjectId } from "../core/detect";
 import {
   renderFailure,
   renderHubPicker,
+  renderPathPicker,
   renderProjectPicker,
 } from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import {
   type Citation,
   type CitationProblem,
+  canBeCreatedByPerson,
   citationProblems,
   citationText,
   citationCandidates,
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
-import { isUnsupportedByHub, RequestFailed, send } from "../core/messages";
+import {
+  isUnsupportedByHub,
+  type Request,
+  RequestFailed,
+  send,
+} from "../core/messages";
 import type {
   GithubRepo,
   OverleafLinkPublic,
@@ -156,14 +163,24 @@ function renderAddScript(
   container: HTMLElement,
   link: OverleafLinkPublic,
   citation: Citation,
-  provenance: Provenance,
+  shows: string,
+  kind: "script" | "notebook",
 ): HTMLElement {
   const owner = link.project_owner_name;
   const project = link.project_name;
-  const shows = citation.kind === "value" ? citation.path : provenance.path;
-  const file = el("input", { type: "file" });
-  const path = textInput({ placeholder: "Or its path in the project" });
-  const read = el("button", { class: "action", text: "Read the script" });
+  const exts =
+    kind === "notebook" ? [".ipynb"] : [".py", ".r", ".jl", ".m", ".sh"];
+  const file = el("input", {
+    type: "file",
+    attrs: { accept: exts.join(",") },
+  });
+  const { element: picker, input: path } = renderPathPicker({
+    owner,
+    project,
+    placeholder: "Or find it in the project",
+    accept: (p) => exts.some((ext) => p.toLowerCase().endsWith(ext)),
+  });
+  const read = el("button", { class: "action", text: `Read the ${kind}` });
   const message = el("div", { class: "small" });
   const review = el("div", { class: "stack", style: { marginTop: "6px" } });
   let request: {
@@ -180,7 +197,7 @@ function renderAddScript(
     const upload = file.files?.[0];
     const typed = path.value.trim();
     if (!upload && !typed) {
-      fail("Choose the script, or give its path in the project.");
+      fail(`Choose the ${kind}, or find it in the project.`);
       return;
     }
     read.disabled = true;
@@ -188,8 +205,8 @@ function renderAddScript(
     try {
       request = upload
         ? {
-            // An upload goes where it's named, or with the other scripts
-            scriptPath: typed || `scripts/${upload.name}`,
+            // An upload goes where it's named, or with others of its kind
+            scriptPath: typed || `${kind}s/${upload.name}`,
             content: await fileBase64(upload),
           }
         : { scriptPath: typed };
@@ -306,11 +323,7 @@ function renderAddScript(
           produces: chosen(),
           save: true,
         });
-        provenanceCache.clear();
-        void checkCitations();
-        const fresh = await citationProvenance(link, citation);
-        clear(container);
-        renderProvenance(container, link, citation, fresh);
+        await showDefined(container, link, citation);
         container.append(renderRunIt(saved));
       } catch (e) {
         fail(e);
@@ -320,13 +333,223 @@ function renderAddScript(
     review.append(el("div", { class: "actions" }, [save]));
   };
   return el("div", { class: "stack", style: { marginTop: "6px" } }, [
-    el("div", { class: "small", text: "The script that makes it:" }),
+    el("div", { class: "small" }, [
+      document.createTextNode(`The ${kind} that makes `),
+      el("span", { class: "name", text: shows }),
+    ]),
     file,
-    path,
+    picker,
     el("div", { class: "actions" }, [read]),
     message,
     review,
   ]);
+}
+
+/** Show what's cited again, now that an origin is defined. */
+async function showDefined(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+): Promise<void> {
+  provenanceCache.clear();
+  void checkCitations();
+  const fresh = await citationProvenance(link, citation);
+  clear(container);
+  renderProvenance(container, link, citation, fresh);
+}
+
+/** Record that a file was imported, or made by the signed-in user. */
+function renderRecordOrigin(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+  target: string,
+  how: "imported" | "created",
+): HTMLElement {
+  const message = el("div", { class: "small" });
+  const fields = el("div", { class: "stack" });
+  const save = el("button", { class: "action", text: "Save" });
+  let read: () => Promise<Omit<
+    ToRecord,
+    "type" | "owner" | "project" | "path"
+  > | null>;
+  if (how === "imported") {
+    const sources = [
+      ["url", "Website", "https://example.org/data/measurements.csv"],
+      ["doi", "DOI", "10.5281/zenodo.1234567"],
+      ["git", "Git repo", "https://github.com/owner/repo"],
+    ] as const;
+    let source: (typeof sources)[number][0] = "url";
+    const where = textInput({ placeholder: sources[0][2] });
+    const rev = textInput({ placeholder: "Commit or tag (optional)" });
+    const repoPath = textInput({ placeholder: "Path in the repo (optional)" });
+    const gitFields = el(
+      "div",
+      { class: "stack", style: { display: "none" } },
+      [rev, repoPath],
+    );
+    const date = el("input", { type: "date" });
+    const radios = sources.map(([value, text, placeholder]) => {
+      const radio = el("input", {
+        type: "radio",
+        attrs: { name: "ck-import-source", value },
+      });
+      radio.checked = value === source;
+      radio.addEventListener("change", () => {
+        source = value;
+        where.placeholder = placeholder;
+        gitFields.style.display = value === "git" ? "" : "none";
+      });
+      return el("label", { class: "small", style: { display: "inline" } }, [
+        radio,
+        document.createTextNode(` ${text}  `),
+      ]);
+    });
+    fields.append(
+      el("div", {}, radios),
+      where,
+      gitFields,
+      el("label", { text: "Retrieved (optional)" }),
+      date,
+    );
+    read = async () => {
+      const value = where.value.trim();
+      if (!value) {
+        return null;
+      }
+      const when = date.value || null;
+      return {
+        importedFrom:
+          source === "url"
+            ? { url: value, date: when }
+            : source === "doi"
+            ? { doi: value, date: when }
+            : {
+                git_repo_url: value,
+                git_ref: rev.value.trim() || null,
+                path: repoPath.value.trim() || null,
+                date: when,
+              },
+      };
+    };
+  } else {
+    const ai = textInput({ placeholder: "Ex: Claude Opus 5" });
+    const who = el("div", { class: "small" });
+    const user = send({ type: "auth.state" }).then((state) => state.user);
+    void user.then((u) => {
+      who.textContent = `Created by ${u?.full_name || u?.email || "you"}`;
+    });
+    fields.append(
+      who,
+      el("label", { text: "Made with generative AI (optional)" }),
+      ai,
+    );
+    read = async () => {
+      const u = await user;
+      if (!u) {
+        throw new Error("Sign in to say you made it.");
+      }
+      const tool = ai.value.trim();
+      return {
+        createdBy: [
+          {
+            email: u.email,
+            name: u.full_name ?? null,
+            ...(tool ? { with_ai: [tool] } : {}),
+          },
+        ],
+      };
+    };
+  }
+  save.addEventListener("click", async () => {
+    clear(message);
+    save.disabled = true;
+    try {
+      const origin = await read();
+      if (!origin) {
+        throw new Error("Say where it came from.");
+      }
+      message.append(loading("Saving"));
+      await send({
+        type: "project.recordOrigin",
+        owner: link.project_owner_name,
+        project: link.project_name,
+        path: target,
+        ...origin,
+      });
+      await showDefined(container, link, citation);
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+      save.disabled = false;
+    }
+  });
+  return el("div", { class: "stack", style: { marginTop: "6px" } }, [
+    el("div", { class: "small" }, [
+      document.createTextNode(how === "imported" ? "Where " : "Who made "),
+      el("span", { class: "name", text: target }),
+      document.createTextNode(how === "imported" ? " came from" : ""),
+    ]),
+    fields,
+    el("div", { class: "actions" }, [save]),
+    message,
+  ]);
+}
+
+type ToRecord = Extract<Request, { type: "project.recordOrigin" }>;
+
+/** The ways to define where a file came from, each opening its form. */
+function renderDefineOrigin(
+  link: OverleafLinkPublic,
+  citation: Citation,
+  target: string,
+): HTMLElement {
+  const open = (form: (body: HTMLElement) => HTMLElement) =>
+    showInPanel((body) => body.append(form(body)));
+  const choices: [string, () => void][] = [
+    [
+      "Script",
+      () =>
+        open((body) => renderAddScript(body, link, citation, target, "script")),
+    ],
+    [
+      "Notebook",
+      () =>
+        open((body) =>
+          renderAddScript(body, link, citation, target, "notebook"),
+        ),
+    ],
+    [
+      "Imported",
+      () =>
+        open((body) =>
+          renderRecordOrigin(body, link, citation, target, "imported"),
+        ),
+    ],
+  ];
+  if (canBeCreatedByPerson(target)) {
+    choices.push([
+      "Created",
+      () =>
+        open((body) =>
+          renderRecordOrigin(body, link, citation, target, "created"),
+        ),
+    ]);
+  }
+  return el(
+    "div",
+    {
+      class: "actions",
+      style: { alignItems: "center", flexWrap: "wrap", marginTop: "4px" },
+    },
+    [
+      el("span", { class: "small dim", text: "Define origin:" }),
+      ...choices.map(([text, onClick]) =>
+        el("button", { class: "action secondary", text, onClick }),
+      ),
+    ],
+  );
 }
 
 /** How to run a stage that's never run, since Overleaf can't. */
@@ -400,25 +623,9 @@ function renderProvenance(
   const problems = citationProblems(citation, provenance);
   for (const problem of problems) {
     container.append(problemLine(problem));
-  }
-  // Its own origin is what a script added here can define
-  if (
-    link.current_user_access !== "read" &&
-    !provenance.stage &&
-    problems.some((p) => p.severity === "error" && p.path === provenance.path)
-  ) {
-    container.append(
-      el("div", { class: "actions" }, [
-        el("button", {
-          class: "action secondary",
-          text: "Add the script that makes it",
-          onClick: () =>
-            showInPanel((body) =>
-              body.append(renderAddScript(body, link, citation, provenance)),
-            ),
-        }),
-      ]),
-    );
+    if (problem.kind === "origin" && link.current_user_access !== "read") {
+      container.append(renderDefineOrigin(link, citation, problem.path));
+    }
   }
   if (provenance.copied_from) {
     container.append(

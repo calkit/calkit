@@ -248,6 +248,26 @@ textarea { min-height: 70px; resize: vertical; }
 label { display: block; font-size: 11px; font-weight: 600; margin: 6px 0 2px; }
 .error { color: var(--ck-danger); }
 .stack { display: flex; flex-direction: column; gap: 6px; }
+.picks {
+  gap: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--ck-border);
+  border-radius: 6px;
+}
+button.pick {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--ck-border);
+  color: var(--ck-fg);
+  padding: 4px 7px;
+  cursor: pointer;
+}
+button.pick:last-child { border-bottom: 0; }
+button.pick:hover, button.pick:focus { background: var(--ck-subtle-bg); }
 .actions { display: flex; gap: 6px; margin-top: 8px; }
 .spinner {
   width: 12px;

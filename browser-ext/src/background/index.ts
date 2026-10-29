@@ -225,6 +225,10 @@ async function handle(message: Request): Promise<unknown> {
           hub: hubFor(message),
         },
       );
+    case "project.contentPaths":
+      return request<string[]>(
+        `${projectPath(message.owner, message.project)}/contents-paths`,
+      );
     case "project.figures": {
       // The hub pages at most 100 figures, so gather paths and titles only
       const items: FiguresPage["items"] = [];
@@ -270,6 +274,21 @@ async function handle(message: Request): Promise<unknown> {
             shows: message.shows,
             produces: message.produces,
             save: message.save ?? false,
+          },
+        },
+      );
+    case "project.recordOrigin":
+      // Recorded as a misc artifact, which the hub only takes for a path
+      // nothing else declares
+      return request<{ path: string }>(
+        `${projectPath(message.owner, message.project)}/misc`,
+        {
+          method: "POST",
+          body: {
+            path: message.path,
+            imported_from: message.importedFrom,
+            created_by: message.createdBy,
+            message: `Record where ${message.path} came from`,
           },
         },
       );

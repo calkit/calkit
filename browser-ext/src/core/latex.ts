@@ -162,8 +162,19 @@ export function citationText(citation: Citation): string {
 }
 
 /** Something wrong with what a command shows, as a lint message. */
+// Mirrors EXPORTED_EXTENSIONS in calkit/provenance.py: something else
+// writes these, e.g., a script or an image editor saving from its own file
+const EXPORTED_EXTENSIONS = [".png", ".gif", ".webp", ".bmp", ".pdf", ".eps"];
+
+/** Whether a person can be the origin of a file, as opposed to a tool. */
+export function canBeCreatedByPerson(path: string): boolean {
+  const lower = path.toLowerCase();
+  return !EXPORTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 export interface CitationProblem {
   severity: "error" | "warning";
+  kind: "value" | "missing" | "origin" | "stale";
   message: string;
   /** What it's about, e.g., data a figure is made from. */
   path: string;
@@ -187,12 +198,14 @@ export function citationProblems(
   if (citation.kind === "value" && provenance.value_error) {
     problems.push({
       severity: "error",
+      kind: "value",
       message: provenance.value_error,
       path,
     });
   } else if (missing && !citation.included) {
     problems.push({
       severity: "error",
+      kind: "missing",
       message: `${path} isn't in the project`,
       path,
     });
@@ -204,6 +217,7 @@ export function citationProblems(
     const via = gap.steps.flatMap((step) => (step.stage ? [step.stage] : []));
     problems.push({
       severity: "error",
+      kind: "origin",
       message:
         gap.path === path
           ? "Origin not defined"
@@ -215,6 +229,7 @@ export function citationProblems(
   if (provenance.stale_reason) {
     problems.push({
       severity: "warning",
+      kind: "stale",
       message:
         provenance.stale_reason === "frozen"
           ? "Out of date: its stage is frozen, and what it reads or " +

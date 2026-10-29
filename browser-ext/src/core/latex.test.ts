@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  canBeCreatedByPerson,
   citationAt,
   citationProblems,
   citationsIn,
@@ -226,9 +227,9 @@ describe("citationProblems", () => {
         },
       ],
     });
-    expect(problems.map((p) => [p.severity, p.path])).toEqual([
-      ["error", "data/raw.csv"],
-      ["warning", "figures/a.png"],
+    expect(problems.map((p) => [p.severity, p.kind, p.path])).toEqual([
+      ["error", "origin", "data/raw.csv"],
+      ["warning", "stale", "figures/a.png"],
     ]);
     expect(problems[0].message).toBe(
       "Origin not defined for data/raw.csv, which it's made from (via plot)",
@@ -257,5 +258,15 @@ describe("citationProblems", () => {
         value_error: "r.json has no key x",
       }).map((p) => p.message),
     ).toEqual(["r.json has no key x"]);
+  });
+});
+
+describe("canBeCreatedByPerson", () => {
+  test("rules out formats something else exports", () => {
+    expect(canBeCreatedByPerson("figures/photo.jpeg")).toBe(true);
+    expect(canBeCreatedByPerson("figures/drawn.svg")).toBe(true);
+    expect(canBeCreatedByPerson("data/raw.csv")).toBe(true);
+    expect(canBeCreatedByPerson("figures/plot.png")).toBe(false);
+    expect(canBeCreatedByPerson("figures/PLOT.PDF")).toBe(false);
   });
 });

@@ -330,7 +330,10 @@ function renderAddScript(
         save.disabled = false;
       }
     });
-    review.append(el("div", { class: "actions" }, [save]));
+    // Only a stage that makes what's shown defines its origin
+    if (choices.length) {
+      review.append(el("div", { class: "actions" }, [save]));
+    }
   };
   return el("div", { class: "stack", style: { marginTop: "6px" } }, [
     el("div", { class: "small" }, [

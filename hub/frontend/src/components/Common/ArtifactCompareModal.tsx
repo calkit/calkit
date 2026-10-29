@@ -737,6 +737,7 @@ function StageFromScriptForm({
             size="xs"
             variant="primary"
             mt={2}
+            isDisabled={!produces}
             isLoading={saveMutation.isPending}
             onClick={() => saveMutation.mutate()}
           >

@@ -999,23 +999,19 @@ function watchEditor(): void {
   });
 }
 
-/** Where a citation lands in the PDF, in points from the page's top left. */
+/** Where a problem lands in the PDF, in points from the page's top left. */
 interface PdfBox {
   page: number;
   h: number;
   v: number;
   width: number;
   height: number;
+  message: string;
   line: number;
   column: number;
-  /** The citation's index in the editor's scan of that version. */
-  index: number;
-  version: number;
-  /** Set for an error, which gets a red box. */
-  message?: string;
 }
 
-type SynctexBox = Omit<PdfBox, "index" | "version" | "message">;
+type SynctexBox = Omit<PdfBox, "message">;
 
 // The PDF Overleaf last built, which code-to-PDF lookups have to name
 let pdfBuild: { buildId: string; clsiServerId: string | null } | null = null;
@@ -1073,7 +1069,7 @@ function synctex(
   return cached;
 }
 
-/** Find where each citation in the open document lands in the PDF. */
+/** Find where each error in the open document lands in the PDF. */
 async function drawPdfBoxes(): Promise<void> {
   const build = pdfBuild;
   const snapshot = editorCitations;
@@ -1092,6 +1088,9 @@ async function drawPdfBoxes(): Promise<void> {
   const boxes: PdfBox[] = [];
   for (const [index, item] of snapshot.items.entries()) {
     const error = problems.found[index]?.find((p) => p.severity === "error");
+    if (!error) {
+      continue;
+    }
     for (const box of await synctex(
       projectId,
       build,
@@ -1099,12 +1098,7 @@ async function drawPdfBoxes(): Promise<void> {
       item.line,
       item.column,
     )) {
-      boxes.push({
-        ...box,
-        index,
-        version: snapshot.version,
-        message: error?.message,
-      });
+      boxes.push({ ...box, message: error.message });
     }
   }
   if (pdfBuild !== build || editorCitations !== snapshot) {
@@ -1131,7 +1125,7 @@ function placePdfBoxes(): void {
       getComputedStyle(page).getPropertyValue("--scale-factor"),
     );
     const wanted = Number.isFinite(scale)
-      ? pdfBoxes.filter((box) => box.page === number && box.message)
+      ? pdfBoxes.filter((box) => box.page === number)
       : [];
     const signature = `${scale}|${wanted
       .map((box) => [box.h, box.v, box.width, box.height].join(","))
@@ -1146,10 +1140,9 @@ function placePdfBoxes(): void {
     existing.forEach((node) => node.remove());
     page.dataset.calkitBoxes = signature;
     for (const box of wanted) {
-      const message = box.message ?? "";
       const tag = el("button", {
-        text: message,
-        title: `${message}. Click to show it in the editor.`,
+        text: box.message,
+        title: `${box.message}. Click to show it in the editor.`,
         onClick: () =>
           toEditor({ type: "goto", line: box.line, column: box.column }),
       });
@@ -1211,11 +1204,14 @@ function watchPdf(): void {
     clearTimeout(timer);
     timer = setTimeout(placePdfBoxes, 200);
   }).observe(document.body, { childList: true, subtree: true });
-  // A citation's provenance on hover, as in the editor, found by where the
-  // pointer is so the PDF still gets every click
-  let shown: { box: PdfBox; host: HTMLElement } | null = null;
+  // A citation's provenance on hover, as in the editor. Overleaf says
+  // which line of which file is under the pointer, as for a double click,
+  // so the PDF still gets every click
+  let shown: { index: number; version: number; host: HTMLElement } | null =
+    null;
   let showing: ReturnType<typeof setTimeout> | undefined;
   let hiding: ReturnType<typeof setTimeout> | undefined;
+  let lookups = 0;
   let tips = 0;
   const hide = () => {
     clearTimeout(hiding);
@@ -1223,20 +1219,79 @@ function watchPdf(): void {
     shown?.host.remove();
     shown = null;
   };
-  const show = (box: PdfBox, rect: DOMRect) => {
-    hide();
-    if (editorCitations?.version !== box.version) {
-      return;
+  const citationAt = async (page: number, h: number, v: number) => {
+    const build = pdfBuild;
+    const projectId = currentProjectId;
+    const snapshot = editorCitations;
+    const file = openDocPath();
+    if (!projectId || !snapshot || !file) {
+      console.debug(
+        "[Calkit] PDF hover: no .tex file selected in the file tree",
+      );
+      return null;
     }
+    const params = new URLSearchParams({
+      page: String(page),
+      h: h.toFixed(2),
+      v: v.toFixed(2),
+    });
+    if (build) {
+      params.set("buildId", build.buildId);
+      if (build.clsiServerId) {
+        params.set("clsiserverid", build.clsiServerId);
+      }
+    }
+    // Each pointer position is new, so there's nothing worth caching
+    const code: { file: string; line: number; column?: number }[] = await fetch(
+      `/project/${projectId}/sync/pdf?${params}`,
+      { headers: { Accept: "application/json" } },
+    )
+      .then((response) => (response.ok ? response.json() : { code: [] }))
+      .then((data) => data.code ?? [])
+      .catch(() => []);
+    for (const position of code) {
+      // A root file in a folder comes back as, e.g., folder/./main.tex
+      const at = position.file.replace(/(^|\/)\.\//g, "$1");
+      if (at !== file) {
+        continue;
+      }
+      const onLine = snapshot.items.flatMap((item, index) =>
+        item.line === position.line ? [{ item, index }] : [],
+      );
+      if (!onLine.length) {
+        continue;
+      }
+      // Usually there's no column, but when there is, take the nearest
+      const column = position.column ?? -1;
+      const best =
+        column < 0
+          ? onLine[0]
+          : onLine.reduce((a, b) =>
+              Math.abs(b.item.column - column) <
+              Math.abs(a.item.column - column)
+                ? b
+                : a,
+            );
+      return { index: best.index, version: snapshot.version };
+    }
+    console.debug("[Calkit] PDF hover: no citation in", file, "at", code);
+    return null;
+  };
+  const show = (
+    found: { index: number; version: number },
+    x: number,
+    y: number,
+  ) => {
+    hide();
     const host = el("div");
     host.id = `calkit-pdf-tooltip-${++tips}`;
-    const below = rect.top < window.innerHeight / 2;
+    const below = y < window.innerHeight / 2;
     Object.assign(host.style, {
       position: "fixed",
-      left: `${Math.max(4, Math.min(rect.left, window.innerWidth - 386))}px`,
+      left: `${Math.max(4, Math.min(x - 20, window.innerWidth - 386))}px`,
       ...(below
-        ? { top: `${rect.bottom + 4}px` }
-        : { bottom: `${window.innerHeight - rect.top + 4}px` }),
+        ? { top: `${y + 12}px` }
+        : { bottom: `${window.innerHeight - y + 12}px` }),
       zIndex: "2147483646",
       border: "1px solid rgba(0, 0, 0, 0.15)",
       borderRadius: "4px",
@@ -1244,12 +1299,13 @@ function watchPdf(): void {
       overflow: "hidden",
     });
     document.body.append(host);
-    shown = { box, host };
-    void fillTooltip(host.id, box.version, box.index);
+    shown = { ...found, host };
+    void fillTooltip(host.id, found.version, found.index);
   };
   document.addEventListener(
     "mousemove",
     (event) => {
+      clearTimeout(showing);
       if (shown && event.target === shown.host) {
         clearTimeout(hiding);
         hiding = undefined;
@@ -1261,51 +1317,35 @@ function watchPdf(): void {
       const scale = page
         ? parseFloat(getComputedStyle(page).getPropertyValue("--scale-factor"))
         : NaN;
-      let hit: { box: PdfBox; rect: DOMRect } | null = null;
-      if (page && Number.isFinite(scale)) {
-        const bounds = page.getBoundingClientRect();
-        const left = bounds.left + page.clientLeft;
-        const top = bounds.top + page.clientTop;
-        const x = (event.clientX - left) / scale;
-        const y = (event.clientY - top) / scale;
-        const number = Number(page.dataset.pageNumber);
-        // The smallest box under the pointer, e.g., a value in a table
-        const box = pdfBoxes
-          .filter(
-            (b) =>
-              b.page === number &&
-              x >= b.h &&
-              x <= b.h + b.width &&
-              y >= b.v - 10 &&
-              y <= b.v - 10 + b.height,
-          )
-          .sort((a, b) => a.width * a.height - b.width * b.height)[0];
-        if (box) {
-          hit = {
-            box,
-            rect: new DOMRect(
-              left + box.h * scale,
-              top + (box.v - 10) * scale,
-              box.width * scale,
-              box.height * scale,
-            ),
-          };
+      if (!page || !Number.isFinite(scale)) {
+        if (shown && hiding === undefined) {
+          hiding = setTimeout(hide, 300);
         }
-      }
-      if (shown && hit?.box === shown.box) {
-        clearTimeout(hiding);
-        hiding = undefined;
-        clearTimeout(showing);
         return;
       }
-      if (shown && hiding === undefined) {
-        hiding = setTimeout(hide, 300);
-      }
-      clearTimeout(showing);
-      if (hit) {
-        const { box, rect } = hit;
-        showing = setTimeout(() => show(box, rect), 300);
-      }
+      // Over the PDF, what's under the pointer once it rests decides
+      clearTimeout(hiding);
+      hiding = undefined;
+      const bounds = page.getBoundingClientRect();
+      const h = (event.clientX - bounds.left - page.clientLeft) / scale;
+      const v = (event.clientY - bounds.top - page.clientTop) / scale;
+      const number = Number(page.dataset.pageNumber);
+      const { clientX, clientY } = event;
+      showing = setTimeout(async () => {
+        const lookup = ++lookups;
+        const found = await citationAt(number, h, v);
+        if (lookup !== lookups) {
+          return;
+        }
+        if (!found) {
+          hide();
+        } else if (
+          shown?.index !== found.index ||
+          shown.version !== found.version
+        ) {
+          show(found, clientX, clientY);
+        }
+      }, 300);
     },
     { passive: true },
   );

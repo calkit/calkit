@@ -923,7 +923,7 @@ async function checkCitations(): Promise<void> {
         : [],
     ),
   });
-  void drawPdfProblems();
+  void drawPdfBoxes();
 }
 
 const TOOLTIP_STYLES = `
@@ -999,22 +999,28 @@ function watchEditor(): void {
   });
 }
 
-/** Where a problem lands in the PDF, in points from the page's top left. */
+/** Where a citation lands in the PDF, in points from the page's top left. */
 interface PdfBox {
   page: number;
   h: number;
   v: number;
   width: number;
   height: number;
-  message: string;
   line: number;
   column: number;
+  /** The citation's index in the editor's scan of that version. */
+  index: number;
+  version: number;
+  /** Set for an error, which gets a red box. */
+  message?: string;
 }
+
+type SynctexBox = Omit<PdfBox, "index" | "version" | "message">;
 
 // The PDF Overleaf last built, which code-to-PDF lookups have to name
 let pdfBuild: { buildId: string; clsiServerId: string | null } | null = null;
 let pdfBoxes: PdfBox[] = [];
-const synctexCache = new Map<string, Promise<Omit<PdfBox, "message">[]>>();
+const synctexCache = new Map<string, Promise<SynctexBox[]>>();
 
 /** The open document's path in the Overleaf project, from the file tree. */
 function openDocPath(): string | null {
@@ -1041,7 +1047,7 @@ function synctex(
   file: string,
   line: number,
   column: number,
-): Promise<Omit<PdfBox, "message">[]> {
+): Promise<SynctexBox[]> {
   const params = new URLSearchParams({
     file,
     line: String(line),
@@ -1058,7 +1064,7 @@ function synctex(
       headers: { Accept: "application/json" },
     })
       .then((response) => (response.ok ? response.json() : { pdf: [] }))
-      .then((data: { pdf?: Omit<PdfBox, "message" | "line" | "column">[] }) =>
+      .then((data: { pdf?: Omit<SynctexBox, "line" | "column">[] }) =>
         (data.pdf ?? []).map((box) => ({ ...box, line, column })),
       )
       .catch(() => []);
@@ -1067,8 +1073,8 @@ function synctex(
   return cached;
 }
 
-/** Find where each error in the open document lands in the PDF. */
-async function drawPdfProblems(): Promise<void> {
+/** Find where each citation in the open document lands in the PDF. */
+async function drawPdfBoxes(): Promise<void> {
   const build = pdfBuild;
   const snapshot = editorCitations;
   const problems = editorProblems;
@@ -1084,12 +1090,8 @@ async function drawPdfProblems(): Promise<void> {
     return;
   }
   const boxes: PdfBox[] = [];
-  for (const [index, found] of problems.found.entries()) {
-    const error = found?.find((p) => p.severity === "error");
-    if (!error) {
-      continue;
-    }
-    const item = snapshot.items[index];
+  for (const [index, item] of snapshot.items.entries()) {
+    const error = problems.found[index]?.find((p) => p.severity === "error");
     for (const box of await synctex(
       projectId,
       build,
@@ -1097,7 +1099,12 @@ async function drawPdfProblems(): Promise<void> {
       item.line,
       item.column,
     )) {
-      boxes.push({ ...box, message: error.message });
+      boxes.push({
+        ...box,
+        index,
+        version: snapshot.version,
+        message: error?.message,
+      });
     }
   }
   if (pdfBuild !== build || editorCitations !== snapshot) {
@@ -1124,7 +1131,7 @@ function placePdfBoxes(): void {
       getComputedStyle(page).getPropertyValue("--scale-factor"),
     );
     const wanted = Number.isFinite(scale)
-      ? pdfBoxes.filter((box) => box.page === number)
+      ? pdfBoxes.filter((box) => box.page === number && box.message)
       : [];
     const signature = `${scale}|${wanted
       .map((box) => [box.h, box.v, box.width, box.height].join(","))
@@ -1139,9 +1146,10 @@ function placePdfBoxes(): void {
     existing.forEach((node) => node.remove());
     page.dataset.calkitBoxes = signature;
     for (const box of wanted) {
+      const message = box.message ?? "";
       const tag = el("button", {
-        text: box.message,
-        title: `${box.message}. Click to show it in the editor.`,
+        text: message,
+        title: `${message}. Click to show it in the editor.`,
         onClick: () =>
           toEditor({ type: "goto", line: box.line, column: box.column }),
       });
@@ -1194,7 +1202,7 @@ function watchPdf(): void {
           clsiServerId: new URL(entry.name).searchParams.get("clsiserverid"),
         };
         synctexCache.clear();
-        void drawPdfProblems();
+        void drawPdfBoxes();
       }
     }
   }).observe({ type: "resource", buffered: true });
@@ -1203,6 +1211,115 @@ function watchPdf(): void {
     clearTimeout(timer);
     timer = setTimeout(placePdfBoxes, 200);
   }).observe(document.body, { childList: true, subtree: true });
+  // A citation's provenance on hover, as in the editor, found by where the
+  // pointer is so the PDF still gets every click
+  let shown: { box: PdfBox; host: HTMLElement } | null = null;
+  let showing: ReturnType<typeof setTimeout> | undefined;
+  let hiding: ReturnType<typeof setTimeout> | undefined;
+  let tips = 0;
+  const hide = () => {
+    clearTimeout(hiding);
+    hiding = undefined;
+    shown?.host.remove();
+    shown = null;
+  };
+  const show = (box: PdfBox, rect: DOMRect) => {
+    hide();
+    if (editorCitations?.version !== box.version) {
+      return;
+    }
+    const host = el("div");
+    host.id = `calkit-pdf-tooltip-${++tips}`;
+    const below = rect.top < window.innerHeight / 2;
+    Object.assign(host.style, {
+      position: "fixed",
+      left: `${Math.max(4, Math.min(rect.left, window.innerWidth - 386))}px`,
+      ...(below
+        ? { top: `${rect.bottom + 4}px` }
+        : { bottom: `${window.innerHeight - rect.top + 4}px` }),
+      zIndex: "2147483646",
+      border: "1px solid rgba(0, 0, 0, 0.15)",
+      borderRadius: "4px",
+      boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
+      overflow: "hidden",
+    });
+    document.body.append(host);
+    shown = { box, host };
+    void fillTooltip(host.id, box.version, box.index);
+  };
+  document.addEventListener(
+    "mousemove",
+    (event) => {
+      if (shown && event.target === shown.host) {
+        clearTimeout(hiding);
+        hiding = undefined;
+        return;
+      }
+      const page = (event.target as Element | null)?.closest?.<HTMLElement>(
+        ".pdfViewer .page[data-page-number]",
+      );
+      const scale = page
+        ? parseFloat(getComputedStyle(page).getPropertyValue("--scale-factor"))
+        : NaN;
+      let hit: { box: PdfBox; rect: DOMRect } | null = null;
+      if (page && Number.isFinite(scale)) {
+        const bounds = page.getBoundingClientRect();
+        const left = bounds.left + page.clientLeft;
+        const top = bounds.top + page.clientTop;
+        const x = (event.clientX - left) / scale;
+        const y = (event.clientY - top) / scale;
+        const number = Number(page.dataset.pageNumber);
+        // The smallest box under the pointer, e.g., a value in a table
+        const box = pdfBoxes
+          .filter(
+            (b) =>
+              b.page === number &&
+              x >= b.h &&
+              x <= b.h + b.width &&
+              y >= b.v - 10 &&
+              y <= b.v - 10 + b.height,
+          )
+          .sort((a, b) => a.width * a.height - b.width * b.height)[0];
+        if (box) {
+          hit = {
+            box,
+            rect: new DOMRect(
+              left + box.h * scale,
+              top + (box.v - 10) * scale,
+              box.width * scale,
+              box.height * scale,
+            ),
+          };
+        }
+      }
+      if (shown && hit?.box === shown.box) {
+        clearTimeout(hiding);
+        hiding = undefined;
+        clearTimeout(showing);
+        return;
+      }
+      if (shown && hiding === undefined) {
+        hiding = setTimeout(hide, 300);
+      }
+      clearTimeout(showing);
+      if (hit) {
+        const { box, rect } = hit;
+        showing = setTimeout(() => show(box, rect), 300);
+      }
+    },
+    { passive: true },
+  );
+  // A fixed tooltip would stay put while the PDF scrolls away under it
+  document.addEventListener(
+    "scroll",
+    (event) => {
+      if (shown && event.target !== shown.host) {
+        clearTimeout(showing);
+        hide();
+      }
+    },
+    { capture: true, passive: true },
+  );
 }
 
 /**

@@ -1,6 +1,6 @@
 {
-  "date": "2026-10-27",
-  "hub_users": 138,
+  "date": "2026-10-29",
+  "hub_users": 139,
   "hub_projects": 52,
   "hub_projects_worked_on": 17,
   "hub_project_owners": 37,
@@ -9,14 +9,14 @@
     "petebachant",
     "pwbachant"
   ],
-  "hub_monthly_active_users": 8,
-  "hub_monthly_active_signed_in_users": 5,
-  "hub_human_project_visits_last_30_days": 7,
-  "hub_projects_viewed_last_30_days": 7,
+  "hub_monthly_active_users": null,
+  "hub_monthly_active_signed_in_users": null,
+  "hub_human_project_visits_last_30_days": null,
+  "hub_projects_viewed_last_30_days": null,
   "github_stars": 60,
   "github_forks": 17,
   "pypi_downloads_last_month": 3616,
-  "releases": 331,
-  "releases_per_week_last_90_days": 8.0,
+  "releases": 335,
+  "releases_per_week_last_90_days": 8.3,
   "papers_shipped": 5
 }

@@ -324,7 +324,7 @@ function renderAddScript(
           save: true,
         });
         await showDefined(container, link, citation);
-        container.append(renderRunIt(saved));
+        container.append(renderRunIt(saved, `${owner}/${project}`));
       } catch (e) {
         fail(e);
         save.disabled = false;
@@ -553,14 +553,14 @@ function renderDefineOrigin(
 }
 
 /** How to run a stage that's never run, since Overleaf can't. */
-function renderRunIt(saved: StageFromScript): HTMLElement {
+function renderRunIt(saved: StageFromScript, spec: string): HTMLElement {
   const folder = saved.git_repo_url
     .replace(/\.git$/, "")
     .split("/")
     .pop();
   const commands = [
     "curl -LsSf install.calkit.org | sh",
-    `calkit clone ${saved.git_repo_url}`,
+    `calkit clone ${spec}`,
     `cd ${folder}`,
     "calkit run --save --overleaf",
   ].join("\n");

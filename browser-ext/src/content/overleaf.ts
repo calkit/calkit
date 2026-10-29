@@ -7,7 +7,8 @@ import {
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import {
   type Citation,
-  citationAt,
+  type CitationProblem,
+  citationProblems,
   citationText,
   citationCandidates,
 } from "../core/latex";
@@ -30,8 +31,10 @@ import {
   loading,
   mountPanel,
   type Panel,
+  STYLES,
   textInput,
 } from "../core/ui";
+import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
 
 const PANEL_ID = "calkit-overleaf-panel";
 const LAUNCHER_ID = "calkit-overleaf-launcher";
@@ -39,7 +42,6 @@ const TOKEN_PANEL_ID = "calkit-overleaf-token-panel";
 const OVERLEAF_GIT_SETTINGS =
   "https://www.overleaf.com/user/settings#git-integration";
 const OVERLEAF_TOKEN_RE = /\bolp_[A-Za-z0-9]{20,}\b/;
-const CARD_ID = "calkit-overleaf-citation-card";
 
 let panel: Panel | null = null;
 let currentProjectId: string | null = null;
@@ -60,7 +62,11 @@ let loadGeneration = 0;
 let tokenWatcher: MutationObserver | null = null;
 // The Calkit project this Overleaf project syncs with, once found
 let currentLink: OverleafLinkPublic | null = null;
-const provenanceCache = new Map<string, Promise<Provenance>>();
+// Kept for a minute, since the project changes under it, e.g., with a sync
+const provenanceCache = new Map<
+  string,
+  { at: number; provenance: Promise<Provenance> }
+>();
 
 function provenanceFor(
   link: OverleafLinkPublic,
@@ -70,20 +76,21 @@ function provenanceFor(
   const cacheKey = `${link.project_owner_name}/${link.project_name}:${path}:${
     key ?? ""
   }`;
-  let cached = provenanceCache.get(cacheKey);
-  if (!cached) {
-    cached = send({
-      type: "project.provenance",
-      owner: link.project_owner_name,
-      project: link.project_name,
-      path,
-      key,
-    });
-    // A failure is worth asking again about next time
-    cached.catch(() => provenanceCache.delete(cacheKey));
-    provenanceCache.set(cacheKey, cached);
+  const cached = provenanceCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.provenance;
   }
-  return cached;
+  const provenance = send({
+    type: "project.provenance",
+    owner: link.project_owner_name,
+    project: link.project_name,
+    path,
+    key,
+  });
+  // A failure is worth asking again about next time
+  provenance.catch(() => provenanceCache.delete(cacheKey));
+  provenanceCache.set(cacheKey, { at: Date.now(), provenance });
+  return provenance;
 }
 
 /**
@@ -143,7 +150,7 @@ function valueText(value: unknown): string {
  * The hub reads the script the way `calkit xr --dry-run` does, without
  * running it, so the user sees the environment, inputs, and outputs before
  * anything is committed. Overleaf can't run it, so once it's saved the
- * card says how to, on the user's own computer.
+ * panel says how to, on the user's own computer.
  */
 function renderAddScript(
   container: HTMLElement,
@@ -300,6 +307,7 @@ function renderAddScript(
           save: true,
         });
         provenanceCache.clear();
+        void checkCitations();
         const fresh = await citationProvenance(link, citation);
         clear(container);
         renderProvenance(container, link, citation, fresh);
@@ -389,6 +397,29 @@ function renderProvenance(
   const path = citation.kind === "value" ? citation.path : provenance.path;
   const label = citation.key ? `${path}: ${citation.key}` : path;
   container.append(el("div", { class: "name", text: label }));
+  const problems = citationProblems(citation, provenance);
+  for (const problem of problems) {
+    container.append(problemLine(problem));
+  }
+  // Its own origin is what a script added here can define
+  if (
+    link.current_user_access !== "read" &&
+    !provenance.stage &&
+    problems.some((p) => p.severity === "error" && p.path === provenance.path)
+  ) {
+    container.append(
+      el("div", { class: "actions" }, [
+        el("button", {
+          class: "action secondary",
+          text: "Add the script that makes it",
+          onClick: () =>
+            showInPanel((body) =>
+              body.append(renderAddScript(body, link, citation, provenance)),
+            ),
+        }),
+      ]),
+    );
+  }
   if (provenance.copied_from) {
     container.append(
       el("div", { class: "dim small" }, [
@@ -404,20 +435,15 @@ function renderProvenance(
       ]),
     );
   }
-  if (citation.kind === "value") {
+  if (
+    citation.kind === "value" &&
+    !provenance.value_error &&
+    provenance.value !== undefined
+  ) {
     container.append(
       el("div", {
         style: { fontSize: "18px", fontWeight: "600", margin: "4px 0" },
-        text:
-          provenance.value_error ??
-          (provenance.value === undefined ? "" : valueText(provenance.value)),
-      }),
-    );
-  } else if (!provenance.exists) {
-    container.append(
-      el("div", {
-        class: "dim small",
-        text: "The project doesn't have this file yet.",
+        text: valueText(provenance.value),
       }),
     );
   }
@@ -439,28 +465,7 @@ function renderProvenance(
           : null,
       ]),
     );
-  } else if (!provenance.stage) {
-    container.append(
-      el("div", {
-        class: "dim small",
-        text: "No pipeline stage produces this.",
-      }),
-    );
-    if (link.current_user_access !== "read") {
-      const add = el("button", {
-        class: "action secondary",
-        text: "Add the script that makes it",
-      });
-      const actions = el("div", { class: "actions" }, [add]);
-      add.addEventListener("click", () =>
-        actions.replaceWith(
-          renderAddScript(container, link, citation, provenance),
-        ),
-      );
-      container.append(actions);
-    }
-  } else {
-    const stale = provenance.stale_reason;
+  } else if (provenance.stage) {
     container.append(
       el("div", { class: "row" }, [
         el("div", { class: "grow small" }, [
@@ -479,17 +484,8 @@ function renderProvenance(
               })
             : null,
         ]),
-        stale
-          ? el("span", {
-              class: "badge warn",
-              text: stale === "frozen" ? "frozen" : "stale",
-              title:
-                stale === "frozen"
-                  ? "Frozen, and its inputs or outputs have moved since it ran"
-                  : "Its inputs or code changed since it last ran; run the " +
-                    "pipeline, then sync",
-            })
-          : provenance.stage_status?.status === "up-to-date"
+        !provenance.stale_reason &&
+        provenance.stage_status?.status === "up-to-date"
           ? el("span", { class: "badge ok", text: "current" })
           : null,
       ]),
@@ -526,24 +522,6 @@ function renderProvenance(
       );
     }
   }
-  // Data behind it that nothing records the origin of, which a reader
-  // can't trace however current the pipeline is
-  for (const gap of provenance.gaps ?? []) {
-    const via = gap.steps.flatMap((step) => (step.stage ? [step.stage] : []));
-    container.append(
-      el("div", {
-        class: "small",
-        style: { color: "var(--ck-warning)", marginTop: "4px" },
-        text:
-          `Nothing records where ${gap.path} came from` +
-          (via.length ? ` (via ${via.join(", ")})` : "") +
-          ".",
-        title:
-          "Record it in calkit.yaml with imported_from or created_by, or " +
-          "add the stage that makes it",
-      }),
-    );
-  }
   container.append(
     el("div", { class: "small", style: { marginTop: "6px" } }, [
       el("a", {
@@ -565,86 +543,354 @@ function renderProvenance(
   );
 }
 
-/**
- * Follow the cursor in the editor, and when it's on something the document
- * shows from the project, whether with a calkit.sty command or a plain
- * `\\includegraphics` or `\\input`, say where it came from.
- *
- * A card rather than the panel, since the panel is about syncing and
- * mostly closed, while this is about the line being written.
- */
-function watchCursor(): void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let shown: string | null = null;
-  let dismissed: string | null = null;
-  const hide = () => {
-    document.getElementById(CARD_ID)?.remove();
-    shown = null;
-  };
-  const update = async () => {
-    const link = currentLink;
-    const selection = document.getSelection();
-    const anchor = selection?.anchorNode;
-    const line =
-      anchor instanceof Element
-        ? anchor.closest(".cm-line")
-        : anchor?.parentElement?.closest(".cm-line");
-    if (!link || !selection || !anchor || !line) {
-      // Clicking into the card itself moves the selection there
-      if (!document.getElementById(CARD_ID)?.contains(anchor ?? null)) {
-        hide();
-      }
-      return;
-    }
-    // How far into the line the cursor is, in characters
-    const range = document.createRange();
-    range.setStart(line, 0);
-    range.setEnd(anchor, selection.anchorOffset);
-    const citation = citationAt(
-      line.textContent ?? "",
-      range.toString().length,
-    );
-    const id = citation
-      ? citation.included
-        ? `${citation.kind}:${citation.path}`
-        : citationText(citation)
-      : null;
-    if (!citation || !id) {
-      hide();
-      dismissed = null;
-      return;
-    }
-    if (id === shown || id === dismissed) {
-      return;
-    }
-    shown = id;
-    const card = mountPanel({
-      id: CARD_ID,
-      title: "From the project",
-      position: "top-right",
-      onClose: () => {
-        dismissed = id;
-        shown = null;
-      },
-    });
-    card.body.append(loading());
-    try {
-      const provenance = await citationProvenance(link, citation);
-      if (shown !== id) {
-        return;
-      }
-      clear(card.body);
-      renderProvenance(card.body, link, citation, provenance);
-    } catch (e) {
-      clear(card.body).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
-    }
-  };
-  document.addEventListener("selectionchange", () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => void update(), 200);
+/** One problem, colored by how bad it is. */
+function problemLine(problem: CitationProblem): HTMLElement {
+  return el("div", {
+    class: "small",
+    style: {
+      color:
+        problem.severity === "error" ? "var(--ck-danger)" : "var(--ck-warning)",
+      fontWeight: "600",
+    },
+    text: problem.message,
   });
+}
+
+type Without<T> = T extends unknown ? Omit<T, "calkit"> : never;
+
+// What the editor last said the open document shows, and what's wrong with
+// each, by its index there
+let editorCitations: { version: number; items: EditorCitation[] } | null = null;
+let editorProblems: { version: number; found: CitationProblem[][] } | null =
+  null;
+
+function toEditor(message: Without<ToEditor>): void {
+  window.postMessage({ calkit: "lint", ...message }, window.location.origin);
+}
+
+/** Find what's wrong with what the open document shows, and mark it. */
+async function checkCitations(): Promise<void> {
+  const link = currentLink;
+  const snapshot = editorCitations;
+  if (!link || !snapshot) {
+    return;
+  }
+  const found: CitationProblem[][] = [];
+  // A few at a time, since each has the hub read the project
+  let next = 0;
+  const work = async () => {
+    while (next < snapshot.items.length) {
+      const i = next++;
+      const { citation } = snapshot.items[i];
+      try {
+        found[i] = citationProblems(
+          citation,
+          await citationProvenance(link, citation),
+        );
+      } catch {
+        found[i] = [];
+      }
+    }
+  };
+  await Promise.all([work(), work(), work(), work()]);
+  if (editorCitations !== snapshot || currentLink !== link) {
+    return;
+  }
+  editorProblems = { version: snapshot.version, found };
+  toEditor({
+    type: "problems",
+    version: snapshot.version,
+    items: found.flatMap((problems, index) =>
+      problems.length
+        ? [
+            {
+              index,
+              severity: problems.some((p) => p.severity === "error")
+                ? "error"
+                : "warning",
+            },
+          ]
+        : [],
+    ),
+  });
+  void drawPdfProblems();
+}
+
+const TOOLTIP_STYLES = `
+.tip {
+  color: var(--ck-fg);
+  background: var(--ck-bg);
+  padding: 8px 10px;
+  max-width: 360px;
+}
+`;
+
+/** Fill a tooltip the editor opened over something the document shows. */
+async function fillTooltip(
+  id: string,
+  version: number,
+  index: number,
+): Promise<void> {
+  const link = currentLink;
+  const item =
+    editorCitations?.version === version
+      ? editorCitations.items[index]
+      : undefined;
+  if (!link || !item) {
+    return;
+  }
+  // Made as the tooltip opens, so it may not be on the page quite yet
+  let host = document.getElementById(id);
+  for (let i = 0; i < 20 && !host; i++) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    host = document.getElementById(id);
+  }
+  if (!host || host.shadowRoot) {
+    return;
+  }
+  const root = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = STYLES + TOOLTIP_STYLES;
+  const body = el("div", { class: "tip" }, [loading()]);
+  root.append(style, body);
+  try {
+    const provenance = await citationProvenance(link, item.citation);
+    clear(body);
+    renderProvenance(body, link, item.citation, provenance);
+  } catch (e) {
+    clear(body).append(
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
+  }
+}
+
+/**
+ * Hear from the editor, through the script in the page's world, what the
+ * open document shows and when a tooltip opens over it.
+ *
+ * The page can post these too, so all they can do is have the linked
+ * project's provenance looked up and shown, which the page could show
+ * anyway.
+ */
+function watchEditor(): void {
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.calkit !== "editor") {
+      return;
+    }
+    const message = event.data as FromEditor;
+    if (message.type === "citations") {
+      editorCitations = { version: message.version, items: message.items };
+      void checkCitations();
+    } else if (message.type === "tooltip") {
+      void fillTooltip(message.id, message.version, message.index);
+    }
+  });
+}
+
+/** Where a problem lands in the PDF, in points from the page's top left. */
+interface PdfBox {
+  page: number;
+  h: number;
+  v: number;
+  width: number;
+  height: number;
+  message: string;
+  line: number;
+  column: number;
+}
+
+// The PDF Overleaf last built, which code-to-PDF lookups have to name
+let pdfBuild: { buildId: string; clsiServerId: string | null } | null = null;
+let pdfBoxes: PdfBox[] = [];
+const synctexCache = new Map<string, Promise<Omit<PdfBox, "message">[]>>();
+
+/** The open document's path in the Overleaf project, from the file tree. */
+function openDocPath(): string | null {
+  const selected = document.querySelector<HTMLElement>(
+    '[role="treeitem"][aria-selected="true"]',
+  );
+  const name = selected?.getAttribute("aria-label");
+  if (!selected || !name || !/\.tex$/i.test(name)) {
+    return null;
+  }
+  const parts = [name];
+  let folder = selected.parentElement?.closest('[role="treeitem"]');
+  while (folder) {
+    parts.unshift(folder.getAttribute("aria-label") ?? "");
+    folder = folder.parentElement?.closest('[role="treeitem"]');
+  }
+  return parts.join("/");
+}
+
+/** Where in the PDF a line of the open document landed, as Overleaf says. */
+function synctex(
+  projectId: string,
+  build: { buildId: string; clsiServerId: string | null },
+  file: string,
+  line: number,
+  column: number,
+): Promise<Omit<PdfBox, "message">[]> {
+  const params = new URLSearchParams({
+    file,
+    line: String(line),
+    column: String(column),
+    buildId: build.buildId,
+  });
+  if (build.clsiServerId) {
+    params.set("clsiserverid", build.clsiServerId);
+  }
+  const key = params.toString();
+  let cached = synctexCache.get(key);
+  if (!cached) {
+    cached = fetch(`/project/${projectId}/sync/code?${params}`, {
+      headers: { Accept: "application/json" },
+    })
+      .then((response) => (response.ok ? response.json() : { pdf: [] }))
+      .then((data: { pdf?: Omit<PdfBox, "message" | "line" | "column">[] }) =>
+        (data.pdf ?? []).map((box) => ({ ...box, line, column })),
+      )
+      .catch(() => []);
+    synctexCache.set(key, cached);
+  }
+  return cached;
+}
+
+/** Find where each error in the open document lands in the PDF. */
+async function drawPdfProblems(): Promise<void> {
+  const build = pdfBuild;
+  const snapshot = editorCitations;
+  const problems = editorProblems;
+  const projectId = currentProjectId;
+  const file = openDocPath();
+  if (
+    !build ||
+    !snapshot ||
+    !projectId ||
+    !file ||
+    problems?.version !== snapshot.version
+  ) {
+    return;
+  }
+  const boxes: PdfBox[] = [];
+  for (const [index, found] of problems.found.entries()) {
+    const error = found?.find((p) => p.severity === "error");
+    if (!error) {
+      continue;
+    }
+    const item = snapshot.items[index];
+    for (const box of await synctex(
+      projectId,
+      build,
+      file,
+      item.line,
+      item.column,
+    )) {
+      boxes.push({ ...box, message: error.message });
+    }
+  }
+  if (pdfBuild !== build || editorCitations !== snapshot) {
+    return;
+  }
+  pdfBoxes = boxes;
+  placePdfBoxes();
+}
+
+/**
+ * Put a red box around each error on the PDF's pages.
+ *
+ * pdf.js clears a page it redraws, e.g., on zooming, so this runs whenever
+ * the viewer changes, and leaves a page alone that already has its boxes.
+ * The positions follow Overleaf's own synctex highlight.
+ */
+function placePdfBoxes(): void {
+  const color = "#e5484d";
+  for (const page of document.querySelectorAll<HTMLElement>(
+    ".pdfViewer .page[data-page-number]",
+  )) {
+    const number = Number(page.dataset.pageNumber);
+    const scale = parseFloat(
+      getComputedStyle(page).getPropertyValue("--scale-factor"),
+    );
+    const wanted = Number.isFinite(scale)
+      ? pdfBoxes.filter((box) => box.page === number)
+      : [];
+    const signature = `${scale}|${wanted
+      .map((box) => [box.h, box.v, box.width, box.height].join(","))
+      .join(";")}`;
+    const existing = page.querySelectorAll(":scope > .calkit-pdf-box");
+    if (
+      existing.length === wanted.length &&
+      page.dataset.calkitBoxes === signature
+    ) {
+      continue;
+    }
+    existing.forEach((node) => node.remove());
+    page.dataset.calkitBoxes = signature;
+    for (const box of wanted) {
+      const tag = el("button", {
+        text: box.message,
+        title: `${box.message}. Click to show it in the editor.`,
+        onClick: () =>
+          toEditor({ type: "goto", line: box.line, column: box.column }),
+      });
+      Object.assign(tag.style, {
+        position: "absolute",
+        left: "-2px",
+        bottom: "100%",
+        maxWidth: "320px",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        padding: "1px 5px",
+        border: "none",
+        borderRadius: "3px 3px 0 0",
+        background: color,
+        color: "#fff",
+        font: "600 11px/1.4 -apple-system, BlinkMacSystemFont, sans-serif",
+        cursor: "pointer",
+        pointerEvents: "auto",
+      });
+      const outline = el("div", { class: "calkit-pdf-box" }, [tag]);
+      Object.assign(outline.style, {
+        position: "absolute",
+        left: `${box.h * scale}px`,
+        top: `${(box.v - 10) * scale}px`,
+        width: `${box.width * scale}px`,
+        height: `${box.height * scale}px`,
+        border: `2px solid ${color}`,
+        borderRadius: "2px",
+        boxSizing: "border-box",
+        // Left to the PDF, so a double click still goes to the source
+        pointerEvents: "none",
+        zIndex: "5",
+      });
+      page.append(outline);
+    }
+  }
+}
+
+/** Follow Overleaf's builds and its PDF viewer, to keep the boxes on it. */
+function watchPdf(): void {
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) {
+      const match = entry.name.match(
+        /\/build\/([0-9a-f]+-[0-9a-f]+)\/output\/output\.pdf/,
+      );
+      if (match && match[1] !== pdfBuild?.buildId) {
+        pdfBuild = {
+          buildId: match[1],
+          clsiServerId: new URL(entry.name).searchParams.get("clsiserverid"),
+        };
+        synctexCache.clear();
+        void drawPdfProblems();
+      }
+    }
+  }).observe({ type: "resource", buffered: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  new MutationObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(placePdfBoxes, 200);
+  }).observe(document.body, { childList: true, subtree: true });
 }
 
 /**
@@ -1958,6 +2204,7 @@ async function load(overleafProjectId: string): Promise<void> {
     lastTokenProblem = false;
     lastSyncNeeded = !statuses[0].in_sync;
     currentLink = link;
+    void checkCitations();
     lastCheck = { overleafProjectId, hubWebUrl, link, status: statuses[0] };
     renderStatus(content, link, statuses[0], reload);
     showNotice();
@@ -2076,7 +2323,10 @@ let lastSyncNeeded = false;
 let lastTokenProblem = false;
 let lastUnlinked = false;
 
-function openPanel(overleafProjectId: string): void {
+function openPanel(
+  overleafProjectId: string,
+  fill?: (body: HTMLElement) => void,
+): void {
   document.getElementById(LAUNCHER_ID)?.remove();
   panel = mountPanel({
     id: PANEL_ID,
@@ -2095,7 +2345,29 @@ function openPanel(overleafProjectId: string): void {
       );
     },
   });
-  void load(overleafProjectId);
+  if (fill) {
+    fill(panel.body);
+  } else {
+    void load(overleafProjectId);
+  }
+}
+
+/** Open the panel on something to do, e.g., a fix from a tooltip. */
+function showInPanel(fill: (body: HTMLElement) => void): void {
+  const overleafProjectId = currentProjectId;
+  if (!overleafProjectId) {
+    return;
+  }
+  openPanel(overleafProjectId, (body) => {
+    body.append(
+      el("button", {
+        class: "action secondary",
+        text: "\u2190 Back",
+        onClick: () => openPanel(overleafProjectId),
+      }),
+    );
+    fill(body);
+  });
 }
 
 function teardown(): void {
@@ -2103,7 +2375,6 @@ function teardown(): void {
   tokenWatcher = null;
   document.getElementById(TOKEN_PANEL_ID)?.remove();
   document.getElementById(LAUNCHER_ID)?.remove();
-  document.getElementById(CARD_ID)?.remove();
   panel?.remove();
   panel = null;
   currentProjectId = null;
@@ -2167,6 +2438,7 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       return;
     }
     currentLink = link;
+    void checkCitations();
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
@@ -2242,7 +2514,8 @@ function watchForSaves(): void {
 }
 
 watchForSaves();
-watchCursor();
+watchEditor();
+watchPdf();
 runContentScript({
   id: "overleaf",
   sync,

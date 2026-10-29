@@ -293,18 +293,48 @@ def get_importable_artifact_kinds() -> list[str]:
     ]
 
 
+# Formats exported from something else, e.g., a plotting script or an
+# image editor's own file, rather than made directly, so a person can't be
+# their origin: they're imported or produced by the pipeline. Photos and
+# instrument images, e.g., JPEG and TIFF, and SVG drawn in an editor that
+# saves it natively, can be made by a person.
+EXPORTED_EXTENSIONS = {".png", ".gif", ".webp", ".bmp", ".pdf", ".eps"}
+
+
+def can_be_created_by_person(path: str) -> bool:
+    """Whether ``created_by`` can account for what's at ``path``."""
+    return posixpath.splitext(path)[1].lower() not in EXPORTED_EXTENSIONS
+
+
+def how_to_define_origin(path: str) -> str:
+    """Say what defines the origin of ``path``, for a message."""
+    if can_be_created_by_person(path):
+        return (
+            "record it in calkit.yaml with imported_from or created_by, "
+            "or add the stage that makes it"
+        )
+    return (
+        "it's exported from something else, so add the stage that makes "
+        "it, or record it in calkit.yaml with imported_from"
+    )
+
+
 def has_provenance(artifact: dict) -> bool:
     """Return whether an artifact entry records where it came from.
 
     A stage and an import are the stronger forms, but ``created_by`` counts
     too: a dataset someone measured, or a schematic someone drew, is
-    accounted for even though there's nothing upstream to point at. The
-    field names in ``calkit.reproducibility.ReproCheck`` predate
+    accounted for even though there's nothing upstream to point at. It
+    doesn't for a format that's exported rather than made, e.g., a PNG.
+    The field names in ``calkit.reproducibility.ReproCheck`` predate
     attribution and are kept so callers reading them keep working.
     """
-    return any(
-        artifact.get(key) is not None
-        for key in ["stage", "imported_from", "created_by"]
+    if artifact.get("stage") is not None:
+        return True
+    if artifact.get("imported_from") is not None:
+        return True
+    return artifact.get("created_by") is not None and can_be_created_by_person(
+        str(artifact.get("path", ""))
     )
 
 
@@ -867,16 +897,13 @@ class ProvenanceGap:
 
     def __str__(self) -> str:
         if len(self.steps) == 1:
-            return f"nothing records where {self.path} came from"
+            return f"origin not defined for {self.path}"
         chain = []
         for step in self.steps:
             chain.append(step.path)
             if step.stage:
                 chain.append(f"stage {step.stage}")
-        return (
-            f"nothing records where {self.path} came from "
-            f"({' <- '.join(chain)})"
-        )
+        return f"origin not defined for {self.path} ({' <- '.join(chain)})"
 
 
 def find_provenance_gaps(
@@ -924,7 +951,10 @@ def find_provenance_gaps(
         )
         if entry is not None and (
             entry.get("imported_from") is not None
-            or entry.get("created_by") is not None
+            or (
+                entry.get("created_by") is not None
+                and can_be_created_by_person(path)
+            )
         ):
             return
         stage = producer(path)

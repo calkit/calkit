@@ -45,8 +45,10 @@ def test_check_reproducibility(tmp_dir):
             {"path": "mystery.csv"},
         ],
         "figures": [
-            {"path": "schematic.png", "created_by": {"email": "me@x.edu"}},
+            {"path": "schematic.svg", "created_by": {"email": "me@x.edu"}},
             {"path": "mystery.png"},
+            # Exported, so a person can't be its origin
+            {"path": "exported.png", "created_by": {"email": "me@x.edu"}},
         ],
         "publications": [
             {"path": "paper.pdf", "imported_from": {"doi": "10.1234/y"}}
@@ -70,8 +72,8 @@ def test_check_reproducibility(tmp_dir):
     assert res.n_datasets == 4
     assert res.n_datasets_no_import_or_stage == 1
     assert res.n_datasets_with_import_or_stage == 3
-    assert res.n_figures == 2
-    assert res.n_figures_no_import_or_stage == 1
+    assert res.n_figures == 3
+    assert res.n_figures_no_import_or_stage == 2
     assert res.n_publications_no_import_or_stage == 0
     assert res.n_misc == 3
     assert res.n_misc_no_import_or_stage == 1
@@ -88,10 +90,11 @@ def test_check_reproducibility(tmp_dir):
     # nothing behind it is a gap, while one whose stage isn't compiled yet
     # is taken at its word
     assert res.provenance_gaps == [
-        "nothing records where mystery.png came from",
-        "nothing records where mystery.csv came from",
+        "origin not defined for mystery.png",
+        "origin not defined for exported.png",
+        "origin not defined for mystery.csv",
     ]
-    assert "traced back to their sources: 2" in res.to_pretty()
+    assert "with origin not defined: 3" in res.to_pretty()
     # Nothing tracked yet, so no scripts to flag, and the mystery misc
     # artifact isn't of a kind that's hard to make by hand
     assert res.scripts_not_in_pipeline == []
@@ -185,7 +188,7 @@ def test_check_reproducibility(tmp_dir):
     assert "2 misc artifacts (plot.png, slides.PPTX)" in rec  # type: ignore
     good |= {"scripts_not_in_pipeline": [], "misc_needing_provenance": []}
     rec = ReproCheck.model_validate(good).recommendation
-    assert "e.g., nothing records where mystery.png came from" in rec  # type: ignore
+    assert "e.g., origin not defined for mystery.png" in rec  # type: ignore
     rec = ReproCheck.model_validate(
         good | {"provenance_gaps": []}
     ).recommendation
@@ -237,9 +240,13 @@ def test_check_reproducibility(tmp_dir):
             "\\end{document}\n"
         )
     res = check_reproducibility()
-    assert [g for g in res.provenance_gaps if "mystery" not in g] == [
-        "nothing records where figures/pasted.png came from",
-        "nothing records where paper/drawn.png came from",
+    assert [
+        g
+        for g in res.provenance_gaps
+        if "mystery" not in g and "exported" not in g
+    ] == [
+        "origin not defined for figures/pasted.png",
+        "origin not defined for paper/drawn.png",
     ]
 
 

@@ -580,6 +580,24 @@ def test_import_search_is_wider_than_provenance_scoring():
         assert kind in ("tables", "presentations"), kind
 
 
+def test_has_provenance():
+    from calkit.provenance import has_provenance, how_to_define_origin
+
+    person = {"email": "a@b.c"}
+    assert has_provenance({"path": "data/measured.csv", "created_by": person})
+    assert has_provenance({"path": "figures/photo.JPEG", "created_by": person})
+    assert not has_provenance(
+        {"path": "figures/plot.PNG", "created_by": person}
+    )
+    assert not has_provenance({"path": "figures/plot.pdf"})
+    assert has_provenance({"path": "figures/plot.png", "stage": "plot"})
+    assert has_provenance(
+        {"path": "figures/plot.png", "imported_from": {"doi": "10.1/x"}}
+    )
+    assert "created_by" in how_to_define_origin("data/measured.csv")
+    assert "created_by" not in how_to_define_origin("figures/plot.png")
+
+
 def test_find_provenance_gaps():
     import posixpath
 
@@ -590,6 +608,7 @@ def test_find_provenance_gaps():
             {"path": "data/imported", "imported_from": {"doi": "10.1/x"}},
             {"path": "data/measured.csv", "created_by": {"email": "a@b.c"}},
         ],
+        "misc": [{"path": "photos", "created_by": {"email": "a@b.c"}}],
         # Taken at its word, though the stage isn't compiled yet
         "figures": [{"path": "figures/new.png", "stage": "not-compiled"}],
     }
@@ -659,24 +678,28 @@ def test_find_provenance_gaps():
     # while an import, a measurement, code, and Calkit's bookkeeping are
     # all fine
     assert gaps(["figures/fit.png"]) == [
-        "nothing records where data/raw.csv came from (figures/fit.png "
+        "origin not defined for data/raw.csv (figures/fit.png "
         "<- stage fit <- data/clean <- stage clean <- data/raw.csv)"
     ]
     # Something shown that nothing produces is a gap itself, unless it's
     # written by hand, e.g., a table typed in LaTeX
     assert gaps(["figures/drawn.png", "tables/typed.tex"]) == [
-        "nothing records where figures/drawn.png came from"
+        "origin not defined for figures/drawn.png"
     ]
     # Config is fine, and loose data is reported once however many paths
     # lead to it
     assert gaps(["results/summary.json", "results/summary.json"]) == [
-        "nothing records where data/loose.json came from "
+        "origin not defined for data/loose.json "
         "(results/summary.json <- stage summarize <- data/loose.json)"
     ]
     assert gaps(["figures/new.png"]) == []
+    # A person can take a photo, but a PNG is exported from something
+    assert gaps(["photos/site.jpeg", "photos/export.png"]) == [
+        "origin not defined for photos/export.png"
+    ]
     # A matrix stage that hasn't run produces nothing known yet
     assert gaps(["figures/sweep-1.png"]) == [
-        "nothing records where figures/sweep-1.png came from"
+        "origin not defined for figures/sweep-1.png"
     ]
 
 

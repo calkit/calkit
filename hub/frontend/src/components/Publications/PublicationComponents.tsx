@@ -109,6 +109,13 @@ export function relativeComponentPath(path: string, folder: string): string {
 
 type ResolveMode = "figure" | "attest" | "import"
 
+// Formats exported from something else, so a person can't be their origin;
+// mirrors EXPORTED_EXTENSIONS in calkit.provenance
+const EXPORTED_EXTS = [".png", ".gif", ".webp", ".bmp", ".pdf", ".eps"]
+
+const isExported = (path: string) =>
+  EXPORTED_EXTS.some((ext) => path.toLowerCase().endsWith(ext))
+
 interface ResolveTarget {
   ownerName: string
   projectName: string
@@ -501,12 +508,14 @@ function ComponentsModal({
                               >
                                 Link figure
                               </Button>
-                              <Button
-                                isActive={expanded === "attest"}
-                                onClick={() => onResolve(item.path, "attest")}
-                              >
-                                Made here
-                              </Button>
+                              {isExported(item.path) ? null : (
+                                <Button
+                                  isActive={expanded === "attest"}
+                                  onClick={() => onResolve(item.path, "attest")}
+                                >
+                                  Made here
+                                </Button>
+                              )}
                               <Button
                                 isActive={expanded === "import"}
                                 onClick={() => onResolve(item.path, "import")}

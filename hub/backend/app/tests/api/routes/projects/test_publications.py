@@ -267,6 +267,11 @@ def test_get_project_publication_components(
                 "path": "paper/photo.jpg",
                 "created_by": [{"email": "a@example.com"}],
             },
+            # Exported, so a person can't be its origin
+            {
+                "path": "paper/figures/hand.png",
+                "created_by": [{"email": "a@example.com"}],
+            },
             {
                 "path": "paper/logo.png",
                 "imported_from": {"url": "https://example.org/logo.png"},

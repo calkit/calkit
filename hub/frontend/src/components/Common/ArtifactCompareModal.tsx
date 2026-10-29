@@ -118,11 +118,23 @@ function ArtifactContent({
   kind,
   path,
   data,
+  missing,
+  atRef,
 }: {
   kind: ArtifactKind
   path: string
   data: Figure | Publication | Notebook | ContentsItem | undefined
+  /** Whether the hub said there's nothing at this path. */
+  missing?: boolean
+  /** The version shown, when it isn't the current one. */
+  atRef?: string
 }) {
+  if (!data && missing)
+    return (
+      <Text color="gray.500">
+        This {kind} does not exist{atRef ? " at this version" : ""}.
+      </Text>
+    )
   if (!data) return <Text color="gray.500">Not available at this version.</Text>
 
   if (kind === "file") {
@@ -350,6 +362,28 @@ function FigureInfo({
     enabled: Boolean(figure.stage),
     retry: false,
   })
+  // Where it came from when no stage makes it, e.g., an import or a person
+  const provenanceQuery = useQuery({
+    queryKey: [
+      "projects",
+      ownerName,
+      projectName,
+      "provenance",
+      figure.path,
+      gitRef,
+    ],
+    queryFn: () =>
+      ProjectsService.getProjectProvenance({
+        owner_name: ownerName,
+        project_name: projectName,
+        path: figure.path,
+        ref: gitRef,
+      }).then((response) => response.data),
+    enabled: !figure.stage,
+    retry: false,
+  })
+  const origin = provenanceQuery.data?.origin
+  const originUrl = provenanceQuery.data?.origin_url
   const dataLinks: InputLink[] = []
   if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
     const deps = declaredInputs(
@@ -423,21 +457,32 @@ function FigureInfo({
       </Text>
       <Text fontSize="sm" mb={1}>
         <Text as="span" fontWeight="semibold">
-          Pipeline stage:
+          Origin:
         </Text>{" "}
         {figure.stage ? (
-          <Link
-            as={RouterLink}
-            to={pipelineTo}
-            search={{ stage: figure.stage, ref: gitRef } as any}
-          >
-            <Code fontSize="xs" cursor="pointer">
-              {figure.stage}
-            </Code>
+          <>
+            Stage{" "}
+            <Link
+              as={RouterLink}
+              to={pipelineTo}
+              search={{ stage: figure.stage, ref: gitRef } as any}
+            >
+              <Code fontSize="xs" cursor="pointer">
+                {figure.stage}
+              </Code>
+            </Link>
+          </>
+        ) : provenanceQuery.isPending ? (
+          <Spinner size="xs" />
+        ) : origin && originUrl ? (
+          <Link href={originUrl} isExternal>
+            {origin}
           </Link>
+        ) : origin ? (
+          <Text as="span">{origin}</Text>
         ) : (
           <Text as="span" color="red.500">
-            Not in pipeline
+            Not defined
           </Text>
         )}
       </Text>
@@ -711,6 +756,10 @@ export function ArtifactCompareModal({
     kind === "file" || ref1 || !initialIsDisplayable
       ? artifact1Query.isPending
       : false
+  const missing1 =
+    Boolean(kind === "file" || ref1 || !initialIsDisplayable) &&
+    httpStatus(artifact1Query.error) === 404
+  const missing2 = httpStatus(artifact2Query.error) === 404
 
   const isComparing = Boolean(ref2)
   // LaTeX diffs are kept with the publication at each version, so the two
@@ -1101,6 +1150,8 @@ export function ArtifactCompareModal({
                             kind={kind}
                             path={path}
                             data={displayData1}
+                            missing={missing1}
+                            atRef={ref1}
                           />
                         )}
                       </Box>
@@ -1117,6 +1168,8 @@ export function ArtifactCompareModal({
                             kind={kind}
                             path={path}
                             data={artifact2Query.data}
+                            missing={missing2}
+                            atRef={ref2}
                           />
                         )}
                       </Box>
@@ -1168,6 +1221,8 @@ export function ArtifactCompareModal({
                           kind={kind}
                           path={path}
                           data={displayData1}
+                          missing={missing1}
+                          atRef={ref1}
                         />
                       )}
                     </Box>

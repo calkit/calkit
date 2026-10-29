@@ -680,3 +680,12 @@ def test_get_staged_files_for_a_deleted_path(tmp_dir):
         "gone.txt",
         "keep.txt",
     ]
+    # Git quotes a path that needs it in its default output, so a rename to a
+    # non-ASCII name has to come back literal for callers to match on it
+    os.rename("other.txt", "óther.txt")
+    repo.git.add(["-A"])
+    assert calkit.git.get_staged_files_with_status(repo=repo) == [
+        {"status": "D", "path": "gone.txt"},
+        {"status": "M", "path": "keep.txt"},
+        {"status": "R100", "path": "óther.txt"},
+    ]

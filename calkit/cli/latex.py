@@ -676,13 +676,15 @@ def build(
     # wherever the pipeline made the file
     shown = calkit.latex.find_shown(tex_file)
     if shown:
-        from calkit.provenance import find_project_provenance_gaps
+        from calkit.provenance import (
+            find_project_provenance_gaps,
+            how_to_define_origin,
+        )
 
         for gap in find_project_provenance_gaps(shown):
+            msg = str(gap)
             warn(
-                f"The document can't be traced back to its sources: {gap}; "
-                "record it in calkit.yaml with imported_from or created_by, "
-                "or add the stage that makes it"
+                f"{msg[0].upper()}{msg[1:]}; {how_to_define_origin(gap.path)}"
             )
     if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
         fdb_dir = aux_dir if aux_dir is not None else tex_dir

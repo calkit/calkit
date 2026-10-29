@@ -223,10 +223,11 @@ class ReproCheck(BaseModel):
         if self.provenance_gaps:
             return (
                 f"There are {len(self.provenance_gaps)} figures, tables, or "
-                "results that can't be traced back to their sources, e.g., "
+                "results whose origin isn't defined, e.g., "
                 f"{self.provenance_gaps[0]}. Record where each came from "
                 "in calkit.yaml with imported_from or created_by, or add "
-                "the stage that makes it."
+                "the stage that makes it. A person can't create an "
+                "exported format like PNG, so it needs a stage or an import."
             )
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
@@ -347,8 +348,8 @@ class ReproCheck(BaseModel):
             f"{self._tag('provenance')}\n"
         )
         txt += (
-            "Figures, tables, and results that can't be traced back to "
-            f"their sources: {len(self.provenance_gaps)} "
+            "Figures, tables, and results with origin not defined: "
+            f"{len(self.provenance_gaps)} "
             f"{calkit.check_or_x(not self.provenance_gaps)}"
             f"{self._tag('gaps')}\n"
         )

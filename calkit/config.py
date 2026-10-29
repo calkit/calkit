@@ -410,12 +410,16 @@ def _delete_old_macos_secret(service: str, username: str) -> None:
 
 def _set_macos_secret(service: str, username: str, value: str) -> bool:
     """Store a secret through the security tool, returning ``False`` if its
-    command line would be over the 4 KiB it reads.
+    command line would be over the 4 KiB it reads, or split in two.
     """
 
     def quote(s: str) -> str:
         return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
+    # A line break would end the command and start another, e.g., from a
+    # hub URL a cloned project declares, so those stay with keyring
+    if not (service.isprintable() and username.isprintable()):
+        return False
     creator, stored = _SECURITY_CREATOR, value
     if not (value.isascii() and value.isprintable()):
         creator, stored = _SECURITY_HEX_CREATOR, value.encode("utf-8").hex()
@@ -424,7 +428,7 @@ def _set_macos_secret(service: str, username: str, value: str) -> bool:
         f"add-generic-password -U -c {creator} "
         f"-s {quote(service)} -a {quote(username)} -w {quote(stored)}\n"
     )
-    if len(command) > 4000:
+    if len(command.encode("utf-8")) > 4000:
         return False
     attrs = _security_item(service, username)
     if attrs is not None and _get_creator(attrs) is None:

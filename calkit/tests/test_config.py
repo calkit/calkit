@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
-from typing import get_args
+from typing import Any, get_args
 
 import keyring
 import keyring.backend
@@ -362,7 +364,9 @@ def test_write_keeps_secrets_it_never_read(
     assert fake_keyring.writes == ["github_token"]
 
 
-def test_macos_secrets_go_through_the_security_tool(monkeypatch, tmp_path):
+def test_macos_secrets_go_through_the_security_tool(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     import shlex
     import subprocess
     import sys
@@ -378,20 +382,22 @@ def test_macos_secrets_go_through_the_security_tool(monkeypatch, tmp_path):
     class MacKeyring(keyring.backends.macOS.Keyring):
         priority = 0
 
-        def __init__(self):
+        def __init__(self) -> None:
             self.store: dict[str, str] = {}
             self.error: Exception | None = None
             self.delete_error: Exception | None = None
 
-        def get_password(self, service, username):
+        def get_password(self, service: str, username: str) -> str | None:
             if self.error is not None:
                 raise self.error
             return self.store.get(username)
 
-        def set_password(self, service, username, password):
+        def set_password(
+            self, service: str, username: str, password: str
+        ) -> None:
             self.store[username] = password
 
-        def delete_password(self, service, username):
+        def delete_password(self, service: str, username: str) -> None:
             if self.delete_error is not None:
                 raise self.delete_error
             del self.store[username]
@@ -400,9 +406,12 @@ def test_macos_secrets_go_through_the_security_tool(monkeypatch, tmp_path):
     calls: list[list[str]] = []
     timeout_after: list[bool] = []
 
-    def run_security(args, input=None):
+    def run_security(
+        args: list[str], input: str | None = None
+    ) -> SimpleNamespace:
         calls.append(args)
         if args == ["-i"]:
+            assert input is not None
             argv = shlex.split(input)
             assert argv[:3] == ["add-generic-password", "-U", "-c"]
             opts = dict(zip(argv[2::2], argv[3::2]))
@@ -427,7 +436,7 @@ def test_macos_secrets_go_through_the_security_tool(monkeypatch, tmp_path):
     ui: list[bool] = []
 
     @contextmanager
-    def keychain_ui(allowed):
+    def keychain_ui(allowed: bool) -> Iterator[None]:
         ui.append(allowed)
         yield
 
@@ -435,7 +444,7 @@ def test_macos_secrets_go_through_the_security_tool(monkeypatch, tmp_path):
     prompts: list[str] = []
     answer = [True]
 
-    def confirm(text, **kwargs):
+    def confirm(text: str, **kwargs: Any) -> bool:
         prompts.append(text)
         return answer[0]
 
@@ -509,7 +518,7 @@ def test_macos_secrets_go_through_the_security_tool(monkeypatch, tmp_path):
     backend.delete_error = keyring.errors.PasswordDeleteError("-25293")
 
     @contextmanager
-    def dialog_once(allowed):
+    def dialog_once(allowed: bool) -> Iterator[None]:
         ui.append(allowed)
         backend.error = None if allowed else keyring.errors.KeyringError()
         yield
@@ -543,6 +552,12 @@ def test_macos_secrets_go_through_the_security_tool(monkeypatch, tmp_path):
     config.set_secret("zenodo_token", "x" * 5000)
     assert backend.store["zenodo_token"] == "x" * 5000
     assert "zenodo_token" not in items
+    # As does one whose account would split the tool's command line in
+    # two, e.g., from a hub URL in a cloned project's calkit.yaml
+    calls.clear()
+    account = "token@https://evil.example\ndelete-keychain login.keychain"
+    assert not config._set_macos_secret(config.get_app_name(), account, "v")
+    assert calls == []
     # Deleting goes through the tool too
     config.delete_secret("github_token")
     assert "github_token" not in items
@@ -555,7 +570,9 @@ def test_macos_secrets_go_through_the_security_tool(monkeypatch, tmp_path):
         config.get_secret("access_token")
     timeouts: list[float | None] = []
 
-    def fake_run(*args, timeout=None, **kwargs):
+    def fake_run(
+        *args: Any, timeout: float | None = None, **kwargs: Any
+    ) -> SimpleNamespace:
         # As if a dialog were up
         timeouts.append(timeout)
         if timeout is not None:

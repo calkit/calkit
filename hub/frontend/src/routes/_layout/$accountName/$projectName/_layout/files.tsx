@@ -631,7 +631,7 @@ function Files() {
         />
       )}
 
-      {file_editor_open && editableFilePath && (
+      {file_editor_open && editableFilePath && canEdit && (
         <FileEditorModal
           isOpen={Boolean(file_editor_open)}
           onClose={closeFileEditor}
@@ -641,7 +641,7 @@ function Files() {
         />
       )}
 
-      {editor_open && latexTexPath && (
+      {editor_open && latexTexPath && canEdit && (
         <LatexEditor
           isOpen={Boolean(editor_open)}
           onClose={closeEditor}

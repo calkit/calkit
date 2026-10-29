@@ -1539,9 +1539,6 @@ def commit(
         repo.git.add(["-u"])
     staged_status = calkit.git.get_staged_files_with_status(repo=repo)
     staged_paths = [f["path"] for f in staged_status]
-    if not staged_paths:
-        typer.echo("No changes to commit; exiting")
-        raise typer.Exit(0)
     # Git runs from the repo root, so interpret any requested paths, which
     # were typed relative to the working directory, relative to that
     repo_root = Path(str(repo.working_dir)).resolve()
@@ -1561,7 +1558,7 @@ def commit(
     if restrict:
         zip_path_map = calkit.dvc.zip.get_zip_path_map()
 
-        def staged_for(path: str) -> list[str]:
+        def staged_for(path: str) -> tuple[list[str], list[str]]:
             # A requested path is often not what ends up staged for it, e.g.,
             # a DVC-tracked file stays out of Git entirely and is represented
             # by a .dvc pointer and an ignore rule, so committing the path
@@ -1570,21 +1567,37 @@ def commit(
             candidates.add(path + ".dvc")
             if path in zip_path_map:
                 candidates.add(zip_path_map[path] + ".dvc")
-            # These are shared bookkeeping files Calkit writes on behalf of
-            # whatever is being added, so they ride along if they're staged
-            candidates.update(["dvc.lock", calkit.dvc.zip.PATH_MAP_PATH])
+            # Bookkeeping Calkit writes on behalf of whatever is being added
+            # rides along with the path it was written for, but can't count as
+            # staging for a path with nothing of its own, since one requested
+            # path would vouch for another and hide the one that's missing
+            shared = {"dvc.lock", calkit.dvc.zip.PATH_MAP_PATH}
             for parent in [Path(path)] + list(Path(path).parents):
-                candidates.add((parent / ".gitignore").as_posix())
-            return [p for p in staged_paths if p in candidates]
+                shared.add((parent / ".gitignore").as_posix())
+            return (
+                [p for p in staged_paths if p in candidates],
+                [p for p in staged_paths if p in shared],
+            )
 
         commit_paths = []
         for requested_path in requested_paths:
-            for staged_path in staged_for(requested_path):
+            owned, shared = staged_for(requested_path)
+            if not owned:
+                # A path the user named resolved to nothing staged for it
+                # alone. Keep going so the rest of the save still lands, but
+                # say so: silently dropping one is how a caller ends up
+                # believing a file was committed when it wasn't
+                warn(f"No changes staged for {requested_path}; skipping")
+                continue
+            for staged_path in owned + shared:
                 if staged_path not in commit_paths:
                     commit_paths.append(staged_path)
         if not commit_paths:
             typer.echo(f"No changes staged for {requested_paths}; exiting")
             raise typer.Exit(0)
+    elif not staged_paths:
+        typer.echo("No changes to commit; exiting")
+        raise typer.Exit(0)
     else:
         commit_paths = staged_paths
     if auto_commit_message and message is None:

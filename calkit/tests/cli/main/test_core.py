@@ -1280,6 +1280,70 @@ def test_save(tmp_dir):
         os.rename(".git-moved", ".git")
 
 
+def test_save_missing_path(tmp_dir):
+    # A path that isn't in the workspace shouldn't abort the save: the files
+    # that are there still get committed, and the missing one gets reported
+    subprocess.check_call(["calkit", "init"])
+    with open("present.txt", "w") as f:
+        f.write("sup")
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "save",
+            "present.txt",
+            "not-there.txt",
+            "-m",
+            "Add present",
+            "--no-push",
+        ],
+        text=True,
+    )
+    assert "No changes staged for not-there.txt; skipping" in out
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Add present"
+    assert "present.txt" in repo.git.show("--name-only", "--format=", "HEAD")
+    # Bookkeeping staged for one requested path can't double as staging for
+    # another one, or a missing path next to a DVC-ish save goes unreported
+    with open(".gitignore", "a") as f:
+        f.write("# unrelated\n")
+    subprocess.check_call(["git", "add", ".gitignore"])
+    with open("second.txt", "w") as f:
+        f.write("more")
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "save",
+            "second.txt",
+            "also-missing.txt",
+            "-m",
+            "Add second",
+            "--no-push",
+        ],
+        text=True,
+    )
+    assert "No changes staged for also-missing.txt; skipping" in out
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Add second"
+    assert "second.txt" in repo.git.show("--name-only", "--format=", "HEAD")
+    # When no requested path staged anything, every one of them is named
+    # rather than only the generic no-changes message
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "save",
+            "gone-a.txt",
+            "gone-b.txt",
+            "-m",
+            "Nothing to save",
+            "--no-push",
+        ],
+        text=True,
+    )
+    assert "No changes staged for gone-a.txt; skipping" in out
+    assert "No changes staged for gone-b.txt; skipping" in out
+    assert git.Repo().head.commit.message.strip() == "Add second"
+
+
 def test_save_data_not_in_cache(tmp_dir):
     # We should skip DVC-tracked paths that are missing from both the
     # workspace and the cache, e.g., because they were never pulled

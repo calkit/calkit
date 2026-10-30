@@ -420,6 +420,18 @@ export function typedNumbersIn(line: string): TypedNumberMatch[] {
   return found;
 }
 
+/** What a line ends with to say its numbers aren't results. */
+export const IGNORE_COMMENT = "% calkit: ignore";
+
+/**
+ * Whether a line says its numbers aren't results, e.g., ones quoted from a
+ * datasheet, with `% calkit: ignore` in its comment.
+ */
+export function isIgnored(line: string): boolean {
+  const comment = line.search(/(?<!\\)%/);
+  return comment >= 0 && /calkit:\s*ignore\b/.test(line.slice(comment));
+}
+
 /** A table typed into a document, with the numbers in it. */
 export interface TypedTable {
   /** Where `\\begin{tabular}` starts, by 0-based line. */
@@ -440,7 +452,11 @@ const TABLE_RE = /\\begin\s*\{(tabular\*?|tabularx|tabulary|longtable)\}/;
  *
  * Only the body counts, where there is one, since the preamble sets up
  * the document rather than reporting anything, and neither does code in
- * a verbatim or listing environment, or the bibliography.
+ * a verbatim or listing environment, or the bibliography. Nor does a
+ * number cited in its sentence with no other number in between, since
+ * it's likely quoted from there, or one on a line marked with
+ * `% calkit: ignore`, which on a table's `\\begin` line ignores the
+ * whole table.
  */
 export function typedNumbersInDocument(lines: string[]): {
   numbers: { line: number; match: TypedNumberMatch }[];
@@ -449,11 +465,44 @@ export function typedNumbersInDocument(lines: string[]): {
   const body = lines.findIndex((line) =>
     /^[^%]*\\begin\s*\{document\}/.test(line),
   );
+  const first = body < 0 ? 0 : body + 1;
+  const code = (n: number) => {
+    const comment = lines[n].search(/(?<!\\)%/);
+    return comment >= 0 ? lines[n].slice(0, comment) : lines[n];
+  };
+  // Whether the sentence a number is in cites something, looking across
+  // lines to where it starts and ends, or to a blank line
+  const sentenceEnd = /[.!?](?=\s|$)/g;
+  const cited = (n: number, match: TypedNumberMatch) => {
+    let before = code(n).slice(0, match.start);
+    for (let i = n; !before.match(sentenceEnd) && i > first; i--) {
+      if (!code(i - 1).trim()) {
+        break;
+      }
+      before = `${code(i - 1)} ${before}`;
+    }
+    const ends = [...before.matchAll(sentenceEnd)];
+    before = before.slice((ends.at(-1)?.index ?? -1) + 1);
+    let after = code(n).slice(match.end);
+    for (let i = n; !after.match(sentenceEnd) && i + 1 < lines.length; i++) {
+      if (!code(i + 1).trim()) {
+        break;
+      }
+      after = `${after} ${code(i + 1)}`;
+    }
+    after = after.slice(0, after.search(sentenceEnd) + 1 || after.length);
+    // Only up to the next number either way, since a citation next to
+    // another number is that number's
+    const cite = /\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]]*\]\s*)*\{/;
+    const last = typedNumbersIn(before).at(-1)?.end ?? 0;
+    const next = typedNumbersIn(after)[0]?.start ?? after.length;
+    return cite.test(before.slice(last)) || cite.test(after.slice(0, next));
+  };
   const numbers: { line: number; match: TypedNumberMatch }[] = [];
   const tables: TypedTable[] = [];
   let skipping: string | null = null;
-  let table: TypedTable | null = null;
-  for (let n = body < 0 ? 0 : body + 1; n < lines.length; n++) {
+  let table: (TypedTable & { ignored: boolean }) | null = null;
+  for (let n = first; n < lines.length; n++) {
     const line = lines[n];
     if (/^[^%]*\\end\s*\{document\}/.test(line)) {
       break;
@@ -471,18 +520,19 @@ export function typedNumbersInDocument(lines: string[]): {
       skipping = line.includes(`\\end{${begin[1]}}`) ? null : begin[1];
       continue;
     }
-    const comment = line.search(/(?<!\\)%/);
-    const code = comment >= 0 ? line.slice(0, comment) : line;
+    const text = code(n);
+    const ignored = isIgnored(line);
     let from = 0;
     if (!table) {
-      const opened = code.match(TABLE_RE);
+      const opened = text.match(TABLE_RE);
       if (opened) {
         from = opened.index ?? 0;
         table = {
           start: { line: n, column: from },
-          end: { line: n, column: code.length },
+          end: { line: n, column: text.length },
           env: opened[1],
           numbers: [],
+          ignored,
         };
       }
     }
@@ -490,23 +540,24 @@ export function typedNumbersInDocument(lines: string[]): {
     let closed = false;
     if (table) {
       const end = `\\end{${table.env}}`;
-      const at = code.indexOf(end, from);
+      const at = text.indexOf(end, from);
       if (at >= 0) {
         to = at + end.length;
         table.end = { line: n, column: to };
         closed = true;
       }
     }
-    for (const match of typedNumbersIn(line)) {
+    for (const match of ignored ? [] : typedNumbersIn(line)) {
       if (table && match.start >= from && match.start < to) {
         table.numbers.push(match.number);
-      } else {
+      } else if (!cited(n, match)) {
         numbers.push({ line: n, match });
       }
     }
     if (table && closed) {
-      if (table.numbers.length) {
-        tables.push(table);
+      const { ignored, ...typed } = table;
+      if (typed.numbers.length && !ignored) {
+        tables.push(typed);
       }
       table = null;
     }

@@ -15,6 +15,7 @@ import {
   type TypedNumber,
   canBeCreatedByPerson,
   EXPORT_APPS,
+  IGNORE_COMMENT,
   citationProblems,
   citationText,
   citationCandidates,
@@ -1237,6 +1238,7 @@ async function replaceInEditor(
   link: OverleafLinkPublic,
   at: { version: number; index: number },
   text: string,
+  endOfLine = false,
 ): Promise<string | undefined> {
   const id = `replace-${++replacements}`;
   const error = await new Promise<string | undefined>((resolve) => {
@@ -1249,7 +1251,14 @@ async function replaceInEditor(
       replacing.delete(id);
       resolve(error);
     });
-    toEditor({ type: "replace", id, ...at, text, usePackage: true });
+    toEditor({
+      type: "replace",
+      id,
+      ...at,
+      text,
+      usePackage: !endOfLine,
+      endOfLine,
+    });
   });
   if (error) {
     return error;
@@ -1271,6 +1280,39 @@ async function replaceInEditor(
       ),
     );
   return undefined;
+}
+
+/**
+ * A way to say a typed number or table isn't a result, e.g., one quoted
+ * from a datasheet, which marks its line with `% calkit: ignore`.
+ */
+function ignoreRow(
+  link: OverleafLinkPublic,
+  at: { version: number; index: number },
+  message: HTMLElement,
+  what: string,
+): HTMLElement {
+  return el("div", { class: "row", style: { marginTop: "6px" } }, [
+    el("div", {
+      class: "grow dim small",
+      text: `Not ${what}, e.g., quoted from somewhere else?`,
+    }),
+    el("button", {
+      class: "action secondary",
+      text: "Ignore",
+      onClick: async () => {
+        const error = await replaceInEditor(
+          link,
+          at,
+          ` ${IGNORE_COMMENT}`,
+          true,
+        );
+        if (error) {
+          clear(message).append(errorMessage(error));
+        }
+      },
+    }),
+  ]);
 }
 
 /**
@@ -1349,6 +1391,9 @@ function renderTyped(
       }),
     );
   }
+  if (canWrite) {
+    container.append(ignoreRow(link, at, message, "a result"));
+  }
   container.append(message);
 }
 
@@ -1422,6 +1467,9 @@ function renderTypedTable(
           "e.g., with pandas' to_latex, so the paper can show it from there.",
       }),
     );
+  }
+  if (canWrite) {
+    container.append(ignoreRow(link, at, message, "results"));
   }
   container.append(message);
 }

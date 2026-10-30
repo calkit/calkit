@@ -20,6 +20,7 @@ import {
   typedTableProblem,
   typedNumbersIn,
   typedNumbersInDocument,
+  isIgnored,
 } from "./latex";
 
 describe("latexDiffPath", () => {
@@ -440,6 +441,34 @@ describe("typedNumbersInDocument", () => {
         numbers: ["1.5"],
       },
     ]);
+  });
+
+  test("leaves out numbers quoted or marked as not results", () => {
+    const { numbers, tables } = typedNumbersInDocument([
+      "Smith~\\cite{smith} measured 0.42 in a flume. We measured",
+      "0.47, about 12.5\\% more,",
+      "which agrees with 0.45~\\citep[p.~3]{jones}.",
+      "",
+      "The pump runs at 1.5 kW. % calkit: ignore, from its datasheet",
+      "The sensor reads to 0.01 V %calkit:ignore",
+      "but 0.03 isn't. % calkit ignore",
+      "\\begin{tabular}{c} % calkit: ignore",
+      "  0.6 \\\\",
+      "\\end{tabular}",
+      "\\begin{tabular}{c}",
+      "  0.7 \\\\ 0.8 % calkit: ignore",
+      "  0.9 \\\\",
+      "\\end{tabular}",
+    ]);
+    // Of a sentence's numbers, only the one next to its citation
+    expect(numbers.map(({ match }) => match.number.text)).toEqual([
+      "0.47",
+      "12.5",
+      "0.03",
+    ]);
+    expect(tables.map((t) => t.numbers.map((n) => n.text))).toEqual([["0.9"]]);
+    expect(isIgnored("1.5 % calkit: ignore")).toBe(true);
+    expect(isIgnored("1.5 \\% calkit: ignore")).toBe(false);
   });
 });
 

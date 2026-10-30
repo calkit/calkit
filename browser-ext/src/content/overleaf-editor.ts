@@ -71,6 +71,9 @@ export type ToEditor =
       text: string;
       /** Add \\usepackage{calkit} to the preamble if it isn't there. */
       usePackage: boolean;
+      /** Add the text to the end of the item's line instead, e.g., a
+       * comment saying its numbers aren't results. */
+      endOfLine?: boolean;
     };
 
 // CodeMirror comes from Overleaf's bundle at runtime, so it's untyped here
@@ -278,8 +281,8 @@ window.addEventListener("message", (event) => {
 
 /**
  * Swap a typed number or table for what the extension says shows it
- * instead, e.g., a \\ckvalue, as one edit, so it's one step in Overleaf's
- * history.
+ * instead, e.g., a \\ckvalue, or mark its line as not results, as one
+ * edit, so it's one step in Overleaf's history.
  */
 function replace(message: ToEditor & { type: "replace" }): void {
   const item = citations[message.index];
@@ -295,7 +298,10 @@ function replace(message: ToEditor & { type: "replace" }): void {
   if (item.typed ? now !== item.typed.text : !now.startsWith("\\begin")) {
     return fail(changed);
   }
-  const changes = [{ from: item.from, to: item.to, insert: message.text }];
+  const end = doc.lineAt(item.from).to;
+  const changes = message.endOfLine
+    ? [{ from: end, to: end, insert: message.text }]
+    : [{ from: item.from, to: item.to, insert: message.text }];
   const text = doc.toString();
   const body = text.search(/^[^%\n]*\\begin\s*\{document\}/m);
   const loaded =

@@ -387,11 +387,12 @@ def test_post_project_stage_from_script_or_notebook(
     assert not repo.is_dirty(untracked_files=True)
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
     # A stage that already runs the script keeps what it declares, including
-    # inputs that are objects carrying paths
+    # inputs that are objects carrying paths, or aren't paths at all
     stage["outputs"].append("figures/extra.png")
     stage["inputs"] = [
         {"path": "data/raw.csv"},
         {"path": "data/extra.csv"},
+        {"kind": "env-var", "name": "SEED"},
     ]
     (wdir / "calkit.yaml").write_text(yaml.safe_dump(ck))
     repo.git.add("calkit.yaml")

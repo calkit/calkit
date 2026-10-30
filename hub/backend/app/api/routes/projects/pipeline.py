@@ -453,7 +453,9 @@ def post_project_stage_from_script_or_notebook(
         merged = dict(existing_stage)
         for field in ("outputs", "inputs"):
             items = list(existing_stage.get(field) or [])
-            known = {i["path"] if isinstance(i, dict) else i for i in items}
+            known = {
+                i.get("path") if isinstance(i, dict) else i for i in items
+            }
             items += [
                 i
                 for i in stage.get(field) or []

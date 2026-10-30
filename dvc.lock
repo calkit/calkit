@@ -253,12 +253,12 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 0ee97aabc9ba077c5c875efe7aef0d88
-      size: 12954
+      md5: 49b638562b3891aa2f030ee081094ad7
+      size: 13406
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: 4ae1c083c047a72493b2e547f5fc78f4
-      size: 49453
+      md5: 1078d8d6187e0e072d20f488176ff71e
+      size: 50208
     - path: docs/img/pipeline.png
       hash: md5
       md5: 0c09798b4e2fd432f0ca5f0edefb5b38
@@ -286,8 +286,8 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: eeb5911921549dd55d62a90602930f42
-      size: 179372
+      md5: 75622bf39e727b5fd8bb1c2a1105086b
+      size: 179729
   traction:
     cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit

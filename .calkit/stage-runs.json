@@ -132,40 +132,40 @@
     }
   },
   "one-pager-font": {
-    "start_time": "2026-10-30T18:47:48.954000",
-    "end_time": "2026-10-30T18:47:49.621000",
+    "start_time": "2026-10-30T18:50:37.374000",
+    "end_time": "2026-10-30T18:50:38.237000",
     "environment": "tex",
-    "git_rev": "f5612e4cad5d4d7c682181c69d79ed952dfa8a42",
-    "git_dirty": true,
+    "git_rev": "bd5ba2a1a4ff05fbe824331f53eee16091cb9607",
+    "git_dirty": false,
     "dvc_lock_hash": "sha256:058fdde0c2d38cac8839169442b183a2da27bed59ce920492748ba38429c5f00",
-    "calkit_version": "0.50.4.dev5+gff5aa5458.d20261030",
-    "calkit_git_rev": "f5612e4cad5d4d7c682181c69d79ed952dfa8a42",
+    "calkit_version": "0.50.4.dev7+gbd5ba2a1",
+    "calkit_git_rev": "bd5ba2a1a4ff05fbe824331f53eee16091cb9607",
     "system": {
-      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
-      "os": "Darwin",
-      "os_version": "27.0.0",
-      "machine": "arm64",
-      "processor": "arm",
-      "cpu_count": 10,
-      "memory_gb": 64.0
+      "machine_id": "dea6d6a5eb9548ec97f8b91c56f0bffa",
+      "os": "Linux",
+      "os_version": "7.0.0-1017-azure",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "cpu_count": 4,
+      "memory_gb": 15.6
     }
   },
   "one-pager/pdf": {
-    "start_time": "2026-10-30T00:04:51.735000",
-    "end_time": "2026-10-30T00:04:56.174000",
-    "git_rev": "75be6710210b20e3fb0c8cad8ac44983df800352",
+    "start_time": "2026-10-30T18:50:38.271000",
+    "end_time": "2026-10-30T18:50:41.788000",
+    "git_rev": "bd5ba2a1a4ff05fbe824331f53eee16091cb9607",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:c304db223395f77a0fbe21b10082a75c6c58713c20f98ee2231945a7b1f8185c",
-    "calkit_version": "0.50.3.dev112+gaef6bc687",
-    "calkit_git_rev": "75be6710210b20e3fb0c8cad8ac44983df800352",
+    "dvc_lock_hash": "sha256:12f7096873e06735bf50570558cb6c9c9305b4572ed191d29a2c19c90c9ecda2",
+    "calkit_version": "0.50.4.dev7+gbd5ba2a1",
+    "calkit_git_rev": "bd5ba2a1a4ff05fbe824331f53eee16091cb9607",
     "system": {
-      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
-      "os": "Darwin",
-      "os_version": "27.0.0",
-      "machine": "arm64",
-      "processor": "arm",
-      "cpu_count": 10,
-      "memory_gb": 64.0
+      "machine_id": "dea6d6a5eb9548ec97f8b91c56f0bffa",
+      "os": "Linux",
+      "os_version": "7.0.0-1017-azure",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "cpu_count": 4,
+      "memory_gb": 15.6
     }
   },
   "research-flow": {

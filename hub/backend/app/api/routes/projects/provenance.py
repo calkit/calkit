@@ -13,16 +13,23 @@ from fastapi import APIRouter, HTTPException
 
 import app.projects
 import calkit.pipeline
+import calkit.provenance
 import calkit.questions
 from app.api.deps import CurrentUserOptional, SessionDep
 from app.api.routes.projects.core import (
     DEFAULT_REPO_TTL,
     LATEX_COMPONENT_VALUES_MAX_BYTES,
+    _imported_from_info,
 )
 from app.api.routes.projects.figures import _clean_rel_path
 from app.core import logger
 from app.git import get_repo, get_repo_tree_for_ref
-from app.models import Provenance, StageStatus
+from app.models import (
+    Provenance,
+    ProvenanceGap,
+    ProvenanceStep,
+    StageStatus,
+)
 from app.pipeline import find_stage_for_path, pipeline_at_ref
 
 router = APIRouter()
@@ -119,6 +126,16 @@ def get_project_provenance(
         ck_stage = stages.get(stage.split("@")[0])
         return ck_stage if isinstance(ck_stage, dict) else None
 
+    def is_data(path: str) -> bool:
+        return bool(
+            calkit.provenance.is_data_path(
+                path,
+                is_file=tree.is_file,
+                is_dir=tree.is_dir,
+                listdir=tree.listdir,
+            )
+        )
+
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -189,6 +206,88 @@ def get_project_provenance(
         out.copied_from = traced
     if copy_stale:
         out.stale_reason = "pipeline"
+    # Where calkit.yaml says it came from, if not from a stage, e.g., a
+    # download or a photo someone took; a folder's entry covers its files,
+    # and a person can't be the origin of an exported format like PNG
+    # The path's own entry, else its closest folder's, whatever order
+    # calkit.yaml lists them in
+    entry = max(
+        (
+            e
+            for items in ck_info.values()
+            if isinstance(items, list)
+            for e in items
+            if isinstance(e, dict)
+            and isinstance(e.get("path"), str)
+            and (
+                e.get("imported_from") is not None
+                or (
+                    e.get("created_by") is not None
+                    and calkit.provenance.can_be_created_by_person(traced)
+                )
+            )
+            and (
+                traced == posixpath.normpath(e["path"])
+                or traced.startswith(posixpath.normpath(e["path"]) + "/")
+            )
+        ),
+        key=lambda e: len(posixpath.normpath(e["path"])),
+        default=None,
+    )
+    if entry is not None:
+        entry_path = posixpath.normpath(entry["path"])
+        out.origin_path = entry_path if entry_path != traced else None
+        imported = _imported_from_info(entry.get("imported_from"))
+        created = entry.get("created_by")
+        if imported is not None:
+            if set(imported) <= {"description", "date"}:
+                out.origin = imported.get("description")
+            else:
+                out.origin = "Imported from " + (
+                    calkit.provenance.describe_source(imported)
+                )
+            doi = imported.get("doi")
+            out.origin_url = (
+                imported.get("url")
+                or (f"https://doi.org/{doi}" if doi else None)
+                or imported.get("git_repo_url")
+            )
+        elif created is not None:
+            people = created if isinstance(created, list) else [created]
+            names = [
+                p.get("name") or p.get("email") or p.get("orcid") or "someone"
+                for p in people
+                if isinstance(p, dict)
+            ]
+            tools: list[str] = []
+            for p in people:
+                with_ai = p.get("with_ai") if isinstance(p, dict) else None
+                tools += (
+                    [with_ai] if isinstance(with_ai, str) else with_ai or []
+                )
+            out.origin = "Created by " + ", ".join(names)
+            if tools:
+                out.origin += " with " + ", ".join(dict.fromkeys(tools))
+    # What nothing accounts for, however far back the chain goes, trusting
+    # a stage calkit.yaml names for something dvc.yaml doesn't have yet
+    if out.exists or stage is not None:
+        out.gaps = [
+            ProvenanceGap(
+                path=gap.path,
+                steps=[
+                    ProvenanceStep(path=step.path, stage=step.stage)
+                    for step in gap.steps
+                ],
+            )
+            for gap in calkit.provenance.find_provenance_gaps(
+                [path],
+                ck_info=ck_info,
+                dvc_yaml=pipeline.dvc_yaml,
+                dvc_lock=pipeline.dvc_lock,
+                is_data=is_data,
+            )
+            if stage_for(gap.path) is None
+        ]
     if stage is None:
         return out
     out.stage = stage

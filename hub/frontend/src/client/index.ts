@@ -1074,6 +1074,8 @@ export type {
   ProjectStatus,
   ProjectStatusPost,
   Provenance,
+  ProvenanceGap,
+  ProvenanceStep,
   Publication,
   PublicationComponent,
   PublicationComponents,

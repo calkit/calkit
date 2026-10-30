@@ -76,40 +76,40 @@
     }
   },
   "latex-image-readme/sizes": {
-    "start_time": "2026-10-28T22:03:55.673000",
-    "end_time": "2026-10-28T22:04:03.600000",
-    "git_rev": "d1eaf2317c1427a047913683943a376e4c467ce3",
+    "start_time": "2026-10-30T00:57:30.045000",
+    "end_time": "2026-10-30T00:57:39.786000",
+    "git_rev": "a81bf6197e2bf82bab64c006c5c970da10423289",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:0f27764c58f7bebce8f13672b1a2cc657103b23895db084dd6353ee056aa8a93",
-    "calkit_version": "0.50.3.dev15+gd1eaf231",
-    "calkit_git_rev": "d1eaf2317c1427a047913683943a376e4c467ce3",
+    "dvc_lock_hash": "sha256:c43facebcdc125903bc93b8e3aee1177f2089c97d07a771497f93a99e49e1dcc",
+    "calkit_version": "0.50.3.dev80+gceb1a7437",
+    "calkit_git_rev": "a81bf6197e2bf82bab64c006c5c970da10423289",
     "system": {
-      "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
-      "os_version": "25.6.0",
+      "os_version": "27.0.0",
       "machine": "arm64",
       "processor": "arm",
-      "cpu_count": 14,
-      "memory_gb": 24.0
+      "cpu_count": 10,
+      "memory_gb": 64.0
     }
   },
   "latex-word-round-trip": {
-    "start_time": "2026-10-28T22:03:36.774000",
-    "end_time": "2026-10-28T22:03:53.637000",
+    "start_time": "2026-10-30T01:25:50.492000",
+    "end_time": "2026-10-30T01:26:08.957000",
     "environment": "dev",
-    "git_rev": "d1eaf2317c1427a047913683943a376e4c467ce3",
+    "git_rev": "720af88bfbd4f8ba1551377347218ef60319ebde",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:270efe855bcae7ee5f69788d2f3c871266b71f1be301641af9d87455292be960",
-    "calkit_version": "0.50.3.dev15+gd1eaf231",
-    "calkit_git_rev": "d1eaf2317c1427a047913683943a376e4c467ce3",
+    "dvc_lock_hash": "sha256:ed7d858fc15e1e97ae64edaedca75d75d5ed3cdbf5a647ccd43a4bb96845e550",
+    "calkit_version": "0.50.3.dev159+gcb98f5d1e",
+    "calkit_git_rev": "720af88bfbd4f8ba1551377347218ef60319ebde",
     "system": {
-      "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
-      "os_version": "25.6.0",
+      "os_version": "27.0.0",
       "machine": "arm64",
       "processor": "arm",
-      "cpu_count": 14,
-      "memory_gb": 24.0
+      "cpu_count": 10,
+      "memory_gb": 64.0
     }
   },
   "latex-word-round-trip-figure": {

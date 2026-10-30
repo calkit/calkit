@@ -310,6 +310,22 @@ def test_build_ck_components(tmp_dir):
     assert os.path.isfile("paper/main.pdf")
     # Not brought in yet, so it prints as ?? rather than failing the build
     assert "figures/not-yet.png is not in the project yet" in out.stdout
+    # Nothing says where the figure came from, which a build points out
+    assert "Origin not defined for figures/plot.png" in out.stdout
+
+    def gaps(stdout: str) -> list[str]:
+        return [ln for ln in stdout.splitlines() if "Origin not defined" in ln]
+
+    # Built from the document's folder, it's still the project that says
+    # what's accounted for
+    from_paper = subprocess.run(
+        ["calkit", "latex", "build", "main.tex"],
+        capture_output=True,
+        text=True,
+        cwd="paper",
+    )
+    assert from_paper.returncode == 0, from_paper.stderr
+    assert gaps(from_paper.stdout) == gaps(out.stdout)
     with open("paper/main.log", errors="replace") as f:
         log = f.read()
     assert "figures/not-yet.png hasn't been brought in yet" in log

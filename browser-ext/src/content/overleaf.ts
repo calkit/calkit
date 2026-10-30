@@ -191,7 +191,25 @@ function renderProvenance(
       }),
     );
   }
-  if (!provenance.stage) {
+  if (!provenance.stage && provenance.origin) {
+    container.append(
+      el("div", { class: "small" }, [
+        provenance.origin_url
+          ? el("a", {
+              text: provenance.origin,
+              href: provenance.origin_url,
+              attrs: { target: "_blank" },
+            })
+          : document.createTextNode(provenance.origin),
+        provenance.origin_path
+          ? el("span", {
+              class: "dim",
+              text: ` (recorded for ${provenance.origin_path})`,
+            })
+          : null,
+      ]),
+    );
+  } else if (!provenance.stage) {
     container.append(
       el("div", {
         class: "dim small",
@@ -264,6 +282,24 @@ function renderProvenance(
         ]),
       );
     }
+  }
+  // Data behind it that nothing records the origin of, which a reader
+  // can't trace however current the pipeline is
+  for (const gap of provenance.gaps ?? []) {
+    const via = gap.steps.flatMap((step) => (step.stage ? [step.stage] : []));
+    container.append(
+      el("div", {
+        class: "small",
+        style: { color: "var(--ck-warning)", marginTop: "4px" },
+        text:
+          `Nothing records where ${gap.path} came from` +
+          (via.length ? ` (via ${via.join(", ")})` : "") +
+          ".",
+        title:
+          "Record it in calkit.yaml with imported_from or created_by, or " +
+          "add the stage that makes it",
+      }),
+    );
   }
   container.append(
     el("div", { class: "small", style: { marginTop: "6px" } }, [

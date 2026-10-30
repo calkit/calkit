@@ -672,6 +672,30 @@ def build(
     # \ckfigure, have to be beside it before TeX can read them
     for problem in calkit.latex.map_ck_components(tex_file):
         warn(f"{problem}; it will print as ??")
+    # Plain \includegraphics counts as much as \ckfigure, and is fine
+    # wherever the pipeline made the file. Paths are the enclosing
+    # project's, wherever the build runs from, e.g., a stage's wdir
+    root = os.path.abspath(tex_dir)
+    while not os.path.isfile(os.path.join(root, "calkit.yaml")):
+        parent = os.path.dirname(root)
+        if parent == root:
+            root = os.path.abspath(".")
+            break
+        root = parent
+    shown = calkit.latex.find_shown(
+        os.path.relpath(os.path.abspath(tex_file), root), wdir=root
+    )
+    if shown:
+        from calkit.provenance import (
+            find_project_provenance_gaps,
+            how_to_define_origin,
+        )
+
+        for gap in find_project_provenance_gaps(shown, wdir=root):
+            msg = str(gap)
+            warn(
+                f"{msg[0].upper()}{msg[1:]}; {how_to_define_origin(gap.path)}"
+            )
     if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
         fdb_dir = aux_dir if aux_dir is not None else tex_dir
         fdb_fpath = os.path.join(fdb_dir, stem + ".fdb_latexmk")

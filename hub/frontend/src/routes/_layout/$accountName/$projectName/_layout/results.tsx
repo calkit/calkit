@@ -161,13 +161,55 @@ function ProvenanceCard({
       {provenance.copy_stage ? ` by ${provenance.copy_stage}` : ""}
     </Text>
   ) : null
+  // What calkit.yaml records for something no stage makes
+  const origin = provenance.origin ? (
+    <Text fontSize="sm">
+      {provenance.origin_url ? (
+        <Link href={provenance.origin_url} isExternal>
+          {provenance.origin}
+        </Link>
+      ) : (
+        provenance.origin
+      )}
+      {provenance.origin_path ? (
+        <Text as="span" color={subtle}>
+          {" "}
+          (recorded for {fileLink(provenance.origin_path)})
+        </Text>
+      ) : null}
+    </Text>
+  ) : null
+  // Data behind it, however far back, that nothing records the origin of
+  const gaps = provenance.gaps?.length ? (
+    <Box mt={1} fontSize="sm" color="orange.400">
+      {provenance.gaps.map((gap) => {
+        const via = (gap.steps ?? []).flatMap((step) =>
+          step.stage ? [step.stage] : [],
+        )
+        return (
+          <Text key={gap.path}>
+            Origin not defined for {fileLink(gap.path)}
+            {via.length ? ` (via ${via.join(", ")})` : ""}.
+          </Text>
+        )
+      })}
+      <Text color={subtle}>
+        Record it in calkit.yaml with imported_from or created_by, or add the
+        stage that makes it. A person can't create an exported format like PNG,
+        so it needs a stage or an import.
+      </Text>
+    </Box>
+  ) : null
   if (!provenance.stage) {
     return (
       <Box>
         {copied}
-        <Text fontSize="sm" color={subtle}>
-          No pipeline stage produces this file.
-        </Text>
+        {origin ?? (
+          <Text fontSize="sm" color={subtle}>
+            No pipeline stage produces this file.
+          </Text>
+        )}
+        {gaps}
       </Box>
     )
   }
@@ -224,6 +266,7 @@ function ProvenanceCard({
           </Flex>
         </Box>
       ) : null}
+      {gaps}
     </Box>
   )
 }

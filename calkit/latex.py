@@ -676,6 +676,21 @@ def component_path(
     return None, f"{component.path} is not in the project yet"
 
 
+def find_shown(document: str, wdir: str | None = None) -> list[str]:
+    """Project files a document shows, whether cited with calkit.sty's
+    commands or included plainly, e.g., with ``\\includegraphics`` or
+    ``\\input``, relative to ``wdir`` like ``document`` is.
+    """
+    _, components = read_ck_usage(os.path.join(wdir or ".", document))
+    cited = []
+    for c in components:
+        rel, _ = component_path(
+            c, lambda p: os.path.isfile(os.path.join(wdir or ".", p))
+        )
+        cited.append(rel or c.path)
+    return list(dict.fromkeys(cited + detect_inputs(document, wdir=wdir)))
+
+
 def root_documents(folder: str) -> list[str]:
     """The documents directly in a folder, i.e., ``.tex`` files with a
     ``\\documentclass``, rather than the files they input.

@@ -614,6 +614,130 @@ def test_align_rendered_paragraphs() -> None:
     assert not calkit.latex.equation_fragment("Actuator disk model (k=0.04)")
 
 
+def test_prepare_for_pandoc() -> None:
+    def prepare(text: str, aux: str = "", bbl: str = "", **kw: object) -> str:
+        lines = [
+            calkit.latex.SourceLine("main.tex", i + 1, ln)
+            for i, ln in enumerate(text.split("\n"))
+        ]
+        return calkit.latex.prepare_for_pandoc(lines, aux, bbl, **kw)  # type: ignore[arg-type]
+
+    aux = "\n".join(
+        [
+            r"\newlabel{sec:a}{{1}{1}{Intro}{section.1}{}}",
+            r"\newlabel{eq:a}{{1}{1}{}{equation.1}{}}",
+            r"\newlabel{eq:c}{{4}{2}{}{equation.4}{}}",
+            r"\newlabel{fig:a}{{1}{2}{}{figure.1}{}}",
+            r"\newlabel{app:a}{{A}{3}{More}{appendix.A}{}}",
+            r"\@writefile{toc}{\contentsline {section}{\numberline {1}Intro}"
+            r"{1}{}}",
+            r"\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}"
+            r"Sub}{1}{}}",
+            r"\@writefile{toc}{\contentsline {section}{\numberline {A}More}"
+            r"{3}{}}",
+            r"\@writefile{lof}{\contentsline {figure}{\numberline {1}"
+            r"{\ignorespaces Cap}}{2}{}}",
+            r"\bibcite{lee}{{1}{2018}{{Lee}}{{}}}",
+            r"\bibcite{kim}{{2}{2020\natexlab{a}}{{Kim et~al.}}{{}}}",
+        ]
+    )
+    body = "\n".join(
+        [
+            r"\documentclass{article}",
+            r"\usepackage{natbib}",
+            r"\begin{document}",
+            r"\section{Intro}\label{sec:a}",
+            r"\subsection{Sub}",
+            r"\section*{Thanks}",
+            r"As \citet{lee} found \citep[see][p.~2]{lee,kim}, and \cite{kim}.",
+            r"\begin{equation}",
+            r"a = b \label{eq:a}",
+            r"\end{equation}",
+            r"\begin{align}",
+            r"c &= d \\",
+            r"e &= f \nonumber \\",
+            r"g &= h \label{eq:c}",
+            r"\end{align}",
+            r"\begin{equation*}",
+            r"x = y",
+            r"\end{equation*}",
+            r"\begin{equation}",
+            r"z = w \tag{$*$}",
+            r"\end{equation}",
+            r"See \eqref{eq:a}, \ref{fig:a}, \autoref{sec:a}, \Cref{eq:c},",
+            r"page \pageref{eq:c}, \nameref{app:a}, and \ref{nope}.",
+            r"\begin{figure}",
+            r"\includegraphics[width=2in]{plot}",
+            r"\includegraphics{photo}",
+            r"\caption{Cap}",
+            r"\end{figure}",
+            r"A 5\textperthousand{} rise, \dataset\xspace and more.",
+            r"\appendix",
+            r"\section{More}",
+            r"\bibliography{refs}",
+            r"\end{document}",
+        ]
+    )
+    bbl = "\n".join(
+        [
+            r"\begin{thebibliography}{2}",
+            r"\providecommand{\natexlab}[1]{#1}",
+            r"\bibitem[Lee(2018)]{lee}",
+            r"K.~Lee. A paper.",
+            r"\bibitem[Kim et~al.(2020)]{kim}",
+            r"J.~Kim. Another.",
+            r"\end{thebibliography}",
+        ]
+    )
+    out = prepare(
+        body,
+        aux,
+        bbl,
+        find_image=lambda path: "/tmp/plot.png" if path == "plot" else None,
+    )
+    # Headings and captions numbered as the .aux has them, but not starred
+    # ones
+    assert r"\section{1 Intro}" in out and r"\subsection{1.1 Sub}" in out
+    assert r"\section*{Thanks}" in out and r"\section{A More}" in out
+    assert r"\caption{Figure 1: Cap}" in out
+    # Citations as natbib sets them, in brackets by default
+    assert (
+        "As Lee [2018] found [see Lee, 2018; Kim et~al., 2020a, p.~2]" in out
+    )
+    assert "and Kim et~al. [2020a]." in out
+    # Displays as their numbers, counted between labeled ones, with tags,
+    # and none for unnumbered ones
+    paras = [p.strip() for p in out.split("\n\n")]
+    assert ["(1)", "(2) (4)", "=", "($*$)"] == [
+        p for p in paras if p.startswith("(") or p == "="
+    ]
+    # References with their numbers and names, and ?? for one not there
+    assert "See (1), 1, Section~1, Eq.~(4)," in out
+    assert "page 2, More, and ??." in out
+    # Pictures Word can show, and text symbols as characters
+    assert r"\includegraphics[width=2in]{/tmp/plot.png}" in out
+    assert r"\includegraphics{photo}" in out
+    assert "A 5‰ rise" in out
+    # The bibliography as typeset, without its setup
+    assert r"\section*{References}" in out and "providecommand" not in out
+    assert r"\bibitem[Lee(2018)]{lee}" in out
+    # Round parentheses where asked for, and numbers for a numbered style,
+    # in the bibliography too
+    round_ = prepare(body.replace("{natbib}", "[round]{natbib}"), aux, bbl)
+    assert "As Lee (2018) found (see Lee, 2018; Kim et~al., 2020a, p.~2)" in (
+        round_
+    )
+    numbered = prepare(body.replace("{natbib}", "[numbers]{natbib}"), aux, bbl)
+    assert "As Lee~[1] found [see 1, 2, p.~2]" in numbered
+    assert r"\bibitem{kim}{[}2{]}" in numbered
+    # Without a build, references are ?? and displays are still counted
+    bare = prepare(body)
+    assert "See (??), ??, ??, ??," in bare
+    assert [
+        p.strip() for p in bare.split("\n\n") if p.strip().startswith("(")
+    ] == ["(1)", "(2) (3)", "($*$)"]
+
+
 def test_detex() -> None:
     macros = {"ppt": r"\text{\textperthousand}\xspace"}
     # Symbols print as themselves, a command word skipping the space after

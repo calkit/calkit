@@ -1600,6 +1600,339 @@ def expand_macros(
     return "".join(parts)
 
 
+def prepare_for_pandoc(
+    lines: list[SourceLine],
+    aux: str = "",
+    bbl: str = "",
+    find_image: Callable[[str], str | None] | None = None,
+) -> str:
+    """The flattened source as Pandoc should read it, with what TeX worked
+    out filled in from the build's ``.aux`` and ``.bbl``.
+
+    References, citations, and section, figure, and table numbers read as
+    in the PDF, and the bibliography as typeset. Each display becomes a
+    paragraph of its numbers, e.g., "(3)", or "=" if it has none, for the
+    export to replace with the converted equation, as Pandoc can't number
+    them. ``find_image`` gives a picture Word can show for one in the
+    source, e.g., a PDF figure drawn as PNG, if any.
+    """
+
+    def read_groups(text: str, i: int) -> list[str]:
+        # The brace groups from i on, as their contents
+        out: list[str] = []
+        while True:
+            while i < len(text) and text[i].isspace():
+                i += 1
+            if i >= len(text) or text[i] != "{":
+                return out
+            depth, start = 0, i
+            while i < len(text):
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            out.append(text[start + 1 : i])
+            i += 1
+
+    # What the .aux has: each label's number, page, title, and anchor, each
+    # citation's number, year, and authors, and headings and captions'
+    # numbers in order
+    labels: dict[str, list[str]] = {}
+    cites: dict[str, list[str]] = {}
+    headings: dict[str, list[str]] = {}
+    captions: dict[str, list[str]] = {"figure": [], "table": []}
+    for m in re.finditer(r"\\(newlabel|bibcite)\{([^}]*)\}", aux):
+        groups = read_groups(aux, m.end())
+        if not groups:
+            continue
+        inner = read_groups(groups[0], 0) or [groups[0]]
+        if m.group(1) == "newlabel":
+            labels[m.group(2)] = inner + [""] * (4 - len(inner))
+        else:
+            # Without the group natbib puts authors in, e.g., {{Lee}}
+            cites[m.group(2)] = [
+                re.sub(
+                    r"\\natexlab\{([^}]*)\}",
+                    r"\1",
+                    g[1:-1] if read_groups(g, 0) == [g[1:-1]] else g,
+                )
+                for g in inner
+            ]
+    for m in re.finditer(
+        r"\\contentsline\s*\{(part|chapter|section|subsection|subsubsection"
+        r"|figure|table)\}\s*\{\\numberline\s*\{([^}]*)\}",
+        aux,
+    ):
+        kind, number = m.group(1), m.group(2)
+        if kind in captions:
+            captions[kind].append(number)
+        else:
+            headings.setdefault(kind, []).append(number)
+
+    def next_number(last: str) -> str:
+        m = re.match(r"(.*?)(\d+)$", last)
+        return f"{m.group(1)}{int(m.group(2)) + 1}" if m else "1"
+
+    # Displays as paragraphs of their numbers, counted as TeX does, with
+    # those labeled as the .aux has them
+    last = "0"
+    placeholders: dict[int, str] = {}
+    skipped: set[int] = set()
+    for blk in blocks(lines):
+        if blk.display is None:
+            continue
+        env = blk.display
+        name, starred = env.rstrip("*"), env.endswith("*")
+        src = "\n".join(_strip_comments(ln.text) for ln in blk.lines)
+        rows = [src]
+        if name in _MULTIROW_ENVS:
+            rows, depth, start = [], 0, 0
+            for m in re.finditer(r"\\(begin|end)\{[^}]*\}|\\\\", src):
+                if m.group(1) == "begin":
+                    depth += 1
+                elif m.group(1) == "end":
+                    depth -= 1
+                elif depth == 1:
+                    rows.append(src[start : m.start()])
+                    start = m.end()
+            rows.append(src[start:])
+            rows = [
+                r for r in rows if re.sub(r"\\end\{[^}]*\}", "", r).strip()
+            ]
+        numbers = []
+        for row in rows:
+            tag = re.search(r"\\tag\*?\{([^}]*)\}", row)
+            label = re.search(r"\\label\{([^}]*)\}", row)
+            if tag is not None:
+                numbers.append(tag.group(1))
+            elif (
+                starred
+                or env in ("[", "$$")
+                or re.search(r"\\(nonumber|notag)\b", row)
+            ):
+                continue
+            else:
+                known = labels.get(label.group(1)) if label else None
+                last = known[0] if known and known[0] else next_number(last)
+                numbers.append(last)
+        placeholders[id(blk.lines[0])] = (
+            " ".join(f"({n})" for n in numbers) or "="
+        )
+        skipped.update(id(ln) for ln in blk.lines[1:])
+    text = "\n".join(
+        f"\n{placeholders[id(ln)]}\n" if id(ln) in placeholders else ln.text
+        for ln in lines
+        if id(ln) not in skipped
+    )
+
+    # Headings and captions with their numbers, as the .aux lists them
+    def number_heading(m: re.Match[str]) -> str:
+        queue = headings.get(m.group(1), [])
+        if m.group(2) or not queue:
+            return m.group(0)
+        return f"{m.group(0)}{queue.pop(0)} "
+
+    text = re.sub(
+        r"\\(part|chapter|section|subsection|subsubsection)(\*?)\s*"
+        r"(?:\[[^\]]*\])?\s*\{",
+        number_heading,
+        text,
+    )
+    out, kind, i = [], "figure", 0
+    for m in re.finditer(
+        r"\\begin\{(figure|table)\*?\}|\\caption\s*(?:\[[^\]]*\])?\s*\{", text
+    ):
+        out.append(text[i : m.end()])
+        i = m.end()
+        if m.group(1):
+            kind = m.group(1)
+        elif captions[kind]:
+            out.append(f"{kind.title()} {captions[kind].pop(0)}: ")
+    text = "".join(out) + text[i:]
+
+    # References as their numbers, or names with them
+    names = {
+        "autoref": {
+            "equation": "Equation",
+            "figure": "Figure",
+            "table": "Table",
+            "section": "Section",
+            "subsection": "Section",
+            "subsubsection": "Section",
+            "appendix": "Appendix",
+        },
+        "cref": {"equation": "eq.", "figure": "fig.", "table": "table"},
+    }
+
+    def render_ref(m: re.Match[str]) -> str:
+        command, keys = m.group(1), m.group(2).split(",")
+        rendered = []
+        for key in keys:
+            number, page, title, anchor = labels.get(key.strip(), ["??"] * 4)[
+                :4
+            ]
+            if command == "pageref":
+                rendered.append(page)
+                continue
+            if command == "nameref":
+                rendered.append(title)
+                continue
+            shown = f"({number})" if command == "eqref" else number
+            kind = anchor.split(".")[0]
+            if command in ("autoref", "cref", "Cref"):
+                word = names[
+                    "autoref" if command == "autoref" else "cref"
+                ].get(kind, names["autoref"].get(kind, ""))
+                if command == "Cref":
+                    word = word[:1].upper() + word[1:]
+                if kind == "equation" and command != "autoref":
+                    shown = f"({number})"
+                shown = f"{word}~{shown}" if word else shown
+            rendered.append(shown)
+        return ", ".join(rendered)
+
+    text = re.sub(
+        r"\\(eqref|ref|autoref|cref|Cref|pageref|nameref)\*?\s*\{([^}]*)\}",
+        render_ref,
+        text,
+    )
+
+    # Citations as typeset: by author and year, or by number
+    head = text.split("\\begin{document}")[0]
+    numeric = bool(
+        re.search(
+            r"\\usepackage\s*\[[^\]]*\bnumbers\b[^\]]*\]\s*\{natbib\}"
+            r"|\\setcitestyle\{[^}]*\bnumbers\b",
+            head,
+        )
+    ) or any(len(c) < 3 or not c[1] for c in cites.values())
+    elsarticle = re.search(
+        r"\\documentclass\s*(\[[^\]]*\])?\s*\{elsarticle\}", head
+    )
+    if not numeric and elsarticle and not re.search(r"authoryear", head):
+        numeric = True
+    # In brackets, as natbib sets them unless asked for round ones
+    if elsarticle or re.search(
+        r"\\usepackage\s*\[[^\]]*\bround\b[^\]]*\]\s*\{natbib\}"
+        r"|\\setcitestyle\{[^}]*\bround\b|\\bibpunct\s*\{\(",
+        head,
+    ):
+        opening, closing = "(", ")"
+    else:
+        opening, closing = "[", "]"
+
+    def render_cite(m: re.Match[str]) -> str:
+        command = m.group(1)
+        notes = [n[1:-1] for n in (m.group(2), m.group(3)) if n]
+        pre, post = (notes[0], notes[1]) if len(notes) == 2 else ("", "")
+        if len(notes) == 1:
+            post = notes[0]
+        keys = [k.strip() for k in m.group(4).split(",") if k.strip()]
+        found = [cites.get(k, ["?", "?", "?"]) for k in keys]
+        lower = command.lower()
+        if lower in ("nocite",):
+            return ""
+        if numeric:
+            nums = ", ".join(c[0] for c in found)
+            if lower in ("citet", "citealt", "textcite"):
+                inner = "; ".join(
+                    f"{c[2] if len(c) > 2 else '?'}~[{c[0]}]" for c in found
+                )
+                return inner
+            if lower == "citeauthor":
+                return "; ".join(c[2] if len(c) > 2 else "?" for c in found)
+            inner = " ".join(p for p in (pre, nums) if p)
+            return "[" + ", ".join(p for p in (inner, post) if p) + "]"
+        authors = [c[2] if len(c) > 2 else "?" for c in found]
+        years = [c[1] if len(c) > 1 else "?" for c in found]
+        if lower == "citeauthor":
+            shown = "; ".join(authors)
+        elif lower == "citeyear":
+            shown = ", ".join(years)
+        elif lower == "citeyearpar":
+            shown = opening + ", ".join(years) + closing
+        elif lower in ("citet", "cite", "textcite"):
+            shown = "; ".join(
+                f"{a} {opening}{y}{closing}" for a, y in zip(authors, years)
+            )
+            if post:
+                shown = shown[:-1] + f", {post}{closing}"
+        else:
+            inner = "; ".join(f"{a}, {y}" for a, y in zip(authors, years))
+            inner = " ".join(p for p in (pre, inner) if p)
+            inner = ", ".join(p for p in (inner, post) if p)
+            shown = (
+                inner
+                if lower in ("citealp", "citealt")
+                else f"{opening}{inner}{closing}"
+            )
+        if command[:1].isupper():
+            shown = shown[:1].upper() + shown[1:]
+        return shown
+
+    text = re.sub(
+        r"\\(cite[pt]?|citealp|citealt|citeauthor|citeyear|citeyearpar"
+        r"|Cite[pt]?|Citealp|Citealt|Citeauthor|parencite|textcite|nocite)"
+        r"\*?\s*(\[[^\]]*\])?\s*(\[[^\]]*\])?\s*\{([^}]*)\}",
+        render_cite,
+        text,
+    )
+
+    # The bibliography as typeset, numbered where citations are
+    if bbl:
+        # Without its setup before the first item, e.g., \providecommand
+        bib = re.sub(
+            r"\\begin\{thebibliography\}\s*\{[^}]*\}.*?(?=\\bibitem)",
+            lambda m: "\\begin{thebibliography}{}\n",
+            bbl,
+            flags=re.S,
+        )
+        if numeric:
+            bib = re.sub(
+                r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}",
+                lambda m: (
+                    f"\\bibitem{{{m.group(1)}}}"
+                    f"{{[}}{cites.get(m.group(1), ['?'])[0]}{{]}} "
+                ),
+                bib,
+            )
+        bib = "\\section*{References}\n" + bib
+        text = re.sub(
+            r"\\(bibliography\{[^}]*\}|printbibliography(\[[^\]]*\])?)",
+            lambda m: bib,
+            text,
+        )
+
+    # Text symbols Pandoc doesn't know, and pictures Word can show
+    text = re.sub(
+        r"\\(" + "|".join(TEXT_SYMBOLS) + r")(?![A-Za-z])\s*(\{\})?",
+        lambda m: TEXT_SYMBOLS[m.group(1)],
+        text,
+    )
+    text = re.sub(r"\\xspace(?![A-Za-z])\s*(?=[\w(])", " ", text)
+    text = re.sub(r"\\xspace(?![A-Za-z])", "", text)
+    if find_image is not None:
+
+        def swap_image(m: re.Match[str]) -> str:
+            found = find_image(m.group(2))
+            if found is None:
+                return m.group(0)
+            return f"\\includegraphics{m.group(1) or ''}{{{found}}}"
+
+        text = re.sub(
+            r"\\includegraphics\s*(\[[^\]]*\])?\s*\{([^}]*)\}",
+            swap_image,
+            text,
+        )
+    return text
+
+
 def detex(text: str, marks: bool = False) -> str:
     """Roughly what LaTeX would print for a bit of source, with, if
     ``marks``, a reference as ``REF_MARK`` and a citation as ``CITE_MARK``,
@@ -2003,9 +2336,13 @@ def find_block(
 ) -> Block | None:
     """The block a bookmark points at, by line first and text second."""
     same_file = [b for b in blks if b.path == path]
+    # A part of the block reads as in it, e.g., a table's cell
+    part = keep_letters_and_digits(text)
     for b in same_file:
         if b.lineno == lineno and (
-            b.display or similarity(text, b.text) >= 0.5
+            b.display
+            or similarity(text, b.text) >= 0.5
+            or (part and part in keep_letters_and_digits(b.text))
         ):
             return b
     scored = [
@@ -2062,8 +2399,17 @@ def already_applied(block: Block, old: str, new: str) -> bool:
     change, with a word or two either side, reads as new and not as old,
     since a common word, e.g., "the", is anywhere."""
 
-    def holds(seq: list[str]) -> bool:
-        return any(keep_letters_and_digits(" ".join(seq)) in h for h in have)
+    def squash(text: str, exact: bool) -> str:
+        # Letters and digits only, in their case if exact
+        text = unicodedata.normalize("NFKC", text)
+        return (
+            "".join(c for c in text if c.isalnum())
+            if exact
+            else (keep_letters_and_digits(text))
+        )
+
+    def holds(seq: list[str], exact: bool) -> bool:
+        return any(squash(" ".join(seq), exact) in h for h in have[exact])
 
     # Without the rendered citations both have, which the source has as
     # commands, but with any that changed, e.g., "(June 2019)"
@@ -2075,25 +2421,28 @@ def already_applied(block: Block, old: str, new: str) -> bool:
     ]
     for c in cites:
         old, new = old.replace(c, " "), new.replace(c, " ")
-    # As rendered, with its inline math as text or not, as Word may have it
-    have = [keep_letters_and_digits(block.text)]
+    # As rendered, with its inline math as text or not, as Word may have it,
+    # and in its case, for a change only of case, e.g., "Gnet" to "GNet"
+    rendered = [block.text]
     if not block.markdown:
         src = _strip_comments_joined("\n".join(ln.text for ln in block.lines))
         src = _INLINE_MATH_RE.sub(
             lambda m: f" {get_math_text(m.group(1) or m.group(2))} ", src
         )
-        have.append(
-            keep_letters_and_digits(detex(expand_macros(src, block.macros)))
-        )
+        rendered.append(detex(expand_macros(src, block.macros)))
+    have = {e: [squash(t, e) for t in rendered] for e in (False, True)}
     ow = re.findall(r"[A-Za-z0-9][\w.]*", old)
     nw = re.findall(r"[A-Za-z0-9][\w.]*", new)
     ops = difflib.SequenceMatcher(None, ow, nw, autojunk=False).get_opcodes()
     for tag, i1, i2, j1, j2 in ops:
         if tag == "equal":
             continue
+        exact = [w.lower() for w in ow[i1:i2]] == [
+            w.lower() for w in nw[j1:j2]
+        ]
         if not any(
-            holds(nw[max(0, j1 - n) : j2 + n])
-            and not holds(ow[max(0, i1 - n) : i2 + n])
+            holds(nw[max(0, j1 - n) : j2 + n], exact)
+            and not holds(ow[max(0, i1 - n) : i2 + n], exact)
             for n in (2, 1)
         ):
             return False
@@ -2258,6 +2607,8 @@ def normalize_math(tex: str) -> str:
         r"\\(" + "|".join(_MATH_FUNCTIONS) + r")(?![a-zA-Z])", r" \1 ", tex
     )
     tex = tex.replace("{}", "")
+    # Italic letters are math's own, which Word keeps without saying so
+    tex = re.sub(r"\\mathit\s*\{\s*([A-Za-z]+)\s*\}", r"\1", tex)
     # Pandoc versions read the same accent back differently
     for wide, accent in (
         ("widehat", "hat"),

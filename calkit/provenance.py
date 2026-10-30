@@ -887,23 +887,33 @@ class ProvenanceStep:
 class ProvenanceGap:
     """A path nothing records the origin of, and the chain from what's
     shown back to it.
+
+    One that's ``unchecked`` is recorded as imported, but from somewhere
+    only described, e.g., a folder on someone's computer, so nobody else
+    can check it.
     """
 
     steps: list[ProvenanceStep]
+    unchecked: bool = False
 
     @property
     def path(self) -> str:
         return self.steps[-1].path
 
     def __str__(self) -> str:
+        what = (
+            f"{self.path} is imported from somewhere that can't be checked"
+            if self.unchecked
+            else f"origin not defined for {self.path}"
+        )
         if len(self.steps) == 1:
-            return f"origin not defined for {self.path}"
+            return what
         chain = []
         for step in self.steps:
             chain.append(step.path)
             if step.stage:
                 chain.append(f"stage {step.stage}")
-        return f"origin not defined for {self.path} ({' <- '.join(chain)})"
+        return f"{what} ({' <- '.join(chain)})"
 
 
 def find_provenance_gaps(
@@ -945,18 +955,36 @@ def find_provenance_gaps(
                 return name
         return None
 
+    def checkable(imported_from: object) -> bool:
+        # A source someone else can look at, rather than only a description
+        if isinstance(imported_from, str):
+            try:
+                imported_from = source_from_location(imported_from)
+            except ValueError:
+                return False
+        return isinstance(imported_from, dict) and any(
+            imported_from.get(k)
+            for k in ("git_repo_url", "project", "url", "doi")
+        )
+
     def walk(path: str, trail: list[ProvenanceStep]) -> None:
         # Every entry covering the path counts, e.g., a file's and its
         # folder's, whatever order calkit.yaml lists them in
         covering = [e for e in entries if under(path, norm(e["path"]))]
         if any(
-            e.get("imported_from") is not None
+            checkable(e.get("imported_from"))
             or (
                 e.get("created_by") is not None
                 and can_be_created_by_person(path)
             )
             for e in covering
         ):
+            return
+        if any(e.get("imported_from") is not None for e in covering):
+            if path not in gaps:
+                gaps[path] = ProvenanceGap(
+                    trail + [ProvenanceStep(path)], unchecked=True
+                )
             return
         stage = producer(path)
         if stage is None:

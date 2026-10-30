@@ -230,6 +230,8 @@ export interface StageFromScript {
 export interface ProvenanceGap {
   path: string;
   steps: { path: string; stage?: string | null }[];
+  /** Imported, but from somewhere only described, which nobody can check. */
+  unchecked?: boolean;
 }
 
 export interface ReferenceEntry {

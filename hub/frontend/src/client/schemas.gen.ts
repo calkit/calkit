@@ -7338,6 +7338,11 @@ export const ProvenanceGapSchema = {
       type: "array",
       title: "Steps",
     },
+    unchecked: {
+      type: "boolean",
+      title: "Unchecked",
+      default: false,
+    },
   },
   type: "object",
   required: ["path"],
@@ -9933,6 +9938,14 @@ export const ReproCheckSchema = {
       },
       type: "array",
       title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
       default: [],
     },
     scripts_not_in_pipeline: {
@@ -12751,6 +12764,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
       default: [],
     },
     scripts_not_in_pipeline: {

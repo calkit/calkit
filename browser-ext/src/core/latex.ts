@@ -215,14 +215,18 @@ export function citationProblems(
       continue;
     }
     const via = gap.steps.flatMap((step) => (step.stage ? [step.stage] : []));
+    const through = via.length ? ` (via ${via.join(", ")})` : "";
     problems.push({
-      severity: "error",
+      severity: gap.unchecked ? "warning" : "error",
       kind: "origin",
-      message:
-        gap.path === path
-          ? "Origin not defined"
-          : `Origin not defined for ${gap.path}, which it's made from` +
-            (via.length ? ` (via ${via.join(", ")})` : ""),
+      message: gap.unchecked
+        ? gap.path === path
+          ? "Imported from somewhere that can't be checked"
+          : `${gap.path}, which it's made from, is imported from ` +
+            `somewhere that can't be checked${through}`
+        : gap.path === path
+        ? "Origin not defined"
+        : `Origin not defined for ${gap.path}, which it's made from${through}`,
       path: gap.path,
     });
   }

@@ -2128,8 +2128,10 @@ function renderStatus(
         },
         notice:
           `Synced. ${result.commits_from_overleaf} change` +
-          `${result.commits_from_overleaf === 1 ? "" : "s"} came from ` +
-          "Overleaf.",
+          (result.commits_from_overleaf === 1
+            ? " from Overleaf was"
+            : "s from Overleaf were") +
+          " synced to the main project.",
       };
       reload();
     } catch (e) {

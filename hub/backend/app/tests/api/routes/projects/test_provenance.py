@@ -18,6 +18,7 @@ def test_get_project_provenance(client: TestClient) -> None:
         ),
         "scripts/analyze.py": "print()",
         "data/downloaded/a.csv": "x\n1\n",
+        "data/downloaded/notes.csv": "x\n2\n",
         "paper/drawn.svg": "",
         "paper/exported.png": "",
         "paper/pasted.png": "",
@@ -27,11 +28,21 @@ def test_get_project_provenance(client: TestClient) -> None:
     tree = SimpleNamespace(
         is_file=lambda path: path in files,
         is_dir=lambda path: path == "data/downloaded",
-        listdir=lambda path: ["a.csv"] if path == "data/downloaded" else [],
+        listdir=lambda path: (
+            ["a.csv", "notes.csv"] if path == "data/downloaded" else []
+        ),
     )
     ck_info = {
         "datasets": [
-            {"path": "data/downloaded", "imported_from": "https://x.org/d.zip"}
+            {
+                "path": "data/downloaded",
+                "imported_from": "https://x.org/d.zip",
+            },
+            # Listed after the folder it's in, but it's the file's own
+            {
+                "path": "data/downloaded/notes.csv",
+                "created_by": {"name": "Ada"},
+            },
         ],
         "figures": [
             {
@@ -189,6 +200,10 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["origin_url"] == "https://x.org/d.zip"
     assert body["origin_path"] == "data/downloaded"
     assert body["gaps"] == []
+    # A file's own entry says more than its folder's
+    body = get("path=data/downloaded/notes.csv")
+    assert body["origin"] == "Created by Ada"
+    assert body["origin_path"] is None
     body = get("path=paper/drawn.svg")
     assert body["origin"] == "Created by Ada with Claude"
     assert body["origin_url"] is None

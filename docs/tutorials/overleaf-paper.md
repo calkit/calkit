@@ -19,6 +19,14 @@ and number and saying where it came from. By the end, everything the paper
 shows can be traced back to the code and data that made it, and Overleaf
 tells you when something is out of date.
 
+Unlike tools that put your code inside the paper, e.g., Quarto or
+R Markdown, Calkit keeps the two separate but connected. When you're
+writing, you're on Overleaf, and when you're analyzing, you're in your
+scripts, with only what that work needs in front of you. Calkit connects
+them, so switching is cheap: a change to the analysis shows up in the
+paper, and anything in the paper leads back to what made it. The cheaper
+the switch, the more often you can go around again.
+
 You don't need to have used Calkit before, and you don't need to change how
 your analysis is organized to get started.
 

@@ -234,6 +234,19 @@ describe("citationProblems", () => {
     expect(problems[0].message).toBe(
       "Origin not defined for data/raw.csv, which it's made from (via plot)",
     );
+    // Exported by hand, so it says what to do
+    expect(
+      citationProblems(figure, {
+        ...base,
+        stage: "export-a",
+        stage_kind: "manual",
+        source: "figures/src/a.psd",
+        stale_reason: "pipeline",
+      }).map((p) => p.message),
+    ).toEqual([
+      "Needs exporting again: figures/src/a.psd changed since it was last " +
+        "exported",
+    ]);
   });
 
   test("names what isn't in the project, except a plain include", () => {

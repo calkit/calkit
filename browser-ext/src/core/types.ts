@@ -194,6 +194,13 @@ export interface Provenance {
   gaps?: ProvenanceGap[];
 }
 
+/** A manual stage exporting a figure by hand from a source file. */
+export interface ManualExport {
+  stage_name: string;
+  stage_yaml: string;
+  message: string;
+}
+
 /** A stage made from a script, as `calkit xr` makes one, maybe saved. */
 export interface StageFromScript {
   stage_name: string;

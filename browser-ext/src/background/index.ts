@@ -21,6 +21,7 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
+  ManualExport,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -289,6 +290,20 @@ async function handle(message: Request): Promise<unknown> {
             imported_from: message.importedFrom,
             created_by: message.createdBy,
             message: `Record where ${message.path} came from`,
+          },
+        },
+      );
+    case "project.manualExport":
+      return request<ManualExport>(
+        `${projectPath(message.owner, message.project)}` +
+          "/pipeline/stages/manual-export",
+        {
+          method: "POST",
+          body: {
+            path: message.path,
+            source_path: message.sourcePath,
+            content: message.content,
+            app: message.app,
           },
         },
       );

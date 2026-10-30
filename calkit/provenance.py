@@ -243,7 +243,7 @@ def local_edit(path: str, lock: dict | None) -> bool:
     claim it can.
     """
     recorded = (lock or {}).get("hash")
-    if not recorded or not os.path.exists(path):
+    if not isinstance(recorded, str) or not os.path.exists(path):
         return False
     # The algorithm is named in the value, so a file hashed by a version
     # that used a different one is not mistaken for an edited file
@@ -946,21 +946,22 @@ def find_provenance_gaps(
         return None
 
     def walk(path: str, trail: list[ProvenanceStep]) -> None:
-        entry = next(
-            (e for e in entries if under(path, norm(e["path"]))), None
-        )
-        if entry is not None and (
-            entry.get("imported_from") is not None
+        # Every entry covering the path counts, e.g., a file's and its
+        # folder's, whatever order calkit.yaml lists them in
+        covering = [e for e in entries if under(path, norm(e["path"]))]
+        if any(
+            e.get("imported_from") is not None
             or (
-                entry.get("created_by") is not None
+                e.get("created_by") is not None
                 and can_be_created_by_person(path)
             )
+            for e in covering
         ):
             return
         stage = producer(path)
         if stage is None:
             # An entry naming a stage not compiled yet is taken at its word
-            if entry is None or entry.get("stage") is None:
+            if not any(e.get("stage") is not None for e in covering):
                 if is_data(path) and path not in gaps:
                     gaps[path] = ProvenanceGap(trail + [ProvenanceStep(path)])
             return

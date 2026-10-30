@@ -39,7 +39,7 @@ router = APIRouter()
 MAX_VALUE_BYTES = 100_000
 RESULTS_EXTS = (".json", ".yaml", ".yml", ".toml")
 # The stage fields that name what someone edits to change its output
-SOURCE_FIELDS = ("script_path", "notebook_path", "target_path")
+SOURCE_FIELDS = ("script_path", "notebook_path", "target_path", "source_path")
 
 
 def _read_value(

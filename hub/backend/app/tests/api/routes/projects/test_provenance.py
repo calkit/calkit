@@ -22,6 +22,7 @@ def test_get_project_provenance(client: TestClient) -> None:
         "paper/drawn.svg": "",
         "paper/exported.png": "",
         "paper/pasted.png": "",
+        "paper/diagram.png": "",
     }
     # In object storage, inside a directory a stage outputs
     stored = {"results/sweep/summary.json": json.dumps({"best": 7})}
@@ -67,6 +68,13 @@ def test_get_project_provenance(client: TestClient) -> None:
                     "environment": "py",
                     "wdir": "figs",
                     "outputs": ["out.png"],
+                },
+                # Exported by hand from a file someone made
+                "export-diagram": {
+                    "kind": "manual",
+                    "message": "In Photoshop, export paper/diagram.png",
+                    "source_path": "figs/diagram.psd",
+                    "outputs": ["paper/diagram.png"],
                 },
                 # Puts the plot beside the paper, which includes it there
                 "copy": {
@@ -209,6 +217,11 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["origin_url"] is None
     assert body["origin_path"] is None
     assert body["gaps"] == []
+    # A figure exported by hand names the file to change
+    body = get("path=paper/diagram.png")
+    assert body["stage"] == "export-diagram"
+    assert body["stage_kind"] == "manual"
+    assert body["source"] == "figs/diagram.psd"
     # A figure nothing accounts for is a gap itself
     for path in ["paper/pasted.png", "paper/exported.png"]:
         body = get(f"path={path}")

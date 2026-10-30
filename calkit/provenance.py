@@ -243,7 +243,7 @@ def local_edit(path: str, lock: dict | None) -> bool:
     claim it can.
     """
     recorded = (lock or {}).get("hash")
-    if not recorded or not os.path.exists(path):
+    if not isinstance(recorded, str) or not os.path.exists(path):
         return False
     # The algorithm is named in the value, so a file hashed by a version
     # that used a different one is not mistaken for an edited file

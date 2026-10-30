@@ -1033,18 +1033,24 @@ def is_data_path(
         is_file("/".join(parts[:i]) + ".dvc") for i in range(1, len(parts) + 1)
     ):
         return True
-    if is_dir(path):
-        pending = [path]
-        while pending:
-            parent = pending.pop()
-            for name in listdir(parent):
-                child = f"{parent}/{name}"
-                if is_dir(child):
-                    pending.append(child)
-                elif posixpath.splitext(name)[1].lower() in exts:
-                    return True
+    # Named like data, even as a folder, e.g., a .zarr store
+    if posixpath.splitext(path)[1].lower() in exts:
+        return True
+    if not is_dir(path):
         return False
-    return posixpath.splitext(path)[1].lower() in exts
+    pending = [path]
+    while pending:
+        parent = pending.pop()
+        for name in listdir(parent):
+            child = f"{parent}/{name}"
+            if posixpath.splitext(name)[1].lower() in exts:
+                return True
+            if is_dir(child):
+                pending.append(child)
+            # A DVC pointer stands in for data, whether pulled or not
+            elif name.endswith(".dvc"):
+                return True
+    return False
 
 
 def find_project_provenance_gaps(

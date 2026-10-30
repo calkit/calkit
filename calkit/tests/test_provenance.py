@@ -729,6 +729,11 @@ def test_is_data_path(tmp_path):
     (tmp_path / "scripts" / "plot.py").write_text("")
     (tmp_path / "big").mkdir()
     (tmp_path / "big.dvc").write_text("outs: []\n")
+    (tmp_path / "pointers").mkdir()
+    (tmp_path / "pointers" / "raw.csv.dvc").write_text("outs: []\n")
+    (tmp_path / "store.zarr" / "0").mkdir(parents=True)
+    (tmp_path / "store.zarr" / "0" / "0").write_text("")
+    (tmp_path / "nested" / "store.zarr").mkdir(parents=True)
     # A data file, or a folder with one anywhere inside, is data
     assert is_data("data/raw/deep/x.csv")
     assert is_data("data")
@@ -741,3 +746,8 @@ def test_is_data_path(tmp_path):
     # its kind
     assert is_data("big")
     assert is_data("big/notes.txt")
+    # A folder of DVC pointers is data before anything is pulled, and a
+    # store is data by its name, whatever its insides are called
+    assert is_data("pointers")
+    assert is_data("store.zarr")
+    assert is_data("nested")

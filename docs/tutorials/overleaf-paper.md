@@ -121,7 +121,7 @@ paper, a data repository, or a colleague's project, give its URL or DOI.
 Calkit records it, and can check it again later to see whether the source
 has changed.
 
-### Exported by hand from a file you made
+### Exported manually from a file you made
 
 Plenty of figures aren't made by code: a diagram drawn in Illustrator or
 Inkscape, a photo touched up in Photoshop, or a plot laid out in
@@ -129,16 +129,18 @@ PowerPoint.
 What goes into the paper is a PNG or PDF exported from that file,
 and that file is what you'd change if the figure had to.
 
-Choose **Exported**, then pick or upload the file it's exported from, and
-say which app you export it with.
-Calkit records the file as yours, and adds a step to the pipeline saying
-the figure is exported from it by hand.
+Choose **Exported**, then pick or upload the file it's exported from.
+Calkit records the file as yours.
+If it's an Inkscape SVG or a GIMP file, Calkit exports the figure from it
+whenever the pipeline runs, the same as a figure made by a script.
+For anything else, say which app you export it with, and Calkit adds a
+manual step to the pipeline.
 
-Nothing runs that step for you, but Calkit keeps track of whether it's
+Nothing runs a manual step for you, but Calkit keeps track of whether it's
 been done.
 Months later, when the reviews come back and you change the diagram, the
-figure in the paper shows as out of date, with a reminder to export it
-again.
+figure in the paper shows as out of date, with a reminder that it needs a
+manual step.
 Running the pipeline on your computer opens the file in its app, waits
 while you export the figure, then checks the new export is there before
 carrying on.

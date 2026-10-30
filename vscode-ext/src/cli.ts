@@ -44,3 +44,31 @@ export function missingInstallDirs(
     (dir) => !dirs.includes(dir) && exists(dir),
   );
 }
+
+// STATUS_SYSTEM_INTEGRITY_POLICY_VIOLATION, what a process exits with when
+// Windows won't load one of its DLLs
+const APP_CONTROL_BLOCK_STATUS = 0xc0e90002;
+const APP_CONTROL_BLOCK_REGEX =
+  /Application Control policy has blocked|os error 4551|0xc0e90002/i;
+
+// Whether running a command failed because Windows App Control, e.g., Smart
+// App Control, blocked an unsigned file it doesn't trust, like the calkit.exe
+// uv installs or the Python it starts. Windows refusing to start a program
+// has no error code of its own in Node, so shows as UNKNOWN.
+export function isAppControlBlock(error: unknown, platform: string): boolean {
+  if (platform !== "win32" || typeof error !== "object" || error === null) {
+    return false;
+  }
+  const { code, message, stderr } = error as {
+    code?: unknown;
+    message?: unknown;
+    stderr?: unknown;
+  };
+  if (code === "UNKNOWN") {
+    return true;
+  }
+  if (typeof code === "number" && code >>> 0 === APP_CONTROL_BLOCK_STATUS) {
+    return true;
+  }
+  return APP_CONTROL_BLOCK_REGEX.test(`${message ?? ""}\n${stderr ?? ""}`);
+}

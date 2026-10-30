@@ -16,7 +16,7 @@ import dotenv
 import typer
 
 import calkit
-from calkit.cli import AliasGroup, raise_error, warn
+from calkit.cli import AliasGroup, raise_error, warn, warn_app_control
 from calkit.core import get_md5
 
 
@@ -605,6 +605,7 @@ def check_environment(
         try:
             subprocess.check_call(cmd)
         except subprocess.CalledProcessError:
+            warn_app_control(maybe=True)
             raise_error("Failed to check pixi environment")
     elif env["kind"] == "uv":
         cmd = ["uv", "sync"]
@@ -616,6 +617,7 @@ def check_environment(
         try:
             subprocess.check_call(cmd)
         except subprocess.CalledProcessError:
+            warn_app_control(maybe=True)
             raise_error("Failed to check uv environment")
     elif (kind := env["kind"]) in ["uv-venv", "venv"]:
         if "path" not in env:
@@ -1835,6 +1837,7 @@ def check_conda_env(
             verbose=not quiet,
         )
     except Exception as e:
+        warn_app_control(output=str(e), maybe=True)
         raise_error(f"Failed to check conda environment: {e}")
 
 
@@ -1917,6 +1920,7 @@ def check_venv(
         try:
             subprocess.check_call(create_cmd + [prefix], cwd=wdir)
         except subprocess.CalledProcessError:
+            warn_app_control(maybe=True)
             raise_error(f"Failed to create {kind} at {prefix}")
         # Put a gitignore file in the env dir if one doesn't exist
         gitignore_fpath = os.path.join(prefix_full_path, ".gitignore")
@@ -2117,6 +2121,7 @@ def check_venv(
             pip_install_and_freeze(dep_file_txt)
         except (subprocess.CalledProcessError, OSError):
             if lock_is_current:
+                warn_app_control(maybe=True)
                 raise_error(
                     f"Failed to create {kind} at {prefix} from its lock file "
                     f"({lock_fpath}), which matches the spec ({path}). "
@@ -2132,6 +2137,7 @@ def check_venv(
             try:
                 pip_install_and_freeze(f"-r {path}")
             except subprocess.CalledProcessError:
+                warn_app_control(maybe=True)
                 raise_error(f"Failed to check {kind} from input file {path}")
 
 

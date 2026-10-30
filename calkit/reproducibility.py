@@ -899,7 +899,13 @@ def check_reproducibility(
         if not isinstance(stage, dict) or stage.get("kind") != "latex":
             continue
         target = stage.get("target_path")
-        if target and os.path.isfile(os.path.join(wdir, target)):
+        if not target:
+            continue
+        # Relative to the stage's working directory, like its other paths
+        target = posixpath.normpath(
+            posixpath.join(stage.get("wdir") or "", target)
+        )
+        if os.path.isfile(os.path.join(wdir, target)):
             shown += calkit.latex.find_shown(target, wdir=wdir)
     res["provenance_gaps"] = [
         str(gap)

@@ -132,13 +132,13 @@
     }
   },
   "one-pager/pdf": {
-    "start_time": "2026-10-30T18:18:05.824000",
-    "end_time": "2026-10-30T18:18:10.115000",
-    "git_rev": "480308408d1edbb63493c6e0fdacdd4d7845adf3",
+    "start_time": "2026-10-30T18:54:04.549000",
+    "end_time": "2026-10-30T18:54:08.099000",
+    "git_rev": "9015b31b4973d64d39a5e234a53a11f7b24b23a0",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:c93d241eba4c111773f19ff738461c74afcf74d1aee936ff2d500e436b6d4a95",
-    "calkit_version": "0.50.4.dev313+g48030840",
-    "calkit_git_rev": "480308408d1edbb63493c6e0fdacdd4d7845adf3",
+    "dvc_lock_hash": "sha256:2faa8ad4ff98e0c6c75825100586f82a20a94a381be1a56b6e67127b078cbda7",
+    "calkit_version": "0.50.4.dev318+g9015b31b",
+    "calkit_git_rev": "9015b31b4973d64d39a5e234a53a11f7b24b23a0",
     "system": {
       "machine_id": "dea6d6a5eb9548ec97f8b91c56f0bffa",
       "os": "Linux",

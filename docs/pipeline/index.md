@@ -446,16 +446,16 @@ Model class: `LatexStage`
 Model class: `ManualStepStage`
 
 A step someone does manually, e.g., exporting a figure from
-Photoshop, which the pipeline asks for when its inputs change.
+Photoshop, which the pipeline asks for when its inputs change, e.g.,
+the Photoshop file.
 
 Its outputs are kept while it runs, since they're what the person
 replaces, and the step checks that they changed.
 
-| Kind-specific parameter | Type        | Required | Default    | Description                                                                                                            |
-| ----------------------- | ----------- | -------- | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `environment`           | str         | no       | '\_system' | Name of the environment in which to run this stage.                                                                    |
-| `message`               | str         | yes      |            | What to do, e.g., 'In Photoshop, export figures/wake-diagram.png'.                                                     |
-| `source_path`           | str \| None | no       | null       | A file to open in its default app for the step, e.g., the Photoshop file a figure is exported from. It's an input too. |
+| Kind-specific parameter | Type | Required | Default    | Description                                                        |
+| ----------------------- | ---- | -------- | ---------- | ------------------------------------------------------------------ |
+| `environment`           | str  | no       | '\_system' | Name of the environment in which to run this stage.                |
+| `message`               | str  | yes      |            | What to do, e.g., 'In Photoshop, export figures/wake-diagram.png'. |
 
 ### `map-paths`
 

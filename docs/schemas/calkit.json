@@ -3513,7 +3513,7 @@
     },
     "ManualStepStage": {
       "additionalProperties": false,
-      "description": "A step someone does manually, e.g., exporting a figure from\nPhotoshop, which the pipeline asks for when its inputs change.\n\nIts outputs are kept while it runs, since they're what the person\nreplaces, and the step checks that they changed.",
+      "description": "A step someone does manually, e.g., exporting a figure from\nPhotoshop, which the pipeline asks for when its inputs change, e.g.,\nthe Photoshop file.\n\nIts outputs are kept while it runs, since they're what the person\nreplaces, and the step checks that they changed.",
       "properties": {
         "always_run": {
           "default": false,
@@ -3732,19 +3732,6 @@
           "default": null,
           "deprecated": true,
           "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
-        },
-        "source_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A file to open in its default app for the step, e.g., the Photoshop file a figure is exported from. It's an input too.",
-          "title": "Source Path"
         },
         "wdir": {
           "anyOf": [

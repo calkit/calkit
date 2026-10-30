@@ -701,7 +701,7 @@ def post_project_manual_export(
     stage: dict[str, Any] = {
         "kind": "manual-step",
         "message": message,
-        "source_path": source_path,
+        "inputs": [source_path],
         "outputs": [{"path": path, "storage": "git"} if tracked else path],
     }
     _validate_ck_stage(stage, stage_name)

@@ -304,6 +304,8 @@ def get_project_provenance(
     source = None
     if ck_stage is not None:
         out.stage_kind = ck_stage.get("kind")
+        if out.stage_kind == "manual-step":
+            out.message = ck_stage.get("message")
         wdir = ck_stage.get("wdir") or ""
         field = next((f for f in SOURCE_FIELDS if ck_stage.get(f)), None)
         if field is not None:

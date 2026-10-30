@@ -7719,7 +7719,7 @@ export class ProjectsService {
   /**
    * Post Project Manual Export
    *
-   * Record that a figure is exported by hand from a source file, e.g.,
+   * Record that a figure is exported manually from a source file, e.g.,
    * a PNG from a Photoshop file, as a manual stage.
    *
    * The source, uploaded or already in the project, is recorded as created

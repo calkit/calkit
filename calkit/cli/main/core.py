@@ -4027,6 +4027,8 @@ def manual_step(
         bool, typer.Option("--show-stderr", help="Show stderr.")
     ] = False,
 ) -> None:
+    import textwrap
+
     from calkit.provenance import hash_path
 
     # Waiting for someone who isn't there would hang, e.g., in CI
@@ -4058,7 +4060,17 @@ def manual_step(
     # Each prompt ends its line, since 'calkit run' passes stage output on
     # a line at a time, so a prompt waiting on its line wouldn't show
     while True:
-        print(f"{message}. Press Enter when done.", flush=True)
+        prompt = f"{message.rstrip('.')}. Press Enter when done."
+        # Paths aren't split, so they can still be copied
+        print(
+            textwrap.fill(
+                prompt,
+                width=80,
+                break_long_words=False,
+                break_on_hyphens=False,
+            ),
+            flush=True,
+        )
         input()
         missing = [path for path in outputs if not os.path.exists(path)]
         if missing:

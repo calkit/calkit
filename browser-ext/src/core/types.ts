@@ -177,6 +177,8 @@ export interface Provenance {
   /** What to edit to change it: the stage's script, notebook, or document. */
   source?: string | null;
   command?: string | null;
+  /** What a manual step says to do. */
+  message?: string | null;
   inputs: string[];
   stage_status?: StageStatus | null;
   stale_reason?: "pipeline" | "frozen" | null;

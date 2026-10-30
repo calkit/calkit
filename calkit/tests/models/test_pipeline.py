@@ -100,7 +100,6 @@ def test_wordtopdfstage():
 def test_manualstage():
     s = ManualStepStage(
         message="In Photoshop, export figures/wake.png",
-        source_path="figures/src/wake diagram.psd",
         inputs=["figures/src/wake diagram.psd", "fonts/brand.otf"],
         outputs=[
             "figures/wake.png",
@@ -108,13 +107,11 @@ def test_manualstage():
         ],
     )
     sd = s.to_dvc()
-    # The file is opened for the person, and what they write is checked
+    # What the person writes is checked
     assert sd["cmd"] == (
         "calkit manual-step --message 'In Photoshop, export "
-        "figures/wake.png' --open 'figures/src/wake diagram.psd' "
-        "--output figures/wake.png --output paper/wake.png"
+        "figures/wake.png' --output figures/wake.png --output paper/wake.png"
     )
-    # The source is an input once, however it's named
     assert sd["deps"] == ["figures/src/wake diagram.psd", "fonts/brand.otf"]
     # Outputs are kept while it runs, since the person replaces them
     assert sd["outs"] == [

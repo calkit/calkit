@@ -7273,6 +7273,17 @@ export const ProvenanceSchema = {
       ],
       title: "Command",
     },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
     inputs: {
       items: {
         type: "string",

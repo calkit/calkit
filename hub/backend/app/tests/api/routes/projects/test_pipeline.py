@@ -501,7 +501,7 @@ def test_post_project_manual_export(
     assert info["pipeline"]["stages"]["export-drawn"] == {
         "kind": "manual-step",
         "message": message,
-        "source_path": "figures/src/drawn.psd",
+        "inputs": ["figures/src/drawn.psd"],
         "outputs": [{"path": "paper/figures/drawn.png", "storage": "git"}],
     }
     [entry] = info["misc"]

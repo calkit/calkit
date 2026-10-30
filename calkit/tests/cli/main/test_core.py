@@ -3922,3 +3922,11 @@ def test_manual_step(tmp_dir, monkeypatch, capsys):
     assert answers[2].endswith("Unchanged: fig.png. Keep as is? [y/N]\n")
     assert len(answers) == 4
     assert capsys.readouterr().out.rstrip().endswith("Done")
+    # A long message is wrapped to fit a terminal
+    message = "In Photoshop, export paper/deficit_new.png from " + "x/" * 30
+    monkeypatch.setattr("builtins.input", lambda: "")
+    manual_step(message=message + ".")
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) > 2
+    assert all(len(line) <= 80 for line in lines)
+    assert " ".join(lines[:-1]).endswith("x/. Press Enter when done.")

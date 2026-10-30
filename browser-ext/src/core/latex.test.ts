@@ -234,18 +234,18 @@ describe("citationProblems", () => {
     expect(problems[0].message).toBe(
       "Origin not defined for data/raw.csv, which it's made from (via plot)",
     );
-    // Exported manually, so it says what to do
+    // Made manually, so it says what to do
     expect(
       citationProblems(figure, {
         ...base,
         stage: "export-a",
         stage_kind: "manual-step",
-        source: "figures/src/a.psd",
+        message: "In Photoshop, export figures/a.png",
         stale_reason: "pipeline",
       }).map((p) => p.message),
     ).toEqual([
-      "Needs a manual step: re-export it from figures/src/a.psd, which " +
-        "changed",
+      "Needs a manual step, since what it's made from changed: In " +
+        "Photoshop, export figures/a.png",
     ]);
   });
 

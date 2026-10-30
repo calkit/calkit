@@ -768,14 +768,14 @@ function renderProvenance(
                   : null,
               ]),
             );
-            if (p.source) {
+            if (p.stage_kind === "manual-step" && p.message) {
+              lines.push(
+                el("div", { class: "dim", text: `Manual step: ${p.message}` }),
+              );
+            } else if (p.source) {
               lines.push(
                 el("div", { class: "dim" }, [
-                  document.createTextNode(
-                    p.stage_kind === "manual-step"
-                      ? "Exported manually from "
-                      : "Runs ",
-                  ),
+                  document.createTextNode("Runs "),
                   el("a", { text: p.source, href: fileUrl(p.source) }),
                 ]),
               );
@@ -905,24 +905,25 @@ function renderProvenance(
           : null,
       ]),
     );
-    if (provenance.source) {
+    if (provenance.stage_kind === "manual-step" && provenance.message) {
+      container.append(
+        el("div", {
+          class: "small",
+          text: `Manual step: ${provenance.message}`,
+        }),
+      );
+    } else if (provenance.source) {
       const source = el("a", {
         text: provenance.source,
         href: fileUrl(provenance.source),
         attrs: { target: "_blank" },
       });
       container.append(
-        el(
-          "div",
-          { class: "small" },
-          provenance.stage_kind === "manual-step"
-            ? [document.createTextNode("Exported manually from "), source]
-            : [
-                document.createTextNode("Edit "),
-                source,
-                document.createTextNode(" to change it."),
-              ],
-        ),
+        el("div", { class: "small" }, [
+          document.createTextNode("Edit "),
+          source,
+          document.createTextNode(" to change it."),
+        ]),
       );
     }
     if (provenance.inputs.length) {

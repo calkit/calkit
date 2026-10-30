@@ -2273,7 +2273,8 @@ class WordToPdfStage(Stage):
 
 class ManualStepStage(Stage):
     """A step someone does manually, e.g., exporting a figure from
-    Photoshop, which the pipeline asks for when its inputs change.
+    Photoshop, which the pipeline asks for when its inputs change, e.g.,
+    the Photoshop file.
 
     Its outputs are kept while it runs, since they're what the person
     replaces, and the step checks that they changed.
@@ -2286,21 +2287,7 @@ class ManualStepStage(Stage):
             "figures/wake-diagram.png'."
         )
     )
-    source_path: RelativeChildPathString | None = Field(
-        default=None,
-        description=(
-            "A file to open in its default app for the step, e.g., the "
-            "Photoshop file a figure is exported from. It's an input too."
-        ),
-    )
     environment: str = "_system"
-
-    @property
-    def dvc_deps(self) -> list[str]:
-        deps = super().dvc_deps
-        if self.source_path is not None and self.source_path not in deps:
-            deps = [self.source_path] + deps
-        return deps
 
     @property
     def output_paths(self) -> list[str]:
@@ -2321,8 +2308,6 @@ class ManualStepStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = f"calkit manual-step --message {shlex.quote(self.message)}"
-        if self.source_path is not None:
-            cmd += f" --open {shlex.quote(self.source_path)}"
         for path in self.output_paths:
             cmd += f" --output {shlex.quote(path)}"
         return cmd

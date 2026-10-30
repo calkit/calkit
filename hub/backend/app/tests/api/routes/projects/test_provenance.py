@@ -74,7 +74,7 @@ def test_get_project_provenance(client: TestClient) -> None:
                 "export-diagram": {
                     "kind": "manual-step",
                     "message": "In Photoshop, export paper/diagram.png",
-                    "source_path": "figs/diagram.psd",
+                    "inputs": ["figs/diagram.psd"],
                     "outputs": ["paper/diagram.png"],
                 },
                 # Puts the plot beside the paper, which includes it there
@@ -222,11 +222,12 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["origin_url"] is None
     assert body["origin_path"] is None
     assert body["gaps"] == []
-    # A figure exported manually names the file to change
+    # A figure exported manually says what to do, and what it's from
     body = get("path=paper/diagram.png")
     assert body["stage"] == "export-diagram"
     assert body["stage_kind"] == "manual-step"
-    assert body["source"] == "figs/diagram.psd"
+    assert body["message"] == "In Photoshop, export paper/diagram.png"
+    assert body["source"] is None
     # A figure nothing accounts for is a gap itself
     for path in ["paper/pasted.png", "paper/exported.png"]:
         body = get(f"path={path}")

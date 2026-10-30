@@ -609,6 +609,13 @@ def test_find_provenance_gaps():
             {"path": "data/imported/listed.csv"},
             {"path": "data/imported", "imported_from": {"doi": "10.1/x"}},
             {"path": "data/measured.csv", "created_by": {"email": "a@b.c"}},
+            # Only described, so nobody else can check it
+            {"path": "data/box.csv", "imported_from": "Our Box folder"},
+            {
+                "path": "data/laptop.csv",
+                "imported_from": {"description": "My laptop"},
+            },
+            {"path": "data/web.csv", "imported_from": "https://x.org/w.csv"},
         ],
         "misc": [
             {"path": "photos", "created_by": {"email": "a@b.c"}},
@@ -705,6 +712,12 @@ def test_find_provenance_gaps():
     # A person can take a photo, but a PNG is exported from something
     assert gaps(["photos/site.jpeg", "photos/export.png"]) == [
         "origin not defined for photos/export.png"
+    ]
+    # An import is fine when it names a source someone else can check
+    assert gaps(["data/web.csv"]) == []
+    assert gaps(["data/box.csv", "data/laptop.csv"]) == [
+        "data/box.csv is imported from somewhere that can't be checked",
+        "data/laptop.csv is imported from somewhere that can't be checked",
     ]
     # A matrix stage that hasn't run produces nothing known yet
     assert gaps(["figures/sweep-1.png"]) == [

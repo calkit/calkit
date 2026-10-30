@@ -279,6 +279,7 @@ def get_project_provenance(
                     ProvenanceStep(path=step.path, stage=step.stage)
                     for step in gap.steps
                 ],
+                unchecked=gap.unchecked,
             )
             for gap in calkit.provenance.find_provenance_gaps(
                 [path],

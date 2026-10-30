@@ -22,6 +22,7 @@ def test_get_project_provenance(client: TestClient) -> None:
         "paper/drawn.svg": "",
         "paper/exported.png": "",
         "paper/pasted.png": "",
+        "paper/box.png": "",
     }
     # In object storage, inside a directory a stage outputs
     stored = {"results/sweep/summary.json": json.dumps({"best": 7})}
@@ -52,6 +53,8 @@ def test_get_project_provenance(client: TestClient) -> None:
             },
             # Exported from something, so a person can't be its origin
             {"path": "paper/exported.png", "created_by": {"name": "Ada"}},
+            # Only described, so nobody else can check it
+            {"path": "paper/box.png", "imported_from": "Our Box folder"},
         ],
         "pipeline": {
             "stages": {
@@ -156,6 +159,7 @@ def test_get_project_provenance(client: TestClient) -> None:
                 {"path": "results/metrics.json", "stage": "analyze"},
                 {"path": "data/raw.csv", "stage": None},
             ],
+            "unchecked": False,
         }
     ]
     assert body["origin"] is None
@@ -219,8 +223,16 @@ def test_get_project_provenance(client: TestClient) -> None:
         body = get(f"path={path}")
         assert body["origin"] is None
         assert body["gaps"] == [
-            {"path": path, "steps": [{"path": path, "stage": None}]}
+            {
+                "path": path,
+                "steps": [{"path": path, "stage": None}],
+                "unchecked": False,
+            }
         ]
+    # Imported from somewhere nobody else can check
+    body = get("path=paper/box.png")
+    assert body["origin"] == "Our Box folder"
+    assert [g["unchecked"] for g in body["gaps"]] == [True]
     # Nothing produces an authored file
     body = get("path=scripts/analyze.py")
     assert body["exists"]

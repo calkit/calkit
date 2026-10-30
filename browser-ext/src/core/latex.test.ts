@@ -234,6 +234,29 @@ describe("citationProblems", () => {
     expect(problems[0].message).toBe(
       "Origin not defined for data/raw.csv, which it's made from (via plot)",
     );
+    // Imported from somewhere only described, which is worth a warning
+    expect(
+      citationProblems(figure, {
+        ...base,
+        stage: "plot",
+        gaps: [
+          {
+            path: "data/raw.csv",
+            steps: [
+              { path: "figures/a.png", stage: "plot" },
+              { path: "data/raw.csv" },
+            ],
+            unchecked: true,
+          },
+        ],
+      }).map((p) => [p.severity, p.message]),
+    ).toEqual([
+      [
+        "warning",
+        "data/raw.csv, which it's made from, is imported from somewhere " +
+          "that can't be checked (via plot)",
+      ],
+    ]);
   });
 
   test("names what isn't in the project, except a plain include", () => {

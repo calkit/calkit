@@ -10,7 +10,7 @@ from calkit.models.pipeline import (
     JuliaScriptStage,
     JupyterNotebookStage,
     LatexStage,
-    ManualStage,
+    ManualStepStage,
     MapPathsStage,
     MarimoHtmlWasmStage,
     MarkdownStage,
@@ -98,7 +98,7 @@ def test_wordtopdfstage():
 
 
 def test_manualstage():
-    s = ManualStage(
+    s = ManualStepStage(
         message="In Photoshop, export figures/wake.png",
         source_path="figures/src/wake diagram.psd",
         inputs=["figures/src/wake diagram.psd", "fonts/brand.otf"],

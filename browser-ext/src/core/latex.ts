@@ -234,11 +234,11 @@ export function citationProblems(
         provenance.stale_reason === "frozen"
           ? "Out of date: its stage is frozen, and what it reads or " +
             "writes has moved since it ran"
-          : // Exported by hand, so someone has to do it again
-          provenance.stage_kind === "manual"
-          ? `Needs exporting again: ${
-              provenance.source ?? "what it's exported from"
-            } changed since it was last exported`
+          : // Exported manually, so someone has to do it again
+          provenance.stage_kind === "manual-step"
+          ? `Needs a manual step: re-export it from ${
+              provenance.source ?? "its source"
+            }, which changed`
           : "Out of date: what it's made from changed since it last ran",
       path,
     });

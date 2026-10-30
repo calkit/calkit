@@ -69,9 +69,9 @@ def test_get_project_provenance(client: TestClient) -> None:
                     "wdir": "figs",
                     "outputs": ["out.png"],
                 },
-                # Exported by hand from a file someone made
+                # Exported manually from a file someone made
                 "export-diagram": {
-                    "kind": "manual",
+                    "kind": "manual-step",
                     "message": "In Photoshop, export paper/diagram.png",
                     "source_path": "figs/diagram.psd",
                     "outputs": ["paper/diagram.png"],
@@ -217,10 +217,10 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["origin_url"] is None
     assert body["origin_path"] is None
     assert body["gaps"] == []
-    # A figure exported by hand names the file to change
+    # A figure exported manually names the file to change
     body = get("path=paper/diagram.png")
     assert body["stage"] == "export-diagram"
-    assert body["stage_kind"] == "manual"
+    assert body["stage_kind"] == "manual-step"
     assert body["source"] == "figs/diagram.psd"
     # A figure nothing accounts for is a gap itself
     for path in ["paper/pasted.png", "paper/exported.png"]:

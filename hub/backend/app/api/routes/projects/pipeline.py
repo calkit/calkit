@@ -615,7 +615,7 @@ def post_project_manual_export(
     current_user: CurrentUser,
     session: SessionDep,
 ) -> ManualExport:
-    """Record that a figure is exported by hand from a source file, e.g.,
+    """Record that a figure is exported manually from a source file, e.g.,
     a PNG from a Photoshop file, as a manual stage.
 
     The source, uploaded or already in the project, is recorded as created
@@ -688,7 +688,7 @@ def post_project_manual_export(
         n += 1
     tracked = bool(repo.git.ls_files("--", path).strip())
     stage: dict[str, Any] = {
-        "kind": "manual",
+        "kind": "manual-step",
         "message": message,
         "source_path": source_path,
         "outputs": [{"path": path, "storage": "git"} if tracked else path],
@@ -749,7 +749,7 @@ def post_project_manual_export(
         None,
         [],
         [],
-        f"Export {path} from {source_path} by hand",
+        f"Export {path} from {source_path} manually",
     )
     return ManualExport(
         stage_name=stage_name,

@@ -479,7 +479,7 @@ def test_post_project_manual_export(
     assert resp.json()["message"] == message
     info = ck_info()
     assert info["pipeline"]["stages"]["export-drawn"] == {
-        "kind": "manual",
+        "kind": "manual-step",
         "message": message,
         "source_path": "figures/src/drawn.psd",
         "outputs": [{"path": "paper/figures/drawn.png", "storage": "git"}],

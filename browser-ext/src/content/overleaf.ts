@@ -350,7 +350,7 @@ function renderAddScript(
 }
 
 /**
- * Record that a figure is exported by hand from a file someone made, e.g.,
+ * Record that a figure is exported manually from a file someone made, e.g.,
  * a PNG from a Photoshop file, so the pipeline asks for a new export
  * whenever that file changes.
  */
@@ -762,8 +762,8 @@ function renderProvenance(
               lines.push(
                 el("div", { class: "dim" }, [
                   document.createTextNode(
-                    p.stage_kind === "manual"
-                      ? "Exported by hand from "
+                    p.stage_kind === "manual-step"
+                      ? "Exported manually from "
                       : "Runs ",
                   ),
                   el("a", { text: p.source, href: fileUrl(p.source) }),
@@ -905,8 +905,8 @@ function renderProvenance(
         el(
           "div",
           { class: "small" },
-          provenance.stage_kind === "manual"
-            ? [document.createTextNode("Exported by hand from "), source]
+          provenance.stage_kind === "manual-step"
+            ? [document.createTextNode("Exported manually from "), source]
             : [
                 document.createTextNode("Edit "),
                 source,

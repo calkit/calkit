@@ -3511,9 +3511,9 @@
       "title": "MachineIdEqualsCondition",
       "type": "object"
     },
-    "ManualStage": {
+    "ManualStepStage": {
       "additionalProperties": false,
-      "description": "A step someone does by hand, e.g., exporting a figure from\nPhotoshop, which the pipeline asks for when its inputs change.\n\nIts outputs are kept while it runs, since they're what the person\nreplaces, and the step checks that they changed.",
+      "description": "A step someone does manually, e.g., exporting a figure from\nPhotoshop, which the pipeline asks for when its inputs change.\n\nIts outputs are kept while it runs, since they're what the person\nreplaces, and the step checks that they changed.",
       "properties": {
         "always_run": {
           "default": false,
@@ -3605,8 +3605,8 @@
           "title": "Iterate Over"
         },
         "kind": {
-          "const": "manual",
-          "default": "manual",
+          "const": "manual-step",
+          "default": "manual-step",
           "title": "Kind",
           "type": "string"
         },
@@ -3763,7 +3763,7 @@
       "required": [
         "message"
       ],
-      "title": "ManualStage",
+      "title": "ManualStepStage",
       "type": "object"
     },
     "MapPathsStage": {
@@ -5838,7 +5838,7 @@
                 "julia-script": "#/$defs/JuliaScriptStage",
                 "jupyter-notebook": "#/$defs/JupyterNotebookStage",
                 "latex": "#/$defs/LatexStage",
-                "manual": "#/$defs/ManualStage",
+                "manual-step": "#/$defs/ManualStepStage",
                 "map-paths": "#/$defs/MapPathsStage",
                 "marimo-html-wasm": "#/$defs/MarimoHtmlWasmStage",
                 "markdown": "#/$defs/MarkdownStage",
@@ -5897,7 +5897,7 @@
                 "$ref": "#/$defs/WordToPdfStage"
               },
               {
-                "$ref": "#/$defs/ManualStage"
+                "$ref": "#/$defs/ManualStepStage"
               },
               {
                 "$ref": "#/$defs/JupyterNotebookStage"

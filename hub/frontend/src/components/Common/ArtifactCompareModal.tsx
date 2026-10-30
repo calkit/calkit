@@ -414,7 +414,7 @@ function FigureInfo({
   // A figure calkit.yaml doesn't declare can still have a stage that makes it
   const stage = figure.stage ?? provenanceQuery.data?.stage
   const exportedFrom =
-    provenanceQuery.data?.stage_kind === "manual"
+    provenanceQuery.data?.stage_kind === "manual-step"
       ? provenanceQuery.data.source
       : null
   const dataLinks: InputLink[] = []
@@ -506,7 +506,7 @@ function FigureInfo({
             </Link>
             {exportedFrom ? (
               <>
-                , exported by hand from{" "}
+                , exported manually from{" "}
                 <Link
                   as={RouterLink}
                   to={filesTo}
@@ -632,7 +632,7 @@ function DefineFigureOrigin({
 }
 
 /**
- * Record that a file is exported by hand from one someone made, e.g., a
+ * Record that a file is exported manually from one someone made, e.g., a
  * PNG from a Photoshop file, so the pipeline asks for a new export
  * whenever that file changes.
  */

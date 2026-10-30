@@ -34,6 +34,7 @@ def test_get_project_provenance(client: TestClient) -> None:
         ),
     )
     ck_info = {
+        "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
         "datasets": [
             {
                 "path": "data/downloaded",
@@ -99,6 +100,10 @@ def test_get_project_provenance(client: TestClient) -> None:
                         {"path": "scripts/analyze.py"},
                         {"path": "data/raw.csv"},
                         {"path": ".calkit/env-locks/py.json"},
+                        # The environment's, which aren't what it reads
+                        {"path": "uv.lock"},
+                        {"path": "pyproject.toml"},
+                        {"path": ".python-version"},
                     ],
                     "outs": [{"path": "results/metrics.json"}],
                 }

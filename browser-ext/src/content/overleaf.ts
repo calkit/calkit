@@ -1,4 +1,5 @@
 import { getOverleafProjectId } from "../core/detect";
+import calkitLogo from "../../public/icons/calkit.svg?raw";
 import {
   renderFailure,
   renderHubPicker,
@@ -3039,9 +3040,86 @@ function watchForSaves(): void {
   );
 }
 
+/**
+ * List Calkit among Overleaf's own integrations, beside GitHub and
+ * Dropbox, as another way to open the panel.
+ */
+function watchIntegrations(): void {
+  // An image has no text color to inherit, so the logo gets its own
+  const icon = `data:image/svg+xml,${encodeURIComponent(
+    calkitLogo.replace(/currentColor/g, "#009688"),
+  )}`;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const addCard = () => {
+    const list = document.querySelector(".integrations-panel");
+    if (!list || !currentProjectId) {
+      return;
+    }
+    const description = currentLink
+      ? `Synced with ${currentLink.project_owner_name}/${currentLink.project_name}.`
+      : "Make this paper reproducible.";
+    const existing = list.querySelector<HTMLElement>("#calkit-integration");
+    if (existing) {
+      const text = existing.querySelector(
+        ".integrations-panel-card-description",
+      );
+      if (text && text.textContent !== description) {
+        text.textContent = description;
+      }
+      return;
+    }
+    const card = el(
+      "button",
+      {
+        class: "integrations-panel-card-button",
+        attrs: { id: "calkit-integration", type: "button" },
+      },
+      [
+        el("div", { class: "integrations-panel-card-contents" }, [
+          el("div", { class: "integrations-panel-card-icon" }, [
+            el("img", {
+              attrs: { src: icon, alt: "", width: "32", height: "32" },
+            }),
+          ]),
+          el("div", { class: "integrations-panel-card-inner" }, [
+            el("div", { class: "integrations-panel-card-header" }, [
+              el("div", {
+                class: "integrations-panel-card-title",
+                text: "Calkit",
+                attrs: { translate: "no" },
+              }),
+            ]),
+            el("p", {
+              class: "integrations-panel-card-description",
+              text: description,
+            }),
+          ]),
+        ]),
+      ],
+    );
+    card.addEventListener("click", () => {
+      if (currentProjectId && !panel) {
+        openPanel(currentProjectId);
+      }
+    });
+    // First after the header, being the one that brings the rest together
+    const header = list.querySelector(".rail-panel-header");
+    if (header) {
+      header.after(card);
+    } else {
+      list.prepend(card);
+    }
+  };
+  new MutationObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(addCard, 100);
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
 watchForSaves();
 watchEditor();
 watchPdf();
+watchIntegrations();
 runContentScript({
   id: "overleaf",
   sync,

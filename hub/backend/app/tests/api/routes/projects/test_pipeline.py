@@ -574,7 +574,7 @@ def test_post_project_stage_export(
     }
     dvc_yaml = yaml.safe_load((tmp_path / "repo" / "dvc.yaml").read_text())
     assert dvc_yaml["stages"]["export-setup"]["cmd"] == (
-        "calkit inkscape export figures/src/setup.svg "
+        "calkit export inkscape figures/src/setup.svg "
         "-o paper/figures/setup.png"
     )
     # A GIMP file is GIMP's to export

@@ -2369,7 +2369,7 @@ class InkscapeExportStage(AppExportStage):
     @property
     def dvc_cmd(self) -> str:
         cmd = (
-            f"calkit inkscape export {shlex.quote(self.source_path)} "
+            f"calkit export inkscape {shlex.quote(self.source_path)} "
             f"-o {shlex.quote(self.output_path)}"
         )
         if self.dpi is not None:
@@ -2395,7 +2395,7 @@ class GimpExportStage(AppExportStage):
     @property
     def dvc_cmd(self) -> str:
         return (
-            f"calkit gimp export {shlex.quote(self.source_path)} "
+            f"calkit export gimp {shlex.quote(self.source_path)} "
             f"-o {shlex.quote(self.output_path)}"
         )
 

@@ -132,7 +132,7 @@ def test_appexportstage():
     sd = s.to_dvc()
     # The command names the app it needs
     assert sd["cmd"] == (
-        "calkit inkscape export figures/src/setup.svg -o paper/setup.png "
+        "calkit export inkscape figures/src/setup.svg -o paper/setup.png "
         "--dpi 150"
     )
     assert sd["deps"] == ["figures/src/setup.svg"]
@@ -143,7 +143,7 @@ def test_appexportstage():
         source_path="figures/src/photo.xcf", outputs=["paper/photo.tif"]
     )
     assert s.to_dvc()["cmd"] == (
-        "calkit gimp export figures/src/photo.xcf -o paper/photo.tif"
+        "calkit export gimp figures/src/photo.xcf -o paper/photo.tif"
     )
     # What an app doesn't export from, or to, is refused, as is a stage
     # with other than one output

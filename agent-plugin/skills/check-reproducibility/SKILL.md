@@ -61,6 +61,11 @@ Judgment, done here:
    rewrite a sentence to make a check pass, and never invent a stage to
    compute a number somebody else measured.
 
+   A line ending in a `% calkit: ignore` comment, optionally with a reason,
+   e.g., `% calkit: ignore, from the pump's datasheet`, is left out of both
+   checks, as it is by the Overleaf extension. Add one only for a number the
+   user confirms isn't this project's result.
+
    For a number that is this project's result, it must reach the page
    through the pipeline rather than through the author's fingers:
 

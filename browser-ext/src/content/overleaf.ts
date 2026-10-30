@@ -1106,13 +1106,27 @@ async function drawPdfBoxes(): Promise<void> {
     if (!error) {
       continue;
     }
-    for (const box of await synctex(
-      projectId,
-      build,
-      file,
-      item.line,
-      item.column,
-    )) {
+    const found = await synctex(projectId, build, file, item.line, item.column);
+    // Overleaf repeats boxes, and puts the line's box around a figure's,
+    // so only the innermost of each is kept
+    const inside = (a: SynctexBox, b: SynctexBox) =>
+      a.page === b.page &&
+      a.h >= b.h &&
+      a.h + a.width <= b.h + b.width &&
+      a.v - a.height >= b.v - b.height &&
+      a.v <= b.v;
+    const kept: SynctexBox[] = [];
+    for (const box of found) {
+      if (
+        !kept.some((k) => inside(k, box)) &&
+        !found.some(
+          (other) => other !== box && inside(other, box) && !inside(box, other),
+        )
+      ) {
+        kept.push(box);
+      }
+    }
+    for (const box of kept) {
       boxes.push({ ...box, message: error.message });
     }
   }
@@ -1128,7 +1142,8 @@ async function drawPdfBoxes(): Promise<void> {
  *
  * pdf.js clears a page it redraws, e.g., on zooming, so this runs whenever
  * the viewer changes, and leaves a page alone that already has its boxes.
- * The positions follow Overleaf's own synctex highlight.
+ * A box's ``v`` is its bottom, e.g., a figure's baseline, and its height
+ * goes up from there; for a scaled figure, it's the unscaled height.
  */
 function placePdfBoxes(): void {
   const color = "#e5484d";
@@ -1182,7 +1197,7 @@ function placePdfBoxes(): void {
       Object.assign(outline.style, {
         position: "absolute",
         left: `${box.h * scale}px`,
-        top: `${(box.v - 10) * scale}px`,
+        top: `${(box.v - box.height) * scale}px`,
         width: `${box.width * scale}px`,
         height: `${box.height * scale}px`,
         border: `2px solid ${color}`,

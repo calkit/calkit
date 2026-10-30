@@ -17,6 +17,7 @@ import type {
   GithubRepo,
   OverleafLinkPublic,
   Provenance,
+  StageFromScriptOrNotebookResponse,
   OverleafSyncStatus,
   OverleafSyncStatusFile,
   ProjectPublic,
@@ -136,6 +137,235 @@ function valueText(value: unknown): string {
 }
 
 /**
+ * Make the stage that produces what the document shows, from the script
+ * that makes it, uploaded or already in the project.
+ *
+ * The hub reads the script the way `calkit xr --dry-run` does, without
+ * running it, so the user sees the environment, inputs, and outputs before
+ * anything is committed. Overleaf can't run it, so once it's saved the
+ * card says how to, on the user's own computer.
+ */
+function renderAddScript(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+  provenance: Provenance,
+): HTMLElement {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const shows = citation.kind === "value" ? citation.path : provenance.path;
+  const file = el("input", { type: "file" });
+  const path = textInput({ placeholder: "Or its path in the project" });
+  const read = el("button", { class: "action", text: "Read the script" });
+  const message = el("div", { class: "small" });
+  const review = el("div", { class: "stack", style: { marginTop: "6px" } });
+  let request: {
+    scriptPath: string;
+    content?: string;
+  } | null = null;
+  const fail = (e: unknown) =>
+    clear(message).append(
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
+  read.addEventListener("click", async () => {
+    clear(message);
+    clear(review);
+    const upload = file.files?.[0];
+    const typed = path.value.trim();
+    if (!upload && !typed) {
+      fail("Choose the script, or give its path in the project.");
+      return;
+    }
+    read.disabled = true;
+    message.append(loading("Reading"));
+    try {
+      request = upload
+        ? {
+            // An upload goes where it's named, or with the other scripts
+            scriptPath: typed || `scripts/${upload.name}`,
+            content: await fileBase64(upload),
+          }
+        : { scriptPath: typed };
+      const detected = await send({
+        type: "project.stageFromScriptOrNotebook",
+        owner,
+        project,
+        ...request,
+        shows,
+      });
+      clear(message);
+      renderReview(detected);
+    } catch (e) {
+      fail(e);
+    } finally {
+      read.disabled = false;
+    }
+  });
+  const renderReview = (detected: StageFromScriptOrNotebookResponse) => {
+    review.append(
+      el("div", { class: "small" }, [
+        document.createTextNode("Stage "),
+        el("span", { class: "name", text: detected.stage_name }),
+        el("span", {
+          class: "dim",
+          text:
+            ` runs ${request?.scriptPath} in ${detected.environment}` +
+            (detected.environment_is_new
+              ? `, a new environment${
+                  detected.dependencies.length
+                    ? ` with ${detected.dependencies.join(", ")}`
+                    : ""
+                }`
+              : ""),
+        }),
+      ]),
+    );
+    if (detected.inputs.length) {
+      review.append(
+        el("div", { class: "small" }, [
+          el("span", { class: "dim", text: "Reads " }),
+          document.createTextNode(detected.inputs.join(", ")),
+        ]),
+      );
+    }
+    if (detected.missing_inputs.length) {
+      review.append(
+        el("div", {
+          class: "small",
+          style: { color: "var(--ck-warning)" },
+          text:
+            `Not in the project yet: ${detected.missing_inputs.join(", ")}. ` +
+            "Add it, or record where it came from, before running.",
+        }),
+      );
+    }
+    // Which output this is, when the script writes several or names it
+    // differently from the paper
+    const choices = detected.outputs.map((output) => {
+      const radio = el("input", {
+        type: "radio",
+        attrs: { name: "ck-produces", value: output },
+      });
+      radio.checked = output === detected.produces;
+      return { output, radio };
+    });
+    const copyNote = el("div", { class: "dim small" });
+    const chosen = () => choices.find((c) => c.radio.checked)?.output;
+    const updateNote = () => {
+      const output = chosen();
+      copyNote.textContent =
+        output && output !== shows
+          ? `The pipeline will copy it to ${shows}, where the paper has it.`
+          : "";
+    };
+    if (choices.length) {
+      review.append(
+        el("div", { class: "small dim", text: `Which output is ${shows}?` }),
+        ...choices.map(({ output, radio }) => {
+          radio.addEventListener("change", updateNote);
+          return el("label", { class: "small", style: { display: "block" } }, [
+            radio,
+            document.createTextNode(` ${output}`),
+          ]);
+        }),
+        copyNote,
+      );
+      updateNote();
+    } else {
+      review.append(
+        el("div", {
+          class: "small dim",
+          text: "Calkit didn't find anything the script writes.",
+        }),
+      );
+    }
+    const save = el("button", {
+      class: "action",
+      text: "Add to the pipeline",
+    });
+    save.addEventListener("click", async () => {
+      if (!request) {
+        return;
+      }
+      save.disabled = true;
+      clear(message).append(loading("Saving"));
+      try {
+        const saved = await send({
+          type: "project.stageFromScriptOrNotebook",
+          owner,
+          project,
+          ...request,
+          shows,
+          produces: chosen(),
+          save: true,
+        });
+        provenanceCache.clear();
+        const fresh = await citationProvenance(link, citation);
+        clear(container);
+        renderProvenance(container, link, citation, fresh);
+        container.append(renderRunIt(saved));
+      } catch (e) {
+        fail(e);
+        save.disabled = false;
+      }
+    });
+    review.append(el("div", { class: "actions" }, [save]));
+  };
+  return el("div", { class: "stack", style: { marginTop: "6px" } }, [
+    el("div", { class: "small", text: "The script that makes it:" }),
+    file,
+    path,
+    el("div", { class: "actions" }, [read]),
+    message,
+    review,
+  ]);
+}
+
+/** How to run a stage that's never run, since Overleaf can't. */
+function renderRunIt(saved: StageFromScriptOrNotebookResponse): HTMLElement {
+  const folder = saved.git_repo_url
+    .replace(/\.git$/, "")
+    .split("/")
+    .pop();
+  const commands = [
+    "curl -LsSf install.calkit.org | sh",
+    `calkit clone ${saved.git_repo_url}`,
+    `cd ${folder}`,
+    "calkit run --save --overleaf",
+  ].join("\n");
+  const copy = el("button", { class: "action secondary", text: "Copy" });
+  copy.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(commands);
+    copy.textContent = "Copied";
+  });
+  return el("div", { class: "muted-box", style: { marginTop: "6px" } }, [
+    el("div", {
+      class: "small",
+      text:
+        `Added stage ${saved.stage_name}. It hasn't run yet. To run it ` +
+        "and bring the result into this paper, on your computer:",
+    }),
+    el("pre", {
+      class: "name",
+      style: { whiteSpace: "pre-wrap", margin: "6px 0" },
+      text: commands,
+    }),
+    el("div", { class: "actions" }, [copy]),
+  ]);
+}
+
+/** A file's contents, base64-encoded, as the hub takes an upload. */
+function fileBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * What produced a figure, table, or value the document shows, and whether
  * it's current.
  *
@@ -216,6 +446,19 @@ function renderProvenance(
         text: "No pipeline stage produces this.",
       }),
     );
+    if (link.current_user_access !== "read") {
+      const add = el("button", {
+        class: "action secondary",
+        text: "Add the script that makes it",
+      });
+      const actions = el("div", { class: "actions" }, [add]);
+      add.addEventListener("click", () =>
+        actions.replaceWith(
+          renderAddScript(container, link, citation, provenance),
+        ),
+      );
+      container.append(actions);
+    }
   } else {
     const stale = provenance.stale_reason;
     container.append(

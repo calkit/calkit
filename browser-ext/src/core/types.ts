@@ -194,6 +194,27 @@ export interface Provenance {
   gaps?: ProvenanceGap[];
 }
 
+/** A stage made from a script, as `calkit xr` makes one, maybe saved. */
+export interface StageFromScriptOrNotebookResponse {
+  stage_name: string;
+  stage_yaml: string;
+  environment: string;
+  environment_is_new: boolean;
+  environment_spec_path?: string | null;
+  environment_spec_content?: string | null;
+  dependencies: string[];
+  inputs: string[];
+  outputs: string[];
+  /** Inputs that aren't in the project and that no stage produces. */
+  missing_inputs: string[];
+  /** Which output is what the document shows. */
+  produces?: string | null;
+  /** The map-paths stage copying it to where the document shows it. */
+  copy_stage?: string | null;
+  saved: boolean;
+  git_repo_url: string;
+}
+
 export interface ProvenanceGap {
   path: string;
   steps: { path: string; stage?: string | null }[];

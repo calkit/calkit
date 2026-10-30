@@ -1,5 +1,6 @@
-"""Map-paths stages: copying project paths to where something expects them.
+"""Routes for managing project pipelines.
 
+Map-paths stages copy project paths to where something expects them.
 A file or directory often needs to be somewhere other than where it lives,
 e.g., a paper wants figures from the root ``figures`` directory under its
 own, where LaTeX can find them without ``../``. A symlink would do that on
@@ -7,9 +8,17 @@ one machine, but doesn't survive Git on every platform; a map-paths stage
 is the reproducible, cross-platform stand-in, making the copy part of the
 pipeline so it's always current and any stage that reads it can depend on
 it.
+
+A stage can also be made from a script, as ``calkit xr`` makes one locally,
+e.g., for a figure a paper includes that nothing in the pipeline produces.
 """
 
+import base64
+import binascii
+import json
 import os
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +34,7 @@ from app.api.routes.projects.core import (
     _validate_ck_stage,
 )
 from app.api.routes.projects.figures import _clean_rel_path
-from app.core import ryaml
+from app.core import logger, ryaml
 from app.git import (
     get_ck_info_from_repo,
     get_repo,
@@ -297,3 +306,242 @@ def _commit_pipeline(
         repo.git.commit(["-m", message])
         push_and_expire(project, repo)
         record_project_update(project, repo, session)
+
+
+# What calkit xr makes a script stage from, by extension
+SCRIPT_EXTS = (".py", ".r", ".jl", ".m", ".ipynb", ".sh")
+MAX_SCRIPT_BYTES = 1_000_000
+
+
+class StageFromScriptOrNotebookPost(BaseModel):
+    # Where the script is in the project, or goes, when it's uploaded
+    script_path: str
+    # An uploaded script, base64-encoded
+    content: str | None = None
+    # What a document shows, e.g., a figure a paper includes, and which of
+    # the script's outputs that is, when the script writes it elsewhere
+    shows: str | None = None
+    produces: str | None = None
+    # Without it, nothing is written, so the user can see what would be
+    save: bool = False
+
+
+class StageFromScriptOrNotebookResponse(BaseModel):
+    stage_name: str
+    stage_yaml: str
+    environment: str
+    environment_is_new: bool
+    # A spec file written for a new environment, e.g., a pyproject.toml
+    # listing the packages the script imports
+    environment_spec_path: str | None = None
+    environment_spec_content: str | None = None
+    dependencies: list[str] = []
+    inputs: list[str] = []
+    outputs: list[str] = []
+    # Inputs that aren't in the project and that no stage produces
+    missing_inputs: list[str] = []
+    # Which output is what the document shows, and the copy that puts it
+    # there when that's a different path
+    produces: str | None = None
+    copy_stage: str | None = None
+    saved: bool = False
+    git_repo_url: str
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook"
+)
+def post_project_stage_from_script_or_notebook(
+    owner_name: str,
+    project_name: str,
+    req: StageFromScriptOrNotebookPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> StageFromScriptOrNotebookResponse:
+    """Make a stage from a script, uploaded or already in the project.
+
+    The script is read, not run, as ``calkit xr --dry-run`` reads it: its
+    environment from what it imports, and its inputs and outputs from the
+    paths it opens. That happens in a checkout of its own, so an uploaded
+    script isn't left in the project's clone before it's saved. With
+    ``save``, the script, its environment, and the stage are committed,
+    with a map-paths copy when the document shows the output elsewhere.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    script_path = _clean_rel_path(req.script_path, "script")
+    if not script_path.lower().endswith(SCRIPT_EXTS):
+        raise HTTPException(
+            422,
+            "Scripts can be Python, R, Julia, MATLAB, shell, or Jupyter "
+            "notebooks",
+        )
+    content = None
+    if req.content is not None:
+        try:
+            content = base64.b64decode(req.content, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(422, "Script content isn't valid base64")
+        if len(content) > MAX_SCRIPT_BYTES:
+            raise HTTPException(413, "Script is too large")
+    elif not os.path.isfile(os.path.join(wdir, script_path)):
+        raise HTTPException(404, f"'{script_path}' is not in the project")
+    # Read in a checkout of its own, discarded after
+    scan_dir = tempfile.mkdtemp(prefix="calkit-xr-")
+    os.rmdir(scan_dir)
+    repo.git.worktree("add", "--detach", scan_dir, "HEAD")
+    try:
+        if content is not None:
+            dest = os.path.join(scan_dir, script_path)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as fb:
+                fb.write(content)
+        try:
+            result = subprocess.run(
+                ["calkit", "xr", "--dry-run", "--json", script_path],
+                cwd=scan_dir,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, f"Reading '{script_path}' took too long")
+    finally:
+        repo.git.worktree("remove", "--force", scan_dir)
+    # Anything printed before the JSON is xr saying what it chose
+    start = result.stdout.find("\n{")
+    if result.returncode != 0 or not result.stdout.strip():
+        lines = [x.strip() for x in result.stderr.splitlines() if x.strip()]
+        detail = lines[-1].removeprefix("Error: ") if lines else ""
+        logger.info(f"xr --dry-run on {script_path} failed: {result.stderr}")
+        raise HTTPException(422, detail or f"Can't read '{script_path}'")
+    detected = json.loads(
+        result.stdout
+        if result.stdout.startswith("{")
+        else result.stdout[start + 1 :]
+    )
+    env = detected["environment"]
+    stage_name = detected["stage"]["name"]
+    stage = detected["stage"]["stage"]
+    outputs = [
+        o["path"] if isinstance(o, dict) else o
+        for o in stage.get("outputs") or []
+    ]
+    # Env vars, schedules, and other stages' outputs aren't paths
+    inputs = [
+        i if isinstance(i, str) else i["path"]
+        for i in stage.get("inputs") or []
+        if isinstance(i, str) or "path" in i
+    ]
+    ck_info = get_ck_info_from_repo(repo=repo)
+    tree = get_repo_tree_for_ref(repo, None)
+    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    missing = [
+        i
+        for i in inputs
+        if not os.path.exists(os.path.join(wdir, i))
+        and i not in dvc_outs
+        and calkit.pipeline.get_stage_for_output(i, ck_info) is None
+    ]
+    # The output the document shows: the same path, or the one the user
+    # picked, or else the only one with the same file name
+    shows = _clean_rel_path(req.shows, "shown") if req.shows else None
+    produces = None
+    if req.produces is not None:
+        produces = _clean_rel_path(req.produces, "output")
+        if produces not in outputs:
+            raise HTTPException(
+                422, f"'{script_path}' doesn't write '{produces}'"
+            )
+    elif shows in outputs:
+        produces = shows
+    elif shows is not None:
+        same_name = [
+            o
+            for o in outputs
+            if os.path.basename(o) == os.path.basename(shows)
+        ]
+        if len(same_name) == 1:
+            produces = same_name[0]
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    copy_stage = None
+    if shows is not None and produces is not None and produces != shows:
+        copy_stage = _default_stage_name(None, shows)
+        existing = stages.get(copy_stage)
+        if existing is not None and existing.get("kind") != "map-paths":
+            raise HTTPException(
+                409,
+                f"Stage '{copy_stage}' exists and is not a map-paths stage",
+            )
+    out = StageFromScriptOrNotebookResponse(
+        stage_name=stage_name,
+        stage_yaml=_dump_ck_stage_map(stage),
+        environment=env["name"],
+        environment_is_new=not env["exists"],
+        environment_spec_path=(
+            env["spec_path"] if env["created_from_dependencies"] else None
+        ),
+        environment_spec_content=(
+            env["spec_content"] if env["created_from_dependencies"] else None
+        ),
+        dependencies=env.get("dependencies") or [],
+        inputs=inputs,
+        outputs=outputs,
+        missing_inputs=missing,
+        produces=produces,
+        copy_stage=copy_stage,
+        git_repo_url=project.git_repo_url,
+    )
+    if not req.save:
+        return out
+    # Written as xr writes them, then committed with the pipeline
+    if content is not None:
+        dest = os.path.join(wdir, script_path)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fb:
+            fb.write(content)
+    if out.environment_spec_path and out.environment_spec_content is not None:
+        spec_path = os.path.join(
+            wdir, _clean_rel_path(out.environment_spec_path, "environment")
+        )
+        os.makedirs(os.path.dirname(spec_path) or wdir, exist_ok=True)
+        with open(spec_path, "w") as f:
+            f.write(out.environment_spec_content)
+    if out.environment_is_new:
+        ck_info.setdefault("environments", {})[env["name"]] = env["env"]
+    _validate_ck_stage(stage, stage_name)
+    stages[stage_name] = stage
+    dests = []
+    if copy_stage is not None and produces is not None and shows is not None:
+        copy = stages.get(copy_stage) or {"kind": "map-paths", "paths": []}
+        mapping = MapPathsStage.mapping_from(produces, shows, is_dir=False)
+        paths = copy.setdefault("paths", [])
+        if not any(
+            p.get("src") == produces and p.get("dest") == shows for p in paths
+        ):
+            paths.append(mapping.model_dump())
+        _validate_ck_stage(copy, copy_stage)
+        stages[copy_stage] = copy
+        dests = [p["dest"] for p in paths]
+    ck_info.setdefault("pipeline", {})["stages"] = stages
+    _commit_pipeline(
+        project,
+        session,
+        repo,
+        ck_info,
+        None,
+        dests,
+        [],
+        f"Add stage {stage_name} for {script_path}",
+    )
+    out.saved = True
+    return out

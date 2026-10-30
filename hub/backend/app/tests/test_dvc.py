@@ -99,6 +99,25 @@ def test_make_mermaid_diagram(
     # A missing param still fails
     with pytest.raises(ResolveError, match="Could not find 'lr'"):
         make_mermaid_diagram(pipeline)
+    # Stage names come from the repo, so they can't add Mermaid of their own,
+    # e.g., a click with a javascript: link
+    name = 'x"]\n\tclick node1 href "javascript:alert(1)"\n\tnode9["`<b>`'
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                name: {"cmd": "echo", "outs": ["o"]},
+                "b": {"cmd": "echo", "deps": ["o"]},
+            }
+        }
+    )
+    lines = mm.splitlines()
+    assert lines[0] == "flowchart TD"
+    assert lines[1] == '\tnode1["b"]'
+    assert lines[2].startswith('\tnode2["x#34;#93;#10;#9;click node1 href')
+    assert lines[2].endswith('#96;#60;b#62;#96;"]')
+    assert lines[3:] == ["\tnode2-->node1"]
+    for c in '"[]`<>\n':
+        assert c not in lines[2][len('\tnode2["') : -len('"]')]
 
 
 def test_output_from_pipeline():

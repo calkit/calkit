@@ -13,10 +13,10 @@ from functools import lru_cache
 from typing import Any
 
 import networkx as nx
-from dvc.commands import dag
 from dvc.exceptions import DvcException
 from dvc.fs import MemoryFileSystem
 from dvc.repo import Repo
+from dvc.repo.graph import get_pipelines
 from dvc.utils import relpath
 
 import calkit.dvc
@@ -104,8 +104,31 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
             e.args = (str(e).replace(f"{relpath('/dvc.yaml')}:", ""),)
             raise
         graph = nx.relabel_nodes(graph, lambda stage: stage.name)
-    mermaid: str = dag._show_mermaid(graph, markdown=False)
-    return mermaid
+    # As DVC's own _show_mermaid draws it, but with labels escaped, since
+    # stage names come from the repo and could otherwise add Mermaid of their
+    # own, e.g., a click with a javascript: link
+    lines = ["flowchart TD"]
+    n = 0
+    for pipeline_graph in get_pipelines(graph):
+        node_ids = {}
+        for node in sorted(str(x) for x in pipeline_graph.nodes):
+            n += 1
+            node_ids[node] = f"node{n}"
+            label = escape_mermaid_label(node)
+            lines.append(f'\tnode{n}["{label}"]')
+        edges = sorted((str(a), str(b)) for b, a in pipeline_graph.edges)
+        for a, b in edges:
+            lines.append(f"\t{node_ids[a]}-->{node_ids[b]}")
+    return "\n".join(lines)
+
+
+def escape_mermaid_label(label: str) -> str:
+    """Write everything but plain name characters as Mermaid entity codes,
+    which it shows as the characters themselves.
+    """
+    return re.sub(
+        r"[^A-Za-z0-9 _.@/:+-]", lambda m: f"#{ord(m.group())};", label
+    )
 
 
 def output_from_pipeline(

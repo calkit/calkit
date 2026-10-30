@@ -48,6 +48,8 @@ class Installer(_InstallerRequired, total=False):
     # Registry apps that must be present first, e.g., Homebrew before
     # anything installed through it
     requires: list[str]
+    # What to look for afterward, when it isn't named after the app
+    binary: str
 
 
 # ``unix`` is the fallback for both ``mac`` and ``linux`` when an entry
@@ -240,6 +242,35 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     "conda": _MINIFORGE_INSTALLER,
     "R": _R_INSTALLER,
     # Converts equations for Word exports of LaTeX documents
+    # Converts LaTeX documents to Word without Word, with its Math
+    # component, which Linux distributions package separately and without
+    # which equations come out empty
+    "libreoffice": {
+        "mac": {
+            "script": "brew install --cask libreoffice",
+            "path_add": "/Applications/LibreOffice.app/Contents/MacOS",
+            "requires": ["brew"],
+            "binary": "soffice",
+        },
+        "linux": {
+            "script": (
+                "if command -v apt-get >/dev/null; then "
+                "sudo apt-get update && "
+                "sudo apt-get install -y libreoffice-writer libreoffice-math; "
+                "elif command -v dnf >/dev/null; then "
+                "sudo dnf install -y libreoffice-writer libreoffice-math; "
+                "else echo 'Install LibreOffice Writer and Math with your "
+                "package manager' >&2; exit 1; fi"
+            ),
+            "path_add": "/usr/bin",
+            "binary": "soffice",
+        },
+        "windows": {
+            "script": _WINGET + "TheDocumentFoundation.LibreOffice",
+            "path_add": "%ProgramFiles%\\LibreOffice\\program",
+            "binary": "soffice",
+        },
+    },
     "pandoc": {
         "mac": {
             "script": "brew install pandoc",
@@ -254,6 +285,7 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
 }
 # Aliases for the binaries users actually invoke / list as deps; sharing
 # the same installer dict by reference keeps the entries in lockstep.
+INSTALLERS["soffice"] = INSTALLERS["libreoffice"]
 INSTALLERS["cargo"] = _RUSTUP_INSTALLER
 INSTALLERS["julia"] = _JULIAUP_INSTALLER
 INSTALLERS["mamba"] = _MINIFORGE_INSTALLER
@@ -437,7 +469,7 @@ def install(app: str) -> bool:
     if result.returncode != 0:
         return False
     _add_to_path(entry)
-    ok = shutil.which(app) is not None
+    ok = shutil.which(entry.get("binary", app)) is not None
     if ok:
         record_install(app, entry)
     return ok

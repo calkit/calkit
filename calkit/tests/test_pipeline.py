@@ -2013,6 +2013,13 @@ def test_get_status(tmp_dir):
     assert "get-data" in status.stale_stage_names
     assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
     assert status.stale_stages["get-data"].modified_outputs == []
+    # Without checking environments, it says what their last checks did
+    status = calkit.pipeline.get_status(
+        ck_info=ck_info, check_environments=False
+    )
+    assert status.environment_checks == {}
+    assert status.environment_states["py"]["success"]
+    assert "get-data" in status.stale_stage_names
     # Run the pipeline and check that status updates to up-to-date
     subprocess.check_call(["calkit", "run"])
     status = calkit.pipeline.get_status(ck_info=ck_info)

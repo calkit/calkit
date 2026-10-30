@@ -1,7 +1,7 @@
 """Core models that should make it into the top-level ``models`` namespace."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, get_args
 
 import sqlalchemy
@@ -100,6 +100,9 @@ class UserUpdateMe(SQLModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     github_username: str | None = Field(default=None, max_length=255)
     analytics_consent: bool | None = None
+    # The code emailed to the current address, which changing a verified
+    # one takes
+    email_code: str | None = Field(default=None, max_length=8)
 
 
 class UpdatePassword(SQLModel):
@@ -189,6 +192,11 @@ class UserExternalCredential(SQLModel, table=True):
     user: "User" = Relationship(back_populates="external_credentials")
 
 
+# Whether everyone can link machines, for workspaces, rather than only
+# superusers
+MACHINES_FOR_EVERYONE = True
+
+
 # Database model, database table inferred from class name
 class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -213,6 +221,11 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    machines: list["Machine"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
+    totp: Union["UserTOTP", None] = Relationship(cascade_delete=True)
     external_credentials: list[UserExternalCredential] = Relationship(
         back_populates="user",
         cascade_delete=True,
@@ -276,6 +289,12 @@ class User(UserBase, table=True):
             and cred.provider_account_id.lower() == self.email.lower()
         )
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def can_link_machines(self) -> bool:
+        """Whether the user can link machines, for workspaces."""
+        return self.is_superuser or MACHINES_FOR_EVERYONE
+
     @computed_field
     @property
     def created(self) -> datetime:
@@ -311,6 +330,7 @@ class UserPublic(UserBase):
     created: datetime
     github_username: str | None
     email_verified: bool
+    can_link_machines: bool
     subscription: Union["UserSubscription", None]
     analytics_consent: bool | None = None
 
@@ -331,6 +351,19 @@ class UserEmailVerification(SQLModel, table=True):
     attempts: int = Field(default=0)
     # Relationships
     user: User = Relationship(back_populates="email_verification")
+
+
+class UserDailyCount(SQLModel, table=True):
+    """How many times today a user did something limited per day, e.g.,
+    entered a wrong emailed code.
+    """
+
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", primary_key=True, ondelete="CASCADE"
+    )
+    kind: str = Field(primary_key=True, max_length=32)
+    day: date
+    count: int = 0
 
 
 class UserAdminPublic(UserPublic):
@@ -547,6 +580,11 @@ class UserTokenPublic(SQLModel):
     is_active: bool
     description: str | None = Field(default=None, max_length=256)
     last_used: datetime | None = Field(default=None)
+    # The machine it was made for, as its CLI token, which
+    # revoking the machine deactivates
+    machine_id: uuid.UUID | None = Field(
+        default=None, foreign_key="machine.id", ondelete="CASCADE"
+    )
 
 
 class UserToken(UserTokenPublic, table=True):
@@ -563,6 +601,143 @@ class UserToken(UserTokenPublic, table=True):
         if self.expires is None:
             return False
         return self.expires < utcnow()
+
+
+class UserTOTP(SQLModel, table=True):
+    """An authenticator app generating time-based one-time passwords
+    (TOTP), used as a second factor before sensitive actions, e.g.,
+    opening sessions on a machine.
+    """
+
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", primary_key=True, ondelete="CASCADE"
+    )
+    # Encrypted with the app's Fernet keys
+    secret: str = Field(max_length=512)
+    # The sign-in that started setting it up, which only it can finish
+    setup_session_id: uuid.UUID | None = Field(default=None)
+    created: datetime = Field(default_factory=utcnow)
+    # Null until the user proves the app works by entering a code from it
+    confirmed_at: datetime | None = Field(default=None)
+    last_verified_at: datetime | None = Field(default=None)
+    # So a code can't be used twice
+    last_used_step: int | None = Field(
+        default=None, sa_type=sqlalchemy.BigInteger
+    )
+    failed_attempts: int = 0
+    locked_until: datetime | None = Field(default=None)
+    # Lockouts since the last right code, each twice as long as the one
+    # before
+    lockouts: int = Field(default=0, sa_column_kwargs=dict(server_default="0"))
+    # A code emailed when setting it up, so a leaked token alone can't add an
+    # attacker's app; stored as an HMAC like email verification codes
+    email_code_hash: str | None = Field(default=None, max_length=64)
+    email_code_expires: datetime | None = Field(default=None)
+    email_code_attempts: int = 0
+
+
+class MachinePublic(SQLModel):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", index=True, ondelete="CASCADE"
+    )
+    name: str = Field(min_length=1, max_length=64)
+    hostname: str | None = Field(default=None, max_length=255)
+    system_machine_id: str | None = Field(default=None, max_length=255)
+    platform: str | None = Field(default=None, max_length=64)
+    calkit_version: str | None = Field(default=None, max_length=64)
+    # Hosts this machine serves, so stages whose environment names one can
+    # run through it
+    hosts: list[str] = Field(
+        default_factory=list,
+        sa_column=sqlalchemy.Column(
+            sqlalchemy.JSON, nullable=False, server_default="[]"
+        ),
+    )
+    created: datetime = Field(default_factory=utcnow)
+    last_seen: datetime | None = Field(default=None)
+    # How it runs: "service", "foreground", or "cron", which only connects
+    # when asked
+    mode: str | None = Field(default=None, max_length=16)
+    # Whether it was connected to the relay at its latest check-in, which a
+    # machine in cron mode that's only asking whether to connect isn't
+    connected: bool = False
+    # When the owner last asked it to connect, for machines in cron mode
+    connect_requested_at: datetime | None = Field(default=None)
+    # Whether it will restart once idle, e.g., after Calkit was upgraded
+    restart_pending: bool = False
+    # Whether its owner asked it to restart and it hasn't heard yet
+    restart_requested: bool = False
+    is_active: bool = True
+
+
+class Machine(MachinePublic, table=True):
+    # Names are unique among the user's active machines, so a revoked
+    # one's name can be used again
+    __table_args__ = (
+        sqlalchemy.Index(
+            "uq_machine_user_name_active",
+            "user_id",
+            "name",
+            unique=True,
+            postgresql_where=sqlalchemy.text("is_active"),
+        ),
+    )
+    selector: str = Field(index=True, unique=True, max_length=32)
+    hashed_verifier: str = Field(max_length=64)
+    # Its own P-256 public key as a JWK, which browsers check its replies
+    # with; set once, from registration or its first check-in
+    public_key: dict[str, str] | None = Field(
+        default=None, sa_column=sqlalchemy.Column(sqlalchemy.JSON)
+    )
+    # When its owner asked for a CLI token to be issued to it
+    cli_token_requested_at: datetime | None = Field(default=None)
+    # Relationships
+    user: User = Relationship(back_populates="machines")
+    workspaces: list["MachineWorkspace"] = Relationship(
+        back_populates="machine", cascade_delete=True
+    )
+
+
+class MachineWorkspace(SQLModel, table=True):
+    """A project checkout on a machine, as of its latest check-in."""
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "machine_id", "path", name="uq_machineworkspace_machine_path"
+        ),
+        sqlalchemy.Index(
+            "ix_machineworkspace_project", "owner_name", "project_name"
+        ),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    machine_id: uuid.UUID = Field(
+        foreign_key="machine.id", index=True, ondelete="CASCADE"
+    )
+    path: str = Field(max_length=4096)
+    # "personal" checkouts, or "managed" ones Calkit uses to run stages
+    kind: str = Field(max_length=16)
+    # The project, lowercased for matching, if the machine could tell
+    owner_name: str | None = Field(default=None, max_length=255)
+    project_name: str | None = Field(default=None, max_length=255)
+    branch: str | None = Field(default=None, max_length=256)
+    commit: str | None = Field(default=None, max_length=64)
+    dirty: bool | None = None
+    ahead: int | None = None
+    behind: int | None = None
+    # Whether a pipeline run held DVC's lock at the check-in
+    running: bool = False
+    # Which stages were running and since when, and how the latest run
+    # ended, as the machine reported them
+    run_state: dict = Field(
+        default_factory=dict,
+        sa_column=sqlalchemy.Column(
+            sqlalchemy.JSON, nullable=False, server_default="{}"
+        ),
+    )
+    updated: datetime = Field(default_factory=utcnow)
+    # Relationships
+    machine: Machine = Relationship(back_populates="workspaces")
 
 
 class DeviceAuth(SQLModel, table=True):
@@ -608,6 +783,17 @@ class RefreshToken(SQLModel, table=True):
     expires: datetime
     is_active: bool = True
     description: str | None = Field(default=None, max_length=256)
+    # Shared by every token rotated from the same sign-in, so it names that
+    # sign-in for as long as it lasts
+    session_id: uuid.UUID | None = Field(default=None, index=True)
+    # Whether a person signed in through the web app, rather than a script
+    # or the CLI, which some actions, e.g., opening a shell, require
+    interactive: bool = Field(
+        default=False, sa_column_kwargs=dict(server_default=sqlalchemy.false())
+    )
+    # When it was exchanged for a new one, after which it only works for a
+    # short grace period, and using it later ends its session
+    rotated_at: datetime | None = Field(default=None)
     # Relationships
     user: "User" = Relationship(back_populates="refresh_tokens")
 

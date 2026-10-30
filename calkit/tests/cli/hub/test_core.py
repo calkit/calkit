@@ -6,8 +6,15 @@ import pytest
 import typer
 from requests.exceptions import HTTPError
 
-import calkit.cli.hub as hub_cli
+import calkit.cli.hub.core as hub_cli
 import calkit.config
+
+
+def patch_hub(monkeypatch, **fakes) -> None:
+    # The CLI calls the package's names, and the device flow core's own
+    for module in (calkit.hub, calkit.hub.core):
+        for name, fake in fakes.items():
+            monkeypatch.setattr(module, name, fake)
 
 
 def test_use_hub(monkeypatch, tmp_dir):
@@ -43,7 +50,7 @@ def test_cloud_login_already_logged_in(monkeypatch, capsys):
         assert path == "/user"
         return {"email": "user@example.com"}
 
-    monkeypatch.setattr(hub_cli.calkit.hub, "get", _get)
+    patch_hub(monkeypatch, get=_get)
     hub_cli.login()
     out = capsys.readouterr().out
     assert "Authenticated successfully" in out
@@ -90,14 +97,13 @@ def test_cloud_login_device_flow_success(monkeypatch, capsys):
             }
         raise AssertionError(f"Unexpected path: {path}")
 
-    monkeypatch.setattr(hub_cli.calkit.hub, "get", _get)
-    monkeypatch.setattr(hub_cli.calkit.hub, "post", _post)
+    patch_hub(monkeypatch, get=_get, post=_post)
     monkeypatch.setattr(hub_cli.calkit.config, "read", lambda: cfg)
     monkeypatch.setattr(
-        hub_cli.calkit.hub.webbrowser, "open", lambda _url: True
+        hub_cli.calkit.hub.core.webbrowser, "open", lambda _url: True
     )
     monkeypatch.setattr(
-        hub_cli.calkit.hub.time, "sleep", lambda _seconds: None
+        hub_cli.calkit.hub.core.time, "sleep", lambda _seconds: None
     )
     hub_cli.login()
     out = capsys.readouterr().out
@@ -146,13 +152,12 @@ def test_cloud_login_force_re_authenticates(monkeypatch, capsys):
             }
         raise AssertionError(f"Unexpected path: {path}")
 
-    monkeypatch.setattr(hub_cli.calkit.hub, "get", _get)
-    monkeypatch.setattr(hub_cli.calkit.hub, "post", _post)
+    patch_hub(monkeypatch, get=_get, post=_post)
     monkeypatch.setattr(hub_cli.calkit.config, "read", lambda: cfg)
     monkeypatch.setattr(
-        hub_cli.calkit.hub.webbrowser, "open", lambda _url: True
+        hub_cli.calkit.hub.core.webbrowser, "open", lambda _url: True
     )
-    monkeypatch.setattr(hub_cli.calkit.hub.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(hub_cli.calkit.hub.core.time, "sleep", lambda _s: None)
     hub_cli.login(force=True)
     out = capsys.readouterr().out
     assert "Logged in successfully" in out
@@ -175,12 +180,11 @@ def test_cloud_login_device_code_expired(monkeypatch):
             }
         raise Exception("401: Device code has expired")
 
-    monkeypatch.setattr(hub_cli.calkit.hub, "get", _get)
-    monkeypatch.setattr(hub_cli.calkit.hub, "post", _post)
+    patch_hub(monkeypatch, get=_get, post=_post)
     monkeypatch.setattr(
-        hub_cli.calkit.hub.webbrowser, "open", lambda _url: True
+        hub_cli.calkit.hub.core.webbrowser, "open", lambda _url: True
     )
-    monkeypatch.setattr(hub_cli.calkit.hub.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(hub_cli.calkit.hub.core.time, "sleep", lambda _s: None)
     with pytest.raises(typer.Exit):
         hub_cli.login()
 
@@ -201,11 +205,10 @@ def test_cloud_login_device_code_not_found(monkeypatch):
             }
         raise Exception("404: Device code not found")
 
-    monkeypatch.setattr(hub_cli.calkit.hub, "get", _get)
-    monkeypatch.setattr(hub_cli.calkit.hub, "post", _post)
+    patch_hub(monkeypatch, get=_get, post=_post)
     monkeypatch.setattr(
-        hub_cli.calkit.hub.webbrowser, "open", lambda _url: True
+        hub_cli.calkit.hub.core.webbrowser, "open", lambda _url: True
     )
-    monkeypatch.setattr(hub_cli.calkit.hub.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(hub_cli.calkit.hub.core.time, "sleep", lambda _s: None)
     with pytest.raises(typer.Exit):
         hub_cli.login()

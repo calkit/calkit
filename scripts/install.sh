@@ -1,5 +1,21 @@
 #!/usr/bin/env sh
 # Install Calkit with uv (installing the latter if it isn't yet)
+#
+# Options, passed with `curl -LsSf install.calkit.org | sh -s -- <options>`:
+#   --link                 Also link this machine to the hub, which connects
+#                          its workspaces to the hub
+#                          (or set CALKIT_INSTALL_LINK=1)
+#   --no-shell-completion  Skip installing shell completion
+
+LINK="${CALKIT_INSTALL_LINK:-0}"
+COMPLETION=1
+for arg in "$@"; do
+    case "$arg" in
+        --link) LINK=1 ;;
+        --no-shell-completion) COMPLETION=0 ;;
+        *) echo "⚠️ Ignoring unknown option '$arg'" ;;
+    esac
+done
 
 # Check if uv is installed
 if ! command -v uv >/dev/null 2>&1; then
@@ -22,14 +38,34 @@ if ! uv tool install --upgrade calkit-python --python=3.14; then
     exit 1
 fi
 
+# Where uv put the executables, which may not be on this shell's PATH yet
+BIN="$(uv tool dir --bin)"
+
 # Completion is installed per command name, so the `ck` alias gets it too
-echo "Installing shell completion"
-for cmd in calkit ck; do
-    if ! $cmd --install-completion; then
-        echo "⚠️ Failed to install shell completion for '$cmd'; run '$cmd --install-completion' manually"
+if [ "$COMPLETION" = 1 ]; then
+    echo "Installing shell completion"
+    for cmd in calkit ck; do
+        if ! "$BIN/$cmd" --install-completion; then
+            echo "⚠️ Failed to install shell completion for '$cmd'; run '$cmd --install-completion' manually"
+        else
+            echo "✅ Shell completion installed for '$cmd'"
+        fi
+    done
+fi
+
+if [ "$LINK" = 1 ]; then
+    echo "Linking this machine to the hub"
+    # When piped into sh, this script is sh's input, so logging in to the hub
+    # needs the terminal's
+    if (exec </dev/tty) 2>/dev/null; then
+        "$BIN/calkit" hub link install </dev/tty
     else
-        echo "✅ Shell completion installed for '$cmd'"
+        "$BIN/calkit" hub link install
     fi
-done
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to link this machine; run 'calkit hub link install' to try again"
+        exit 1
+    fi
+fi
 
 echo "✅ Success! 🚀"

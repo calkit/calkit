@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     # the default email sender name and in the default frontend title.
     PROJECT_NAME: str
     SECRET_KEY: str = secrets.token_urlsafe(32)
+    # Signs relay tokens, apart from SECRET_KEY, since the relay holds it
+    RELAY_SECRET_KEY: str = secrets.token_urlsafe(32)
     FERNET_KEY: str  # Can be generated with Fernet.generate_key()
     # Optional comma-separated list of keys for decryption fallback.
     # First key is treated as the active key for encryption.
@@ -107,6 +109,18 @@ class Settings(BaseSettings):
             return self.FRONTEND_HOST
         # Otherwise, use the same as server_host
         return self.server_host
+
+    # Where machines and browsers open relay websockets
+    RELAY_URL: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def relay_url(self) -> str:
+        if self.RELAY_URL:
+            return self.RELAY_URL.rstrip("/")
+        if self.ENVIRONMENT == "local":
+            return "ws://localhost:8002"
+        return f"wss://relay.{self.DOMAIN}"
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -364,6 +378,15 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _enforce_non_default_secrets(self) -> Self:
         self._check_default_secret("SECRET_KEY", self.SECRET_KEY)
+        self._check_default_secret("RELAY_SECRET_KEY", self.RELAY_SECRET_KEY)
+        # The relay is exposed to the internet, so its key has to be too
+        # long to guess
+        if len(self.RELAY_SECRET_KEY) < 32:
+            message = "RELAY_SECRET_KEY must be at least 32 characters"
+            if self.ENVIRONMENT == "local":
+                warnings.warn(message, stacklevel=1)
+            else:
+                raise ValueError(message)
         self._check_default_secret("POSTGRES_PASSWORD", self.POSTGRES_PASSWORD)
         self._check_default_secret(
             "FIRST_SUPERUSER_PASSWORD", self.FIRST_SUPERUSER_PASSWORD

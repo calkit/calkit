@@ -19,7 +19,6 @@
 | [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
 | [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                 |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
-| [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
@@ -30,7 +29,7 @@
 | [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
 | [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
 | [`merge`](#top-command-merge)                    | Merge a branch, resolving dvc.lock and stage run records per stage.                                          |
-| [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                           |
+| [`stash`](#top-command-stash)                    | Stash workspace changes, including DVC-tracked data, or bring them back.                                     |
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
 | [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                      |
@@ -323,18 +322,6 @@ Options:
 | ------------- | ------- | -------- | ------- | ------------------------------------ |
 | `--no-commit` | boolean | no       | False   | Do not commit changes to .gitignore. |
 
-<a id="top-command-local-server"></a>
-
-### `calkit local-server`
-
-Run the local server to interact over HTTP.
-
-Usage:
-
-```text
-calkit local-server
-```
-
 <a id="top-command-run"></a>
 
 ### `calkit run`
@@ -606,23 +593,28 @@ Options:
 
 ### `calkit stash`
 
-Stash or restore workspace changes including dvc-zip tracked dirs.
+Stash workspace changes, including DVC-tracked data, or bring them back.
 
-Without --pop: zips any modified workspace dirs and commits any other modified DVC-tracked paths into the DVC cache, then git-stashes (saving the updated .dvc files and dvc.lock), checks out the committed DVC state, and unzips it to the workspace.
-
-With --pop: pops the git stash (restoring the saved .dvc files), checks out the stashed DVC state, and unzips it to the workspace.
+Stashing commits changed DVC-tracked data to the DVC cache, including zipped folders, so the Git stash holds pointers to it, then checks out the committed data. Popping restores the stash and checks out the data it points to.
 
 Usage:
 
 ```text
-calkit stash [OPTIONS]
+calkit stash [OPTIONS] [ACTION]
 ```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                  |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `action` | str  | no       | push    | 'push' to stash changes, which is the default, or 'pop' to bring back the most recent stash. |
 
 Options:
 
-| Option  | Type    | Required | Default | Description                |
-| ------- | ------- | -------- | ------- | -------------------------- |
-| `--pop` | boolean | no       | False   | Pop the most recent stash. |
+| Option            | Type    | Required | Default | Description                          |
+| ----------------- | ------- | -------- | ------- | ------------------------------------ |
+| `--message`, `-m` | str     | no       |         | A message to stash the changes with. |
+| `--pop`           | boolean | no       | False   | Same as 'calkit stash pop'.          |
 
 <a id="top-command-dvc"></a>
 
@@ -889,6 +881,7 @@ Create a new Calkit object.
 | [`latex-stage`](#subcommand-new-create-latex-stage)                       | Add a stage to the pipeline that compiles a LaTeX document.                                       |
 | [`jupyter-notebook-stage`](#subcommand-new-create-jupyter-notebook-stage) | Add a stage to the pipeline that runs a Jupyter notebook.                                         |
 | [`release`](#subcommand-new-create-release)                               | Create a new release.                                                                             |
+| [`workspace`](#subcommand-new-create-workspace)                           | Create another workspace for this project, e.g., to work on a change without disturbing this one. |
 
 <a id="subcommand-new-create-project"></a>
 
@@ -1748,6 +1741,33 @@ Options:
 | `--draft`                 | boolean | no       | False   | Create draft record with reserved DOI but do not publish.                                                                                                                                             |
 | `--license`               | str     | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                              |
 | `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                 |
+
+<a id="subcommand-new-create-workspace"></a>
+
+#### `calkit new|create workspace`
+
+Create another workspace for this project, e.g., to work on a change without disturbing this one.
+
+It's a Git worktree that shares the main checkout's DVC cache, so its data is checked out without being pulled again.
+
+Usage:
+
+```text
+calkit new|create workspace [OPTIONS] BRANCH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                    |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------ |
+| `branch` | str  | yes      |         | The branch to work on there, created from the current commit unless it exists. |
+
+Options:
+
+| Option   | Type | Required | Default | Description                                                                  |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--path` | str  | no       |         | Where to put it; defaults to beside this one, named after it and the branch. |
+| `--from` | str  | no       |         | What to start a new branch from, e.g., another branch.                       |
 
 <a id="command-group-delete-rm"></a>
 
@@ -4369,11 +4389,12 @@ Options:
 
 Interact with a Calkit hub.
 
-| Command                                  | Description                             |
-| ---------------------------------------- | --------------------------------------- |
-| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.        |
-| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                 |
-| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens). |
+| Command                                  | Description                                               |
+| ---------------------------------------- | --------------------------------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.                          |
+| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                                   |
+| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens).                   |
+| [`link`](#subcommand-hub-cloud-link)     | Manage this machine's hub link, to work on it from a hub. |
 
 <a id="subcommand-hub-cloud-get"></a>
 
@@ -4431,6 +4452,277 @@ Usage:
 ```text
 calkit hub|cloud config COMMAND [ARGS]...
 ```
+
+| Command                                       | Description                                             |
+| --------------------------------------------- | ------------------------------------------------------- |
+| [`list`](#subcommand-hub-cloud-config-list)   | List per-hub credential keys.                           |
+| [`set`](#subcommand-hub-cloud-config-set)     | Set a credential for the active or given hub.           |
+| [`get`](#subcommand-hub-cloud-config-get)     | Get and print a credential for the active or given hub. |
+| [`unset`](#subcommand-hub-cloud-config-unset) | Unset a credential for the active or given hub.         |
+
+<a id="subcommand-hub-cloud-config-list"></a>
+
+##### `calkit hub|cloud config list`
+
+List per-hub credential keys.
+
+Usage:
+
+```text
+calkit hub|cloud config list
+```
+
+<a id="subcommand-hub-cloud-config-set"></a>
+
+##### `calkit hub|cloud config set`
+
+Set a credential for the active or given hub.
+
+Usage:
+
+```text
+calkit hub|cloud config set [OPTIONS] KEY VALUE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | str  | yes      |         |             |
+| `value`  | str  | yes      |         |             |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                  |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub, e.g., https://staging.calkit.io. Defaults to the active hub. |
+
+<a id="subcommand-hub-cloud-config-get"></a>
+
+##### `calkit hub|cloud config get`
+
+Get and print a credential for the active or given hub.
+
+Usage:
+
+```text
+calkit hub|cloud config get [OPTIONS] KEY
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | str  | yes      |         |             |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                  |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub, e.g., https://staging.calkit.io. Defaults to the active hub. |
+
+<a id="subcommand-hub-cloud-config-unset"></a>
+
+##### `calkit hub|cloud config unset`
+
+Unset a credential for the active or given hub.
+
+Usage:
+
+```text
+calkit hub|cloud config unset [OPTIONS] KEY
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | str  | yes      |         |             |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                  |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub, e.g., https://staging.calkit.io. Defaults to the active hub. |
+
+<a id="subcommand-hub-cloud-link"></a>
+
+#### `calkit hub|cloud link`
+
+Manage this machine's hub link, to work on it from a hub.
+
+Usage:
+
+```text
+calkit hub|cloud link COMMAND [ARGS]...
+```
+
+| Command                                                     | Description                                                                                     |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [`install`](#subcommand-hub-cloud-link-install)             | Link this machine to a hub and run the hub link as a service.                                   |
+| [`start`](#subcommand-hub-cloud-link-start)                 | Run the hub link in the foreground, e.g., inside tmux.                                          |
+| [`status`](#subcommand-hub-cloud-link-status)               | Show this machine's hub links and their workspaces.                                             |
+| [`stop`](#subcommand-hub-cloud-link-stop)                   | Stop the hub link's service until it's restarted, for every hub unless one is given.            |
+| [`restart`](#subcommand-hub-cloud-link-restart)             | Restart the hub link's service, e.g., after updating Calkit, for every hub unless one is given. |
+| [`logs`](#subcommand-hub-cloud-link-logs)                   | Show the hub link service's logs.                                                               |
+| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace) | Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or one on another hub.      |
+| [`uninstall`](#subcommand-hub-cloud-link-uninstall)         | Revoke this machine on the hub and remove its hub link.                                         |
+
+<a id="subcommand-hub-cloud-link-install"></a>
+
+##### `calkit hub|cloud link install`
+
+Link this machine to a hub and run the hub link as a service.
+
+Usage:
+
+```text
+calkit hub|cloud link install [OPTIONS]
+```
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                                                                                                                                      |
+| -------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub`        | str     | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+| `--login`      | boolean | no       | False   | Start at login, not at boot (boot requires sudo on macOS and Linux).                                                                                             |
+| `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                                       |
+| `--ssh`        | str     | no       |         | Link another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed.                                 |
+| `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit hub link start' inside tmux on a cluster.                                                                         |
+
+<a id="subcommand-hub-cloud-link-start"></a>
+
+##### `calkit hub|cloud link start`
+
+Run the hub link in the foreground, e.g., inside tmux.
+
+Usage:
+
+```text
+calkit hub|cloud link start [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                                                                      |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | Log in more detail.                                                                                                                                              |
+| `--hub`           | str     | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-status"></a>
+
+##### `calkit hub|cloud link status`
+
+Show this machine's hub links and their workspaces.
+
+Usage:
+
+```text
+calkit hub|cloud link status [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-stop"></a>
+
+##### `calkit hub|cloud link stop`
+
+Stop the hub link's service until it's restarted, for every hub unless one is given.
+
+Usage:
+
+```text
+calkit hub|cloud link stop [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-restart"></a>
+
+##### `calkit hub|cloud link restart`
+
+Restart the hub link's service, e.g., after updating Calkit, for every hub unless one is given.
+
+Usage:
+
+```text
+calkit hub|cloud link restart [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-logs"></a>
+
+##### `calkit hub|cloud link logs`
+
+Show the hub link service's logs.
+
+Usage:
+
+```text
+calkit hub|cloud link logs [OPTIONS]
+```
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                                                      |
+| ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--follow`, `-f` | boolean | no       | False   | Keep printing new lines.                                                                                                                                         |
+| `--hub`          | str     | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-add-workspace"></a>
+
+##### `calkit hub|cloud link add-workspace`
+
+Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or one on another hub.
+
+Usage:
+
+```text
+calkit hub|cloud link add-workspace [OPTIONS] [PATH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description               |
+| -------- | ---- | -------- | ------- | ------------------------- |
+| `path`   | str  | no       | .       | Path to a Calkit project. |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-uninstall"></a>
+
+##### `calkit hub|cloud link uninstall`
+
+Revoke this machine on the hub and remove its hub link.
+
+Usage:
+
+```text
+calkit hub|cloud link uninstall [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
 
 <a id="command-group-scheduler-sch"></a>
 

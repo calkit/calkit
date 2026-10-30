@@ -59,7 +59,7 @@ import {
   type Notebook,
   ProjectsService,
   type Publication,
-  type StageFromScript,
+  type StageFromScriptOrNotebookResponse,
 } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
@@ -619,7 +619,8 @@ function StageFromScriptForm({
   const showToast = useCustomToast()
   const [scriptPath, setScriptPath] = useState("")
   const [file, setFile] = useState<File | null>(null)
-  const [detected, setDetected] = useState<StageFromScript | null>(null)
+  const [detected, setDetected] =
+    useState<StageFromScriptOrNotebookResponse | null>(null)
   const [produces, setProduces] = useState<string | undefined>()
   const exts =
     kind === "notebook" ? [".ipynb"] : [".py", ".r", ".jl", ".m", ".sh"]
@@ -633,10 +634,10 @@ function StageFromScriptForm({
           reader.readAsDataURL(file)
         })
       : null
-    return ProjectsService.postProjectStageFromScript({
+    return ProjectsService.postProjectStageFromScriptOrNotebook({
       owner_name: ownerName,
       project_name: projectName,
-      stageFromScriptPost: {
+      stageFromScriptOrNotebookPost: {
         // An upload goes where it's named, or with others of its kind
         script_path: scriptPath || (file ? `${kind}s/${file.name}` : ""),
         content,

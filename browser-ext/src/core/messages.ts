@@ -19,7 +19,7 @@ import type {
   ReferenceSearchMatch,
   References,
   Result,
-  StageFromScript,
+  StageFromScriptOrNotebookResponse,
   Table,
 } from "./types";
 
@@ -119,7 +119,7 @@ export type Request =
       key?: string;
     }
   | {
-      type: "project.stageFromScript";
+      type: "project.stageFromScriptOrNotebook";
       owner: string;
       project: string;
       scriptPath: string;
@@ -223,7 +223,7 @@ export interface ResponseMap {
   "project.tables": Table[];
   "project.results": Result[];
   "project.provenance": Provenance;
-  "project.stageFromScript": StageFromScript;
+  "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
   "project.recordOrigin": { path: string };
   "content.imageDataUrl": string;
   "content.dataUrl": string;

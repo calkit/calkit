@@ -390,8 +390,8 @@ import type {
   PostProjectReleaseErrors,
   PostProjectReleaseResponses,
   PostProjectResponses,
-  PostProjectStageFromScriptErrors,
-  PostProjectStageFromScriptResponses,
+  PostProjectStageFromScriptOrNotebookErrors,
+  PostProjectStageFromScriptOrNotebookResponses,
   PostProjectStatusErrors,
   PostProjectStatusResponses,
   PostProjectSyncErrors,
@@ -489,7 +489,7 @@ import type {
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
-  StageFromScriptPost,
+  StageFromScriptOrNotebookPost,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -7659,7 +7659,7 @@ export class ProjectsService {
   }
 
   /**
-   * Post Project Stage From Script
+   * Post Project Stage From Script Or Notebook
    *
    * Make a stage from a script, uploaded or already in the project.
    *
@@ -7671,16 +7671,18 @@ export class ProjectsService {
    * with each document that shows the output elsewhere changed to show it
    * with ``\ckfigure`` from where it's made.
    */
-  public static postProjectStageFromScript<ThrowOnError extends boolean = true>(
+  public static postProjectStageFromScriptOrNotebook<
+    ThrowOnError extends boolean = true,
+  >(
     parameters: {
       owner_name: string
       project_name: string
-      stageFromScriptPost: StageFromScriptPost
+      stageFromScriptOrNotebookPost: StageFromScriptOrNotebookPost
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostProjectStageFromScriptResponses,
-    PostProjectStageFromScriptErrors,
+    PostProjectStageFromScriptOrNotebookResponses,
+    PostProjectStageFromScriptOrNotebookErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
@@ -7690,19 +7692,19 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
-            { key: "stageFromScriptPost", map: "body" },
+            { key: "stageFromScriptOrNotebookPost", map: "body" },
           ],
         },
       ],
     )
     return (options?.client ?? client).post<
-      PostProjectStageFromScriptResponses,
-      PostProjectStageFromScriptErrors,
+      PostProjectStageFromScriptOrNotebookResponses,
+      PostProjectStageFromScriptOrNotebookErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script",
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook",
       ...options,
       ...params,
       headers: {

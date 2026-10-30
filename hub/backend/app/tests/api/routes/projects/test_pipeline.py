@@ -278,7 +278,7 @@ def test_map_paths_on_dvc_only_pipeline_and_removal(
     assert resp.status_code == 404
 
 
-def test_post_project_stage_from_script(
+def test_post_project_stage_from_script_or_notebook(
     client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
 ) -> None:
     import base64
@@ -334,7 +334,7 @@ def test_post_project_stage_from_script(
             ),
         ):
             return client.post(
-                "/projects/o/p/pipeline/stages/from-script",
+                "/projects/o/p/pipeline/stages/from-script-or-notebook",
                 json=body,
                 headers=normal_user_token_headers,
             )
@@ -386,12 +386,19 @@ def test_post_project_stage_from_script(
     assert "plot" in yaml.safe_load((wdir / "dvc.yaml").read_text())["stages"]
     assert not repo.is_dirty(untracked_files=True)
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
-    # A stage that already runs the script keeps what it declares
-    ck["pipeline"]["stages"]["plot"]["outputs"].append("figures/extra.png")
+    # A stage that already runs the script keeps what it declares, including
+    # inputs that are objects carrying paths
+    stage["outputs"].append("figures/extra.png")
+    stage["inputs"] = [
+        {"path": "data/raw.csv"},
+        {"path": "data/extra.csv"},
+    ]
     (wdir / "calkit.yaml").write_text(yaml.safe_dump(ck))
     repo.git.add("calkit.yaml")
-    repo.git.commit("-m", "Declare another output")
+    repo.git.commit("-m", "Declare another output and inputs")
     resp = post(script_path="scripts/plot.py", shows="figures/fit.png")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["inputs"] == ["data/raw.csv", "data/extra.csv"]
     assert resp.status_code == 200, resp.text
     assert resp.json()["stage_name"] == "plot"
     assert {"figures/fit.png", "figures/extra.png"} <= set(

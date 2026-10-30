@@ -283,11 +283,22 @@ def test_post_project_stage_from_script(
 ) -> None:
     import base64
 
+    paper = (
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "\\includegraphics[width=\\linewidth]{figures/fit}\n"
+        "\\end{document}\n"
+    )
     repo, origin = _make_repo(
         tmp_path,
-        {"name": "p"},
+        {
+            "name": "p",
+            "overleaf_sync": {
+                "paper": {"url": "https://www.overleaf.com/project/abc"}
+            },
+        },
         files={
-            "paper/paper.tex": "\\documentclass{article}\n",
+            "paper/paper.tex": paper,
             "paper/figures/fit.png": "png",
             "paper/figures/drawn.png": "png",
             "scripts/old.py": "print(1)\n",
@@ -334,7 +345,7 @@ def test_post_project_stage_from_script(
         shows="paper/figures/fit.png",
     )
     # Read, not saved: what it imports, opens, and writes, and that the
-    # paper shows its figure from a copy, with nothing left in the clone
+    # paper will show its figure from there, with nothing left in the clone
     resp = post(**upload)
     assert resp.status_code == 200, resp.text
     data = resp.json()
@@ -347,13 +358,14 @@ def test_post_project_stage_from_script(
     # Nothing has the data the script reads
     assert data["missing_inputs"] == ["data/raw.csv"]
     assert data["produces"] == "figures/fit.png"
-    assert data["copy_stage"] == "map-paths-paper"
+    assert data["cited_in"] == ["paper/paper.tex"]
     assert data["git_repo_url"] == "https://github.com/o/p"
     wdir = tmp_path / "repo"
     assert not (wdir / "scripts" / "plot.py").exists()
     assert not repo.is_dirty(untracked_files=True)
     assert repo.git.worktree("list").count("\n") == 0
-    # Saved: the script, its environment, the stage, and the copy, pushed
+    # Saved: the script, its environment, the stage, and the paper citing
+    # the figure where it's made, pushed
     resp = post(**upload, save=True)
     assert resp.status_code == 200, resp.text
     assert resp.json()["saved"]
@@ -361,13 +373,14 @@ def test_post_project_stage_from_script(
     stage = ck["pipeline"]["stages"]["plot"]
     assert stage["script_path"] == "scripts/plot.py"
     assert stage["environment"] in ck["environments"]
-    assert ck["pipeline"]["stages"]["map-paths-paper"]["paths"] == [
-        {
-            "kind": "file-to-file",
-            "src": "figures/fit.png",
-            "dest": "paper/figures/fit.png",
-        }
-    ]
+    assert set(ck["pipeline"]["stages"]) == {"plot"}
+    assert (wdir / "paper" / "paper.tex").read_text() == (
+        "\\documentclass{article}\n"
+        "\\usepackage{calkit}\n"
+        "\\begin{document}\n"
+        "\\ckfigure[width=\\linewidth]{figures/fit.png}\n"
+        "\\end{document}\n"
+    )
     assert (wdir / "scripts" / "plot.py").read_text() == script
     assert (wdir / data["environment_spec_path"]).is_file()
     assert "plot" in yaml.safe_load((wdir / "dvc.yaml").read_text())["stages"]
@@ -378,7 +391,7 @@ def test_post_project_stage_from_script(
     (wdir / "calkit.yaml").write_text(yaml.safe_dump(ck))
     repo.git.add("calkit.yaml")
     repo.git.commit("-m", "Declare another output")
-    resp = post(script_path="scripts/plot.py", shows="paper/figures/fit.png")
+    resp = post(script_path="scripts/plot.py", shows="figures/fit.png")
     assert resp.status_code == 200, resp.text
     assert resp.json()["stage_name"] == "plot"
     assert {"figures/fit.png", "figures/extra.png"} <= set(
@@ -394,7 +407,7 @@ def test_post_project_stage_from_script(
     assert resp.status_code == 200, resp.text
     assert resp.json()["produces"] == "paper/figures/drawn.png"
     assert "paper/figures/drawn.png" in resp.json()["outputs"]
-    assert resp.json()["copy_stage"] is None
+    assert resp.json()["cited_in"] == []
     resp = post(
         script_path="scripts/old.py",
         shows="paper/figures/drawn.png",
@@ -407,6 +420,13 @@ def test_post_project_stage_from_script(
     ]["stages"][resp.json()["stage_name"]]["outputs"]
     resp = post(script_path="scripts/old.py", produces="figures/x.png")
     assert resp.status_code == 422
+    # Shown from elsewhere only when a document includes it
+    resp = post(
+        script_path="scripts/plot.py",
+        shows="paper/figures/drawn.png",
+        produces="figures/fit.png",
+    )
+    assert resp.status_code == 422, resp.text
     # Not a script, or not there to read
     assert post(script_path="paper/paper.tex").status_code == 422
     assert post(script_path="scripts/gone.py").status_code == 404

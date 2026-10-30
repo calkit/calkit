@@ -442,6 +442,64 @@ def test_ck_components(tmp_dir):
     assert os.path.isfile("more/calkit.sty")
 
 
+def test_cite_figure(tmp_dir):
+    os.makedirs("paper/sections")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{graphicx}\n"
+            "\\begin{document}\n"
+            "\\includegraphics[width=0.7\\textwidth]{Figure 3.png}\n"
+            "% \\includegraphics{Figure 3.png}\n"
+            "\\includegraphics{other.png}\n"
+            "\\input{sections/results}\n"
+            "\\end{document}\n"
+        )
+    with open("paper/sections/results.tex", "w") as f:
+        f.write("\\includegraphics{Figure 3}\n")
+    for path in ["paper/Figure 3.png", "paper/other.png"]:
+        open(path, "w").close()
+    # Every use is rewritten, wherever TeX finds it from, except in a
+    # comment, and calkit.sty is loaded for it
+    changed = calkit.latex.cite_figure(
+        "paper/main.tex", "paper/Figure 3.png", "figures/fig3.png"
+    )
+    assert changed == {
+        "paper/main.tex": (
+            "\\documentclass{article}\n"
+            "\\usepackage{graphicx}\n"
+            "\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "\\ckfigure[width=0.7\\textwidth]{figures/fig3.png}\n"
+            "% \\includegraphics{Figure 3.png}\n"
+            "\\includegraphics{other.png}\n"
+            "\\input{sections/results}\n"
+            "\\end{document}\n"
+        ),
+        "paper/sections/results.tex": "\\ckfigure{figures/fig3.png}\n",
+    }
+    # Nothing is written, and a document already loading calkit.sty
+    # isn't given it twice
+    with open("paper/main.tex") as f:
+        assert "ckfigure" not in f.read()
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{graphicx,calkit}\n"
+            "\\begin{document}\n"
+            "\\includegraphics{other}\n"
+            "\\end{document}\n"
+        )
+    changed = calkit.latex.cite_figure(
+        "paper/main.tex", "paper/other.png", "figures/other.png"
+    )
+    assert list(changed) == ["paper/main.tex"]
+    assert changed["paper/main.tex"].count("calkit") == 1
+    assert "\\ckfigure{figures/other.png}" in changed["paper/main.tex"]
+    # A figure the document doesn't show changes nothing
+    assert calkit.latex.cite_figure("paper/main.tex", "x.png", "y.png") == {}
+
+
 def test_expand_ck_components(tmp_dir):
     # A revision's data, apart from its sources, as for the working tree's
     # side of a diff

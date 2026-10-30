@@ -219,8 +219,8 @@ export interface StageFromScript {
   missing_inputs: string[];
   /** Which output is what the document shows. */
   produces?: string | null;
-  /** The map-paths stage copying it to where the document shows it. */
-  copy_stage?: string | null;
+  /** Documents changed to show it from there, with `\ckfigure`. */
+  cited_in: string[];
   saved: boolean;
   git_repo_url: string;
 }

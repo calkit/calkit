@@ -10546,16 +10546,13 @@ export const StageFromScriptSchema = {
       ],
       title: "Produces",
     },
-    copy_stage: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Copy Stage",
+    cited_in: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Cited In",
+      default: [],
     },
     saved: {
       type: "boolean",

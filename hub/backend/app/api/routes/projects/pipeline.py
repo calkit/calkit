@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import app.projects
+import calkit.latex
 import calkit.pipeline
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import (
@@ -341,10 +342,10 @@ class StageFromScript(BaseModel):
     outputs: list[str] = []
     # Inputs that aren't in the project and that no stage produces
     missing_inputs: list[str] = []
-    # Which output is what the document shows, and the copy that puts it
-    # there when that's a different path
+    # Which output is what the document shows, and the documents changed
+    # to show it from there with \ckfigure when that's a different path
     produces: str | None = None
-    copy_stage: str | None = None
+    cited_in: list[str] = []
     saved: bool = False
     git_repo_url: str
 
@@ -366,7 +367,8 @@ def post_project_stage_from_script(
     paths it opens. That happens in a checkout of its own, so an uploaded
     script isn't left in the project's clone before it's saved. With
     ``save``, the script, its environment, and the stage are committed,
-    with a map-paths copy when the document shows the output elsewhere.
+    with each document that shows the output elsewhere changed to show it
+    with ``\\ckfigure`` from where it's made.
     """
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -505,14 +507,32 @@ def post_project_stage_from_script(
             {"path": produces, "storage": "git"} if tracked else produces
         )
         outputs.append(produces)
-    copy_stage = None
+    cited: dict[str, str] = {}
     if shows is not None and produces is not None and produces != shows:
-        copy_stage = _default_stage_name(None, shows)
-        existing = stages.get(copy_stage)
-        if existing is not None and existing.get("kind") != "map-paths":
+        documents = [
+            s["target_path"]
+            for s in stages.values()
+            if isinstance(s, dict)
+            and s.get("kind") == "latex"
+            and s.get("target_path")
+        ]
+        for folder in ck_info.get("overleaf_sync") or {}:
+            if os.path.isdir(os.path.join(wdir, folder)):
+                documents += [
+                    os.path.relpath(d, wdir)
+                    for d in calkit.latex.root_documents(
+                        os.path.join(wdir, folder)
+                    )
+                ]
+        for document in dict.fromkeys(documents):
+            cited.update(
+                calkit.latex.cite_figure(document, shows, produces, wdir=wdir)
+            )
+        if not cited:
             raise HTTPException(
-                409,
-                f"Stage '{copy_stage}' exists and is not a map-paths stage",
+                422,
+                f"No document includes '{shows}' to show it from "
+                f"'{produces}' instead",
             )
     out = StageFromScript(
         stage_name=stage_name,
@@ -530,7 +550,7 @@ def post_project_stage_from_script(
         outputs=outputs,
         missing_inputs=missing,
         produces=produces,
-        copy_stage=copy_stage,
+        cited_in=sorted(cited),
         git_repo_url=project.git_repo_url,
     )
     if not req.save:
@@ -552,18 +572,9 @@ def post_project_stage_from_script(
         ck_info.setdefault("environments", {})[env["name"]] = env["env"]
     _validate_ck_stage(stage, stage_name)
     stages[stage_name] = stage
-    dests = []
-    if copy_stage is not None and produces is not None and shows is not None:
-        copy = stages.get(copy_stage) or {"kind": "map-paths", "paths": []}
-        mapping = MapPathsStage.mapping_from(produces, shows, is_dir=False)
-        paths = copy.setdefault("paths", [])
-        if not any(
-            p.get("src") == produces and p.get("dest") == shows for p in paths
-        ):
-            paths.append(mapping.model_dump())
-        _validate_ck_stage(copy, copy_stage)
-        stages[copy_stage] = copy
-        dests = [p["dest"] for p in paths]
+    for path, text in cited.items():
+        with open(os.path.join(wdir, path), "w") as f:
+            f.write(text)
     ck_info.setdefault("pipeline", {})["stages"] = stages
     _commit_pipeline(
         project,
@@ -571,7 +582,7 @@ def post_project_stage_from_script(
         repo,
         ck_info,
         None,
-        dests,
+        [],
         [],
         f"Add stage {stage_name} for {script_path}",
     )

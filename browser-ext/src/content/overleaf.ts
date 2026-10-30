@@ -274,13 +274,13 @@ function renderAddScript(
       radio.checked = output === detected.produces;
       return { output, radio };
     });
-    const copyNote = el("div", { class: "dim small" });
+    const citeNote = el("div", { class: "dim small" });
     const chosen = () => choices.find((c) => c.radio.checked)?.output;
     const updateNote = () => {
       const output = chosen();
-      copyNote.textContent =
+      citeNote.textContent =
         output && output !== shows
-          ? `The pipeline will copy it to ${shows}, where the paper has it.`
+          ? `The paper will show it from there, with \\ckfigure{${output}}.`
           : "";
     };
     if (choices.length) {
@@ -293,7 +293,7 @@ function renderAddScript(
             document.createTextNode(` ${output}`),
           ]);
         }),
-        copyNote,
+        citeNote,
       );
       updateNote();
     } else {
@@ -324,6 +324,16 @@ function renderAddScript(
           produces: chosen(),
           save: true,
         });
+        // Brings the \ckfigure into the editor
+        if (saved.cited_in.length) {
+          clear(message).append(loading("Syncing"));
+          await send({
+            type: "overleaf.sync",
+            owner,
+            project,
+            path: link.path,
+          });
+        }
         await showDefined(container, link, citation);
         container.append(renderRunIt(saved, `${owner}/${project}`));
       } catch (e) {

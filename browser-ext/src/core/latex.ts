@@ -180,7 +180,7 @@ export function canBeCreatedByPerson(path: string): boolean {
 
 export interface CitationProblem {
   severity: "error" | "warning";
-  kind: "value" | "missing" | "origin" | "stale";
+  kind: "value" | "missing" | "origin" | "stale" | "typed";
   message: string;
   /** What it's about, e.g., data a figure is made from. */
   path: string;
@@ -253,4 +253,301 @@ export function citationProblems(
     });
   }
   return problems;
+}
+
+/** A number typed into a document's text that looks like a result. */
+export interface TypedNumber {
+  /** As typed, e.g., `-1,234.50`. */
+  text: string;
+  value: number;
+  /** Decimal places typed, which says how far it was rounded. */
+  decimals: number;
+  /** Typed with commas between thousands. */
+  grouped: boolean;
+  /** The power of ten typed with it, e.g., 3 for `1.2e3`. */
+  exponent: number | null;
+}
+
+export interface TypedNumberMatch {
+  number: TypedNumber;
+  start: number;
+  end: number;
+}
+
+// Commands whose arguments aren't text, and how many of those arguments
+// there are, e.g., \multicolumn's third is the cell's text
+//
+// siunitx's commands are left out for now, since a number in one can't
+// simply be swapped for a \ckvalue
+const NOT_TEXT: Record<string, number> = {
+  addtocounter: 2,
+  addtolength: 2,
+  autoref: 1,
+  begin: 2,
+  bibliography: 1,
+  bibliographystyle: 1,
+  cite: 1,
+  citealp: 1,
+  citeauthor: 1,
+  citep: 1,
+  citet: 1,
+  citeyear: 1,
+  ckfigure: 1,
+  ckinclude: 1,
+  cknum: 1,
+  cktable: 1,
+  ckvalue: 2,
+  cline: 1,
+  cmidrule: 1,
+  colorbox: 1,
+  cref: 1,
+  Cref: 1,
+  definecolor: 3,
+  documentclass: 1,
+  end: 1,
+  eqref: 1,
+  graphicspath: 1,
+  hspace: 1,
+  href: 1,
+  include: 1,
+  includegraphics: 1,
+  input: 1,
+  label: 1,
+  linespread: 1,
+  multicolumn: 2,
+  multirow: 2,
+  num: 1,
+  numrange: 2,
+  newcommand: 2,
+  nocite: 1,
+  pageref: 1,
+  qty: 2,
+  qtyrange: 3,
+  raisebox: 1,
+  ref: 1,
+  renewcommand: 2,
+  RequirePackage: 1,
+  resizebox: 2,
+  rule: 2,
+  scalebox: 1,
+  setcounter: 2,
+  setlength: 2,
+  SI: 2,
+  si: 1,
+  SIrange: 3,
+  textcolor: 1,
+  unit: 1,
+  url: 1,
+  usepackage: 1,
+  vspace: 1,
+};
+// A decimal, or a whole number with commas between thousands, and not part
+// of a name, a version like 1.2.3, or a length like 0.5\textwidth
+const NUMBER_RE =
+  /(?<![\w.\\@])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?(?![\w]|\.\d|,\d{3}|\\(?:text|line|column|paper)(?:width|height)|\\baselineskip)/g;
+
+/**
+ * The numbers typed into one line of a document that look like results,
+ * which a `\\ckvalue` could show instead, in order.
+ *
+ * Those are decimals, whole numbers grouped with commas, percentages, and
+ * either side of a ±. Other whole numbers are too often counts, years,
+ * or section numbers to be worth marking. A number in a comment, an
+ * option, or an argument that isn't text, e.g., a length, doesn't count.
+ */
+export function typedNumbersIn(line: string): TypedNumberMatch[] {
+  const comment = line.search(/(?<!\\)%/);
+  const text = comment >= 0 ? line.slice(0, comment) : line;
+  // Where options and arguments that aren't text are
+  const skipped: [number, number][] = [];
+  for (const command of text.matchAll(/\\([A-Za-z@]+)\*?/g)) {
+    let args = NOT_TEXT[command[1]] ?? 0;
+    let at = (command.index ?? 0) + command[0].length;
+    while (at < text.length) {
+      const start = at + (text.slice(at).match(/^\s*/)?.[0].length ?? 0);
+      const open = text[start];
+      if (open !== "[" && !(open === "{" && args > 0)) {
+        break;
+      }
+      // Options are never text; braces nest, but brackets don't
+      let end = start + 1;
+      if (open === "[") {
+        while (end < text.length && text[end] !== "]") {
+          end++;
+        }
+      } else {
+        let depth = 1;
+        while (end < text.length && depth) {
+          depth += text[end] === "{" ? 1 : text[end] === "}" ? -1 : 0;
+          end++;
+        }
+        args--;
+      }
+      skipped.push([start, end]);
+      at = end + 1;
+    }
+  }
+  const found: TypedNumberMatch[] = [];
+  for (const match of text.matchAll(NUMBER_RE)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    if (skipped.some(([from, to]) => start >= from && start < to)) {
+      continue;
+    }
+    const raw = match[0];
+    const [mantissa, power] = raw.split(/[eE]/);
+    const decimals = mantissa.split(".")[1]?.length ?? 0;
+    const grouped = mantissa.includes(",");
+    const percent = /^(?:\s|~|\\,)*\\%/.test(text.slice(end));
+    const plusMinus =
+      /^\s*(?:\\pm|±|\\mp)/.test(text.slice(end)) ||
+      /(?:\\pm|±|\\mp)\s*$/.test(text.slice(0, start));
+    if (!decimals && !grouped && !percent && !plusMinus) {
+      continue;
+    }
+    found.push({
+      number: {
+        text: raw,
+        value: Number(raw.replace(/,/g, "")),
+        decimals,
+        grouped,
+        exponent: power === undefined ? null : Number(power),
+      },
+      start,
+      end,
+    });
+  }
+  return found;
+}
+
+/**
+ * The typed numbers in a whole document, by 0-based line.
+ *
+ * Only the body counts, where there is one, since the preamble sets up
+ * the document rather than reporting anything, and neither does code in
+ * a verbatim or listing environment, or the bibliography.
+ */
+export function typedNumbersInDocument(
+  lines: string[],
+): { line: number; match: TypedNumberMatch }[] {
+  const body = lines.findIndex((line) =>
+    /^[^%]*\\begin\s*\{document\}/.test(line),
+  );
+  const found: { line: number; match: TypedNumberMatch }[] = [];
+  let skipping: string | null = null;
+  for (let n = body < 0 ? 0 : body + 1; n < lines.length; n++) {
+    const line = lines[n];
+    if (/^[^%]*\\end\s*\{document\}/.test(line)) {
+      break;
+    }
+    if (skipping) {
+      if (line.includes(`\\end{${skipping}}`)) {
+        skipping = null;
+      }
+      continue;
+    }
+    const begin = line.match(
+      /\\begin\s*\{(verbatim\*?|Verbatim|lstlisting|minted|comment|thebibliography)\}/,
+    );
+    if (begin) {
+      skipping = line.includes(`\\end{${begin[1]}}`) ? null : begin[1];
+      continue;
+    }
+    for (const match of typedNumbersIn(line)) {
+      found.push({ line: n, match });
+    }
+  }
+  return found;
+}
+
+/** A number in a results file, by the key `\\ckvalue` takes for it. */
+export interface ResultValue {
+  path: string;
+  key: string;
+  value: number;
+}
+
+/** Every number in a results file, by its dotted key. */
+export function resultValues(path: string, data: unknown): ResultValue[] {
+  const found: ResultValue[] = [];
+  const walk = (value: unknown, key: string) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      found.push({ path, key, value });
+    } else if (value !== null && typeof value === "object") {
+      const entries = Array.isArray(value)
+        ? value.map((item, i) => [String(i), item] as const)
+        : Object.entries(value as Record<string, unknown>);
+      for (const [name, item] of entries) {
+        walk(item, key ? `${key}.${name}` : name);
+      }
+    }
+  };
+  walk(data, "");
+  return found;
+}
+
+/**
+ * The results a typed number could be, i.e., those that round to it, or
+ * failing that, the few nearest it, which may be what it should have said.
+ */
+export function typedNumberMatches(
+  number: TypedNumber,
+  values: ResultValue[],
+): { exact: ResultValue[]; close: ResultValue[] } {
+  const scale = 10 ** (number.exponent ?? 0);
+  const half = (0.5 * scale) / 10 ** number.decimals;
+  const off = (v: ResultValue) => Math.abs(v.value - number.value);
+  const exact = values.filter((v) => off(v) <= half * (1 + 1e-9) + 1e-12);
+  if (exact.length) {
+    return { exact, close: [] };
+  }
+  // Near enough to be a mistyped or outdated copy of it
+  const near = Math.max(Math.abs(number.value) * 0.25, half * 4);
+  const close = values
+    .filter((v) => off(v) <= near)
+    .sort((a, b) => off(a) - off(b))
+    .slice(0, 3);
+  return { exact, close };
+}
+
+/** The `\\ckvalue` showing a result the way a typed number was written. */
+export function typedNumberCitation(
+  number: TypedNumber,
+  value: ResultValue,
+): Citation {
+  const options =
+    number.exponent !== null
+      ? `.${number.decimals}e`
+      : `${number.grouped ? "," : ""}.${number.decimals}f`;
+  return { kind: "value", path: value.path, key: value.key, options };
+}
+
+/** How a result reads once rounded the way a typed number was. */
+export function roundedLike(number: TypedNumber, value: number): string {
+  if (number.exponent !== null) {
+    return value.toExponential(number.decimals);
+  }
+  const fixed = value.toFixed(number.decimals);
+  return number.grouped
+    ? Number(fixed).toLocaleString("en-US", {
+        minimumFractionDigits: number.decimals,
+        maximumFractionDigits: number.decimals,
+      })
+    : fixed;
+}
+
+/** What's wrong with a typed number: the paper can't say where it's from. */
+export function typedNumberProblem(
+  number: TypedNumber,
+  values: ResultValue[],
+): CitationProblem {
+  const [first] = typedNumberMatches(number, values).exact;
+  return {
+    severity: "warning",
+    kind: "typed",
+    message: first
+      ? `Typed in, though it matches ${first.key} in ${first.path}`
+      : "Typed in, and no result in the project matches it",
+    path: first?.path ?? "",
+  };
 }

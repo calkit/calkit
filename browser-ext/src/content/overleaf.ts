@@ -10,11 +10,18 @@ import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import {
   type Citation,
   type CitationProblem,
+  type ResultValue,
+  type TypedNumber,
   canBeCreatedByPerson,
   EXPORT_APPS,
   citationProblems,
   citationText,
   citationCandidates,
+  resultValues,
+  roundedLike,
+  typedNumberCitation,
+  typedNumberMatches,
+  typedNumberProblem,
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import {
@@ -43,7 +50,7 @@ import {
   STYLES,
   textInput,
 } from "../core/ui";
-import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
+import type { EditorItem, FromEditor, ToEditor } from "./overleaf-editor";
 
 const PANEL_ID = "calkit-overleaf-panel";
 const LAUNCHER_ID = "calkit-overleaf-launcher";
@@ -100,6 +107,42 @@ function provenanceFor(
   provenance.catch(() => provenanceCache.delete(cacheKey));
   provenanceCache.set(cacheKey, { at: Date.now(), provenance });
   return provenance;
+}
+
+// Kept for a minute too, since checking a document asks for them each time
+// it changes
+const valuesCache = new Map<
+  string,
+  { at: number; values: Promise<ResultValue[]> }
+>();
+
+/**
+ * Every number in the project's results files, which a typed number may be
+ * a copy of.
+ */
+function projectValues(link: OverleafLinkPublic): Promise<ResultValue[]> {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const cacheKey = `${owner}/${project}`;
+  const cached = valuesCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.values;
+  }
+  const values = (async () => {
+    const results = await send({ type: "project.results", owner, project });
+    const paths = [...new Set(results.map((result) => result.path))].filter(
+      (path) => /\.(json|ya?ml|toml)$/i.test(path),
+    );
+    const files = await Promise.all(
+      paths.map((path) => provenanceFor(link, path).catch(() => null)),
+    );
+    return files.flatMap((file, i) =>
+      file && !file.value_error ? resultValues(paths[i], file.value) : [],
+    );
+  })();
+  values.catch(() => valuesCache.delete(cacheKey));
+  valuesCache.set(cacheKey, { at: Date.now(), values });
+  return values;
 }
 
 /**
@@ -994,7 +1037,7 @@ type Without<T> = T extends unknown ? Omit<T, "calkit"> : never;
 
 // What the editor last said the open document shows, and what's wrong with
 // each, by its index there
-let editorCitations: { version: number; items: EditorCitation[] } | null = null;
+let editorCitations: { version: number; items: EditorItem[] } | null = null;
 let editorProblems: { version: number; found: CitationProblem[][] } | null =
   null;
 
@@ -1015,12 +1058,14 @@ async function checkCitations(): Promise<void> {
   const work = async () => {
     while (next < snapshot.items.length) {
       const i = next++;
-      const { citation } = snapshot.items[i];
+      const { citation, typed } = snapshot.items[i];
       try {
-        found[i] = citationProblems(
-          citation,
-          await citationProvenance(link, citation),
-        );
+        found[i] = typed
+          ? [typedNumberProblem(typed, await projectValues(link))]
+          : citationProblems(
+              citation,
+              await citationProvenance(link, citation),
+            );
       } catch {
         found[i] = [];
       }
@@ -1090,6 +1135,12 @@ async function fillTooltip(
   const body = el("div", { class: "tip" }, [loading()]);
   root.append(style, body);
   try {
+    if (item.typed) {
+      const values = await projectValues(link);
+      clear(body);
+      renderTyped(body, link, item.typed, values, { version, index });
+      return;
+    }
     const provenance = await citationProvenance(link, item.citation);
     clear(body);
     renderProvenance(body, link, item.citation, provenance);
@@ -1098,6 +1149,126 @@ async function fillTooltip(
       errorMessage(e instanceof Error ? e.message : String(e)),
     );
   }
+}
+
+// Replacements asked of the editor, by id, until it says how they went
+const replacing = new Map<string, (error: string | undefined) => void>();
+let replacements = 0;
+
+/** Have the editor swap a typed number for what shows it instead. */
+function replaceInEditor(
+  at: { version: number; index: number },
+  text: string,
+): Promise<string | undefined> {
+  const id = `replace-${++replacements}`;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      replacing.delete(id);
+      resolve("The editor didn't respond; reload the page and try again");
+    }, 5000);
+    replacing.set(id, (error) => {
+      clearTimeout(timer);
+      replacing.delete(id);
+      resolve(error);
+    });
+    toEditor({ type: "replace", id, ...at, text, usePackage: true });
+  });
+}
+
+/**
+ * A typed number, what's wrong with it, and the results that could show
+ * it instead, which replace it with a \\ckvalue and sync.
+ */
+function renderTyped(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  number: TypedNumber,
+  values: ResultValue[],
+  at: { version: number; index: number },
+): void {
+  const { exact, close } = typedNumberMatches(number, values);
+  const canWrite = link.current_user_access !== "read";
+  const message = el("div", { class: "small", style: { marginTop: "6px" } });
+  const use = async (value: ResultValue) => {
+    const text = citationText(typedNumberCitation(number, value));
+    const error = await replaceInEditor(at, text);
+    if (error) {
+      clear(message).append(errorMessage(error));
+      return;
+    }
+    // The edit closes this tooltip, so a failed sync is shown in the panel.
+    // Overleaf saves an edit a moment after it's made, and a sync started
+    // first would miss it.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    try {
+      await send({
+        type: "overleaf.sync",
+        owner: link.project_owner_name,
+        project: link.project_name,
+        path: link.path,
+      });
+    } catch (e) {
+      showInPanel((body) =>
+        body.append(errorMessage(e instanceof Error ? e.message : String(e))),
+      );
+    }
+  };
+  const row = (value: ResultValue) => {
+    const reads = roundedLike(number, value.value);
+    return el("div", { class: "row" }, [
+      el("div", { class: "grow" }, [
+        el("div", { class: "small", text: `${value.path}: ${value.key}` }),
+        el("div", {
+          class: "dim small",
+          text:
+            reads === number.text
+              ? String(value.value)
+              : `${value.value}, which would read ${reads}`,
+        }),
+      ]),
+      canWrite
+        ? el("button", {
+            class: "action secondary",
+            text: "Use",
+            onClick: () => void use(value),
+          })
+        : null,
+    ]);
+  };
+  container.append(
+    el("div", { class: "name", text: `Typed-in number: ${number.text}` }),
+    problemLine(typedNumberProblem(number, values)),
+  );
+  if (exact.length) {
+    container.append(
+      el("div", {
+        class: "dim small",
+        text: "Show it from the results file instead, so it stays current:",
+      }),
+      ...exact.slice(0, 5).map(row),
+    );
+  } else {
+    if (close.length) {
+      container.append(
+        el("div", {
+          class: "dim small",
+          text: "The nearest results, if it's a mistyped or outdated copy:",
+        }),
+        ...close.map(row),
+      );
+    }
+    container.append(
+      el("div", {
+        class: "dim small",
+        style: { marginTop: "6px" },
+        text:
+          "If a script computes it but only prints it, have the script " +
+          "save it to a results file too, e.g., results.json, so the paper " +
+          "can show it from there.",
+      }),
+    );
+  }
+  container.append(message);
 }
 
 /**
@@ -1119,6 +1290,8 @@ function watchEditor(): void {
       void checkCitations();
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
+    } else if (message.type === "replaced") {
+      replacing.get(message.id)?.(message.error);
     }
   });
 }
@@ -1451,8 +1624,10 @@ function watchPdf(): void {
       if (at !== file) {
         continue;
       }
+      // Only what's cited, since synctex rarely says which column, and a
+      // number typed beside a figure would take its place
       const onLine = snapshot.items.flatMap((item, index) =>
-        item.line === position.line ? [{ item, index }] : [],
+        item.citation && item.line === position.line ? [{ item, index }] : [],
       );
       if (!onLine.length) {
         continue;

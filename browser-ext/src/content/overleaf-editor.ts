@@ -8,25 +8,36 @@
  * talk with window messages: this side says what the document cites and
  * where, and the other says what's wrong and fills the hover tooltips.
  */
-import { type Citation, citationsIn } from "../core/latex";
+import {
+  type Citation,
+  type TypedNumber,
+  citationsIn,
+  typedNumbersInDocument,
+} from "../core/latex";
 
-/** A command showing project content, and where it is in the document. */
-export interface EditorCitation {
+/**
+ * A command showing project content, or a number typed in that looks like
+ * a result, and where it is in the document.
+ */
+export type EditorItem = {
   from: number;
   to: number;
   /** 1-based, as Overleaf numbers lines. */
   line: number;
   column: number;
-  citation: Citation;
-}
+} & (
+  | { citation: Citation; typed?: undefined }
+  | { typed: TypedNumber; citation?: undefined }
+);
 
 export type FromEditor =
   | {
       calkit: "editor";
       type: "citations";
       version: number;
-      items: EditorCitation[];
+      items: EditorItem[];
     }
+  | { calkit: "editor"; type: "replaced"; id: string; error?: string }
   | {
       calkit: "editor";
       type: "tooltip";
@@ -42,13 +53,24 @@ export type ToEditor =
       version: number;
       items: { index: number; severity: "error" | "warning" }[];
     }
-  | { calkit: "lint"; type: "goto"; line: number; column: number };
+  | { calkit: "lint"; type: "goto"; line: number; column: number }
+  | {
+      calkit: "lint";
+      type: "replace";
+      /** Echoed in the reply. */
+      id: string;
+      version: number;
+      index: number;
+      text: string;
+      /** Add \\usepackage{calkit} to the preamble if it isn't there. */
+      usePackage: boolean;
+    };
 
 // CodeMirror comes from Overleaf's bundle at runtime, so it's untyped here
 type View = any;
 
 let version = 0;
-let citations: EditorCitation[] = [];
+let citations: EditorItem[] = [];
 let tooltips = 0;
 // Whether the extension has checked the document, which it only does for
 // one linked to a Calkit project, so a tooltip would have something in it
@@ -67,7 +89,21 @@ function post(message: Without<FromEditor>): void {
 
 function scan(view: View): void {
   const doc = view.state.doc;
-  const items: EditorCitation[] = [];
+  const items: EditorItem[] = [];
+  const lines: string[] = [];
+  for (let n = 1; n <= doc.lines; n++) {
+    lines.push(doc.line(n).text);
+  }
+  for (const { line: i, match } of typedNumbersInDocument(lines)) {
+    const line = doc.line(i + 1);
+    items.push({
+      from: line.from + match.start,
+      to: line.from + match.end,
+      line: i + 1,
+      column: match.start,
+      typed: match.number,
+    });
+  }
   for (let n = 1; n <= doc.lines; n++) {
     const line = doc.line(n);
     if (!line.text.includes("\\")) {
@@ -84,7 +120,7 @@ function scan(view: View): void {
     }
   }
   version++;
-  citations = items;
+  citations = items.sort((a, b) => a.from - b.from);
   post({ type: "citations", version, items });
 }
 
@@ -196,6 +232,8 @@ window.addEventListener("message", (event) => {
   if (message.type === "problems") {
     checked = true;
     active?.mark(message);
+  } else if (message.type === "replace") {
+    replace(message);
   } else if (message.type === "goto" && active) {
     const doc = active.view.state.doc;
     if (message.line < 1 || message.line > doc.lines) {
@@ -209,6 +247,36 @@ window.addEventListener("message", (event) => {
     active.view.focus();
   }
 });
+
+/**
+ * Swap a typed number for what the extension says shows it instead, e.g.,
+ * a \\ckvalue, as one edit, so it's one step in Overleaf's history.
+ */
+function replace(message: ToEditor & { type: "replace" }): void {
+  const item = citations[message.index];
+  const view = active?.view;
+  const fail = (error: string) =>
+    post({ type: "replaced", id: message.id, error });
+  if (!view || message.version !== version || !item?.typed) {
+    return fail("The document changed; hover over the number again");
+  }
+  const doc = view.state.doc;
+  if (doc.sliceString(item.from, item.to) !== item.typed.text) {
+    return fail("The document changed; hover over the number again");
+  }
+  const changes = [{ from: item.from, to: item.to, insert: message.text }];
+  const text = doc.toString();
+  const body = text.search(/^[^%\n]*\\begin\s*\{document\}/m);
+  const loaded =
+    /^[^%\n]*\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bcalkit\b[^}]*\}/m.test(
+      text,
+    );
+  if (message.usePackage && body >= 0 && !loaded) {
+    changes.push({ from: body, to: body, insert: "\\usepackage{calkit}\n" });
+  }
+  view.dispatch({ changes, userEvent: "input" });
+  post({ type: "replaced", id: message.id });
+}
 
 // Asks an editor that's already open to take the extension above
 window.dispatchEvent(new Event("editor:extension-loaded"));

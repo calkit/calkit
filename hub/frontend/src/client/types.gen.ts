@@ -5957,9 +5957,9 @@ export type StageFromScript = {
    */
   produces?: string | null
   /**
-   * Copy Stage
+   * Cited In
    */
-  copy_stage?: string | null
+  cited_in?: Array<string>
   /**
    * Saved
    */

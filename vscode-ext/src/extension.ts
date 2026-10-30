@@ -1,11 +1,14 @@
 import * as path from "node:path";
+import * as fs from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import * as http from "node:http";
 import * as https from "node:https";
 import * as net from "node:net";
+import * as os from "node:os";
 import * as vscode from "vscode";
 import YAML from "yaml";
+import { missingInstallDirs } from "./cli";
 import {
   compactSlurmOptions,
   findCalkitEnvKernelSourceCandidate,
@@ -31,6 +34,18 @@ import type {
   StaleStageDetail,
 } from "./types";
 import { dvcStageOutputPaths } from "./pipeline/core";
+import {
+  collectSubprojects,
+  mergeSubprojectConfigs,
+  mergeSubprojectDvcYaml,
+  qualifyEnvDescriptions,
+  splitQualifiedName,
+  splitSubprojectPath,
+  stageNameFromDvcAddress,
+  type QuestionOrigin,
+  type Subproject,
+} from "./subprojects";
+import { alignQuestionChecks, parseQuestionChecks } from "./questions";
 import {
   formatYamlSyntaxError,
   yamlSyntaxError,
@@ -192,7 +207,17 @@ const runningStageNames = new Set<string>();
 // "!" badge below.
 const importedArtifactUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
+// The root's config with its subprojects' folded in, which is what the
+// sidebar and decorations show. Anything that writes reads the one project
+// it writes to instead.
 let currentCalkitConfig: CalkitInfo | undefined;
+// Bumped by each refresh of the pipeline context, so one that a newer refresh
+// has overtaken doesn't overwrite its state
+let pipelineContextGeneration = 0;
+// Subproject directories, relative to the workspace root
+let currentSubprojectDirs: string[] = [];
+let currentQuestionOrigins: QuestionOrigin[] = [];
+let currentArtifactOrigins = new Map<string, string>();
 // For telling open PDF viewers when the config has been read
 let pdfReviewProvider: PdfReviewProvider | undefined;
 // Whether a calkit.yaml exists in the workspace. The sidebar is gated on this:
@@ -238,6 +263,18 @@ export function activate(context: vscode.ExtensionContext): void {
   extensionContextRef = context;
   outputChannel = vscode.window.createOutputChannel("Calkit");
   context.subscriptions.push(outputChannel);
+  // Before anything runs calkit, which VS Code may not have on PATH
+  const addedDirs = missingInstallDirs(
+    process.env,
+    os.homedir(),
+    process.platform,
+  );
+  if (addedDirs.length) {
+    process.env.PATH = [process.env.PATH, ...addedDirs]
+      .filter(Boolean)
+      .join(path.delimiter);
+    log(`Added install folders missing from PATH: ${addedDirs.join(", ")}`);
+  }
   slurmStatusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
     200,
@@ -462,13 +499,26 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // A document and the PDF its stage builds take each other's place,
-  // like a Plotly figure and its preview. The other file opens in the same
-  // group first, since closing the last tab first can close the group too.
+  // like a Plotly figure and its preview, unless the other is open already,
+  // in which case it's shown and both stay open. The other file opens in the
+  // same group first, since closing the last tab first can close the group.
   const swapActiveTab = async (
     from: vscode.Uri,
-    open: () => Promise<unknown>,
+    to: vscode.Uri,
+    open: (column: vscode.ViewColumn) => Promise<unknown>,
   ): Promise<void> => {
-    await open();
+    const active = vscode.window.tabGroups.activeTabGroup;
+    const shown = [
+      active,
+      ...vscode.window.tabGroups.all.filter((group) => group !== active),
+    ]
+      .flatMap((group) => group.tabs)
+      .find((tab) => tabResourceUri(tab)?.toString() === to.toString());
+    if (shown) {
+      await open(shown.group.viewColumn);
+      return;
+    }
+    await open(vscode.ViewColumn.Active);
     const group = vscode.window.tabGroups.activeTabGroup;
     const previous = group.tabs.find(
       (tab) =>
@@ -510,13 +560,13 @@ export function activate(context: vscode.ExtensionContext): void {
           );
           return;
         }
-        await swapActiveTab(fileUri, () =>
+        await swapActiveTab(fileUri, pdfUri, (column) =>
           Promise.resolve(
             vscode.commands.executeCommand(
               "vscode.openWith",
               pdfUri,
               PDF_REVIEW_VIEW_TYPE,
-              vscode.ViewColumn.Active,
+              column,
             ),
           ),
         );
@@ -632,10 +682,10 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const sourceUri = vscode.Uri.file(path.join(workspaceRoot, sourceFile));
-        await swapActiveTab(fileUri, () =>
+        await swapActiveTab(fileUri, sourceUri, (column) =>
           Promise.resolve(
             vscode.window.showTextDocument(sourceUri, {
-              viewColumn: vscode.ViewColumn.Active,
+              viewColumn: column,
               preview: false,
             }),
           ),
@@ -1220,20 +1270,23 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  // Remove a project question by its 1-based index (its nodeId).
+  // Remove a project question by its 1-based index (its nodeId), which counts
+  // subprojects' questions too, so it's removed by its index where declared.
   context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_DELETE_QUESTION,
       async (item?: import("./sidebar").SidebarItem) => {
         const workspaceRoot = getWorkspaceRoot();
-        const index = item?.nodeId;
-        if (!workspaceRoot || !index) {
+        const origin = currentQuestionOrigins[Number(item?.nodeId) - 1];
+        if (!workspaceRoot || !origin) {
           return;
         }
         try {
-          await execFileAsync("calkit", ["rm", "question", index], {
-            cwd: workspaceRoot,
-          });
+          await execFileAsync(
+            "calkit",
+            ["rm", "question", String(origin.index)],
+            { cwd: path.join(workspaceRoot, origin.dir) },
+          );
         } catch (error) {
           const err = error as { stderr?: string; message?: string };
           void vscode.window.showErrorMessage(
@@ -1282,13 +1335,17 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        // A subproject's stage is edited in its own calkit.yaml, where its
+        // paths and environment are named from there
+        const project = projectForName(workspaceRoot, stageName);
+        const stage = (await readCalkitConfig(project.projectDir))?.pipeline
+          ?.stages?.[project.name];
         await showStageEditor(
           context,
-          workspaceRoot,
+          project.projectDir,
           undefined,
           undefined,
-          stageName,
+          project.name,
           stage,
         );
       },
@@ -1307,7 +1364,13 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        await defineProvenance(context, workspaceRoot, fileUri);
+        // Recorded where the file is declared, or else in the calkit.yaml
+        // of the subproject it's in
+        const { projectDir } = projectForArtifact(
+          workspaceRoot,
+          path.relative(workspaceRoot, fileUri.fsPath).replace(/\\/g, "/"),
+        );
+        await defineProvenance(context, projectDir, fileUri);
       },
     ),
   );
@@ -1326,10 +1389,11 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const artifactKind =
           item?.nodeKind === "dataset" ? "dataset" : "figure";
+        const project = projectForArtifact(workspaceRoot, artifactPath);
         await showStageEditor(
           context,
-          workspaceRoot,
-          artifactPath,
+          project.projectDir,
+          project.path,
           undefined,
           undefined,
           undefined,
@@ -1360,11 +1424,12 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!url) {
           return;
         }
+        const project = projectForArtifact(workspaceRoot, artifactPath);
         try {
           await execFileAsync(
             "calkit",
-            ["update", artifactKind, artifactPath, "--imported-from-url", url],
-            { cwd: workspaceRoot },
+            ["update", artifactKind, project.path, "--imported-from-url", url],
+            { cwd: project.projectDir },
           );
           void refreshPipelineOutputContext(context);
         } catch (error: unknown) {
@@ -1446,13 +1511,15 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+      const project = projectForName(workspaceRoot, stageName);
+      const stage = (await readCalkitConfig(project.projectDir))?.pipeline
+        ?.stages?.[project.name];
       await showStageEditor(
         context,
-        workspaceRoot,
+        project.projectDir,
         undefined,
         undefined,
-        stageName,
+        project.name,
         stage,
       );
     }),
@@ -1468,19 +1535,30 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!notebookUri) {
         return;
       }
-      const relPath = path
-        .relative(workspaceRoot, notebookUri.fsPath)
-        .replace(/\\/g, "/");
+      const project = projectForPath(
+        workspaceRoot,
+        path.relative(workspaceRoot, notebookUri.fsPath).replace(/\\/g, "/"),
+      );
       const profile = getLaunchProfileForActiveNotebook(context);
-      const envName = profile?.environmentName;
+      // The stage goes in the notebook's project, so its environment is
+      // only one that project declares, named as it is there
+      const env = profile?.environmentName
+        ? splitQualifiedName(profile.environmentName, currentSubprojectDirs)
+        : undefined;
+      const envName =
+        env &&
+        path.resolve(workspaceRoot, env.dir) ===
+          path.resolve(project.projectDir)
+          ? env.name
+          : undefined;
       const prefillStage = envName
         ? { kind: "jupyter-notebook", environment: envName }
         : { kind: "jupyter-notebook" };
       await showStageEditor(
         context,
-        workspaceRoot,
+        project.projectDir,
         undefined,
-        relPath,
+        project.path,
         undefined,
         prefillStage,
       );
@@ -1507,7 +1585,15 @@ export function activate(context: vscode.ExtensionContext): void {
             .relative(workspaceRoot, notebookUri.fsPath)
             .replace(/\\/g, "/");
         }
-        const htmlRelPath = getExecutedNotebookHtmlPath(relPath);
+        // Under the .calkit of the project its stage runs in
+        const nbStage = Object.values(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+        ).find((s) => s.notebook_path === relPath);
+        const htmlRelPath = getExecutedNotebookHtmlPath(
+          relPath,
+          nbStage?.subproject_wdir ??
+            splitSubprojectPath(relPath, currentSubprojectDirs).dir,
+        );
         if (!(await fileExists(path.join(workspaceRoot, htmlRelPath)))) {
           void vscode.window.showInformationMessage(
             `No executed HTML found for ${relPath}. Run the notebook to generate it.`,
@@ -2110,17 +2196,31 @@ export function deactivate(): void {
 
 async function fetchEnvDescriptions(
   workspaceRoot: string,
+  subprojectDirs: string[],
 ): Promise<Record<string, EnvDescription> | undefined> {
-  try {
-    const { stdout } = await execFileAsync("calkit", ["describe", "envs"], {
-      cwd: workspaceRoot,
-      timeout: 15_000,
-    });
-    return JSON.parse(stdout) as Record<string, EnvDescription>;
-  } catch (error) {
-    log(`Failed to fetch env descriptions: ${String(error)}`);
+  // The CLI describes only the project it's run in
+  const described = await Promise.all(
+    [".", ...subprojectDirs].map(async (dir) => {
+      try {
+        const { stdout } = await execFileAsync(
+          "calkit",
+          ["describe", "envs", "--json"],
+          { cwd: path.join(workspaceRoot, dir), timeout: 15_000 },
+        );
+        return qualifyEnvDescriptions(
+          dir,
+          JSON.parse(stdout) as Record<string, EnvDescription>,
+        );
+      } catch (error) {
+        log(`Failed to fetch env descriptions in ${dir}: ${String(error)}`);
+        return undefined;
+      }
+    }),
+  );
+  if (described.every((d) => d === undefined)) {
     return undefined;
   }
+  return Object.assign({}, ...described);
 }
 
 async function readDvcYaml(
@@ -2280,32 +2380,42 @@ async function getSubmodulePaths(workspaceRoot: string): Promise<string[]> {
 // artifacts reserved so they aren't listed twice) and flags auto-detected
 // entries with `detected: true`; we keep only those, since declared artifacts
 // already come from calkit.yaml.
+// Each subproject is listed from its own directory, so what it declares
+// keeps its files from being detected, and the root's listing skips them.
 async function listDetectedArtifacts(
   workspaceRoot: string,
   kind: "figures" | "datasets" | "results" | "presentations",
+  subprojectDirs: string[],
 ): Promise<string[]> {
-  try {
-    const { stdout } = await execFileAsync("calkit", ["list", kind, "--json"], {
-      cwd: workspaceRoot,
-      timeout: 30_000,
-    });
-    const entries = JSON.parse(stdout) as {
-      path?: string;
-      detected?: boolean;
-    }[];
-    return entries
-      .filter((e) => e.detected === true && typeof e.path === "string")
-      .map((e) => e.path as string)
-      .sort();
-  } catch (error) {
-    log(`Failed to list detected ${kind}: ${String(error)}`);
-    return [];
-  }
+  const listed = await Promise.all(
+    [".", ...subprojectDirs].map(async (dir) => {
+      try {
+        const { stdout } = await execFileAsync(
+          "calkit",
+          ["list", kind, "--json"],
+          { cwd: path.join(workspaceRoot, dir), timeout: 30_000 },
+        );
+        const entries = JSON.parse(stdout) as {
+          path?: string;
+          detected?: boolean;
+        }[];
+        return entries
+          .filter((e) => e.detected === true && typeof e.path === "string")
+          .map((e) => path.posix.join(dir, e.path as string))
+          .filter((p) => splitSubprojectPath(p, subprojectDirs).dir === dir);
+      } catch (error) {
+        log(`Failed to list detected ${kind} in ${dir}: ${String(error)}`);
+        return [];
+      }
+    }),
+  );
+  return listed.flat().sort();
 }
 
 async function scanDetectedFiles(
   workspaceRoot: string,
   calkitYamlExists: boolean,
+  generation: number,
 ): Promise<void> {
   // Outside a Calkit project the sidebar shows the welcome view, so detected
   // files are never displayed. Skip the scan (including the `calkit list`
@@ -2331,11 +2441,19 @@ async function scanDetectedFiles(
       DETECTED_FILES_EXCLUDE,
     ),
     getSubmodulePaths(workspaceRoot),
-    listDetectedArtifacts(workspaceRoot, "figures"),
-    listDetectedArtifacts(workspaceRoot, "datasets"),
-    listDetectedArtifacts(workspaceRoot, "results"),
-    listDetectedArtifacts(workspaceRoot, "presentations"),
+    listDetectedArtifacts(workspaceRoot, "figures", currentSubprojectDirs),
+    listDetectedArtifacts(workspaceRoot, "datasets", currentSubprojectDirs),
+    listDetectedArtifacts(workspaceRoot, "results", currentSubprojectDirs),
+    listDetectedArtifacts(
+      workspaceRoot,
+      "presentations",
+      currentSubprojectDirs,
+    ),
   ]);
+  // Left to the refresh that overtook this one
+  if (generation !== pipelineContextGeneration) {
+    return;
+  }
   const toRel = (u: vscode.Uri): string =>
     path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
   currentDetectedNotebooks = notebookUris
@@ -2391,13 +2509,37 @@ async function refreshPipelineOutputContext(
   if (!workspaceRoot) {
     return;
   }
-  const [dvcYaml, calkitConfig, envDescriptions] = await Promise.all([
-    readDvcYaml(workspaceRoot),
-    readCalkitConfig(workspaceRoot),
-    fetchEnvDescriptions(workspaceRoot),
-  ]);
+  const generation = ++pipelineContextGeneration;
+  const superseded = (): boolean => {
+    if (generation === pipelineContextGeneration) {
+      return false;
+    }
+    // The newer refresh may not check status, so a forced check still runs
+    if (force) {
+      ensureRunStatusPolling(context);
+    }
+    return true;
+  };
+  const {
+    config: calkitConfig,
+    dvcYaml,
+    subprojects,
+    questionOrigins,
+    artifactOrigins,
+  } = await readMergedProject(workspaceRoot);
+  const subprojectDirs = subprojects.map((sp) => sp.dir);
+  const envDescriptions = await fetchEnvDescriptions(
+    workspaceRoot,
+    subprojectDirs,
+  );
+  if (superseded()) {
+    return;
+  }
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
+  currentSubprojectDirs = subprojectDirs;
+  currentQuestionOrigins = questionOrigins;
+  currentArtifactOrigins = artifactOrigins;
   currentEnvDescriptions = envDescriptions;
   pdfReviewProvider?.stagesChanged();
   void refreshActiveFileBuildsPdfContext(
@@ -2408,6 +2550,9 @@ async function refreshPipelineOutputContext(
   const calkitYamlExists = await fileExists(
     path.join(workspaceRoot, "calkit.yaml"),
   );
+  if (superseded()) {
+    return;
+  }
   const calkitStatusChanged = calkitYamlExists !== currentCalkitYamlExists;
   currentCalkitYamlExists = calkitYamlExists;
   void vscode.commands.executeCommand(
@@ -2461,7 +2606,10 @@ async function refreshPipelineOutputContext(
   // "not produced by the pipeline" badges appear or clear across the tree; the
   // affected figure/notebook files aren't in changedUris otherwise.
   decorationProvider.refresh(calkitStatusChanged ? undefined : changedUris);
-  await scanDetectedFiles(workspaceRoot, calkitYamlExists);
+  await scanDetectedFiles(workspaceRoot, calkitYamlExists, generation);
+  if (superseded()) {
+    return;
+  }
   renderSidebarFromState();
   // Run the staleness check after the fast decoration pass: "not produced
   // by the pipeline" badges are applied immediately, and stale-output
@@ -2470,6 +2618,7 @@ async function refreshPipelineOutputContext(
   // forces it.
   if (force || isAutoRefreshStatusEnabled()) {
     ensureRunStatusPolling(context);
+    void refreshQuestionChecks(workspaceRoot, force);
   }
 }
 
@@ -2661,10 +2810,13 @@ async function pollPipelineRunStatus(
       // update the spinners and keep the previous stale badges. An iterate_over
       // sweep reports its expanded DVC items (e.g. "benchmark@zdt1"); the
       // sidebar keys stages by the base name, so collapse "stage@item" back to
-      // "stage" to drive the parent stage's spinner.
+      // "stage" to drive the parent stage's spinner. A subproject's stages
+      // come back as DVC addresses, named here as they are when stale.
       applyRunningStages(
         new Set(
-          (pipeline.running_stages ?? []).map((name) => name.split("@")[0]),
+          (pipeline.running_stages ?? []).map(
+            (name) => stageNameFromDvcAddress(name).split("@")[0],
+          ),
         ),
       );
     } else {
@@ -2690,6 +2842,102 @@ async function pollPipelineRunStatus(
     );
   } else {
     runStatusPolling = false;
+  }
+}
+
+// Each question's status from `calkit check questions`, shown in the sidebar.
+// It reads Git history, so it runs in the background, one at a time, with a
+// request made while one runs queued to run after it, and only when what it
+// reads has changed, unless forced.
+let questionChecksRunning = false;
+let questionChecksQueued = false;
+let questionChecksForced = false;
+let questionChecksInputs: string | undefined;
+
+async function refreshQuestionChecks(
+  workspaceRoot: string,
+  force = false,
+): Promise<void> {
+  questionChecksForced ||= force;
+  if (questionChecksRunning) {
+    questionChecksQueued = true;
+    return;
+  }
+  questionChecksRunning = true;
+  try {
+    do {
+      questionChecksQueued = false;
+      const questions = currentCalkitConfig?.questions ?? [];
+      if (!questions.length) {
+        sidebarProvider?.setQuestionChecks([]);
+        continue;
+      }
+      // What the check reads: the commit, and each project's calkit.yaml,
+      // dvc.lock, and evidence
+      let head = "";
+      try {
+        ({ stdout: head } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+          cwd: workspaceRoot,
+        }));
+      } catch {
+        // No commits yet
+      }
+      const paths = [
+        ...new Set(currentQuestionOrigins.map((o) => o.dir)),
+      ].flatMap((dir) =>
+        ["calkit.yaml", "dvc.lock"].map((f) => path.join(dir, f)),
+      );
+      questions.forEach((q, n) => {
+        const dir = currentQuestionOrigins[n]?.dir ?? ".";
+        for (const ev of typeof q === "string" ? [] : q.evidence ?? []) {
+          if (ev.path) {
+            paths.push(path.join(dir, ev.path));
+          }
+        }
+      });
+      const mtimes = await Promise.all(
+        paths.map((p) =>
+          fs.promises.stat(path.join(workspaceRoot, p)).then(
+            (stat) => stat.mtimeMs,
+            () => 0,
+          ),
+        ),
+      );
+      const inputs = JSON.stringify([head.trim(), paths, mtimes]);
+      if (!questionChecksForced && inputs === questionChecksInputs) {
+        continue;
+      }
+      questionChecksForced = false;
+      questionChecksInputs = inputs;
+      let stdout = "";
+      try {
+        suppressRwlockUntil = Date.now() + 5000;
+        // Without the pipeline, since the sidebar already knows which stages
+        // are stale and asking DVC is the slow part
+        ({ stdout } = await execFileAsync(
+          "calkit",
+          ["check", "questions", "--json", "--no-pipeline"],
+          { cwd: workspaceRoot, timeout: 120_000, maxBuffer: 32 * 1024 * 1024 },
+        ));
+      } catch (error) {
+        // It exits nonzero when a question fails, with the report still on
+        // stdout; with no report, e.g., an older CLI, questions show no status
+        stdout = String((error as { stdout?: unknown }).stdout ?? "");
+        if (!stdout.trim()) {
+          log(`Question check failed: ${String(error)}`);
+        }
+      } finally {
+        suppressRwlockUntil = Date.now() + 5000;
+      }
+      sidebarProvider?.setQuestionChecks(
+        alignQuestionChecks(
+          parseQuestionChecks(stdout),
+          currentQuestionOrigins,
+        ),
+      );
+    } while (questionChecksQueued);
+  } finally {
+    questionChecksRunning = false;
   }
 }
 
@@ -2971,6 +3219,8 @@ async function getGitVisibleFiles(
   }
 }
 
+// The workspaceRoot here is the project the stage is in, which is a
+// subproject's directory when editing one of its stages.
 async function showStageEditor(
   context: vscode.ExtensionContext,
   workspaceRoot: string,
@@ -2981,23 +3231,35 @@ async function showStageEditor(
   artifactKind?: "figure" | "dataset",
 ): Promise<void> {
   const nonce = getNonce();
-  const [sourceUris, allUris, gitVisibleFiles] = await Promise.all([
-    vscode.workspace.findFiles(SOURCE_GLOB, SOURCE_EXCLUDE),
-    vscode.workspace.findFiles("**/*", ALL_FILES_EXCLUDE),
-    getGitVisibleFiles(workspaceRoot),
-  ]);
+  const [sourceUris, allUris, gitVisibleFiles, projectConfig] =
+    await Promise.all([
+      vscode.workspace.findFiles(SOURCE_GLOB, SOURCE_EXCLUDE),
+      vscode.workspace.findFiles("**/*", ALL_FILES_EXCLUDE),
+      getGitVisibleFiles(workspaceRoot),
+      readCalkitConfig(workspaceRoot),
+    ]);
+  const toProjectRelative = (u: vscode.Uri): string =>
+    path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
   // Don't suggest gitignored source files (e.g. scripts inside a venv). When
   // the Git listing is unavailable, keep everything.
   const workspaceFiles = sourceUris
-    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .map(toProjectRelative)
+    .filter((rel) => !rel.startsWith("../"))
     .filter((rel) => !gitVisibleFiles || gitVisibleFiles.has(rel))
     .sort();
   // Outputs are left unfiltered: a stage output may legitimately be a
   // DVC-tracked (and therefore gitignored) file.
   const allProjectFiles = allUris
-    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .map(toProjectRelative)
+    .filter((rel) => !rel.startsWith("../"))
     .sort();
-  const envs = currentCalkitConfig?.environments ?? {};
+  // The calkit run terminal is shared, so it opens at the root and a
+  // subproject's commands say where to run
+  const terminalCwd = getWorkspaceRoot() ?? workspaceRoot;
+  const calkitCmd = path.relative(terminalCwd, workspaceRoot)
+    ? `calkit -C ${shQuote(workspaceRoot)}`
+    : "calkit";
+  const envs = projectConfig?.environments ?? {};
   const envEntries = Object.entries(envs).map(([name, env]) => ({
     name,
     kind: typeof env.kind === "string" ? env.kind : "",
@@ -3079,15 +3341,15 @@ async function showStageEditor(
             );
           });
         }
-        const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+        const terminal = getOrCreateTerminal("calkit: run", terminalCwd);
         terminal.show();
-        let cmd = `calkit xr ${args.map(shQuote).join(" ")}`;
+        let cmd = `${calkitCmd} xr ${args.map(shQuote).join(" ")}`;
         if (gitOuts.length > 0) {
           const gitOutArgs = ["update", "stage", msg.stageName];
           for (const o of gitOuts) {
             gitOutArgs.push("--set-outputs-git", o);
           }
-          cmd += ` && calkit ${gitOutArgs.map(shQuote).join(" ")}`;
+          cmd += ` && ${calkitCmd} ${gitOutArgs.map(shQuote).join(" ")}`;
         }
         terminal.sendText(cmd);
         void panel.dispose();
@@ -3123,12 +3385,9 @@ async function showStageEditor(
         void execFileAsync("calkit", updateArgs, { cwd: workspaceRoot })
           .then(() => {
             if (msg.andRun) {
-              const terminal = getOrCreateTerminal(
-                "calkit: run",
-                workspaceRoot,
-              );
+              const terminal = getOrCreateTerminal("calkit: run", terminalCwd);
               terminal.show();
-              terminal.sendText(`calkit run ${shQuote(editStageName)}`);
+              terminal.sendText(`${calkitCmd} run ${shQuote(editStageName)}`);
             }
             void panel.dispose();
           })
@@ -4174,10 +4433,8 @@ async function openStageSourceFile(
 async function buildOutputToStageMap(
   workspaceRoot: string,
 ): Promise<Map<string, string>> {
-  const [dvcYaml, calkitConfig] = await Promise.all([
-    readDvcYaml(workspaceRoot),
-    readCalkitConfig(workspaceRoot),
-  ]);
+  const { dvcYaml, config: calkitConfig } =
+    await readMergedProject(workspaceRoot);
   const map = new Map<string, string>();
   for (const [stageName, stage] of Object.entries(
     calkitConfig?.pipeline?.stages ?? {},
@@ -4205,10 +4462,8 @@ async function findStageForFile(
   const relPath = path
     .relative(workspaceRoot, fileUri.fsPath)
     .replace(/\\/g, "/");
-  const [dvcYaml, calkitConfig] = await Promise.all([
-    readDvcYaml(workspaceRoot),
-    readCalkitConfig(workspaceRoot),
-  ]);
+  const { dvcYaml, config: calkitConfig } =
+    await readMergedProject(workspaceRoot);
   for (const [stageName, stage] of Object.entries(dvcYaml?.stages ?? {})) {
     if (dvcStageOutputPaths(stage).includes(relPath)) {
       return stageName;
@@ -4256,10 +4511,8 @@ async function findStageProducingOutput(
   const relPath = path
     .relative(workspaceRoot, fileUri.fsPath)
     .replace(/\\/g, "/");
-  const [dvcYaml, calkitConfig] = await Promise.all([
-    readDvcYaml(workspaceRoot),
-    readCalkitConfig(workspaceRoot),
-  ]);
+  const { dvcYaml, config: calkitConfig } =
+    await readMergedProject(workspaceRoot);
   for (const [stageName, stage] of Object.entries(
     calkitConfig?.pipeline?.stages ?? {},
   )) {
@@ -4609,6 +4862,92 @@ async function selectCalkitEnvironment(
 
 function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+// The root's calkit.yaml and dvc.yaml with every subproject's folded in.
+// Only for reading: writing this back would copy the subprojects into the
+// root.
+async function readMergedProject(workspaceRoot: string): Promise<{
+  config: CalkitInfo | undefined;
+  dvcYaml: DvcYaml | undefined;
+  subprojects: Subproject[];
+  questionOrigins: QuestionOrigin[];
+  artifactOrigins: Map<string, string>;
+}> {
+  const [config, dvcYaml] = await Promise.all([
+    readCalkitConfig(workspaceRoot),
+    readDvcYaml(workspaceRoot),
+  ]);
+  if (!config) {
+    return {
+      config,
+      dvcYaml,
+      subprojects: [],
+      questionOrigins: [],
+      artifactOrigins: new Map(),
+    };
+  }
+  const found = await collectSubprojects(
+    config,
+    async (dir) => {
+      const projectDir = path.join(workspaceRoot, dir);
+      return (await fileExists(path.join(projectDir, "calkit.yaml")))
+        ? readCalkitConfig(projectDir)
+        : undefined;
+    },
+    (dir) =>
+      fs.promises
+        .realpath(path.join(workspaceRoot, dir))
+        .catch(() => path.join(workspaceRoot, dir)),
+  );
+  const subprojects: Subproject[] = await Promise.all(
+    found.map(async (sp) => ({
+      ...sp,
+      dvcYaml: await readDvcYaml(path.join(workspaceRoot, sp.dir)),
+    })),
+  );
+  const merged = mergeSubprojectConfigs(config, subprojects);
+  return {
+    config: merged.config,
+    dvcYaml: dvcYaml && mergeSubprojectDvcYaml(dvcYaml, subprojects),
+    subprojects,
+    questionOrigins: merged.questionOrigins,
+    artifactOrigins: merged.artifactOrigins,
+  };
+}
+
+// The project a sidebar name or root-relative path belongs to, and what it's
+// called there, for commands that write to that project's calkit.yaml.
+function projectForName(
+  workspaceRoot: string,
+  name: string,
+): { projectDir: string; name: string } {
+  const split = splitQualifiedName(name, currentSubprojectDirs);
+  return { projectDir: path.join(workspaceRoot, split.dir), name: split.name };
+}
+
+function projectForPath(
+  workspaceRoot: string,
+  relPath: string,
+): { projectDir: string; path: string } {
+  const split = splitSubprojectPath(relPath, currentSubprojectDirs);
+  return { projectDir: path.join(workspaceRoot, split.dir), path: split.path };
+}
+
+// An artifact is edited where it's declared, falling back to the project its
+// file is in
+function projectForArtifact(
+  workspaceRoot: string,
+  relPath: string,
+): { projectDir: string; path: string } {
+  const dir = currentArtifactOrigins.get(relPath);
+  if (dir === undefined) {
+    return projectForPath(workspaceRoot, relPath);
+  }
+  return {
+    projectDir: path.join(workspaceRoot, dir),
+    path: dir === "." ? relPath : path.posix.relative(dir, relPath),
+  };
 }
 
 async function readCalkitConfig(
@@ -6703,11 +7042,27 @@ async function openEnvironmentEditor(
   workspaceRoot: string,
   envName: string,
 ): Promise<void> {
-  const env = currentCalkitConfig?.environments?.[envName];
-  const desc = currentEnvDescriptions?.[envName];
-  const specPath =
-    desc?.spec_path ?? (typeof env?.path === "string" ? env.path : undefined);
-  await showEnvCreatorWebview(context, workspaceRoot, envName, env, specPath);
+  // A subproject's environment is edited in its own calkit.yaml, with its
+  // spec path from there
+  const project = projectForName(workspaceRoot, envName);
+  const env = (await readCalkitConfig(project.projectDir))?.environments?.[
+    project.name
+  ];
+  const descSpecPath = currentEnvDescriptions?.[envName]?.spec_path;
+  const specPath = descSpecPath
+    ? path
+        .relative(project.projectDir, path.join(workspaceRoot, descSpecPath))
+        .replace(/\\/g, "/")
+    : typeof env?.path === "string"
+    ? env.path
+    : undefined;
+  await showEnvCreatorWebview(
+    context,
+    project.projectDir,
+    project.name,
+    env,
+    specPath,
+  );
 }
 
 async function getConfiguredCandidateForNotebookPath(

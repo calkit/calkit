@@ -919,35 +919,49 @@ def check_environments(
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
 ) -> None:
+    """Check that the project's environments are up to date.
+
+    Subprojects' environments are checked too, as 'calkit run' does.
+    """
     ck_info = calkit.load_calkit_info()
-    envs = ck_info.get("environments", {})
-    if not envs:
+    projects = list(calkit.iter_projects(ck_info=ck_info))
+    if not any(info.get("environments") for _, info in projects):
         typer.echo("No environments defined in calkit.yaml")
         return
     # Set any project-level environmental variables before checking
     # environments
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    calkit.set_env_vars(ck_info=ck_info, cli=True)
     failures = []
-    for env_name, env in envs.items():
-        if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
-            if verbose:
-                typer.echo(
-                    f"Skipping check for {env['kind']} env '{env_name}'"
-                )
+    for wdir, info in projects:
+        # A parent's variables apply to its subprojects even if it has no
+        # environments of its own, as in 'calkit run'
+        calkit.set_env_vars(ck_info=info, cli=True)
+        if not info.get("environments"):
             continue
-        typer.echo(f"Checking environment: '{env_name}'")
-        try:
-            check_environment(env_name=env_name, verbose=verbose)
-        except typer.Exit:
-            # The check reported its own reason through raise_error, which
-            # has already printed it. Repeating it here would replace a
-            # real message ("Unknown system property to lock: ...") with
-            # the exit code, since that is all this exception carries.
-            failures.append(env_name)
-        except Exception as e:
-            warn(f"Error checking environment '{env_name}': {e}")
-            failures.append(env_name)
+        # check_environment reads the project it's in, so go there
+        with calkit.in_project(wdir):
+            for env_name, env in info["environments"].items():
+                if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
+                    if verbose:
+                        typer.echo(
+                            f"Skipping check for {env['kind']} env "
+                            f"'{env_name}'"
+                        )
+                    continue
+                qualified = calkit.qualify_with_project(wdir, env_name)
+                typer.echo(f"Checking environment: '{qualified}'")
+                try:
+                    check_environment(env_name=env_name, verbose=verbose)
+                except typer.Exit:
+                    # The check reported its own reason through raise_error,
+                    # which has already printed it. Repeating it here would
+                    # replace a real message ("Unknown system property to
+                    # lock: ...") with the exit code, since that is all this
+                    # exception carries.
+                    failures.append(qualified)
+                except Exception as e:
+                    warn(f"Error checking environment '{qualified}': {e}")
+                    failures.append(qualified)
     if failures:
         raise_error(
             f"Failed to check the following environments: {', '.join(failures)}"
@@ -2195,15 +2209,21 @@ def check_project_requirements(
         ),
     ] = False,
 ) -> None:
-    """Check that a project's system-level requirements are met."""
+    """Check that a project's system-level requirements are met.
+
+    Subprojects' requirements are checked too, since the host has to meet
+    them for the project's pipeline to run.
+    """
     typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
         calkit.requirements.cache_clear()
-    try:
-        calkit.check_requirements(use_cache=not no_cache)
-    except Exception as e:
-        raise_error(str(e))
+    for wdir, info in calkit.iter_projects():
+        try:
+            with calkit.in_project(wdir):
+                calkit.check_requirements(ck_info=info, use_cache=not no_cache)
+        except Exception as e:
+            raise_error(f"{calkit.describe_project(wdir)}{e}")
     message = "✅ All set!"
     calkit.echo(message)
 
@@ -2219,34 +2239,71 @@ def check_stage_runs() -> None:
     mistakes and shortcuts, not forgery, since a matching entry can be
     written by anyone.
     """
+    # Every pipeline 'calkit run' runs with this one is checked too, e.g., a
+    # subproject's, against the record kept beside its dvc.lock: any other
+    # dvc.yaml in this DVC repo. One inside a DVC repo of its own is run by
+    # a wrapper stage, which doesn't record its stages.
     try:
-        with open(calkit.STAGE_RUNS_FPATH) as f:
-            stage_runs = json.load(f)
-    except OSError:
-        stage_runs = {}
-    except json.JSONDecodeError as e:
-        raise_error(f"Can't read {calkit.STAGE_RUNS_FPATH}: {e}")
-    # By directory, for a subproject's stages
-    lock_stages = {None: calkit.dvc.read_lock_stages()}
-    problems = []
-    for name in sorted(set(lock_stages[None]) | set(stage_runs)):
-        lock_dir, lock_name = calkit.dvc.split_lock_stage_name(name)
-        if lock_dir not in lock_stages:
-            lock_stages[lock_dir] = calkit.dvc.read_lock_stages(lock_dir)
-        locked = lock_stages[lock_dir].get(lock_name)
-        # One no longer in dvc.lock has nothing to vouch for
-        if not isinstance(locked, dict):
-            continue
-        recorded = stage_runs.get(name)
-        if not isinstance(recorded, dict):
-            problems.append(f"Stage '{name}' has no recorded run")
-        elif recorded.get("dvc_lock_hash") != calkit.dvc.stage_lock_hash(
-            locked
+        listed = subprocess.check_output(
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*/dvc.yaml",
+            ],
+            text=True,
+        ).splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        listed = []
+    lock_dirs: list[str | None] = [None]
+    for path in sorted(listed):
+        parts = path.split("/")[:-1]
+        if not os.path.isfile(path) or any(
+            os.path.isdir(os.path.join(*parts[:i], ".dvc"))
+            for i in range(1, len(parts) + 1)
         ):
-            problems.append(
-                f"Stage '{name}' has changed in dvc.lock since its last "
-                "recorded run"
+            continue
+        lock_dirs.append("/".join(parts))
+    stage_runs: dict[str | None, dict] = {}
+    for lock_dir in lock_dirs:
+        try:
+            stage_runs[lock_dir] = calkit.read_stage_runs(lock_dir)
+        except json.JSONDecodeError as e:
+            fpath = os.path.join(lock_dir or "", calkit.STAGE_RUNS_FPATH)
+            raise_error(f"Can't read {fpath}: {e}")
+    # This project's records of other pipelines' stages, under the names
+    # they have here, from before they were kept beside their own dvc.lock
+    parent_runs = {
+        k.replace("\\", "/"): v for k, v in stage_runs[None].items()
+    }
+    problems = []
+    for lock_dir in lock_dirs:
+        lock_stages = calkit.dvc.read_lock_stages(lock_dir)
+        for lock_name, locked in sorted(lock_stages.items()):
+            if not isinstance(locked, dict):
+                continue
+            name = (
+                lock_name
+                if lock_dir is None
+                else f"{lock_dir}/dvc.yaml:{lock_name}"
             )
+            # Either record matching will do, since a stage may have been
+            # run from both directories before they were kept together
+            candidates = [stage_runs[lock_dir].get(lock_name)]
+            if lock_dir is not None:
+                candidates.append(parent_runs.get(name))
+            records = [r for r in candidates if isinstance(r, dict)]
+            lock_hash = calkit.dvc.stage_lock_hash(locked)
+            if not records:
+                problems.append(f"Stage '{name}' has no recorded run")
+            elif all(r.get("dvc_lock_hash") != lock_hash for r in records):
+                problems.append(
+                    f"Stage '{name}' has changed in dvc.lock since its last "
+                    "recorded run"
+                )
     for problem in problems:
         typer.echo(problem)
     if problems:
@@ -2264,23 +2321,31 @@ def check_env_vars(
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
     ] = False,
 ) -> None:
-    """Check that the project's required environmental variables exist."""
+    """Check that the project's required environmental variables exist.
+
+    Subprojects' are included, since they are read from the same
+    environment.
+    """
     from calkit.core import _normalize_requirement
 
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
-    ck_info = calkit.load_calkit_info()
-    for raw in calkit.get_requirements(ck_info):
-        req = _normalize_requirement(raw)
-        if req["kind"] != "env-var":
-            continue
-        name = req["name"]
-        if verbose:
-            typer.echo(f"Checking for environmental variable '{name}'")
-        if name not in os.environ:
-            value = calkit.requirements.prompt_for_env_var_req(req)
-            if value is None:
-                raise_error(f"No value provided for '{name}'")
+    for wdir, info in calkit.iter_projects():
+        with calkit.in_project(wdir):
+            for raw in calkit.get_requirements(info):
+                req = _normalize_requirement(raw)
+                if req["kind"] != "env-var":
+                    continue
+                name = req["name"]
+                if verbose:
+                    typer.echo(f"Checking for environmental variable '{name}'")
+                if name not in os.environ:
+                    value = calkit.requirements.prompt_for_env_var_req(req)
+                    if value is None:
+                        raise_error(
+                            f"{calkit.describe_project(wdir)}no value "
+                            f"provided for '{name}'"
+                        )
     message = "✅ All set!"
     calkit.echo(message)
 
@@ -2296,21 +2361,34 @@ def check_pipeline(
         ),
     ] = False,
 ) -> None:
-    """Check that the project pipeline is defined correctly."""
+    """Check that the project pipeline is defined correctly.
+
+    Subprojects' pipelines are checked too, since those are stages the
+    project runs.
+    """
     from calkit.models.pipeline import Pipeline
 
     ck_info = calkit.load_calkit_info()
-    if "pipeline" not in ck_info:
+    projects = [
+        (wdir, info)
+        for wdir, info in calkit.iter_projects(ck_info=ck_info)
+        if "pipeline" in info
+    ]
+    if not projects:
         raise_error("No pipeline is defined in calkit.yaml")
-    try:
-        pipeline = Pipeline.model_validate(ck_info["pipeline"], strict=True)
-    except Exception as e:
-        raise_error(f"Pipeline is not defined correctly: {e}")
-    # Check that we have no leading underscores in stage names, since those
-    # are reserved for auto-generated stages
-    for stage_name in pipeline.stages.keys():
-        if stage_name.startswith("_"):
-            raise_error("Stage names cannot start with an underscore")
+    for wdir, info in projects:
+        where = calkit.describe_project(wdir)
+        try:
+            pipeline = Pipeline.model_validate(info["pipeline"], strict=True)
+        except Exception as e:
+            raise_error(f"{where}pipeline is not defined correctly: {e}")
+        # Check that we have no leading underscores in stage names, since
+        # those are reserved for auto-generated stages
+        for stage_name in pipeline.stages.keys():
+            if stage_name.startswith("_"):
+                raise_error(
+                    f"{where}stage names cannot start with an underscore"
+                )
     message = "✅ This project's pipeline is defined correctly!"
     calkit.echo(message)
     if compile_to_dvc:
@@ -2388,7 +2466,9 @@ def check_storage(
     stale: set[str] | None = set()
     if any(p["stage"] for p in to_record):
         status = calkit.pipeline.get_status(
-            check_environments=False, clean_notebooks=False
+            check_environments=False,
+            clean_notebooks=False,
+            preprocess_stages=False,
         )
         if not status.errors:
             stale = {n.split("@")[0] for n in status.stale_stage_names}

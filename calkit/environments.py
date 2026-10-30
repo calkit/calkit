@@ -459,12 +459,15 @@ STAGED_CALKIT_PATHS = [
 ]
 
 
-def stage_calkit_files(wdir: str | None = None) -> None:
+def stage_calkit_files(
+    wdir: str | None = None, extra_paths: list[str] | None = None
+) -> None:
     """Stage what Calkit has written to be committed, when autostaging.
 
     DVC stages ``dvc.lock``, which records hashes of, e.g., env locks and
     stage command files, so a commit of it without them leaves a clone
-    without what its stages depend on.
+    without what its stages depend on. ``extra_paths`` are others Calkit
+    wrote, relative to ``wdir`` like the rest.
     """
     import calkit.dvc
     import calkit.git
@@ -474,13 +477,22 @@ def stage_calkit_files(wdir: str | None = None) -> None:
         return
     paths = [
         os.path.abspath(p)
-        for p in [os.path.join(wdir or "", p) for p in STAGED_CALKIT_PATHS]
+        for p in [
+            os.path.join(wdir or "", p)
+            for p in STAGED_CALKIT_PATHS + (extra_paths or [])
+        ]
         if os.path.exists(p)
     ]
     if not paths:
         return
     try:
-        calkit.git.get_repo(wdir).git.add("-A", "--", *paths)
+        repo = calkit.git.get_repo(wdir)
+        # A project that ignores one of these has chosen not to commit it,
+        # and naming it to 'git add' would fail the whole call
+        ignored = {os.path.abspath(p) for p in repo.ignored(*paths)}
+        paths = [p for p in paths if p not in ignored]
+        if paths:
+            repo.git.add("-A", "--", *paths)
     except Exception as e:
         warn(f"Couldn't stage the files Calkit wrote: {e}")
 
@@ -2224,31 +2236,61 @@ def check_all_in_pipeline(
 
     @contextmanager
     def silenced() -> Iterator[None]:
-        # Tools write to the terminal directly, so this is done at the file
-        # descriptor level as well as Python's
+        # Tools write to the terminal directly, so this is done where they
+        # inherit it from as well as Python's. Nobody can see a prompt here,
+        # so input is from devnull, which answers one rather than hangs.
         if not quiet:
             yield
             return
         sys.stdout.flush()
         sys.stderr.flush()
-        saved = [os.dup(1), os.dup(2)]
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        try:
-            os.dup2(devnull, 1)
-            os.dup2(devnull, 2)
-            with (
-                open(os.devnull, "w") as null,
-                redirect_stdout(null),
-                redirect_stderr(null),
-            ):
-                yield
-        finally:
-            sys.stdout.flush()
-            sys.stderr.flush()
-            os.dup2(saved[0], 1)
-            os.dup2(saved[1], 2)
-            for fd in [*saved, devnull]:
-                os.close(fd)
+        saved_stdin = sys.stdin
+        with (
+            open(os.devnull, "r+") as null,
+            redirect_stdout(null),
+            redirect_stderr(null),
+        ):
+            sys.stdin = null
+            try:
+                if sys.platform == "win32":
+                    # Replacing descriptors 0-2 would close the console
+                    # handles Click uses, so only the standard handles that
+                    # subprocesses inherit are swapped
+                    import ctypes
+                    import msvcrt
+                    from ctypes import wintypes
+
+                    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+                    kernel32.GetStdHandle.restype = wintypes.HANDLE
+                    kernel32.SetStdHandle.argtypes = [
+                        wintypes.DWORD,
+                        wintypes.HANDLE,
+                    ]
+                    kernel32.SetStdHandle.restype = wintypes.BOOL
+                    # STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
+                    std_ids = [-10, -11, -12]
+                    null_handle = msvcrt.get_osfhandle(null.fileno())
+                    saved = [kernel32.GetStdHandle(i) for i in std_ids]
+                    try:
+                        for i in std_ids:
+                            kernel32.SetStdHandle(i, null_handle)
+                        yield
+                    finally:
+                        for i, h in zip(std_ids, saved):
+                            kernel32.SetStdHandle(i, h)
+                else:
+                    saved = [os.dup(fd) for fd in (0, 1, 2)]
+                    try:
+                        for fd in (0, 1, 2):
+                            os.dup2(null.fileno(), fd)
+                        yield
+                    finally:
+                        for fd, saved_fd in enumerate(saved):
+                            os.dup2(saved_fd, fd)
+                            os.close(saved_fd)
+            finally:
+                sys.stdin = saved_stdin
 
     # TODO: ``check_environment`` should be able to take a wdir argument
     if wdir is not None:

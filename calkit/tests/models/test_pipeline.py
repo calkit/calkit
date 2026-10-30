@@ -12,6 +12,7 @@ from calkit.models.pipeline import (
     LatexStage,
     MapPathsStage,
     MarimoHtmlWasmStage,
+    MarkdownStage,
     MatlabCommandStage,
     MatlabScriptStage,
     Pipeline,
@@ -20,6 +21,7 @@ from calkit.models.pipeline import (
     ShellScriptStage,
     StageIteration,
     WordToPdfStage,
+    quote_arg,
 )
 
 
@@ -49,6 +51,38 @@ def test_pythonscriptstage():
     assert sd["outs"][1] == {
         "data/something.csv": dict(cache=False, persist=False)
     }
+
+
+def test_quote_arg():
+    # One argument with a space is quoted for both cmd.exe and POSIX shells
+    assert quote_arg("2026-06-09 12:00:00") == '"2026-06-09 12:00:00"'
+    assert quote_arg(r"C:\My Data\\") == r'"C:\My Data\\\\"'
+    # Args that compiled to these before keep doing so
+    assert quote_arg("--model={var}") == "--model={var}"
+    assert quote_arg("$HOME") == "$HOME"
+    assert quote_arg("") == ""
+    assert quote_arg('--date="{date}"') == '--date="{date}"'
+    assert quote_arg("'a b'") == "'a b'"
+    assert quote_arg("--theta {theta}") == "--theta {theta}"
+    # Each stage kind with script args passes them through it
+    s = PythonScriptStage(
+        name="sample",
+        environment="py1",
+        script_path="scripts/x.py",
+        args=["--before", "2026-06-09 12:00:00", "--theta 5"],
+    )
+    assert s.to_dvc()["cmd"] == (
+        "calkit xenv -n py1 --no-check -- python scripts/x.py "
+        '--before "2026-06-09 12:00:00" --theta 5'
+    )
+    s = ShellScriptStage(
+        name="sample",
+        kind="shell-script",
+        environment="_system",
+        script_path="scripts/x.sh",
+        args=["a b"],
+    )
+    assert s.to_dvc()["cmd"].endswith('scripts/x.sh "a b"')
 
 
 def test_wordtopdfstage():
@@ -926,6 +960,18 @@ def test_json_to_latex_cmd_uses_paths_not_objects():
     assert "'b.json'" in cmd
     assert "PathInput" not in cmd
     assert "from_stage_outputs" not in cmd
+    # A schedule's period file is a dependency, but not data to read
+    stage = JsonToLatexStage.model_validate(
+        {
+            "kind": "json-to-latex",
+            "inputs": ["a.json", {"kind": "schedule", "period": "1 day"}],
+            "outputs": ["out.tex"],
+        }
+    )
+    period_file = ".calkit/local/current-periods/1-day-utc.txt"
+    assert period_file in stage.to_dvc()["deps"]
+    assert "current-periods" not in stage.dvc_cmd
+    assert "'a.json'" in stage.dvc_cmd
 
 
 def test_system_env_can_wrap_a_runtime():
@@ -1064,3 +1110,16 @@ def test_to_dvc_deps_have_no_duplicates():
     ]:
         deps = stage.to_dvc()["deps"]
         assert len(deps) == len(set(deps)), f"duplicates in {deps}"
+
+
+def test_markdownstage():
+    # The file's blocks become their own stages with their own outputs, so
+    # the stage standing in for them has none, e.g., when the hub lists
+    # what each stage produces without expanding Markdown first
+    s = MarkdownStage(
+        target_path="docs/main.md",
+        pdf={"output_path": "docs/main.pdf", "environment": "tex"},
+    )
+    assert s.outputs is None
+    assert s.dvc_outs == []
+    assert s.dvc_out_paths == []

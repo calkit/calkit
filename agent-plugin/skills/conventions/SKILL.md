@@ -37,9 +37,8 @@ A minimal example:
 ```yaml
 environments:
   main:
-    kind: uv-venv
-    path: requirements.txt
-    python: "3.13"
+    kind: uv
+    path: pyproject.toml
 
 pipeline:
   stages:
@@ -61,7 +60,8 @@ kinds:
 
 | Kind      | Spec file                               |
 | --------- | --------------------------------------- |
-| `uv-venv` | `requirements.txt` or `pyproject.toml`  |
+| `uv`      | `pyproject.toml` (with `uv.lock`)       |
+| `uv-venv` | `requirements.txt`                      |
 | `venv`    | `requirements.txt`                      |
 | `conda`   | `environment.yml`                       |
 | `pixi`    | `pixi.toml`                             |
@@ -72,6 +72,12 @@ kinds:
 | `ssh`     | (remote host config)                    |
 | `slurm`   | (HPC cluster config)                    |
 
+For Python, default to a `uv` project environment, created with
+`calkit new uv-env -n <name> <packages>`, which writes `pyproject.toml` and
+`uv.lock`; set the Python version with `--python`, which becomes
+`requires-python`. Use `uv-venv` only for a project that already has a
+`requirements.txt` it should keep.
+
 Example environment definitions:
 
 ```yaml
@@ -79,12 +85,6 @@ environments:
   py:
     kind: uv
     path: pyproject.toml
-    python: "3.13"
-
-  py2:
-    kind: uv-venv
-    path: requirements.txt
-    python: "3.13"
 
   texlive:
     kind: docker
@@ -197,23 +197,24 @@ DVC handles:
 
 ## Key CLI commands
 
-| Command                         | What it does                                         |
-| ------------------------------- | ---------------------------------------------------- |
-| `calkit run`                    | Run the pipeline (skips unchanged stages)            |
-| `calkit run --force`            | Force re-run all stages                              |
-| `calkit status`                 | Show which stages are stale                          |
-| `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline    |
-| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                 |
-| `calkit push`                   | Push Git commits and DVC-tracked files to remotes    |
-| `calkit pull`                   | Pull latest code and data                            |
-| `calkit save`                   | Auto-add, commit, and push (Git + DVC)               |
-| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)               |
-| `calkit add <file>`             | Add a file to version control                        |
-| `calkit check env --name <env>` | Verify an environment matches its spec               |
-| `calkit new`                    | Create new project objects (notebook, dataset, etc.) |
-| `calkit new question "<text>"`  | Record a research question                           |
-| `calkit list questions`         | Show questions with answers rendered from evidence   |
-| `calkit check questions`        | Check answers against current evidence               |
+| Command                         | What it does                                           |
+| ------------------------------- | ------------------------------------------------------ |
+| `calkit run`                    | Run the pipeline (skips unchanged stages)              |
+| `calkit run --force`            | Force re-run all stages                                |
+| `calkit status`                 | Show which stages are stale                            |
+| `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline      |
+| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                   |
+| `calkit push`                   | Push Git commits and DVC-tracked files to remotes      |
+| `calkit pull`                   | Pull latest code and data                              |
+| `calkit save`                   | Auto-add, commit, and push (Git + DVC)                 |
+| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)                 |
+| `calkit add <file>`             | Add a file to version control                          |
+| `calkit check env --name <env>` | Verify an environment matches its spec                 |
+| `calkit new`                    | Create new project objects (notebook, dataset, etc.)   |
+| `calkit new question "<text>"`  | Record a research question                             |
+| `calkit list questions`         | List questions with what each has and lacks            |
+| `calkit show question <n>`      | Show a question with its answer rendered from evidence |
+| `calkit check questions`        | Check answers against current evidence                 |
 
 ## `calkit xr`: The fastest path to a reproducible stage
 

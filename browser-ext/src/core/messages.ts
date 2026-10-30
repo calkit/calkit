@@ -6,17 +6,20 @@ import type {
   ContentsItem,
   DvcOutput,
   TextDiff,
-  Figure,
+  FiguresPage,
   GithubRepo,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
+  Provenance,
   PullRequestRefs,
   ProjectsPublic,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
+  Result,
+  Table,
 } from "./types";
 
 /**
@@ -55,6 +58,8 @@ export type Request =
        * would then fail.
        */
       minAccessLevel?: "read" | "write";
+      /** Only the project for this GitHub repo, e.g., "owner/repo". */
+      githubRepo?: string;
     }
   | ({ type: "projects.byGithubRepo"; githubRepo: string } & HubScoped)
   | ({
@@ -70,6 +75,7 @@ export type Request =
     } & HubScoped)
   | { type: "github.calkitInfo"; githubRepo: string }
   | { type: "github.repos"; perPage?: number }
+  | { type: "github.installations" }
   | ({
       type: "github.pullRequest";
       owner: string;
@@ -100,6 +106,16 @@ export type Request =
       head: string;
     } & HubScoped)
   | { type: "project.figures"; owner: string; project: string }
+  | { type: "project.tables"; owner: string; project: string }
+  | { type: "project.results"; owner: string; project: string }
+  | {
+      type: "project.provenance";
+      owner: string;
+      project: string;
+      path: string;
+      /** A value in a results file; without one, the file comes back whole. */
+      key?: string;
+    }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
   | {
@@ -118,6 +134,7 @@ export type Request =
     }
   | { type: "overleaf.sync"; owner: string; project: string; path: string }
   | { type: "overleaf.setToken"; token: string }
+  | { type: "overleaf.connectSession" }
   | {
       type: "overleaf.import";
       owner: string;
@@ -172,17 +189,22 @@ export interface ResponseMap {
   "projects.create": ProjectPublic;
   "github.calkitInfo": CalkitYamlInfo;
   "github.repos": GithubRepo[];
+  "github.installations": { total_count: number };
   "github.pullRequest": PullRequestRefs;
   "project.contents": ContentsItem;
   "project.dvcOutputs": DvcOutput[];
   "project.textDiff": TextDiff;
-  "project.figures": Figure[];
+  "project.figures": FiguresPage;
+  "project.tables": Table[];
+  "project.results": Result[];
+  "project.provenance": Provenance;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;
   "overleaf.status": OverleafSyncStatus[];
   "overleaf.sync": OverleafSyncResponse;
   "overleaf.setToken": { message: string };
+  "overleaf.connectSession": { message: string };
   "overleaf.import": { path: string; title: string };
   "references.list": References[];
   "references.search": ReferenceSearchMatch[];

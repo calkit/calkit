@@ -937,13 +937,45 @@ def read_lock_stages(wdir: str | None = None) -> dict:
     return stages if isinstance(stages, dict) else {}
 
 
+def read_lock_stages_at_ref(ref: str, wdir: str | None = None) -> dict:
+    """The stages the ``dvc.lock`` committed at ``ref`` records.
+
+    How a stage stood at an old commit can only be read from the record
+    that commit carries, since there is nothing on disk there to hash.
+    """
+    import io
+
+    import calkit.git
+
+    repo = calkit.git.get_repo()
+    rel = os.path.relpath(
+        os.path.join(wdir or ".", "dvc.lock"), str(repo.working_dir)
+    ).replace(os.sep, "/")
+    blob = calkit.git.read_at_ref(repo, ref, rel)
+    if blob is None:
+        raise FileNotFoundError(f"No {rel} at {ref}")
+    data = calkit.ryaml.load(io.StringIO(blob.decode())) or {}
+    stages = data.get("stages") if isinstance(data, dict) else None
+    return stages if isinstance(stages, dict) else {}
+
+
+def cache_path(md5: str, wdir: str | None = None) -> str | None:
+    """Where a hash's contents sit in the local cache, if they're there."""
+    root = wdir or "."
+    for parts in (("files", "md5", md5[:2], md5[2:]), (md5[:2], md5[2:])):
+        path = os.path.join(root, ".dvc", "cache", *parts)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def split_lock_stage_name(stage_name: str) -> tuple[str | None, str]:
     """The directory of the ``dvc.lock`` recording a stage, and its name there.
 
     A subproject's stage run from its parent is named, e.g.,
-    'sub/dvc.yaml:stage'.
+    'sub/dvc.yaml:stage', with a backslash on Windows.
     """
-    dvc_yaml, sep, name = stage_name.rpartition(":")
+    dvc_yaml, sep, name = stage_name.replace("\\", "/").rpartition(":")
     if sep and posixpath.basename(dvc_yaml) == "dvc.yaml":
         return posixpath.dirname(dvc_yaml) or None, name
     return None, stage_name

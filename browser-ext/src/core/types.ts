@@ -145,6 +145,60 @@ export interface Figure {
   storage?: "git" | "dvc" | "dvc-zip" | null;
 }
 
+export interface FiguresPage {
+  items: Figure[];
+  total: number;
+}
+
+export interface Table {
+  path: string;
+  title: string;
+  stage?: string | null;
+  stage_status?: StageStatus | null;
+}
+
+export interface Result {
+  path: string;
+  title: string;
+  key?: string | null;
+  stage?: string | null;
+  stage_status?: StageStatus | null;
+}
+
+/** Where a path, or one value in a results file, came from. */
+export interface Provenance {
+  path: string;
+  key?: string | null;
+  exists: boolean;
+  value?: unknown;
+  value_error?: string | null;
+  stage?: string | null;
+  stage_kind?: string | null;
+  /** What to edit to change it: the stage's script, notebook, or document. */
+  source?: string | null;
+  command?: string | null;
+  inputs: string[];
+  stage_status?: StageStatus | null;
+  stale_reason?: "pipeline" | "frozen" | null;
+  /** Where a copy, e.g., one put beside a document, came from. */
+  copied_from?: string | null;
+  copy_stage?: string | null;
+  /**
+   * Where calkit.yaml says something no stage makes came from, e.g., an
+   * import or who created it, maybe recorded for a folder it's in.
+   */
+  origin?: string | null;
+  origin_url?: string | null;
+  origin_path?: string | null;
+  /** Data behind it, however far back, nothing records the origin of. */
+  gaps?: ProvenanceGap[];
+}
+
+export interface ProvenanceGap {
+  path: string;
+  steps: { path: string; stage?: string | null }[];
+}
+
 export interface ReferenceEntry {
   type: string;
   key: string;

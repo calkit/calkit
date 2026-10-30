@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
 import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -252,6 +253,7 @@ KEYRING_FIELDS = frozenset(
         "zenodo_token",
         "caltechdata_token",
         "overleaf_token",
+        "overleaf_session",
     ]
 )
 
@@ -301,6 +303,243 @@ def get_config_yaml_fpath() -> str:
 _secret_cache: dict[tuple[str, str], str | None] = {}
 
 
+# On macOS, Apple's security tool reads and writes Calkit's items, since
+# the keychain trusts only the program that last wrote one, and Python
+# differs between installs and versions; any program running as the user
+# can read them through the tool, as through a trusted Python before
+_SECURITY = "/usr/bin/security"
+# Mark the items Calkit wrote through the security tool, the second for
+# values stored as hex, since the tool reads others back as hex anyway
+_SECURITY_CREATOR = "ckit"
+_SECURITY_HEX_CREATOR = "ckhx"
+# A keychain call takes milliseconds, so one still running after this is
+# waiting on a dialog
+_SECURITY_TIMEOUT = 15
+_SECURITY_ITEM_NOT_FOUND = 44
+
+
+def _uses_security_tool() -> bool:
+    if platform.system() != "Darwin" or not os.path.exists(_SECURITY):
+        return False
+    import keyring.backends.macOS
+
+    return isinstance(keyring.get_keyring(), keyring.backends.macOS.Keyring)
+
+
+def _has_terminal() -> bool:
+    """Whether someone may be there to answer a keychain dialog."""
+    import sys
+
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except (ValueError, OSError):
+        return False
+
+
+def _run_security(
+    args: list[str], input: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run the security tool, giving up on a dialog when no one can answer
+    it, since a command run by an editor or agent would otherwise hang.
+    """
+    try:
+        return subprocess.run(
+            [_SECURITY, *args],
+            input=input,
+            capture_output=True,
+            text=True,
+            timeout=None if _has_terminal() else _SECURITY_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise keyring.errors.KeyringLocked(
+            "The macOS keychain is waiting on a dialog to allow access, "
+            "and with no terminal attached, nobody may be there to answer "
+            "it; run the command again from a terminal and allow access"
+        )
+
+
+def _security_item(service: str, username: str) -> str | None:
+    """Return an item's attributes, without its secret, so without asking
+    the user, or ``None`` if there's no such item.
+    """
+    found = _run_security(
+        ["find-generic-password", "-s", service, "-a", username]
+    )
+    if found.returncode == _SECURITY_ITEM_NOT_FOUND:
+        return None
+    if found.returncode != 0:
+        raise keyring.errors.KeyringError(
+            f"Can't find password on keychain: {found.stderr.strip()}"
+        )
+    return found.stdout
+
+
+def _get_creator(attrs: str) -> str | None:
+    """Return which of Calkit's creator codes an item has, if any."""
+    for creator in (_SECURITY_CREATOR, _SECURITY_HEX_CREATOR):
+        if f'"crtr"<uint32>="{creator}"' in attrs:
+            return creator
+    return None
+
+
+def _delete_old_macos_secret(service: str, username: str) -> None:
+    """Delete an item an older Calkit wrote, in-process first, since this
+    Python may be trusted with it and the security tool isn't.
+    """
+    try:
+        with _keychain_ui(False):
+            keyring.delete_password(service, username)
+        return
+    except keyring.errors.KeyringError:
+        pass
+    if not _has_terminal():
+        raise keyring.errors.KeyringLocked(
+            f"Changing '{username}' in the macOS keychain needs a dialog to "
+            "allow access, and with no terminal attached, nobody may be "
+            "there to answer it; run 'calkit config list' in a terminal "
+            "and allow access"
+        )
+    deleted = _run_security(
+        ["delete-generic-password", "-s", service, "-a", username]
+    )
+    if deleted.returncode not in (0, _SECURITY_ITEM_NOT_FOUND):
+        raise keyring.errors.PasswordDeleteError(
+            f"Can't delete old password in keychain: {deleted.stderr.strip()}"
+        )
+
+
+def _set_macos_secret(service: str, username: str, value: str) -> bool:
+    """Store a secret through the security tool, returning ``False`` if its
+    command line would be over the 4 KiB it reads, or split in two.
+    """
+
+    def quote(s: str) -> str:
+        return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+    # A line break would end the command and start another, e.g., from a
+    # hub URL a cloned project declares, so those stay with keyring
+    if not (service.isprintable() and username.isprintable()):
+        return False
+    creator, stored = _SECURITY_CREATOR, value
+    if not (value.isascii() and value.isprintable()):
+        creator, stored = _SECURITY_HEX_CREATOR, value.encode("utf-8").hex()
+    # On stdin rather than in the arguments, which other users can see
+    command = (
+        f"add-generic-password -U -c {creator} "
+        f"-s {quote(service)} -a {quote(username)} -w {quote(stored)}\n"
+    )
+    if len(command.encode("utf-8")) > 4000:
+        return False
+    attrs = _security_item(service, username)
+    if attrs is not None and _get_creator(attrs) is None:
+        # Updating an item keeps who may read it, which doesn't include
+        # the security tool, so replace it instead
+        _delete_old_macos_secret(service, username)
+    added = _run_security(["-i"], input=command)
+    if added.returncode != 0:
+        raise keyring.errors.PasswordSetError(
+            f"Can't store password on keychain: {added.stderr.strip()}"
+        )
+    return True
+
+
+@contextmanager
+def _keychain_ui(allowed: bool) -> Iterator[None]:
+    """Allow or forbid keychain dialogs from this process, so a read that
+    would need one fails at once instead.
+    """
+    import ctypes
+    import ctypes.util
+
+    sec = ctypes.CDLL(ctypes.util.find_library("Security"))
+    sec.SecKeychainGetUserInteractionAllowed.argtypes = (
+        ctypes.POINTER(ctypes.c_bool),
+    )
+    sec.SecKeychainSetUserInteractionAllowed.argtypes = (ctypes.c_bool,)
+    before = ctypes.c_bool(True)
+    sec.SecKeychainGetUserInteractionAllowed(ctypes.byref(before))
+    sec.SecKeychainSetUserInteractionAllowed(allowed)
+    try:
+        yield
+    finally:
+        sec.SecKeychainSetUserInteractionAllowed(before.value)
+
+
+# Whether the user agreed to macOS asking to read older Calkit items,
+# asked once per process
+_old_items_allowed: bool | None = None
+
+
+def _allow_old_items() -> bool:
+    """Ask, in Calkit's words, before macOS asks to let this Python read
+    items an older Calkit wrote, since its dialog names Python.
+    """
+    global _old_items_allowed
+    if _old_items_allowed is None:
+        import sys
+
+        import typer
+
+        python = os.path.basename(os.path.realpath(sys.executable))
+        _old_items_allowed = typer.confirm(
+            "Calkit needs to open your keychain to move logins an older "
+            "version saved there, after which no Calkit install asks "
+            f"again. macOS will ask whether '{python}', which runs Calkit, "
+            "may use your keychain. Continue?",
+            default=True,
+            err=True,
+        )
+    return _old_items_allowed
+
+
+def _get_macos_secret(service: str, username: str) -> str | None:
+    attrs = _security_item(service, username)
+    if attrs is None:
+        return None
+    creator = _get_creator(attrs)
+    if creator is not None:
+        found = _run_security(
+            ["find-generic-password", "-s", service, "-a", username, "-w"]
+        )
+        if found.returncode == _SECURITY_ITEM_NOT_FOUND:
+            return None
+        if found.returncode != 0:
+            raise keyring.errors.KeyringError(
+                f"Can't get password from keychain: {found.stderr.strip()}"
+            )
+        stored = found.stdout.removesuffix("\n")
+        if creator == _SECURITY_HEX_CREATOR:
+            return bytes.fromhex(stored).decode("utf-8")
+        return stored
+    # Written by an older Calkit, so only the interpreters it trusts can
+    # read it without a dialog, which is tried first
+    try:
+        with _keychain_ui(False):
+            value = keyring.get_password(service, username)
+    except keyring.errors.KeyringError as e:
+        if not _has_terminal():
+            raise keyring.errors.KeyringLocked(
+                f"Reading '{username}' from the macOS keychain needs a "
+                "dialog to allow access, and with no terminal attached, "
+                "nobody may be there to answer it; run 'calkit config list' "
+                "in a terminal and allow access, after which every Calkit "
+                "install can read it without asking"
+            ) from e
+        if not _allow_old_items():
+            raise keyring.errors.KeyringLocked(
+                f"Not allowed to read '{username}' from the macOS keychain"
+            ) from e
+        with _keychain_ui(True):
+            value = keyring.get_password(service, username)
+    if value is not None:
+        # Move it over so other installs can read it too
+        try:
+            _set_macos_secret(service, username, value)
+        except keyring.errors.KeyringError as e:
+            warnings.warn(f"Couldn't move '{username}' in the keychain: {e}")
+    return value
+
+
 def set_secret(key: str, value: str) -> None:
     """Sets a secret using keyring, handling byte conversion for Linux."""
     service_name = get_app_name()
@@ -309,7 +548,9 @@ def set_secret(key: str, value: str) -> None:
         if platform.system() == "Linux":
             value_bytes = value.encode("utf-8")
             keyring.set_password(service_name, username, value_bytes)  # type: ignore
-        else:
+        elif not _uses_security_tool() or not _set_macos_secret(
+            service_name, username, value
+        ):
             keyring.set_password(service_name, username, value)
     _secret_cache[(service_name, username)] = value
 
@@ -322,7 +563,10 @@ def get_secret(key: str) -> str | None:
     if cache_key in _secret_cache:
         return _secret_cache[cache_key]
     with _keyring_home():
-        password = keyring.get_password(service_name, username)
+        if _uses_security_tool():
+            password = _get_macos_secret(service_name, username)
+        else:
+            password = keyring.get_password(service_name, username)
     if platform.system() == "Linux" and isinstance(password, bytes):
         password = password.decode("utf-8")
     _secret_cache[cache_key] = password
@@ -335,7 +579,22 @@ def delete_secret(key: str) -> None:
     username = _keyring_username(key)
     _secret_cache.pop((service_name, username), None)
     with _keyring_home():
-        keyring.delete_password(service_name, username)
+        if not _uses_security_tool():
+            keyring.delete_password(service_name, username)
+            return
+        attrs = _security_item(service_name, username)
+        if attrs is not None and _get_creator(attrs) is None:
+            _delete_old_macos_secret(service_name, username)
+            return
+        deleted = _run_security(
+            ["delete-generic-password", "-s", service_name, "-a", username]
+        )
+    if deleted.returncode == _SECURITY_ITEM_NOT_FOUND:
+        raise keyring.errors.PasswordDeleteError("Password not found")
+    if deleted.returncode != 0:
+        raise keyring.errors.PasswordDeleteError(
+            f"Can't delete password in keychain: {deleted.stderr.strip()}"
+        )
 
 
 class KeyringOptionalSecret(str):
@@ -428,6 +687,8 @@ class Settings(BaseSettings):
     zenodo_token: KeyringOptionalSecret | None = None
     caltechdata_token: KeyringOptionalSecret | None = None
     overleaf_token: KeyringOptionalSecret | None = None
+    # Browser session cookie, for syncing without Overleaf's Git integration
+    overleaf_session: KeyringOptionalSecret | None = None
 
     # Which fields have been resolved from the keyring, so a secret that
     # is genuinely absent isn't looked up again, and an assignment (even
@@ -514,7 +775,9 @@ class Settings(BaseSettings):
         fpath = get_config_yaml_fpath()
         base_dir = os.path.dirname(fpath)
         os.makedirs(base_dir, exist_ok=True)
-        cfg = self.model_dump()
+        # Without reading secrets nothing asked for, which can mean a
+        # keychain dialog, since an unread one hasn't changed
+        cfg = super().model_dump()
         # Remove anything that should be in the keyring; hub-scoped
         # credentials get hub-namespaced usernames via set/delete_secret
         if supports_keyring():
@@ -523,6 +786,16 @@ class Settings(BaseSettings):
                     KeyringOptionalSecret in get_type_args(value.annotation)
                 ) and key in cfg:
                     secret_val = cfg.pop(key)
+                    if (
+                        secret_val is None
+                        and key not in self._resolved_secrets
+                    ):
+                        continue
+                    # Only what changed, so a token refresh leaves the
+                    # others, and who may read them, alone
+                    stored = (get_app_name(), _keyring_username(key))
+                    if _secret_cache.get(stored, ...) == secret_val:
+                        continue
                     if secret_val is not None:
                         set_secret(key, secret_val)
                     else:

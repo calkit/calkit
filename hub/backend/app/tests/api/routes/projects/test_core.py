@@ -21,6 +21,8 @@ from app.config import settings
 from app.core import ryaml
 from app.models import Project, UserCreate
 from app.models.core import Account, ContentsItem, UserProjectAccess
+from app.pipeline import PipelineAtRef
+from app.pipeline import StageStatus as PipelineStageStatus
 from app.projects import CkInfoAndOuts
 from app.tests import authentication_token_from_email, create_random_user
 
@@ -1371,7 +1373,11 @@ def test_get_project_results_autodetects_and_reads_ref(
 ) -> None:
     """Results under a results-style dir are auto-detected, and declared
     results plus the tree are read at the requested ref."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000002")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000002",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     detected_paths = [
         "results/summary.json",
         "results/data.csv",
@@ -1425,6 +1431,22 @@ def test_get_project_results_autodetects_and_reads_ref(
             ".get_ck_info_and_dvc_outs_from_tree",
             return_value=CkInfoAndOuts({}, {}, {}, {}),
         ),
+        # The stage that writes a result, and whether it's out of date
+        patch(
+            "app.api.routes.projects.core.pipeline_at_ref",
+            return_value=PipelineAtRef(
+                dvc_yaml={},
+                dvc_lock={
+                    "stages": {
+                        "summarize": {
+                            "outs": [{"path": "results/summary.json"}]
+                        }
+                    }
+                },
+                statuses={"summarize": PipelineStageStatus(status="stale")},
+                frozen=set(),
+            ),
+        ),
     ):
         response = client.get(
             "/projects/test-owner/test-project/results?ref=some-branch"
@@ -1445,6 +1467,10 @@ def test_get_project_results_autodetects_and_reads_ref(
     assert titles["results/data.csv"] == "Data"
     assert mock_get_repo.call_args.kwargs["ref"] == "some-branch"
     assert mock_ck_for_ref.call_args.kwargs["ref"] == "some-branch"
+    by_path = {res["path"]: res for res in body}
+    assert by_path["results/summary.json"]["stage"] == "summarize"
+    assert by_path["results/summary.json"]["stage_status"]["status"] == "stale"
+    assert by_path["results/data.csv"]["stage_status"] is None
 
 
 def test_get_project_questions_without_an_index(
@@ -1506,6 +1532,97 @@ def test_get_project_questions_without_an_index(
         indexed = client.get(f"{base}/questions", headers=headers).json()
     by_number = {q.number: str(q.id) for q in project.questions}
     assert [q["id"] for q in indexed] == [by_number[n] for n in (1, 2, 3)]
+
+
+def test_get_project_questions_checks_sign_offs(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    import git
+
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    repo = git.Repo.init(tmp_path)
+    with repo.config_writer() as config:
+        config.set_value("user", "name", "t")
+        config.set_value("user", "email", "t@t")
+    ada = {"name": "Ada", "email": "ada@example.org"}
+    question = {
+        "question": "Does it work?",
+        "approach": "Run it.",
+        "answer": "Yes.",
+        "verifications": [
+            {"by": ada, "date": "2026-10-04", "notes": "Read run.py."}
+        ],
+        "validations": [
+            {"by": {**ada, "with_ai": "Claude Opus 5"}, "date": "2026-10-04"}
+        ],
+    }
+
+    def commit(message: str) -> str:
+        with open(tmp_path / "calkit.yaml", "w") as f:
+            ryaml.dump({"questions": [question]}, f)
+        repo.git.add("calkit.yaml")
+        repo.git.commit("-m", message)
+        return repo.head.commit.hexsha
+
+    signed = commit("Sign off")
+    question["answer"] = "Mostly."
+    commit("Edit the answer")
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        r = client.get(f"{base}/questions", headers=headers)
+        assert r.status_code == 200, r.text
+        now = r.json()[0]
+        r = client.get(
+            f"{base}/questions", params={"ref": signed}, headers=headers
+        )
+        assert r.status_code == 200, r.text
+        then = r.json()[0]
+    # Editing the answer makes the validation stale, but not the
+    # verification, since the approach and stages didn't change
+    assert now["approach"] == "Run it."
+    assert [s["status"] for s in now["verifications"]] == ["current"]
+    assert now["verifications"][0]["by"] == "Ada"
+    assert now["verifications"][0]["notes"] == "Read run.py."
+    assert [s["status"] for s in now["validations"]] == ["stale"]
+    assert "question was edited" in now["validations"][0]["message"]
+    assert now["validations"][0]["with_ai"] == ["Claude Opus 5"]
+    # At the ref it was signed off at, it's current
+    assert [s["status"] for s in then["validations"]] == ["current"]
+    # Evidence on a branch is rechecked when the branch moves, though the
+    # project's own commit hasn't
+    (tmp_path / "result.json").write_text('{"r": 1}')
+    repo.git.add("result.json")
+    question["evidence"] = [
+        {
+            "kind": "value",
+            "path": "result.json",
+            "key": "r",
+            "git_ref": "published",
+        }
+    ]
+    question["validations"] = [{"by": ada, "date": "2026-10-05"}]
+    with repo.git.custom_environment(
+        GIT_COMMITTER_DATE="2099-01-01T00:00:00+00:00"
+    ):
+        commit("Cite the published result")
+    repo.git.branch("published")
+    statuses = []
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        for moved in [False, True]:
+            if moved:
+                main = repo.active_branch.name
+                repo.git.checkout("-q", "published")
+                (tmp_path / "result.json").write_text('{"r": 2}')
+                repo.git.add("result.json")
+                with repo.git.custom_environment(
+                    GIT_COMMITTER_DATE="2099-01-02T00:00:00+00:00"
+                ):
+                    repo.git.commit("-m", "Publish again")
+                repo.git.checkout("-q", main)
+            r = client.get(f"{base}/questions", headers=headers)
+            assert r.status_code == 200, r.text
+            statuses.append(r.json()[0]["validations"][0]["status"])
+    assert statuses == ["current", "stale"]
 
 
 def test_render_template() -> None:
@@ -1775,6 +1892,20 @@ def test_apply_question_update_builds_object() -> None:
         existing, QuestionPut(answer="maybe"), rendered_answer="no"
     )
     assert isinstance(out, dict) and out["answer"] == "maybe"
+    # The approach is kept when not sent, so an older client can't clear
+    # it, set when sent, and cleared when sent empty; sign-offs are kept
+    signed = {
+        "question": "q?",
+        "approach": "Run it.",
+        "validations": [{"by": {"name": "Ada"}, "date": "2026-10-04"}],
+    }
+    out = _apply_question_update(signed, QuestionPut())
+    assert isinstance(out, dict) and out["approach"] == "Run it."
+    assert out["validations"] == signed["validations"]
+    out = _apply_question_update(signed, QuestionPut(approach="Fit it."))
+    assert isinstance(out, dict) and out["approach"] == "Fit it."
+    out = _apply_question_update(signed, QuestionPut(approach=""))
+    assert isinstance(out, dict) and "approach" not in out
 
 
 def test_apply_question_update_figure_evidence_drops_key() -> None:

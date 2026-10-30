@@ -537,7 +537,12 @@ def test_declared_paths_with_leading_dot_slash(
         "    title: A figure\n"
         "showcase:\n"
         "  - figure: ./figures/plot.png\n"
+        "results:\n"
+        "  - path: results/fit.json\n"
+        "    name: slope\n"
     )
+    (repo_dir / "results").mkdir()
+    (repo_dir / "results" / "fit.json").write_text('{"slope": 1.2}')
     (repo_dir / "dvc.lock").write_text(
         "schema: '2.0'\n"
         "stages:\n"
@@ -562,6 +567,13 @@ def test_declared_paths_with_leading_dot_slash(
         assert item.stage == "build-paper"
         assert item.calkit_object is not None
         assert item.calkit_object["title"] == "A paper"
+        assert item.calkit_object["kind"] == "publication"
+    # A declared result is one too
+    item = app.projects.get_contents_from_repo(
+        project=project, repo=repo, path="results/fit.json"
+    )
+    assert item.calkit_object is not None
+    assert item.calkit_object["kind"] == "result"
     # Declared metadata comes back with normalized paths, so everything
     # downstream keys artifacts the same way DVC and Git do
     ck_info = app.projects.get_ck_info_for_ref(project=project, repo=repo)
@@ -1093,4 +1105,16 @@ def test_dvc_dir_out_resolves_after_being_pushed(
     res = app.projects.get_ck_info_and_dvc_outs_from_tree(
         project=project, tree=tree
     )
+    assert res.dvc_lock_outs["app/index.html"]["md5"] == file_md5
+    # A calkit.yaml that doesn't parse, e.g., a key wrapped over two lines,
+    # leaves the files readable instead of raising
+    (repo_dir / "calkit.yaml").write_text(
+        "answer:\n  if a and\n    b: >-\n    Yes.\n"
+    )
+    repo.git.add(["calkit.yaml"])
+    repo.git.commit(["-m", "Break calkit.yaml"])
+    res = app.projects.get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=get_repo_tree_for_ref(repo, None)
+    )
+    assert res.ck_info == {}
     assert res.dvc_lock_outs["app/index.html"]["md5"] == file_md5

@@ -34,6 +34,7 @@ from calkit.models.io import (
     InputsFromStageOutputs,
     PathInput,
     PathOutput,
+    ScheduleInput,
 )
 from calkit.models.iteration import (
     ExpandedParametersType,
@@ -44,7 +45,44 @@ from calkit.models.iteration import (
 from calkit.models.requirements import RequirementType
 
 # What a stage's 'inputs' can list
-StageInput = str | EnvVarInput | PathInput | InputsFromStageOutputs
+StageInput = (
+    str | EnvVarInput | ScheduleInput | PathInput | InputsFromStageOutputs
+)
+
+
+def is_flag_and_value(arg: str) -> bool:
+    """Whether a stage arg is a flag and its value in one item, e.g.,
+    '--theta {theta}'.
+
+    The shell splits these into separate arguments, as it always has, and
+    existing projects rely on that, so they are left unquoted.
+    """
+    return (
+        arg.startswith("-")
+        and any(c.isspace() for c in arg)
+        and '"' not in arg
+        and "'" not in arg
+    )
+
+
+def quote_arg(arg: str) -> str:
+    """A stage arg as one word of the shell command that runs it.
+
+    Double quotes, since cmd.exe on Windows doesn't treat single quotes as
+    quoting. An arg with no whitespace, with quotes of its own, or that is
+    a flag and its value is left as it is, so commands compiled before
+    stay the same.
+    """
+    if (
+        not any(c.isspace() for c in arg)
+        or '"' in arg
+        or "'" in arg
+        or is_flag_and_value(arg)
+    ):
+        return arg
+    # Doubled, so a trailing backslash doesn't escape the closing quote
+    body = arg.rstrip("\\")
+    return '"' + body + "\\" * 2 * (len(arg) - len(body)) + '"'
 
 
 def check_path_relative_and_child_of_cwd(s: str) -> str:
@@ -304,8 +342,9 @@ class Stage(Model):
         default=[],
         description="Paths this stage depends on, which trigger a rerun when "
         "they change. Normally plain path strings; an object carrying a "
-        "'path' is also accepted, and an 'env-var' entry makes the stage "
-        "depend on an environment variable's value.",
+        "'path' is also accepted, an 'env-var' entry makes the stage "
+        "depend on an environment variable's value, and a 'schedule' entry "
+        "makes it run once per period, e.g., once a day.",
         json_schema_extra=_allow_null,
     )
     # TODO: Support database outputs
@@ -608,6 +647,38 @@ class Stage(Model):
         return rel_path
 
     @property
+    def input_paths(self) -> list[str]:
+        """The paths among this stage's inputs, i.e., not what's generated
+        for it, e.g., its schedule's period file.
+        """
+        paths = []
+        for i in self.inputs:
+            if isinstance(
+                i, (InputsFromStageOutputs, EnvVarInput, ScheduleInput)
+            ):
+                continue
+            path = i if isinstance(i, str) else i.path
+            if path not in paths:
+                paths.append(path)
+        return paths
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+    ) -> None:
+        """Work out what the stage depends on from the project before it's
+        compiled, for a kind of stage whose sources name some of it.
+
+        ``project_dir`` is where the project is, and ``is_output`` says
+        whether a stage makes a project path. With ``write_files``, the stage also
+        writes files it reads that aren't kept in the project, since it's
+        about to run or have its status checked. That happens on every
+        call, so only fast work belongs here.
+        """
+
+    @property
     def dvc_deps(self) -> list[str]:
         deps = []
         setup_file = self.setup_file_path
@@ -617,9 +688,11 @@ class Stage(Model):
         if env_var_file is not None:
             deps.append(self.path_from_wdir(env_var_file))
         for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
-                continue
-            path = i if isinstance(i, str) else i.path
+            if isinstance(i, ScheduleInput):
+                period_file = self.path_from_wdir(i.period_file_path)
+                if period_file not in deps:
+                    deps.append(period_file)
+        for path in self.input_paths:
             if path not in deps:
                 deps.append(path)
         return deps
@@ -823,10 +896,7 @@ class Stage(Model):
         """
         cmd = self.dvc_cmd
         deps = self.dvc_deps
-        for i in self.inputs:
-            if isinstance(i, (InputsFromStageOutputs, EnvVarInput)):
-                continue
-            path = i if isinstance(i, str) else i.path
+        for path in self.input_paths:
             if path not in deps:
                 deps.append(path)
         # Each path appears once: a stage that names the same one twice, e.g.
@@ -896,14 +966,15 @@ class PythonScriptStage(Stage):
         description="Path to the Python script to run."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
 
     @property
     def dvc_cmd(self) -> str:
         cmd = f"{self.xenv_cmd} python {self.script_path}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd.strip()
 
     @property
@@ -1123,7 +1194,8 @@ class LatexStage(Stage):
             "Calkit's dependencies.",
         )
         args: list[str] = Field(
-            default=[], description="Arguments passed to the script."
+            default=[],
+            description="Arguments passed to the script, each item one argument.",
         )
 
     kind: Literal["latex"] = "latex"
@@ -1215,18 +1287,23 @@ class LatexStage(Stage):
         Without keys the only honest option for a revision that can move
         is to run every time.
         """
+        desc = (
+            f"Automatically generated from the '{self.name}' stage "
+            "in calkit.yaml. Changes made here will be overwritten."
+        )
+        stages: dict[str, dict] = {}
         deps = self.dvc_deps + (extra_inputs or [])
         inputs = [
             path
             for path in deps
             if path not in (self.target_path, self.latexmkrc_path)
+            and path not in self.component_copies
             and not path.startswith(".calkit/")
         ]
         # Changing the filter's script rebuilds the diff
         filter_deps = (
             [self.diff_filter.script_path] if self.diff_filter else []
         )
-        stages = {}
         for entry, (from_ref, to_ref), path in zip(
             self.diffs, self.diff_pairs, self.diff_paths
         ):
@@ -1297,10 +1374,7 @@ class LatexStage(Stage):
                 "cmd": cmd,
                 "deps": (deps if moving else []) + filter_deps,
                 "outs": [out],
-                "desc": (
-                    f"Automatically generated from the '{self.name}' stage "
-                    "in calkit.yaml. Changes made here will be overwritten."
-                ),
+                "desc": desc,
             }
             if self.wdir is not None:
                 stage["wdir"] = self.wdir
@@ -1406,9 +1480,106 @@ class LatexStage(Stage):
         cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
+    # Project paths the document's components depend on, the files among
+    # them it reads copies of, and whether it loads calkit.sty, set by
+    # preprocess
+    _component_paths: list[str] = PrivateAttr(default_factory=list)
+    _copied_paths: list[str] = PrivateAttr(default_factory=list)
+    _loads_calkit: bool = PrivateAttr(default=False)
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+    ) -> None:
+        """Read which components the document includes with calkit.sty's
+        commands, since they're as much inputs as its source, and with
+        ``write_files``, map them in beside it.
+
+        Each is depended on where it's kept: the file, if it's there, stored
+        with DVC, or a stage output, or the folder holding it, if that's
+        stored with DVC or a stage output. A typo or a figure not made yet
+        prints as ?? instead of stopping the pipeline. The copies read of
+        files kept in Git are depended on too, which, unlike other copies,
+        are there before the stage runs on any clone.
+        """
+
+        def exists(p: str) -> bool:
+            return os.path.isfile(os.path.join(project_dir or "", p))
+
+        def is_input(p: str) -> bool:
+            return exists(p) or exists(p + ".dvc") or is_output(p)
+
+        def folder_kept_elsewhere(p: str) -> str | None:
+            parts = p.split("/")
+            for i in range(1, len(parts)):
+                folder = "/".join(parts[:i])
+                if is_output(folder) or exists(folder + ".dvc"):
+                    return folder
+            return None
+
+        document = os.path.join(
+            project_dir or "", self.wdir or "", self.target_path
+        )
+        self._loads_calkit, components = calkit.latex.read_ck_usage(document)
+        paths = []
+        copied = []
+        for c in components:
+            named, _ = calkit.latex.component_path(c, lambda p: True)
+            if named is None:
+                continue
+            folder = folder_kept_elsewhere(named)
+            if folder is not None:
+                paths.append(folder)
+                continue
+            rel, _ = calkit.latex.component_path(c, is_input)
+            if rel is None:
+                continue
+            paths.append(rel)
+            if (
+                c.kind != "value"
+                and exists(rel)
+                and not exists(rel + ".dvc")
+                and not is_output(rel)
+            ):
+                copied.append(rel)
+        self._component_paths = list(dict.fromkeys(paths))
+        self._copied_paths = list(dict.fromkeys(copied))
+        if write_files and self._loads_calkit:
+            calkit.latex.map_ck_components(document)
+
+    @property
+    def component_copies(self) -> list[str]:
+        """What the document reads its components from, relative to the
+        stage's ``wdir``: ``calkit.sty`` and ``_calkit/values.tex`` beside
+        it, and the copies of figures and tables kept in Git, or nothing if
+        it doesn't load calkit.sty.
+
+        Like cleaned notebooks, they're written before the pipeline runs or
+        is checked, and kept out of Git. A figure a stage makes or DVC
+        stores may only be copied after DVC checks the stage's dependencies
+        are there, so the stage depends on the figure itself instead.
+        """
+        if not self._loads_calkit:
+            return []
+        folder = posixpath.dirname(self.target_path)
+        components_dir = posixpath.join(folder, calkit.latex.COMPONENTS_DIR)
+        return [
+            posixpath.join(folder, calkit.latex.STYLE_FNAME),
+            posixpath.join(components_dir, calkit.latex.VALUES_FNAME),
+        ] + [posixpath.join(components_dir, p) for p in self._copied_paths]
+
     @property
     def dvc_deps(self) -> list[str]:
-        deps = [self.target_path] + super().dvc_deps
+        # The copies the document reads, and what they're copied from, so it
+        # builds after the stages making them
+        deps = (
+            [self.target_path]
+            + super().dvc_deps
+            + [self.path_from_wdir(p) for p in self._component_paths]
+            + self.component_copies
+        )
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
         return _unique_paths(deps)
@@ -1468,7 +1639,7 @@ class QuartoStage(Stage):
         if self.to is not None:
             cmd += f" --to {self.to}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd.strip()
 
     @property
@@ -1501,9 +1672,9 @@ class JsonToLatexStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = "calkit latex from-json"
-        # dvc_deps rather than inputs, since an input can be an object
-        # carrying a path, which would otherwise interpolate its repr.
-        for input_path in self.dvc_deps:
+        # Only the declared paths, since what's generated for the stage, e.g.,
+        # its setup or schedule period file, isn't data
+        for input_path in self.input_paths:
             cmd += f" '{input_path}'"
         for out in self.outputs:
             if isinstance(out, str):
@@ -1703,7 +1874,8 @@ class ShellScriptStage(Stage):
         description="Path to the shell script to run."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
     shell: Literal["sh", "bash", "zsh"] = Field(
         default="bash", description="Shell in which to run the script."
@@ -1725,7 +1897,7 @@ class ShellScriptStage(Stage):
             cmd = self.scheduler_cmd
             cmd += f" -- {self.script_path}"
             for arg in self.args:
-                cmd += f" {arg}"
+                cmd += f" {quote_arg(arg)}"
             # Avoid duplicating the script path as both --dep and target.
             dep_txt = f"--dep {self.script_path} "
             if dep_txt in cmd:
@@ -1738,7 +1910,7 @@ class ShellScriptStage(Stage):
             norc_args = "--noprofile --norc"
         cmd += f" {self.shell} {norc_args} {self.script_path}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd.strip()
 
 
@@ -1768,7 +1940,8 @@ class RScriptStage(Stage):
         description="Path to the R script to run."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
 
     @property
@@ -1779,7 +1952,7 @@ class RScriptStage(Stage):
     def dvc_cmd(self) -> str:
         cmd = f"{self.xenv_cmd} Rscript {self.script_path}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd.strip()
 
 
@@ -1789,14 +1962,15 @@ class JuliaScriptStage(Stage):
         description="Path to the Julia script to run."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
 
     @property
     def dvc_cmd(self) -> str:
         cmd = f'{self.xenv_cmd} "{self.script_path}"'
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         return cmd
 
     @property
@@ -1827,7 +2001,8 @@ class SBatchStage(Stage):
         description="Path to the script to submit."
     )
     args: list[str] = Field(
-        default=[], description="Arguments passed to the script."
+        default=[],
+        description="Arguments passed to the script, each item one argument.",
     )
     sbatch_options: list[str] = Field(
         default=[], description="Options passed to sbatch."
@@ -1905,7 +2080,7 @@ class SBatchStage(Stage):
         cmd = self.scheduler_cmd
         cmd += f" -- {self.script_path}"
         for arg in self.args:
-            cmd += f" {arg}"
+            cmd += f" {quote_arg(arg)}"
         # Remove the script path from deps for backward compatibility
         dep_txt = f"--dep {self.script_path} "
         if dep_txt in cmd:
@@ -2477,6 +2652,11 @@ class MarkdownStage(Stage):
     def markdown_path(self) -> str:
         return Path(self.target_path).as_posix()
 
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        # The outputs belong to the stages the file expands into
+        return []
+
 
 class Pipeline(Model):
     """The project's reproducible pipeline."""
@@ -2787,6 +2967,51 @@ class Pipeline(Model):
                 ]
             converted[name] = calkit_yaml_stage
         return converted
+
+    def preprocess_stages(
+        self, project_dir: str | None, write_files: bool = False
+    ) -> None:
+        """Let each stage work out what it depends on from the project,
+        telling it where the project is and what stages make.
+
+        An iterated stage's outputs are patterns, e.g., ``plot-{n}.png``,
+        which match whatever each iteration makes.
+        """
+        outputs: set[str] = set()
+        patterns: list[re.Pattern[str]] = []
+        for stage in self.stages.values():
+            try:
+                dvc_outs = stage.dvc_outs
+            except Exception:
+                continue
+            for dvc_out in dvc_outs:
+                path = (
+                    next(iter(dvc_out))
+                    if isinstance(dvc_out, dict)
+                    else dvc_out
+                )
+                if not isinstance(path, str):
+                    continue
+                path = posixpath.normpath(
+                    posixpath.join(stage.wdir or "", path)
+                )
+                if stage.iterate_over and "{" in path:
+                    patterns.append(
+                        re.compile(
+                            re.sub(
+                                r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)
+                            )
+                            + r"\Z"
+                        )
+                    )
+                elif "${" not in path:
+                    outputs.add(path)
+
+        def is_output(path: str) -> bool:
+            return path in outputs or any(p.match(path) for p in patterns)
+
+        for stage in self.stages.values():
+            stage.preprocess(project_dir, is_output, write_files=write_files)
 
     def resolve_procedure_paths(self, procedures: dict) -> None:
         """Tell procedure stages where their procedure is written down.

@@ -44,6 +44,65 @@ export const AccountPublicSchema = {
   title: "AccountPublic",
 } as const
 
+export const ActiveCountsSchema = {
+  properties: {
+    last_day: {
+      type: "integer",
+      title: "Last Day",
+    },
+    last_7_days: {
+      type: "integer",
+      title: "Last 7 Days",
+    },
+    last_30_days: {
+      type: "integer",
+      title: "Last 30 Days",
+    },
+  },
+  type: "object",
+  required: ["last_day", "last_7_days", "last_30_days"],
+  title: "ActiveCounts",
+} as const
+
+export const AnalyticsStatsSchema = {
+  properties: {
+    active_users: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Likely human users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.",
+    },
+    active_visitors: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.",
+    },
+    human_visits: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Visitor-days from visitors who didn't accept analytics, i.e., distinct (UTC day, visitor) pairs with a page view in the window that followed input and wasn't from a bot. Not unique people: their IDs reset daily, so one person visiting on three days counts three times.",
+    },
+    human_project_visits: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Human visits as above that included a project page, leaving out projects owned by excluded accounts",
+    },
+    projects_viewed: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Distinct projects, not owned by excluded accounts, with human visits as above",
+    },
+  },
+  type: "object",
+  required: [
+    "active_users",
+    "active_visitors",
+    "human_visits",
+    "human_project_visits",
+    "projects_viewed",
+  ],
+  title: "AnalyticsStats",
+} as const
+
 export const Body_login_login_access_tokenSchema = {
   properties: {
     analytics_consent: {
@@ -646,6 +705,16 @@ export const ConnectedAccountsSchema = {
     overleaf: {
       type: "boolean",
       title: "Overleaf",
+    },
+    overleaf_token: {
+      type: "boolean",
+      title: "Overleaf Token",
+      default: false,
+    },
+    overleaf_session: {
+      type: "boolean",
+      title: "Overleaf Session",
+      default: false,
     },
     google: {
       type: "boolean",
@@ -3419,6 +3488,38 @@ export const HttpRequestAccessSchema = {
   title: "HttpRequestAccess",
 } as const
 
+export const HubStatsSchema = {
+  properties: {
+    users: {
+      $ref: "#/components/schemas/UserStats",
+    },
+    projects: {
+      $ref: "#/components/schemas/ProjectStats",
+    },
+    excluded_accounts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Excluded Accounts",
+    },
+    analytics: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/AnalyticsStats",
+        },
+        {
+          type: "null",
+        },
+      ],
+      description: "From Mixpanel; null when not configured or unreachable",
+    },
+  },
+  type: "object",
+  required: ["users", "projects", "excluded_accounts"],
+  title: "HubStats",
+} as const
+
 export const HubVersionSchema = {
   properties: {
     version: {
@@ -4013,6 +4114,79 @@ export const LatexCommentsMoveSchema = {
   type: "object",
   required: ["path"],
   title: "LatexCommentsMove",
+} as const
+
+export const LatexComponentsSchema = {
+  properties: {
+    loads_calkit: {
+      type: "boolean",
+      title: "Loads Calkit",
+    },
+    style: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Style",
+    },
+    values: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
+    copies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Copies",
+      default: [],
+    },
+    problems: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Problems",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["loads_calkit"],
+  title: "LatexComponents",
+  description:
+    "What a document needs beside it for calkit.sty's commands, as\n``calkit latex build`` would write it.",
+} as const
+
+export const LatexComponentsRequestSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    sources: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Sources",
+      default: {},
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "LatexComponentsRequest",
+  description: "A LaTeX document to bring calkit.sty's components in for.",
 } as const
 
 export const MapPathEntrySchema = {
@@ -4875,6 +5049,30 @@ export const OverleafLookupSchema = {
   type: "object",
   required: ["links", "projects_scanned", "projects_remaining"],
   title: "OverleafLookup",
+} as const
+
+export const OverleafSessionPutSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionPut",
+} as const
+
+export const OverleafSessionResponseSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionResponse",
 } as const
 
 export const OverleafSyncPostSchema = {
@@ -6826,6 +7024,45 @@ export const ProjectPushEventPostSchema = {
     "A push that happened somewhere else.\n\nWhat was pushed and where, recorded for reference: the hub works out the\ncurrent state from the repo itself, so none of this is trusted as input,\nbut it is what makes a log line worth reading.",
 } as const
 
+export const ProjectStatsSchema = {
+  properties: {
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    public: {
+      type: "integer",
+      title: "Public",
+    },
+    private: {
+      type: "integer",
+      title: "Private",
+    },
+    owners: {
+      type: "integer",
+      title: "Owners",
+    },
+    worked_on: {
+      type: "integer",
+      title: "Worked On",
+    },
+    updated_last_90_days: {
+      type: "integer",
+      title: "Updated Last 90 Days",
+    },
+  },
+  type: "object",
+  required: [
+    "total",
+    "public",
+    "private",
+    "owners",
+    "worked_on",
+    "updated_last_90_days",
+  ],
+  title: "ProjectStats",
+} as const
+
 export const ProjectStatusSchema = {
   properties: {
     timestamp: {
@@ -6896,6 +7133,230 @@ export const ProjectsPublicSchema = {
   type: "object",
   required: ["data", "count"],
   title: "ProjectsPublic",
+} as const
+
+export const ProvenanceSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    exists: {
+      type: "boolean",
+      title: "Exists",
+      default: false,
+    },
+    value: {
+      title: "Value",
+    },
+    value_error: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Value Error",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_kind: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Kind",
+    },
+    source: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Source",
+    },
+    command: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Command",
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    stale_reason: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["pipeline", "frozen"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stale Reason",
+    },
+    copied_from: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copied From",
+    },
+    copy_stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copy Stage",
+    },
+    origin: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin",
+    },
+    origin_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Url",
+    },
+    origin_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Path",
+    },
+    gaps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceGap",
+      },
+      type: "array",
+      title: "Gaps",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "Provenance",
+  description:
+    "Where an artifact, or one value inside a results file, came from.",
+} as const
+
+export const ProvenanceGapSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    steps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceStep",
+      },
+      type: "array",
+      title: "Steps",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceGap",
+  description: "Something nothing records the origin of, and the chain to it.",
+} as const
+
+export const ProvenanceStepSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceStep",
+  description:
+    "A path on the way back from an artifact, and the stage producing it.",
 } as const
 
 export const PublicationSchema = {
@@ -7055,7 +7516,7 @@ export const PublicationComponentSchema = {
     },
     via: {
       type: "string",
-      enum: ["folder", "input"],
+      enum: ["folder", "input", "included"],
       title: "Via",
       default: "folder",
     },
@@ -7671,6 +8132,17 @@ export const QuestionPublicSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7688,6 +8160,22 @@ export const QuestionPublicSchema = {
       },
       type: "array",
       title: "Evidence",
+      default: [],
+    },
+    verifications: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Verifications",
+      default: [],
+    },
+    validations: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Validations",
       default: [],
     },
   },
@@ -7720,6 +8208,17 @@ export const QuestionPutSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7742,6 +8241,66 @@ export const QuestionPutSchema = {
   },
   type: "object",
   title: "QuestionPut",
+} as const
+
+export const QuestionSignOffSchema = {
+  properties: {
+    by: {
+      type: "string",
+      title: "By",
+    },
+    date: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date",
+    },
+    notes: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Notes",
+    },
+    with_ai: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "With Ai",
+      default: [],
+    },
+    status: {
+      type: "string",
+      enum: ["current", "stale", "unchecked"],
+      title: "Status",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["by", "status"],
+  title: "QuestionSignOff",
+  description:
+    "A verification or validation of a question, checked against history.\n\nA verification says the stages behind the evidence implement the\napproach; a validation says the approach suits the question and the\nevidence justifies the answer. Stale means what it vouches for changed\nafter the commit that added it; unchecked means that commit couldn't be\nfound.",
 } as const
 
 export const ReferenceEntrySchema = {
@@ -9357,6 +9916,14 @@ export const ReproCheckSchema = {
       title: "Misc Needing Provenance",
       default: [],
     },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
@@ -9526,6 +10093,16 @@ export const ResultSchema = {
         },
       ],
       title: "Key",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
     },
   },
   type: "object",
@@ -10742,6 +11319,28 @@ export const UserRegisterSchema = {
   title: "UserRegister",
 } as const
 
+export const UserStatsSchema = {
+  properties: {
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    verified: {
+      type: "integer",
+      title: "Verified",
+    },
+    likely_human: {
+      type: "integer",
+      title: "Likely Human",
+      description:
+        "Users with a GitHub or other connected identity, a verified email, an invitation to a project or org, a personal access token, or sessions on two or more days. Password signup checks none of these, so it's how bot accounts get in.",
+    },
+  },
+  type: "object",
+  required: ["total", "verified", "likely_human"],
+  title: "UserStats",
+} as const
+
 export const UserSubscriptionSchema = {
   properties: {
     id: {
@@ -11904,6 +12503,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Misc Needing Provenance",
+      default: [],
+    },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
       default: [],
     },
     scripts_not_in_pipeline: {

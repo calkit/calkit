@@ -1,0 +1,18 @@
+schema: '2.0'
+stages:
+  calibrate:
+    cmd: calkit xenv -n py --no-check -- python scripts/calibrate.py
+    deps:
+    - path: scripts/calibrate.py
+      hash: md5
+      md5: cc38a18f3ca9e6b808883090e73a3bfe
+      size: 463
+    - path: uv.lock
+      hash: md5
+      md5: 8d3da5e69b427c0ad8cb1322b3d55513
+      size: 17618
+    outs:
+    - path: results/calibration.json
+      hash: md5
+      md5: 9140d119090326fcfadb06966600772a
+      size: 20

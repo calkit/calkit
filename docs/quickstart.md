@@ -59,20 +59,24 @@ and `{r2}` is read from one of those files rather than typed in by hand.
 We can see the rendered answer with:
 
 ```sh
-calkit list questions
+calkit show question 1
 ```
 
-```
-1. question: How does the system respond to increasing $x$?
-    hypothesis: The value of $y$ increases linearly with $x$.
-    answer: $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
-    evidence:
-      - kind: figure
-        path: figures/x-vs-y.png
-      - kind: value
-        path: results/summary.json
-        key: r_squared_quadratic
-        name: r2
+```markdown
+# 1. How does the system respond to increasing $x$?
+
+`H A - -`
+
+**Hypothesis:** The value of $y$ increases linearly with $x$.
+
+**Stages:** `collect-data`, `analyze`
+
+**Answer:** $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
+
+## Evidence
+
+- Figure `figures/x-vs-y.png`
+- Value `results/summary.json` as `r2` at `r_squared_quadratic` = 0.985
 ```
 
 The evidence files are produced by the pipeline,
@@ -92,10 +96,6 @@ calkit run
 ```
 
 ```
-💻 Getting system information
-🔗 Checking system-level requirements
-📦 Checking environments
-🔀 Compiling DVC pipeline
 Running stage 'collect-data':
 Running stage 'analyze':
 Running stage 'figs-to-paper':

@@ -1130,7 +1130,7 @@ class Figure(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     dataset: str | None = None
     content: str | None = None  # Base64 encoded
     url: str | None = None
@@ -1152,6 +1152,52 @@ class Result(SQLModel):
     # Which value inside the file this result is; null means the whole file.
     # Several results can share a path with different keys.
     key: str | None = None
+    stage_status: StageStatus | None = None
+
+
+class ProvenanceStep(SQLModel):
+    """A path on the way back from an artifact, and the stage producing it."""
+
+    path: str
+    stage: str | None = None
+
+
+class ProvenanceGap(SQLModel):
+    """Something nothing records the origin of, and the chain to it."""
+
+    path: str
+    steps: list[ProvenanceStep] = Field(default_factory=list)
+
+
+class Provenance(SQLModel):
+    """Where an artifact, or one value inside a results file, came from."""
+
+    path: str
+    key: str | None = None
+    exists: bool = False
+    # JSON-able, so a key can name a subtree as well as a number
+    value: Any = None
+    value_error: str | None = None
+    stage: str | None = None
+    stage_kind: str | None = None
+    # What to open to change it: the stage's script, notebook, or document
+    source: str | None = None
+    command: str | None = None
+    inputs: list[str] = Field(default_factory=list)
+    stage_status: StageStatus | None = None
+    stale_reason: Literal["pipeline", "frozen"] | None = None
+    # Where a copy, e.g., one a map-paths stage put beside a document, came
+    # from, and the stage that copied it; the rest describes the original
+    copied_from: str | None = None
+    copy_stage: str | None = None
+    # What calkit.yaml says about an artifact no stage produces: where it
+    # was imported from, or who created it, possibly recorded for a folder
+    # it's in
+    origin: str | None = None
+    origin_url: str | None = None
+    origin_path: str | None = None
+    # Data behind it that nothing records the origin of, however far back
+    gaps: list[ProvenanceGap] = Field(default_factory=list)
 
 
 class Table(SQLModel):
@@ -1167,7 +1213,7 @@ class Table(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     content: str | None = None  # Base64 encoded
     url: str | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
@@ -1527,7 +1573,7 @@ class Publication(_DeclaredArtifact):
     description: str | None = None
     kind: PublicationKind | None = None
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     content: str | None = None
     stage_info: DvcPipelineStage | None = None
     # The full Calkit pipeline stage definition from calkit.yaml, unlike
@@ -1547,9 +1593,9 @@ class PublicationComponent(BaseModel):
     # Repo-relative
     path: str
     kind: Literal["produced", "authored", "attested", "imported", "unknown"]
-    # In the publication's folder, or read by its build stage from
-    # elsewhere in the project
-    via: Literal["folder", "input"] = "folder"
+    # In the publication's folder, read by its build stage from elsewhere
+    # in the project, or included by a document with calkit.sty's commands
+    via: Literal["folder", "input", "included"] = "folder"
     # For "produced": the stage that makes it, and that stage's kind, so a
     # map-paths copy can be told from something computed
     stage: str | None = None
@@ -1565,6 +1611,30 @@ class PublicationComponents(BaseModel):
     folder: str
     items: list[PublicationComponent]
     n_unknown: int
+
+
+class LatexComponentsRequest(BaseModel):
+    """A LaTeX document to bring calkit.sty's components in for."""
+
+    # Repo-relative
+    path: str
+    # Text that differs from what's committed, e.g., an editor's unsaved
+    # changes, by repo-relative path
+    sources: dict[str, str] = {}
+
+
+class LatexComponents(BaseModel):
+    """What a document needs beside it for calkit.sty's commands, as
+    ``calkit latex build`` would write it.
+    """
+
+    loads_calkit: bool
+    # calkit.sty from this hub's Calkit, and _calkit/values.tex
+    style: str | None = None
+    values: str | None = None
+    # Project paths to copy into _calkit, each at the same path under it
+    copies: list[str] = []
+    problems: list[str] = []
 
 
 class MiscArtifact(BaseModel):
@@ -1634,7 +1704,7 @@ class QuestionEvidence(SQLModel):
     # citing an artifact the pipeline would rebuild differently, which is
     # worth knowing before trusting it as an answer.
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     # Why this citation shouldn't be taken at face value, if it shouldn't.
     # 'missing': it resolves to nothing -- never pushed, deleted, or at a ref
     # that isn't there. 'pipeline': the stage that made it is out of date.
@@ -1662,19 +1732,44 @@ class QuestionEvidencePost(SQLModel):
     git_ref: str | None = None
 
 
+class QuestionSignOff(SQLModel):
+    """A verification or validation of a question, checked against history.
+
+    A verification says the stages behind the evidence implement the
+    approach; a validation says the approach suits the question and the
+    evidence justifies the answer. Stale means what it vouches for changed
+    after the commit that added it; unchecked means that commit couldn't be
+    found.
+    """
+
+    # Their name, or their email if no name is given
+    by: str
+    date: str | None = None
+    notes: str | None = None
+    with_ai: list[str] = []
+    status: Literal["current", "stale", "unchecked"]
+    # What changed, when stale
+    message: str | None = None
+
+
 class QuestionPublic(SQLModel):
     id: uuid.UUID
     project_id: uuid.UUID
     number: int
     question: str
     hypothesis: str | None = None
+    approach: str | None = None
     answer: str | None = None
     evidence: list[QuestionEvidence] = []
+    verifications: list[QuestionSignOff] = []
+    validations: list[QuestionSignOff] = []
 
 
 class QuestionPut(SQLModel):
     question: str | None = None
     hypothesis: str | None = None
+    # Left as is when not sent, so an older client can't clear it
+    approach: str | None = None
     answer: str | None = None
     evidence: list[QuestionEvidencePost] = []
 

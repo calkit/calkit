@@ -226,6 +226,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -240,7 +243,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -784,6 +787,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -798,7 +804,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -1830,6 +1836,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -1844,7 +1853,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2074,6 +2083,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2088,7 +2100,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2325,7 +2337,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -2379,6 +2391,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2393,7 +2408,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -2670,6 +2685,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -2684,7 +2702,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3001,6 +3019,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3015,7 +3036,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3546,6 +3567,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3560,7 +3584,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -3819,6 +3843,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -3833,7 +3860,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -4188,6 +4215,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -4409,6 +4439,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -4423,7 +4456,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -4720,6 +4753,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -4734,7 +4770,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -5955,6 +5991,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -5969,7 +6008,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6409,7 +6448,7 @@
       "properties": {
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -6459,7 +6498,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -6513,6 +6552,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -6527,7 +6569,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6762,6 +6804,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -6776,7 +6821,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -6959,7 +7004,7 @@
       "type": "object"
     },
     "Question": {
-      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a ``value`` evidence entry can be templated into the text by\nname, as in ``\"about {improvement:.1f}x\"``, so it is read from the\nresults file rather than retyped. Longer reasoning belongs in the\npublication, pointed at with a publication evidence entry and its\n``section``.\n\nAn answer is a claim about the evidence as it was when the answer was\nlast edited, and Git records when that was. ``calkit check questions``\nreports a question as stale when any of its evidence has changed since\nthat commit, so editing the question after re-reading it against the\nnew evidence is how to say it still holds.",
+      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a ``value`` evidence entry can be templated into the text by\nname, as in ``\"about {improvement:.1f}x\"``, so it is read from the\nresults file rather than retyped. Longer reasoning belongs in the\npublication, pointed at with a publication evidence entry and its\n``section``.\n\nAn answer is a claim about the evidence as it was when the answer was\nlast edited, and Git records when that was. ``calkit check questions``\nreports evidence that has changed since that commit. People sign off on\na question in two ways. A verification says the stages behind the\nevidence implement the ``approach``, and goes stale when the approach or\nthose stages change. A validation says the approach suits the question\nand the evidence justifies the answer, and goes stale when the question\nor its evidence changes.",
       "properties": {
         "answer": {
           "anyOf": [
@@ -6979,6 +7024,19 @@
           "default": null,
           "description": "The claim the evidence supports. A mapping keyed by 'if <condition>', 'elif <condition>' and 'else' picks its wording from the evidence, so an answer resting on a threshold states the other outcome instead of going stale when a value moves.",
           "title": "Answer"
+        },
+        "approach": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One sentence on how the question is answered, e.g., the method the pipeline implements. The stages themselves aren't listed here, since they follow from the evidence the pipeline produces.",
+          "title": "Approach"
         },
         "evidence": {
           "anyOf": [
@@ -7055,6 +7113,38 @@
         "question": {
           "title": "Question",
           "type": "string"
+        },
+        "validations": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SignOff"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sign-offs that the approach suits the question and the evidence justifies the answer, i.e., the right thing was worked out. Stale once the question, hypothesis, approach, answer, or evidence changes. One per person; signing off again replaces theirs.",
+          "title": "Validations"
+        },
+        "verifications": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SignOff"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sign-offs that the pipeline stages behind the evidence implement the approach correctly, i.e., the answer was worked out right. Stale once the approach or any of those stages changes. One per person; signing off again replaces theirs.",
+          "title": "Verifications"
         }
       },
       "required": [
@@ -7126,6 +7216,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -7140,7 +7233,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -7373,7 +7466,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -7427,6 +7520,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -7441,7 +7537,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -8302,7 +8398,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -8356,6 +8452,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -8370,7 +8469,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -8578,6 +8677,35 @@
       "title": "SBatchStage",
       "type": "object"
     },
+    "ScheduleInput": {
+      "additionalProperties": false,
+      "description": "A schedule a stage runs on, e.g., once a day.\n\nEvery compile writes the current period, e.g., today's date, to a file\nthe stage depends on, so the stage reruns once each period and is\nskipped until the next one starts. The stage can read the file to learn\nwhich period it's running for, e.g.,\n``.calkit/local/current-periods/1-day-utc.txt`` holds ``2026-10-20`` on\nthat day. A period of more than one unit, e.g., '3 days', is counted\nfrom the start of 1970 (or for weeks, its first Monday), so every machine\nagrees where one starts, and is written as its first unit, e.g., the day\nit starts. Set ``CALKIT_NOW`` to an ISO 8601 time to compile as if it\nwere then, e.g., to redo a past day.",
+      "properties": {
+        "kind": {
+          "const": "schedule",
+          "description": "Always 'schedule'.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "period": {
+          "description": "How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, and years; 'm' is a minute and 'mo' a month.",
+          "title": "Period",
+          "type": "string"
+        },
+        "timezone": {
+          "default": "UTC",
+          "description": "Time zone periods start in, e.g., 'America/New_York'.",
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "period"
+      ],
+      "title": "ScheduleInput",
+      "type": "object"
+    },
     "SetupRequirement": {
       "description": "A ``setup`` requirement, whose ``name`` may be omitted.\n\nWithout a ``name``, Calkit derives a stable ``setup-<hash>`` one from\n``check_command``.",
       "properties": {
@@ -8779,6 +8907,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -8793,7 +8924,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -8979,7 +9110,7 @@
         },
         "args": {
           "default": [],
-          "description": "Arguments passed to the script.",
+          "description": "Arguments passed to the script, each item one argument.",
           "items": {
             "type": "string"
           },
@@ -9033,6 +9164,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -9047,7 +9181,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {
@@ -9342,6 +9476,49 @@
         "yaml_file"
       ],
       "title": "ShowcaseYamlFile",
+      "type": "object"
+    },
+    "SignOff": {
+      "additionalProperties": false,
+      "description": "A person's sign-off on a question, as a verification or validation.\n\nIt applies to the question as it was at the commit that added it, which\nis read from Git rather than written here, so a sign-off can't quietly\ncarry over to something nobody checked.",
+      "properties": {
+        "by": {
+          "$ref": "#/$defs/_Person",
+          "description": "Who signed off. Generative AI tools used are disclosed with their ``with_ai``."
+        },
+        "date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "format": "date-time",
+              "type": "string"
+            }
+          ],
+          "description": "When they signed off. Written with the time, so signing off again, even on the same day, records a new sign-off.",
+          "title": "Date"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What they checked, or anything they want on record.",
+          "title": "Notes"
+        }
+      },
+      "required": [
+        "by",
+        "date"
+      ],
+      "title": "SignOff",
       "type": "object"
     },
     "SlurmEnvironment": {
@@ -10794,6 +10971,9 @@
                     "$ref": "#/$defs/EnvVarInput"
                   },
                   {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
                     "$ref": "#/$defs/PathInput"
                   },
                   {
@@ -10808,7 +10988,7 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, and an 'env-var' entry makes the stage depend on an environment variable's value.",
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
           "title": "Inputs"
         },
         "iterate_over": {

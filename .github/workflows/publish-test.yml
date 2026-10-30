@@ -9,10 +9,27 @@ on:
     types: [published]
 
 jobs:
+  check-tag:
+    name: Check it's a CLI release
+    runs-on: ubuntu-latest
+    outputs:
+      is-version: ${{ steps.check.outputs.is-version }}
+    steps:
+      - id: check
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        # Only a version tag, e.g., v0.49.2, is a CLI release; other products
+        # use a prefix, e.g., hub/v0.30.14, and hub releases use their name,
+        # e.g., one-pager-2026-v1
+        run: |
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$ ]]; then
+            echo "is-version=true" >> "$GITHUB_OUTPUT"
+          fi
   build:
     name: Build distribution 📦
     runs-on: ubuntu-latest
-    if: "!contains(github.event.release.tag_name, '/')"
+    needs: check-tag
+    if: needs.check-tag.outputs.is-version == 'true'
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python
@@ -20,7 +37,7 @@ jobs:
         with:
           python-version: "3.x"
       - name: Setup uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -68,6 +85,6 @@ jobs:
           name: python-package-distributions
           path: dist/
       - name: Publish distribution 📦 to TestPyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/

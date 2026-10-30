@@ -134,6 +134,16 @@ which is a critical feature to have when using generative AI.
 
 ## Features
 
+- [Research questions and answers](https://docs.calkit.org/questions) as the front door to a
+  project.
+  Each answer cites its evidence, with numbers read from results files
+  rather than typed in, and leads back through the pipeline to the code and
+  data behind it.
+  Answers whose evidence has changed are flagged,
+  and people can sign off on answers, with sign-offs that lapse when the
+  evidence moves,
+  so a project can be checked a little at a time as the work goes,
+  rather than all at once at the end.
 - A simplified [version control](https://docs.calkit.org/version-control)
   interface that unifies Git and DVC (Data Version Control),
   so everything can be kept in the same project repository.
@@ -409,20 +419,24 @@ and `{r2}` is read from one of those files rather than typed in by hand.
 We can see the rendered answer with:
 
 ```sh
-calkit list questions
+calkit show question 1
 ```
 
-```
-1. question: How does the system respond to increasing $x$?
-    hypothesis: The value of $y$ increases linearly with $x$.
-    answer: $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
-    evidence:
-      - kind: figure
-        path: figures/x-vs-y.png
-      - kind: value
-        path: results/summary.json
-        key: r_squared_quadratic
-        name: r2
+```markdown
+## 1. How does the system respond to increasing $x$?
+
+`H A - -`
+
+**Hypothesis:** The value of $y$ increases linearly with $x$.
+
+**Stages:** `collect-data`, `analyze`
+
+**Answer:** $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
+
+### Evidence
+
+- Figure `figures/x-vs-y.png`
+- Value `results/summary.json` as `r2` at `r_squared_quadratic` = 0.985
 ```
 
 The evidence files are produced by the pipeline,
@@ -442,10 +456,6 @@ calkit run
 ```
 
 ```
-💻 Getting system information
-🔗 Checking system-level requirements
-📦 Checking environments
-🔀 Compiling DVC pipeline
 Running stage 'collect-data':
 Running stage 'analyze':
 Running stage 'figs-to-paper':

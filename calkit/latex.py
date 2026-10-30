@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import bisect
 import difflib
 import hashlib
 import os
+import posixpath
 import re
+import shutil
 import textwrap
+import unicodedata
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
 from calkit.core import LOCAL_DIR, ensure_local_dir
@@ -57,7 +61,7 @@ WORKING_NAME = "working"
 # of a full TeX Live image. Pinned to an exact tag rather than :latest so
 # a document keeps building against the same TeX until this is moved
 # deliberately; what it carries is recorded in images/latex/README.md.
-DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.6"
+DEFAULT_LATEX_IMAGE = "ghcr.io/calkit/latex:0.1.7"
 # The environment created for a document that doesn't have one, wherever
 # that happens: a new publication, an Overleaf import, or a stage whose
 # environment is worked out from what it runs. Copied where it's used,
@@ -69,6 +73,55 @@ DEFAULT_LATEX_ENVIRONMENT = {
 }
 
 
+# TeX run before the document, leaving the dates and trailer ID out of the
+# PDF. Even taken from a commit, the date changes when history is rewritten,
+# e.g., by a squash merge, which changes the bytes of an identical document.
+# The ID, which pdfTeX derives from the date, is put back from the content
+# afterwards by ``set_content_id``. XeTeX's driver can't leave them out, so
+# its PDF keeps the source date.
+PDF_PRETEX = (
+    r"\ifdefined\pdfinfoomitdate\pdfinfoomitdate=1 \pdftrailerid{}"
+    # LuaTeX's flags for CreationDate (32), ModDate (64), and ID (512)
+    r"\else\ifdefined\pdfvariable\pdfvariable suppressoptionalinfo 608 "
+    r"\pdfvariable trailerid{}\fi\fi"
+)
+
+
+def set_content_id(pdf_path: str) -> bool:
+    """Give a PDF with no trailer ID one hashed from its content.
+
+    PDF/A and PDF 2.0 require an ID, and a viewer keeps its first half when
+    it saves an annotated copy, so a PDF back from review can still be
+    matched to its build. Hashing the bytes keeps the ID the same for the
+    same content. Only the last cross-reference section's dictionary
+    changes, which comes after every offset the file records, so they all
+    stay valid. Returns whether an ID was added.
+    """
+    data = Path(pdf_path).read_bytes()
+    pos = data.rfind(b"startxref")
+    m = re.match(rb"startxref\s+(\d+)", data[pos:]) if pos >= 0 else None
+    if m is None:
+        return False
+    section = int(m.group(1))
+    tail = data[section:pos]
+    # A table's dictionary follows the 'trailer' keyword, and a stream's is
+    # its own, ending where the stream starts
+    if tail.startswith(b"xref"):
+        start = tail.find(b"trailer")
+        end = len(tail)
+    else:
+        start = 0
+        end = tail.find(b"stream")
+    opening = tail.find(b"<<", start) if start >= 0 else -1
+    if opening < 0 or end < 0 or re.search(rb"/ID\b", tail[opening:end]):
+        return False
+    digest = hashlib.md5(data).hexdigest().upper().encode()
+    at = section + opening + 2
+    entry = b" /ID [<" + digest + b"> <" + digest + b">]"
+    Path(pdf_path).write_bytes(data[:at] + entry + data[at:])
+    return True
+
+
 def get_source_date_epoch(tex_file: str) -> str | None:
     """When to say the PDF was built, in seconds since the epoch.
 
@@ -76,7 +129,8 @@ def get_source_date_epoch(tex_file: str) -> str | None:
     ID, so two builds of identical source differ byte for byte, and every
     rebuild rewrites the output's hash in ``dvc.lock``. Taking the date
     from the last commit that touched the document keeps it meaningful
-    while the bytes stay put until the document itself changes.
+    while the bytes stay put until the document itself changes. Where
+    ``PDF_PRETEX`` leaves the date out, it still sets ``\\today``.
     """
     import subprocess
 
@@ -386,6 +440,22 @@ def _strip_comments(tex: str) -> str:
     return "\n".join(out)
 
 
+def _strip_comments_joined(tex: str) -> str:
+    """Remove TeX comments as TeX reads them: a comment takes its line's
+    end, so the next line joins on, without its leading spaces."""
+    lines = tex.split("\n")
+    out, joined = [], False
+    for i, line in enumerate(lines):
+        if joined:
+            line = line.lstrip()
+        m = re.search(r"(?<!\\)%", line)
+        joined = m is not None
+        out.append(line[: m.start()] if m else line)
+        if i < len(lines) - 1 and not joined:
+            out.append("\n")
+    return "".join(out)
+
+
 def _project_has(base: Path, rel: str) -> bool:
     """Whether the project contains this file.
 
@@ -465,6 +535,652 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
     return sorted(found)
 
 
+# Where Calkit puts the components that the documents in a folder include
+# with calkit.sty's commands. Not hidden, since Overleaf drops dot-folders
+# from an uploaded zip.
+COMPONENTS_DIR = "_calkit"
+VALUES_FNAME = "values.tex"
+STYLE_FNAME = "calkit.sty"
+# What Calkit writes in _calkit itself, which no component can replace
+_CALKIT_OWN_FILES = (".gitignore", "README.md", VALUES_FNAME)
+# calkit.sty's commands, each with an optional [...] and its {...} args, of
+# which only \ckvalue has two, so a brace group after another is left alone
+_CK_COMMAND_RE = re.compile(
+    r"\\ck(?P<kind>(?P<value>v)alue|figure|table|include)"
+    r"\s*(?:\[(?P<option>[^\]]*)\])?\s*\{(?P<first>[^}]*)\}"
+    r"(?(value)\s*\{(?P<second>[^}]*)\})"
+)
+_PACKAGE_RE = re.compile(
+    r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}"
+)
+_TEX_SPECIALS = {
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
+
+
+@dataclass(frozen=True)
+class CkComponent:
+    """A document component included with one of calkit.sty's commands,
+    named by its path relative to the project root.
+
+    Components can be integrated other ways, e.g., a stage writing into the
+    document's folder, a map-paths copy, or json-to-latex; this is only the
+    kind Calkit brings in itself.
+    """
+
+    kind: str
+    path: str
+    key: str | None = None
+    # How calkit.sty formats a value: siunitx options, or a Python format
+    # spec, e.g., .2f
+    format: str = ""
+
+
+def _read_leniently(path: str) -> str | None:
+    """A source file's text, with anything that isn't UTF-8 replaced, since
+    finding components mustn't fail on a document in another encoding.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return None
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
+def read_ck_usage(
+    document: str, read: Callable[[str], str | None] = _read_leniently
+) -> tuple[bool, list[CkComponent]]:
+    """Whether a document loads calkit.sty, and the components it includes
+    with its commands, including in the files it inputs, in order and
+    without repeats.
+
+    Files are read with ``read``, e.g., from the hub's copy of a repo.
+
+    Commands in a document that doesn't load calkit.sty can't compile, so
+    they aren't components. Nor are commands in a macro's definition, whose
+    arguments are its parameters, e.g., ``#1``, until used, which can't be
+    followed.
+    """
+    lines = flatten(document, read=read)
+    text = "\n".join(_strip_comments(line.text) for line in lines)
+    loads = any(
+        "calkit" in (name.strip() for name in m.group(1).split(","))
+        for m in _PACKAGE_RE.finditer(text)
+    )
+    if not loads:
+        return False, []
+    found: list[CkComponent] = []
+    for match in _CK_COMMAND_RE.finditer(text):
+        kind, option, first = match.group("kind", "option", "first")
+        option, second = option or "", match.group("second") or ""
+        if "#" in first + second:
+            continue
+        if kind == "value":
+            found.append(
+                CkComponent(
+                    kind, first.strip(), second.strip(), option.strip()
+                )
+            )
+        else:
+            found.append(CkComponent(kind, first.strip()))
+    return True, list(dict.fromkeys(found))
+
+
+def component_candidates(
+    component: CkComponent,
+) -> tuple[list[str], str | None]:
+    """The project paths a component's file could be at, in the order TeX
+    tries them, or what's wrong with how it's named.
+
+    A figure or table named without an extension is found the way TeX
+    finds it, e.g., ``figures/plot`` as ``figures/plot.pdf`` or ``.png``,
+    and so is one with a dot in its name, e.g., ``figures/fit_1.5``.
+    """
+    raw = component.path.replace("\\", "/")
+    if raw.startswith("/") or PureWindowsPath(component.path).drive:
+        return [], f"{component.path} is outside the project"
+    rel = posixpath.normpath(raw)
+    if rel == ".." or rel.startswith("../"):
+        return [], f"{component.path} is outside the project"
+    # TeX reads the path as written, so a copy at the normalized path
+    # wouldn't be found
+    if ".." in raw.split("/"):
+        return [], f"{component.path} can't include '..'"
+    if component.kind != "value":
+        exts = _GRAPHICS_EXTS if component.kind == "figure" else [".tex"]
+        if posixpath.splitext(rel)[1].lower() not in exts:
+            return [rel + ext for ext in exts] + [rel], None
+    return [rel], None
+
+
+def component_path(
+    component: CkComponent, exists: Callable[[str], bool]
+) -> tuple[str | None, str | None]:
+    """Where a component's file is, relative to the project, or what's
+    wrong with it, with ``exists`` saying whether a project path is there.
+    """
+    candidates, problem = component_candidates(component)
+    if problem is not None:
+        return None, problem
+    for candidate in candidates:
+        if exists(candidate):
+            return candidate, None
+    return None, f"{component.path} is not in the project yet"
+
+
+def find_shown(document: str, wdir: str | None = None) -> list[str]:
+    """Project files a document shows, whether cited with calkit.sty's
+    commands or included plainly, e.g., with ``\\includegraphics`` or
+    ``\\input``, relative to ``wdir`` like ``document`` is.
+    """
+    _, components = read_ck_usage(os.path.join(wdir or ".", document))
+    cited = []
+    for c in components:
+        rel, _ = component_path(
+            c, lambda p: os.path.isfile(os.path.join(wdir or ".", p))
+        )
+        cited.append(rel or c.path)
+    return list(dict.fromkeys(cited + detect_inputs(document, wdir=wdir)))
+
+
+def root_documents(folder: str) -> list[str]:
+    """The documents directly in a folder, i.e., ``.tex`` files with a
+    ``\\documentclass``, rather than the files they input.
+    """
+    docs = []
+    for name in sorted(os.listdir(folder or ".")):
+        path = os.path.join(folder, name)
+        if not name.endswith(".tex") or not os.path.isfile(path):
+            continue
+        text = _read_leniently(path) or ""
+        if re.search(r"^\s*\\documentclass", _strip_comments(text), re.M):
+            docs.append(path)
+    return docs
+
+
+def escape_tex(text: str) -> str:
+    """Escape TeX's special characters in plain text."""
+    return "".join(_TEX_SPECIALS.get(c, c) for c in str(text))
+
+
+def tex_value(value: Any) -> tuple[str, str]:
+    """A value's kind and text for ``_calkit/values.tex``: ``n`` for a
+    number, written in full for calkit.sty to format, or ``t`` for text.
+    """
+    import math
+
+    # MATLAB and NumPy write a scalar as a one-element array
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "t", escape_tex(str(value))
+    if isinstance(value, float) and not math.isfinite(value):
+        return "t", escape_tex(str(value))
+    return "n", repr(value)
+
+
+def _write_if_changed(path: str, content: str | bytes) -> None:
+    """Write a file only if its content differs, so latexmk, which goes by
+    content and timestamps, doesn't rebuild for nothing.
+    """
+    data = content.encode("utf-8") if isinstance(content, str) else content
+    if os.path.isfile(path):
+        with open(path, "rb") as f:
+            if f.read() == data:
+                return
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def _make_writable(path: str) -> None:
+    """Let a file be overwritten or removed, e.g., one copied from DVC's
+    cache, which is read-only, or on Windows, where read-only blocks
+    removal. A link is left alone, since that would change what it points
+    to.
+    """
+    import stat
+
+    if (
+        os.path.exists(path)
+        and not os.path.islink(path)
+        and not os.access(path, os.W_OK)
+    ):
+        os.chmod(path, os.stat(path).st_mode | stat.S_IWUSR)
+
+
+def _is_within(path: str, base: str) -> bool:
+    try:
+        return os.path.commonpath([path, base]) == base
+    except ValueError:
+        return False
+
+
+def _within_project(path: str, root: str) -> bool:
+    """Whether a file is really in the project, rather than reached through
+    a link out of it, e.g., a symlink committed to Git, so nothing outside
+    is read and pushed to Overleaf. DVC's cache counts, since DVC can check
+    files out as links to it.
+    """
+    real = os.path.realpath(path)
+    real_root = os.path.realpath(root)
+    if _is_within(real, real_root):
+        return True
+    # A cache kept elsewhere, only looked for when a link leaves the project
+    dvc_dir = os.path.join(real_root, ".dvc")
+    for name in ["config", "config.local"]:
+        try:
+            with open(os.path.join(dvc_dir, name), encoding="utf-8") as f:
+                config = f.read()
+        except OSError:
+            continue
+        section = re.search(
+            r"^\[cache\]\s*$(.*?)(?=^\[|\Z)", config, re.M | re.S
+        )
+        match = section and re.search(
+            r"^\s*dir\s*=\s*(.+?)\s*$", section.group(1), re.M
+        )
+        if match:
+            cache = os.path.realpath(os.path.join(dvc_dir, match.group(1)))
+            if _is_within(real, cache):
+                return True
+    return False
+
+
+@dataclass
+class CkMapping:
+    """What goes in a ``_calkit`` folder for the components documents
+    include: the project files copied in, each with whether it's there to
+    copy rather than only stored with DVC, the text of ``values.tex``, and
+    what couldn't be brought in.
+    """
+
+    files: dict[str, bool]
+    values: str
+    problems: list[str]
+
+
+def plan_ck_components(
+    components: list[CkComponent],
+    is_file: Callable[[str], bool],
+    read_data: Callable[[str], Any],
+    is_tracked: Callable[[str], bool] | None = None,
+    is_outside: Callable[[str], bool] | None = None,
+    previous_values: str = "",
+    link_base: str | None = None,
+) -> CkMapping:
+    """Work out what goes in ``_calkit`` for some components, reading the
+    project only through the functions given, so it works wherever its
+    files are, e.g., in the hub's copy of a repo.
+
+    ``is_file`` says whether a project path is there, ``read_data`` reads a
+    results file's data, and ``is_outside`` whether a path is reached
+    through a link out of the project. ``is_tracked`` and
+    ``previous_values`` are as for ``map_ck_components``. ``link_base`` is
+    the project's URL on its hub, which components link to in the PDF.
+    """
+    from calkit.questions import resolve_key
+
+    def find(c: CkComponent) -> tuple[str | None, str | None, bool]:
+        """Where a component is, what's wrong with it, and whether it's
+        here rather than only stored with DVC.
+        """
+        rel, problem = component_path(c, is_file)
+        if rel is not None and is_outside is not None and is_outside(rel):
+            return None, f"{c.path} links outside the project", False
+        # Calkit's own files in _calkit can't be replaced by a copy
+        if c.kind != "value" and rel in _CALKIT_OWN_FILES:
+            return None, f"{c.path} has a name Calkit uses in _calkit", False
+        if rel is None and is_tracked is not None:
+            tracked, _ = component_path(c, is_tracked)
+            if tracked is not None:
+                return tracked, None, False
+        return rel, problem, rel is not None
+
+    files: dict[str, bool] = {}
+    problems: list[str] = []
+    lines = ["%% Written by Calkit from what the documents here include.\n"]
+    if link_base:
+        lines.append(f"\\cklinkbase{{{link_base}}}\n")
+    for c in components:
+        if c.kind == "value":
+            continue
+        rel, problem, here = find(c)
+        if rel is None:
+            problems.append(str(problem))
+            continue
+        files[rel] = files.get(rel, False) or here
+        # Where TeX finds one named without an extension, and nothing for one
+        # named in full, so values.tex is the same whether or not the file
+        # could be copied
+        if rel != c.path:
+            lines.append(f"\\cksetfile{{{c.path}}}{{{rel}}}\n")
+    loaded: dict[str, Any] = {}
+    # Formats are applied by calkit.sty, so a value is written once however
+    # many ways it's formatted
+    written: set[tuple[str, str | None]] = set()
+    for c in components:
+        if c.kind != "value" or (c.path, c.key) in written:
+            continue
+        written.add((c.path, c.key))
+        rel, problem, here = find(c)
+        if rel is None:
+            problems.append(str(problem))
+            continue
+        if not here:
+            start = f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{"
+            kept_line = next(
+                (
+                    line + "\n"
+                    for line in previous_values.splitlines()
+                    if line.startswith(start)
+                ),
+                None,
+            )
+            if kept_line is None:
+                problems.append(f"{c.path} is stored with DVC and not pulled")
+            else:
+                lines.append(kept_line)
+            continue
+        try:
+            if rel not in loaded:
+                loaded[rel] = read_data(rel)
+            kind, text = tex_value(resolve_key(loaded[rel], c.key or ""))
+        except KeyError:
+            problems.append(f"{c.path} has no {c.key}")
+            continue
+        except Exception as e:
+            problems.append(f"{c.key} from {c.path}: {e}")
+            continue
+        lines.append(
+            f"\\cksetvalue{{{c.path}}}{{{c.key}}}{{{kind}}}{{{text}}}\n"
+        )
+    return CkMapping(files=files, values="".join(lines), problems=problems)
+
+
+def map_ck_components(
+    path: str,
+    is_tracked: Callable[[str], bool] | None = None,
+    previous_values: str | None = None,
+) -> list[str]:
+    """Bring the components a document, or the documents in a folder,
+    include with calkit.sty's commands into the ``_calkit`` folder beside
+    them, so they build without the rest of the project, e.g., on Overleaf.
+
+    Only documents that load calkit.sty are mapped, so Calkit writes nothing
+    beside one that doesn't. One that does gets ``calkit.sty`` and
+    ``_calkit`` even before it includes anything, so it compiles.
+
+    Every document directly in the folder is included, plus the document
+    named, e.g., one whose ``\\documentclass`` is in a file it inputs, since
+    they share the ``_calkit`` folder, and mapping one alone would remove
+    the others' copies. Files are copied, values are written to
+    ``_calkit/values.tex`` for calkit.sty to format, and ``calkit.sty`` is
+    put beside the documents. Anything no longer included is removed, since
+    nothing else writes there, as is ``calkit.sty`` once no document loads
+    it.
+
+    ``is_tracked`` says whether a project path is stored with DVC, so
+    something that isn't pulled, e.g., on the hub, comes out as it would
+    where it is: a figure or table named without an extension is found the
+    same way, and a value is kept from ``previous_values``, e.g., Overleaf's
+    ``values.tex``, or the one being replaced. It's only asked about what
+    isn't here.
+
+    Returns what couldn't be brought in, e.g., a file the pipeline hasn't
+    produced yet. Those print as ``??`` rather than failing the build.
+    """
+    import calkit.git
+    import calkit.resources
+    from calkit.questions import read_evidence_file
+
+    named = [] if os.path.isdir(path or ".") else [path]
+    folder = os.path.dirname(path) if named else path
+    docs = list(
+        dict.fromkeys(
+            os.path.normpath(d)
+            for d in root_documents(folder) + named
+            if os.path.isfile(d)
+        )
+    )
+    usage = [read_ck_usage(doc) for doc in docs]
+    components = list(dict.fromkeys(c for _, found in usage for c in found))
+    out = os.path.join(folder, COMPONENTS_DIR)
+    style_path = os.path.join(folder, STYLE_FNAME)
+    # Nothing is written, changed, or removed through a link, e.g., one
+    # committed to Git, which could point anywhere
+    for path in [out, style_path]:
+        if os.path.islink(path):
+            return [f"{path} is a link, so Calkit won't write there"]
+    real_out = os.path.realpath(out)
+
+    def can_write(dest: str) -> bool:
+        """Whether a file can go in _calkit without following a link out of
+        it, removing a link where the file goes.
+        """
+        parent = os.path.realpath(os.path.dirname(dest))
+        if not _is_within(parent, real_out):
+            return False
+        if os.path.islink(dest):
+            os.remove(dest)
+        return True
+
+    if not any(loads for loads, _ in usage):
+        if os.path.isdir(out):
+            for dirpath, _, filenames in os.walk(out):
+                for name in filenames:
+                    _make_writable(os.path.join(dirpath, name))
+            shutil.rmtree(out)
+        # Only the one Calkit wrote, and never one that's committed
+        if os.path.isfile(style_path):
+            with open(style_path, encoding="utf-8", errors="replace") as f:
+                ours = "Calkit project components" in f.read()
+            try:
+                repo = calkit.git.get_repo(folder or ".")
+                committed = bool(
+                    repo.git.ls_files(
+                        "--",
+                        os.path.relpath(
+                            os.path.abspath(style_path), repo.working_dir
+                        ),
+                    )
+                )
+            except Exception:
+                committed = False
+            if ours and not committed:
+                os.remove(style_path)
+        return []
+    # Component paths are relative to the project, wherever the document is
+    root = os.path.abspath(folder or ".")
+    while not os.path.isfile(os.path.join(root, "calkit.yaml")):
+        parent = os.path.dirname(root)
+        if parent == root:
+            root = os.path.abspath(folder or ".")
+            break
+        root = parent
+    # Components link to the project on its hub, when calkit.yaml says whose
+    # it is, since a Git remote differs between clones
+    link_base = None
+    try:
+        import calkit.config
+
+        ck_info = calkit.load_calkit_info(wdir=root, read_only=True)
+        if ck_info.get("owner") and ck_info.get("name"):
+            hub = calkit.config.normalize_hub_url(
+                str(ck_info.get("hub") or "calkit.io")
+            )
+            link_base = f"{hub}/{ck_info['owner']}/{ck_info['name']}"
+    except Exception:
+        pass
+    if previous_values is None:
+        try:
+            with open(os.path.join(out, VALUES_FNAME), encoding="utf-8") as f:
+                previous_values = f.read()
+        except (OSError, UnicodeDecodeError):
+            previous_values = ""
+    plan = plan_ck_components(
+        components,
+        is_file=lambda rel: os.path.isfile(os.path.join(root, rel)),
+        read_data=lambda rel: read_evidence_file(os.path.join(root, rel)),
+        is_tracked=is_tracked,
+        is_outside=lambda rel: (
+            not _within_project(os.path.join(root, rel), root)
+        ),
+        previous_values=previous_values,
+        link_base=link_base,
+    )
+    problems = list(plan.problems)
+    kept = set(_CALKIT_OWN_FILES) | set(plan.files)
+    for name in _CALKIT_OWN_FILES:
+        can_write(os.path.join(out, name))
+    _write_if_changed(
+        os.path.join(out, ".gitignore"),
+        "# Calkit copies the components the documents beside this folder\n"
+        "# include into it\n"
+        "*\n",
+    )
+    # Pushed to Overleaf with the rest, where the .gitignore isn't a hint
+    _write_if_changed(
+        os.path.join(out, "README.md"),
+        "# Don't edit anything here\n\n"
+        "Calkit writes this folder from the project, for the documents\n"
+        "beside it to include with `\\ckvalue`, `\\ckfigure`,\n"
+        "`\\cktable`, and `\\ckinclude`. It's rewritten whenever the\n"
+        "pipeline runs or is checked and on every Overleaf sync, so edits\n"
+        "here are lost and never reach the project.\n"
+        "To change a value, figure, or table, change where it comes from.\n",
+    )
+    for rel, here in plan.files.items():
+        # Skipped while size and timestamp match, since this runs before
+        # every status check. Only the content is copied, so a read-only
+        # file from DVC's cache leaves a copy that can be updated.
+        src = os.path.join(root, rel)
+        dest = os.path.join(out, rel)
+        if not can_write(dest):
+            problems.append(f"{rel} would be copied through a link")
+            continue
+        if here:
+            src_stat = os.stat(src)
+            if not os.path.isfile(dest) or (
+                os.stat(dest).st_size,
+                os.stat(dest).st_mtime_ns,
+            ) != (src_stat.st_size, src_stat.st_mtime_ns):
+                os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+                _make_writable(dest)
+                shutil.copyfile(src, dest)
+                os.utime(dest, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+    _write_if_changed(os.path.join(out, VALUES_FNAME), plan.values)
+    for dirpath, _, filenames in os.walk(out, topdown=False):
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            if Path(os.path.relpath(path, out)).as_posix() not in kept:
+                _make_writable(path)
+                os.remove(path)
+        if dirpath != out and not os.listdir(dirpath):
+            os.rmdir(dirpath)
+    new_style = not os.path.isfile(style_path)
+    _write_if_changed(
+        style_path, calkit.resources.read_text("latex", STYLE_FNAME)
+    )
+    # Written whenever it's needed, so kept out of Git, wherever this runs
+    if new_style:
+        try:
+            repo = calkit.git.get_repo(root)
+            rel_style = os.path.relpath(
+                os.path.abspath(style_path), repo.working_dir
+            )
+            if not repo.git.ls_files("--", rel_style):
+                calkit.git.ensure_path_is_ignored(repo, rel_style)
+        except Exception:
+            pass
+    return problems
+
+
+def expand_ck_components(
+    source_root: str, data_root: str, document: str
+) -> None:
+    """Replace calkit.sty's commands in a document and the files it inputs
+    with what they show, read from ``data_root``, so latexdiff can mark a
+    changed value, figure, or table.
+
+    The sources are rewritten under ``source_root``, e.g., a checkout of a
+    revision, and ``document`` is relative to it. A figure becomes an
+    ``\\includegraphics`` of its file and a table its contents, and a value
+    a ``\\cknum`` of the number, which calkit.sty formats. A command whose
+    component can't be found is left alone, to print as ``??``.
+    """
+    from calkit.questions import read_evidence_file, resolve_key
+
+    doc_dir = os.path.dirname(document)
+
+    def is_file(rel: str) -> bool:
+        path = os.path.join(data_root, rel)
+        return os.path.isfile(path) and _within_project(path, data_root)
+
+    def replace(match: re.Match[str]) -> str:
+        kind, option, first, second = match.group(
+            "kind", "option", "first", "second"
+        )
+        if "#" in first + (second or ""):
+            return match.group(0)
+        c = CkComponent(kind, first.strip(), (second or "").strip() or None)
+        rel, _ = component_path(c, is_file)
+        if rel is None:
+            return match.group(0)
+        if kind == "figure":
+            name = posixpath.relpath(rel, doc_dir or ".")
+            return f"\\includegraphics[{option or ''}]{{{name}}}"
+        if kind in ("table", "include"):
+            return _read_leniently(os.path.join(data_root, rel)) or ""
+        try:
+            value = resolve_key(
+                read_evidence_file(os.path.join(data_root, rel)), c.key or ""
+            )
+        except Exception:
+            return match.group(0)
+        value_kind, text = tex_value(value)
+        if value_kind == "t":
+            return text
+        return f"\\cknum[{(option or '').strip()}]{{{text}}}"
+
+    sources = [document] + [
+        path
+        for path in detect_inputs(document, wdir=source_root)
+        if Path(path).suffix in _SOURCE_EXTS
+    ]
+    for source in dict.fromkeys(sources):
+        path = Path(source_root, source)
+        text = _read_leniently(str(path))
+        if text is None:
+            continue
+        # Comments are set aside, marked by their number, so a command split
+        # across lines is still found, but none in a comment
+        comments: list[str] = []
+        code_lines = []
+        for line in text.split("\n"):
+            m = re.search(r"(?<!\\)%", line)
+            if m:
+                code_lines.append(f"{line[: m.start()]}\0{len(comments)}\0")
+                comments.append(line[m.start() :])
+            else:
+                code_lines.append(line)
+        new_text = re.sub(
+            "\0(\\d+)\0",
+            lambda m: comments[int(m.group(1))],
+            _CK_COMMAND_RE.sub(replace, "\n".join(code_lines)),
+        )
+        if new_text != text:
+            path.write_text(new_text, encoding="utf-8")
+
+
 # Records of Word exports and merges: always kept on this machine, like run
 # logs, and in the project too when asked, e.g., with --log
 DOCX_EXPORTS_DIR = os.path.join(".calkit", "latex", "docx-exports")
@@ -480,6 +1196,20 @@ _INCLUDE_RE = re.compile(
 _BLOCK_START_RE = re.compile(
     r"^\s*\\(begin|end|section|subsection|subsubsection|chapter|part|item|"
     r"caption|maketitle|documentclass)\b"
+)
+# An author-year citation as rendered, e.g., "(Smith et al., 2020; Lee,
+# 2021a)", or the year of a textual one
+_CITATION_RE = re.compile(r"\((?=[^()]*\b(?:1[5-9]|20)\d\d[a-z]?\b)[^()]*\)")
+# A sectioning command, which renders as a paragraph of its own
+_HEADING_RE = re.compile(
+    r"^\s*\\(part|chapter|section|subsection|subsubsection)\*?"
+    r"(\[[^\]]*\])?\{"
+)
+# A macro defined without arguments, through its body's opening brace
+_MACRO_DEF_RE = re.compile(
+    r"\\(?:(?:re)?newcommand|providecommand|DeclareRobustCommand)\*?\s*"
+    r"(?:\{\s*\\([A-Za-z@]+)\s*\}|\\([A-Za-z@]+))\s*\{"
+    r"|\\def\s*\\([A-Za-z@]+)\s*\{"
 )
 # Display math, which Word gets as equations rather than paragraphs
 _DISPLAY_RE = re.compile(
@@ -499,6 +1229,127 @@ _MD_HEADING_RE = re.compile(r"^[ ]{0,3}#{1,6}(\s|$)")
 _INLINE_MATH_RE = re.compile(
     r"(?<![\\$])\$(?!\$)((?:\\.|[^$\\])+?)\$|\\\((.+?)\\\)", re.S
 )
+# Text-mode symbol commands, by name, and the characters they print
+TEXT_SYMBOLS = {
+    "textperthousand": "\u2030",
+    "textdegree": "\u00b0",
+    "textcelsius": "\u2103",
+    "textmu": "\u00b5",
+    "textpm": "\u00b1",
+    "texttimes": "\u00d7",
+    "textdiv": "\u00f7",
+    "textendash": "\u2013",
+    "textemdash": "\u2014",
+    "textasciitilde": "~",
+    "textbullet": "\u2022",
+    "textsection": "\u00a7",
+}
+# And more that only print in text, e.g., \o, which isn't math
+_DETEX_SYMBOLS = TEXT_SYMBOLS | {
+    "textasciicircum": "^",
+    "textbackslash": "\\",
+    "textbar": "|",
+    "textless": "<",
+    "textgreater": ">",
+    "textquoteleft": "\u2018",
+    "textquoteright": "\u2019",
+    "textquotedblleft": "\u201c",
+    "textquotedblright": "\u201d",
+    "textregistered": "\u00ae",
+    "texttrademark": "\u2122",
+    "textcopyright": "\u00a9",
+    "copyright": "\u00a9",
+    "textdagger": "\u2020",
+    "dag": "\u2020",
+    "textdaggerdbl": "\u2021",
+    "ddag": "\u2021",
+    "ldots": "\u2026",
+    "dots": "\u2026",
+    "textellipsis": "\u2026",
+    "S": "\u00a7",
+    "P": "\u00b6",
+    "ss": "\u00df",
+    "o": "\u00f8",
+    "O": "\u00d8",
+    "ae": "\u00e6",
+    "AE": "\u00c6",
+    "oe": "\u0153",
+    "OE": "\u0152",
+    "aa": "\u00e5",
+    "AA": "\u00c5",
+    "l": "\u0142",
+    "L": "\u0141",
+    "i": "\u0131",
+    "LaTeX": "LaTeX",
+    "TeX": "TeX",
+}
+# Accent commands, by the character naming them, as combining marks
+_ACCENTS = {
+    "`": "\u0300",
+    "'": "\u0301",
+    "^": "\u0302",
+    "~": "\u0303",
+    "=": "\u0304",
+    "u": "\u0306",
+    ".": "\u0307",
+    '"': "\u0308",
+    "r": "\u030a",
+    "H": "\u030b",
+    "v": "\u030c",
+    "c": "\u0327",
+    "k": "\u0328",
+}
+# siunitx unit and prefix macros, by name, as printed
+_SI_PREFIXES = {
+    "femto": "f",
+    "pico": "p",
+    "nano": "n",
+    "micro": "\u00b5",
+    "milli": "m",
+    "centi": "c",
+    "deci": "d",
+    "kilo": "k",
+    "mega": "M",
+    "giga": "G",
+}
+_SI_UNITS = _SI_PREFIXES | {
+    "kelvin": "K",
+    "celsius": "\u00b0C",
+    "degreeCelsius": "\u00b0C",
+    "degree": "\u00b0",
+    "percent": "%",
+    "second": "s",
+    "minute": "min",
+    "hour": "h",
+    "day": "d",
+    "metre": "m",
+    "meter": "m",
+    "gram": "g",
+    "kilogram": "kg",
+    "mole": "mol",
+    "ampere": "A",
+    "hertz": "Hz",
+    "newton": "N",
+    "pascal": "Pa",
+    "joule": "J",
+    "watt": "W",
+    "volt": "V",
+    "ohm": "\u03a9",
+    "litre": "L",
+    "liter": "L",
+    "electronvolt": "eV",
+    "angstrom": "\u00c5",
+    "dalton": "Da",
+    "per": "/",
+    "squared": "\u00b2",
+    "cubed": "\u00b3",
+}
+# Where rendered text holds a reference or citation, e.g., "A.4" or "(Lee,
+# 2020)", in prose from ``detex``
+REF_MARK = "\ue010"
+CITE_MARK = "\ue011"
+# And a textual citation, e.g., "Lee (2020)"
+TEXT_CITE_MARK = "\ue012"
 # Environments whose rows are numbered one by one
 _MULTIROW_ENVS = frozenset({"align", "gather", "eqnarray", "flalign"})
 
@@ -519,6 +1370,11 @@ class Block:
     # it in the rendered document
     floating: bool = False
     markdown: bool = False
+    # The document's macros without arguments, by name, which render as
+    # their text
+    macros: dict[str, str] = field(default_factory=dict)
+    # Before \begin{document}, so not rendered
+    preamble: bool = False
 
     @property
     def path(self) -> str:
@@ -533,25 +1389,32 @@ class Block:
         if self.display:
             return ""
         src = "\n".join(ln.text for ln in self.lines)
-        return demarkdown(src) if self.markdown else detex(src)
+        if self.markdown:
+            return demarkdown(src)
+        return detex(expand_macros(src, self.macros))
 
     @property
     def inline_math(self) -> list[tuple[str, str, str]]:
         """Each piece of inline math, with the prose on either side of it as
-        rendered: (before, LaTeX, after)."""
+        rendered: (before, LaTeX, after), the prose with a space next to
+        the math where there's one in the source, and references and
+        citations marked."""
         if self.display:
             return []
-        src = "\n".join(ln.text.split("%")[0] for ln in self.lines)
+        src = _strip_comments_joined("\n".join(ln.text for ln in self.lines))
         found = list(_INLINE_MATH_RE.finditer(src))
         out = []
         for i, m in enumerate(found):
             start = found[i - 1].end() if i else 0
             end = found[i + 1].start() if i + 1 < len(found) else len(src)
+            before, after = src[start : m.start()], src[m.end() : end]
             out.append(
                 (
-                    detex(src[start : m.start()]),
+                    detex(expand_macros(before, self.macros), marks=True)
+                    + (" " if re.search(r"[\s~]$", before) else ""),
                     m.group(1) or m.group(2),
-                    detex(src[m.end() : end]),
+                    (" " if re.match(r"[\s~]", after) else "")
+                    + detex(expand_macros(after, self.macros), marks=True),
                 )
             )
         return out
@@ -575,7 +1438,7 @@ class Block:
         env = self.display
         if env is None:
             return []
-        src = "\n".join(ln.text.split("%")[0] for ln in self.lines)
+        src = "\n".join(_strip_comments(ln.text) for ln in self.lines)
         src = re.sub(r"\\(label|tag\*?)\{[^}]*\}", "", src)
         body = re.sub(
             r"^\s*(\\begin\{[^}]*\}|\\\[|\$\$)|(\\end\{[^}]*\}|\\\]|\$\$)\s*$",
@@ -653,7 +1516,7 @@ def flatten(
             return
         seen.add(key)
         for i, line in enumerate(text.split("\n"), 1):
-            m = None if markdown else _INCLUDE_RE.match(line.split("%")[0])
+            m = None if markdown else _INCLUDE_RE.match(_strip_comments(line))
             if m:
                 cmd, a, b = m.groups()
                 target = Path(b) if cmd == "import" and b else Path(a)
@@ -661,7 +1524,9 @@ def flatten(
                 child = start / target
                 if child.suffix == "":
                     child = child.with_suffix(".tex")
-                visit(child, child.parent)
+                # TeX reads \input paths from where it compiles, and only
+                # \import moves that to the imported file's folder
+                visit(child, child.parent if cmd == "import" else base)
                 continue
             out.append(SourceLine(rel, i, line))
 
@@ -688,19 +1553,504 @@ def from_word_text(text: str) -> str:
     return text.translate(_WORD_TO_TEX)
 
 
-def detex(text: str) -> str:
-    """Roughly what LaTeX would print for a bit of source."""
-    text = "\n".join(ln.split("%")[0] for ln in text.split("\n"))
-    text = re.sub(r"\$[^$]*\$", " ", text)
+def macro_definitions(lines: list[SourceLine]) -> dict[str, str]:
+    """The bodies of macros defined without arguments, by name, e.g.,
+    ``{"tool": "Wake\\textendash Sim\\xspace"}``."""
+    src = "\n".join(_strip_comments(ln.text) for ln in lines)
+    out: dict[str, str] = {}
+    for m in _MACRO_DEF_RE.finditer(src):
+        name = m.group(1) or m.group(2) or m.group(3)
+        # A later definition replaces an earlier one, but \providecommand
+        # only defines what isn't yet
+        provide = m.group(0).startswith("\\providecommand")
+        # The body, through its matching brace
+        depth, start = 0, m.end() - 1
+        for i in range(start, len(src)):
+            if src[i] == "{" and src[i - 1] != "\\":
+                depth += 1
+            elif src[i] == "}" and src[i - 1] != "\\":
+                depth -= 1
+                if depth == 0:
+                    if not provide or name not in out:
+                        out[name] = src[start + 1 : i]
+                    break
+    return out
+
+
+def expand_macros(
+    text: str, macros: dict[str, str], math: bool = False
+) -> str:
+    """``text`` with the macros in ``macros`` replaced by their bodies,
+    outside math, which a converter expands itself, unless ``math``."""
+    if not macros:
+        return text
+    pattern = re.compile(
+        r"\\("
+        + "|".join(re.escape(n) for n in sorted(macros, key=len, reverse=True))
+        + r")(?![A-Za-z@])"
+    )
+    parts = [text] if math else re.split(r"(\$[^$]*\$)", text)
+    for i in range(0, len(parts), 2):
+        # Bodies can use other macros
+        for _ in range(5):
+            new = pattern.sub(lambda m: macros[m.group(1)], parts[i])
+            if new == parts[i]:
+                break
+            parts[i] = new
+    return "".join(parts)
+
+
+def prepare_for_pandoc(
+    lines: list[SourceLine],
+    aux: str = "",
+    bbl: str = "",
+    find_image: Callable[[str], str | None] | None = None,
+) -> str:
+    """The flattened source as Pandoc should read it, with what TeX worked
+    out filled in from the build's ``.aux`` and ``.bbl``.
+
+    References, citations, and section, figure, and table numbers read as
+    in the PDF, and the bibliography as typeset. Each display becomes a
+    paragraph of its numbers, e.g., "(3)", or "=" if it has none, for the
+    export to replace with the converted equation, as Pandoc can't number
+    them. ``find_image`` gives a picture Word can show for one in the
+    source, e.g., a PDF figure drawn as PNG, if any.
+    """
+
+    def read_groups(text: str, i: int) -> list[str]:
+        # The brace groups from i on, as their contents
+        out: list[str] = []
+        while True:
+            while i < len(text) and text[i].isspace():
+                i += 1
+            if i >= len(text) or text[i] != "{":
+                return out
+            depth, start = 0, i
+            while i < len(text):
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            out.append(text[start + 1 : i])
+            i += 1
+
+    # What the .aux has: each label's number, page, title, and anchor, each
+    # citation's number, year, and authors, and headings and captions'
+    # numbers in order
+    labels: dict[str, list[str]] = {}
+    cites: dict[str, list[str]] = {}
+    headings: dict[str, list[str]] = {}
+    captions: dict[str, list[str]] = {"figure": [], "table": []}
+    for m in re.finditer(r"\\(newlabel|bibcite)\{([^}]*)\}", aux):
+        groups = read_groups(aux, m.end())
+        if not groups:
+            continue
+        inner = read_groups(groups[0], 0) or [groups[0]]
+        if m.group(1) == "newlabel":
+            labels[m.group(2)] = inner + [""] * (4 - len(inner))
+        else:
+            # Without the group natbib puts authors in, e.g., {{Lee}}
+            cites[m.group(2)] = [
+                re.sub(
+                    r"\\natexlab\{([^}]*)\}",
+                    r"\1",
+                    g[1:-1] if read_groups(g, 0) == [g[1:-1]] else g,
+                )
+                for g in inner
+            ]
+    for m in re.finditer(
+        r"\\contentsline\s*\{(part|chapter|section|subsection|subsubsection"
+        r"|figure|table)\}\s*\{\\numberline\s*\{([^}]*)\}",
+        aux,
+    ):
+        kind, number = m.group(1), m.group(2)
+        if kind in captions:
+            captions[kind].append(number)
+        else:
+            headings.setdefault(kind, []).append(number)
+
+    def next_number(last: str) -> str:
+        m = re.match(r"(.*?)(\d+)$", last)
+        return f"{m.group(1)}{int(m.group(2)) + 1}" if m else "1"
+
+    # Displays as paragraphs of their numbers, counted as TeX does, with
+    # those labeled as the .aux has them
+    last = "0"
+    placeholders: dict[int, str] = {}
+    skipped: set[int] = set()
+    for blk in blocks(lines):
+        if blk.display is None:
+            continue
+        env = blk.display
+        name, starred = env.rstrip("*"), env.endswith("*")
+        src = "\n".join(_strip_comments(ln.text) for ln in blk.lines)
+        rows = [src]
+        if name in _MULTIROW_ENVS:
+            rows, depth, start = [], 0, 0
+            for m in re.finditer(r"\\(begin|end)\{[^}]*\}|\\\\", src):
+                if m.group(1) == "begin":
+                    depth += 1
+                elif m.group(1) == "end":
+                    depth -= 1
+                elif depth == 1:
+                    rows.append(src[start : m.start()])
+                    start = m.end()
+            rows.append(src[start:])
+            rows = [
+                r for r in rows if re.sub(r"\\end\{[^}]*\}", "", r).strip()
+            ]
+        numbers = []
+        for row in rows:
+            tag = re.search(r"\\tag\*?\{([^}]*)\}", row)
+            label = re.search(r"\\label\{([^}]*)\}", row)
+            if tag is not None:
+                numbers.append(tag.group(1))
+            elif (
+                starred
+                or env in ("[", "$$")
+                or re.search(r"\\(nonumber|notag)\b", row)
+            ):
+                continue
+            else:
+                known = labels.get(label.group(1)) if label else None
+                last = known[0] if known and known[0] else next_number(last)
+                numbers.append(last)
+        placeholders[id(blk.lines[0])] = (
+            " ".join(f"({n})" for n in numbers) or "="
+        )
+        skipped.update(id(ln) for ln in blk.lines[1:])
+    text = "\n".join(
+        f"\n{placeholders[id(ln)]}\n" if id(ln) in placeholders else ln.text
+        for ln in lines
+        if id(ln) not in skipped
+    )
+
+    # Headings and captions with their numbers, as the .aux lists them
+    def number_heading(m: re.Match[str]) -> str:
+        queue = headings.get(m.group(1), [])
+        if m.group(2) or not queue:
+            return m.group(0)
+        return f"{m.group(0)}{queue.pop(0)} "
+
     text = re.sub(
-        r"\\(cite[pt]?|ref|eqref|label|includegraphics|usepackage|"
-        r"documentclass|bibliography\w*|begin|end)\*?(\[[^\]]*\])?\{[^}]*\}",
+        r"\\(part|chapter|section|subsection|subsubsection)(\*?)\s*"
+        r"(?:\[[^\]]*\])?\s*\{",
+        number_heading,
+        text,
+    )
+    out, kind, i = [], "figure", 0
+    for m in re.finditer(
+        r"\\begin\{(figure|table)\*?\}|\\caption\s*(?:\[[^\]]*\])?\s*\{", text
+    ):
+        out.append(text[i : m.end()])
+        i = m.end()
+        if m.group(1):
+            kind = m.group(1)
+        elif captions[kind]:
+            out.append(f"{kind.title()} {captions[kind].pop(0)}: ")
+    text = "".join(out) + text[i:]
+
+    # References as their numbers, or names with them
+    names = {
+        "autoref": {
+            "equation": "Equation",
+            "figure": "Figure",
+            "table": "Table",
+            "section": "Section",
+            "subsection": "Section",
+            "subsubsection": "Section",
+            "appendix": "Appendix",
+        },
+        "cref": {"equation": "eq.", "figure": "fig.", "table": "table"},
+    }
+
+    def render_ref(m: re.Match[str]) -> str:
+        command, keys = m.group(1), m.group(2).split(",")
+        rendered = []
+        for key in keys:
+            number, page, title, anchor = labels.get(key.strip(), ["??"] * 4)[
+                :4
+            ]
+            if command == "pageref":
+                rendered.append(page)
+                continue
+            if command == "nameref":
+                rendered.append(title)
+                continue
+            shown = f"({number})" if command == "eqref" else number
+            kind = anchor.split(".")[0]
+            if command in ("autoref", "cref", "Cref"):
+                word = names[
+                    "autoref" if command == "autoref" else "cref"
+                ].get(kind, names["autoref"].get(kind, ""))
+                if command == "Cref":
+                    word = word[:1].upper() + word[1:]
+                if kind == "equation" and command != "autoref":
+                    shown = f"({number})"
+                shown = f"{word}~{shown}" if word else shown
+            rendered.append(shown)
+        return ", ".join(rendered)
+
+    text = re.sub(
+        r"\\(eqref|ref|autoref|cref|Cref|pageref|nameref)\*?\s*\{([^}]*)\}",
+        render_ref,
+        text,
+    )
+
+    # Citations as typeset: by author and year, or by number
+    head = text.split("\\begin{document}")[0]
+    numeric = bool(
+        re.search(
+            r"\\usepackage\s*\[[^\]]*\bnumbers\b[^\]]*\]\s*\{natbib\}"
+            r"|\\setcitestyle\{[^}]*\bnumbers\b",
+            head,
+        )
+    ) or any(len(c) < 3 or not c[1] for c in cites.values())
+    elsarticle = re.search(
+        r"\\documentclass\s*(\[[^\]]*\])?\s*\{elsarticle\}", head
+    )
+    if not numeric and elsarticle and not re.search(r"authoryear", head):
+        numeric = True
+    # In brackets, as natbib sets them unless asked for round ones
+    if elsarticle or re.search(
+        r"\\usepackage\s*\[[^\]]*\bround\b[^\]]*\]\s*\{natbib\}"
+        r"|\\setcitestyle\{[^}]*\bround\b|\\bibpunct\s*\{\(",
+        head,
+    ):
+        opening, closing = "(", ")"
+    else:
+        opening, closing = "[", "]"
+
+    def render_cite(m: re.Match[str]) -> str:
+        command = m.group(1)
+        notes = [n[1:-1] for n in (m.group(2), m.group(3)) if n]
+        pre, post = (notes[0], notes[1]) if len(notes) == 2 else ("", "")
+        if len(notes) == 1:
+            post = notes[0]
+        keys = [k.strip() for k in m.group(4).split(",") if k.strip()]
+        found = [cites.get(k, ["?", "?", "?"]) for k in keys]
+        lower = command.lower()
+        if lower in ("nocite",):
+            return ""
+        if numeric:
+            nums = ", ".join(c[0] for c in found)
+            if lower in ("citet", "citealt", "textcite"):
+                inner = "; ".join(
+                    f"{c[2] if len(c) > 2 else '?'}~[{c[0]}]" for c in found
+                )
+                return inner
+            if lower == "citeauthor":
+                return "; ".join(c[2] if len(c) > 2 else "?" for c in found)
+            inner = " ".join(p for p in (pre, nums) if p)
+            return "[" + ", ".join(p for p in (inner, post) if p) + "]"
+        authors = [c[2] if len(c) > 2 else "?" for c in found]
+        years = [c[1] if len(c) > 1 else "?" for c in found]
+        if lower == "citeauthor":
+            shown = "; ".join(authors)
+        elif lower == "citeyear":
+            shown = ", ".join(years)
+        elif lower == "citeyearpar":
+            shown = opening + ", ".join(years) + closing
+        elif lower in ("citet", "cite", "textcite"):
+            shown = "; ".join(
+                f"{a} {opening}{y}{closing}" for a, y in zip(authors, years)
+            )
+            if post:
+                shown = shown[:-1] + f", {post}{closing}"
+        else:
+            inner = "; ".join(f"{a}, {y}" for a, y in zip(authors, years))
+            inner = " ".join(p for p in (pre, inner) if p)
+            inner = ", ".join(p for p in (inner, post) if p)
+            shown = (
+                inner
+                if lower in ("citealp", "citealt")
+                else f"{opening}{inner}{closing}"
+            )
+        if command[:1].isupper():
+            shown = shown[:1].upper() + shown[1:]
+        return shown
+
+    text = re.sub(
+        r"\\(cite[pt]?|citealp|citealt|citeauthor|citeyear|citeyearpar"
+        r"|Cite[pt]?|Citealp|Citealt|Citeauthor|parencite|textcite|nocite)"
+        r"\*?\s*(\[[^\]]*\])?\s*(\[[^\]]*\])?\s*\{([^}]*)\}",
+        render_cite,
+        text,
+    )
+
+    # The bibliography as typeset, numbered where citations are
+    if bbl:
+        # Without its setup before the first item, e.g., \providecommand
+        bib = re.sub(
+            r"\\begin\{thebibliography\}\s*\{[^}]*\}.*?(?=\\bibitem)",
+            lambda m: "\\begin{thebibliography}{}\n",
+            bbl,
+            flags=re.S,
+        )
+        if numeric:
+            bib = re.sub(
+                r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}",
+                lambda m: (
+                    f"\\bibitem{{{m.group(1)}}}"
+                    f"{{[}}{cites.get(m.group(1), ['?'])[0]}{{]}} "
+                ),
+                bib,
+            )
+        bib = "\\section*{References}\n" + bib
+        text = re.sub(
+            r"\\(bibliography\{[^}]*\}|printbibliography(\[[^\]]*\])?)",
+            lambda m: bib,
+            text,
+        )
+
+    # Text symbols Pandoc doesn't know, and pictures Word can show
+    text = re.sub(
+        r"\\(" + "|".join(TEXT_SYMBOLS) + r")(?![A-Za-z])\s*(\{\})?",
+        lambda m: TEXT_SYMBOLS[m.group(1)],
+        text,
+    )
+    text = re.sub(r"\\xspace(?![A-Za-z])\s*(?=[\w(])", " ", text)
+    text = re.sub(r"\\xspace(?![A-Za-z])", "", text)
+    if find_image is not None:
+
+        def swap_image(m: re.Match[str]) -> str:
+            found = find_image(m.group(2))
+            if found is None:
+                return m.group(0)
+            return f"\\includegraphics{m.group(1) or ''}{{{found}}}"
+
+        text = re.sub(
+            r"\\includegraphics\s*(\[[^\]]*\])?\s*\{([^}]*)\}",
+            swap_image,
+            text,
+        )
+    return text
+
+
+def detex(text: str, marks: bool = False) -> str:
+    """Roughly what LaTeX would print for a bit of source, with, if
+    ``marks``, a reference as ``REF_MARK`` and a citation as ``CITE_MARK``,
+    or ``TEXT_CITE_MARK`` for a textual one, since their text isn't
+    known."""
+
+    def render_units(tex: str) -> str:
+        # Prefixes join the unit after them, e.g., \milli\second as "ms"
+        out = re.sub(
+            r"\\([A-Za-z]+)\s*",
+            lambda m: (
+                _SI_UNITS.get(m.group(1), m.group(1))
+                + ("" if m.group(1) in _SI_PREFIXES else " ")
+            ),
+            tex,
+        )
+        return re.sub(r"[{}^~]", "", out).strip()
+
+    text = _strip_comments_joined(text)
+    # Line breaks first, so the word after one isn't taken for a command
+    text = text.replace("\\\\", " ")
+    # Escaped characters print as themselves, held aside from the math and
+    # braces below
+    text = re.sub(
+        r"\\([$%&#_{}])",
+        lambda m: chr(0xE000 + "$%&#_{}".index(m.group(1))),
+        text,
+    )
+    text = re.sub(r"\$[^$]*\$|\\\(.*?\\\)", " ", text, flags=re.S)
+    if marks:
+        text = re.sub(r"\\eqref\s*\{[^}]*\}", f"({REF_MARK})", text)
+        text = re.sub(
+            r"\\(?:auto|c|C|page|name)?ref\*?\s*\{[^}]*\}", REF_MARK, text
+        )
+        text = re.sub(
+            r"\\(?:[Cc]ite(?:t|alt|author)|[Tt]extcite)\*?\s*"
+            r"(\[[^\]]*\]\s*){0,2}\{[^}]*\}",
+            TEXT_CITE_MARK,
+            text,
+        )
+        # Any other citation, e.g., biblatex's \parencite, but \nocite,
+        # which prints nothing
+        text = re.sub(
+            r"\\(?!nocite)[A-Za-z]*[Cc]ite[A-Za-z]*\*?\s*(\[[^\]]*\]\s*){0,2}"
+            r"\{[^}]*\}",
+            CITE_MARK,
+            text,
+        )
+    text = re.sub(
+        r"\\([A-Za-z]*[Cc]ite[A-Za-z]*|ref|eqref|label|includegraphics|"
+        r"usepackage|"
+        r"documentclass|bibliography\w*|begin|end)\*?(\[[^\]]*\]){0,2}"
+        r"\{[^}]*\}",
         " ",
         text,
     )
+    arg = r"\{((?:[^{}]|\{[^{}]*\})*)\}"
+    opt = r"\s*(?:\[[^\]]*\])?\s*"
+    # Chemistry, e.g., \ce{^{13}C} as "13C", and siunitx quantities, e.g.,
+    # \SI{20}{\kelvin} as "20 K"
+    text = re.sub(
+        r"\\ce" + opt + arg, lambda m: re.sub(r"[{}^_]", "", m[1]), text
+    )
+    text = re.sub(
+        r"\\(?:SIrange|qtyrange)" + opt + arg + r"\s*" + arg + r"\s*" + arg,
+        lambda m: (
+            f"{m[1]} {render_units(m[3])} to {m[2]} {render_units(m[3])}"
+        ),
+        text,
+    )
+    text = re.sub(r"\\numrange" + opt + arg + r"\s*" + arg, r"\1 to \2", text)
+    text = re.sub(
+        r"\\(?:SI|qty)" + opt + arg + r"\s*" + arg,
+        lambda m: f"{m[1]} {render_units(m[2])}",
+        text,
+    )
+    text = re.sub(
+        r"\\(?:si|unit)" + opt + arg, lambda m: render_units(m[1]), text
+    )
+    text = re.sub(r"\\num" + opt + arg, r"\1", text)
+    text = re.sub(r"\\href" + opt + arg + r"\s*" + arg, r"\2", text)
+    # Accents, e.g., \'e or \"{o}, on the letter they go over
+    text = re.sub(
+        r"\\([`'^\"~=.])\s*(?:\{\s*([A-Za-z])\s*\}|([A-Za-z]))"
+        r"|\\([uvHckr])(?:\s*\{\s*([A-Za-z])\s*\}|\s+([A-Za-z]))",
+        lambda m: unicodedata.normalize(
+            "NFC",
+            (m[2] or m[3] or m[5] or m[6]) + _ACCENTS[m[1] or m[4]],
+        ),
+        text,
+    )
+    # Symbols, through the space after a command word, which TeX skips
+    text = re.sub(
+        r"\\(" + "|".join(_DETEX_SYMBOLS) + r")(?![A-Za-z])(\{\}|\s*)",
+        lambda m: _DETEX_SYMBOLS[m[1]],
+        text,
+    )
+    # Styled text prints as itself, with no space around it, e.g.,
+    # \textit{ad}-hoc
+    styled = re.compile(
+        r"\\(?:text(?:it|bf|rm|sf|tt|sc|up|md|sl|normal|superscript|"
+        r"subscript)?|emph|mbox|underline|uline)\s*\{([^{}]*)\}"
+    )
+    while True:
+        new = styled.sub(r"\1", text)
+        if new == text:
+            break
+        text = new
+    text = re.sub(r"\\xspace(?![A-Za-z])\s*(?=[.,;:!?)\]}/'-])", "", text)
     text = re.sub(r"\\[a-zA-Z]+\*?(\[[^\]]*\])?", " ", text)
-    text = re.sub(r"[{}~]", " ", text).replace("---", " ").replace("--", " ")
-    text = text.replace("``", "").replace("''", "")
+    text = re.sub(r"\\[,;:! ]", " ", text)
+    text = re.sub(r"\\[-/@]", "", text)
+    text = re.sub(r"[{}~]", " ", text)
+    text = text.replace("---", "\u2014").replace("--", "\u2013")
+    text = text.replace("``", "\u201c").replace("''", "\u201d")
+    text = re.sub(
+        r"[\uE000-\uE006]", lambda m: "$%&#_{}"[ord(m[0]) - 0xE000], text
+    )
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -785,8 +2135,17 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
     cur: list[SourceLine] = []
     # The text that closes the display math being read, if any
     closing: str | None = None
+    # Whether cur is a heading, which ends after it and any labels
+    heading = False
     for ln in lines:
         stripped, rest = ln.text.strip(), ln.text
+        if heading and not (
+            stripped
+            and re.fullmatch(r"(\\label\{[^}]*\}\s*)*(%.*)?", stripped)
+        ):
+            if cur:
+                out.append(Block(cur))
+            cur, heading = [], False
         # Display math is a block of its own, through its closing line
         m = _DISPLAY_RE.match(ln.text) if closing is None else None
         if m is not None:
@@ -820,12 +2179,28 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
             out.append(Block(cur))
             cur = []
         cur.append(ln)
+        # Through its closing brace, so prose right after it is its own
+        if (
+            _HEADING_RE.match(ln.text)
+            and _brace_depth(_strip_comments(ln.text)) == 0
+        ):
+            heading = True
     if cur:
         out.append(Block(cur))
+    macros = macro_definitions(lines)
+    begin = next(
+        (
+            i
+            for i, ln in enumerate(lines)
+            if re.match(r"\s*\\begin\{document\}", ln.text)
+        ),
+        0,
+    )
+    before = {id(ln) for ln in lines[:begin]}
     in_float: set[tuple[str, int]] = set()
     depth = 0
     for ln in lines:
-        for m in _FLOAT_RE.finditer(ln.text.split("%")[0]):
+        for m in _FLOAT_RE.finditer(_strip_comments(ln.text)):
             depth = max(0, depth + (1 if m.group(1) == "begin" else -1))
             if m.group(1) == "begin":
                 in_float.add((ln.path, ln.lineno))
@@ -833,7 +2208,16 @@ def blocks(lines: list[SourceLine]) -> list[Block]:
             in_float.add((ln.path, ln.lineno))
     for b in out:
         b.floating = (b.path, b.lineno) in in_float
+        b.macros = macros
+        b.preamble = id(b.lines[0]) in before
     return [b for b in out if b.text or b.display]
+
+
+def _brace_depth(text: str) -> int:
+    """How many more braces ``text`` opens than closes."""
+    return len(re.findall(r"(?<!\\)\{", text)) - len(
+        re.findall(r"(?<!\\)\}", text)
+    )
 
 
 def _words(text: str) -> set[str]:
@@ -845,43 +2229,98 @@ def similarity(a: str, b: str) -> float:
     return len(wa & wb) / len(wa) if wa else 0.0
 
 
+def equation_fragment(text: str) -> bool:
+    """Whether rendered text is a short piece of a display: with its
+    number ending it, or anywhere in it with math, e.g.,
+    "L = a, if x < τ (6) otherwise,", else with hardly any words and math
+    or an unclosed parenthesis, e.g., "f("."""
+    words = _words(text)
+    math = re.search(r"[=≈<>≤≥∈∑∫|≪≫]", text) is not None
+    number = re.search(r"\(([A-Z]\.?)?\d+(\.\d+)*[a-z]?\)(\s*$)?", text)
+    if number is not None and len(words) < 4:
+        return number.group(3) is not None or math
+    return len(words) < 3 and (math or text.count("(") != text.count(")"))
+
+
 def align(
     texts: list[str], blks: list[Block], threshold: float = 0.5
 ) -> list[Block | None]:
     """Match rendered paragraphs to source blocks, in order."""
-    out: list[Block | None] = []
-    last = 0
-    floats = [j for j, b in enumerate(blks) if b.floating]
-    for text in texts:
-        # A short line ending in an equation number is a display's
-        # fragment, even when it shares a word with the prose around it
-        if re.search(r"\(([A-Z]\.)?\d+(\.\d+)*\)\s*$", text) and (
-            len(_words(text)) < 4
+
+    def score(text: str, j: int) -> tuple[float, bool, int, int]:
+        b = blks[j]
+        # A match on a few words can't skip ahead past prose, e.g., an
+        # equation's "otherwise" to a later paragraph saying it, nor
+        # reach a figure or table more than a few pages off
+        skipped = abs(
+            bisect.bisect_left(prose, j) - bisect.bisect_left(prose, last)
+        )
+        if skipped > (8 if b.floating else 2) and (
+            len(_words(text) & _words(b.text)) < 4
         ):
+            return (0.0, False, 0, j)
+        # Of the preamble, only the title and authors render
+        if b.preamble and not any(
+            re.match(r"\s*\\(title|author|date)\b", ln.text) for ln in b.lines
+        ):
+            return (0.0, False, 0, j)
+        # On a tie, a block the paragraph is the whole of, e.g., a
+        # heading over a caption using its words, then the nearest, so
+        # a short heading can't jump ahead to a later paragraph, nor a
+        # table's cell to another table
+        return (
+            similarity(text, b.text),
+            similarity(b.text, text) >= 0.8,
+            -min(abs(j - last), abs(j - recent)),
+            j,
+        )
+
+    out: list[Block | None] = []
+    # The block the prose has reached, and the last matched, which can be
+    # a figure or table
+    last = recent = 0
+    floats = [j for j, b in enumerate(blks) if b.floating]
+    # Prose blocks, by index, for how far a match jumps ahead, not counting
+    # the preamble's, of which only the title and authors render
+    prose = [
+        j
+        for j, b in enumerate(blks)
+        if not b.floating and not b.preamble and b.text
+    ]
+    for text in texts:
+        fragment = equation_fragment(text)
+        # Author-year citations render as names the source doesn't have
+        text = _CITATION_RE.sub(" ", text)
+        # A figure or table can be anywhere, since it floats, and doesn't
+        # move the place in the source the prose has reached
+        candidates = sorted(set(range(last, len(blks))) | set(floats))
+        best = max(
+            (score(text, j) for j in candidates), default=(0.0, False, 0, 0)
+        )
+        # A display's fragment, even when it shares a word with the prose
+        # around it, unless it's the whole of a block, e.g., a heading with
+        # math
+        if fragment and not (best[1] and best[0] >= threshold):
             out.append(None)
             continue
-        # On a tie the nearest block wins, so a short heading can't jump
-        # ahead to a later paragraph sharing its words. A figure or table
-        # can be anywhere, since it floats, and doesn't move the place in
-        # the source the prose has reached.
-        candidates = sorted(set(range(last, len(blks))) | set(floats))
-        scores = [(similarity(text, blks[j].text), -j) for j in candidates]
-        best = max(scores, default=(0.0, 1))
         # A table's rows or a caption's lines stay with it on a tie, e.g.,
-        # a row "Growth rate k 0.05" beside prose about the growth rate
+        # a row "Growth rate k 0.05" beside prose about the growth rate,
+        # unless the paragraph is the whole of the other, e.g., a heading
         prev = next((b for b in reversed(out) if b is not None), None)
         if (
             prev is not None
             and prev.floating
             and best[0] >= threshold
             and similarity(text, prev.text) >= best[0]
+            and (not best[1] or similarity(prev.text, text) >= 0.8)
         ):
             out.append(prev)
             continue
         if best[0] >= threshold:
-            out.append(blks[-best[1]])
-            if not blks[-best[1]].floating:
-                last = -best[1]
+            out.append(blks[best[3]])
+            recent = best[3]
+            if not blks[best[3]].floating:
+                last = best[3]
         else:
             out.append(None)
     return out
@@ -897,9 +2336,13 @@ def find_block(
 ) -> Block | None:
     """The block a bookmark points at, by line first and text second."""
     same_file = [b for b in blks if b.path == path]
+    # A part of the block reads as in it, e.g., a table's cell
+    part = keep_letters_and_digits(text)
     for b in same_file:
         if b.lineno == lineno and (
-            b.display or similarity(text, b.text) >= 0.5
+            b.display
+            or similarity(text, b.text) >= 0.5
+            or (part and part in keep_letters_and_digits(b.text))
         ):
             return b
     scored = [
@@ -937,19 +2380,73 @@ def find_display(
     return best[2] if best and best[0] >= 0.6 else None
 
 
-def _tokens(text: str) -> set[str]:
-    """Words and numbers, so a change to a value counts as a change."""
-    return set(re.findall(r"[A-Za-z0-9][\w.]*", text))
+def keep_letters_and_digits(text: str) -> str:
+    """Text without anything but its letters and digits, lowercased, to
+    compare however words split, e.g., "300K" and "300 K"."""
+    text = unicodedata.normalize("NFKC", text).lower()
+    return "".join(c for c in text if c.isalnum())
+
+
+# A citation as rendered in brackets, e.g., "[Lee, 2018]" or "[3, 4]"
+_BRACKET_CITATION_RE = re.compile(
+    r"\[(?:[^\[\]]*\b(?:1[5-9]|20)\d\d[a-z]?\b[^\[\]]*|"
+    r"\d+(?:\s*[,\u2013-]\s*\d+)*)\]"
+)
 
 
 def already_applied(block: Block, old: str, new: str) -> bool:
-    """Whether the block already reads as ``new`` rather than ``old``."""
-    have = _tokens("\n".join(ln.text for ln in block.lines))
-    inserted = _tokens(new) - _tokens(old)
-    deleted = _tokens(old) - _tokens(new)
-    if not inserted <= have:
-        return False
-    return not deleted or len(deleted & have) / len(deleted) <= 0.5
+    """Whether the block already reads as ``new`` rather than ``old``: each
+    change, with a word or two either side, reads as new and not as old,
+    since a common word, e.g., "the", is anywhere."""
+
+    def squash(text: str, exact: bool) -> str:
+        # Letters and digits only, in their case if exact
+        text = unicodedata.normalize("NFKC", text)
+        return (
+            "".join(c for c in text if c.isalnum())
+            if exact
+            else (keep_letters_and_digits(text))
+        )
+
+    def holds(seq: list[str], exact: bool) -> bool:
+        return any(squash(" ".join(seq), exact) in h for h in have[exact])
+
+    # Without the rendered citations both have, which the source has as
+    # commands, but with any that changed, e.g., "(June 2019)"
+    cites = [
+        c
+        for r in (_CITATION_RE, _BRACKET_CITATION_RE)
+        for c in r.findall(old)
+        if c in new
+    ]
+    for c in cites:
+        old, new = old.replace(c, " "), new.replace(c, " ")
+    # As rendered, with its inline math as text or not, as Word may have it,
+    # and in its case, for a change only of case, e.g., "Gnet" to "GNet"
+    rendered = [block.text]
+    if not block.markdown:
+        src = _strip_comments_joined("\n".join(ln.text for ln in block.lines))
+        src = _INLINE_MATH_RE.sub(
+            lambda m: f" {get_math_text(m.group(1) or m.group(2))} ", src
+        )
+        rendered.append(detex(expand_macros(src, block.macros)))
+    have = {e: [squash(t, e) for t in rendered] for e in (False, True)}
+    ow = re.findall(r"[A-Za-z0-9][\w.]*", old)
+    nw = re.findall(r"[A-Za-z0-9][\w.]*", new)
+    ops = difflib.SequenceMatcher(None, ow, nw, autojunk=False).get_opcodes()
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal":
+            continue
+        exact = [w.lower() for w in ow[i1:i2]] == [
+            w.lower() for w in nw[j1:j2]
+        ]
+        if not any(
+            holds(nw[max(0, j1 - n) : j2 + n], exact)
+            and not holds(ow[max(0, i1 - n) : i2 + n], exact)
+            for n in (2, 1)
+        ):
+            return False
+    return True
 
 
 def _find_span(src: str, words: list[str]) -> tuple[int, int] | None:
@@ -990,38 +2487,94 @@ def apply_edit(block: Block, old: str, new: str) -> list[str] | None:
             continue
         new_span = " ".join(nw[j1:j2])
         if tag == "insert":
-            # Anchor on the preceding word(s), widening the phrase until
-            # it's unique -- a single preceding word is often repeated
-            # elsewhere in the block even when the insertion point isn't
-            # anywhere near markup.
-            if i1 == 0:
-                return None
-            hits = None
-            for k in range(1, i1 + 1):
-                phrase = ow[i1 - k : i1]
-                pattern = (
-                    r"(?<![A-Za-z])"
-                    + r"[\s~]+".join(re.escape(w) for w in phrase)
-                    + r"(?![A-Za-z])"
-                )
-                found = list(re.finditer(pattern, src))
-                if len(found) == 1:
-                    hits = found
+            # Anchor on the words before, widened until unique, braces
+            # allowed between them, else on the words after
+            hits, after = None, True
+            for phrases in (
+                [ow[i1 - k : i1] for k in range(1, i1 + 1)],
+                [ow[i1 : i1 + k] for k in range(1, len(ow) - i1 + 1)],
+            ):
+                for phrase in phrases:
+                    pattern = (
+                        r"(?<![A-Za-z])"
+                        + r"[\s~{}]+".join(re.escape(w) for w in phrase)
+                        + r"(?![A-Za-z])"
+                    )
+                    found = list(re.finditer(pattern, src))
+                    if len(found) == 1:
+                        hits = found
+                        break
+                    if not found:
+                        break
+                if hits is not None:
                     break
-                if not found:
-                    break
+                after = False
             if hits is None:
                 return None
-            at = hits[0].end()
-            src = src[:at] + " " + new_span + src[at:]
+            # Already there, as from merging this before
+            there = r"[\s~{}]+".join(re.escape(w) for w in nw[j1:j2])
+            if after:
+                at = hits[0].end()
+                if re.match(rf"[\s~{{}}]*{there}(?![A-Za-z])", src[at:]):
+                    continue
+                src = src[:at] + " " + new_span + src[at:]
+            else:
+                at = hits[0].start()
+                if re.search(rf"(?<![A-Za-z]){there}[\s~{{}}]*$", src[:at]):
+                    continue
+                src = src[:at] + new_span + " " + src[at:]
             continue
         span = _find_span(src, ow[i1:i2])
-        if span is None:
+        if span is not None:
+            src = src[: span[0]] + new_span + src[span[1] :]
+            continue
+        through = _edit_through_markup(src, " ".join(ow[i1:i2]), new_span)
+        if through is None:
             return None
-        src = src[: span[0]] + new_span + src[span[1] :]
+        src = through
     # A line emptied by a deletion goes, since a blank line would split
     # the paragraph
     return [ln.rstrip() for ln in src.split("\n") if ln.strip()]
+
+
+def _edit_through_markup(src: str, old: str, new: str) -> str | None:
+    """``src`` with the one place reading as ``old`` once its markup is
+    left out, e.g., \\ce{^{15}N} for "15N", changed to read as ``new``, where
+    the changed characters sit together in the source, and not in math,
+    which is edited as an equation."""
+    markup = r"(?:\\[A-Za-z]+\*?\s*|[{}^_])*"
+    pattern = "".join(
+        r"[\s~]+" if c == " " else f"({re.escape(c)})" + markup
+        for c in old.rstrip()
+    )
+    found = list(
+        re.finditer(rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])", src)
+    )
+    if len(found) != 1 or old != old.rstrip():
+        return None
+    m, chars = found[0], [c for c in old if c != " "]
+    if any(
+        x.start() < m.end() and m.start() < x.end()
+        for x in _INLINE_MATH_RE.finditer(src)
+    ):
+        return None
+    at = [m.start(k + 1) for k in range(len(chars))]
+    old_c, new_c = "".join(chars), new.replace(" ", "")
+    if new.count(" ") != old.count(" "):
+        return None
+    ops = difflib.SequenceMatcher(None, old_c, new_c, autojunk=False)
+    for tag, i1, i2, j1, j2 in reversed(ops.get_opcodes()):
+        if tag == "equal":
+            continue
+        if tag == "insert":
+            pos = at[i1 - 1] + 1 if i1 else at[0]
+            src = src[:pos] + new_c[j1:j2] + src[pos:]
+            continue
+        # Only characters next to each other in the source
+        if any(at[k + 1] != at[k] + 1 for k in range(i1, i2 - 1)):
+            return None
+        src = src[: at[i1]] + new_c[j1:j2] + src[at[i2 - 1] + 1 :]
+    return src
 
 
 _MATH_TOKEN_RE = re.compile(r"\\[a-zA-Z]+|\\.|\S")
@@ -1029,6 +2582,11 @@ _MATH_FUNCTIONS = (
     "arccos arcsin arctan arg cos cosh cot coth det exp lg lim ln log max "
     "min sec sin sinh sup tan tanh"
 ).split()
+# A math alphabet command and the group it styles, without nested groups
+_MATH_ALPHABET_RE = re.compile(
+    r"\\(mathcal|mathbf|mathit|mathsf|mathtt|mathbb|mathfrak|mathscr|"
+    r"boldsymbol|bm)\s*\{([^{}]*)\}"
+)
 # Grouping and wrappers that the source and a converter may disagree on
 _MATH_NOISE = frozenset(
     ["{", "}", "\\mathrm", "\\text", "\\operatorname", "\\left", "\\right"]
@@ -1046,9 +2604,38 @@ def normalize_math(tex: str) -> str:
     tex = re.sub(r"\\(quad|qquad)\b|\\[,;:! ]", " ", tex)
     # Word may save a function name as plain letters
     tex = re.sub(
-        r"\\(" + "|".join(_MATH_FUNCTIONS) + r")(?![a-zA-Z])", r"\1 ", tex
+        r"\\(" + "|".join(_MATH_FUNCTIONS) + r")(?![a-zA-Z])", r" \1 ", tex
     )
     tex = tex.replace("{}", "")
+    # Italic letters are math's own, which Word keeps without saying so
+    tex = re.sub(r"\\mathit\s*\{\s*([A-Za-z]+)\s*\}", r"\1", tex)
+    # Pandoc versions read the same accent back differently
+    for wide, accent in (
+        ("widehat", "hat"),
+        ("widetilde", "tilde"),
+        ("overrightarrow", "vec"),
+    ):
+        tex = re.sub(rf"\\{wide}(?![a-zA-Z])", rf"\\{accent}", tex)
+
+    def letters_only(m: re.Match[str]) -> str:
+        # A math alphabet styles letters, so symbols at the ends of its
+        # group, which Word joins it to on saving, e.g., \mathcal{\in E,},
+        # go outside
+        tokens = _MATH_TOKEN_RE.findall(m.group(2))
+        letter = [
+            bool(re.fullmatch(r"[A-Za-z0-9]", t))
+            or t.lstrip("\\").lower().removeprefix("var") in _GREEK
+            for t in tokens
+        ]
+        if not any(letter):
+            return m.group(0)
+        i, j = letter.index(True), len(letter) - letter[::-1].index(True)
+        core = " ".join(tokens[i:j])
+        return " ".join(
+            tokens[:i] + [f"\\{m.group(1)}{{{core}}}"] + tokens[j:]
+        )
+
+    tex = _MATH_ALPHABET_RE.sub(letters_only, tex)
     return " ".join(tex.split())
 
 
@@ -1424,7 +3011,7 @@ def file_blocks(path: str, lines: list[str]) -> list[Block]:
         [
             SourceLine(path, i, text)
             for i, text in enumerate(lines, 1)
-            if not _INCLUDE_RE.match(text.split("%")[0])
+            if not _INCLUDE_RE.match(_strip_comments(text))
         ]
     )
 
@@ -1443,25 +3030,52 @@ _GREEK = (
 
 def display_text(block: Block) -> str:
     """A display's math roughly as it reads in a PDF, e.g., to find it by
-    what was selected there: its symbols, without commands, grouping, or
-    wrappers, and Greek letters as themselves."""
-    import unicodedata
+    what was selected there."""
+    src = "\n".join(_strip_comments(ln.text) for ln in block.lines)
+    return get_math_text(
+        re.sub(r"\\(label|tag\*?|begin|end)\{[^}]*\}", " ", src)
+    )
 
-    src = "\n".join(ln.text.split("%")[0] for ln in block.lines)
-    src = re.sub(r"\\(label|tag\*?|begin|end)\{[^}]*\}", " ", src)
+
+def get_math_text(tex: str) -> str:
+    """Math roughly as it reads rendered: its symbols, without commands,
+    grouping, or wrappers, and Greek letters and operator names, e.g.,
+    \\ln, as themselves."""
 
     def greek(m: re.Match) -> str:
         name = m.group(1)
         case = "CAPITAL" if name[0].isupper() else "SMALL"
-        return unicodedata.lookup(f"GREEK {case} LETTER {name.upper()}")
+        # Unicode spells lambda without its b
+        upper = name.upper().replace("LAMBDA", "LAMDA")
+        return unicodedata.lookup(f"GREEK {case} LETTER {upper}")
 
-    src = re.sub(
-        r"\\(" + "|".join(_GREEK + [g.capitalize() for g in _GREEK]) + r")\b",
+    tex = re.sub(
+        r"\\(" + "|".join(_GREEK + [g.capitalize() for g in _GREEK]) + r")"
+        r"(?![A-Za-z])",
         greek,
-        src,
+        tex,
     )
-    src = re.sub(r"\\[a-zA-Z]+\*?|\\.|[{}^_&$]", " ", src)
-    return " ".join(src.split())
+    names = set(_MATH_FUNCTIONS) | {
+        "inf",
+        "liminf",
+        "limsup",
+        "deg",
+        "dim",
+        "ker",
+        "gcd",
+        "hom",
+        "Pr",
+    }
+    tex = re.sub(
+        r"\\("
+        + "|".join(sorted(names, key=len, reverse=True))
+        + r")(?![A-Za-z])",
+        r" \1 ",
+        tex,
+    )
+    tex = tex.replace("\\hbar", "\u210f").replace("\\ell", "\u2113")
+    tex = re.sub(r"\\[a-zA-Z]+\*?|\\.|[{}^_&$]", " ", tex)
+    return " ".join(tex.split())
 
 
 def _math_chars(text: str) -> str:

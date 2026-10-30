@@ -85,6 +85,81 @@ def test_detect_project_name(tmp_dir):
         assert calkit.detect_project_name() == expected
 
 
+def test_encode_safe() -> None:
+    import ast
+    import io
+    from pathlib import Path
+
+    with mock.patch(
+        "sys.stdout", io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    ):
+        assert calkit.core.encode_safe("✅ Done ν") == "? Done ?"
+    # A Windows console that can't encode a mark kills the command, so text
+    # with one never goes straight to a print
+    unsafe = []
+    pkg_dir = Path(calkit.__file__).parent
+    for path in pkg_dir.rglob("*.py"):
+        if "tests" in path.relative_to(pkg_dir).parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = ast.unparse(node.func)
+            if name not in ("print", "typer.echo", "typer.secho"):
+                continue
+            inner = [n for arg in node.args for n in ast.walk(arg)]
+            if any(
+                isinstance(n, ast.Call) and "encode_safe" in ast.unparse(n)
+                for n in inner
+            ):
+                continue
+            if any(
+                isinstance(n, ast.Constant)
+                and isinstance(n.value, str)
+                and not n.value.isascii()
+                for n in inner
+            ):
+                unsafe.append(f"{path.relative_to(pkg_dir)}:{node.lineno}")
+    assert not unsafe, "Use calkit.echo for non-ASCII text: " + ", ".join(
+        unsafe
+    )
+
+
+def test_is_mintty() -> None:
+    import sys
+
+    with open(os.devnull, "w") as f:
+        assert not calkit.core.is_mintty(f)
+    assert not calkit.core.is_mintty(object())
+    if sys.platform != "win32":
+        return
+    import _winapi
+
+    # mintty's terminal is a pipe named for its pty; any other pipe isn't one
+    for name, expected in [
+        ("msys-1888ae32e00d56aa-pty0-to-master", True),
+        ("cygwin-1888ae32e00d56aa-pty3-from-master", True),
+        ("calkit-test-not-a-pty", False),
+    ]:
+        path = rf"\\.\pipe\{name}"
+        server = _winapi.CreateNamedPipe(
+            path,
+            _winapi.PIPE_ACCESS_DUPLEX,
+            _winapi.PIPE_WAIT,
+            1,
+            4096,
+            4096,
+            0,
+            _winapi.NULL,
+        )
+        try:
+            with open(path, "wb", buffering=0) as client:
+                assert calkit.core.is_mintty(client) is expected, name
+        finally:
+            _winapi.CloseHandle(server)
+
+
 def test_save_calkit_info_preserves_unicode(tmp_dir):
     # Regression: on Windows, opening calkit.yaml without encoding="utf-8"
     # writes as cp1252, which either errors or corrupts non-ASCII content
@@ -140,6 +215,73 @@ def test_load_calkit_info(tmp_dir, monkeypatch):
     # A project with no calkit.yaml loads as an empty dict
     os.remove("calkit.yaml")
     assert calkit.load_calkit_info() == {}
+
+
+def test_iter_projects(tmp_dir):
+    def write(wdir, info):
+        os.makedirs(wdir, exist_ok=True)
+        with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
+            calkit.ryaml.dump(info, f)
+
+    write(
+        ".",
+        {
+            "name": "root",
+            "subprojects": [
+                {"path": "sub1"},
+                {"path": "sub2"},
+                # Declared but never created, so there's nothing to read
+                {"path": "missing"},
+                # Not a mapping, and a mapping with no path
+                "sub1",
+                {"description": "no path"},
+            ],
+        },
+    )
+    write("sub1", {"name": "sub1", "subprojects": [{"path": "nested"}]})
+    write("sub1/nested", {"name": "nested"})
+    write("sub2", {"name": "sub2"})
+    # A directory with no calkit.yaml isn't a project
+    os.makedirs("missing", exist_ok=True)
+    found = [(wdir, info["name"]) for wdir, info in calkit.iter_projects()]
+    assert found == [
+        (".", "root"),
+        ("sub1", "sub1"),
+        (os.path.join("sub1", "nested"), "nested"),
+        ("sub2", "sub2"),
+    ]
+    # Starting from a subproject yields paths relative to it
+    assert [wdir for wdir, _ in calkit.iter_projects(wdir="sub1")] == [
+        "sub1",
+        os.path.join("sub1", "nested"),
+    ]
+    # A subproject naming itself, or its parent, terminates
+    write(
+        "sub2",
+        {"name": "sub2", "subprojects": [{"path": "."}, {"path": ".."}]},
+    )
+    assert [wdir for wdir, _ in calkit.iter_projects()] == [
+        ".",
+        "sub1",
+        os.path.join("sub1", "nested"),
+        "sub2",
+    ]
+    assert calkit.describe_project(".") == ""
+    assert calkit.describe_project("sub1/nested") == (
+        "subproject 'sub1/nested': "
+    )
+    assert calkit.qualify_with_project(".", "env") == "env"
+    assert calkit.qualify_with_project(
+        os.path.join("sub1", "nested"), "env"
+    ) == ("sub1/nested:env")
+    # A project is checked from its own directory, with its own .env
+    with open(os.path.join("sub1", ".env"), "w") as f:
+        f.write("CALKIT_TEST_SUB1_VAR=from-sub1\n")
+    cwd = os.getcwd()
+    with calkit.in_project("sub1"):
+        assert os.getcwd() == os.path.join(cwd, "sub1")
+        assert os.environ.pop("CALKIT_TEST_SUB1_VAR") == "from-sub1"
+    assert os.getcwd() == cwd
 
 
 def test_get_env_var_dep_names():
@@ -399,6 +541,21 @@ def test_ryaml_dump_leaves_no_trailing_whitespace():
             f"trailing whitespace at length {n}: {text!r}"
         )
         assert calkit.ryaml.load(text) == data
+    # A long key, e.g., an answer's condition, stays on one line, since a
+    # key wrapped over two isn't valid YAML
+    key = (
+        "if same and pdf_same and eq_docx == eq_src and inline_docx == "
+        "inline_src and threads_docx == threads_src"
+    )
+    for text in [
+        f"questions:\n  - answer:\n      {key}: >-\n        Yes.\n",
+        f"{key}: x\n",
+    ]:
+        data = calkit.ryaml.load(text)
+        buf = io.StringIO()
+        calkit.ryaml.dump(data, buf)
+        assert f"{key}:" in buf.getvalue()
+        assert calkit.ryaml.load(buf.getvalue()) == data
 
 
 def test_ryaml_dump_keeps_significant_trailing_whitespace():

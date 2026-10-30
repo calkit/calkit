@@ -415,7 +415,9 @@ def check(command: str | None) -> None:
     current = calkit.__version__
     # Notices are for people, so are skipped when nobody's at a terminal,
     # and kept until somebody is
-    if sys.stderr.isatty():
+    from calkit.core import is_mintty
+
+    if sys.stderr.isatty() or is_mintty(sys.stderr):
         upgraded_from = state.get("upgraded_from")
         upgrading = now - state.get("upgrading", 0) < UPGRADE_GRACE_SECONDS
         latest = state.get("latest")

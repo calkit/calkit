@@ -19,17 +19,20 @@ import type {
   ContentsItem,
   DvcOutput,
   TextDiff,
-  Figure,
+  FiguresPage,
   GithubRepo,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
   ProjectsPublic,
+  Provenance,
   PullRequestRefs,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
+  Result,
+  Table,
 } from "../core/types";
 
 function projectPath(owner: string, project: string): string {
@@ -37,6 +40,11 @@ function projectPath(owner: string, project: string): string {
     project,
   )}`;
 }
+
+// The session Overleaf's web app signs in with, which lets the hub sync for
+// users without Overleaf Premium, whose Git integration needs a token
+const OVERLEAF_URL = "https://www.overleaf.com";
+const OVERLEAF_SESSION_COOKIE = "overleaf_session2";
 
 const MAX_PREVIEW_BYTES = 2_000_000;
 const MAX_VIEWER_BYTES = 25_000_000;
@@ -147,6 +155,7 @@ async function handle(message: Request): Promise<unknown> {
           search_for: message.searchFor,
           limit: message.limit ?? 100,
           min_access_level: message.minAccessLevel ?? "write",
+          github_repo: message.githubRepo,
         },
       });
     case "projects.create":
@@ -169,6 +178,10 @@ async function handle(message: Request): Promise<unknown> {
       return request<GithubRepo[]>("/user/github/repos", {
         query: { per_page: message.perPage ?? 100 },
       });
+    case "github.installations":
+      // Where the Calkit GitHub app is installed, without which the hub can't
+      // create or update a project's repo
+      return request<{ total_count: number }>("/user/github-app-installations");
     case "github.pullRequest":
       // Through the hub, which holds a GitHub token, so a private repo
       // resolves where an unauthenticated request would not
@@ -211,9 +224,38 @@ async function handle(message: Request): Promise<unknown> {
           hub: hubFor(message),
         },
       );
-    case "project.figures":
-      return request<Figure[]>(
-        `${projectPath(message.owner, message.project)}/figures`,
+    case "project.figures": {
+      // The hub pages at most 100 figures, so gather paths and titles only
+      const items: FiguresPage["items"] = [];
+      let total = 0;
+      do {
+        const page = await request<FiguresPage>(
+          `${projectPath(message.owner, message.project)}/figures`,
+          {
+            query: {
+              limit: 100,
+              offset: items.length,
+              include_content: false,
+            },
+          },
+        );
+        items.push(...page.items);
+        total = page.items.length ? page.total : items.length;
+      } while (items.length < total);
+      return { items, total };
+    }
+    case "project.tables":
+      return request<Table[]>(
+        `${projectPath(message.owner, message.project)}/tables`,
+      );
+    case "project.results":
+      return request<Result[]>(
+        `${projectPath(message.owner, message.project)}/results`,
+      );
+    case "project.provenance":
+      return request<Provenance>(
+        `${projectPath(message.owner, message.project)}/provenance`,
+        { query: { path: message.path, key: message.key } },
       );
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });
@@ -251,6 +293,21 @@ async function handle(message: Request): Promise<unknown> {
         method: "PUT",
         body: { token: message.token },
       });
+    case "overleaf.connectSession": {
+      // Read here, since Overleaf keeps the cookie from page scripts, and
+      // only when the user asks, so it's never held otherwise
+      const cookie = await chrome.cookies.get({
+        url: OVERLEAF_URL,
+        name: OVERLEAF_SESSION_COOKIE,
+      });
+      if (!cookie) {
+        throw new Error("Sign in to Overleaf first");
+      }
+      return request<{ message: string }>("/user/overleaf-session", {
+        method: "PUT",
+        body: { session: cookie.value },
+      });
+    }
     case "overleaf.import":
       return request<{ path: string; title: string }>(
         `${projectPath(message.owner, message.project)}/publications/overleaf`,

@@ -834,7 +834,15 @@ def get_ck_info_and_dvc_outs_from_tree(
         f"(read {t_read * 1000:.0f}ms)"
     )
     t1 = time.perf_counter()
-    ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
+    try:
+        ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
+    except yaml.YAMLError as e:
+        # Bad data in the user's repo, so show its files without metadata
+        # rather than failing the whole page
+        logger.warning(
+            f"Failed to parse calkit.yaml for {owner_name}/{project_name}: {e}"
+        )
+        ck_info = {}
     # calkit.yaml can hold any YAML value, and only a mapping is usable
     if not isinstance(ck_info, dict):
         ck_info = {}
@@ -939,7 +947,9 @@ def get_contents_from_tree(
         "datasets",
         "references",
         "notebooks",
+        "results",
     ]
+    kinds = CATEGORIES_PLURAL_TO_SINGULAR | {"results": "result"}
     ck_objects = {}
     for category, itemlist in ck_info.items():
         if category not in categories_with_path:
@@ -949,13 +959,10 @@ def get_contents_from_tree(
                 f"{owner_name}/{project_name} {category} is not a list"
             )
             continue
-        if category not in CATEGORIES_PLURAL_TO_SINGULAR:
-            logger.warning(
-                f"{owner_name}/{project_name} {category} not understood"
-            )
-            continue
         for item in itemlist:
-            item["kind"] = CATEGORIES_PLURAL_TO_SINGULAR[category]
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            item = item | {"kind": kinds[category]}
             ck_objects[item["path"]] = item
             # Handle files inside references objects
             if category == "references":

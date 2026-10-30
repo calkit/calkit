@@ -103,6 +103,7 @@ from app.dvc import (
     run_dvc_command,
 )
 from app.git import (
+    OVERLEAF_SESSION_REJECTED,
     RepoTree,
     expire_shared_read_clone,
     get_ck_info,
@@ -129,6 +130,8 @@ from app.models import (
     Figure,
     FileLock,
     GitRef,
+    LatexComponents,
+    LatexComponentsRequest,
     Message,
     MiscArtifact,
     Notebook,
@@ -165,6 +168,7 @@ from app.models import (
     QuestionEvidenceValue,
     QuestionPublic,
     QuestionPut,
+    QuestionSignOff,
     Result,
     StageStatus,
     Table,
@@ -196,6 +200,7 @@ from app.pipeline import (
     compute_stage_statuses,
     find_frozen_tainted_stages,
     find_stage_for_path,
+    pipeline_at_ref,
 )
 from app.security import generate_refresh_token, hash_refresh_token
 from app.storage import (
@@ -2688,6 +2693,73 @@ def _build_questions_public(
     def _evidence_of(q: str | dict) -> list:
         return q.get("evidence") or [] if isinstance(q, dict) else []
 
+    def check_sign_offs() -> list[tuple[list[Any], list[Any]]]:
+        """Each question's verifications and validations, checked against
+        the history up to ``ref``, cached by the commit it resolves to."""
+        empty: list[tuple[list[Any], list[Any]]] = [
+            ([], []) for _ in questions_ck
+        ]
+        if not any(
+            isinstance(q, dict)
+            and (q.get("verifications") or q.get("validations"))
+            for q in questions_ck
+        ):
+            return empty
+        try:
+            sha = repo.git.rev_parse(f"{ref or 'HEAD'}^{{commit}}")
+        except Exception:
+            return empty
+        # A branch or tag cited by evidence can move without the project's
+        # commit changing, so where each points now is part of the key
+        cited = sorted(
+            {
+                str(ev["git_ref"])
+                for q in questions_ck
+                for ev in _evidence_of(q)
+                if isinstance(ev, dict) and ev.get("git_ref")
+            }
+        )
+        resolved = []
+        for cited_ref in cited:
+            try:
+                resolved.append(repo.git.rev_parse(f"{cited_ref}^{{commit}}"))
+            except Exception:
+                resolved.append("-")
+        key = cache.make_key(
+            "question-sign-offs", str(project.id), sha, *resolved
+        )
+        cached = cache.get_json(key)
+        if isinstance(cached, list) and len(cached) == len(questions_ck):
+            return [(v, a) for v, a in cached]
+        wdir = str(repo.working_dir)
+        history = calkit.questions.CalkitYamlHistory(repo, wdir, sha)
+        # As committed, not as normalized for display, so it compares
+        # cleanly with the history it's checked against
+        raw = history.at(sha) or {}
+        out: list[tuple[list[Any], list[Any]]] = []
+        for q in raw.get("questions") or []:
+            if not isinstance(q, dict):
+                out.append(([], []))
+                continue
+            try:
+                ver, val = calkit.questions.check_sign_offs(
+                    q, raw, wdir, repo, history, ref=sha
+                )
+            except Exception as e:
+                # Best-effort, like evidence staleness
+                logger.warning(f"Could not check question sign-offs: {e}")
+                ver, val = [], []
+            out.append(
+                (
+                    [c.model_dump(mode="json") for c in ver],
+                    [c.model_dump(mode="json") for c in val],
+                )
+            )
+        if len(out) != len(questions_ck):
+            return empty
+        cache.set_json(key, out)
+        return out
+
     def _build_lookups(
         ev_ref: str | None, entries: list[dict]
     ) -> _EvidenceLookups:
@@ -2840,9 +2912,11 @@ def _build_questions_public(
     # wherever the shorter list ended.
     db_by_number = {q.number: q for q in project.questions}
     result_value_cache: dict[tuple[str | None, str], dict | None] = {}
+    sign_offs = check_sign_offs()
     questions_public = []
     for number, q_ck in enumerate(questions_ck, start=1):
         hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
+        approach = q_ck.get("approach") if isinstance(q_ck, dict) else None
         answer = q_ck.get("answer") if isinstance(q_ck, dict) else None
         # Templates are filled from the question's own value evidence, so a
         # number in an answer is read out of the results file rather than
@@ -2856,6 +2930,7 @@ def _build_questions_public(
             cache=result_value_cache,
         )
         hypothesis = _render_template(hypothesis, values)
+        approach = _render_template(approach, values)
         answer = _render_template(answer, values)
         evidence = _build_question_evidence(
             project=project,
@@ -2879,8 +2954,17 @@ def _build_questions_public(
                 number=number,
                 question=app.index.extract_question_text(q_ck),
                 hypothesis=hypothesis,
+                approach=approach,
                 answer=answer,
                 evidence=evidence,
+                verifications=[
+                    QuestionSignOff.model_validate(c)
+                    for c in sign_offs[number - 1][0]
+                ],
+                validations=[
+                    QuestionSignOff.model_validate(c)
+                    for c in sign_offs[number - 1][1]
+                ],
             )
         )
     return questions_public
@@ -3023,6 +3107,11 @@ def _apply_question_update(
         question["hypothesis"] = req.hypothesis
     else:
         question.pop("hypothesis", None)
+    if "approach" in req.model_fields_set:
+        if req.approach:
+            question["approach"] = req.approach
+        else:
+            question.pop("approach", None)
     unchanged = calkit.questions.is_conditional(question.get("answer")) and (
         req.answer == rendered_answer
     )
@@ -3981,7 +4070,21 @@ def get_project_results(
         ref=ref,
         read_only=True,
     )
-    return _build_results(project=project, repo=repo, ref=ref)
+    results = _build_results(project=project, repo=repo, ref=ref)
+    # Whether each is out of date, like a figure or table
+    pipeline = pipeline_at_ref(
+        repo, ref, project.owner_account_name, project.name
+    )
+    for result in results:
+        result.stage = result.stage or find_stage_for_path(
+            result.path, pipeline.dvc_lock, valid_stages=set(pipeline.statuses)
+        )
+        status = pipeline.statuses.get(result.stage) if result.stage else None
+        if status is not None:
+            result.stage_status = StageStatus.model_validate(
+                status.model_dump()
+            )
+    return results
 
 
 # ``figure_path`` takes the path convertor because figures live in nested
@@ -6055,10 +6158,22 @@ def get_project_publication_components(
             not folder or PurePosixPath(out_path).is_relative_to(folder)
         ):
             file_paths.append(out_path)
+    # Calkit writes calkit.sty and _calkit beside a document that uses
+    # calkit.sty's commands, so what those include is listed where it comes
+    # from instead
+    managed_style = posixpath.join(folder, calkit.latex.STYLE_FNAME)
+    managed_dir = posixpath.join(folder, calkit.latex.COMPONENTS_DIR) + "/"
+    documents = [
+        p
+        for p in file_paths
+        if p.endswith(".tex") and not p.startswith(managed_dir)
+    ]
     file_paths = [
         p
         for p in sorted(file_paths)
         if p != pub_path
+        and p != managed_style
+        and not p.startswith(managed_dir)
         and not any(part.startswith(".") for part in p.split("/"))
         and not any(p.endswith(ext) for ext in LATEX_BUILD_EXTS)
     ]
@@ -6122,6 +6237,35 @@ def get_project_publication_components(
         if p not in file_paths
         and not any(part.startswith(".") for part in p.split("/"))
     ]
+
+    def read_source(source: str) -> str | None:
+        try:
+            return tree.read_bytes(posixpath.normpath(source)).decode(
+                "utf-8", errors="replace"
+            )
+        except Exception:
+            return None
+
+    def is_project_file(rel: str) -> bool:
+        out = dvc_outs.get(rel)
+        return tree.is_file(rel) or bool(
+            out and out.get("md5") and not str(out["md5"]).endswith(".dir")
+        )
+
+    included_paths: list[str] = []
+    for document in documents:
+        _, ck_components = calkit.latex.read_ck_usage(
+            document, read=read_source
+        )
+        for c in ck_components:
+            rel, _ = calkit.latex.component_path(c, is_project_file)
+            if (
+                rel is not None
+                and rel not in file_paths
+                and rel not in input_paths
+                and rel not in included_paths
+            ):
+                included_paths.append(rel)
     # What calkit.yaml attributes, by path
     declared: dict[str, Literal["attested", "imported"]] = {}
     for section in ["figures", "datasets", "misc"]:
@@ -6129,8 +6273,10 @@ def get_project_publication_components(
             if not isinstance(entry, dict) or not entry.get("path"):
                 continue
             entry_path = normalize_artifact_path(str(entry["path"]))
+            # A person can't be the origin of an exported format, e.g., PNG
             if entry.get("created_by"):
-                declared.setdefault(entry_path, "attested")
+                if calkit.provenance.can_be_created_by_person(entry_path):
+                    declared.setdefault(entry_path, "attested")
             elif entry.get("imported_from"):
                 declared.setdefault(entry_path, "imported")
     overleaf_info = calkit.overleaf.get_sync_info(
@@ -6147,9 +6293,11 @@ def get_project_publication_components(
     # Figure hashes are computed once, and only if something needs them
     figure_md5s: dict[str, str | None] = {}
     items: list[PublicationComponent] = []
-    for p, via in [(p, "folder") for p in file_paths] + [
-        (p, "input") for p in input_paths
-    ]:
+    for p, via in (
+        [(p, "folder") for p in file_paths]
+        + [(p, "input") for p in input_paths]
+        + [(p, "included") for p in sorted(included_paths)]
+    ):
         size: int | None = None
         if tree.is_file(p):
             size = tree.size(p)
@@ -6220,6 +6368,100 @@ def get_project_publication_components(
         folder=folder,
         items=items,
         n_unknown=sum(1 for item in items if item.kind == "unknown"),
+    )
+
+
+# Results files are read whole for their values
+LATEX_COMPONENT_VALUES_MAX_BYTES = 10_000_000
+
+
+@router.post("/projects/{owner_name}/{project_name}/latex-components")
+def post_project_latex_components(
+    owner_name: str,
+    project_name: str,
+    req: LatexComponentsRequest,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    ref: str | None = None,
+) -> LatexComponents:
+    """What a LaTeX document needs beside it for calkit.sty's commands, as
+    ``calkit latex build`` would write it, for compiling it elsewhere, e.g.,
+    in the browser.
+
+    The document and the files it inputs are read from ``sources`` where
+    given, e.g., an editor's unsaved text, and otherwise from the project at
+    ``ref``. Values are read here, from Git or DVC storage. Copies are named
+    by their project paths, each going at the same path under ``_calkit``
+    beside the document, for the caller to fetch, since a figure may be
+    large or stored with DVC.
+    """
+    tex_path = _normalize_artifact_file_path(req.path)
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    tree = get_repo_tree_for_ref(repo, ref)
+    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    sources = {posixpath.normpath(p): t for p, t in req.sources.items()}
+
+    def read(path: str) -> str | None:
+        key = posixpath.normpath(Path(path).as_posix())
+        if key in sources:
+            return sources[key]
+        try:
+            return tree.read_bytes(key).decode("utf-8", errors="replace")
+        except Exception:
+            return None
+
+    def is_file(rel: str) -> bool:
+        out = dvc_outs.get(rel)
+        return tree.is_file(rel) or bool(
+            out and out.get("md5") and not str(out["md5"]).endswith(".dir")
+        )
+
+    def is_outside(rel: str) -> bool:
+        return tree.is_symlink(rel) and not tree.is_safe_symlink(rel)
+
+    def read_data(rel: str) -> Any:
+        data = app.projects.read_project_file(
+            project=project,
+            tree=tree,
+            path=rel,
+            max_bytes=LATEX_COMPONENT_VALUES_MAX_BYTES,
+            session=session,
+            current_user=current_user,
+        )
+        return calkit.questions.parse_evidence_text(data.decode("utf-8"), rel)
+
+    loads, components = calkit.latex.read_ck_usage(tex_path, read=read)
+    if not loads:
+        return LatexComponents(loads_calkit=False)
+    plan = calkit.latex.plan_ck_components(
+        components,
+        is_file=is_file,
+        read_data=read_data,
+        is_outside=is_outside,
+        link_base=(
+            f"{settings.frontend_host.rstrip('/')}/"
+            f"{project.owner_account_name}/{project.name}"
+        ),
+    )
+    return LatexComponents(
+        loads_calkit=True,
+        style=calkit.resources.read_text("latex", calkit.latex.STYLE_FNAME),
+        values=plan.values,
+        copies=[rel for rel, here in plan.files.items() if here],
+        problems=plan.problems,
     )
 
 
@@ -6913,17 +7155,18 @@ async def post_project_overleaf_publication(
                 token=overleaf_token,
                 expires=None,
             )
-        try:
-            users.get_overleaf_token(session=session, user=current_user)
-        except HTTPException:
-            raise HTTPException(400, "No Overleaf token found")
+        # 401 like the other Overleaf routes, so clients offer to connect
+        overleaf_auth = users.get_overleaf_auth(
+            session=session, user=current_user
+        )
         try:
             with get_overleaf_repo(
                 project=project,
                 user=current_user,
                 session=session,
                 overleaf_project_id=overleaf_project_id,
-            ) as overleaf_repo:
+                overleaf_auth=overleaf_auth,
+            ) as (overleaf_repo, _):
                 # Snapshot the files and commit while the clone is locked, so
                 # a concurrent pull or sync can't change them mid-import; the
                 # directory is removed when the snapshot is garbage collected
@@ -7205,10 +7448,7 @@ def post_project_overleaf_sync(
     current_user: CurrentUser,
     session: SessionDep,
 ) -> OverleafSyncResponse:
-    try:
-        users.get_overleaf_token(session=session, user=current_user)
-    except HTTPException:
-        raise HTTPException(401, "Overleaf token not found")
+    overleaf_auth = users.get_overleaf_auth(session=session, user=current_user)
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7237,7 +7477,8 @@ def post_project_overleaf_sync(
             user=current_user,
             session=session,
             overleaf_project_id=overleaf_project_id,
-        ) as overleaf_repo:
+            overleaf_auth=overleaf_auth,
+        ) as (overleaf_repo, overleaf_push):
             res = calkit.overleaf.sync(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,
@@ -7247,6 +7488,7 @@ def post_project_overleaf_sync(
                 sync_info_for_path=None,
                 print_info=logger.info,
                 no_commit=False,
+                push=overleaf_push,
             )
     except HTTPException:
         raise
@@ -7259,6 +7501,11 @@ def post_project_overleaf_sync(
             event_name="Overleaf sync failed",
             add_event_info={"path": path_in_project, "exception": str(e)},
         )
+        # Only a session's push raises these, since 'git push' doesn't
+        if isinstance(e, calkit.overleaf.AuthError):
+            raise HTTPException(401, OVERLEAF_SESSION_REJECTED)
+        if isinstance(e, calkit.overleaf.ChangedOnOverleafError):
+            raise HTTPException(409, str(e))
         raise HTTPException(
             400, "Overleaf sync failed; try locally with Calkit CLI"
         )
@@ -7329,10 +7576,7 @@ def get_project_overleaf_sync_status(
     folder with ``path`` or to the folders synced with a single Overleaf
     project with ``overleaf_project_id``.
     """
-    try:
-        users.get_overleaf_token(session=session, user=current_user)
-    except HTTPException:
-        raise HTTPException(401, "Overleaf token not found")
+    overleaf_auth = users.get_overleaf_auth(session=session, user=current_user)
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7412,7 +7656,8 @@ def get_project_overleaf_sync_status(
             user=current_user,
             session=session,
             overleaf_project_id=this_overleaf_project_id,
-        ) as overleaf_repo:
+            overleaf_auth=overleaf_auth,
+        ) as (overleaf_repo, _):
             status = calkit.overleaf.get_sync_status(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,

@@ -1,21 +1,34 @@
 # LaTeX documents
 
-Calkit builds LaTeX documents with `latexmk`, in whichever
-[environment](environments.md) the project defines:
+LaTeX is a longstanding favorite typesetting system for technical
+documents, and its math syntax has become the de facto standard.
+It's also a great choice to use in a Calkit pipeline to produce
+papers and theses since it can easily include figures, tables, and
+even numerical result values produced in other stages,
+so there's no need to copy/paste them in, like you might in
+like Microsoft Word.
+
+For one-off compilation,
+Calkit offers a `calkit latex build` command,
+which will invoke `latexmk`, optionally using one of the
+project's [environments](environments.md):
 
 ```sh
 calkit latex build paper/main.tex --env tex
 ```
 
-Without `--env`, `latexmk` runs directly if it's installed, and in a TeX Live
+Without `--env`, `latexmk` is called directly
+if it's installed on the system, and in Calkit's TinyTeX/TeXlive
 container if it isn't.
 
 ## Adding a document to the pipeline
 
-A one-off build isn't reproducible on its own.
-Add the document to the [pipeline](pipeline/index.md) as a `latex` stage, and
-`calkit run` rebuilds it whenever the source or any of its inputs change,
-and skips it when nothing has:
+If your project involves more than just writing,
+you'll likely have other stages that create figures and results.
+Tie these all together by
+adding the document to the [pipeline](pipeline/index.md) as a `latex` stage,
+and `calkit run` will rebuild it whenever the source or any of
+its inputs change, skipping if not:
 
 ```sh
 calkit new latex-stage --name paper --target paper/main.tex --environment tex
@@ -32,19 +45,20 @@ pipeline:
       target_path: paper/main.tex
 ```
 
-The compiled PDF is an output of the stage without being declared, so there's
-nothing to add for it.
-Use `--output` only for the extras a build produces, and see the
-[pipeline docs](pipeline/index.md) for the attributes every stage shares,
-e.g., `inputs`, which can include figures, tables, and results
-converted to [.tex from JSON](pipeline/index.md#json-to-latex).
+## Using a template
 
-To start a document from scratch instead, `calkit new publication` writes the
-source files, the environment, and the stage in one go:
+To start a new document from scratch, `calkit new publication` writes the
+source files, the environment, and the stage in one go.
+For example, this command will start a journal article using the
+Journal of Fluid Mechanics (JFM) template in a folder called `paper`:
 
 ```sh
-calkit new publication paper --template latex/jfm --stage paper \
-    --environment tex --kind journal-article --title "A cool paper"
+calkit new publication paper \
+    --template latex/jfm \
+    --stage paper \
+    --environment tex \
+    --kind journal-article \
+    --title "A cool paper"
 ```
 
 Available templates are `latex/article` (generic), `latex/ieee-conference`
@@ -72,15 +86,12 @@ you'll need to install packages the usual way.
 
 ## Inputs
 
-A document's class, style, bibliography, and figure files are inputs to
-building it, but LaTeX resolves those itself, so the pipeline can't see them
-unless the stage declares them.
-`calkit new latex-stage` and `calkit new publication` read the document and
+A document's class, style, bibliography, and figure files
+need to be declared as inputs to its pipeline stage.
+`calkit new latex-stage` and `calkit new publication`
+scan through the document and
 add the ones that live in the project, following `\input`, `\include`, and
 any class or style file that loads others.
-Anything that comes from TeX Live is left alone, since it isn't the project's
-to track, and anything an already-declared directory covers is left off
-rather than listed again underneath it.
 Pass `--no-detect-inputs` to turn this off, and `--input` to add more.
 `calkit xr` detects the same inputs when the command it wraps builds a
 document.
@@ -88,6 +99,99 @@ document.
 Undeclared inputs mean editing the class file doesn't rebuild the paper, and
 the web app's in-browser editor, which loads exactly what the stage declares,
 can't compile the document at all.
+
+## Including project components
+
+A document can include figures, tables, and result values from anywhere in
+the project by their path, with the commands the `calkit` package:
+
+```latex
+\usepackage{calkit}
+...
+The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
+\ckfigure[width=0.7\textwidth]{figures/plot.png}
+\cktable{tables/summary.tex}
+```
+
+- `\ckvalue[format]{path}{key}` prints a value from a JSON, YAML, or TOML
+  file.
+  Keys are separated by dots to reach into nested values, e.g., `fit.slope`.
+- `\ckfigure[options]{path}` includes a figure, with the same options as
+  `\includegraphics`.
+- `\cktable{path}` includes a table a stage writes.
+- `\ckinclude{path}` includes any other LaTeX a stage writes,
+  e.g., a sentence that reports several results.
+
+Paths are relative to the project, not the document's working directory,
+so nothing needs copying into the document's folder,
+and no `map-paths` or `json-to-latex` stages are needed.
+A figure, table, or included file can be named without its extension,
+as with `\includegraphics` and `\input`.
+Paths outside the project, or with `..` in them, aren't read.
+Before running or checking the pipeline, and before each
+`calkit latex build`, Calkit copies what a document that loads the package
+includes into a `_calkit` folder beside it, writes the values it uses to
+`_calkit/values.tex`, and puts `calkit.sty` next to the document.
+A document that doesn't load it gets none of these.
+Neither is committed to Git, since Calkit writes them at pipeline
+compilation time.
+With `\usepackage[links]{calkit}`, values and figures in the PDF
+link (with `hyperref`)
+to the project's page on Calkit to allow inspection of its origin
+or provenance, e.g., the pipeline stage that produced it.
+Captions link too, in a `figure` or `table` environment around a
+`\ckfigure` or `\cktable`, or in the LaTeX that `\cktable` or `\ckinclude`
+brings in.
+
+The document's stage depends on everything it includes this way,
+without any of it being listed as an input,
+so `calkit run` builds the document after the stages that produce what it
+includes, and again whenever one of them changes.
+Calkit finds them by reading the document and the files it inputs,
+so a command inside a macro of your own, e.g., one that takes the key as
+an argument, isn't seen.
+
+Anything not in the project yet, e.g., a figure the pipeline hasn't made or
+a path with a typo, prints as **??** with a warning rather than failing the
+build.
+
+These commands are optional.
+`\includegraphics` and `\input` work as usual for files in the document's
+folder.
+
+### Formatting values
+
+The document formats numbers when it compiles, with the
+[siunitx](https://ctan.org/pkg/siunitx) package,
+so a changed format takes effect on the next build, including on Overleaf.
+A format is either a Python-style format spec, which Calkit translates,
+or siunitx options:
+
+| Format                                 | Meaning                     | Example                   |
+| -------------------------------------- | --------------------------- | ------------------------- |
+| `.2f`                                  | Decimal places              | 0.123456 → 0.12           |
+| `.3g` or `.3`                          | Significant figures         | 0.123456 → 0.123          |
+| `.2e`                                  | Scientific notation         | 0.000123456 → 1.23 × 10⁻⁴ |
+| `d`                                    | Whole number                | 42.7 → 43                 |
+| `,d`, `,.2f`, etc.                     | Thousands grouped by commas | 1234567 → 1,234,567       |
+| `round-mode=places, round-precision=1` | siunitx options             | 0.123456 → 0.1            |
+
+As in Python, digits are only grouped with a comma,
+and `g` switches to scientific notation for very large or small numbers.
+Unlike Python, it keeps zeros left by rounding, e.g., 2.501 → 2.50.
+
+Without a format, siunitx's defaults apply, which print every digit,
+grouped in threes with thin spaces, e.g., 0.123 456.
+To set a default for the whole document, use `\sisetup`, e.g.,
+`\sisetup{round-mode=figures, round-precision=3}`.
+A value that isn't a number, e.g., a name, prints as it is.
+Since `%` starts a comment in LaTeX, a percentage is easiest written to the
+results file by the pipeline.
+
+`\ckvalue` can't go inside siunitx's own commands or an `S` column, since
+those read their argument as a number.
+For a value with units, write the unit after it, e.g.,
+`\ckvalue[.2f]{results/metrics.json}{speed}~\unit{\metre\per\second}`.
 
 ## Build dates
 
@@ -109,6 +213,8 @@ A LaTeX PDF output is stored/tracked with DVC by default
 file changing and nothing about the document itself.
 Calkit can mark up one revision of a document against another with
 `latexdiff`, so additions and deletions appear where they happen.
+Each side's [project components](#including-project-components) are read
+from its own revision, so a changed value, figure, or table is marked too.
 
 List the comparisons a document should keep in its `latex` stage
 under the `diffs` list:
@@ -203,7 +309,7 @@ possible with the `--pipeline` option,
 which creates a standalone pipeline for the LaTeX stage and everything
 it depends on upstream.
 
-### Where they go
+### Where diffs are stored
 
 Each comparison gets a directory named after what it compares, with the
 document's own path inside it:
@@ -461,7 +567,7 @@ which can misplace a thread on a paragraph that's repeated word for word.
 ### On the Calkit Hub
 
 On the Calkit Hub, comments on a publication that a `latex` stage builds
-are kept in the same way, in its `.tex` source,
+are stored the same way, in its `.tex` source,
 so they show up for anyone who views the document,
 whether in VS Code, from the command line, or on the hub.
 A comment made on the hub is saved to the source on the branch being viewed.

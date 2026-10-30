@@ -8,7 +8,10 @@ import type {
   EnvDescription,
   NotebookEntry,
   PipelineStage,
+  QuestionCheck,
   QuestionEntry,
+  SignOffCheck,
+  SignOffEntry,
   StaleStageDetail,
 } from "./types";
 import { getExecutedNotebookHtmlPath } from "./notebooks";
@@ -19,6 +22,14 @@ import {
   type StaleClassification,
   outputEntryPath,
 } from "./pipeline/core";
+import { envRefParts } from "./subprojects";
+import {
+  LETTER_COLORS,
+  lettersDescription,
+  lettersTooltip,
+  questionLetters,
+  worstLetterState,
+} from "./questions";
 
 // Singular node kinds and the matching calkit.yaml collection keys for the
 // artifact-style sections (figures, datasets, results, publications,
@@ -55,6 +66,9 @@ function answerText(question: string | QuestionEntry): string | undefined {
     .map(([clause, wording]) => `${clause}: ${wording}`)
     .join("; ");
 }
+
+// Where scheduler logs go, under a subproject's directory for its stages
+const SCHEDULER_LOG_DIR = /(^|\/)\.calkit\/scheduler\/logs\//;
 
 // Base codicon for each artifact kind (used when the artifact has provenance and
 // isn't stale; imported artifacts use a cloud icon instead).
@@ -105,6 +119,10 @@ export class CalkitSidebarProvider
   // sections containing them) are shown. Set via setFilter, not refresh.
   private filterText = "";
   private lastFingerprint: string | undefined;
+  // From `calkit check questions`, in merged question order; empty until it
+  // has run, so questions render without their status until then
+  private questionChecks: (QuestionCheck | undefined)[] = [];
+  private lastQuestionChecks = "[]";
 
   // Cached section items so reveal() can use getParent()
   private readonly questionsSectionItem = this.makeSection(
@@ -202,6 +220,18 @@ export class CalkitSidebarProvider
 
   getFilter(): string {
     return this.filterText;
+  }
+
+  // Set each question's check, aligned with the merged questions. Kept
+  // separate from refresh() since the check is slower and arrives later.
+  setQuestionChecks(checks: (QuestionCheck | undefined)[]): void {
+    const next = JSON.stringify(checks);
+    if (next === this.lastQuestionChecks) {
+      return;
+    }
+    this.lastQuestionChecks = next;
+    this.questionChecks = checks;
+    this._onDidChangeTreeData.fire();
   }
 
   // True when no filter is active, or any of the given texts contains it.
@@ -451,6 +481,7 @@ export class CalkitSidebarProvider
         this.matchesFilter(
           questionText(question),
           typeof question === "string" ? undefined : question.hypothesis,
+          typeof question === "string" ? undefined : question.approach,
           answerText(question),
         ),
       );
@@ -464,8 +495,11 @@ export class CalkitSidebarProvider
       const hasDetails =
         typeof question !== "string" &&
         (!!question.hypothesis ||
+          !!question.approach ||
           !!question.answer ||
-          (question.evidence?.length ?? 0) > 0);
+          (question.evidence?.length ?? 0) > 0 ||
+          (question.verifications?.length ?? 0) > 0 ||
+          (question.validations?.length ?? 0) > 0);
       const item = new SidebarItem(
         text,
         hasDetails
@@ -477,6 +511,23 @@ export class CalkitSidebarProvider
       item.iconPath = new vscode.ThemeIcon("question");
       item.tooltip = text;
       item.contextValue = "question";
+      const check = this.questionChecks[index - 1];
+      if (check) {
+        // Tree items can't color parts of a row, so the letters go in the
+        // description, the worst state colors the icon, and the tooltip has
+        // the colored row with what each letter means
+        const letters = questionLetters(question, check, this.staleStageNames);
+        item.description = lettersDescription(letters);
+        item.iconPath = new vscode.ThemeIcon(
+          "question",
+          new vscode.ThemeColor(LETTER_COLORS[worstLetterState(letters)]),
+        );
+        const tooltip = new vscode.MarkdownString(
+          lettersTooltip(text, letters),
+        );
+        tooltip.supportHtml = true;
+        item.tooltip = tooltip;
+      }
       return item;
     });
   }
@@ -486,6 +537,7 @@ export class CalkitSidebarProvider
     if (question === undefined || typeof question === "string") {
       return [];
     }
+    const check = this.questionChecks[Number(indexId) - 1];
     const items: SidebarItem[] = [];
     // Hypothesis and answer are single-line text props, mirroring the
     // label/description prop rows used by stages and artifacts.
@@ -502,6 +554,9 @@ export class CalkitSidebarProvider
     };
     if (question.hypothesis) {
       detail("Hypothesis", question.hypothesis, "lightbulb");
+    }
+    if (question.approach) {
+      detail("Approach", question.approach, "list-ordered");
     }
     const answer = answerText(question);
     if (answer) {
@@ -530,6 +585,41 @@ export class CalkitSidebarProvider
         };
       }
       items.push(evItem);
+    }
+    // Sign-offs, with their status once the check has run; the check lists
+    // the same entries in the same order
+    for (const [label, entries, checked] of [
+      ["Verified", question.verifications, check?.verifications],
+      ["Validated", question.validations, check?.validations],
+    ] as [string, SignOffEntry[] | undefined, SignOffCheck[] | undefined][]) {
+      (entries ?? []).forEach((entry, i) => {
+        const c = checked?.[i];
+        const by = c?.by ?? entry.by?.name ?? entry.by?.email ?? "unknown";
+        const date = c?.date ?? entry.date;
+        const item = new SidebarItem(
+          label,
+          vscode.TreeItemCollapsibleState.None,
+          "question-sign-off",
+        );
+        item.description = [
+          by,
+          date ? String(date) : undefined,
+          c?.status === "stale" ? "stale" : undefined,
+        ]
+          .filter(Boolean)
+          .join(", ");
+        item.tooltip =
+          [entry.notes, c?.message].filter(Boolean).join("\n\n") || undefined;
+        item.iconPath = new vscode.ThemeIcon(
+          c?.status === "stale" ? "warning" : "verified",
+          c
+            ? new vscode.ThemeColor(
+                LETTER_COLORS[c.status === "stale" ? "stale" : "ok"],
+              )
+            : undefined,
+        );
+        items.push(item);
+      });
     }
     return items;
   }
@@ -865,7 +955,10 @@ export class CalkitSidebarProvider
       // The notebook itself opens when clicked in the tree, so no separate
       // "Open" child is needed. Offer the executed HTML when it has been
       // generated.
-      const htmlRel = getExecutedNotebookHtmlPath(nbPath);
+      const htmlRel = getExecutedNotebookHtmlPath(
+        nbPath,
+        stage?.subproject_wdir,
+      );
       if (fs.existsSync(path.join(this.workspaceRoot, htmlRel))) {
         const htmlItem = new SidebarItem(
           "Open executed HTML",
@@ -1203,7 +1296,7 @@ export class CalkitSidebarProvider
   // files for each part.
   private envFilePaths(envName: string): string[] {
     const paths: string[] = [];
-    for (const part of envName.split(":")) {
+    for (const part of this.envRefParts(envName)) {
       const desc = this.envDescriptions?.[part];
       if (desc?.spec_path) {
         paths.push(desc.spec_path);
@@ -1250,6 +1343,7 @@ export class CalkitSidebarProvider
               typeof calkitStage.environment === "string"
                 ? this.envFilePaths(calkitStage.environment)
                 : [],
+            projectDir: calkitStage.subproject_wdir,
           })
         : undefined;
     // An output is "modified" when its file changed on disk, or "stale" when an
@@ -1375,7 +1469,7 @@ export class CalkitSidebarProvider
       // "Output" row opens a real file. Scheduler logs get their own row below.
       const explicitOutputs = calkitStage.iterate_over
         ? dvcStageOutputPaths(this.dvcYaml?.stages?.[stageName] ?? {}).filter(
-            (p) => !p.startsWith(".calkit/scheduler/logs/"),
+            (p) => !SCHEDULER_LOG_DIR.test(p),
           )
         : Array.isArray(calkitStage.outputs)
         ? (calkitStage.outputs as (string | { path: string })[]).map(
@@ -1487,7 +1581,7 @@ export class CalkitSidebarProvider
     for (const out of outs) {
       const p =
         typeof out === "string" ? out : String(Object.keys(out)[0] ?? "");
-      if (p.startsWith(".calkit/scheduler/logs/")) {
+      if (SCHEDULER_LOG_DIR.test(p)) {
         return p;
       }
     }
@@ -1496,9 +1590,20 @@ export class CalkitSidebarProvider
       const override = stage.scheduler?.log_path;
       return typeof override === "string" && override
         ? override
-        : `.calkit/scheduler/logs/${stageName}.out`;
+        : path.posix.join(
+            stage.subproject_wdir ?? "",
+            ".calkit/scheduler/logs",
+            `${stageName.slice(stageName.lastIndexOf(":") + 1)}.out`,
+          );
     }
     return undefined;
+  }
+
+  private envRefParts(envRef: string): string[] {
+    return envRefParts(
+      envRef,
+      new Set(Object.keys(this.calkitConfig?.environments ?? {})),
+    );
   }
 
   // Whether a stage runs under a SLURM/PBS scheduler. Environments combine as
@@ -1509,7 +1614,7 @@ export class CalkitSidebarProvider
     if (typeof envRef !== "string") {
       return false;
     }
-    const outerName = envRef.split(":")[0];
+    const outerName = this.envRefParts(envRef)[0];
     const kind = this.calkitConfig?.environments?.[outerName]?.kind;
     return kind === "slurm" || kind === "pbs";
   }

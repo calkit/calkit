@@ -1272,6 +1272,16 @@ def test_check_repro_literals(tmp_dir):
 def test_check_questions(tmp_dir):
     import json
 
+    def show(*args: str) -> str:
+        # With stderr, where a warning goes so the Markdown stays clean
+        proc = subprocess.run(
+            ["calkit", "show", "q", "1", *args],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return proc.stdout + proc.stderr
+
     subprocess.check_call(["calkit", "init"])
     os.makedirs("results")
     with open("results/findings.json", "w") as f:
@@ -1312,13 +1322,9 @@ def test_check_questions(tmp_dir):
     subprocess.check_call(["git", "commit", "-q", "-am", "Import it"])
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "Answers backed by current evidence: 1/1" in out
-    # Listing renders the placeholder from the results file
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "answer: 8 of eight do." in out
-    out = subprocess.check_output(
-        ["calkit", "list", "questions", "--raw"], text=True
-    )
-    assert "answer: {n_top} of eight do." in out
+    # Showing renders the placeholder from the results file
+    assert "**Answer:** 8 of eight do." in show()
+    assert "**Answer:** {n_top} of eight do." in show("--raw")
     # The pipeline changes the number in a later commit: the report says
     # what it was and when, without failing -- the sentence around a number
     # can still be true -- and the listing already shows 0
@@ -1363,8 +1369,7 @@ def test_check_questions(tmp_dir):
         ["calkit", "status", "-c", "questions"], text=True
     )
     assert "1 question, all answered with current evidence" in out
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "answer: 0 of eight do." in out
+    assert "**Answer:** 0 of eight do." in show()
     # Reviewing the answer is an edit to the question, which clears the
     # note about the value having moved
     ck_info = calkit.load_calkit_info()
@@ -1392,31 +1397,31 @@ def test_check_questions(tmp_dir):
     )
     assert "Questions answered: 1/1" in out
     # A placeholder that names nothing renders as written, which looks
-    # like text somebody meant literally, so the listing says so
+    # like text somebody meant literally, so showing it says so
     ck_info = calkit.load_calkit_info()
     ck_info["questions"][0]["answer"] = "It is {missing} of them."
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    out = show()
     assert "could not be filled" in out
     assert "It is {missing} of them." in out
-    # A conditional answer is listed as the branch that holds, and one with
-    # no branch holding is listed as written, with the same warning
+    # A conditional answer is shown as the branch that holds, and one with
+    # no branch holding is shown as written, with the same warning
     ck_info["questions"][0]["answer"] = {
         "if n_top > 4": "Most do.",
         "else": "{n_top} do.",
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "answer: 0 do." in out
+    out = show()
+    assert "**Answer:** 0 do." in out
     assert "could not be filled" not in out
     del ck_info["questions"][0]["answer"]["else"]
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    out = show()
     assert "could not be filled" in out
-    assert "if n_top > 4: Most do." in out
+    assert "- **if** `n_top > 4`: Most do." in out
     # A project with no questions says so rather than printing nothing
     os.remove("calkit.yaml")
     with open("calkit.yaml", "w") as f:
@@ -1546,6 +1551,100 @@ def test_check_stage_runs(tmp_dir):
     # Rerunning them records them again
     subprocess.check_call(["calkit", "run", "--force"])
     subprocess.check_call(check)
+    # A subproject's runs are kept beside its dvc.lock under their names
+    # there, so it is the same record whichever directory ran them
+    os.makedirs("sub")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "c": {
+                            "kind": "shell-command",
+                            "command": "echo c > c.txt",
+                            "environment": "_system",
+                            "outputs": [{"path": "c.txt", "storage": "git"}],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    sub_runs = calkit.read_stage_runs("sub")
+    assert list(sub_runs) == ["c"]
+    assert "sub/dvc.yaml:c" not in calkit.read_stage_runs()
+    subprocess.check_call(check)
+    subprocess.check_call(check, cwd="sub")
+    # Edited in the subproject, it's caught from the parent too
+    with open(os.path.join("sub", "c.txt"), "w") as f:
+        f.write("edited\n")
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "sub/dvc.yaml:c"])
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert "Stage 'sub/dvc.yaml:c' has changed in dvc.lock" in res.stdout
+    subprocess.check_call(["calkit", "run", "--force", "sub/dvc.yaml:c"])
+    subprocess.check_call(check)
+    # A record the parent kept under the subproject stage's name there, as
+    # it used to, still counts, and moves to the subproject when rerun. It's
+    # named as on Windows, which a run elsewhere must recognize too.
+    stage_runs = calkit.read_stage_runs()
+    stage_runs["sub\\dvc.yaml:c"] = calkit.read_stage_runs("sub")["c"]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    os.remove(os.path.join("sub", calkit.STAGE_RUNS_FPATH))
+    subprocess.check_call(check)
+    subprocess.check_call(["calkit", "run", "--force", "sub/dvc.yaml:c"])
+    assert not any("dvc.yaml" in k for k in calkit.read_stage_runs())
+    assert list(calkit.read_stage_runs("sub")) == ["c"]
+    subprocess.check_call(check)
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    )
+    assert "sub/.calkit/stage-runs.json" in staged.splitlines()
+    # When both records exist, one matching is enough: here the
+    # subproject's is stale and the parent's is not
+    sub_runs = calkit.read_stage_runs("sub")
+    stage_runs = calkit.read_stage_runs()
+    stage_runs["sub/dvc.yaml:c"] = dict(sub_runs["c"])
+    sub_runs["c"]["dvc_lock_hash"] = "sha256:stale"
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(stage_runs, f)
+    with open(os.path.join("sub", calkit.STAGE_RUNS_FPATH), "w") as f:
+        json.dump(sub_runs, f)
+    subprocess.check_call(check)
+    # A dvc.yaml that isn't a declared subproject is run and checked the
+    # same way
+    os.makedirs("tools")
+    with open(os.path.join("tools", "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {"stages": {"t": {"cmd": "echo t > t.txt", "outs": ["t.txt"]}}},
+            f,
+        )
+    subprocess.check_call(["calkit", "run"])
+    assert list(calkit.read_stage_runs("tools")) == ["t"]
+    subprocess.check_call(check)
+    with open(os.path.join("tools", "t.txt"), "w") as f:
+        f.write("edited\n")
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "tools/dvc.yaml:t"])
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert "Stage 'tools/dvc.yaml:t' has changed in dvc.lock" in res.stdout
+    subprocess.check_call(["calkit", "run", "--force", "tools/dvc.yaml:t"])
+    # One inside a DVC repo of its own isn't, since its wrapper stage runs
+    # it without recording its stages
+    os.makedirs(os.path.join("iso", ".dvc"))
+    os.makedirs(os.path.join("iso", "inner"))
+    for fname, content in [
+        ("dvc.yaml", {"stages": {"i": {"cmd": "true"}}}),
+        ("dvc.lock", {"schema": "2.0", "stages": {"i": {"cmd": "true"}}}),
+    ]:
+        with open(os.path.join("iso", "inner", fname), "w") as f:
+            calkit.ryaml.dump(content, f)
+    res = subprocess.run(check, capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout
+    assert "iso" not in res.stdout
 
 
 def test_check_env_rebuilds(tmp_dir):

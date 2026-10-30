@@ -3144,10 +3144,60 @@ function watchIntegrations(): void {
   }).observe(document.body, { childList: true, subtree: true });
 }
 
+/**
+ * Add inserting from the project to the editor's right-click menu, which
+ * Overleaf draws itself rather than leaving to the browser. Right-clicking
+ * moves the cursor there, so that's where it's inserted.
+ */
+function watchContextMenu(): void {
+  const addItem = () => {
+    const menu = document.querySelector<HTMLElement>(
+      ".editor-context-menu-container ul[role=menu]",
+    );
+    const check = lastCheck;
+    if (
+      !menu ||
+      menu.querySelector("#calkit-insert") ||
+      !check ||
+      check.link !== currentLink ||
+      check.link.current_user_access === "read"
+    ) {
+      return;
+    }
+    const item = el("button", {
+      class: "dropdown-item",
+      text: "Insert from Calkit\u2026",
+      attrs: { id: "calkit-insert", role: "menuitem", type: "button" },
+    });
+    item.addEventListener("click", () => {
+      // Closes Overleaf's menu, as choosing one of its own items would
+      menu.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      showInPanel((body) =>
+        body.append(
+          renderInsert(check.link, check.status.path, () =>
+            openPanel(check.overleafProjectId),
+          ),
+        ),
+      );
+    });
+    menu.append(
+      el("li", { class: "dropdown-divider", attrs: { role: "separator" } }),
+      el("li", { attrs: { role: "none" } }, [item]),
+    );
+  };
+  new MutationObserver(addItem).observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+}
+
 watchForSaves();
 watchEditor();
 watchPdf();
 watchIntegrations();
+watchContextMenu();
 runContentScript({
   id: "overleaf",
   sync,

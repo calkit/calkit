@@ -42,6 +42,7 @@ from calkit.cli import (
     raise_error,
     run_cmd,
     warn,
+    warn_app_control,
 )
 from calkit.cli.check import (
     check_app,
@@ -3951,6 +3952,7 @@ def run(
             calkit.dvc.restore_output_ignores()
         except Exception as e:
             warn(f"Failed to re-ignore pipeline outputs: {e}")
+        warn_app_control(output=log_content)
         raise_error("Pipeline failed")
     elif skipped_stale:
         for addressing, reason in skipped_stale.items():
@@ -4429,7 +4431,8 @@ def run_in_env(
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, cwd=wdir)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in Conda environment")
     elif env["kind"] == "pixi":
         env_cmd = []
@@ -4443,7 +4446,8 @@ def run_in_env(
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, cwd=wdir)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in Pixi environment")
     elif env["kind"] == "uv":
         env_dir = os.path.dirname(os.path.abspath(env["path"]))
@@ -4452,7 +4456,8 @@ def run_in_env(
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, cwd=wdir)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in uv environment")
     elif (kind := env["kind"]) in ["uv-venv", "venv"]:
         if "path" not in env:
@@ -4490,7 +4495,8 @@ def run_in_env(
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, shell=True, cwd=wdir)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            warn_app_control(returncode=e.returncode)
             raise_error(f"Failed to run in {kind}")
     elif env["kind"] == "julia":
         if not no_check:

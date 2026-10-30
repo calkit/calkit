@@ -155,6 +155,12 @@ class Original:
     media: dict[str, str] = field(default_factory=dict)
     # Each equation's LaTeX as the converter reads it back, by bookmark
     equations: dict[str, str] = field(default_factory=dict)
+    # Each paragraph's inline math placed from the source, by bookmark: its
+    # place among the source paragraph's inline math and its LaTeX as the
+    # converter reads it back
+    inline: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
+    # Whether the export kept its inline math, which older ones didn't
+    kept_inline: bool = True
 
 
 def normalize(text: str) -> str:
@@ -250,6 +256,8 @@ class Document:
         root.set("source", original.source)
         if original.rev:
             root.set("rev", original.rev)
+        if original.kept_inline:
+            root.set("inline", "kept")
         for name, text in original.paragraphs.items():
             p = ET.SubElement(root, _tag(CALKIT_NS, "p"))
             p.set("id", name)
@@ -262,6 +270,12 @@ class Document:
             eq = ET.SubElement(root, _tag(CALKIT_NS, "eq"))
             eq.set("id", name)
             eq.text = tex
+        for name, maths in original.inline.items():
+            for index, tex in maths:
+                im = ET.SubElement(root, _tag(CALKIT_NS, "im"))
+                im.set("id", name)
+                im.set("k", str(index))
+                im.text = tex
         self.parts["customXml/item1.xml"] = ET.tostring(
             root, xml_declaration=True, encoding="UTF-8"
         )
@@ -288,6 +302,11 @@ class Document:
         root = ET.fromstring(data)
         if root.tag != _tag(CALKIT_NS, "review"):
             return None
+        inline: dict[str, list[tuple[int, str]]] = {}
+        for im in root.iter(_tag(CALKIT_NS, "im")):
+            inline.setdefault(im.get("id", ""), []).append(
+                (int(im.get("k", "0")), im.text or "")
+            )
         return Original(
             id=root.get("id", ""),
             rev=root.get("rev"),
@@ -304,6 +323,8 @@ class Document:
                 eq.get("id", ""): eq.text or ""
                 for eq in root.iter(_tag(CALKIT_NS, "eq"))
             },
+            inline=inline,
+            kept_inline=root.get("inline") == "kept",
         )
 
     @property
@@ -1401,8 +1422,13 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                 'error "calkit: not opened"\n'
                 f'set doc to document "{name}"\n'
                 f'save as doc file name "{tmp_path}" file format format document\n'
-                # By reference, since Word may not find the saved copy by name
-                "close active document saving no\n"
+                # Found by name among the open documents, since saving breaks
+                # the reference, Word may not find it by name directly, and
+                # the active document may be another the user switched to
+                "repeat with d in (get documents)\n"
+                f'if name of d is "{os.path.basename(tmp_path)}" then '
+                "close d saving no\n"
+                "end repeat\n"
                 "end tell\n"
                 "end timeout"
             )
@@ -1456,6 +1482,86 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
     finally:
         os.remove(light_path)
     os.replace(tmp_path, docx_path)
+
+
+def pdf_to_png(pdf_path: str, png_path: str, dpi: int = 200) -> bool:
+    """Draw a PDF's first page as a PNG, which Word can show, with whatever
+    can draw it here, returning whether one could.
+    """
+    import shutil
+
+    try:
+        import importlib
+
+        # Optional, so not a dependency
+        pypdfium2 = importlib.import_module("pypdfium2")
+        page = pypdfium2.PdfDocument(pdf_path)[0]
+        page.render(scale=dpi / 72).to_pil().save(png_path)
+        return True
+    except Exception:
+        pass
+    if shutil.which("pdftoppm"):
+        res = subprocess.run(
+            [
+                "pdftoppm",
+                "-png",
+                "-singlefile",
+                "-r",
+                str(dpi),
+                pdf_path,
+                png_path.removesuffix(".png"),
+            ],
+            capture_output=True,
+        )
+        if res.returncode == 0 and os.path.isfile(png_path):
+            return True
+    if sys.platform == "darwin" and shutil.which("sips"):
+        res = subprocess.run(
+            ["sips", "-s", "format", "png", pdf_path, "--out", png_path],
+            capture_output=True,
+        )
+        if res.returncode == 0 and os.path.isfile(png_path):
+            return True
+    return False
+
+
+def make_reference_doc() -> bytes:
+    """Pandoc's reference document for Word, styled more as LaTeX sets a
+    paper: a serif font throughout at 11 points, with black headings.
+    """
+    import io
+
+    default = _pandoc(["--print-default-data-file", "reference.docx"], b"")
+    fonts = (
+        '<w:rFonts w:ascii="Cambria" w:hAnsi="Cambria" w:cs="Cambria" '
+        'w:eastAsiaTheme="minorEastAsia" />'
+    )
+    out = io.BytesIO()
+    with (
+        zipfile.ZipFile(io.BytesIO(default)) as src,
+        zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst,
+    ):
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename == "word/styles.xml":
+                styles = data.decode("utf-8")
+                styles = re.sub(r"<w:rFonts [^>]*/>", fonts, styles)
+                styles = re.sub(r"<w:color [^>]*/>", "", styles)
+                # Body text at 11 points, headings bold
+                styles = styles.replace(
+                    '<w:sz w:val="24" />\n        <w:szCs w:val="24" />',
+                    '<w:sz w:val="22" />\n        <w:szCs w:val="22" />',
+                    1,
+                )
+                styles = re.sub(
+                    r'(<w:style [^>]*w:styleId="Heading\d"[^>]*>.*?<w:rPr>)',
+                    r"\1<w:b />",
+                    styles,
+                    flags=re.S,
+                )
+                data = styles.encode("utf-8")
+            dst.writestr(item, data)
+    return out.getvalue()
 
 
 def find_pandoc() -> str | None:
@@ -1755,6 +1861,514 @@ def latex_to_omml(
                     )
                     wpr.insert(at, ET.Element(_tag(W, flag)))
     return maths
+
+
+# A table environment Pandoc reads, and how many brace groups its column
+# spec takes, e.g., tabular*'s width before it
+TABLE_ENVS = {"tabular": 1, "tabular*": 2, "tabularx": 2, "longtable": 1}
+
+
+def latex_to_tables(
+    tables: list[str],
+    preamble: str = "",
+    widths: list[int] | None = None,
+    sizes: list[int | None] | None = None,
+) -> list[ET.Element | None]:
+    """Convert table environments, e.g., ``tabular``, to Word tables.
+
+    Pandoc converts them, all in one run, with their math converted as
+    ``latex_to_omml`` does and their rules, which Pandoc drops, as borders.
+    Columns are as wide as their content, within each table's width in
+    ``widths``, in twentieths of a point, if given, in its font size in
+    ``sizes``, in half points, or smaller, as ``\\footnotesize`` would, to
+    fit. A table that doesn't
+    convert, or that has links, pictures, or notes, which belong to
+    Pandoc's document rather than this one, is ``None``.
+    """
+    import calkit.latex
+
+    def group_end(tex: str, i: int) -> int:
+        # Just past the brace group opening at i, or the end if unclosed
+        depth = 0
+        while i < len(tex):
+            if tex[i] == "\\":
+                i += 2
+                continue
+            if tex[i] == "{":
+                depth += 1
+            elif tex[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            i += 1
+        return len(tex)
+
+    def pull_math(tex: str) -> str:
+        # Each $...$ or \(...\) as a marker, its LaTeX kept in maths
+        out, i = [], 0
+        while i < len(tex):
+            if tex.startswith("\\(", i):
+                end = tex.find("\\)", i + 2)
+                if end < 0:
+                    break
+                maths.append(tex[i + 2 : end])
+                out.append(f"CKMATH{len(maths) - 1}CK")
+                i = end + 2
+            elif tex[i] == "\\":
+                out.append(tex[i : i + 2])
+                i += 2
+            elif tex[i] == "$":
+                end = i + 1
+                while end < len(tex) and tex[end] != "$":
+                    end += 2 if tex[end] == "\\" else 1
+                maths.append(tex[i + 1 : end])
+                out.append(f"CKMATH{len(maths) - 1}CK")
+                i = end + 1
+            else:
+                out.append(tex[i])
+                i += 1
+        return "".join(out) + tex[i:]
+
+    def break_cells(tex: str) -> str:
+        # A cell's own lines, e.g., \makecell{MAPE\\(x)}, as a marker for
+        # a line break, which Pandoc drops with the command or, before
+        # 3.9, as \newline
+        out, i = [], 0
+        cell = re.compile(
+            r"\\(?:makecell|thead|shortstack)\s*(?:\[[^\]]*\])?\s*"
+        )
+        while True:
+            m = cell.search(tex, i)
+            if m is None or tex[m.end() : m.end() + 1] != "{":
+                out.append(tex[i:] if m is None else tex[i : m.end()])
+                if m is None:
+                    break
+                i = m.end()
+                continue
+            end = group_end(tex, m.end())
+            inner = tex[m.end() + 1 : end - 1]
+            out.append(tex[i : m.start()] + "{")
+            out.append(re.sub(r"\\\\(\s*\[[^\]]*\])?", " CKBRCK ", inner))
+            out.append("}")
+            i = end
+        return "".join(out)
+
+    # A rule with its arguments, e.g., \cmidrule(lr){3-4} with its columns
+    rule_re = re.compile(
+        r"\s*\\(?:(toprule|midrule|bottomrule|hline)"
+        r"|(cline|cmidrule)\s*(?:\([^)]*\))?\s*(?:\[[^\]]*\])?\s*"
+        r"\{\s*(\d+)\s*(?:-\s*(\d+)\s*)?\}"
+        r"|(specialrule)(?:\s*\{[^{}]*\}){3}"
+        r"|(addlinespace|morecmidrules)\s*(?:\[[^\]]*\])?)(?![A-Za-z])"
+    )
+    maths: list[str] = []
+    sources: list[str | None] = []
+    # Each table's rules by the row they're above, as the columns they
+    # span, None for all, and whether they're heavy, as booktabs' top and
+    # bottom rules are, with its row count
+    rules: list[
+        tuple[dict[int, list[tuple[tuple[int, int] | None, bool]]], int]
+    ] = []
+    macros = calkit.latex.macro_definitions(
+        [calkit.latex.SourceLine("", 0, ln) for ln in preamble.split("\n")]
+    )
+    for tex in tables:
+        tex = "\n".join(
+            calkit.latex._strip_comments(ln) for ln in tex.split("\n")
+        )
+        env_m = re.search(
+            r"\\begin\s*\{("
+            + "|".join(re.escape(e) for e in TABLE_ENVS)
+            + r")\}",
+            tex,
+        )
+        if env_m is None:
+            sources.append(None)
+            rules.append(({}, 0))
+            continue
+        # A source block can stop short of the \end line
+        end_at = tex.find(f"\\end{{{env_m.group(1)}}}", env_m.end())
+        if end_at < 0:
+            end_at = len(tex)
+        # The body starts after the column spec and any position
+        i = env_m.end()
+        for _ in range(TABLE_ENVS[env_m.group(1)]):
+            m = re.compile(r"\s*(?:\[[^\]]*\])?\s*").match(tex, i)
+            i = m.end() if m else i
+            if tex[i : i + 1] == "{":
+                i = group_end(tex, i)
+        head, body = tex[env_m.start() : i], tex[i:end_at]
+        # Rows, split at \\ outside groups, with their rules taken off
+        rows, depth, start, k = [], 0, 0, 0
+        while k < len(body):
+            if body.startswith("\\\\", k) and depth == 0:
+                rows.append(body[start:k])
+                k += 2
+                m = re.compile(r"\*?\s*(?:\[[^\]]*\])?").match(body, k)
+                k = start = m.end() if m else k
+                continue
+            if body.startswith("\\tabularnewline", k) and depth == 0:
+                rows.append(body[start:k])
+                k = start = k + len("\\tabularnewline")
+                continue
+            if body[k] == "\\":
+                k += 2
+                continue
+            depth += {"{": 1, "}": -1}.get(body[k], 0)
+            k += 1
+        rows.append(body[start:])
+        found: dict[int, list[tuple[tuple[int, int] | None, bool]]] = {}
+        kept, n = [], 0
+        for row in rows:
+            above: list[tuple[tuple[int, int] | None, bool]] = []
+            while (m := rule_re.match(row)) is not None:
+                full, partial, a, b, special, _ = m.groups()
+                if full is not None:
+                    above.append((None, full in ("toprule", "bottomrule")))
+                    # Pandoc reads these, e.g., to find the header
+                    kept.append(f"\\{full}\n")
+                elif partial is not None:
+                    above.append(((int(a), int(b or a)), False))
+                elif special is not None:
+                    above.append((None, False))
+                row = row[m.end() :]
+            if above:
+                found.setdefault(n, []).extend(above)
+            if row.strip():
+                kept.append(row + " \\\\\n")
+                n += 1
+        rules.append((found, n))
+        text = pull_math(
+            break_cells(
+                head + "\n" + "".join(kept) + f"\\end{{{env_m.group(1)}}}"
+            )
+        )
+        # Then the document's macros, and any math they bring
+        text = calkit.latex.expand_macros(text, macros)
+        text = re.sub(r"\\xspace(?![A-Za-z])\s*(?=[\w(])", " ", text)
+        text = re.sub(r"\\xspace(?![A-Za-z])", "", text)
+        sources.append(pull_math(text))
+    if not any(sources):
+        return [None] * len(tables)
+    src = "".join(
+        f"CKTBL{i}\n\n{s}\n\n" for i, s in enumerate(sources) if s is not None
+    )
+    src = re.sub(r"\\text(normal|up|md|sc)(?=\s*\{)", r"\\text", src)
+    src = re.sub(r"\\textsl(?=\s*\{)", r"\\textit", src)
+    src = re.sub(
+        r"\\("
+        + "|".join(calkit.latex.TEXT_SYMBOLS)
+        + r")(?![A-Za-z])\s*(\{\})?",
+        lambda m: calkit.latex.TEXT_SYMBOLS[m.group(1)],
+        src,
+    )
+    out = _pandoc(["-f", "latex", "-t", "docx", "-o", "-"], src.encode())
+    with zipfile.ZipFile(io.BytesIO(out)) as z:
+        body_el = ET.fromstring(z.read("word/document.xml")).find(
+            _tag(W, "body")
+        )
+    assert body_el is not None
+    converted: list[ET.Element | None] = [None] * len(tables)
+    current = None
+    for child in body_el:
+        text = "".join(t.text or "" for t in child.iter(_tag(W, "t")))
+        m = re.fullmatch(r"CKTBL(\d+)", text.strip())
+        if child.tag == _tag(W, "p") and m is not None:
+            current = int(m.group(1))
+        elif child.tag == _tag(W, "tbl") and current is not None:
+            if converted[current] is None:
+                converted[current] = child
+            current = None
+    omml = latex_to_omml([f"${t}$" for t in maths], preamble)
+    # Eighths of a point, heavy as booktabs' top and bottom rules are
+    border = {True: "8", False: "4"}
+    # A cell's side margins, in twentieths of a point
+    margin = 100
+    for idx, tbl in enumerate(converted):
+        if tbl is None:
+            continue
+        # Links, pictures, and notes point into Pandoc's document
+        if any(
+            el.tag == _tag(W, "footnoteReference")
+            or any(k.startswith(f"{{{REL}}}") for k in el.attrib)
+            for el in tbl.iter()
+        ):
+            converted[idx] = None
+            continue
+        # Laid out on its own, centered, rather than with Pandoc's style
+        tbl_pr = tbl.find(_tag(W, "tblPr"))
+        if tbl_pr is not None:
+            style = tbl_pr.find(_tag(W, "tblStyle"))
+            if style is not None:
+                tbl_pr.remove(style)
+            width = tbl_pr.find(_tag(W, "tblW"))
+            jc = ET.Element(_tag(W, "jc"))
+            jc.set(_tag(W, "val"), "center")
+            tbl_pr.insert(
+                list(tbl_pr).index(width) + 1 if width is not None else 0, jc
+            )
+            # Cell margins about LaTeX's column gap, before the table look
+            cell_mar = ET.Element(_tag(W, "tblCellMar"))
+            for side in ("left", "right"):
+                edge = ET.SubElement(cell_mar, _tag(W, side))
+                edge.set(_tag(W, "w"), str(margin))
+                edge.set(_tag(W, "type"), "dxa")
+            look = tbl_pr.find(_tag(W, "tblLook"))
+            tbl_pr.insert(
+                list(tbl_pr).index(look) if look is not None else len(tbl_pr),
+                cell_mar,
+            )
+        for p in tbl.iter(_tag(W, "p")):
+            ppr = p.find(_tag(W, "pPr"))
+            if ppr is None:
+                ppr = ET.Element(_tag(W, "pPr"))
+                p.insert(0, ppr)
+            pstyle = ppr.find(_tag(W, "pStyle"))
+            if pstyle is not None:
+                ppr.remove(pstyle)
+            # Single spaced and not indented, whatever the body text is
+            spacing = ET.Element(_tag(W, "spacing"))
+            spacing.set(_tag(W, "before"), "0")
+            spacing.set(_tag(W, "after"), "0")
+            spacing.set(_tag(W, "line"), "240")
+            spacing.set(_tag(W, "lineRule"), "auto")
+            ind = ET.Element(_tag(W, "ind"))
+            for side in ("left", "right", "firstLine"):
+                ind.set(_tag(W, side), "0")
+            ppr.insert(0, ind)
+            ppr.insert(0, spacing)
+            # Markers as math and line breaks
+            for run in list(p):
+                if run.tag != _tag(W, "r"):
+                    continue
+                t = run.find(_tag(W, "t"))
+                if t is None or "CK" not in (t.text or ""):
+                    continue
+                pieces = re.split(r"(CKMATH\d+CK|\s*CKBRCK\s*)", t.text or "")
+                at = list(p).index(run)
+                p.remove(run)
+                for piece in pieces:
+                    if not piece:
+                        continue
+                    m = re.fullmatch(r"CKMATH(\d+)CK", piece)
+                    math_el = omml[int(m.group(1))] if m is not None else None
+                    if math_el is not None:
+                        new = copy.deepcopy(math_el)
+                    else:
+                        new = copy.deepcopy(run)
+                        new_t = new.find(_tag(W, "t"))
+                        assert new_t is not None
+                        if m is not None:
+                            new_t.text = f"${maths[int(m.group(1))]}$"
+                        elif piece.strip() == "CKBRCK":
+                            new.remove(new_t)
+                            new.append(ET.Element(_tag(W, "br")))
+                        else:
+                            new_t.text = piece
+                            new_t.set(XML_SPACE, "preserve")
+                    p.insert(at, new)
+                    at += 1
+        # The source's rules as cell borders, if its rows are Pandoc's
+        trs = tbl.findall(_tag(W, "tr"))
+        found, count = rules[idx]
+        if len(trs) != count:
+            found = {0: [(None, True)], len(trs): [(None, True)]}
+        for r, row_rules in found.items():
+            side = "top" if r < len(trs) else "bottom"
+            tr = trs[min(r, len(trs) - 1)] if trs else None
+            if tr is None:
+                continue
+            col = 1
+            for tc in tr.findall(_tag(W, "tc")):
+                tc_pr = tc.find(_tag(W, "tcPr"))
+                if tc_pr is None:
+                    tc_pr = ET.Element(_tag(W, "tcPr"))
+                    tc.insert(0, tc_pr)
+                span = tc_pr.find(_tag(W, "gridSpan"))
+                n = (
+                    int(span.get(_tag(W, "val"), "1"))
+                    if span is not None
+                    else 1
+                )
+                for spanned, heavy in row_rules:
+                    if spanned is not None and (
+                        spanned[1] < col or spanned[0] > col + n - 1
+                    ):
+                        continue
+                    borders = tc_pr.find(_tag(W, "tcBorders"))
+                    if borders is None:
+                        borders = ET.Element(_tag(W, "tcBorders"))
+                        # In schema order, after the width and merges
+                        before = {
+                            _tag(W, t)
+                            for t in (
+                                "cnfStyle",
+                                "tcW",
+                                "gridSpan",
+                                "hMerge",
+                                "vMerge",
+                            )
+                        }
+                        tc_pr.insert(
+                            max(
+                                (
+                                    k + 1
+                                    for k, c in enumerate(tc_pr)
+                                    if c.tag in before
+                                ),
+                                default=0,
+                            ),
+                            borders,
+                        )
+                    line = borders.find(_tag(W, side))
+                    if line is None:
+                        line = ET.Element(_tag(W, side))
+                        # Top before bottom
+                        borders.insert(
+                            0 if side == "top" else len(borders), line
+                        )
+                    line.set(_tag(W, "val"), "single")
+                    sz = line.get(_tag(W, "sz"), "0")
+                    line.set(_tag(W, "sz"), max(sz, border[heavy], key=int))
+                    line.set(_tag(W, "space"), "0")
+                    line.set(_tag(W, "color"), "auto")
+                col += n
+        # Columns as wide as their longest line, narrowed toward their
+        # longest word to fit, with a spanning cell's text over its columns
+        grid = tbl.find(_tag(W, "tblGrid"))
+        cols = grid.findall(_tag(W, "gridCol")) if grid is not None else []
+        if not cols:
+            continue
+
+        # About how wide text is at 11 points, in twentieths of a point
+        def measure(text: str) -> int:
+            return sum(
+                140
+                if c.isupper()
+                else 110
+                if c.isalnum()
+                else 55
+                if c.isspace()
+                else 80
+                for c in text
+            )
+
+        natural, floor = [0] * len(cols), [0] * len(cols)
+        spans: list[tuple[int, int, int]] = []
+        for tr in trs:
+            col = 0
+            for tc in tr.findall(_tag(W, "tc")):
+                span_el = tc.find(f"{_tag(W, 'tcPr')}/{_tag(W, 'gridSpan')}")
+                n = (
+                    int(span_el.get(_tag(W, "val"), "1"))
+                    if span_el is not None
+                    else 1
+                )
+                text = "".join(
+                    "\n"
+                    if el.tag == _tag(W, "br")
+                    else (el.text or "")
+                    if el.tag in (_tag(W, "t"), _tag(M, "t"))
+                    else ""
+                    for el in tc.iter()
+                )
+                # Bold is wider
+                bold = 1.1 if tc.find(f".//{_tag(W, 'b')}") is not None else 1
+                longest = int(
+                    bold * max(measure(ln) for ln in text.split("\n"))
+                )
+                if n == 1 and col < len(cols):
+                    natural[col] = max(natural[col], longest)
+                    floor[col] = max(
+                        [floor[col]]
+                        + [int(bold * measure(w)) for w in text.split()]
+                    )
+                elif n > 1:
+                    spans.append((col, n, longest))
+                col += n
+        for col, n, longest in spans:
+            short = longest - sum(natural[col : col + n])
+            for k in range(col, min(col + n, len(natural))):
+                natural[k] += max(0, short) // n
+        # Smaller, down to 9 points, if it doesn't fit, then narrowed toward
+        # the longest words, with room for misjudging them
+        size = sizes[idx] if sizes is not None else None
+        target = widths[idx] if widths is not None else None
+        room = (target or 0) - 2 * margin * len(cols)
+        total = sum(natural)
+        if size is not None and target is not None and total > 0:
+            fit = 22 * room // int(1.15 * total)
+            if fit < size:
+                size = max(18, fit)
+        scale = (size or 22) / 22
+        natural = [int(1.15 * scale * w) for w in natural]
+        floor = [int(1.15 * scale * w) for w in floor]
+        if target is not None and sum(natural) > room:
+            slack = [max(0, a - b) for a, b in zip(natural, floor)]
+            cut = min(sum(natural) - room, sum(slack))
+            natural = [
+                a - (cut * s // sum(slack) if sum(slack) else 0)
+                for a, s in zip(natural, slack)
+            ]
+        natural = [w + 2 * margin for w in natural]
+        if size is not None:
+            order = [
+                _tag(W, t)
+                for t in (
+                    "highlight",
+                    "u",
+                    "effect",
+                    "bdr",
+                    "shd",
+                    "fitText",
+                    "vertAlign",
+                    "rtl",
+                    "cs",
+                    "em",
+                    "lang",
+                    "eastAsianLayout",
+                    "specVanish",
+                    "oMath",
+                )
+            ]
+            for run in [*tbl.iter(_tag(W, "r")), *tbl.iter(_tag(M, "r"))]:
+                rpr = run.find(_tag(W, "rPr"))
+                if rpr is None:
+                    rpr = ET.Element(_tag(W, "rPr"))
+                    # After a math run's own properties
+                    mpr = run.find(_tag(M, "rPr"))
+                    run.insert(
+                        list(run).index(mpr) + 1 if mpr is not None else 0, rpr
+                    )
+                for name in ("sz", "szCs"):
+                    el = rpr.find(_tag(W, name))
+                    if el is None:
+                        el = ET.Element(_tag(W, name))
+                        # In schema order, before what follows the sizes
+                        rpr.insert(
+                            next(
+                                (
+                                    k
+                                    for k, c in enumerate(rpr)
+                                    if c.tag in order
+                                    or (
+                                        name == "sz"
+                                        and c.tag == _tag(W, "szCs")
+                                    )
+                                ),
+                                len(rpr),
+                            ),
+                            el,
+                        )
+                    el.set(_tag(W, "val"), str(size))
+        for gc, w in zip(cols, natural):
+            gc.set(_tag(W, "w"), str(w))
+        if tbl_pr is not None:
+            tbl_w = tbl_pr.find(_tag(W, "tblW"))
+            if tbl_w is not None:
+                tbl_w.set(_tag(W, "type"), "dxa")
+                tbl_w.set(_tag(W, "w"), str(sum(natural)))
+    return converted
 
 
 def omml_to_latex(maths: list[ET.Element]) -> list[str | None]:

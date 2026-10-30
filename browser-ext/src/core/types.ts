@@ -207,7 +207,7 @@ export interface StageExport {
 }
 
 /** A stage made from a script, as `calkit xr` makes one, maybe saved. */
-export interface StageFromScript {
+export interface StageFromScriptOrNotebookResponse {
   stage_name: string;
   stage_yaml: string;
   environment: string;

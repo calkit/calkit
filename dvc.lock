@@ -163,7 +163,7 @@ stages:
       md5: 4960953114330139033d7281122861de
       size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8 
       --attendees=25 --supported=60 --indirect-rate=0
     deps:
     - path: .python-version
@@ -216,8 +216,8 @@ stages:
       md5: 1078d8d6187e0e072d20f488176ff71e
       size: 50208
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/latex-word-round-trip.py --engine=libreoffice
+    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
+      --engine=libreoffice
     deps:
     - path: .python-version
       hash: md5
@@ -318,8 +318,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 49b638562b3891aa2f030ee081094ad7
-      size: 13406
+      md5: 4675f0054b2da9203227e6dab35ed370
+      size: 13376
     - path: docs/img/2027-budget.png
       hash: md5
       md5: 1078d8d6187e0e072d20f488176ff71e

@@ -184,3 +184,35 @@ def warn(txt: str, prefix: str = "Warning: ", err: bool = False):
     text = typer.style(prefix + encode_safe(str(txt), err=err), fg="yellow")
     if not _echo_above_spinner(text, err=err):
         typer.echo(text, err=err)
+
+
+def warn_app_control(
+    output: str = "", returncode: int | None = None, maybe: bool = False
+) -> None:
+    """Explain a failure Windows App Control may have caused.
+
+    Smart App Control blocks unsigned executables and DLLs it doesn't trust,
+    which environments are full of, and the failure reads as unrelated.
+    Pass ``maybe`` for a failure whose output went straight to the terminal,
+    to warn whenever Smart App Control is on.
+    """
+    from calkit.windows import (
+        SMART_APP_CONTROL_DOCS_URL,
+        app_control_blocked,
+        smart_app_control_on,
+    )
+
+    if app_control_blocked(output=output, returncode=returncode):
+        warn(
+            "Windows blocked a file from running, which Smart App Control "
+            "does to unsigned files it doesn't trust; see "
+            f"{SMART_APP_CONTROL_DOCS_URL}",
+            err=True,
+        )
+    elif maybe and smart_app_control_on():
+        warn(
+            "Smart App Control is on, which can block files in environments "
+            "from running; if the output above says a file was blocked, see "
+            f"{SMART_APP_CONTROL_DOCS_URL}",
+            err=True,
+        )

@@ -209,7 +209,9 @@ def get_project_provenance(
     # Where calkit.yaml says it came from, if not from a stage, e.g., a
     # download or a photo someone took; a folder's entry covers its files,
     # and a person can't be the origin of an exported format like PNG
-    entry = next(
+    # The path's own entry, else its closest folder's, whatever order
+    # calkit.yaml lists them in
+    entry = max(
         (
             e
             for items in ck_info.values()
@@ -229,7 +231,8 @@ def get_project_provenance(
                 or traced.startswith(posixpath.normpath(e["path"]) + "/")
             )
         ),
-        None,
+        key=lambda e: len(posixpath.normpath(e["path"])),
+        default=None,
     )
     if entry is not None:
         entry_path = posixpath.normpath(entry["path"])

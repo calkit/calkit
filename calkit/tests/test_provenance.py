@@ -605,10 +605,17 @@ def test_find_provenance_gaps():
 
     ck_info = {
         "datasets": [
+            # Listed before the folder that records its origin
+            {"path": "data/imported/listed.csv"},
             {"path": "data/imported", "imported_from": {"doi": "10.1/x"}},
             {"path": "data/measured.csv", "created_by": {"email": "a@b.c"}},
         ],
-        "misc": [{"path": "photos", "created_by": {"email": "a@b.c"}}],
+        "misc": [
+            {"path": "photos", "created_by": {"email": "a@b.c"}},
+            # A bare folder listed before a file in it with an origin
+            {"path": "drawings"},
+            {"path": "drawings/sketch.jpeg", "created_by": {"email": "a@b.c"}},
+        ],
         # Taken at its word, though the stage isn't compiled yet
         "figures": [{"path": "figures/new.png", "stage": "not-compiled"}],
     }
@@ -693,6 +700,8 @@ def test_find_provenance_gaps():
         "(results/summary.json <- stage summarize <- data/loose.json)"
     ]
     assert gaps(["figures/new.png"]) == []
+    # Any entry covering a path can record its origin, in any order
+    assert gaps(["data/imported/listed.csv", "drawings/sketch.jpeg"]) == []
     # A person can take a photo, but a PNG is exported from something
     assert gaps(["photos/site.jpeg", "photos/export.png"]) == [
         "origin not defined for photos/export.png"

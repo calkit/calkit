@@ -411,6 +411,12 @@ function FigureInfo({
   })
   const origin = provenanceQuery.data?.origin
   const originUrl = provenanceQuery.data?.origin_url
+  // A figure calkit.yaml doesn't declare can still have a stage that makes it
+  const stage = figure.stage ?? provenanceQuery.data?.stage
+  const exportedFrom =
+    provenanceQuery.data?.stage_kind === "manual"
+      ? provenanceQuery.data.source
+      : null
   const dataLinks: InputLink[] = []
   if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
     const deps = declaredInputs(
@@ -486,18 +492,32 @@ function FigureInfo({
         <Text as="span" fontWeight="semibold">
           Origin:
         </Text>{" "}
-        {figure.stage ? (
+        {stage ? (
           <>
             Stage{" "}
             <Link
               as={RouterLink}
               to={pipelineTo}
-              search={{ stage: figure.stage, ref: gitRef } as any}
+              search={{ stage, ref: gitRef } as any}
             >
               <Code fontSize="xs" cursor="pointer">
-                {figure.stage}
+                {stage}
               </Code>
             </Link>
+            {exportedFrom ? (
+              <>
+                , exported by hand from{" "}
+                <Link
+                  as={RouterLink}
+                  to={filesTo}
+                  search={{ path: exportedFrom, ref: gitRef } as any}
+                >
+                  <Code fontSize="xs" cursor="pointer">
+                    {exportedFrom}
+                  </Code>
+                </Link>
+              </>
+            ) : null}
           </>
         ) : provenanceQuery.isPending ? (
           <Spinner size="xs" />
@@ -513,7 +533,7 @@ function FigureInfo({
           </Text>
         )}
       </Text>
-      {!figure.stage && provenanceQuery.isSuccess && !origin ? (
+      {!stage && provenanceQuery.isSuccess && !origin ? (
         <DefineFigureOrigin
           ownerName={ownerName}
           projectName={projectName}

@@ -1,0 +1,107 @@
+name: Build CLI binary
+
+# A standalone calkit.exe built with PyApp around a Python that already has
+# Calkit installed, so every binary in it can be signed, which Windows Smart
+# App Control requires (#1904)
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of calkit-python to bundle; the latest if empty
+        required: false
+  push:
+    branches: [pyapp-binary]
+
+env:
+  # The python-build-standalone release and the Python from it to bundle
+  PBS_RELEASE: "20261026"
+  PYTHON_VERSION: "3.14.10"
+  PYAPP_VERSION: "0.31.0"
+
+jobs:
+  build-windows:
+    name: Build for Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Setup uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - name: Download Python
+        run: |
+          name="cpython-${PYTHON_VERSION}%2B${PBS_RELEASE}-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+          curl -sSfL -o python.tar.gz \
+            "https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/${name}"
+          tar -xzf python.tar.gz
+      - name: Install Calkit
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          uv pip install --python python/python.exe --break-system-packages \
+            --link-mode copy "calkit-python${VERSION:+==$VERSION}"
+          python/python.exe -I -c "import importlib.metadata as m; print(m.version('calkit-python'))" > version.txt
+          echo "Bundling calkit-python $(cat version.txt)"
+      # DVC's Google Drive remote only needs Drive's API description, and the
+      # descriptions of every other Google API take up 100 MB
+      - name: Prune
+        run: |
+          find python/Lib/site-packages/googleapiclient/discovery_cache/documents \
+            -type f ! -name 'drive.*' -delete
+      # Compiled ahead of time, else the first run compiles everything it
+      # imports, which takes twice as long
+      - name: Compile bytecode
+        run: python/python.exe -I -m compileall -q -j 0 python/Lib
+      - name: List binaries to sign
+        run: |
+          find python -type f \( -iname '*.exe' -o -iname '*.dll' -o -iname '*.pyd' \) > binaries.txt
+          echo "$(wc -l < binaries.txt) binaries to sign"
+      # Signing goes here: every file in binaries.txt, before it's archived
+      - name: Archive Python
+        run: >-
+          python/python.exe -I -c "import tarfile;
+          t = tarfile.open('python.tar.zst', 'w:zst', level=19);
+          t.add('python', arcname='.');
+          t.close()"
+      - name: Build calkit.exe
+        run: |
+          mkdir pyapp
+          curl -sSfL "https://github.com/ofek/pyapp/releases/download/v${PYAPP_VERSION}/source.tar.gz" \
+            | tar -xz --strip-components=1 -C pyapp
+          cd pyapp
+          export PYAPP_PROJECT_NAME=calkit-python
+          export PYAPP_PROJECT_VERSION="$(cat ../version.txt)"
+          export PYAPP_DISTRIBUTION_PATH="$(cygpath -w "$PWD/../python.tar.zst")"
+          export PYAPP_DISTRIBUTION_PYTHON_PATH=python.exe
+          export PYAPP_FULL_ISOLATION=1
+          export PYAPP_SKIP_INSTALL=1
+          export PYAPP_EXEC_SPEC=calkit.cli:run
+          cargo build --release
+          cp target/release/pyapp.exe ../calkit.exe
+      # And then calkit.exe itself
+      - name: Try it
+        run: |
+          ms() { local s=$(date +%s%N); "$@" > /dev/null; echo $(( ($(date +%s%N) - s) / 1000000 )); }
+          first=$(ms ./calkit.exe --version)
+          second=$(ms ./calkit.exe --version)
+          ./calkit.exe --version
+          mb() { echo "$(( $(stat -c %s "$1") / 1048576 )) MB"; }
+          {
+            echo "| | |"
+            echo "|---|---|"
+            echo "| calkit-python | $(cat version.txt) |"
+            echo "| Python, installed | $(du -sm python | cut -f1) MB |"
+            echo "| Binaries to sign | $(wc -l < binaries.txt) |"
+            echo "| Archive | $(mb python.tar.zst) |"
+            echo "| calkit.exe | $(mb calkit.exe) |"
+            echo "| First run, unpacking | ${first} ms |"
+            echo "| Next run | ${second} ms |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload calkit.exe
+        uses: actions/upload-artifact@v7
+        with:
+          name: calkit-windows
+          path: calkit.exe

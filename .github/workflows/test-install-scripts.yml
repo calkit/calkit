@@ -96,8 +96,10 @@ jobs:
             if [[ " ${COMPREPLY[*]} " != *" $3"* ]]; then
               echo "Failed to complete '$1 $2': ${COMPREPLY[*]}"
               cat -A ~/.bash_completions/$1.sh
+              set +e
               env "_${1^^}_COMPLETE=complete_bash" COMP_WORDS="$1 $2" \
                 COMP_CWORD=1 "$1"
+              echo "Exited with $?"
               exit 1
             fi
           }

@@ -317,6 +317,7 @@ class Stage(Model):
         "julia-command",
         "word-to-pdf",
         "manual",
+        "export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -2328,6 +2329,57 @@ class ManualStage(Stage):
         return cmd
 
 
+class ExportStage(Stage):
+    """A figure exported from the file it's drawn in, by the app that draws
+    it, e.g., a PNG from an Inkscape SVG.
+
+    A source no app can export without a person, e.g., a Photoshop file, is
+    a manual stage instead.
+    """
+
+    kind: Literal["export"] = "export"
+    source_path: RelativeChildPathString = Field(
+        description="The file to export from, e.g., an Inkscape SVG."
+    )
+    dpi: int | None = Field(
+        default=None,
+        description="Resolution of a PNG exported from an SVG.",
+    )
+    environment: str = "_system"
+
+    @model_validator(mode="after")
+    def _check_export(self) -> "ExportStage":
+        import calkit.export
+
+        if len(self.outputs) != 1:
+            raise ValueError("An export stage has exactly one output")
+        out = self.outputs[0]
+        calkit.export.check_paths(
+            self.source_path,
+            out if isinstance(out, str) else out.path,
+            self.dpi,
+        )
+        return self
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = super().dvc_deps
+        if self.source_path not in deps:
+            deps = [self.source_path] + deps
+        return deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        out = self.outputs[0]
+        cmd = (
+            f"calkit export {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(out if isinstance(out, str) else out.path)}"
+        )
+        if self.dpi is not None:
+            cmd += f" --dpi {self.dpi}"
+        return cmd
+
+
 class MarimoHtmlWasmStage(Stage):
     """A stage that exports a marimo notebook to a WebAssembly app.
 
@@ -2737,6 +2789,7 @@ class Pipeline(Model):
                 | RScriptStage
                 | WordToPdfStage
                 | ManualStage
+                | ExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

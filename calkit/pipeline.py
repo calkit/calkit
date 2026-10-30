@@ -1083,6 +1083,14 @@ def get_gated_stages(
         if not manual and stage.get("kind") == "manual":
             gated[name] = f"needs a manual step: {stage.get('message')}"
             continue
+        if stage.get("kind") == "export":
+            import calkit.export as export_mod
+
+            source = str(stage.get("source_path") or "")
+            if export_mod.find_app(source) is None:
+                app = export_mod.app_name(source) or "an app"
+                gated[name] = f"needs {app} installed to export {source}"
+                continue
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )

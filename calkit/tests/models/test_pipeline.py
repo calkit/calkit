@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from calkit.models.io import PathOutput
 from calkit.models.pipeline import (
+    ExportStage,
     JsonToLatexStage,
     JuliaCommandStage,
     JuliaScriptStage,
@@ -122,6 +123,32 @@ def test_manualstage():
         {"paper/wake.png": {"cache": False, "persist": True}},
     ]
     assert s.environment == "_system"
+
+
+def test_exportstage():
+    s = ExportStage(
+        source_path="figures/src/setup.svg",
+        outputs=[{"path": "paper/setup.png", "storage": "git"}],
+        dpi=150,
+    )
+    sd = s.to_dvc()
+    assert sd["cmd"] == (
+        "calkit export figures/src/setup.svg -o paper/setup.png --dpi 150"
+    )
+    assert sd["deps"] == ["figures/src/setup.svg"]
+    assert sd["outs"] == [
+        {"paper/setup.png": {"cache": False, "persist": False}}
+    ]
+    # What no app exports on its own, or can't export to, is refused, as
+    # is a stage with other than one output
+    for bad, error in [
+        (dict(source_path="a.psd", outputs=["a.png"]), "manual stage"),
+        (dict(source_path="a.svg", outputs=["a.jpg"]), "not 'a.jpg'"),
+        (dict(source_path="a.xcf", outputs=["a.png"], dpi=72), "dpi only"),
+        (dict(source_path="a.svg", outputs=[]), "exactly one output"),
+    ]:
+        with pytest.raises(ValidationError, match=error):
+            ExportStage(**bad)
 
 
 def test_latexstage():

@@ -4590,6 +4590,26 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         ck_info, stage_names=["by-hand"], interactive=False
     )
     assert gated == {} and errors == {}
+    # An export needs its app installed where it runs
+    from calkit import inkscape
+
+    ck_info["pipeline"]["stages"]["drawn"] = {
+        "kind": "export",
+        "source_path": "made/drawn.svg",
+        "outputs": ["made/drawn.png"],
+    }
+    monkeypatch.setattr(inkscape, "EXECUTABLES", ["calkit-no-inkscape"])
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["drawn"], interactive=False
+    )
+    assert gated == {
+        "drawn": "needs Inkscape installed to export made/drawn.svg"
+    }
+    monkeypatch.setattr(inkscape, "EXECUTABLES", [sys.executable])
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["drawn"], interactive=False
+    )
+    assert gated == {} and errors == {}
 
 
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(

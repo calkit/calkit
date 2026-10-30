@@ -556,6 +556,13 @@ def test_ryaml_dump_leaves_no_trailing_whitespace():
         calkit.ryaml.dump(data, buf)
         assert f"{key}:" in buf.getvalue()
         assert calkit.ryaml.load(buf.getvalue()) == data
+    # A failed dump doesn't send later ones to its stream, which emptied
+    # calkit.yaml on the hub
+    with pytest.raises(Exception):
+        calkit.ryaml.dump({"a": object()}, io.StringIO())
+    buf = io.StringIO()
+    calkit.ryaml.dump({"questions": ["q1", "q2"]}, buf)
+    assert calkit.ryaml.load(buf.getvalue()) == {"questions": ["q1", "q2"]}
 
 
 def test_ryaml_dump_keeps_significant_trailing_whitespace():

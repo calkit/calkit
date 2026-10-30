@@ -138,6 +138,10 @@ class _ThreadLocalYAML(threading.local):
     """
 
     def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        """Replace this thread's ``YAML`` with a freshly configured one."""
         self.yaml = ruamel.yaml.YAML()
         self.yaml.indent(mapping=2, sequence=4, offset=2)
         self.yaml.preserve_quotes = True
@@ -198,10 +202,17 @@ class _ThreadLocalYAMLProxy:
         import io
 
         yaml = _yaml_local.yaml
-        if stream is None:
-            return yaml.dump(data, stream, **kwargs)
         buf = io.StringIO()
-        yaml.dump(data, buf, **kwargs)
+        try:
+            if stream is None:
+                return yaml.dump(data, stream, **kwargs)
+            yaml.dump(data, buf, **kwargs)
+        except BaseException:
+            # ruamel only clears the output it's dumping to on success, so
+            # after a failure every later dump on this thread would go to
+            # the old stream, e.g., leaving calkit.yaml empty
+            _yaml_local.reset()
+            raise
         text = buf.getvalue()
         if " \n" in text:
             cleaned = "".join(

@@ -316,6 +316,7 @@ class Stage(Model):
         "julia-script",
         "julia-command",
         "word-to-pdf",
+        "manual",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -2270,6 +2271,63 @@ class WordToPdfStage(Stage):
         )
 
 
+class ManualStage(Stage):
+    """A step someone does by hand, e.g., exporting a figure from
+    Photoshop, which the pipeline asks for when its inputs change.
+
+    Its outputs are kept while it runs, since they're what the person
+    replaces, and the step checks that they changed.
+    """
+
+    kind: Literal["manual"] = "manual"
+    message: str = Field(
+        description=(
+            "What to do, e.g., 'In Photoshop, export "
+            "figures/wake-diagram.png'."
+        )
+    )
+    source_path: RelativeChildPathString | None = Field(
+        default=None,
+        description=(
+            "A file to open in its default app for the step, e.g., the "
+            "Photoshop file a figure is exported from. It's an input too."
+        ),
+    )
+    environment: str = "_system"
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = super().dvc_deps
+        if self.source_path is not None and self.source_path not in deps:
+            deps = [self.source_path] + deps
+        return deps
+
+    @property
+    def output_paths(self) -> list[str]:
+        return [o if isinstance(o, str) else o.path for o in self.outputs]
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs: list[str | dict] = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(persist=True)})
+            else:
+                outs.append(
+                    {out.path: dict(cache=out.storage == "dvc", persist=True)}
+                )
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit manual-step --message {shlex.quote(self.message)}"
+        if self.source_path is not None:
+            cmd += f" --open {shlex.quote(self.source_path)}"
+        for path in self.output_paths:
+            cmd += f" --output {shlex.quote(path)}"
+        return cmd
+
+
 class MarimoHtmlWasmStage(Stage):
     """A stage that exports a marimo notebook to a WebAssembly app.
 
@@ -2678,6 +2736,7 @@ class Pipeline(Model):
                 | CommandStage
                 | RScriptStage
                 | WordToPdfStage
+                | ManualStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

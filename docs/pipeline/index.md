@@ -441,6 +441,22 @@ Model class: `LatexStage`
 | `latexdiff_args`        | list[str]                      | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--type=CFONT'. Changed figures are shown old and new unless '--graphics-markup' is set here. |
 | `diff_filter`           | PythonScriptDiffFilter \| None | no       | null    | Script each marked-up document is piped through before it's built, e.g., to drop changes that don't change the rendered text.                                                 |
 
+### `manual`
+
+Model class: `ManualStage`
+
+A step someone does by hand, e.g., exporting a figure from
+Photoshop, which the pipeline asks for when its inputs change.
+
+Its outputs are kept while it runs, since they're what the person
+replaces, and the step checks that they changed.
+
+| Kind-specific parameter | Type        | Required | Default    | Description                                                                                                            |
+| ----------------------- | ----------- | -------- | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `environment`           | str         | no       | '\_system' | Name of the environment in which to run this stage.                                                                    |
+| `message`               | str         | yes      |            | What to do, e.g., 'In Photoshop, export figures/wake-diagram.png'.                                                     |
+| `source_path`           | str \| None | no       | null       | A file to open in its default app for the step, e.g., the Photoshop file a figure is exported from. It's an input too. |
+
 ### `map-paths`
 
 Model class: `MapPathsStage`

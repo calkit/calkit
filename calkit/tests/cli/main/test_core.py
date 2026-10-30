@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 import dvc.repo
 import git
 import pytest
+import typer
 import yaml
 from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
@@ -3922,6 +3923,16 @@ def test_manual_step(tmp_dir, monkeypatch, capsys):
     assert answers[2].endswith("Unchanged: fig.png. Keep as is? [y/N]\n")
     assert len(answers) == 4
     assert capsys.readouterr().out.rstrip().endswith("Done")
+    # Input ending says nobody's there too, as an empty stdin on Windows
+    # passes for a terminal
+
+    def no_input() -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", no_input)
+    with pytest.raises(typer.Exit):
+        manual_step(message="Export fig.png", outputs=["fig.png"])
+    assert "nobody here to do it" in capsys.readouterr().err
     # A long message is wrapped to fit a terminal
     message = "In Photoshop, export paper/deficit_new.png from " + "x/" * 30
     monkeypatch.setattr("builtins.input", lambda: "")

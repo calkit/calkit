@@ -1,0 +1,103 @@
+name: Test install scripts
+
+permissions:
+  contents: read
+
+# The scripts install the latest Calkit from PyPI, so they're also run weekly
+# to catch changes in uv, Typer, or the runners that break them
+on:
+  pull_request:
+    paths:
+      - "scripts/install.*"
+      - ".github/workflows/test-install-scripts.yml"
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  powershell:
+    name: install.ps1
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v7
+      # Restricted keeps the profile, and so completion, from loading, which
+      # the script should fix. It also keeps later steps' scripts from
+      # running, so it's set in the same step as the first install.
+      - name: Install with the quoting lost
+        run: |
+          try { Set-ExecutionPolicy Restricted -Scope CurrentUser -Force } catch {}
+          if ("$(Get-ExecutionPolicy -Scope CurrentUser)" -ne "Restricted") { throw "Failed to restrict the execution policy" }
+          # Each line goes to iex on its own (issue #1569); blank lines are
+          # dropped, since iex errors on them
+          $WarningPreference = "Stop"
+          Get-Content scripts/install.ps1 | Where-Object { $_ } | iex
+      - name: Install again as documented
+        run: |
+          powershell -ExecutionPolicy ByPass -c "`$WarningPreference = 'Stop'; `$ErrorActionPreference = 'Stop'; Get-Content scripts/install.ps1 -Raw | iex"
+      - name: Check install
+        run: |
+          $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+          foreach ($cmd in "calkit", "ck") { & $cmd --version; if ($LASTEXITCODE -ne 0) { throw "Failed to run '$cmd'" } }
+          $policy = "$(Get-ExecutionPolicy -Scope CurrentUser)"
+          if ($policy -ne "RemoteSigned") { throw "Execution policy is $policy rather than RemoteSigned" }
+          # Installing twice shouldn't add completion twice
+          foreach ($cmd in "calkit", "ck") {
+            $count = @(Select-String -Path $PROFILE -SimpleMatch -Pattern "-CommandName $cmd -ScriptBlock").Count
+            if ($count -ne 1) { throw "Found completion for '$cmd' $count times in $PROFILE" }
+          }
+          # A new shell should load completion from its profile
+          $completions = powershell -c "(TabExpansion2 'calkit chec' 11).CompletionMatches.CompletionText"
+          if ($completions -notcontains "check") { throw "Failed to complete 'calkit chec': $completions" }
+          $completions = powershell -c "(TabExpansion2 'ck stat' 7).CompletionMatches.CompletionText"
+          if (-not ($completions -match "^status")) { throw "Failed to complete 'ck stat': $completions" }
+
+  sh:
+    name: install.sh (${{ matrix.os == 'windows-latest' && 'Git Bash' || matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      # Piped, as documented, which runs it with sh rather than bash
+      - name: Install as documented
+        run: cat scripts/install.sh | sh
+      - name: Install again
+        run: cat scripts/install.sh | sh
+      - name: Check install
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          calkit --version
+          ck --version
+          # Installing twice shouldn't add completion twice
+          for cmd in calkit ck; do
+            count=$(grep -c "bash_completions.$cmd\.sh" ~/.bashrc || true)
+            if [ "$count" -ne 1 ]; then
+              echo "Found completion for '$cmd' $count times in ~/.bashrc"
+              exit 1
+            fi
+            source ~/.bash_completions/$cmd.sh
+          done
+          # Sourcing ~/.bashrc itself returns early when not interactive
+          COMP_WORDS=(calkit chec)
+          COMP_CWORD=1
+          _calkit_completion calkit
+          if [[ " ${COMPREPLY[*]} " != *" check "* ]]; then
+            echo "Failed to complete 'calkit chec': ${COMPREPLY[*]}"
+            exit 1
+          fi
+          COMP_WORDS=(ck stat)
+          _ck_completion ck
+          if [[ " ${COMPREPLY[*]} " != *" status"* ]]; then
+            echo "Failed to complete 'ck stat': ${COMPREPLY[*]}"
+            exit 1
+          fi

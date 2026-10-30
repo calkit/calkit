@@ -8,7 +8,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as vscode from "vscode";
 import YAML from "yaml";
-import { missingInstallDirs } from "./cli";
+import { isAppControlBlock, missingInstallDirs } from "./cli";
 import {
   compactSlurmOptions,
   findCalkitEnvKernelSourceCandidate,
@@ -176,6 +176,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_MIN_CALKIT_VERSION = "0.49.0";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
+const SMART_APP_CONTROL_DOCS_URL = `${CALKIT_INSTALL_DOCS_URL}/#windows-smart-app-control`;
 const WINDOWS_INSTALL_SCRIPT = "irm install-ps1.calkit.org | iex";
 const WINDOWS_INSTALL_COMMAND = `powershell -ExecutionPolicy ByPass -c "${WINDOWS_INSTALL_SCRIPT}"`;
 const UNIX_INSTALL_COMMAND = "curl -LsSf install.calkit.org | sh";
@@ -2042,6 +2043,19 @@ async function ensureCalkitCliReady(): Promise<void> {
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     log(`Calkit CLI check failed: ${details}`);
+    // Installing again wouldn't help when Windows won't run what's there
+    if (isAppControlBlock(error, process.platform)) {
+      const choice = await vscode.window.showWarningMessage(
+        "Windows blocked the Calkit CLI from running. Smart App Control does this to unsigned programs it doesn't trust.",
+        "Learn More",
+      );
+      if (choice === "Learn More") {
+        await vscode.env.openExternal(
+          vscode.Uri.parse(SMART_APP_CONTROL_DOCS_URL),
+        );
+      }
+      return;
+    }
     await promptCalkitInstallOrUpgrade({
       mode: "install",
       title: "Calkit CLI not found",

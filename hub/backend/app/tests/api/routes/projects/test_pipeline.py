@@ -563,18 +563,30 @@ def test_post_project_stage_export(
         content=svg,
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["kind"] == "export"
+    assert resp.json()["kind"] == "inkscape-export"
     assert resp.json()["message"] == (
         "Exported from figures/src/setup.svg with Inkscape"
     )
     assert ck_info()["pipeline"]["stages"]["export-setup"] == {
-        "kind": "export",
+        "kind": "inkscape-export",
         "source_path": "figures/src/setup.svg",
         "outputs": [{"path": "paper/figures/setup.png", "storage": "git"}],
     }
     dvc_yaml = yaml.safe_load((tmp_path / "repo" / "dvc.yaml").read_text())
     assert dvc_yaml["stages"]["export-setup"]["cmd"] == (
-        "calkit export figures/src/setup.svg -o paper/figures/setup.png"
+        "calkit inkscape export figures/src/setup.svg "
+        "-o paper/figures/setup.png"
+    )
+    # A GIMP file is GIMP's to export
+    resp = post(
+        path="paper/figures/photo.png",
+        source_path="figures/src/photo.xcf",
+        content=base64.b64encode(b"xcf").decode(),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["kind"] == "gimp-export"
+    assert resp.json()["message"] == (
+        "Exported from figures/src/photo.xcf with GIMP"
     )
     for path, body in [
         (

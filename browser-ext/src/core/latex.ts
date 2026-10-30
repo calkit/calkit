@@ -166,6 +166,12 @@ export function citationText(citation: Citation): string {
 // writes these, e.g., a script or an image editor saving from its own file
 const EXPORTED_EXTENSIONS = [".png", ".gif", ".webp", ".bmp", ".pdf", ".eps"];
 
+/** The app each export stage kind runs, e.g., for "Exported with Inkscape". */
+export const EXPORT_APPS: Record<string, string> = {
+  "inkscape-export": "Inkscape",
+  "gimp-export": "GIMP",
+};
+
 /** Whether a person can be the origin of a file, as opposed to a tool. */
 export function canBeCreatedByPerson(path: string): boolean {
   const lower = path.toLowerCase();

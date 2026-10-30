@@ -373,22 +373,6 @@ Model class: `DockerCommandStage`
 | ----------------------- | ---- | -------- | ------- | ----------------------------------------------------- |
 | `command`               | str  | yes      |         | Full command to run, including the 'docker run' call. |
 
-### `export`
-
-Model class: `ExportStage`
-
-A figure exported from the file it's drawn in, by the app that draws
-it, e.g., a PNG from an Inkscape SVG.
-
-A source no app can export without a person, e.g., a Photoshop file, is
-a manual stage instead.
-
-| Kind-specific parameter | Type        | Required | Default    | Description                                         |
-| ----------------------- | ----------- | -------- | ---------- | --------------------------------------------------- |
-| `environment`           | str         | no       | '\_system' | Name of the environment in which to run this stage. |
-| `source_path`           | str         | yes      |            | The file to export from, e.g., an Inkscape SVG.     |
-| `dpi`                   | int \| None | no       | null       | Resolution of a PNG exported from an SVG.           |
-
 ### `json-to-latex`
 
 Model class: `JsonToLatexStage`

@@ -62,8 +62,10 @@ from calkit.cli.fix import (
     TheirsOpt,
     fix_app,
 )
+from calkit.cli.gimp import gimp_app
 from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
+from calkit.cli.inkscape import inkscape_app
 from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
@@ -95,6 +97,8 @@ app.add_typer(show_app, name="show", help="Show Calkit objects.")
 app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
+app.add_typer(inkscape_app, name="inkscape", help="Work with Inkscape.")
+app.add_typer(gimp_app, name="gimp", help="Work with GIMP.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
@@ -4090,28 +4094,6 @@ def manual_step(
                 continue
         break
     typer.echo("Done")
-
-
-@app.command(
-    name="export",
-    help="Export a figure from the file it's drawn in, e.g., an SVG.",
-)
-def export_figure(
-    source: Annotated[str, typer.Argument(help="File to export from.")],
-    output: Annotated[
-        str, typer.Option("--output", "-o", help="File to export to.")
-    ],
-    dpi: Annotated[
-        int | None,
-        typer.Option("--dpi", help="Resolution of a PNG from an SVG."),
-    ] = None,
-) -> None:
-    import calkit.export
-
-    try:
-        calkit.export.export(source, output, dpi=dpi)
-    except ValueError as e:
-        raise_error(str(e))
 
 
 def _env_prefix_exists(

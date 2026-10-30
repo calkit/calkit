@@ -22,7 +22,6 @@
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
-| [`export`](#top-command-export)                  | Export a figure from the file it's drawn in, e.g., an SVG.                                                   |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
 | [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
 | [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                         |
@@ -45,6 +44,8 @@
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
+| [`inkscape`](#command-group-inkscape)            | Work with Inkscape.                                                                                          |
+| [`gimp`](#command-group-gimp)                    | Work with GIMP.                                                                                              |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
@@ -408,31 +409,6 @@ Options:
 | `--output`, `-o`  | str     | no       |         | File the step writes, which must change for it to be done. |
 | `--show-stdout`   | boolean | no       | False   | Show stdout.                                               |
 | `--show-stderr`   | boolean | no       | False   | Show stderr.                                               |
-
-<a id="top-command-export"></a>
-
-### `calkit export`
-
-Export a figure from the file it's drawn in, e.g., an SVG.
-
-Usage:
-
-```text
-calkit export [OPTIONS] SOURCE
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description          |
-| -------- | ---- | -------- | ------- | -------------------- |
-| `source` | str  | yes      |         | File to export from. |
-
-Options:
-
-| Option           | Type | Required | Default | Description                      |
-| ---------------- | ---- | -------- | ------- | -------------------------------- |
-| `--output`, `-o` | str  | yes      |         | File to export to.               |
-| `--dpi`          | int  | no       |         | Resolution of a PNG from an SVG. |
 
 <a id="top-command-xenv-runenv"></a>
 
@@ -2873,6 +2849,75 @@ Options:
 | Option           | Type | Required | Default | Description                                                                          |
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
+
+<a id="command-group-inkscape"></a>
+
+### `calkit inkscape`
+
+Work with Inkscape.
+
+| Command                                 | Description                  |
+| --------------------------------------- | ---------------------------- |
+| [`export`](#subcommand-inkscape-export) | Export a figure from an SVG. |
+
+<a id="subcommand-inkscape-export"></a>
+
+#### `calkit inkscape export`
+
+Export a figure from an SVG.
+
+Usage:
+
+```text
+calkit inkscape export [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description         |
+| -------- | ---- | -------- | ------- | ------------------- |
+| `source` | str  | yes      |         | SVG to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                            |
+| ---------------- | ---- | -------- | ------- | -------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or PDF. |
+| `--dpi`          | int  | no       |         | Resolution of a PNG.                   |
+
+<a id="command-group-gimp"></a>
+
+### `calkit gimp`
+
+Work with GIMP.
+
+| Command                             | Description                                 |
+| ----------------------------------- | ------------------------------------------- |
+| [`export`](#subcommand-gimp-export) | Export a flattened figure from an XCF file. |
+
+<a id="subcommand-gimp-export"></a>
+
+#### `calkit gimp export`
+
+Export a flattened figure from an XCF file.
+
+Usage:
+
+```text
+calkit gimp export [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `source` | str  | yes      |         | XCF file to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                             |
+| ---------------- | ---- | -------- | ------- | --------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
 
 <a id="command-group-update"></a>
 

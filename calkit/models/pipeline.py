@@ -317,7 +317,8 @@ class Stage(Model):
         "julia-command",
         "word-to-pdf",
         "manual-step",
-        "export",
+        "inkscape-export",
+        "gimp-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -2314,36 +2315,29 @@ class ManualStepStage(Stage):
         return cmd
 
 
-class ExportStage(Stage):
-    """A figure exported from the file it's drawn in, by the app that draws
-    it, e.g., a PNG from an Inkscape SVG.
+class AppExportStage(Stage):
+    """A figure an app exports from the file it's drawn in, e.g., a PNG
+    from an Inkscape SVG. Each app is its own kind, since what it takes and
+    what it needs installed differ.
 
     A source no app can export without a person, e.g., a Photoshop file, is
-    a manual stage instead.
+    a manual step instead.
     """
 
-    kind: Literal["export"] = "export"
     source_path: RelativeChildPathString = Field(
-        description="The file to export from, e.g., an Inkscape SVG."
-    )
-    dpi: int | None = Field(
-        default=None,
-        description="Resolution of a PNG exported from an SVG.",
+        description="The file to export from."
     )
     environment: str = "_system"
 
-    @model_validator(mode="after")
-    def _check_export(self) -> "ExportStage":
-        import calkit.export
+    @property
+    def output_path(self) -> str:
+        out = self.outputs[0]
+        return out if isinstance(out, str) else out.path
 
+    @model_validator(mode="after")
+    def _check_one_output(self) -> "AppExportStage":
         if len(self.outputs) != 1:
             raise ValueError("An export stage has exactly one output")
-        out = self.outputs[0]
-        calkit.export.check_paths(
-            self.source_path,
-            out if isinstance(out, str) else out.path,
-            self.dpi,
-        )
         return self
 
     @property
@@ -2353,16 +2347,57 @@ class ExportStage(Stage):
             deps = [self.source_path] + deps
         return deps
 
+
+class InkscapeExportStage(AppExportStage):
+    """A figure Inkscape exports from an SVG, e.g., a PNG or PDF."""
+
+    kind: Literal["inkscape-export"] = "inkscape-export"
+    source_path: RelativeChildPathString = Field(
+        description="The SVG to export from."
+    )
+    dpi: int | None = Field(
+        default=None, description="Resolution of an exported PNG."
+    )
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "InkscapeExportStage":
+        import calkit.inkscape
+
+        calkit.inkscape.check_export(self.source_path, self.output_path)
+        return self
+
     @property
     def dvc_cmd(self) -> str:
-        out = self.outputs[0]
         cmd = (
-            f"calkit export {shlex.quote(self.source_path)} "
-            f"-o {shlex.quote(out if isinstance(out, str) else out.path)}"
+            f"calkit inkscape export {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(self.output_path)}"
         )
         if self.dpi is not None:
             cmd += f" --dpi {self.dpi}"
         return cmd
+
+
+class GimpExportStage(AppExportStage):
+    """A figure GIMP exports, flattened, from an XCF file, e.g., a PNG."""
+
+    kind: Literal["gimp-export"] = "gimp-export"
+    source_path: RelativeChildPathString = Field(
+        description="The XCF file to export from."
+    )
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "GimpExportStage":
+        import calkit.gimp
+
+        calkit.gimp.check_export(self.source_path, self.output_path)
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        return (
+            f"calkit gimp export {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(self.output_path)}"
+        )
 
 
 class MarimoHtmlWasmStage(Stage):
@@ -2774,7 +2809,8 @@ class Pipeline(Model):
                 | RScriptStage
                 | WordToPdfStage
                 | ManualStepStage
-                | ExportStage
+                | InkscapeExportStage
+                | GimpExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

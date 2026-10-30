@@ -11,6 +11,7 @@ import {
   type Citation,
   type CitationProblem,
   canBeCreatedByPerson,
+  EXPORT_APPS,
   citationProblems,
   citationText,
   citationCandidates,
@@ -776,7 +777,9 @@ function renderProvenance(
               lines.push(
                 el("div", { class: "dim" }, [
                   document.createTextNode(
-                    p.stage_kind === "export" ? "Exported from " : "Runs ",
+                    p.stage_kind && EXPORT_APPS[p.stage_kind]
+                      ? `Exported with ${EXPORT_APPS[p.stage_kind]} from `
+                      : "Runs ",
                   ),
                   el("a", { text: p.source, href: fileUrl(p.source) }),
                 ]),
@@ -924,8 +927,13 @@ function renderProvenance(
         el(
           "div",
           { class: "small" },
-          provenance.stage_kind === "export"
-            ? [document.createTextNode("Exported from "), source]
+          provenance.stage_kind && EXPORT_APPS[provenance.stage_kind]
+            ? [
+                document.createTextNode(
+                  `Exported with ${EXPORT_APPS[provenance.stage_kind]} from `,
+                ),
+                source,
+              ]
             : [
                 document.createTextNode("Edit "),
                 source,

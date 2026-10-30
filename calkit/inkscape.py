@@ -13,6 +13,7 @@ EXECUTABLES = [
     "/Applications/Inkscape.app/Contents/MacOS/inkscape",
     r"C:\Program Files\Inkscape\bin\inkscape.exe",
 ]
+SOURCE_EXTS = {".svg"}
 EXPORT_EXTS = {".png", ".pdf", ".eps", ".ps"}
 
 
@@ -27,10 +28,30 @@ def find_executable() -> str | None:
     return None
 
 
+def check_export(source: str, output: str) -> None:
+    """Raise ``ValueError`` unless Inkscape can export ``source`` to
+    ``output``.
+    """
+    if os.path.splitext(source)[1].lower() not in SOURCE_EXTS:
+        raise ValueError(f"Inkscape exports from an SVG, not '{source}'")
+    if os.path.splitext(output)[1].lower() not in EXPORT_EXTS:
+        raise ValueError(
+            f"Inkscape can export to {', '.join(sorted(EXPORT_EXTS))}, "
+            f"not '{output}'"
+        )
+
+
 def export(source: str, output: str, dpi: int | None = None) -> None:
     """Export a drawing to the format ``output``'s extension names,
     raising ``ValueError`` if it can't be.
     """
+    check_export(source, output)
+    if not os.path.isfile(source):
+        raise ValueError(f"'{source}' doesn't exist")
+    os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+    # What was there is from before, so it can't pass for a new export
+    if os.path.exists(output):
+        os.remove(output)
     exe = find_executable()
     if exe is None:
         raise ValueError(f"Exporting '{source}' needs Inkscape installed")

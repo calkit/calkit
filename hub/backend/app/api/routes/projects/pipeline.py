@@ -25,7 +25,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import app.projects
-import calkit.export
+import calkit.gimp
+import calkit.inkscape
 import calkit.latex
 import calkit.pipeline
 import calkit.provenance
@@ -618,8 +619,8 @@ class StageExportPost(BaseModel):
 class StageExport(BaseModel):
     stage_name: str
     stage_yaml: str
-    # export, when an app exports it as the pipeline runs, or manual-step,
-    # when a person does
+    # The app's export kind, e.g., inkscape-export, when it exports as the
+    # pipeline runs, or manual-step, when a person does
     kind: str
     message: str
 
@@ -688,13 +689,20 @@ def post_project_stage_export(
     producer = calkit.pipeline.get_stage_for_output(path, ck_info)
     if producer is not None:
         raise HTTPException(409, f"'{path}' is made by stage '{producer}'")
-    exporter = None if req.manual_step else calkit.export.app_name(source_path)
-    if exporter is not None:
+    # The app that exports the source as the pipeline runs, if any can
+    exporter = None
+    kind = "manual-step"
+    for app_kind, app_label, module in [
+        ("inkscape-export", "Inkscape", calkit.inkscape),
+        ("gimp-export", "GIMP", calkit.gimp),
+    ]:
         try:
-            calkit.export.check_paths(source_path, path)
+            module.check_export(source_path, path)
         except ValueError:
             # e.g., a JPEG from an SVG, which Inkscape doesn't write
-            exporter = None
+            continue
+        if not req.manual_step:
+            exporter, kind = app_label, app_kind
     app_name = (req.app or "").strip()
     message = (
         f"Exported from {source_path} with {exporter}"
@@ -718,7 +726,7 @@ def post_project_stage_export(
         {"path": path, "storage": "git"} if tracked else path
     )
     stage: dict[str, Any] = (
-        {"kind": "export", "source_path": source_path, "outputs": [output]}
+        {"kind": kind, "source_path": source_path, "outputs": [output]}
         if exporter is not None
         else {
             "kind": "manual-step",

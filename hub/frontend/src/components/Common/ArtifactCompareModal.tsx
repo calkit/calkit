@@ -414,8 +414,14 @@ function FigureInfo({
   // A figure calkit.yaml doesn't declare can still have a stage that makes it
   const stage = figure.stage ?? provenanceQuery.data?.stage
   const stageKind = provenanceQuery.data?.stage_kind
-  const exportedFrom =
-    stageKind === "export" ? provenanceQuery.data?.source : null
+  // The app each export stage kind runs
+  const exportApp = (
+    { "inkscape-export": "Inkscape", "gimp-export": "GIMP" } as Record<
+      string,
+      string
+    >
+  )[stageKind ?? ""]
+  const exportedFrom = exportApp ? provenanceQuery.data?.source : null
   const manualStep =
     stageKind === "manual-step" ? provenanceQuery.data?.message : null
   const dataLinks: InputLink[] = []
@@ -507,7 +513,7 @@ function FigureInfo({
             </Link>
             {exportedFrom ? (
               <>
-                , exported from{" "}
+                , exported with {exportApp} from{" "}
                 <Link
                   as={RouterLink}
                   to={filesTo}

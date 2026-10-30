@@ -5,7 +5,8 @@ from pydantic import ValidationError
 
 from calkit.models.io import PathOutput
 from calkit.models.pipeline import (
-    ExportStage,
+    GimpExportStage,
+    InkscapeExportStage,
     JsonToLatexStage,
     JuliaCommandStage,
     JuliaScriptStage,
@@ -122,30 +123,39 @@ def test_manualstage():
     assert s.environment == "_system"
 
 
-def test_exportstage():
-    s = ExportStage(
+def test_appexportstage():
+    s = InkscapeExportStage(
         source_path="figures/src/setup.svg",
         outputs=[{"path": "paper/setup.png", "storage": "git"}],
         dpi=150,
     )
     sd = s.to_dvc()
+    # The command names the app it needs
     assert sd["cmd"] == (
-        "calkit export figures/src/setup.svg -o paper/setup.png --dpi 150"
+        "calkit inkscape export figures/src/setup.svg -o paper/setup.png "
+        "--dpi 150"
     )
     assert sd["deps"] == ["figures/src/setup.svg"]
     assert sd["outs"] == [
         {"paper/setup.png": {"cache": False, "persist": False}}
     ]
-    # What no app exports on its own, or can't export to, is refused, as
-    # is a stage with other than one output
-    for bad, error in [
-        (dict(source_path="a.psd", outputs=["a.png"]), "manual stage"),
-        (dict(source_path="a.svg", outputs=["a.jpg"]), "not 'a.jpg'"),
-        (dict(source_path="a.xcf", outputs=["a.png"], dpi=72), "dpi only"),
-        (dict(source_path="a.svg", outputs=[]), "exactly one output"),
+    s = GimpExportStage(
+        source_path="figures/src/photo.xcf", outputs=["paper/photo.tif"]
+    )
+    assert s.to_dvc()["cmd"] == (
+        "calkit gimp export figures/src/photo.xcf -o paper/photo.tif"
+    )
+    # What an app doesn't export from, or to, is refused, as is a stage
+    # with other than one output
+    for model, bad, error in [
+        (InkscapeExportStage, dict(source_path="a.psd"), "from an SVG"),
+        (InkscapeExportStage, dict(outputs=["a.jpg"]), "not 'a.jpg'"),
+        (InkscapeExportStage, dict(outputs=[]), "exactly one output"),
+        (GimpExportStage, dict(source_path="a.svg"), "from an XCF"),
+        (GimpExportStage, dict(source_path="a.xcf", dpi=72), "dpi"),
     ]:
         with pytest.raises(ValidationError, match=error):
-            ExportStage(**bad)
+            model(**{"source_path": "a.svg", "outputs": ["a.png"], **bad})
 
 
 def test_latexstage():

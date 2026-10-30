@@ -24,8 +24,19 @@ def test_export(tmp_path, monkeypatch):
     )
     fake.chmod(0o755)
     monkeypatch.setattr(calkit.gimp, "EXECUTABLES", [str(fake)])
+    source = tmp_path / "figure.xcf"
+    source.write_text("xcf")
+    # What it can export from and to
+    for src, output, error in [
+        ("a.psd", "a.png", "from an XCF"),
+        ("a.xcf", "a.pdf", "not 'a.pdf'"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            calkit.gimp.check_export(src, output)
+    with pytest.raises(ValueError, match="doesn't exist"):
+        calkit.gimp.export(str(tmp_path / "gone.xcf"), "out.png")
     out = tmp_path / "figure.png"
-    calkit.gimp.export(str(tmp_path / "figure.xcf"), str(out))
+    calkit.gimp.export(str(source), str(out))
     assert out.read_text() == "png"
     # GIMP 3's dialect first, then GIMP 2's, each flattening the document
     attempts = log.read_text().splitlines()
@@ -35,8 +46,8 @@ def test_export(tmp_path, monkeypatch):
     assert "gimp-image-flatten" in attempts[1]
     # Writing nothing in either dialect is a failure
     with pytest.raises(ValueError, match="didn't export"):
-        calkit.gimp.export("figure.xcf", str(tmp_path / "nothing.png"))
+        calkit.gimp.export(str(source), str(tmp_path / "nothing.png"))
     monkeypatch.setattr(calkit.gimp, "EXECUTABLES", ["calkit-test-no-gimp"])
     assert calkit.gimp.find_executable() is None
     with pytest.raises(ValueError, match="needs GIMP installed"):
-        calkit.gimp.export("figure.xcf", str(out))
+        calkit.gimp.export(str(source), str(out))

@@ -919,6 +919,7 @@ def get_gated_stages(
     import sys
 
     import calkit.environments as envs_mod
+    from calkit import gimp, inkscape
 
     if interactive is None:
         from calkit.core import is_tty
@@ -931,6 +932,11 @@ def get_gated_stages(
     cache: dict[str, tuple[str | None, bool]] = {}
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
+    # The app each export kind needs, and how to find it
+    apps = {
+        "inkscape-export": ("Inkscape", inkscape.find_executable),
+        "gimp-export": ("GIMP", gimp.find_executable),
+    }
 
     def check(key: Any, func: Any) -> tuple[str | None, bool]:
         """Memoize a check, returning its problem and whether it's an error."""
@@ -1083,12 +1089,10 @@ def get_gated_stages(
         if not manual and stage.get("kind") == "manual-step":
             gated[name] = f"needs a manual step: {stage.get('message')}"
             continue
-        if stage.get("kind") == "export":
-            import calkit.export as export_mod
-
-            source = str(stage.get("source_path") or "")
-            if export_mod.find_app(source) is None:
-                app = export_mod.app_name(source) or "an app"
+        if stage.get("kind") in apps:
+            app, find = apps[stage["kind"]]
+            if find() is None:
+                source = stage.get("source_path")
                 gated[name] = f"needs {app} installed to export {source}"
                 continue
         env_names = str(stage.get("environment") or "_system").split(

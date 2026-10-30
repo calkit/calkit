@@ -19,17 +19,20 @@ import type {
   ContentsItem,
   DvcOutput,
   TextDiff,
-  Figure,
+  FiguresPage,
   GithubRepo,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
   ProjectsPublic,
+  Provenance,
   PullRequestRefs,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
+  Result,
+  Table,
 } from "../core/types";
 
 function projectPath(owner: string, project: string): string {
@@ -221,9 +224,38 @@ async function handle(message: Request): Promise<unknown> {
           hub: hubFor(message),
         },
       );
-    case "project.figures":
-      return request<Figure[]>(
-        `${projectPath(message.owner, message.project)}/figures`,
+    case "project.figures": {
+      // The hub pages at most 100 figures, so gather paths and titles only
+      const items: FiguresPage["items"] = [];
+      let total = 0;
+      do {
+        const page = await request<FiguresPage>(
+          `${projectPath(message.owner, message.project)}/figures`,
+          {
+            query: {
+              limit: 100,
+              offset: items.length,
+              include_content: false,
+            },
+          },
+        );
+        items.push(...page.items);
+        total = page.items.length ? page.total : items.length;
+      } while (items.length < total);
+      return { items, total };
+    }
+    case "project.tables":
+      return request<Table[]>(
+        `${projectPath(message.owner, message.project)}/tables`,
+      );
+    case "project.results":
+      return request<Result[]>(
+        `${projectPath(message.owner, message.project)}/results`,
+      );
+    case "project.provenance":
+      return request<Provenance>(
+        `${projectPath(message.owner, message.project)}/provenance`,
+        { query: { path: message.path, key: message.key } },
       );
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });

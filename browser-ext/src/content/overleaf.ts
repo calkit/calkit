@@ -3155,9 +3155,16 @@ function watchContextMenu(): void {
       ".editor-context-menu-container ul[role=menu]",
     );
     const check = lastCheck;
+    const ours = menu?.querySelector("#calkit-insert")?.parentElement;
+    if (ours) {
+      // Kept last, since Overleaf adds some of its own items after opening
+      if (ours !== menu?.lastElementChild) {
+        menu?.append(menu.querySelector("#calkit-insert-divider") ?? "", ours);
+      }
+      return;
+    }
     if (
       !menu ||
-      menu.querySelector("#calkit-insert") ||
       !check ||
       check.link !== currentLink ||
       check.link.current_user_access === "read"
@@ -3183,7 +3190,10 @@ function watchContextMenu(): void {
       );
     });
     menu.append(
-      el("li", { class: "dropdown-divider", attrs: { role: "separator" } }),
+      el("li", {
+        class: "dropdown-divider",
+        attrs: { id: "calkit-insert-divider", role: "separator" },
+      }),
       el("li", { attrs: { role: "none" } }, [item]),
     );
   };

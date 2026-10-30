@@ -4219,6 +4219,10 @@ export type ProvenanceGap = {
    * Steps
    */
   steps?: Array<ProvenanceStep>
+  /**
+   * Unchecked
+   */
+  unchecked?: boolean
 }
 
 /**
@@ -5639,6 +5643,10 @@ export type ReproCheck = {
    * Provenance Gaps
    */
   provenance_gaps?: Array<string>
+  /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
   /**
    * Scripts Not In Pipeline
    */
@@ -7274,6 +7282,10 @@ export type ReproCheckWritable = {
    * Provenance Gaps
    */
   provenance_gaps?: Array<string>
+  /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
   /**
    * Scripts Not In Pipeline
    */

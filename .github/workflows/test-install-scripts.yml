@@ -87,17 +87,19 @@ jobs:
             fi
             source ~/.bash_completions/$cmd.sh
           done
-          # Sourcing ~/.bashrc itself returns early when not interactive
-          COMP_WORDS=(calkit chec)
-          COMP_CWORD=1
-          _calkit_completion calkit
-          if [[ " ${COMPREPLY[*]} " != *" check "* ]]; then
-            echo "Failed to complete 'calkit chec': ${COMPREPLY[*]}"
-            exit 1
-          fi
-          COMP_WORDS=(ck stat)
-          _ck_completion ck
-          if [[ " ${COMPREPLY[*]} " != *" status"* ]]; then
-            echo "Failed to complete 'ck stat': ${COMPREPLY[*]}"
-            exit 1
-          fi
+          # Sourcing ~/.bashrc itself returns early when not interactive, so
+          # the completion functions sourced above are called directly
+          check_completion() {
+            COMP_WORDS=("$1" "$2")
+            COMP_CWORD=1
+            "_$1_completion" "$1"
+            if [[ " ${COMPREPLY[*]} " != *" $3"* ]]; then
+              echo "Failed to complete '$1 $2': ${COMPREPLY[*]}"
+              cat -A ~/.bash_completions/$1.sh
+              env "_${1^^}_COMPLETE=complete_bash" COMP_WORDS="$1 $2" \
+                COMP_CWORD=1 "$1"
+              exit 1
+            fi
+          }
+          check_completion calkit chec check
+          check_completion ck stat status

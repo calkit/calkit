@@ -38,7 +38,7 @@ import type {
   GithubRepo,
   OverleafLinkPublic,
   Provenance,
-  StageFromScript,
+  StageFromScriptOrNotebookResponse,
   OverleafSyncStatus,
   OverleafSyncStatusFile,
   ProjectPublic,
@@ -308,7 +308,7 @@ function renderAddScript(
           }
         : { scriptPath: typed };
       const detected = await send({
-        type: "project.stageFromScript",
+        type: "project.stageFromScriptOrNotebook",
         owner,
         project,
         ...request,
@@ -322,7 +322,7 @@ function renderAddScript(
       read.disabled = false;
     }
   });
-  const renderReview = (detected: StageFromScript) => {
+  const renderReview = (detected: StageFromScriptOrNotebookResponse) => {
     review.append(
       el("div", { class: "small" }, [
         document.createTextNode("Stage "),
@@ -412,7 +412,7 @@ function renderAddScript(
       clear(message).append(loading("Saving"));
       try {
         const saved = await send({
-          type: "project.stageFromScript",
+          type: "project.stageFromScriptOrNotebook",
           owner,
           project,
           ...request,
@@ -748,7 +748,10 @@ function renderDefineOrigin(
 }
 
 /** How to run a stage that's never run, since Overleaf can't. */
-function renderRunIt(saved: StageFromScript, spec: string): HTMLElement {
+function renderRunIt(
+  saved: StageFromScriptOrNotebookResponse,
+  spec: string,
+): HTMLElement {
   const folder = saved.git_repo_url
     .replace(/\.git$/, "")
     .split("/")

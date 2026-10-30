@@ -411,3 +411,123 @@ def test_post_project_stage_from_script(
     assert post(script_path="paper/paper.tex").status_code == 422
     assert post(script_path="scripts/gone.py").status_code == 404
     assert post(script_path="../x.py").status_code == 422
+
+
+def test_post_project_manual_export(
+    client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
+) -> None:
+    import base64
+    import hashlib
+
+    import fsspec
+
+    repo, origin = _make_repo(
+        tmp_path,
+        {"name": "p"},
+        files={
+            "paper/figures/drawn.png": "png",
+            "paper/figures/big.png": "png",
+            "figures/src/old.psd": "old",
+        },
+    )
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
+    store = fsspec.filesystem("memory")
+
+    def post(**body):
+        with (
+            patch(
+                "app.api.routes.projects.pipeline.app.projects.get_project",
+                return_value=fake_project,
+            ),
+            patch(
+                "app.api.routes.projects.pipeline.get_repo", return_value=repo
+            ),
+            patch(
+                "app.api.routes.projects.pipeline.get_object_fs",
+                return_value=store,
+            ),
+            patch("app.api.routes.projects.pipeline.SOURCE_GIT_MAX_BYTES", 10),
+        ):
+            return client.post(
+                "/projects/o/p/pipeline/stages/manual-export",
+                json=body,
+                headers=normal_user_token_headers,
+            )
+
+    def ck_info() -> dict:
+        return yaml.safe_load((tmp_path / "repo" / "calkit.yaml").read_text())
+
+    # An uploaded Photoshop file becomes the person's, and a manual stage
+    # exports the figure from it, kept in Git where it already was
+    resp = post(
+        path="paper/figures/drawn.png",
+        source_path="figures/src/drawn.psd",
+        content=base64.b64encode(b"psd").decode(),
+        app="Photoshop",
+    )
+    assert resp.status_code == 200, resp.text
+    message = (
+        "In Photoshop, export paper/figures/drawn.png from "
+        "figures/src/drawn.psd"
+    )
+    assert resp.json()["stage_name"] == "export-drawn"
+    assert resp.json()["message"] == message
+    info = ck_info()
+    assert info["pipeline"]["stages"]["export-drawn"] == {
+        "kind": "manual",
+        "message": message,
+        "source_path": "figures/src/drawn.psd",
+        "outputs": [{"path": "paper/figures/drawn.png", "storage": "git"}],
+    }
+    [entry] = info["misc"]
+    assert entry["path"] == "figures/src/drawn.psd"
+    assert entry["created_by"][0]["email"]
+    assert repo.git.ls_files("figures/src/drawn.psd")
+    dvc_yaml = yaml.safe_load((tmp_path / "repo" / "dvc.yaml").read_text())
+    assert dvc_yaml["stages"]["export-drawn"]["cmd"].startswith(
+        "calkit manual-step"
+    )
+    assert origin.head.commit.hexsha == repo.head.commit.hexsha
+    # Something made once isn't made twice
+    resp = post(
+        path="paper/figures/drawn.png",
+        source_path="figures/src/drawn.psd",
+    )
+    assert resp.status_code == 409, resp.text
+    assert "export-drawn" in resp.json()["detail"]
+    # A source has to be something a person makes, and has to be there
+    for source, status in [
+        ("figures/src/drawn.png", 422),
+        ("figures/src/missing.psd", 404),
+    ]:
+        resp = post(path="paper/figures/big.png", source_path=source)
+        assert resp.status_code == status, resp.text
+    # An upload never replaces a different file
+    resp = post(
+        path="paper/figures/big.png",
+        source_path="figures/src/old.psd",
+        content=base64.b64encode(b"new").decode(),
+    )
+    assert resp.status_code == 409, resp.text
+    assert (tmp_path / "repo" / "figures/src/old.psd").read_text() == "old"
+    # A big source goes to DVC, with its object where the remote serves it
+    big = b"psd" * 10
+    resp = post(
+        path="paper/figures/big.png",
+        source_path="figures/src/big.psd",
+        content=base64.b64encode(big).decode(),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["message"] == (
+        "Export paper/figures/big.png from figures/src/big.psd"
+    )
+    assert not repo.git.ls_files("figures/src/big.psd")
+    assert repo.git.ls_files("figures/src/big.psd.dvc")
+    md5 = hashlib.md5(big).hexdigest()
+    [key] = [k for k in store.store if k.endswith(f"{md5[:2]}/{md5[2:]}")]
+    assert store.cat(key) == big

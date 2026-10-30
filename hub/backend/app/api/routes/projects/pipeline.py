@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 import app.projects
 import calkit.pipeline
+import calkit.provenance
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import (
     STAGE_NAME_RE,
@@ -33,7 +34,9 @@ from app.api.routes.projects.core import (
     _validate_ck_stage,
 )
 from app.api.routes.projects.figures import _clean_rel_path
+from app.config import settings
 from app.core import logger, ryaml
+from app.dvc import run_dvc_command
 from app.git import (
     get_ck_info_from_repo,
     get_repo,
@@ -42,6 +45,7 @@ from app.git import (
     record_project_update,
 )
 from app.models import PipelineStage
+from app.storage import get_object_fs, make_data_fpath, remove_gcs_content_type
 from calkit.models.pipeline import MapPathsKind, MapPathsStage
 
 router = APIRouter()
@@ -577,3 +581,178 @@ def post_project_stage_from_script(
     )
     out.saved = True
     return out
+
+
+MAX_SOURCE_BYTES = 500_000_000
+# A source bigger than this is stored with DVC rather than in Git
+SOURCE_GIT_MAX_BYTES = 1_000_000
+
+
+class ManualExportPost(BaseModel):
+    # What the document shows, e.g., a figure a paper includes
+    path: str
+    # The file it's exported from, in the project or uploaded there
+    source_path: str
+    # An uploaded source, base64-encoded
+    content: str | None = None
+    # The app it's exported with, e.g., Photoshop, for the step's message
+    app: str | None = None
+
+
+class ManualExport(BaseModel):
+    stage_name: str
+    stage_yaml: str
+    message: str
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/manual-export"
+)
+def post_project_manual_export(
+    owner_name: str,
+    project_name: str,
+    req: ManualExportPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> ManualExport:
+    """Record that a figure is exported by hand from a source file, e.g.,
+    a PNG from a Photoshop file, as a manual stage.
+
+    The source, uploaded or already in the project, is recorded as created
+    by the current user, and the stage asks someone to export the figure
+    again whenever the source changes.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    path = _clean_rel_path(req.path, "path")
+    source_path = _clean_rel_path(req.source_path, "source")
+    if source_path == path:
+        raise HTTPException(422, "A file can't be exported from itself")
+    if not calkit.provenance.can_be_created_by_person(source_path):
+        raise HTTPException(
+            422,
+            f"'{source_path}' is exported from something itself; pick the "
+            "file it's made from, e.g., a Photoshop file",
+        )
+    full_source = os.path.join(wdir, source_path)
+    content = None
+    if req.content is not None:
+        try:
+            content = base64.b64decode(req.content, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(422, "Source content isn't valid base64")
+        if len(content) > MAX_SOURCE_BYTES:
+            raise HTTPException(413, "Source is too large")
+        # An upload never replaces a different file already there
+        if os.path.isfile(full_source):
+            with open(full_source, "rb") as fb:
+                if fb.read() != content:
+                    raise HTTPException(
+                        409,
+                        f"'{source_path}' is already in the project; pick "
+                        "it without uploading, or upload under another name",
+                    )
+    elif not (
+        os.path.isfile(full_source) or os.path.isfile(full_source + ".dvc")
+    ):
+        raise HTTPException(404, f"'{source_path}' is not in the project")
+    ck_info = get_ck_info_from_repo(repo=repo)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    producer = calkit.pipeline.get_stage_for_output(path, ck_info)
+    if producer is not None:
+        raise HTTPException(409, f"'{path}' is made by stage '{producer}'")
+    app_name = (req.app or "").strip()
+    message = (
+        f"In {app_name}, export {path} from {source_path}"
+        if app_name
+        else f"Export {path} from {source_path}"
+    )
+    stem = os.path.splitext(os.path.basename(path))[0]
+    slug = "-".join(
+        "".join(c if c.isalnum() else " " for c in stem.lower()).split()
+    )
+    base_name = f"export-{slug or 'figure'}"
+    stage_name = base_name
+    n = 2
+    while stage_name in stages:
+        stage_name = f"{base_name}-{n}"
+        n += 1
+    tracked = bool(repo.git.ls_files("--", path).strip())
+    stage: dict[str, Any] = {
+        "kind": "manual",
+        "message": message,
+        "source_path": source_path,
+        "outputs": [{"path": path, "storage": "git"} if tracked else path],
+    }
+    _validate_ck_stage(stage, stage_name)
+    # The source is the person's, unless something already says otherwise
+    person = {"email": current_user.email}
+    if current_user.full_name:
+        person["name"] = current_user.full_name
+    entry = next(
+        (
+            e
+            for items in ck_info.values()
+            if isinstance(items, list)
+            for e in items
+            if isinstance(e, dict) and e.get("path") == source_path
+        ),
+        None,
+    )
+    if entry is None:
+        ck_info.setdefault("misc", []).append(
+            {"path": source_path, "created_by": [person]}
+        )
+    elif not (
+        entry.get("created_by")
+        or entry.get("imported_from")
+        or entry.get("stage")
+    ):
+        entry["created_by"] = [person]
+    if content is not None:
+        os.makedirs(os.path.dirname(full_source) or wdir, exist_ok=True)
+        with open(full_source, "wb") as fb:
+            fb.write(content)
+        if len(content) > SOURCE_GIT_MAX_BYTES:
+            if not os.path.isdir(os.path.join(wdir, ".dvc")):
+                run_dvc_command(["init"], wdir=wdir, check=True)
+            run_dvc_command(["add", source_path], wdir=wdir, check=True)
+            # Put where the hub's DVC remote serves it, by its hash
+            with open(full_source + ".dvc") as f:
+                md5 = (ryaml.load(f) or {})["outs"][0]["md5"]
+            fpath = make_data_fpath(
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                idx=md5[:2],
+                md5=md5[2:],
+            )
+            with get_object_fs().open(fpath, "wb") as f_out:
+                f_out.write(content)
+            if settings.ENVIRONMENT != "local":
+                remove_gcs_content_type(fpath)
+    stages[stage_name] = stage
+    ck_info.setdefault("pipeline", {})["stages"] = stages
+    _commit_pipeline(
+        project,
+        session,
+        repo,
+        ck_info,
+        None,
+        [],
+        [],
+        f"Export {path} from {source_path} by hand",
+    )
+    return ManualExport(
+        stage_name=stage_name,
+        stage_yaml=_dump_ck_stage_map(stage),
+        message=message,
+    )

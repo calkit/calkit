@@ -22,6 +22,7 @@
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
+| [`export`](#top-command-export)                  | Export a figure from the file it's drawn in, e.g., an SVG.                                                   |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
 | [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
 | [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                         |
@@ -407,6 +408,31 @@ Options:
 | `--output`, `-o`  | str     | no       |         | File the step writes, which must change for it to be done. |
 | `--show-stdout`   | boolean | no       | False   | Show stdout.                                               |
 | `--show-stderr`   | boolean | no       | False   | Show stderr.                                               |
+
+<a id="top-command-export"></a>
+
+### `calkit export`
+
+Export a figure from the file it's drawn in, e.g., an SVG.
+
+Usage:
+
+```text
+calkit export [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description          |
+| -------- | ---- | -------- | ------- | -------------------- |
+| `source` | str  | yes      |         | File to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                      |
+| ---------------- | ---- | -------- | ------- | -------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to.               |
+| `--dpi`          | int  | no       |         | Resolution of a PNG from an SVG. |
 
 <a id="top-command-xenv-runenv"></a>
 

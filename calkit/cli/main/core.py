@@ -4080,6 +4080,28 @@ def manual_step(
     typer.echo("Done")
 
 
+@app.command(
+    name="export",
+    help="Export a figure from the file it's drawn in, e.g., an SVG.",
+)
+def export_figure(
+    source: Annotated[str, typer.Argument(help="File to export from.")],
+    output: Annotated[
+        str, typer.Option("--output", "-o", help="File to export to.")
+    ],
+    dpi: Annotated[
+        int | None,
+        typer.Option("--dpi", help="Resolution of a PNG from an SVG."),
+    ] = None,
+) -> None:
+    import calkit.export
+
+    try:
+        calkit.export.export(source, output, dpi=dpi)
+    except ValueError as e:
+        raise_error(str(e))
+
+
 def _env_prefix_exists(
     env: dict, envs: dict, env_name: str, wdir: str | None
 ) -> bool:

@@ -420,21 +420,39 @@ export function typedNumbersIn(line: string): TypedNumberMatch[] {
   return found;
 }
 
+/** A table typed into a document, with the numbers in it. */
+export interface TypedTable {
+  /** Where `\\begin{tabular}` starts, by 0-based line. */
+  start: { line: number; column: number };
+  /** Just past `\\end{tabular}`. */
+  end: { line: number; column: number };
+  /** The environment's name, e.g., `tabular`. */
+  env: string;
+  numbers: TypedNumber[];
+}
+
+const TABLE_RE = /\\begin\s*\{(tabular\*?|tabularx|tabulary|longtable)\}/;
+
 /**
- * The typed numbers in a whole document, by 0-based line.
+ * The typed numbers in a whole document, by 0-based line, and the tables
+ * that hold some, whose numbers are kept together, since a table is better
+ * shown from a file a stage writes than number by number.
  *
  * Only the body counts, where there is one, since the preamble sets up
  * the document rather than reporting anything, and neither does code in
  * a verbatim or listing environment, or the bibliography.
  */
-export function typedNumbersInDocument(
-  lines: string[],
-): { line: number; match: TypedNumberMatch }[] {
+export function typedNumbersInDocument(lines: string[]): {
+  numbers: { line: number; match: TypedNumberMatch }[];
+  tables: TypedTable[];
+} {
   const body = lines.findIndex((line) =>
     /^[^%]*\\begin\s*\{document\}/.test(line),
   );
-  const found: { line: number; match: TypedNumberMatch }[] = [];
+  const numbers: { line: number; match: TypedNumberMatch }[] = [];
+  const tables: TypedTable[] = [];
   let skipping: string | null = null;
+  let table: TypedTable | null = null;
   for (let n = body < 0 ? 0 : body + 1; n < lines.length; n++) {
     const line = lines[n];
     if (/^[^%]*\\end\s*\{document\}/.test(line)) {
@@ -453,11 +471,47 @@ export function typedNumbersInDocument(
       skipping = line.includes(`\\end{${begin[1]}}`) ? null : begin[1];
       continue;
     }
+    const comment = line.search(/(?<!\\)%/);
+    const code = comment >= 0 ? line.slice(0, comment) : line;
+    let from = 0;
+    if (!table) {
+      const opened = code.match(TABLE_RE);
+      if (opened) {
+        from = opened.index ?? 0;
+        table = {
+          start: { line: n, column: from },
+          end: { line: n, column: code.length },
+          env: opened[1],
+          numbers: [],
+        };
+      }
+    }
+    let to = line.length;
+    let closed = false;
+    if (table) {
+      const end = `\\end{${table.env}}`;
+      const at = code.indexOf(end, from);
+      if (at >= 0) {
+        to = at + end.length;
+        table.end = { line: n, column: to };
+        closed = true;
+      }
+    }
     for (const match of typedNumbersIn(line)) {
-      found.push({ line: n, match });
+      if (table && match.start >= from && match.start < to) {
+        table.numbers.push(match.number);
+      } else {
+        numbers.push({ line: n, match });
+      }
+    }
+    if (table && closed) {
+      if (table.numbers.length) {
+        tables.push(table);
+      }
+      table = null;
     }
   }
-  return found;
+  return { numbers, tables };
 }
 
 /** A number in a results file, by the key `\\ckvalue` takes for it. */
@@ -486,6 +540,12 @@ export function resultValues(path: string, data: unknown): ResultValue[] {
   return found;
 }
 
+/** Whether a value rounds to a number the way it was typed. */
+function roundsTo(number: TypedNumber, value: number): boolean {
+  const half = (0.5 * 10 ** (number.exponent ?? 0)) / 10 ** number.decimals;
+  return Math.abs(value - number.value) <= half * (1 + 1e-9) + 1e-12;
+}
+
 /**
  * The results a typed number could be, i.e., those that round to it, or
  * failing that, the few nearest it, which may be what it should have said.
@@ -494,14 +554,13 @@ export function typedNumberMatches(
   number: TypedNumber,
   values: ResultValue[],
 ): { exact: ResultValue[]; close: ResultValue[] } {
-  const scale = 10 ** (number.exponent ?? 0);
-  const half = (0.5 * scale) / 10 ** number.decimals;
   const off = (v: ResultValue) => Math.abs(v.value - number.value);
-  const exact = values.filter((v) => off(v) <= half * (1 + 1e-9) + 1e-12);
+  const exact = values.filter((v) => roundsTo(number, v.value));
   if (exact.length) {
     return { exact, close: [] };
   }
   // Near enough to be a mistyped or outdated copy of it
+  const half = (0.5 * 10 ** (number.exponent ?? 0)) / 10 ** number.decimals;
   const near = Math.max(Math.abs(number.value) * 0.25, half * 4);
   const close = values
     .filter((v) => off(v) <= near)
@@ -549,5 +608,68 @@ export function typedNumberProblem(
       ? `Typed in, though it matches ${first.key} in ${first.path}`
       : "Typed in, and no result in the project matches it",
     path: first?.path ?? "",
+  };
+}
+
+/** A table a stage writes as TeX, which `\\cktable` can show. */
+export interface TableFile {
+  path: string;
+  /** Its numbers, the same ones a typed table would have. */
+  numbers: TypedNumber[];
+}
+
+/**
+ * The numbers in a table file, or null if `\\cktable` can't replace a
+ * typed table with it, i.e., it has no table, or wraps it in a float.
+ */
+export function tableFile(path: string, text: string): TableFile | null {
+  if (!TABLE_RE.test(text) || /\\begin\s*\{table\*?\}/.test(text)) {
+    return null;
+  }
+  const { numbers, tables } = typedNumbersInDocument(text.split("\n"));
+  return {
+    path,
+    numbers: [
+      ...numbers.map(({ match }) => match.number),
+      ...tables.flatMap((table) => table.numbers),
+    ],
+  };
+}
+
+/**
+ * The table files a typed table could be shown from, best first, with how
+ * many of its numbers each has, rounded the way they were typed.
+ *
+ * A third is enough, since an outdated table may only agree on what it's
+ * tabulated over, e.g., the speeds, and not the results.
+ */
+export function typedTableMatches(
+  table: Pick<TypedTable, "numbers">,
+  files: TableFile[],
+): { path: string; matched: number }[] {
+  return files
+    .map((file) => ({
+      path: file.path,
+      matched: table.numbers.filter((number) =>
+        file.numbers.some((other) => roundsTo(number, other.value)),
+      ).length,
+    }))
+    .filter(({ matched }) => matched * 3 >= table.numbers.length)
+    .sort((a, b) => b.matched - a.matched);
+}
+
+/** What's wrong with a typed table: the paper can't say where it's from. */
+export function typedTableProblem(
+  table: Pick<TypedTable, "numbers">,
+  files: TableFile[],
+): CitationProblem {
+  const [best] = typedTableMatches(table, files);
+  return {
+    severity: "warning",
+    kind: "typed",
+    message: best
+      ? `Typed in, though ${best.path} has a table like it`
+      : "Typed in, and no table in the project matches it",
+    path: best?.path ?? "",
   };
 }

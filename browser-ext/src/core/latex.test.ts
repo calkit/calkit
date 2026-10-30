@@ -12,9 +12,12 @@ import {
   refDirName,
   resultValues,
   roundedLike,
+  tableFile,
   typedNumberCitation,
   typedNumberMatches,
   typedNumberProblem,
+  typedTableMatches,
+  typedTableProblem,
   typedNumbersIn,
   typedNumbersInDocument,
 } from "./latex";
@@ -371,7 +374,7 @@ describe("typedNumbersIn", () => {
 
 describe("typedNumbersInDocument", () => {
   test("only looks in the body, outside code and the bibliography", () => {
-    const found = typedNumbersInDocument([
+    const { numbers, tables } = typedNumbersInDocument([
       "\\documentclass{article}",
       "\\setlength{\\parskip}{0.5em} 1.5",
       "\\begin{document}",
@@ -387,12 +390,113 @@ describe("typedNumbersInDocument", () => {
       "\\end{document}",
       "0.99",
     ]);
-    expect(found.map(({ line, match }) => [line, match.number.text])).toEqual([
-      [3, "0.47"],
-      [11, "0.50"],
-    ]);
+    expect(numbers.map(({ line, match }) => [line, match.number.text])).toEqual(
+      [
+        [3, "0.47"],
+        [11, "0.50"],
+      ],
+    );
+    expect(tables).toEqual([]);
     // A section file has no body of its own, so all of it counts
-    expect(typedNumbersInDocument(["A 0.3 drop.", "% 0.4"])).toHaveLength(1);
+    expect(
+      typedNumbersInDocument(["A 0.3 drop.", "% 0.4"]).numbers,
+    ).toHaveLength(1);
+  });
+
+  test("keeps a table's numbers together", () => {
+    const { numbers, tables } = typedNumbersInDocument([
+      "\\begin{table}[h]",
+      "  \\begin{tabular}{cc}",
+      "    Tow speed (m/s) & Deficit \\\\",
+      "    0.6 & 0.48 \\\\",
+      "    0.8 & 0.45 % was 0.44",
+      "  \\end{tabular} after 0.3",
+      "  \\caption{Deficit, about 0.47 on average}",
+      "\\end{table}",
+      "\\begin{tabular}{c} 1.5 \\end{tabular} \\begin{tabular}{c} A \\end{tabular}",
+    ]);
+    expect(numbers.map(({ match }) => match.number.text)).toEqual([
+      "0.3",
+      "0.47",
+    ]);
+    expect(
+      tables.map(({ start, end, env, numbers }) => ({
+        start,
+        end,
+        env,
+        numbers: numbers.map((n) => n.text),
+      })),
+    ).toEqual([
+      {
+        start: { line: 1, column: 2 },
+        end: { line: 5, column: 15 },
+        env: "tabular",
+        numbers: ["0.6", "0.48", "0.8", "0.45"],
+      },
+      {
+        start: { line: 8, column: 0 },
+        end: { line: 8, column: 36 },
+        env: "tabular",
+        numbers: ["1.5"],
+      },
+    ]);
+  });
+});
+
+describe("typedTableMatches", () => {
+  const typed = typedNumbersInDocument([
+    "\\begin{tabular}{cc}",
+    "0.6 & 0.48 \\\\ 0.8 & 0.45 \\\\ 1.0 & 0.47 \\\\ 1.2 & 0.50 \\\\",
+    "\\end{tabular}",
+  ]).tables[0];
+  const deficits = tableFile(
+    "results/deficit_table.tex",
+    [
+      "\\begin{tabular}{cc}",
+      "    Tow speed (m/s) & Deficit \\\\",
+      "    \\hline",
+      "    0.6 & 0.50 \\\\",
+      "    0.8 & 0.44 \\\\",
+      "    1.0 & 0.50 \\\\",
+      "    1.2 & 0.44 \\\\",
+      "\\end{tabular}",
+    ].join("\n"),
+  );
+
+  test("reads the numbers of a table a stage writes", () => {
+    expect(deficits?.numbers.map((n) => n.text)).toEqual([
+      "0.6",
+      "0.50",
+      "0.8",
+      "0.44",
+      "1.0",
+      "0.50",
+      "1.2",
+      "0.44",
+    ]);
+    // \cktable can't stand in for a tabular with these
+    expect(tableFile("a.tex", "No table here, 0.5")).toBeNull();
+    expect(
+      tableFile("b.tex", "\\begin{table}\\begin{tabular}{c}0.5\\end{tabular}"),
+    ).toBeNull();
+  });
+
+  test("ranks table files by how many of its numbers they have", () => {
+    const other = tableFile(
+      "results/other.tex",
+      "\\begin{tabular}{c} 0.6 & 9.9 \\end{tabular}",
+    );
+    const files = [other!, deficits!];
+    // The speeds and one deficit agree, though the rest are outdated
+    expect(typedTableMatches(typed, files)).toEqual([
+      { path: "results/deficit_table.tex", matched: 5 },
+    ]);
+    expect(typedTableProblem(typed, files).message).toBe(
+      "Typed in, though results/deficit_table.tex has a table like it",
+    );
+    expect(typedTableProblem(typed, [other!]).message).toBe(
+      "Typed in, and no table in the project matches it",
+    );
   });
 });
 

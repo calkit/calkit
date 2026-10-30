@@ -16,8 +16,8 @@ import {
 } from "../core/latex";
 
 /**
- * A command showing project content, or a number typed in that looks like
- * a result, and where it is in the document.
+ * A command showing project content, or a number or table typed in that
+ * looks like a result, and where it is in the document.
  */
 export type EditorItem = {
   from: number;
@@ -26,8 +26,15 @@ export type EditorItem = {
   line: number;
   column: number;
 } & (
-  | { citation: Citation; typed?: undefined }
-  | { typed: TypedNumber; citation?: undefined }
+  | { citation: Citation; typed?: undefined; table?: undefined }
+  | { typed: TypedNumber; citation?: undefined; table?: undefined }
+  | {
+      /** The table's numbers, and where its \\begin command ends, which
+       * is all that's marked, though hovering anywhere in it shows why. */
+      table: { numbers: TypedNumber[]; markTo: number };
+      citation?: undefined;
+      typed?: undefined;
+    }
 );
 
 export type FromEditor =
@@ -94,7 +101,21 @@ function scan(view: View): void {
   for (let n = 1; n <= doc.lines; n++) {
     lines.push(doc.line(n).text);
   }
-  for (const { line: i, match } of typedNumbersInDocument(lines)) {
+  const typed = typedNumbersInDocument(lines);
+  for (const table of typed.tables) {
+    const from = doc.line(table.start.line + 1).from + table.start.column;
+    items.push({
+      from,
+      to: doc.line(table.end.line + 1).from + table.end.column,
+      line: table.start.line + 1,
+      column: table.start.column,
+      table: {
+        numbers: table.numbers,
+        markTo: from + `\\begin{${table.env}}`.length,
+      },
+    });
+  }
+  for (const { line: i, match } of typed.numbers) {
     const line = doc.line(i + 1);
     items.push({
       from: line.from + match.start,
@@ -161,7 +182,7 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
           ? [
               Decoration.mark({
                 class: `calkit-problem calkit-problem-${severity}`,
-              }).range(item.from, item.to),
+              }).range(item.from, item.table?.markTo ?? item.to),
             ]
           : [];
       });
@@ -187,9 +208,16 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
   });
   const tooltip = hoverTooltip(
     (_view: View, pos: number) => {
-      const index = citations.findIndex(
-        (item) => pos >= item.from && pos <= item.to,
-      );
+      // The innermost, e.g., a \\ckvalue in a typed table
+      let index = -1;
+      for (const [i, item] of citations.entries()) {
+        const inner =
+          index < 0 ||
+          item.to - item.from < citations[index].to - citations[index].from;
+        if (pos >= item.from && pos <= item.to && inner) {
+          index = i;
+        }
+      }
       if (index < 0 || !checked) {
         return null;
       }
@@ -249,20 +277,23 @@ window.addEventListener("message", (event) => {
 });
 
 /**
- * Swap a typed number for what the extension says shows it instead, e.g.,
- * a \\ckvalue, as one edit, so it's one step in Overleaf's history.
+ * Swap a typed number or table for what the extension says shows it
+ * instead, e.g., a \\ckvalue, as one edit, so it's one step in Overleaf's
+ * history.
  */
 function replace(message: ToEditor & { type: "replace" }): void {
   const item = citations[message.index];
   const view = active?.view;
   const fail = (error: string) =>
     post({ type: "replaced", id: message.id, error });
-  if (!view || message.version !== version || !item?.typed) {
-    return fail("The document changed; hover over the number again");
+  const changed = "The document changed; hover over it again";
+  if (!view || message.version !== version || !(item?.typed || item?.table)) {
+    return fail(changed);
   }
   const doc = view.state.doc;
-  if (doc.sliceString(item.from, item.to) !== item.typed.text) {
-    return fail("The document changed; hover over the number again");
+  const now = doc.sliceString(item.from, item.to);
+  if (item.typed ? now !== item.typed.text : !now.startsWith("\\begin")) {
+    return fail(changed);
   }
   const changes = [{ from: item.from, to: item.to, insert: message.text }];
   const text = doc.toString();

@@ -723,7 +723,7 @@ def post_project_stage_export(
         else {
             "kind": "manual-step",
             "message": message,
-            "source_path": source_path,
+            "inputs": [source_path],
             "outputs": [output],
         }
     )

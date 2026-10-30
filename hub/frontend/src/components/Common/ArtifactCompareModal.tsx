@@ -415,9 +415,9 @@ function FigureInfo({
   const stage = figure.stage ?? provenanceQuery.data?.stage
   const stageKind = provenanceQuery.data?.stage_kind
   const exportedFrom =
-    stageKind === "manual-step" || stageKind === "export"
-      ? provenanceQuery.data?.source
-      : null
+    stageKind === "export" ? provenanceQuery.data?.source : null
+  const manualStep =
+    stageKind === "manual-step" ? provenanceQuery.data?.message : null
   const dataLinks: InputLink[] = []
   if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
     const deps = declaredInputs(
@@ -507,8 +507,7 @@ function FigureInfo({
             </Link>
             {exportedFrom ? (
               <>
-                , exported {stageKind === "manual-step" ? "manually " : ""}
-                from{" "}
+                , exported from{" "}
                 <Link
                   as={RouterLink}
                   to={filesTo}
@@ -520,6 +519,7 @@ function FigureInfo({
                 </Link>
               </>
             ) : null}
+            {manualStep ? `, a manual step: ${manualStep}` : null}
           </>
         ) : provenanceQuery.isPending ? (
           <Spinner size="xs" />

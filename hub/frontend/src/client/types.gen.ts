@@ -4171,6 +4171,10 @@ export type Provenance = {
    */
   command?: string | null
   /**
+   * Message
+   */
+  message?: string | null
+  /**
    * Inputs
    */
   inputs?: Array<string>

@@ -768,15 +768,15 @@ function renderProvenance(
                   : null,
               ]),
             );
-            if (p.source) {
+            if (p.stage_kind === "manual-step" && p.message) {
+              lines.push(
+                el("div", { class: "dim", text: `Manual step: ${p.message}` }),
+              );
+            } else if (p.source) {
               lines.push(
                 el("div", { class: "dim" }, [
                   document.createTextNode(
-                    p.stage_kind === "manual-step"
-                      ? "Exported manually from "
-                      : p.stage_kind === "export"
-                      ? "Exported from "
-                      : "Runs ",
+                    p.stage_kind === "export" ? "Exported from " : "Runs ",
                   ),
                   el("a", { text: p.source, href: fileUrl(p.source) }),
                 ]),
@@ -907,7 +907,14 @@ function renderProvenance(
           : null,
       ]),
     );
-    if (provenance.source) {
+    if (provenance.stage_kind === "manual-step" && provenance.message) {
+      container.append(
+        el("div", {
+          class: "small",
+          text: `Manual step: ${provenance.message}`,
+        }),
+      );
+    } else if (provenance.source) {
       const source = el("a", {
         text: provenance.source,
         href: fileUrl(provenance.source),
@@ -917,9 +924,7 @@ function renderProvenance(
         el(
           "div",
           { class: "small" },
-          provenance.stage_kind === "manual-step"
-            ? [document.createTextNode("Exported manually from "), source]
-            : provenance.stage_kind === "export"
+          provenance.stage_kind === "export"
             ? [document.createTextNode("Exported from "), source]
             : [
                 document.createTextNode("Edit "),

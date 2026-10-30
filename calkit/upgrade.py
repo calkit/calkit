@@ -481,6 +481,13 @@ def check_in_background(pids: list[int]) -> None:
         return
     if config.read().auto_upgrade is not True:
         return
+    # Every upgrade brings new unsigned files Smart App Control could block,
+    # so under it, users are only told about new versions and upgrade when
+    # they choose to
+    from calkit.windows import smart_app_control_on
+
+    if smart_app_control_on():
+        return
     # Recorded before upgrading, since on Windows the upgrade outlives this
     # process; the next command learns how it went by its own version
     update_state(upgraded_from=current, upgrading=time.time())

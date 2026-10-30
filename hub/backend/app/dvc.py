@@ -22,7 +22,6 @@ from app.storage import get_object_fs, make_data_fpath
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
-yaml = ruamel.yaml.YAML()
 
 # Teach DVC about the ck:// remote scheme, which projects use by default.
 # This must happen before anything in this process validates a DVC config,
@@ -77,6 +76,8 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
     This is a little hacky since we need to create a Git and DVC repo in order
     to run the commands in DVC.
     """
+    # Per call, since a shared YAML instance isn't thread-safe
+    yaml = ruamel.yaml.YAML()
     wd_orig = os.getcwd()
     try:
         with tempfile.TemporaryDirectory() as tmpdirname:

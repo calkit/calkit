@@ -679,8 +679,7 @@ def post_project_upload(
         "hub": settings.frontend_host,
         "git_repo_url": project.git_repo_url,
     }
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     # Which files belong in Git and which in DVC is a real decision (size,
     # extension, directories of many small files), and calkit already makes
     # it. Shelling out keeps that judgment in one place rather than growing
@@ -1161,8 +1160,7 @@ def post_project(
                     git_repo_url=template_git_repo_url,
                     git_rev=template_git_rev,
                 )
-            with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-                ryaml.dump(ck_info, f)
+            ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
             repo.git.add("calkit.yaml")
             if project_in.template is None:
                 # Create devcontainer spec from the one bundled with Calkit
@@ -2304,8 +2302,7 @@ def patch_project_contents(
         else:
             ck_info[target_category] = [current_object]
     # Now it's time to write and commit
-    with open(ck_fpath, "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(ck_fpath))
     git_diff = repo.git.diff("calkit.yaml")
     if not git_diff:
         logger.info("No changes to calkit.yaml detected")
@@ -3063,8 +3060,7 @@ def post_project_question(
     else:
         ck_questions.append(req.question)
     ck_info["questions"] = ck_questions
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Add question"])
     push_and_expire(project, repo)
@@ -3192,8 +3188,7 @@ def put_project_question(
         existing, req, rendered_answer=rendered_answer
     )
     ck_info["questions"] = ck_questions
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     if repo.is_dirty():
         repo.git.commit(["-m", f"Update question {number}"])
@@ -3238,8 +3233,7 @@ def delete_project_question(
         ck_info["questions"] = ck_questions
     else:
         ck_info.pop("questions", None)
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Delete question {number}"])
     push_and_expire(project, repo)
@@ -4249,8 +4243,7 @@ def post_project_figure(
             raise HTTPException(422, f"Invalid figure: {e}")
     figures.append(fig_entry)
     ck_info["figures"] = figures
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Make a commit
     repo.git.commit(["-m", f"Add figure {path}"])
@@ -5511,8 +5504,7 @@ def post_project_dataset(
                 outs[0]["path"] = os.path.basename(req.path)
                 outs[0]["remote"] = remote_name
             dvc_import["outs"] = outs
-            with open(os.path.join(wdir, dvc_fpath), "w") as f:
-                ryaml.dump(dvc_import, f)
+            ryaml.dump(dvc_import, Path(wdir, dvc_fpath))
             repo.git.add(dvc_fpath)
             gitignore_path = os.path.join(wdir, ".gitignore")
             existing_ignore = (
@@ -5641,8 +5633,7 @@ def post_project_dataset(
         raise HTTPException(422, f"Invalid dataset: {e}")
     datasets.append(ds)
     ck_info["datasets"] = datasets
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Add dataset {ds['path']}"])
     push_and_expire(project, repo)
@@ -5782,8 +5773,7 @@ def post_project_dataset_upload(
             raise HTTPException(422, f"Invalid dataset: {e}")
     datasets.append(ds)
     ck_info["datasets"] = datasets
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Make a commit
     repo.git.commit(["-m", f"Add dataset {path}"])
@@ -6565,8 +6555,7 @@ def post_project_misc(
     misc = ck_info.get("misc", [])
     misc.append(entry)
     ck_info["misc"] = misc
-    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
     push_and_expire(project, repo)
@@ -6914,8 +6903,7 @@ def post_project_publication(
             )
         )
         ck_info["publications"] = publications
-        with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-            ryaml.dump(ck_info, f)
+        ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
         repo.git.add("calkit.yaml")
     # Make a commit
     repo.git.commit(["-m", f"Add publication {path} ({kind})"])
@@ -7380,8 +7368,7 @@ async def post_project_overleaf_publication(
         with open(os.path.join(repo.working_dir, ".gitignore"), "a") as f:
             f.write("\n.calkit/overleaf/\n")
         repo.git.add(".gitignore")
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     if not import_zip_mode:
         repo.git.add(calkit.overleaf.get_sync_info_fpath())
@@ -8313,8 +8300,7 @@ def put_project_pipeline_stage(
     _validate_ck_stage(stage_map, stage_name)
     stages[stage_name] = stage_map
     ck_info["pipeline"]["stages"] = stages
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
     # read; otherwise the edit sits in calkit.yaml until the next run.
@@ -8406,8 +8392,7 @@ def put_project_pipeline(
     pipeline = _load_ck_pipeline(req.yaml)
     # Written as the user wrote it: same key order, same comments.
     ck_info["pipeline"] = pipeline
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
     # read; otherwise the edit sits in calkit.yaml until the next run.
@@ -9400,8 +9385,7 @@ def post_project_references(
             f.write("")
     references.append({"path": req.path})
     ck_info["references"] = references
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add(req.path)
     repo.git.add("calkit.yaml")
     verb = "Label" if req.label_existing else "Add"
@@ -9452,8 +9436,7 @@ def delete_project_references(
     if len(kept) == len(references) and not os.path.isfile(bib_full_path):
         raise HTTPException(404, "References collection not found")
     ck_info["references"] = kept
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     if os.path.isfile(bib_full_path):
         os.remove(bib_full_path)
@@ -9579,8 +9562,7 @@ def post_project_reference_item(
         ):
             collections.append({"path": req.path})
             ck_info["references"] = collections
-            with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-                ryaml.dump(ck_info, f)
+            ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
             repo.git.add("calkit.yaml")
     if repo.git.diff("--cached", "--name-only").strip():
         message = (
@@ -9942,8 +9924,7 @@ def post_project_zotero_import(
     else:
         references.append({"path": req.bib_path})
     ck_info["references"] = references
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     last_synced = _record_zotero_sync_info(
         repo=repo,
         bib_path=req.bib_path,
@@ -10840,8 +10821,7 @@ def post_project_environment(
     envs[req.name] = new_env
     ck_info["environments"] = envs
     fpath = os.path.join(repo.working_dir, "calkit.yaml")
-    with open(fpath, "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(fpath))
     repo.git.add("calkit.yaml")
     if req.path and req.file_content:
         fpath = os.path.join(repo.working_dir, req.path)

@@ -10,6 +10,7 @@ it.
 """
 
 import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -275,8 +276,7 @@ def _commit_pipeline(
     ``to_dvc`` carries the stage over rather than compiling it.
     """
     wdir = str(repo.working_dir)
-    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     try:
         calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
@@ -287,8 +287,7 @@ def _commit_pipeline(
             target = dvc_yaml["stages"][legacy_target]
             deps = [d for d in (target.get("deps") or []) if d not in removed]
             target["deps"] = deps + [d for d in dests if d not in deps]
-            with open(dvc_path, "w") as f:
-                ryaml.dump(dvc_yaml, f)
+            ryaml.dump(dvc_yaml, Path(dvc_path))
         repo.git.add("-A")
     except Exception as e:
         repo.git.checkout("--", ".")

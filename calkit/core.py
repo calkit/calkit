@@ -198,8 +198,13 @@ class _ThreadLocalYAMLProxy:
         content. Rather than trying to tell the cases apart while
         emitting, the cleaned text is parsed back and only used if it
         still means the same thing.
+
+        A ``Path`` is only written once the dump has succeeded, so a
+        failure can't leave the file empty, as opening it with ``"w"``
+        first would.
         """
         import io
+        from pathlib import Path
 
         yaml = _yaml_local.yaml
         buf = io.StringIO()
@@ -223,7 +228,10 @@ class _ThreadLocalYAMLProxy:
                     text = cleaned
             except Exception:
                 pass
-        stream.write(text)
+        if isinstance(stream, Path):
+            stream.write_text(text, encoding="utf-8")
+        else:
+            stream.write(text)
         return None
 
 

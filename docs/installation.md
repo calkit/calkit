@@ -50,6 +50,9 @@ it upgrades itself in the background,
 so your next command runs on the new version
 and starts by telling you which version that is.
 Otherwise, it tells you a new version is available.
+While [Windows Smart App Control](#windows-smart-app-control) is on,
+it only tells you,
+since Smart App Control could block files an upgrade brings in.
 
 To be told about new versions but not upgrade automatically, run:
 

@@ -942,11 +942,22 @@ def get_status(
             return
         elif pipeline_status and pipeline_status.is_stale:
             typer.echo("Stale stages:")
+            ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
             for stage_name in pipeline_status.stale_stage_names:
                 stale_stage = pipeline_status.stale_stages.get(stage_name)
                 if stale_stage is None:
                     continue
                 typer.echo(f"        {typer.style(stage_name, fg='yellow')}:")
+                ck_stage = ck_stages.get(stage_name)
+                if (
+                    isinstance(ck_stage, dict)
+                    and ck_stage.get("kind") == "manual"
+                ):
+                    warn(
+                        "          needs a manual step: "
+                        f"{ck_stage.get('message')}",
+                        prefix="",
+                    )
                 if stale_stage.cannot_run_here:
                     warn(
                         "          can't run on this machine: "

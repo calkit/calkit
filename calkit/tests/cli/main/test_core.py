@@ -3849,6 +3849,30 @@ def test_merge(tmp_dir):
 def test_manual_step(tmp_dir, monkeypatch, capsys):
     from calkit.cli.main.core import manual_step
 
+    # Status says what a manual stage needs when it's out of date
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "export": {
+                            "kind": "manual",
+                            "message": "Export fig.png",
+                            "outputs": ["fig.png"],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    out = subprocess.run(
+        ["calkit", "status"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    ).stdout
+    assert "needs a manual step: Export fig.png" in out
     # With nobody to do it, it says so rather than waiting
     out = subprocess.run(
         ["calkit", "manual-step", "-m", "Export fig.png"],

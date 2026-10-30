@@ -75,7 +75,9 @@ jobs:
         run: cat scripts/install.sh | sh
       - name: Check install
         run: |
-          export PATH="$HOME/.local/bin:$PATH"
+          # Appended, since uv's installer puts a script named env there,
+          # which Git Bash would run in place of the completion's env
+          export PATH="$PATH:$HOME/.local/bin"
           calkit --version
           ck --version
           # Installing twice shouldn't add completion twice

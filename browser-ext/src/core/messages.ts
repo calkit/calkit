@@ -145,7 +145,7 @@ export type Request =
       type: "project.stageExport";
       owner: string;
       project: string;
-      /** What the document shows, exported by hand. */
+      /** What the document shows, exported manually. */
       path: string;
       /** The file it's exported from, e.g., a Photoshop file. */
       sourcePath: string;

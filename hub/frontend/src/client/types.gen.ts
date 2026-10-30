@@ -5951,9 +5951,9 @@ export type StageExportPost = {
    */
   app?: string | null
   /**
-   * By Hand
+   * Manual Step
    */
-  by_hand?: boolean
+  manual_step?: boolean
 }
 
 /**

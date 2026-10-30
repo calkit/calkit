@@ -601,14 +601,14 @@ class StageExportPost(BaseModel):
     app: str | None = None
     # A manual step even when an app could export it, e.g., an SVG someone
     # exports from Illustrator
-    by_hand: bool = False
+    manual_step: bool = False
 
 
 class StageExport(BaseModel):
     stage_name: str
     stage_yaml: str
-    # export, when an app exports it as the pipeline runs, or manual, when
-    # a person does
+    # export, when an app exports it as the pipeline runs, or manual-step,
+    # when a person does
     kind: str
     message: str
 
@@ -625,7 +625,7 @@ def post_project_stage_export(
     PNG from an Inkscape SVG or a Photoshop file.
 
     An app that can export it, e.g., Inkscape, does so as the pipeline
-    runs. Otherwise it's a manual stage, which asks someone to export it
+    runs. Otherwise it's a manual step, which asks someone to export it
     again whenever the source changes. Either way the source, uploaded or
     already in the project, is recorded as created by the current user.
     """
@@ -677,7 +677,7 @@ def post_project_stage_export(
     producer = calkit.pipeline.get_stage_for_output(path, ck_info)
     if producer is not None:
         raise HTTPException(409, f"'{path}' is made by stage '{producer}'")
-    exporter = None if req.by_hand else calkit.export.app_name(source_path)
+    exporter = None if req.manual_step else calkit.export.app_name(source_path)
     if exporter is not None:
         try:
             calkit.export.check_paths(source_path, path)
@@ -710,7 +710,7 @@ def post_project_stage_export(
         {"kind": "export", "source_path": source_path, "outputs": [output]}
         if exporter is not None
         else {
-            "kind": "manual",
+            "kind": "manual-step",
             "message": message,
             "source_path": source_path,
             "outputs": [output],
@@ -773,7 +773,7 @@ def post_project_stage_export(
         [],
         [],
         f"Export {path} from {source_path}"
-        + (f" with {exporter}" if exporter is not None else " by hand"),
+        + (f" with {exporter}" if exporter is not None else " manually"),
     )
     return StageExport(
         stage_name=stage_name,

@@ -457,11 +457,11 @@ Model class: `LatexStage`
 | `latexdiff_args`        | list[str]                      | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--type=CFONT'. Changed figures are shown old and new unless '--graphics-markup' is set here. |
 | `diff_filter`           | PythonScriptDiffFilter \| None | no       | null    | Script each marked-up document is piped through before it's built, e.g., to drop changes that don't change the rendered text.                                                 |
 
-### `manual`
+### `manual-step`
 
-Model class: `ManualStage`
+Model class: `ManualStepStage`
 
-A step someone does by hand, e.g., exporting a figure from
+A step someone does manually, e.g., exporting a figure from
 Photoshop, which the pipeline asks for when its inputs change.
 
 Its outputs are kept while it runs, since they're what the person

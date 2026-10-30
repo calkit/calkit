@@ -1080,7 +1080,7 @@ def get_gated_stages(
             continue
         if stage.get("frozen"):
             continue
-        if not manual and stage.get("kind") == "manual":
+        if not manual and stage.get("kind") == "manual-step":
             gated[name] = f"needs a manual step: {stage.get('message')}"
             continue
         if stage.get("kind") == "export":

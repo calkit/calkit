@@ -316,7 +316,7 @@ class Stage(Model):
         "julia-script",
         "julia-command",
         "word-to-pdf",
-        "manual",
+        "manual-step",
         "export",
         "map-paths",
         "marimo-html-wasm",
@@ -2272,15 +2272,15 @@ class WordToPdfStage(Stage):
         )
 
 
-class ManualStage(Stage):
-    """A step someone does by hand, e.g., exporting a figure from
+class ManualStepStage(Stage):
+    """A step someone does manually, e.g., exporting a figure from
     Photoshop, which the pipeline asks for when its inputs change.
 
     Its outputs are kept while it runs, since they're what the person
     replaces, and the step checks that they changed.
     """
 
-    kind: Literal["manual"] = "manual"
+    kind: Literal["manual-step"] = "manual-step"
     message: str = Field(
         description=(
             "What to do, e.g., 'In Photoshop, export "
@@ -2788,7 +2788,7 @@ class Pipeline(Model):
                 | CommandStage
                 | RScriptStage
                 | WordToPdfStage
-                | ManualStage
+                | ManualStepStage
                 | ExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage

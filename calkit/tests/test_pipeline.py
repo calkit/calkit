@@ -4578,7 +4578,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     # A manual step can't run with nobody here to do it, but can when
     # someone is
     ck_info["pipeline"]["stages"]["by-hand"] = {
-        "kind": "manual",
+        "kind": "manual-step",
         "message": "Export made/by-hand.png",
         "outputs": ["made/by-hand.png"],
     }

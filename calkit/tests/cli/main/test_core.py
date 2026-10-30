@@ -3857,7 +3857,7 @@ def test_manual_step(tmp_dir, monkeypatch, capsys):
                 "pipeline": {
                     "stages": {
                         "export": {
-                            "kind": "manual",
+                            "kind": "manual-step",
                             "message": "Export fig.png",
                             "outputs": ["fig.png"],
                         }

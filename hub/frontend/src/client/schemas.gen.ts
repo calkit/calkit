@@ -10452,9 +10452,9 @@ export const StageExportPostSchema = {
       ],
       title: "App",
     },
-    by_hand: {
+    manual_step: {
       type: "boolean",
-      title: "By Hand",
+      title: "Manual Step",
       default: false,
     },
   },

@@ -7722,7 +7722,7 @@ export class ProjectsService {
    * PNG from an Inkscape SVG or a Photoshop file.
    *
    * An app that can export it, e.g., Inkscape, does so as the pipeline
-   * runs. Otherwise it's a manual stage, which asks someone to export it
+   * runs. Otherwise it's a manual step, which asks someone to export it
    * again whenever the source changes. Either way the source, uploaded or
    * already in the project, is recorded as created by the current user.
    */

@@ -482,7 +482,7 @@ def test_post_project_stage_export(
     assert resp.json()["message"] == message
     info = ck_info()
     assert info["pipeline"]["stages"]["export-drawn"] == {
-        "kind": "manual",
+        "kind": "manual-step",
         "message": message,
         "source_path": "figures/src/drawn.psd",
         "outputs": [{"path": "paper/figures/drawn.png", "storage": "git"}],
@@ -535,7 +535,7 @@ def test_post_project_stage_export(
     [key] = [k for k in store.store if k.endswith(f"{md5[:2]}/{md5[2:]}")]
     assert store.cat(key) == big
     # An SVG is exported by Inkscape as the pipeline runs, unless someone
-    # exports it by hand, or it's shown in a format Inkscape doesn't write
+    # exports it manually, or it's shown in a format Inkscape doesn't write
     svg = base64.b64encode(b"<svg/>").decode()
     resp = post(
         path="paper/figures/setup.png",
@@ -557,12 +557,15 @@ def test_post_project_stage_export(
         "calkit export figures/src/setup.svg -o paper/figures/setup.png"
     )
     for path, body in [
-        ("paper/figures/traced.png", dict(by_hand=True, app="Illustrator")),
+        (
+            "paper/figures/traced.png",
+            dict(manual_step=True, app="Illustrator"),
+        ),
         ("paper/figures/photo.jpg", {}),
     ]:
         resp = post(path=path, source_path="figures/src/setup.svg", **body)
         assert resp.status_code == 200, resp.text
-        assert resp.json()["kind"] == "manual"
+        assert resp.json()["kind"] == "manual-step"
     assert resp.json()["message"] == (
         "Export paper/figures/photo.jpg from figures/src/setup.svg"
     )

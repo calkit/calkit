@@ -951,7 +951,7 @@ def get_status(
                 ck_stage = ck_stages.get(stage_name)
                 if (
                     isinstance(ck_stage, dict)
-                    and ck_stage.get("kind") == "manual"
+                    and ck_stage.get("kind") == "manual-step"
                 ):
                     warn(
                         "          needs a manual step: "

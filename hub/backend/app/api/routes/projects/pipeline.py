@@ -1,4 +1,4 @@
-"""Pipeline stages added from the hub, without a local clone.
+"""Routes for managing project pipelines.
 
 Map-paths stages copy project paths to where something expects them.
 A file or directory often needs to be somewhere other than where it lives,
@@ -318,7 +318,7 @@ SCRIPT_EXTS = (".py", ".r", ".jl", ".m", ".ipynb", ".sh")
 MAX_SCRIPT_BYTES = 1_000_000
 
 
-class StageFromScriptPost(BaseModel):
+class StageFromScriptOrNotebookPost(BaseModel):
     # Where the script is in the project, or goes, when it's uploaded
     script_path: str
     # An uploaded script, base64-encoded
@@ -331,7 +331,7 @@ class StageFromScriptPost(BaseModel):
     save: bool = False
 
 
-class StageFromScript(BaseModel):
+class StageFromScriptOrNotebookResponse(BaseModel):
     stage_name: str
     stage_yaml: str
     environment: str
@@ -354,15 +354,15 @@ class StageFromScript(BaseModel):
 
 
 @router.post(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/from-script"
+    "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook"
 )
-def post_project_stage_from_script(
+def post_project_stage_from_script_or_notebook(
     owner_name: str,
     project_name: str,
-    req: StageFromScriptPost,
+    req: StageFromScriptOrNotebookPost,
     current_user: CurrentUser,
     session: SessionDep,
-) -> StageFromScript:
+) -> StageFromScriptOrNotebookResponse:
     """Make a stage from a script, uploaded or already in the project.
 
     The script is read, not run, as ``calkit xr --dry-run`` reads it: its
@@ -457,7 +457,9 @@ def post_project_stage_from_script(
         merged = dict(existing_stage)
         for field in ("outputs", "inputs"):
             items = list(existing_stage.get(field) or [])
-            known = {i["path"] if isinstance(i, dict) else i for i in items}
+            known = {
+                i.get("path") if isinstance(i, dict) else i for i in items
+            }
             items += [
                 i
                 for i in stage.get(field) or []
@@ -470,7 +472,12 @@ def post_project_stage_from_script(
         o["path"] if isinstance(o, dict) else o
         for o in stage.get("outputs") or []
     ]
-    inputs = [i for i in stage.get("inputs") or [] if isinstance(i, str)]
+    # Env vars, schedules, and other stages' outputs aren't paths
+    inputs = [
+        i if isinstance(i, str) else i["path"]
+        for i in stage.get("inputs") or []
+        if isinstance(i, str) or "path" in i
+    ]
     tree = get_repo_tree_for_ref(repo, None)
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
     missing = [
@@ -537,7 +544,7 @@ def post_project_stage_from_script(
                 f"No document includes '{shows}' to show it from "
                 f"'{produces}' instead",
             )
-    out = StageFromScript(
+    out = StageFromScriptOrNotebookResponse(
         stage_name=stage_name,
         stage_yaml=_dump_ck_stage_map(stage),
         environment=env["name"],

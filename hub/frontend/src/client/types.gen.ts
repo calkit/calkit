@@ -5961,9 +5961,35 @@ export type SoftwareItem = {
 }
 
 /**
- * StageFromScript
+ * StageFromScriptOrNotebookPost
  */
-export type StageFromScript = {
+export type StageFromScriptOrNotebookPost = {
+  /**
+   * Script Path
+   */
+  script_path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Shows
+   */
+  shows?: string | null
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
+ * StageFromScriptOrNotebookResponse
+ */
+export type StageFromScriptOrNotebookResponse = {
   /**
    * Stage Name
    */
@@ -6020,32 +6046,6 @@ export type StageFromScript = {
    * Git Repo Url
    */
   git_repo_url: string
-}
-
-/**
- * StageFromScriptPost
- */
-export type StageFromScriptPost = {
-  /**
-   * Script Path
-   */
-  script_path: string
-  /**
-   * Content
-   */
-  content?: string | null
-  /**
-   * Shows
-   */
-  shows?: string | null
-  /**
-   * Produces
-   */
-  produces?: string | null
-  /**
-   * Save
-   */
-  save?: boolean
 }
 
 /**
@@ -13843,8 +13843,8 @@ export type PostProjectMapPathsResponses = {
 export type PostProjectMapPathsResponse =
   PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
 
-export type PostProjectStageFromScriptData = {
-  body: StageFromScriptPost
+export type PostProjectStageFromScriptOrNotebookData = {
+  body: StageFromScriptOrNotebookPost
   path: {
     /**
      * Owner Name
@@ -13856,28 +13856,28 @@ export type PostProjectStageFromScriptData = {
     project_name: string
   }
   query?: never
-  url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script"
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook"
 }
 
-export type PostProjectStageFromScriptErrors = {
+export type PostProjectStageFromScriptOrNotebookErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostProjectStageFromScriptError =
-  PostProjectStageFromScriptErrors[keyof PostProjectStageFromScriptErrors]
+export type PostProjectStageFromScriptOrNotebookError =
+  PostProjectStageFromScriptOrNotebookErrors[keyof PostProjectStageFromScriptOrNotebookErrors]
 
-export type PostProjectStageFromScriptResponses = {
+export type PostProjectStageFromScriptOrNotebookResponses = {
   /**
    * Successful Response
    */
-  200: StageFromScript
+  200: StageFromScriptOrNotebookResponse
 }
 
-export type PostProjectStageFromScriptResponse =
-  PostProjectStageFromScriptResponses[keyof PostProjectStageFromScriptResponses]
+export type PostProjectStageFromScriptOrNotebookResponse =
+  PostProjectStageFromScriptOrNotebookResponses[keyof PostProjectStageFromScriptOrNotebookResponses]
 
 export type PostProjectManualExportData = {
   body: ManualExportPost

@@ -1802,6 +1802,10 @@ class MatlabCommandStage(Stage):
         return cmd
 
 
+# What a shell takes to skip the user's startup files
+NORC_ARGS = {"bash": " --noprofile --norc", "zsh": " -f", "sh": ""}
+
+
 class ShellCommandStage(Stage):
     kind: Literal["shell-command"]
     command: str = Field(description="Shell command to run.")
@@ -1854,17 +1858,16 @@ class ShellCommandStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = self.xenv_cmd
-        if self.shell == "zsh":
-            norc_args = "-f"
-        else:
-            norc_args = "--noprofile --norc"
+        # Without startup files; a POSIX sh run like this reads none anyway,
+        # and refuses Bash's options for skipping them
+        norc_args = NORC_ARGS[self.shell]
         command_file = self.command_file_path
         if command_file is not None:
             command_file = self.path_from_wdir(command_file)
-            cmd += f" {self.shell} {norc_args} {command_file}"
+            cmd += f" {self.shell}{norc_args} {command_file}"
             return cmd.strip()
         shell_cmd = self.command.replace('"', '\\"')
-        cmd += f' {self.shell} {norc_args} -c "{shell_cmd}"'
+        cmd += f' {self.shell}{norc_args} -c "{shell_cmd}"'
         return cmd.strip()
 
 
@@ -1904,11 +1907,7 @@ class ShellScriptStage(Stage):
                 cmd = cmd.replace(dep_txt, "")
             return cmd
         cmd = self.xenv_cmd
-        if self.shell == "zsh":
-            norc_args = "-f"
-        else:
-            norc_args = "--noprofile --norc"
-        cmd += f" {self.shell} {norc_args} {self.script_path}"
+        cmd += f" {self.shell}{NORC_ARGS[self.shell]} {self.script_path}"
         for arg in self.args:
             cmd += f" {quote_arg(arg)}"
         return cmd.strip()

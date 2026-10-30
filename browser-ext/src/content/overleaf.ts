@@ -399,7 +399,7 @@ function renderExported(
     message.append(loading(upload ? "Uploading" : "Saving"));
     try {
       await send({
-        type: "project.manualExport",
+        type: "project.stageExport",
         owner,
         project,
         path: target,
@@ -764,6 +764,8 @@ function renderProvenance(
                   document.createTextNode(
                     p.stage_kind === "manual"
                       ? "Exported by hand from "
+                      : p.stage_kind === "export"
+                      ? "Exported from "
                       : "Runs ",
                   ),
                   el("a", { text: p.source, href: fileUrl(p.source) }),
@@ -907,6 +909,8 @@ function renderProvenance(
           { class: "small" },
           provenance.stage_kind === "manual"
             ? [document.createTextNode("Exported by hand from "), source]
+            : provenance.stage_kind === "export"
+            ? [document.createTextNode("Exported from "), source]
             : [
                 document.createTextNode("Edit "),
                 source,

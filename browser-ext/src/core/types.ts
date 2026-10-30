@@ -194,10 +194,12 @@ export interface Provenance {
   gaps?: ProvenanceGap[];
 }
 
-/** A manual stage exporting a figure by hand from a source file. */
-export interface ManualExport {
+/** A stage exporting a figure from a source file, by an app or by hand. */
+export interface StageExport {
   stage_name: string;
   stage_yaml: string;
+  /** export when an app does it as the pipeline runs, manual otherwise. */
+  kind: string;
   message: string;
 }
 

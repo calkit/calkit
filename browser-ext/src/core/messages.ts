@@ -8,7 +8,6 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
-  ManualExport,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -20,6 +19,7 @@ import type {
   ReferenceSearchMatch,
   References,
   Result,
+  StageExport,
   StageFromScript,
   Table,
 } from "./types";
@@ -142,7 +142,7 @@ export type Request =
       createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
     }
   | {
-      type: "project.manualExport";
+      type: "project.stageExport";
       owner: string;
       project: string;
       /** What the document shows, exported by hand. */
@@ -239,7 +239,7 @@ export interface ResponseMap {
   "project.provenance": Provenance;
   "project.stageFromScript": StageFromScript;
   "project.recordOrigin": { path: string };
-  "project.manualExport": ManualExport;
+  "project.stageExport": StageExport;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

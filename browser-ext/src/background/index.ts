@@ -21,7 +21,6 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
-  ManualExport,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -33,6 +32,7 @@ import type {
   ReferenceSearchMatch,
   References,
   Result,
+  StageExport,
   StageFromScript,
   Table,
 } from "../core/types";
@@ -293,10 +293,10 @@ async function handle(message: Request): Promise<unknown> {
           },
         },
       );
-    case "project.manualExport":
-      return request<ManualExport>(
+    case "project.stageExport":
+      return request<StageExport>(
         `${projectPath(message.owner, message.project)}` +
-          "/pipeline/stages/manual-export",
+          "/pipeline/stages/export",
         {
           method: "POST",
           body: {

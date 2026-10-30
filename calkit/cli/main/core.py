@@ -4031,6 +4031,15 @@ def manual_step(
 
     from calkit.provenance import hash_path
 
+    def ask() -> str:
+        # Windows calls an empty stdin a terminal, so its end says so too
+        try:
+            return input()
+        except EOFError:
+            raise_error(
+                f"Needs a manual step, with nobody here to do it: {message}"
+            )
+
     # Waiting for someone who isn't there would hang, e.g., in CI
     if not sys.stdin.isatty():
         raise_error(
@@ -4071,7 +4080,7 @@ def manual_step(
             ),
             flush=True,
         )
-        input()
+        ask()
         missing = [path for path in outputs if not os.path.exists(path)]
         if missing:
             typer.echo(f"Not there yet: {', '.join(missing)}")
@@ -4086,7 +4095,7 @@ def manual_step(
                 f"Unchanged: {', '.join(unchanged)}. Keep as is? [y/N]",
                 flush=True,
             )
-            if input().strip().lower() not in ("y", "yes"):
+            if ask().strip().lower() not in ("y", "yes"):
                 continue
         break
     typer.echo("Done")

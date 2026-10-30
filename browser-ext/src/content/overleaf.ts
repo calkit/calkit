@@ -2979,6 +2979,9 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       }
       return;
     }
+    // Cards link to the hub the project was found on, and can show before
+    // the panel, which also sets it, is opened
+    hubWebUrl = hub;
     currentLink = link;
     void checkCitations();
     const statuses = await send({

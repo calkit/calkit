@@ -74,10 +74,10 @@ item in the paper selects it in the list.
 ## Say where something came from
 
 Pick an item, e.g., the first figure, and click **Where did this come
-from?** There are four answers.
+from?** There are five answers.
 
 <!-- Screenshot: img/overleaf-paper/where-from.png
-The four choices for one figure. -->
+The five choices for one figure. -->
 
 ### Made by code in a GitHub repository
 
@@ -121,12 +121,38 @@ paper, a data repository, or a colleague's project, give its URL or DOI.
 Calkit records it, and can check it again later to see whether the source
 has changed.
 
+### Exported by hand from a file you made
+
+Plenty of figures aren't made by code: a diagram drawn in Illustrator or
+Inkscape, a photo touched up in Photoshop, or a plot laid out in
+PowerPoint.
+What goes into the paper is a PNG or PDF exported from that file,
+and that file is what you'd change if the figure had to.
+
+Choose **Exported**, then pick or upload the file it's exported from, and
+say which app you export it with.
+Calkit records the file as yours, and adds a step to the pipeline saying
+the figure is exported from it by hand.
+
+Nothing runs that step for you, but Calkit keeps track of whether it's
+been done.
+Months later, when the reviews come back and you change the diagram, the
+figure in the paper shows as out of date, with a reminder to export it
+again.
+Running the pipeline on your computer opens the file in its app, waits
+while you export the figure, then checks the new export is there before
+carrying on.
+The figure in the paper can't quietly fall behind the file it came from,
+and nobody has to remember there was a manual step at all.
+
 ### Drawn or measured by you
 
-Some things don't come from code: a schematic you drew, a photo of the
-experimental setup, or measurements you took by hand. Say who made it.
+Some things don't come from code: a photo of the experimental setup, a
+sketch you scanned, or measurements you took by hand. Say who made it.
 If an AI tool helped, say which one. That's recorded against the person,
 so someone always answers for it.
+A PNG or PDF is exported from something, though, so for those, choose
+**Exported** and give the file it came from.
 
 Numbers can't be accounted for this way. A number in the paper should come
 from something that computed it, so a measurement belongs in a dataset you

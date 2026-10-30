@@ -25,6 +25,7 @@ from git.exc import InvalidGitRepositoryError
 import calkit
 import calkit.cli.main
 import calkit.schema
+import calkit.windows
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
@@ -2738,6 +2739,20 @@ def test_run_captures_stage_logs_failure(tmp_dir):
     assert res.returncode != 0
     log_content = _read_only_log(os.path.join(".calkit", "local", "logs"))
     assert "FAIL_OUT_MARKER" in log_content
+    # An ordinary failure isn't blamed on Windows App Control
+    assert "Smart App Control" not in res.stderr
+    # One that Windows App Control caused is explained
+    with open("stage_fail.py", "w") as f:
+        f.write(
+            "import sys\n"
+            "print('ImportError: DLL load failed while importing _sqlite3: "
+            "An Application Control policy has blocked this file.')\n"
+            "sys.exit(1)\n"
+        )
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Windows blocked a file from running" in res.stderr
+    assert calkit.windows.SMART_APP_CONTROL_DOCS_URL in res.stderr
 
 
 def test_run_log_flag_copies_stage_logs(tmp_dir):

@@ -132,14 +132,14 @@
     }
   },
   "one-pager-font": {
-    "start_time": "2026-10-30T22:12:44.476000",
-    "end_time": "2026-10-30T22:12:45.151000",
+    "start_time": "2026-10-30T22:26:37.528000",
+    "end_time": "2026-10-30T22:26:38.201000",
     "environment": "tex",
-    "git_rev": "29af488ae21eaaceae02c05d25d6dd1b0a607a35",
+    "git_rev": "ff951096a6b4bab3b7b8d704803400d896f23f19",
     "git_dirty": false,
     "dvc_lock_hash": "sha256:058fdde0c2d38cac8839169442b183a2da27bed59ce920492748ba38429c5f00",
-    "calkit_version": "0.50.4.dev242+g29af488a",
-    "calkit_git_rev": "29af488ae21eaaceae02c05d25d6dd1b0a607a35",
+    "calkit_version": "0.50.4.dev184+gff951096",
+    "calkit_git_rev": "ff951096a6b4bab3b7b8d704803400d896f23f19",
     "system": {
       "machine_id": "dea6d6a5eb9548ec97f8b91c56f0bffa",
       "os": "Linux",
@@ -151,21 +151,21 @@
     }
   },
   "one-pager/pdf": {
-    "start_time": "2026-10-30T18:50:38.271000",
-    "end_time": "2026-10-30T18:50:41.788000",
-    "git_rev": "bd5ba2a1a4ff05fbe824331f53eee16091cb9607",
-    "git_dirty": false,
-    "dvc_lock_hash": "sha256:12f7096873e06735bf50570558cb6c9c9305b4572ed191d29a2c19c90c9ecda2",
-    "calkit_version": "0.50.4.dev7+gbd5ba2a1",
-    "calkit_git_rev": "bd5ba2a1a4ff05fbe824331f53eee16091cb9607",
+    "start_time": "2026-10-30T22:26:10.010000",
+    "end_time": "2026-10-30T22:26:14.487000",
+    "git_rev": "a737c91c8fdb6a2e7b7fec341a5b16cf77a85657",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:720c03b6bc43928ff9bdc108d39779216f0638358df6294038f39acd025ec43e",
+    "calkit_version": "0.50.4.dev8+ga737c91c8.d20261030",
+    "calkit_git_rev": "a737c91c8fdb6a2e7b7fec341a5b16cf77a85657",
     "system": {
-      "machine_id": "dea6d6a5eb9548ec97f8b91c56f0bffa",
-      "os": "Linux",
-      "os_version": "7.0.0-1017-azure",
-      "machine": "x86_64",
-      "processor": "x86_64",
-      "cpu_count": 4,
-      "memory_gb": 15.6
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "os": "Darwin",
+      "os_version": "27.0.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 10,
+      "memory_gb": 64.0
     }
   },
   "research-flow": {

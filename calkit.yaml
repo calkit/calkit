@@ -211,8 +211,7 @@ pipeline:
         in it too, wherever the pipeline runs.
       command: cp "$(kpsewhich texgyreheros-regular.otf)" docs/one-pager/
       outputs:
-        - path: docs/one-pager/texgyreheros-regular.otf
-          storage: null
+        - docs/one-pager/texgyreheros-regular.otf
     budget-2027-figure:
       kind: python-script
       script_path: scripts/plot-budget.py

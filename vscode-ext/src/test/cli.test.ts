@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import * as path from "node:path";
 import test from "node:test";
-import { missingInstallDirs } from "../cli";
+import { isAppControlBlock, missingInstallDirs } from "../cli";
 
 test("missingInstallDirs finds install folders missing from PATH", () => {
   const home = "/home/me";
@@ -68,4 +68,36 @@ test("missingInstallDirs finds install folders missing from PATH", () => {
     ),
     [],
   );
+});
+
+test("isAppControlBlock tells Windows blocking the CLI from it missing", () => {
+  const blocked = [
+    // Windows refused to start calkit.exe
+    Object.assign(new Error("spawn calkit UNKNOWN"), { code: "UNKNOWN" }),
+    // It started, but a DLL was blocked, as an unsigned or signed status
+    Object.assign(new Error("Command failed"), { code: 0xc0e90002 }),
+    Object.assign(new Error("Command failed"), { code: -1058471934 }),
+    // uv's launcher couldn't start the Python it installed
+    Object.assign(new Error("Command failed: calkit --version"), {
+      code: 1,
+      stderr:
+        "Failed to spawn: An Application Control policy has blocked this file. (os error 4551)",
+    }),
+  ];
+  for (const error of blocked) {
+    assert.equal(isAppControlBlock(error, "win32"), true);
+    // Nothing on other platforms is blocked this way
+    assert.equal(isAppControlBlock(error, "linux"), false);
+  }
+  // Not installed, or failing for some other reason
+  const notBlocked = [
+    Object.assign(new Error("spawn calkit ENOENT"), { code: "ENOENT" }),
+    Object.assign(new Error("Command failed"), { code: 1, stderr: "Error" }),
+    Object.assign(new Error("timed out"), { killed: true, signal: "SIGTERM" }),
+    "failed",
+    undefined,
+  ];
+  for (const error of notBlocked) {
+    assert.equal(isAppControlBlock(error, "win32"), false);
+  }
 });

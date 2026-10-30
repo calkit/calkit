@@ -6,6 +6,7 @@ import sys
 import pytest
 
 import calkit
+import calkit.windows
 from calkit import upgrade
 
 
@@ -93,6 +94,7 @@ def test_check_in_background(tmp_path, monkeypatch):
     monkeypatch.setattr(upgrade, "can_auto_upgrade", lambda: True)
     monkeypatch.setattr(upgrade, "get_upgrade_cmd", lambda: ["up"])
     monkeypatch.setattr(upgrade, "get_calkit_pids", lambda: [2])
+    monkeypatch.setattr(calkit.windows, "smart_app_control_on", lambda: False)
     runs = []
     monkeypatch.setattr(
         upgrade, "run_after_exit", lambda cmds, pids: runs.append((cmds, pids))
@@ -102,10 +104,16 @@ def test_check_in_background(tmp_path, monkeypatch):
     upgrade.check_in_background([1])
     assert upgrade.read_state()["latest"] == "1.1.0"
     assert not runs
+    # Likewise under Smart App Control, which could block upgraded files
+    monkeypatch.delenv("CALKIT_TEST_AUTO_UPGRADE")
+    monkeypatch.setattr(calkit.windows, "smart_app_control_on", lambda: True)
+    upgrade.check_in_background([1])
+    assert not runs
+    assert "upgraded_from" not in upgrade.read_state()
+    monkeypatch.setattr(calkit.windows, "smart_app_control_on", lambda: False)
     # On by default, it upgrades once the command that started it exits,
     # and on Windows this process too, since it holds files the upgrade
     # replaces
-    monkeypatch.delenv("CALKIT_TEST_AUTO_UPGRADE")
     upgrade.check_in_background([1])
     pids = [1, 2] if sys.platform == "win32" else [1]
     assert runs == [([["up"]], pids)]

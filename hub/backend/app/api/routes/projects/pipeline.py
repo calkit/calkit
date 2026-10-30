@@ -436,7 +436,12 @@ def post_project_stage_from_script_or_notebook(
         o["path"] if isinstance(o, dict) else o
         for o in stage.get("outputs") or []
     ]
-    inputs = [i for i in stage.get("inputs") or [] if isinstance(i, str)]
+    # Env vars, schedules, and other stages' outputs aren't paths
+    inputs = [
+        i if isinstance(i, str) else i["path"]
+        for i in stage.get("inputs") or []
+        if isinstance(i, str) or "path" in i
+    ]
     ck_info = get_ck_info_from_repo(repo=repo)
     tree = get_repo_tree_for_ref(repo, None)
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)

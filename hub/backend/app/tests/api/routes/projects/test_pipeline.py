@@ -372,6 +372,13 @@ def test_post_project_stage_from_script_or_notebook(
     assert "plot" in yaml.safe_load((wdir / "dvc.yaml").read_text())["stages"]
     assert not repo.is_dirty(untracked_files=True)
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
+    # A stage declaring its inputs as objects carrying paths keeps them
+    stage["inputs"] = [{"path": "data/raw.csv"}, {"path": "data/extra.csv"}]
+    (wdir / "calkit.yaml").write_text(yaml.safe_dump(ck))
+    repo.git.commit(["-am", "Declare inputs as objects"])
+    resp = post(script_path="scripts/plot.py")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["inputs"] == ["data/raw.csv", "data/extra.csv"]
     # A script already in the project is read where it is, and an output
     # can be named for what the paper shows
     resp = post(script_path="scripts/old.py", shows="paper/figures/fit.png")

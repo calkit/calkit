@@ -141,9 +141,8 @@ been done.
 Months later, when the reviews come back and you change the diagram, the
 figure in the paper shows as out of date, with a reminder that it needs a
 manual step.
-Running the pipeline on your computer opens the file in its app, waits
-while you export the figure, then checks the new export is there before
-carrying on.
+Running the pipeline on your computer says what to do, waits while you
+export the figure, then checks the new export is there before carrying on.
 The figure in the paper can't quietly fall behind the file it came from,
 and nobody has to remember there was a manual step at all.
 
@@ -174,11 +173,13 @@ calkit run
 The "Sync now" prompt after a figure's origin is recorded. -->
 
 Then click **Sync now** in the panel. Calkit sends the figure from the
-project to the same place in your Overleaf project, replacing the copy that
-was uploaded by hand, and the item is checked off. Your
-`\includegraphics` line stays exactly as it was. If the figure is made
-somewhere other than where the paper expects it, Calkit adds a step that
-copies it into place, so you don't have to rename anything.
+project to your Overleaf project, replacing the copy that was uploaded by
+hand, and the item is checked off.
+If the script saves the figure where the paper already has it, your
+`\includegraphics` line stays exactly as it was.
+If it saves it somewhere else, Calkit changes the line to a `\ckfigure`
+naming where the script saves it, so you don't have to rename or copy
+anything.
 
 Numbers are different, since a number typed into the text has nothing to
 point at. For those, Calkit swaps the typed value for a `\ckvalue`, which
@@ -199,7 +200,7 @@ insert a new figure or table from the project, but nothing you've already
 written needs to change to use them.
 
 From now on, putting the cursor on the figure shows what made it, whether
-it's out of date, and a link to see it on calkit.io. When the code or data
+it's out of date, and a link to see it on Calkit. When the code or data
 changes, the figure shows as stale until you run the pipeline and sync
 again.
 

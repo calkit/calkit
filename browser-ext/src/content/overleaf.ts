@@ -1198,39 +1198,70 @@ function placePdfBoxes(): void {
 
 /** Follow Overleaf's builds and its PDF viewer, to keep the boxes on it. */
 function watchPdf(): void {
+  // A new build means new positions, and a lookup that failed for
+  // want of the editor ID shouldn't stay cached
+  const noteBuild = (url: string, clsiServerId: string | null) => {
+    // e.g., build/<editor id>-<build id>/output/output.pdf, where the
+    // editor ID, a UUID, isn't always there
+    const match = url.match(
+      /\/build\/(?:([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})-)?([0-9a-f]+-[0-9a-f]+)\/output\/(?:cached\/)?output\.pdf/,
+    );
+    if (!match) {
+      return;
+    }
+    const [, editorId = null, buildId] = match;
+    const same = buildId === pdfBuild?.buildId ? pdfBuild : null;
+    const next = {
+      buildId,
+      editorId: editorId ?? same?.editorId ?? null,
+      clsiServerId: clsiServerId ?? same?.clsiServerId ?? null,
+    };
+    if (
+      same &&
+      same.editorId === next.editorId &&
+      same.clsiServerId === next.clsiServerId
+    ) {
+      return;
+    }
+    pdfBuild = next;
+    synctexCache.clear();
+    void drawPdfBoxes();
+  };
+  // Overleaf's own requests say which compile server has the build, but
+  // a content script may not see them, so the PDF's download link, which
+  // it always can, says which build it is
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
-      // e.g., build/<editor id>-<build id>/output/output.pdf, where the
-      // editor ID, a UUID, isn't always there
-      const match = entry.name.match(
-        /\/build\/(?:([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})-)?([0-9a-f]+-[0-9a-f]+)\/output\/output\.pdf/,
+      noteBuild(
+        entry.name,
+        URL.canParse(entry.name)
+          ? new URL(entry.name).searchParams.get("clsiserverid")
+          : null,
       );
-      if (!match) {
-        continue;
-      }
-      const [, editorId = null, buildId] = match;
-      if (
-        buildId !== pdfBuild?.buildId ||
-        (editorId && editorId !== pdfBuild.editorId)
-      ) {
-        pdfBuild = {
-          buildId,
-          editorId: editorId ?? pdfBuild?.editorId ?? null,
-          clsiServerId:
-            new URL(entry.name).searchParams.get("clsiserverid") ??
-            pdfBuild?.clsiServerId ??
-            null,
-        };
-        synctexCache.clear();
-        void drawPdfBoxes();
-      }
     }
   }).observe({ type: "resource", buffered: true });
+  const noteDownloadLink = () => {
+    const link = document.querySelector<HTMLAnchorElement>(
+      'a[href*="/build/"][href*="output.pdf"]',
+    );
+    if (link) {
+      noteBuild(link.href, null);
+    }
+  };
+  noteDownloadLink();
   let timer: ReturnType<typeof setTimeout> | undefined;
   new MutationObserver(() => {
     clearTimeout(timer);
-    timer = setTimeout(placePdfBoxes, 200);
-  }).observe(document.body, { childList: true, subtree: true });
+    timer = setTimeout(() => {
+      noteDownloadLink();
+      placePdfBoxes();
+    }, 200);
+  }).observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["href"],
+  });
   // A citation's provenance on hover, as in the editor. Overleaf says
   // which line of which file is under the pointer, as for a double click,
   // so the PDF still gets every click
@@ -1262,9 +1293,11 @@ function watchPdf(): void {
       h: h.toFixed(2),
       v: v.toFixed(2),
     });
-    if (build) {
-      setBuildParams(params, build);
+    if (!build) {
+      console.debug("[Calkit] PDF hover: no PDF build found yet");
+      return null;
     }
+    setBuildParams(params, build);
     // Each pointer position is new, so there's nothing worth caching
     const code: { file: string; line: number; column?: number }[] = await fetch(
       `/project/${projectId}/sync/pdf?${params}`,

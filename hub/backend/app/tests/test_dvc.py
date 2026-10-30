@@ -2,6 +2,9 @@
 
 import os
 from copy import deepcopy
+from pathlib import Path
+
+import pytest
 
 from app.dvc import (
     get_data_fpath_for_md5,
@@ -34,7 +37,17 @@ def test_ck_remote_scheme_is_registered(tmp_path):
     assert run_dvc_command(["status"], wdir=wdir) == 0
 
 
-def test_make_mermaid_diagram():
+def test_make_mermaid_diagram(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dvc.exceptions import OutputDuplicationError
+    from dvc.parsing import ResolveError
+
+    # Run from a directory away from the root, where DVC's paths relative
+    # to the working directory would show up in labels
+    wdir = tmp_path / "a" / "b"
+    wdir.mkdir(parents=True)
+    monkeypatch.chdir(wdir)
     pipeline = {
         "stages": {
             "do-something": {
@@ -43,14 +56,49 @@ def test_make_mermaid_diagram():
                 "outs": ["something.png"],
             },
             "do-something-else": {
-                "cmd": "echo sup2",
+                "cmd": "echo ${lr}",
                 "deps": ["something.png"],
                 "outs": ["else.pdf"],
             },
+            "loop": {
+                "foreach": [1, 2],
+                "do": {
+                    "cmd": "echo ${item}",
+                    "deps": ["else.pdf"],
+                    "outs": ["out-${item}.txt"],
+                },
+            },
         }
     }
-    mm = make_mermaid_diagram(pipeline)
-    return mm
+    mm = make_mermaid_diagram(pipeline, params={"lr": 0.1})
+    assert mm == (
+        "flowchart TD"
+        '\n\tnode1["do-something"]'
+        '\n\tnode2["do-something-else"]'
+        '\n\tnode3["loop@1"]'
+        '\n\tnode4["loop@2"]'
+        "\n\tnode1-->node2"
+        "\n\tnode2-->node3"
+        "\n\tnode2-->node4"
+    )
+    # Neither the working directory nor its contents change
+    assert os.getcwd() == str(wdir)
+    assert os.listdir(wdir) == []
+    # Errors name stages, not their paths relative to the working directory
+    with pytest.raises(OutputDuplicationError) as exc_info:
+        make_mermaid_diagram(
+            {
+                "stages": {
+                    "a": {"cmd": "x", "outs": ["o"]},
+                    "b": {"cmd": "y", "outs": ["o"]},
+                }
+            }
+        )
+    assert "\t- a\n" in str(exc_info.value)
+    assert "dvc.yaml" not in str(exc_info.value)
+    # A missing param still fails
+    with pytest.raises(ResolveError, match="Could not find 'lr'"):
+        make_mermaid_diagram(pipeline)
 
 
 def test_output_from_pipeline():

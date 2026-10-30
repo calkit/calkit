@@ -605,10 +605,17 @@ def test_find_provenance_gaps():
 
     ck_info = {
         "datasets": [
+            # Listed before the folder that records its origin
+            {"path": "data/imported/listed.csv"},
             {"path": "data/imported", "imported_from": {"doi": "10.1/x"}},
             {"path": "data/measured.csv", "created_by": {"email": "a@b.c"}},
         ],
-        "misc": [{"path": "photos", "created_by": {"email": "a@b.c"}}],
+        "misc": [
+            {"path": "photos", "created_by": {"email": "a@b.c"}},
+            # A bare folder listed before a file in it with an origin
+            {"path": "drawings"},
+            {"path": "drawings/sketch.jpeg", "created_by": {"email": "a@b.c"}},
+        ],
         # Taken at its word, though the stage isn't compiled yet
         "figures": [{"path": "figures/new.png", "stage": "not-compiled"}],
     }
@@ -693,6 +700,8 @@ def test_find_provenance_gaps():
         "(results/summary.json <- stage summarize <- data/loose.json)"
     ]
     assert gaps(["figures/new.png"]) == []
+    # Any entry covering a path can record its origin, in any order
+    assert gaps(["data/imported/listed.csv", "drawings/sketch.jpeg"]) == []
     # A person can take a photo, but a PNG is exported from something
     assert gaps(["photos/site.jpeg", "photos/export.png"]) == [
         "origin not defined for photos/export.png"
@@ -720,6 +729,11 @@ def test_is_data_path(tmp_path):
     (tmp_path / "scripts" / "plot.py").write_text("")
     (tmp_path / "big").mkdir()
     (tmp_path / "big.dvc").write_text("outs: []\n")
+    (tmp_path / "pointers").mkdir()
+    (tmp_path / "pointers" / "raw.csv.dvc").write_text("outs: []\n")
+    (tmp_path / "store.zarr" / "0").mkdir(parents=True)
+    (tmp_path / "store.zarr" / "0" / "0").write_text("")
+    (tmp_path / "nested" / "store.zarr").mkdir(parents=True)
     # A data file, or a folder with one anywhere inside, is data
     assert is_data("data/raw/deep/x.csv")
     assert is_data("data")
@@ -732,3 +746,8 @@ def test_is_data_path(tmp_path):
     # its kind
     assert is_data("big")
     assert is_data("big/notes.txt")
+    # A folder of DVC pointers is data before anything is pulled, and a
+    # store is data by its name, whatever its insides are called
+    assert is_data("pointers")
+    assert is_data("store.zarr")
+    assert is_data("nested")

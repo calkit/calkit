@@ -240,14 +240,29 @@ def test_check_reproducibility(tmp_dir):
             "\\end{document}\n"
         )
     res = check_reproducibility()
+    expected = [
+        "origin not defined for figures/pasted.png",
+        "origin not defined for paper/drawn.png",
+    ]
     assert [
         g
         for g in res.provenance_gaps
         if "mystery" not in g and "exported" not in g
-    ] == [
-        "origin not defined for figures/pasted.png",
-        "origin not defined for paper/drawn.png",
-    ]
+    ] == expected
+    # The same paper, named relative to its stage's working directory
+    ck_info["pipeline"]["stages"]["paper"] = {
+        "kind": "latex",
+        "wdir": "paper",
+        "target_path": "main.tex",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check_reproducibility()
+    assert [
+        g
+        for g in res.provenance_gaps
+        if "mystery" not in g and "exported" not in g
+    ] == expected
 
 
 def test_check_call():

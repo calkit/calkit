@@ -32,7 +32,7 @@ import type {
   ReferenceSearchMatch,
   References,
   Result,
-  StageFromScript,
+  StageFromScriptOrNotebookResponse,
   Table,
 } from "../core/types";
 
@@ -258,10 +258,10 @@ async function handle(message: Request): Promise<unknown> {
         `${projectPath(message.owner, message.project)}/provenance`,
         { query: { path: message.path, key: message.key } },
       );
-    case "project.stageFromScript":
-      return request<StageFromScript>(
+    case "project.stageFromScriptOrNotebook":
+      return request<StageFromScriptOrNotebookResponse>(
         `${projectPath(message.owner, message.project)}` +
-          "/pipeline/stages/from-script",
+          "/pipeline/stages/from-script-or-notebook",
         {
           method: "POST",
           body: {

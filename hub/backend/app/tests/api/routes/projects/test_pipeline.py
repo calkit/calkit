@@ -278,7 +278,7 @@ def test_map_paths_on_dvc_only_pipeline_and_removal(
     assert resp.status_code == 404
 
 
-def test_post_project_stage_from_script(
+def test_post_project_stage_from_script_or_notebook(
     client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
 ) -> None:
     import base64
@@ -322,7 +322,7 @@ def test_post_project_stage_from_script(
             ),
         ):
             return client.post(
-                "/projects/o/p/pipeline/stages/from-script",
+                "/projects/o/p/pipeline/stages/from-script-or-notebook",
                 json=body,
                 headers=normal_user_token_headers,
             )

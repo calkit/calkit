@@ -10396,7 +10396,57 @@ export const SoftwareItemSchema = {
   title: "SoftwareItem",
 } as const
 
-export const StageFromScriptSchema = {
+export const StageFromScriptOrNotebookPostSchema = {
+  properties: {
+    script_path: {
+      type: "string",
+      title: "Script Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    shows: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Shows",
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["script_path"],
+  title: "StageFromScriptOrNotebookPost",
+} as const
+
+export const StageFromScriptOrNotebookResponseSchema = {
   properties: {
     stage_name: {
       type: "string",
@@ -10508,57 +10558,7 @@ export const StageFromScriptSchema = {
     "environment_is_new",
     "git_repo_url",
   ],
-  title: "StageFromScript",
-} as const
-
-export const StageFromScriptPostSchema = {
-  properties: {
-    script_path: {
-      type: "string",
-      title: "Script Path",
-    },
-    content: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Content",
-    },
-    shows: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Shows",
-    },
-    produces: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Produces",
-    },
-    save: {
-      type: "boolean",
-      title: "Save",
-      default: false,
-    },
-  },
-  type: "object",
-  required: ["script_path"],
-  title: "StageFromScriptPost",
+  title: "StageFromScriptOrNotebookResponse",
 } as const
 
 export const StageStatusSchema = {

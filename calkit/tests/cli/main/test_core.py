@@ -3844,3 +3844,57 @@ def test_merge(tmp_dir):
         check_environments=False, clean_notebooks=False
     )
     assert [n.split("@")[0] for n in status.stale_stage_names] == ["a"]
+
+
+def test_manual_step(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import manual_step
+
+    # With nobody to do it, it says so rather than waiting
+    out = subprocess.run(
+        ["calkit", "manual-step", "-m", "Export fig.png"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode != 0
+    assert "Needs a manual step" in out.stdout + out.stderr
+    assert "Export fig.png" in out.stdout + out.stderr
+    # With someone there, the source opens, and the step isn't done until
+    # every output exists and has changed, or they say keep it as is
+    with open("fig.png", "w") as f:
+        f.write("v1")
+    opened = []
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda args, **kwargs: opened.append(args)
+    )
+    monkeypatch.setattr(sys, "stdin", Mock(isatty=lambda: True))
+    answers = []
+
+    def answer() -> str:
+        answers.append(capsys.readouterr().out)
+        if len(answers) == 2:
+            with open("new.png", "w") as f:
+                f.write("v1")
+        elif len(answers) == 3:
+            return "n"
+        elif len(answers) == 4:
+            with open("fig.png", "w") as f:
+                f.write("v2")
+        return ""
+
+    monkeypatch.setattr("builtins.input", answer)
+    manual_step(
+        message="Export fig.png and new.png",
+        open_path="src.psd",
+        outputs=["fig.png", "new.png"],
+    )
+    assert opened == [["xdg-open", "src.psd"]]
+    # Every prompt is a whole line, so it shows under 'calkit run'
+    assert answers[0].endswith(
+        "Export fig.png and new.png. Press Enter when done.\n"
+    )
+    assert answers[1].startswith("Not there yet: new.png\n")
+    assert answers[2].endswith("Unchanged: fig.png. Keep as is? [y/N]\n")
+    assert len(answers) == 4
+    assert capsys.readouterr().out.rstrip().endswith("Done")

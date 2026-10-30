@@ -3052,6 +3052,7 @@ def run(
                 stage_names=stage_names,
                 system_info=system_info,
                 interactive=False if spinner else None,
+                manual=can_ask,
             )
             # A machine that couldn't be reached may only need asking about,
             # e.g., for its host
@@ -3994,6 +3995,20 @@ def manual_step(
     cmd: Annotated[
         str | None, typer.Option("--cmd", help="Command to run.")
     ] = None,
+    open_path: Annotated[
+        str | None,
+        typer.Option(
+            "--open", help="File to open in its default app, e.g., to export."
+        ),
+    ] = None,
+    outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--output",
+            "-o",
+            help="File the step writes, which must change for it to be done.",
+        ),
+    ] = [],
     show_stdout: Annotated[
         bool, typer.Option("--show-stdout", help="Show stdout.")
     ] = False,
@@ -4001,6 +4016,14 @@ def manual_step(
         bool, typer.Option("--show-stderr", help="Show stderr.")
     ] = False,
 ) -> None:
+    from calkit.provenance import hash_path
+
+    # Waiting for someone who isn't there would hang, e.g., in CI
+    if not sys.stdin.isatty():
+        raise_error(
+            f"Needs a manual step, with nobody here to do it: {message}"
+        )
+    before = {path: hash_path(path) for path in outputs}
     if cmd is not None:
         typer.echo(f"Running command: {cmd}")
         subprocess.Popen(
@@ -4009,7 +4032,40 @@ def manual_step(
             stdout=subprocess.PIPE if not show_stdout else None,
             shell=True,
         )
-    input(message + " (press enter to confirm): ")
+    if open_path is not None:
+        typer.echo(f"Opening {open_path}")
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", open_path])
+        elif sys.platform == "win32":
+            os.startfile(open_path)
+        else:
+            subprocess.Popen(
+                ["xdg-open", open_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    # Each prompt ends its line, since 'calkit run' passes stage output on
+    # a line at a time, so a prompt waiting on its line wouldn't show
+    while True:
+        print(f"{message}. Press Enter when done.", flush=True)
+        input()
+        missing = [path for path in outputs if not os.path.exists(path)]
+        if missing:
+            typer.echo(f"Not there yet: {', '.join(missing)}")
+            continue
+        # Unchanged is fine when it was already done, but is asked about,
+        # since otherwise it's an old output recorded as a new one
+        unchanged = [
+            path for path in outputs if hash_path(path) == before[path]
+        ]
+        if unchanged:
+            print(
+                f"Unchanged: {', '.join(unchanged)}. Keep as is? [y/N]",
+                flush=True,
+            )
+            if input().strip().lower() not in ("y", "yes"):
+                continue
+        break
     typer.echo("Done")
 
 

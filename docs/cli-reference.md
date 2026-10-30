@@ -399,12 +399,14 @@ calkit manual-step [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description                     |
-| ----------------- | ------- | -------- | ------- | ------------------------------- |
-| `--message`, `-m` | str     | yes      |         | Message to display as a prompt. |
-| `--cmd`           | str     | no       |         | Command to run.                 |
-| `--show-stdout`   | boolean | no       | False   | Show stdout.                    |
-| `--show-stderr`   | boolean | no       | False   | Show stderr.                    |
+| Option            | Type    | Required | Default | Description                                                |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------- |
+| `--message`, `-m` | str     | yes      |         | Message to display as a prompt.                            |
+| `--cmd`           | str     | no       |         | Command to run.                                            |
+| `--open`          | str     | no       |         | File to open in its default app, e.g., to export.          |
+| `--output`, `-o`  | str     | no       |         | File the step writes, which must change for it to be done. |
+| `--show-stdout`   | boolean | no       | False   | Show stdout.                                               |
+| `--show-stderr`   | boolean | no       | False   | Show stderr.                                               |
 
 <a id="top-command-xenv-runenv"></a>
 

@@ -3,7 +3,6 @@
 import json
 
 import matplotlib.pyplot as plt
-from matplotlib import font_manager
 
 r = json.loads(open("results/2027-budget.json").read())
 LABELS = {
@@ -13,13 +12,10 @@ LABELS = {
     "hosting": "Cloud hosting",
 }
 TEAL, INK, MUTED = "#3F8F80", "#1E2A2E", "#66737A"
-# The one-pager's own font, from the TeX image it's built with, so the figure
-# looks the same wherever the pipeline runs
-font_manager.fontManager.addfont("docs/one-pager/texgyreheros-regular.otf")
 plt.rcParams.update(
     {
         "font.family": "sans-serif",
-        "font.sans-serif": ["TeX Gyre Heros"],
+        "font.sans-serif": ["TeX Gyre Heros", "Helvetica", "Arial"],
         "font.size": 8,
         "text.color": INK,
     }

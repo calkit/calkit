@@ -69,24 +69,6 @@ stages:
       hash: md5
       md5: 4960953114330139033d7281122861de
       size: 135957
-  one-pager-font:
-    cmd: calkit xenv -n tex --no-check -- sh 
-      .calkit/stage-commands/one-pager-font.sh
-    deps:
-    - path: .calkit/env-locks/tex
-      hash: md5
-      md5: b2d28555a90965646645402d6964aa46.dir
-      size: 2832
-      nfiles: 2
-    - path: .calkit/stage-commands/one-pager-font.sh
-      hash: md5
-      md5: ec8d7395661d6af8e24623c6b1840985
-      size: 59
-    outs:
-    - path: docs/one-pager/texgyreheros-regular.otf
-      hash: md5
-      md5: 46896831ad260afebc87cd85a7ea159a
-      size: 133600
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
     deps:
@@ -175,18 +157,14 @@ stages:
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
       size: 5
-    - path: docs/one-pager/texgyreheros-regular.otf
-      hash: md5
-      md5: 46896831ad260afebc87cd85a7ea159a
-      size: 133600
     - path: results/2027-budget.json
       hash: md5
       md5: 35eeb271dbd0ac856631b17035062793
       size: 2007
     - path: scripts/plot-budget.py
       hash: md5
-      md5: 797538b799271ea0db0ec1bf5eda6703
-      size: 1616
+      md5: 2e2e4ac613d605a86f321d6d15081241
+      size: 1404
     - path: uv.lock
       hash: md5
       md5: 8f02103230800fa5a3efcd7d57bc029d
@@ -194,8 +172,8 @@ stages:
     outs:
     - path: docs/img/2027-budget.png
       hash: md5
-      md5: f4cebb77c9a0a98fa433ac90258bc0cd
-      size: 57430
+      md5: 4ae1c083c047a72493b2e547f5fc78f4
+      size: 49453
   latex-word-round-trip:
     cmd: calkit xenv -n dev --no-check -- python 
       scripts/latex-word-round-trip.py --engine=libreoffice

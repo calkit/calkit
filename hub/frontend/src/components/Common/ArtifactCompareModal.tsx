@@ -534,7 +534,7 @@ function FigureInfo({
   )
 }
 
-type OriginMode = "script" | "notebook" | "imported" | "created"
+type OriginMode = "script" | "notebook" | "imported" | "exported" | "created"
 
 /** Define where a figure came from, when nothing does yet. */
 function DefineFigureOrigin({
@@ -555,6 +555,8 @@ function DefineFigureOrigin({
     ["notebook", "Notebook"],
     ["imported", "Imported"],
   ]
+  // Something exported, e.g., a PNG, comes from a file a person made
+  if (!canBeCreatedByPerson(path)) modes.push(["exported", "Exported"])
   if (canBeCreatedByPerson(path)) modes.push(["created", "Created"])
   const onDone = () => {
     setMode(null)
@@ -588,6 +590,13 @@ function DefineFigureOrigin({
           kind={mode}
           onDone={onDone}
         />
+      ) : mode === "exported" ? (
+        <ManualExportForm
+          ownerName={ownerName}
+          projectName={projectName}
+          path={path}
+          onDone={onDone}
+        />
       ) : mode ? (
         <RecordOriginForm
           key={mode}
@@ -598,6 +607,101 @@ function DefineFigureOrigin({
           onDone={onDone}
         />
       ) : null}
+    </Box>
+  )
+}
+
+/**
+ * Record that a file is exported by hand from one someone made, e.g., a
+ * PNG from a Photoshop file, so the pipeline asks for a new export
+ * whenever that file changes.
+ */
+function ManualExportForm({
+  ownerName,
+  projectName,
+  path,
+  onDone,
+}: {
+  ownerName: string
+  projectName: string
+  path: string
+  onDone: () => void
+}) {
+  const showToast = useCustomToast()
+  const [sourcePath, setSourcePath] = useState("")
+  const [file, setFile] = useState<File | null>(null)
+  const [app, setApp] = useState("")
+  // Kept out of the paper's folder, which may sync to Overleaf
+  const source = sourcePath || (file ? `figures/src/${file.name}` : "")
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const content = file
+        ? await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () =>
+              resolve(String(reader.result).replace(/^data:[^,]*,/, ""))
+            reader.onerror = () => reject(reader.error)
+            reader.readAsDataURL(file)
+          })
+        : null
+      return ProjectsService.postProjectManualExport({
+        owner_name: ownerName,
+        project_name: projectName,
+        manualExportPost: {
+          path,
+          source_path: source,
+          content,
+          app: app.trim() || null,
+        },
+      }).then((response) => response.data)
+    },
+    onSuccess: (data) => {
+      showToast("Origin defined", data.message, "success")
+      onDone()
+    },
+    onError: (err: AxiosError) => handleError(err, showToast),
+  })
+  return (
+    <Box mt={2} fontSize="sm">
+      <Text mb={1}>
+        The file <Code fontSize="xs">{path}</Code> is exported from
+      </Text>
+      <Flex gap={2} align="center" wrap="wrap" mb={2}>
+        <PathPicker
+          ownerName={ownerName}
+          projectName={projectName}
+          value={sourcePath}
+          onChange={setSourcePath}
+        />
+        <Input
+          type="file"
+          size="sm"
+          p={1}
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
+      </Flex>
+      <Input
+        size="sm"
+        mb={2}
+        placeholder="App it's exported with, e.g., Photoshop (optional)"
+        value={app}
+        onChange={(e) => setApp(e.target.value)}
+      />
+      {source && !canBeCreatedByPerson(source) ? (
+        <Text fontSize="xs" color="red.500" mb={2}>
+          {source} is exported from something itself; choose the file it's made
+          from.
+        </Text>
+      ) : null}
+      <Button
+        size="xs"
+        variant="primary"
+        isDisabled={!source || !canBeCreatedByPerson(source)}
+        isLoading={saveMutation.isPending}
+        onClick={() => saveMutation.mutate()}
+      >
+        Add the export step
+      </Button>
     </Box>
   )
 }

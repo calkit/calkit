@@ -279,6 +279,7 @@ import type {
   LoginWithGithubTokenResponses,
   LoginWithGoogleErrors,
   LoginWithGoogleResponses,
+  ManualExportPost,
   MapPathsPost,
   MarkAllNotificationsReadResponses,
   MarkNotificationReadErrors,
@@ -369,6 +370,8 @@ import type {
   PostProjectLatexCommentsMoveResponses,
   PostProjectLatexComponentsErrors,
   PostProjectLatexComponentsResponses,
+  PostProjectManualExportErrors,
+  PostProjectManualExportResponses,
   PostProjectMapPathsErrors,
   PostProjectMapPathsResponses,
   PostProjectMiscErrors,
@@ -7702,6 +7705,58 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Manual Export
+   *
+   * Record that a figure is exported by hand from a source file, e.g.,
+   * a PNG from a Photoshop file, as a manual stage.
+   *
+   * The source, uploaded or already in the project, is recorded as created
+   * by the current user, and the stage asks someone to export the figure
+   * again whenever the source changes.
+   */
+  public static postProjectManualExport<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      manualExportPost: ManualExportPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectManualExportResponses,
+    PostProjectManualExportErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "manualExportPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectManualExportResponses,
+      PostProjectManualExportErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/manual-export",
       ...options,
       ...params,
       headers: {

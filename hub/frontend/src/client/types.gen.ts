@@ -2471,6 +2471,46 @@ export type LatexComponentsRequest = {
 }
 
 /**
+ * ManualExport
+ */
+export type ManualExport = {
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Stage Yaml
+   */
+  stage_yaml: string
+  /**
+   * Message
+   */
+  message: string
+}
+
+/**
+ * ManualExportPost
+ */
+export type ManualExportPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Source Path
+   */
+  source_path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * App
+   */
+  app?: string | null
+}
+
+/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -13822,6 +13862,42 @@ export type PostProjectStageFromScriptResponses = {
 
 export type PostProjectStageFromScriptResponse =
   PostProjectStageFromScriptResponses[keyof PostProjectStageFromScriptResponses]
+
+export type PostProjectManualExportData = {
+  body: ManualExportPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/manual-export"
+}
+
+export type PostProjectManualExportErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectManualExportError =
+  PostProjectManualExportErrors[keyof PostProjectManualExportErrors]
+
+export type PostProjectManualExportResponses = {
+  /**
+   * Successful Response
+   */
+  200: ManualExport
+}
+
+export type PostProjectManualExportResponse =
+  PostProjectManualExportResponses[keyof PostProjectManualExportResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

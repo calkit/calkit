@@ -279,7 +279,6 @@ import type {
   LoginWithGithubTokenResponses,
   LoginWithGoogleErrors,
   LoginWithGoogleResponses,
-  ManualExportPost,
   MapPathsPost,
   MarkAllNotificationsReadResponses,
   MarkNotificationReadErrors,
@@ -370,8 +369,6 @@ import type {
   PostProjectLatexCommentsMoveResponses,
   PostProjectLatexComponentsErrors,
   PostProjectLatexComponentsResponses,
-  PostProjectManualExportErrors,
-  PostProjectManualExportResponses,
   PostProjectMapPathsErrors,
   PostProjectMapPathsResponses,
   PostProjectMiscErrors,
@@ -393,6 +390,8 @@ import type {
   PostProjectReleaseErrors,
   PostProjectReleaseResponses,
   PostProjectResponses,
+  PostProjectStageExportErrors,
+  PostProjectStageExportResponses,
   PostProjectStageFromScriptErrors,
   PostProjectStageFromScriptResponses,
   PostProjectStatusErrors,
@@ -492,6 +491,7 @@ import type {
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
+  StageExportPost,
   StageFromScriptPost,
   SubscriptionUpdate,
   TestEmailErrors,
@@ -7716,25 +7716,26 @@ export class ProjectsService {
   }
 
   /**
-   * Post Project Manual Export
+   * Post Project Stage Export
    *
-   * Record that a figure is exported by hand from a source file, e.g.,
-   * a PNG from a Photoshop file, as a manual stage.
+   * Record that a figure is exported from a file someone made, e.g., a
+   * PNG from an Inkscape SVG or a Photoshop file.
    *
-   * The source, uploaded or already in the project, is recorded as created
-   * by the current user, and the stage asks someone to export the figure
-   * again whenever the source changes.
+   * An app that can export it, e.g., Inkscape, does so as the pipeline
+   * runs. Otherwise it's a manual stage, which asks someone to export it
+   * again whenever the source changes. Either way the source, uploaded or
+   * already in the project, is recorded as created by the current user.
    */
-  public static postProjectManualExport<ThrowOnError extends boolean = true>(
+  public static postProjectStageExport<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
-      manualExportPost: ManualExportPost
+      stageExportPost: StageExportPost
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostProjectManualExportResponses,
-    PostProjectManualExportErrors,
+    PostProjectStageExportResponses,
+    PostProjectStageExportErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
@@ -7744,19 +7745,19 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
-            { key: "manualExportPost", map: "body" },
+            { key: "stageExportPost", map: "body" },
           ],
         },
       ],
     )
     return (options?.client ?? client).post<
-      PostProjectManualExportResponses,
-      PostProjectManualExportErrors,
+      PostProjectStageExportResponses,
+      PostProjectStageExportErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/pipeline/stages/manual-export",
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/export",
       ...options,
       ...params,
       headers: {

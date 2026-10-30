@@ -4189,64 +4189,6 @@ export const LatexComponentsRequestSchema = {
   description: "A LaTeX document to bring calkit.sty's components in for.",
 } as const
 
-export const ManualExportSchema = {
-  properties: {
-    stage_name: {
-      type: "string",
-      title: "Stage Name",
-    },
-    stage_yaml: {
-      type: "string",
-      title: "Stage Yaml",
-    },
-    message: {
-      type: "string",
-      title: "Message",
-    },
-  },
-  type: "object",
-  required: ["stage_name", "stage_yaml", "message"],
-  title: "ManualExport",
-} as const
-
-export const ManualExportPostSchema = {
-  properties: {
-    path: {
-      type: "string",
-      title: "Path",
-    },
-    source_path: {
-      type: "string",
-      title: "Source Path",
-    },
-    content: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Content",
-    },
-    app: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "App",
-    },
-  },
-  type: "object",
-  required: ["path", "source_path"],
-  title: "ManualExportPost",
-} as const
-
 export const MapPathEntrySchema = {
   properties: {
     src: {
@@ -10452,6 +10394,73 @@ export const SoftwareItemSchema = {
   type: "object",
   required: ["title", "path"],
   title: "SoftwareItem",
+} as const
+
+export const StageExportSchema = {
+  properties: {
+    stage_name: {
+      type: "string",
+      title: "Stage Name",
+    },
+    stage_yaml: {
+      type: "string",
+      title: "Stage Yaml",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    message: {
+      type: "string",
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["stage_name", "stage_yaml", "kind", "message"],
+  title: "StageExport",
+} as const
+
+export const StageExportPostSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    source_path: {
+      type: "string",
+      title: "Source Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
+    },
+    by_hand: {
+      type: "boolean",
+      title: "By Hand",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path", "source_path"],
+  title: "StageExportPost",
 } as const
 
 export const StageFromScriptSchema = {

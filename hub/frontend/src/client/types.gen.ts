@@ -2471,46 +2471,6 @@ export type LatexComponentsRequest = {
 }
 
 /**
- * ManualExport
- */
-export type ManualExport = {
-  /**
-   * Stage Name
-   */
-  stage_name: string
-  /**
-   * Stage Yaml
-   */
-  stage_yaml: string
-  /**
-   * Message
-   */
-  message: string
-}
-
-/**
- * ManualExportPost
- */
-export type ManualExportPost = {
-  /**
-   * Path
-   */
-  path: string
-  /**
-   * Source Path
-   */
-  source_path: string
-  /**
-   * Content
-   */
-  content?: string | null
-  /**
-   * App
-   */
-  app?: string | null
-}
-
-/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -5946,6 +5906,54 @@ export type SoftwareItem = {
    * Description
    */
   description?: string | null
+}
+
+/**
+ * StageExport
+ */
+export type StageExport = {
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Stage Yaml
+   */
+  stage_yaml: string
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Message
+   */
+  message: string
+}
+
+/**
+ * StageExportPost
+ */
+export type StageExportPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Source Path
+   */
+  source_path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * App
+   */
+  app?: string | null
+  /**
+   * By Hand
+   */
+  by_hand?: boolean
 }
 
 /**
@@ -13863,8 +13871,8 @@ export type PostProjectStageFromScriptResponses = {
 export type PostProjectStageFromScriptResponse =
   PostProjectStageFromScriptResponses[keyof PostProjectStageFromScriptResponses]
 
-export type PostProjectManualExportData = {
-  body: ManualExportPost
+export type PostProjectStageExportData = {
+  body: StageExportPost
   path: {
     /**
      * Owner Name
@@ -13876,28 +13884,28 @@ export type PostProjectManualExportData = {
     project_name: string
   }
   query?: never
-  url: "/projects/{owner_name}/{project_name}/pipeline/stages/manual-export"
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/export"
 }
 
-export type PostProjectManualExportErrors = {
+export type PostProjectStageExportErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostProjectManualExportError =
-  PostProjectManualExportErrors[keyof PostProjectManualExportErrors]
+export type PostProjectStageExportError =
+  PostProjectStageExportErrors[keyof PostProjectStageExportErrors]
 
-export type PostProjectManualExportResponses = {
+export type PostProjectStageExportResponses = {
   /**
    * Successful Response
    */
-  200: ManualExport
+  200: StageExport
 }
 
-export type PostProjectManualExportResponse =
-  PostProjectManualExportResponses[keyof PostProjectManualExportResponses]
+export type PostProjectStageExportResponse =
+  PostProjectStageExportResponses[keyof PostProjectStageExportResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

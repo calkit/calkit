@@ -413,9 +413,10 @@ function FigureInfo({
   const originUrl = provenanceQuery.data?.origin_url
   // A figure calkit.yaml doesn't declare can still have a stage that makes it
   const stage = figure.stage ?? provenanceQuery.data?.stage
+  const stageKind = provenanceQuery.data?.stage_kind
   const exportedFrom =
-    provenanceQuery.data?.stage_kind === "manual"
-      ? provenanceQuery.data.source
+    stageKind === "manual" || stageKind === "export"
+      ? provenanceQuery.data?.source
       : null
   const dataLinks: InputLink[] = []
   if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
@@ -506,7 +507,7 @@ function FigureInfo({
             </Link>
             {exportedFrom ? (
               <>
-                , exported by hand from{" "}
+                , exported {stageKind === "manual" ? "by hand " : ""}from{" "}
                 <Link
                   as={RouterLink}
                   to={filesTo}
@@ -653,6 +654,12 @@ function ManualExportForm({
   const [app, setApp] = useState("")
   // Kept out of the paper's folder, which may sync to Overleaf
   const source = sourcePath || (file ? `figures/src/${file.name}` : "")
+  // An app that exports it as the pipeline runs, as the hub decides
+  const exporter = source.toLowerCase().endsWith(".svg")
+    ? "Inkscape"
+    : source.toLowerCase().endsWith(".xcf")
+      ? "GIMP"
+      : null
   const saveMutation = useMutation({
     mutationFn: async () => {
       const content = file
@@ -664,10 +671,10 @@ function ManualExportForm({
             reader.readAsDataURL(file)
           })
         : null
-      return ProjectsService.postProjectManualExport({
+      return ProjectsService.postProjectStageExport({
         owner_name: ownerName,
         project_name: projectName,
-        manualExportPost: {
+        stageExportPost: {
           path,
           source_path: source,
           content,
@@ -707,6 +714,11 @@ function ManualExportForm({
         value={app}
         onChange={(e) => setApp(e.target.value)}
       />
+      {exporter ? (
+        <Text fontSize="xs" color="gray.500" mb={2}>
+          {exporter} exports it whenever the pipeline runs.
+        </Text>
+      ) : null}
       {source && !canBeCreatedByPerson(source) ? (
         <Text fontSize="xs" color="red.500" mb={2}>
           {source} is exported from something itself; choose the file it's made

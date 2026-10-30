@@ -413,7 +413,7 @@ def test_post_project_stage_from_script(
     assert post(script_path="../x.py").status_code == 422
 
 
-def test_post_project_manual_export(
+def test_post_project_stage_export(
     client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
 ) -> None:
     import base64
@@ -427,6 +427,9 @@ def test_post_project_manual_export(
         files={
             "paper/figures/drawn.png": "png",
             "paper/figures/big.png": "png",
+            "paper/figures/setup.png": "png",
+            "paper/figures/traced.png": "png",
+            "paper/figures/photo.jpg": "jpg",
             "figures/src/old.psd": "old",
         },
     )
@@ -454,7 +457,7 @@ def test_post_project_manual_export(
             patch("app.api.routes.projects.pipeline.SOURCE_GIT_MAX_BYTES", 10),
         ):
             return client.post(
-                "/projects/o/p/pipeline/stages/manual-export",
+                "/projects/o/p/pipeline/stages/export",
                 json=body,
                 headers=normal_user_token_headers,
             )
@@ -531,3 +534,35 @@ def test_post_project_manual_export(
     md5 = hashlib.md5(big).hexdigest()
     [key] = [k for k in store.store if k.endswith(f"{md5[:2]}/{md5[2:]}")]
     assert store.cat(key) == big
+    # An SVG is exported by Inkscape as the pipeline runs, unless someone
+    # exports it by hand, or it's shown in a format Inkscape doesn't write
+    svg = base64.b64encode(b"<svg/>").decode()
+    resp = post(
+        path="paper/figures/setup.png",
+        source_path="figures/src/setup.svg",
+        content=svg,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["kind"] == "export"
+    assert resp.json()["message"] == (
+        "Exported from figures/src/setup.svg with Inkscape"
+    )
+    assert ck_info()["pipeline"]["stages"]["export-setup"] == {
+        "kind": "export",
+        "source_path": "figures/src/setup.svg",
+        "outputs": [{"path": "paper/figures/setup.png", "storage": "git"}],
+    }
+    dvc_yaml = yaml.safe_load((tmp_path / "repo" / "dvc.yaml").read_text())
+    assert dvc_yaml["stages"]["export-setup"]["cmd"] == (
+        "calkit export figures/src/setup.svg -o paper/figures/setup.png"
+    )
+    for path, body in [
+        ("paper/figures/traced.png", dict(by_hand=True, app="Illustrator")),
+        ("paper/figures/photo.jpg", {}),
+    ]:
+        resp = post(path=path, source_path="figures/src/setup.svg", **body)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["kind"] == "manual"
+    assert resp.json()["message"] == (
+        "Export paper/figures/photo.jpg from figures/src/setup.svg"
+    )

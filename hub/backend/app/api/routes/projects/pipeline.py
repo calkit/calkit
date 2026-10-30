@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import app.projects
+import calkit.export
 import calkit.pipeline
 import calkit.provenance
 from app.api.deps import CurrentUser, SessionDep
@@ -588,39 +589,45 @@ MAX_SOURCE_BYTES = 500_000_000
 SOURCE_GIT_MAX_BYTES = 1_000_000
 
 
-class ManualExportPost(BaseModel):
+class StageExportPost(BaseModel):
     # What the document shows, e.g., a figure a paper includes
     path: str
     # The file it's exported from, in the project or uploaded there
     source_path: str
     # An uploaded source, base64-encoded
     content: str | None = None
-    # The app it's exported with, e.g., Photoshop, for the step's message
+    # The app it's exported with, e.g., Photoshop, for a manual step's
+    # message
     app: str | None = None
+    # A manual step even when an app could export it, e.g., an SVG someone
+    # exports from Illustrator
+    by_hand: bool = False
 
 
-class ManualExport(BaseModel):
+class StageExport(BaseModel):
     stage_name: str
     stage_yaml: str
+    # export, when an app exports it as the pipeline runs, or manual, when
+    # a person does
+    kind: str
     message: str
 
 
-@router.post(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/manual-export"
-)
-def post_project_manual_export(
+@router.post("/projects/{owner_name}/{project_name}/pipeline/stages/export")
+def post_project_stage_export(
     owner_name: str,
     project_name: str,
-    req: ManualExportPost,
+    req: StageExportPost,
     current_user: CurrentUser,
     session: SessionDep,
-) -> ManualExport:
-    """Record that a figure is exported by hand from a source file, e.g.,
-    a PNG from a Photoshop file, as a manual stage.
+) -> StageExport:
+    """Record that a figure is exported from a file someone made, e.g., a
+    PNG from an Inkscape SVG or a Photoshop file.
 
-    The source, uploaded or already in the project, is recorded as created
-    by the current user, and the stage asks someone to export the figure
-    again whenever the source changes.
+    An app that can export it, e.g., Inkscape, does so as the pipeline
+    runs. Otherwise it's a manual stage, which asks someone to export it
+    again whenever the source changes. Either way the source, uploaded or
+    already in the project, is recorded as created by the current user.
     """
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -670,9 +677,18 @@ def post_project_manual_export(
     producer = calkit.pipeline.get_stage_for_output(path, ck_info)
     if producer is not None:
         raise HTTPException(409, f"'{path}' is made by stage '{producer}'")
+    exporter = None if req.by_hand else calkit.export.app_name(source_path)
+    if exporter is not None:
+        try:
+            calkit.export.check_paths(source_path, path)
+        except ValueError:
+            # e.g., a JPEG from an SVG, which Inkscape doesn't write
+            exporter = None
     app_name = (req.app or "").strip()
     message = (
-        f"In {app_name}, export {path} from {source_path}"
+        f"Exported from {source_path} with {exporter}"
+        if exporter is not None
+        else f"In {app_name}, export {path} from {source_path}"
         if app_name
         else f"Export {path} from {source_path}"
     )
@@ -687,12 +703,19 @@ def post_project_manual_export(
         stage_name = f"{base_name}-{n}"
         n += 1
     tracked = bool(repo.git.ls_files("--", path).strip())
-    stage: dict[str, Any] = {
-        "kind": "manual",
-        "message": message,
-        "source_path": source_path,
-        "outputs": [{"path": path, "storage": "git"} if tracked else path],
-    }
+    output: str | dict[str, str] = (
+        {"path": path, "storage": "git"} if tracked else path
+    )
+    stage: dict[str, Any] = (
+        {"kind": "export", "source_path": source_path, "outputs": [output]}
+        if exporter is not None
+        else {
+            "kind": "manual",
+            "message": message,
+            "source_path": source_path,
+            "outputs": [output],
+        }
+    )
     _validate_ck_stage(stage, stage_name)
     # The source is the person's, unless something already says otherwise
     person = {"email": current_user.email}
@@ -749,10 +772,12 @@ def post_project_manual_export(
         None,
         [],
         [],
-        f"Export {path} from {source_path} by hand",
+        f"Export {path} from {source_path}"
+        + (f" with {exporter}" if exporter is not None else " by hand"),
     )
-    return ManualExport(
+    return StageExport(
         stage_name=stage_name,
         stage_yaml=_dump_ck_stage_map(stage),
+        kind=stage["kind"],
         message=message,
     )

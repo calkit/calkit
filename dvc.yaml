@@ -87,9 +87,7 @@ stages:
       - .calkit/stage-commands/one-pager-font.sh
       - .calkit/env-locks/tex
     outs:
-      - docs/one-pager/texgyreheros-regular.otf:
-          cache: false
-          persist: false
+      - docs/one-pager/texgyreheros-regular.otf
     desc: Automatically generated from the 'one-pager-font' stage in
       calkit.yaml. Changes made here will be overwritten.
   budget-2027-figure:

@@ -11,6 +11,7 @@ import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
 import type { IconType } from "react-icons"
 import { FaCubes } from "react-icons/fa"
 import {
+  FiBarChart2,
   FiBookOpen,
   FiDatabase,
   FiFolder,
@@ -49,6 +50,7 @@ export const projectNavItems: ProjectNavItem[] = [
   { icon: FiDatabase, title: "Datasets", path: "/datasets" },
   { icon: FiImage, title: "Figures", path: "/figures" },
   { icon: FiGrid, title: "Tables", path: "/tables" },
+  { icon: FiBarChart2, title: "Results", path: "/results" },
   { icon: FiBookOpen, title: "Publications", path: "/publications" },
   { icon: FiMonitor, title: "Presentations", path: "/presentations" },
   { icon: SiJupyter, title: "Notebooks", path: "/notebooks" },

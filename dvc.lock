@@ -93,7 +93,7 @@ stages:
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 1d81ee4bd6f8313b6d4913750e872f70
+      md5: 1746953254c055ec4cdd6f917de4b3af
       size: 11
     - path: .python-version
       hash: md5
@@ -101,8 +101,8 @@ stages:
       size: 5
     - path: data/calkit-projects/papers.csv
       hash: md5
-      md5: 2c5a4859e8f02e4ec0787e5a2f851955
-      size: 5241
+      md5: 8922d813a4e72bf1600400fd0d6f38d8
+      size: 5368
     - path: scripts/traction.py
       hash: md5
       md5: 3c46a0f6c5ec81bddb3cfc6b089c173d
@@ -114,14 +114,14 @@ stages:
     outs:
     - path: results/traction.json
       hash: md5
-      md5: 099f2c80065f8ede66e7f028ee9f598e
+      md5: 1e34bd0c17caf8e64c373a205b910a78
       size: 539
   find-calkit-projects:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 1d81ee4bd6f8313b6d4913750e872f70
+      md5: 1746953254c055ec4cdd6f917de4b3af
       size: 11
     - path: .python-version
       hash: md5
@@ -138,14 +138,14 @@ stages:
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 2e47576a4fce3343541e32a907d0201b
+      md5: feccf12ce7e3ea59dc5513e52dbc9ace
       size: 11725
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 1d81ee4bd6f8313b6d4913750e872f70
+      md5: 1746953254c055ec4cdd6f917de4b3af
       size: 11
     - path: .python-version
       hash: md5
@@ -153,7 +153,7 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 2e47576a4fce3343541e32a907d0201b
+      md5: feccf12ce7e3ea59dc5513e52dbc9ace
       size: 11725
     - path: scripts/find-calkit-papers.py
       hash: md5
@@ -166,8 +166,8 @@ stages:
     outs:
     - path: data/calkit-projects/papers.csv
       hash: md5
-      md5: 2c5a4859e8f02e4ec0787e5a2f851955
-      size: 5241
+      md5: 8922d813a4e72bf1600400fd0d6f38d8
+      size: 5368
   research-flow:
     cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
     deps:
@@ -277,3 +277,28 @@ stages:
       hash: md5
       md5: f4cebb77c9a0a98fa433ac90258bc0cd
       size: 57430
+  latex-image-readme/sizes:
+    cmd: calkit xenv -n dev --no-check -- python 
+      .calkit/markdown/images/latex/README.md/sizes.py
+    deps:
+    - path: .calkit/markdown/images/latex/README.md/sizes.py
+      hash: md5
+      md5: 7ee40f897ceb2046753dc7aee67b09f7
+      size: 1955
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: calkit/latex.py
+      hash: md5
+      md5: 517c2b009f9b06908b258f5afdae6e77
+      size: 122885
+    - path: uv.lock
+      hash: md5
+      md5: b5d0e9511259dec7553283d5727fe0c1
+      size: 1727624
+    outs:
+    - path: images/latex/sizes.json
+      hash: md5
+      md5: 050df5f87097cc2a733a4985c9c49f3b
+      size: 335

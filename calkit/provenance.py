@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import os
+import posixpath
 import re
+from collections.abc import Callable
 
 # The artifact kinds whose provenance is *checked*. Each entry must say
 # where it came from: a pipeline stage, an import, or the person who
@@ -240,7 +243,7 @@ def local_edit(path: str, lock: dict | None) -> bool:
     claim it can.
     """
     recorded = (lock or {}).get("hash")
-    if not recorded or not os.path.exists(path):
+    if not isinstance(recorded, str) or not os.path.exists(path):
         return False
     # The algorithm is named in the value, so a file hashed by a version
     # that used a different one is not mistaken for an edited file
@@ -290,18 +293,48 @@ def get_importable_artifact_kinds() -> list[str]:
     ]
 
 
+# Formats exported from something else, e.g., a plotting script or an
+# image editor's own file, rather than made directly, so a person can't be
+# their origin: they're imported or produced by the pipeline. Photos and
+# instrument images, e.g., JPEG and TIFF, and SVG drawn in an editor that
+# saves it natively, can be made by a person.
+EXPORTED_EXTENSIONS = {".png", ".gif", ".webp", ".bmp", ".pdf", ".eps"}
+
+
+def can_be_created_by_person(path: str) -> bool:
+    """Whether ``created_by`` can account for what's at ``path``."""
+    return posixpath.splitext(path)[1].lower() not in EXPORTED_EXTENSIONS
+
+
+def how_to_define_origin(path: str) -> str:
+    """Say what defines the origin of ``path``, for a message."""
+    if can_be_created_by_person(path):
+        return (
+            "record it in calkit.yaml with imported_from or created_by, "
+            "or add the stage that makes it"
+        )
+    return (
+        "it's exported from something else, so add the stage that makes "
+        "it, or record it in calkit.yaml with imported_from"
+    )
+
+
 def has_provenance(artifact: dict) -> bool:
     """Return whether an artifact entry records where it came from.
 
     A stage and an import are the stronger forms, but ``created_by`` counts
     too: a dataset someone measured, or a schematic someone drew, is
-    accounted for even though there's nothing upstream to point at. The
-    field names in ``calkit.reproducibility.ReproCheck`` predate
+    accounted for even though there's nothing upstream to point at. It
+    doesn't for a format that's exported rather than made, e.g., a PNG.
+    The field names in ``calkit.reproducibility.ReproCheck`` predate
     attribution and are kept so callers reading them keep working.
     """
-    return any(
-        artifact.get(key) is not None
-        for key in ["stage", "imported_from", "created_by"]
+    if artifact.get("stage") is not None:
+        return True
+    if artifact.get("imported_from") is not None:
+        return True
+    return artifact.get("created_by") is not None and can_be_created_by_person(
+        str(artifact.get("path", ""))
     )
 
 
@@ -837,4 +870,213 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
     raise ValueError(
         "Nothing to fetch from: expected one of 'git', 'url', 'project', or "
         "'doi'"
+    )
+
+
+@dataclasses.dataclass
+class ProvenanceStep:
+    """A path on the way back from something shown, and the stage that
+    produces it, if one does.
+    """
+
+    path: str
+    stage: str | None = None
+
+
+@dataclasses.dataclass
+class ProvenanceGap:
+    """A path nothing records the origin of, and the chain from what's
+    shown back to it.
+    """
+
+    steps: list[ProvenanceStep]
+
+    @property
+    def path(self) -> str:
+        return self.steps[-1].path
+
+    def __str__(self) -> str:
+        if len(self.steps) == 1:
+            return f"origin not defined for {self.path}"
+        chain = []
+        for step in self.steps:
+            chain.append(step.path)
+            if step.stage:
+                chain.append(f"stage {step.stage}")
+        return f"origin not defined for {self.path} ({' <- '.join(chain)})"
+
+
+def find_provenance_gaps(
+    paths: list[str],
+    ck_info: dict,
+    dvc_yaml: dict,
+    dvc_lock: dict,
+    is_data: Callable[[str], bool],
+) -> list[ProvenanceGap]:
+    """Follow each path back through the stages that produce it, to where
+    each chain starts, and return the starts nothing accounts for.
+
+    A chain starts somewhere accounted for at an entry recording an import
+    or who created it, or at code and config the authors wrote. Anything
+    else nothing produces, i.e., what ``is_data`` says is data, is a gap.
+    Stages are read from ``dvc.lock`` where they've run, and from
+    ``dvc.yaml`` where they haven't, except for matrix stages, whose
+    expansions aren't known until they run.
+    """
+
+    def norm(path: str, wdir: str = "") -> str:
+        return posixpath.normpath(posixpath.join(wdir, path))
+
+    def stage_paths(items: list | None, wdir: str) -> list[str]:
+        out = []
+        for item in items or []:
+            if isinstance(item, dict):
+                item = item.get("path") or next(iter(item), None)
+            if isinstance(item, str) and "${" not in item:
+                out.append(norm(item, wdir))
+        return out
+
+    def under(path: str, parent: str) -> bool:
+        return path == parent or path.startswith(parent.rstrip("/") + "/")
+
+    def producer(path: str) -> str | None:
+        for name, (_, outs) in stages.items():
+            if any(under(path, out) for out in outs):
+                return name
+        return None
+
+    def walk(path: str, trail: list[ProvenanceStep]) -> None:
+        # Every entry covering the path counts, e.g., a file's and its
+        # folder's, whatever order calkit.yaml lists them in
+        covering = [e for e in entries if under(path, norm(e["path"]))]
+        if any(
+            e.get("imported_from") is not None
+            or (
+                e.get("created_by") is not None
+                and can_be_created_by_person(path)
+            )
+            for e in covering
+        ):
+            return
+        stage = producer(path)
+        if stage is None:
+            # An entry naming a stage not compiled yet is taken at its word
+            if not any(e.get("stage") is not None for e in covering):
+                if is_data(path) and path not in gaps:
+                    gaps[path] = ProvenanceGap(trail + [ProvenanceStep(path)])
+            return
+        if stage in walked:
+            return
+        walked.add(stage)
+        for dep in stages[stage][0]:
+            # Calkit's own bookkeeping, e.g., environment locks
+            if dep.startswith(".calkit/") or dep == "calkit.yaml":
+                continue
+            walk(dep, trail + [ProvenanceStep(path, stage)])
+
+    yaml_stages = dvc_yaml.get("stages") or {}
+    lock_stages = dvc_lock.get("stages") or {}
+    # Each stage's inputs and outputs, relative to the project
+    stages: dict[str, tuple[list[str], list[str]]] = {}
+    for name, stage in lock_stages.items():
+        base = (yaml_stages.get(name.split("@")[0]) or {}).get("wdir") or ""
+        stages[name] = (
+            stage_paths((stage or {}).get("deps"), base),
+            stage_paths((stage or {}).get("outs"), base),
+        )
+    for name, stage in yaml_stages.items():
+        if (
+            not isinstance(stage, dict)
+            or name in stages
+            or "matrix" in stage
+            or "foreach" in stage
+        ):
+            continue
+        wdir = stage.get("wdir") or ""
+        stages[name] = (
+            stage_paths(stage.get("deps"), wdir),
+            stage_paths(stage.get("outs"), wdir),
+        )
+    entries = [
+        entry
+        for items in ck_info.values()
+        if isinstance(items, list)
+        for entry in items
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    ]
+    gaps: dict[str, ProvenanceGap] = {}
+    walked: set[str] = set()
+    for path in paths:
+        walk(norm(path), [])
+    return list(gaps.values())
+
+
+def is_data_path(
+    path: str,
+    is_file: Callable[[str], bool],
+    is_dir: Callable[[str], bool],
+    listdir: Callable[[str], list[str]],
+) -> bool:
+    """Whether a path is data, which needs a recorded origin, rather than
+    code or config the authors wrote.
+
+    Data is anything DVC tracks, and otherwise files of a kind that isn't
+    code or config, including inside a directory. Takes the filesystem as
+    functions, so a project on disk and one read out of Git agree.
+    """
+    from calkit.detect import DATASET_EXTENSIONS
+    from calkit.reproducibility import MISC_EXTENSIONS_NEEDING_PROVENANCE
+
+    exts = MISC_EXTENSIONS_NEEDING_PROVENANCE | DATASET_EXTENSIONS | {".tsv"}
+    parts = path.split("/")
+    if any(
+        is_file("/".join(parts[:i]) + ".dvc") for i in range(1, len(parts) + 1)
+    ):
+        return True
+    # Named like data, even as a folder, e.g., a .zarr store
+    if posixpath.splitext(path)[1].lower() in exts:
+        return True
+    if not is_dir(path):
+        return False
+    pending = [path]
+    while pending:
+        parent = pending.pop()
+        for name in listdir(parent):
+            child = f"{parent}/{name}"
+            if posixpath.splitext(name)[1].lower() in exts:
+                return True
+            if is_dir(child):
+                pending.append(child)
+            # A DVC pointer stands in for data, whether pulled or not
+            elif name.endswith(".dvc"):
+                return True
+    return False
+
+
+def find_project_provenance_gaps(
+    paths: list[str], wdir: str = ".", ck_info: dict | None = None
+) -> list[ProvenanceGap]:
+    """:func:`find_provenance_gaps` for a project on disk."""
+    import calkit
+
+    def read_yaml(name: str) -> dict:
+        fpath = os.path.join(wdir, name)
+        if not os.path.isfile(fpath):
+            return {}
+        with open(fpath) as f:
+            return calkit.ryaml.load(f) or {}
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    return find_provenance_gaps(
+        paths,
+        ck_info=ck_info,
+        dvc_yaml=read_yaml("dvc.yaml"),
+        dvc_lock=read_yaml("dvc.lock"),
+        is_data=lambda path: is_data_path(
+            path,
+            is_file=lambda p: os.path.isfile(os.path.join(wdir, p)),
+            is_dir=lambda p: os.path.isdir(os.path.join(wdir, p)),
+            listdir=lambda p: os.listdir(os.path.join(wdir, p)),
+        ),
     )

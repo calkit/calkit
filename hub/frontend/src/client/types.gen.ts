@@ -4544,6 +4544,115 @@ export type ProjectsPublic = {
 }
 
 /**
+ * Provenance
+ *
+ * Where an artifact, or one value inside a results file, came from.
+ */
+export type Provenance = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Exists
+   */
+  exists?: boolean
+  /**
+   * Value
+   */
+  value?: unknown
+  /**
+   * Value Error
+   */
+  value_error?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Stage Kind
+   */
+  stage_kind?: string | null
+  /**
+   * Source
+   */
+  source?: string | null
+  /**
+   * Command
+   */
+  command?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  stage_status?: StageStatus | null
+  /**
+   * Stale Reason
+   */
+  stale_reason?: "pipeline" | "frozen" | null
+  /**
+   * Copied From
+   */
+  copied_from?: string | null
+  /**
+   * Copy Stage
+   */
+  copy_stage?: string | null
+  /**
+   * Origin
+   */
+  origin?: string | null
+  /**
+   * Origin Url
+   */
+  origin_url?: string | null
+  /**
+   * Origin Path
+   */
+  origin_path?: string | null
+  /**
+   * Gaps
+   */
+  gaps?: Array<ProvenanceGap>
+}
+
+/**
+ * ProvenanceGap
+ *
+ * Something nothing records the origin of, and the chain to it.
+ */
+export type ProvenanceGap = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Steps
+   */
+  steps?: Array<ProvenanceStep>
+}
+
+/**
+ * ProvenanceStep
+ *
+ * A path on the way back from an artifact, and the stage producing it.
+ */
+export type ProvenanceStep = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Stage
+   */
+  stage?: string | null
+}
+
+/**
  * PublicKey
  *
  * A P-256 public key as a JSON Web Key, e.g., a browser's for one
@@ -4950,6 +5059,10 @@ export type QuestionPublic = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4957,6 +5070,14 @@ export type QuestionPublic = {
    * Evidence
    */
   evidence?: Array<QuestionEvidence>
+  /**
+   * Verifications
+   */
+  verifications?: Array<QuestionSignOff>
+  /**
+   * Validations
+   */
+  validations?: Array<QuestionSignOff>
 }
 
 /**
@@ -4972,6 +5093,10 @@ export type QuestionPut = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4979,6 +5104,44 @@ export type QuestionPut = {
    * Evidence
    */
   evidence?: Array<QuestionEvidencePost>
+}
+
+/**
+ * QuestionSignOff
+ *
+ * A verification or validation of a question, checked against history.
+ *
+ * A verification says the stages behind the evidence implement the
+ * approach; a validation says the approach suits the question and the
+ * evidence justifies the answer. Stale means what it vouches for changed
+ * after the commit that added it; unchecked means that commit couldn't be
+ * found.
+ */
+export type QuestionSignOff = {
+  /**
+   * By
+   */
+  by: string
+  /**
+   * Date
+   */
+  date?: string | null
+  /**
+   * Notes
+   */
+  notes?: string | null
+  /**
+   * With Ai
+   */
+  with_ai?: Array<string>
+  /**
+   * Status
+   */
+  status: "current" | "stale" | "unchecked"
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -5949,6 +6112,10 @@ export type ReproCheck = {
    */
   misc_needing_provenance?: Array<string>
   /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
+  /**
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
@@ -6040,6 +6207,7 @@ export type Result = {
    * Key
    */
   key?: string | null
+  stage_status?: StageStatus | null
 }
 
 /**
@@ -7737,6 +7905,10 @@ export type ReproCheckWritable = {
    * Misc Needing Provenance
    */
   misc_needing_provenance?: Array<string>
+  /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
   /**
    * Scripts Not In Pipeline
    */
@@ -14453,6 +14625,55 @@ export type PostProjectMapPathsResponses = {
 
 export type PostProjectMapPathsResponse =
   PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
+
+export type GetProjectProvenanceData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Key
+     */
+    key?: string | null
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/provenance"
+}
+
+export type GetProjectProvenanceErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectProvenanceError =
+  GetProjectProvenanceErrors[keyof GetProjectProvenanceErrors]
+
+export type GetProjectProvenanceResponses = {
+  /**
+   * Successful Response
+   */
+  200: Provenance
+}
+
+export type GetProjectProvenanceResponse =
+  GetProjectProvenanceResponses[keyof GetProjectProvenanceResponses]
 
 export type PostProjectFigureScriptData = {
   body: FigureScriptPost

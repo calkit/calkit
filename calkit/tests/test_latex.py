@@ -4,6 +4,7 @@ import gzip
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -103,6 +104,8 @@ def test_ck_components(tmp_dir):
     os.makedirs("tables")
     with open("tables/summary.tex", "w") as f:
         f.write("\\begin{tabular}{l}\\end{tabular}\n")
+    with open("results/sentence.tex", "w") as f:
+        f.write("We ran 42 trials.\n")
     os.makedirs("paper/sections")
     with open("paper/sections/results.tex", "w") as f:
         f.write("Error: \\ckvalue[.2f]{results/metrics.json}{rmse}.\n")
@@ -114,6 +117,7 @@ def test_ck_components(tmp_dir):
             "\\input{sections/results}\n"
             "\\ckfigure[width=0.5\\textwidth]{figures/plot.png}\n"
             "\\cktable{tables/summary.tex}\n"
+            "\\ckinclude{results/sentence}\n"
             "Slope: \\ckvalue{results/metrics.json}{fit.slope},\n"
             "runs: \\ckvalue{results/metrics.json}{n_runs}.\n"
             "% \\ckfigure{figures/commented.png}\n"
@@ -128,6 +132,7 @@ def test_ck_components(tmp_dir):
         ("value", "results/metrics.json", "rmse", ".2f"),
         ("figure", "figures/plot.png", None, ""),
         ("table", "tables/summary.tex", None, ""),
+        ("include", "results/sentence", None, ""),
         ("value", "results/metrics.json", "fit.slope", ""),
         ("value", "results/metrics.json", "n_runs", ""),
         ("value", "results/metrics.json", "nope", ""),
@@ -143,6 +148,8 @@ def test_ck_components(tmp_dir):
     with open("paper/_calkit/figures/plot.png", "rb") as f:
         assert f.read() == b"png"
     assert os.path.isfile("paper/_calkit/tables/summary.tex")
+    # Any TeX a stage writes, found like a table without its extension
+    assert os.path.isfile("paper/_calkit/results/sentence.tex")
     with open("paper/_calkit/values.tex") as f:
         values = f.read()
     # Numbers are written in full, since calkit.sty formats them, so a format
@@ -153,13 +160,36 @@ def test_ck_components(tmp_dir):
     assert ".2f" not in values
     # Where TeX finds a file is only written for one named without an
     # extension
-    assert "cksetfile" not in values
+    assert values.count("cksetfile") == 1
+    assert "\\cksetfile{results/sentence}{results/sentence.tex}" in values
     # Text is escaped, and only numbers are formatted
     assert calkit.latex.tex_value("run_a") == ("t", "run\\_a")
     assert calkit.latex.tex_value(True) == ("t", "True")
     assert calkit.latex.tex_value(float("nan")) == ("t", "nan")
     assert calkit.latex.tex_value([3]) == ("n", "3")
     assert calkit.latex.tex_value(1e-05) == ("n", "1e-05")
+    # No link base without knowing whose project it is, even from a remote,
+    # which differs between clones
+    assert "cklinkbase" not in values
+    subprocess.run(["git", "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/fork/test.git"],
+        check=True,
+    )
+    calkit.latex.map_ck_components("paper")
+    with open("paper/_calkit/values.tex") as f:
+        assert "cklinkbase" not in f.read()
+    with open("calkit.yaml", "w") as f:
+        f.write("name: test\nowner: someone\n")
+    calkit.latex.map_ck_components("paper")
+    with open("paper/_calkit/values.tex") as f:
+        assert "\\cklinkbase{https://calkit.io/someone/test}" in f.read()
+    with open("calkit.yaml", "a") as f:
+        f.write("hub: calkit.example.edu\n")
+    calkit.latex.map_ck_components("paper")
+    with open("paper/_calkit/values.tex") as f:
+        values = f.read()
+    assert "\\cklinkbase{https://calkit.example.edu/someone/test}" in values
     # Kept out of Git without touching the project's own .gitignore
     with open("paper/_calkit/.gitignore") as f:
         assert f.read().strip().endswith("*")
@@ -421,6 +451,8 @@ def test_expand_ck_components(tmp_dir):
     os.makedirs("data/tables")
     with open("data/tables/t.tex", "w") as f:
         f.write("\\begin{tabular}{l}B\\end{tabular}")
+    with open("data/tables/n.tex", "w") as f:
+        f.write("We ran 42 trials.")
     os.makedirs("data/figures")
     with open("data/figures/plot.png", "wb") as fb:
         fb.write(b"png")
@@ -433,6 +465,7 @@ def test_expand_ck_components(tmp_dir):
             "\\ckfigure[width=1cm]{figures/plot}\n"
             "\\ckfigure{figures/plot} {\\small (a) left}\n"
             "\\cktable{tables/t}\n"
+            "\\ckinclude{tables/n.tex}\n"
             "Split: \\ckvalue{results/m.json}\n  {rmse}.\n"
             "Missing: \\ckvalue{results/m.json}{nope}.\n"
             "% \\ckvalue{results/m.json}{rmse}\n"
@@ -452,6 +485,7 @@ def test_expand_ck_components(tmp_dir):
         "\\includegraphics[]{../figures/plot.png} {\\small (a) left}" in text
     )
     assert "\\begin{tabular}{l}B\\end{tabular}" in text
+    assert "We ran 42 trials." in text
     # What can't be found is left to print as ??, and comments alone
     assert "\\ckvalue{results/m.json}{nope}" in text
     assert "% \\ckvalue{results/m.json}{rmse}" in text
@@ -578,6 +612,130 @@ def test_align_rendered_paragraphs() -> None:
         "Combining (A.5) and (A.6), we get:"
     )
     assert not calkit.latex.equation_fragment("Actuator disk model (k=0.04)")
+
+
+def test_prepare_for_pandoc() -> None:
+    def prepare(text: str, aux: str = "", bbl: str = "", **kw: object) -> str:
+        lines = [
+            calkit.latex.SourceLine("main.tex", i + 1, ln)
+            for i, ln in enumerate(text.split("\n"))
+        ]
+        return calkit.latex.prepare_for_pandoc(lines, aux, bbl, **kw)  # type: ignore[arg-type]
+
+    aux = "\n".join(
+        [
+            r"\newlabel{sec:a}{{1}{1}{Intro}{section.1}{}}",
+            r"\newlabel{eq:a}{{1}{1}{}{equation.1}{}}",
+            r"\newlabel{eq:c}{{4}{2}{}{equation.4}{}}",
+            r"\newlabel{fig:a}{{1}{2}{}{figure.1}{}}",
+            r"\newlabel{app:a}{{A}{3}{More}{appendix.A}{}}",
+            r"\@writefile{toc}{\contentsline {section}{\numberline {1}Intro}"
+            r"{1}{}}",
+            r"\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}"
+            r"Sub}{1}{}}",
+            r"\@writefile{toc}{\contentsline {section}{\numberline {A}More}"
+            r"{3}{}}",
+            r"\@writefile{lof}{\contentsline {figure}{\numberline {1}"
+            r"{\ignorespaces Cap}}{2}{}}",
+            r"\bibcite{lee}{{1}{2018}{{Lee}}{{}}}",
+            r"\bibcite{kim}{{2}{2020\natexlab{a}}{{Kim et~al.}}{{}}}",
+        ]
+    )
+    body = "\n".join(
+        [
+            r"\documentclass{article}",
+            r"\usepackage{natbib}",
+            r"\begin{document}",
+            r"\section{Intro}\label{sec:a}",
+            r"\subsection{Sub}",
+            r"\section*{Thanks}",
+            r"As \citet{lee} found \citep[see][p.~2]{lee,kim}, and \cite{kim}.",
+            r"\begin{equation}",
+            r"a = b \label{eq:a}",
+            r"\end{equation}",
+            r"\begin{align}",
+            r"c &= d \\",
+            r"e &= f \nonumber \\",
+            r"g &= h \label{eq:c}",
+            r"\end{align}",
+            r"\begin{equation*}",
+            r"x = y",
+            r"\end{equation*}",
+            r"\begin{equation}",
+            r"z = w \tag{$*$}",
+            r"\end{equation}",
+            r"See \eqref{eq:a}, \ref{fig:a}, \autoref{sec:a}, \Cref{eq:c},",
+            r"page \pageref{eq:c}, \nameref{app:a}, and \ref{nope}.",
+            r"\begin{figure}",
+            r"\includegraphics[width=2in]{plot}",
+            r"\includegraphics{photo}",
+            r"\caption{Cap}",
+            r"\end{figure}",
+            r"A 5\textperthousand{} rise, \dataset\xspace and more.",
+            r"\appendix",
+            r"\section{More}",
+            r"\bibliography{refs}",
+            r"\end{document}",
+        ]
+    )
+    bbl = "\n".join(
+        [
+            r"\begin{thebibliography}{2}",
+            r"\providecommand{\natexlab}[1]{#1}",
+            r"\bibitem[Lee(2018)]{lee}",
+            r"K.~Lee. A paper.",
+            r"\bibitem[Kim et~al.(2020)]{kim}",
+            r"J.~Kim. Another.",
+            r"\end{thebibliography}",
+        ]
+    )
+    out = prepare(
+        body,
+        aux,
+        bbl,
+        find_image=lambda path: "/tmp/plot.png" if path == "plot" else None,
+    )
+    # Headings and captions numbered as the .aux has them, but not starred
+    # ones
+    assert r"\section{1 Intro}" in out and r"\subsection{1.1 Sub}" in out
+    assert r"\section*{Thanks}" in out and r"\section{A More}" in out
+    assert r"\caption{Figure 1: Cap}" in out
+    # Citations as natbib sets them, in brackets by default
+    assert (
+        "As Lee [2018] found [see Lee, 2018; Kim et~al., 2020a, p.~2]" in out
+    )
+    assert "and Kim et~al. [2020a]." in out
+    # Displays as their numbers, counted between labeled ones, with tags,
+    # and none for unnumbered ones
+    paras = [p.strip() for p in out.split("\n\n")]
+    assert ["(1)", "(2) (4)", "=", "($*$)"] == [
+        p for p in paras if p.startswith("(") or p == "="
+    ]
+    # References with their numbers and names, and ?? for one not there
+    assert "See (1), 1, Section~1, Eq.~(4)," in out
+    assert "page 2, More, and ??." in out
+    # Pictures Word can show, and text symbols as characters
+    assert r"\includegraphics[width=2in]{/tmp/plot.png}" in out
+    assert r"\includegraphics{photo}" in out
+    assert "A 5‰ rise" in out
+    # The bibliography as typeset, without its setup
+    assert r"\section*{References}" in out and "providecommand" not in out
+    assert r"\bibitem[Lee(2018)]{lee}" in out
+    # Round parentheses where asked for, and numbers for a numbered style,
+    # in the bibliography too
+    round_ = prepare(body.replace("{natbib}", "[round]{natbib}"), aux, bbl)
+    assert "As Lee (2018) found (see Lee, 2018; Kim et~al., 2020a, p.~2)" in (
+        round_
+    )
+    numbered = prepare(body.replace("{natbib}", "[numbers]{natbib}"), aux, bbl)
+    assert "As Lee~[1] found [see 1, 2, p.~2]" in numbered
+    assert r"\bibitem{kim}{[}2{]}" in numbered
+    # Without a build, references are ?? and displays are still counted
+    bare = prepare(body)
+    assert "See (??), ??, ??, ??," in bare
+    assert [
+        p.strip() for p in bare.split("\n\n") if p.strip().startswith("(")
+    ] == ["(1)", "(2) (3)", "($*$)"]
 
 
 def test_detex() -> None:

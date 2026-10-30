@@ -118,21 +118,30 @@ The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
   Keys are separated by dots to reach into nested values, e.g., `fit.slope`.
 - `\ckfigure[options]{path}` includes a figure, with the same options as
   `\includegraphics`.
-- `\cktable{path}` includes a table, or any other LaTeX a stage writes.
+- `\cktable{path}` includes a table a stage writes.
+- `\ckinclude{path}` includes any other LaTeX a stage writes,
+  e.g., a sentence that reports several results.
 
-Paths are relative to the project, wherever the document is,
+Paths are relative to the project, not the document's working directory,
 so nothing needs copying into the document's folder,
-and no `map-paths` or `json-to-latex` stage is needed.
-A figure or table can be named without its extension, as with
-`\includegraphics` and `\input`.
+and no `map-paths` or `json-to-latex` stages are needed.
+A figure, table, or included file can be named without its extension,
+as with `\includegraphics` and `\input`.
 Paths outside the project, or with `..` in them, aren't read.
 Before running or checking the pipeline, and before each
 `calkit latex build`, Calkit copies what a document that loads the package
 includes into a `_calkit` folder beside it, writes the values it uses to
 `_calkit/values.tex`, and puts `calkit.sty` next to the document.
 A document that doesn't load it gets none of these.
-Neither is committed to Git, since Calkit writes them again whenever they're
-needed.
+Neither is committed to Git, since Calkit writes them at pipeline
+compilation time.
+With `\usepackage[links]{calkit}`, values and figures in the PDF
+link (with `hyperref`)
+to the project's page on Calkit to allow inspection of its origin
+or provenance, e.g., the pipeline stage that produced it.
+Captions link too, in a `figure` or `table` environment around a
+`\ckfigure` or `\cktable`, or in the LaTeX that `\cktable` or `\ckinclude`
+brings in.
 
 The document's stage depends on everything it includes this way,
 without any of it being listed as an input,

@@ -11,6 +11,8 @@ Take this example:
 questions:
   - question: How does the system respond to increasing $x$?
     hypothesis: The value of $y$ increases linearly with $x$.
+    approach: Measure $y$ at ten values of $x$ and fit linear and quadratic
+      models to it.
     answer: $y$ increases quadratically with $x$, not linearly
       ($R^2 = {r2:.3f}$ for the quadratic fit).
     evidence:
@@ -27,12 +29,23 @@ questions:
 ```
 
 Early on in the project, we may start with a question,
-then add a hypothesis, then an answer with some evidence.
+then add a hypothesis and the approach we'll take to answer it,
+then an answer with some evidence.
+The approach is one sentence on how the question is answered.
 The evidence references artifacts created by the project pipeline,
 so each answer can be traced back to the raw data and code behind it,
 as long as the pipeline is up to date.
+`calkit show question` prints a question as Markdown,
+including the pipeline stages behind its evidence,
+worked out from the pipeline itself, so they never need to be written down.
+`calkit list questions`, or `calkit ls q` for short,
+lists every question with a row of letters,
+H A V V,
+for whether it has a hypothesis, an answer,
+and has been verified and validated.
 Together, the questions form a structured summary of the project's
-findings.
+findings,
+and the natural place to start when reviewing a project.
 
 ## Evidence
 
@@ -119,7 +132,7 @@ spec:
 answer: The closure cuts the error by about {improvement:.1f}x.
 ```
 
-`calkit list questions` shows the text with these placeholders filled in
+`calkit show question` shows the text with these placeholders filled in
 from the results files, so the number always matches what the pipeline
 produced.
 Use `--raw` to see the text as written.
@@ -166,6 +179,19 @@ When the pipeline runs again, the answer updates to match the new result.
 `calkit check questions` checks every branch, so a mistake in one that
 doesn't currently apply still shows up.
 
+## Declaring before answering
+
+Write the question, hypothesis, and approach down before running the
+analysis that answers them.
+The project's history then shows that they came first.
+This matters most when an AI agent does the analysis:
+it can try many variations in seconds, and the code left behind shows only
+the one it kept.
+With the approach declared up front, a reviewer can check the code against
+it, rather than against the agent's account of what it did.
+Conditional answers work the same way:
+writing the branches first makes the threshold part of the claim.
+
 ## Checking questions
 
 ```sh
@@ -193,13 +219,95 @@ last edited in `calkit.yaml`, according to Git history, or `dvc.lock` for
 DVC-tracked files.
 This doesn't fail the check, since the answer may still be correct,
 but it's a sign the answer should be read again.
-If it still holds, edit the question, e.g., by adding to its `notes`,
-to mark it as reviewed.
-This mechanism is being replaced with an explicit review record; see
-[issue #1606](https://github.com/calkit/calkit/issues/1606).
+If it still holds, [validate it](#verifying-and-validating-answers) to
+record that.
 
 Checking questions is separate from `calkit status` because it needs to
 read the history of `calkit.yaml`.
+
+## Verifying and validating answers
+
+Before trusting an answer, someone should check it,
+and there are two different things to check.
+The terms come from computational science and engineering,
+where they're often summed up as:
+
+> Verification: Are we solving the equations right?
+
+> Validation: Are we solving the right equations?
+
+For a question in a Calkit project,
+verification means checking that the implementation matches the approach,
+i.e., that the pipeline stages behind the evidence do what the approach
+says they do.
+If the approach says we fit linear and quadratic models to $y$ at ten
+values of $x$,
+verifying means reading the code and confirming that's what it does.
+
+Validation means checking that the answer is justified.
+Does the approach make sense for the question?
+Does the evidence actually back up the answer,
+and is the reasoning logical?
+An answer can be verified and still not valid,
+e.g., if the quadratic fit only wins on $R^2$,
+which an extra parameter can never make worse.
+
+Basically, verification is about the code,
+and validation is about the argument.
+They don't need to be done by the same person,
+e.g., someone who knows the code can verify,
+and a domain expert can validate.
+
+Sign off on a question with `calkit update question`:
+
+```sh
+calkit update question 1 --verify "fit.py fits both models as stated."
+calkit update question 1 --validate "The linear fit's residuals curve."
+```
+
+Each adds a sign-off with your name and email from Git and the time,
+replacing any earlier one of yours of the same kind:
+
+```yaml
+questions:
+  - question: How does the system respond to increasing $x$?
+    # ...
+    verifications:
+      - by:
+          name: Ada Lovelace
+          email: ada@example.org
+        date: 2026-10-05 14:32:10-04:00
+        notes: fit.py fits both models as stated.
+    validations:
+      - by:
+          name: Ada Lovelace
+          email: ada@example.org
+        date: 2026-10-05 14:32:11-04:00
+        notes: The linear fit's residuals curve.
+```
+
+Add `--with-ai` to note any AI tools used,
+e.g., `--with-ai "Claude Opus 5.5"`.
+
+A sign-off covers the project as it was when it was added,
+and goes stale when what it vouches for changes:
+
+- A verification goes stale when the approach changes,
+  or any of the question's stages does,
+  i.e., its definition in `calkit.yaml`,
+  or a dependency `dvc.lock` lists for it, such as its script.
+- A validation goes stale when the question, hypothesis, approach, or answer
+  changes, or any of its evidence does,
+  including evidence pinned to a branch or tag that has moved since.
+
+Editing a question's `notes` doesn't make either stale.
+A stale sign-off fails `calkit check questions` until someone signs off
+again.
+A question nobody has signed off on doesn't fail the check.
+
+Because every answer leads to its evidence and the stages behind it,
+a project can be verified and validated a little at a time as the work
+goes, rather than all at once at the end.
 
 ## Quoting questions and answers in a LaTeX document
 
@@ -243,7 +351,7 @@ A key that doesn't exist renders as `??`.
 The stage depends on `calkit.yaml` and on every file the questions cite as
 evidence, so the text is rebuilt when an answer or a value it reads
 changes.
-Unlike the display in `calkit list questions`, a placeholder that can't be
+Unlike the display in `calkit show question`, a placeholder that can't be
 filled is an error here rather than being left in the text.
 The same output can be written without a stage with
 `calkit latex from-questions -o questions.tex`.

@@ -169,6 +169,7 @@ from app.models import (
     QuestionEvidenceValue,
     QuestionPublic,
     QuestionPut,
+    QuestionSignOff,
     Result,
     StageStatus,
     Table,
@@ -200,6 +201,7 @@ from app.pipeline import (
     compute_stage_statuses,
     find_frozen_tainted_stages,
     find_stage_for_path,
+    pipeline_at_ref,
 )
 from app.security import generate_refresh_token, hash_refresh_token
 from app.storage import (
@@ -654,8 +656,7 @@ def post_project_upload(
         "hub": settings.frontend_host,
         "git_repo_url": project.git_repo_url,
     }
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     # Which files belong in Git and which in DVC is a real decision (size,
     # extension, directories of many small files), and calkit already makes
     # it. Shelling out keeps that judgment in one place rather than growing
@@ -1149,8 +1150,7 @@ def post_project(
                     git_repo_url=template_git_repo_url,
                     git_rev=template_git_rev,
                 )
-            with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-                ryaml.dump(ck_info, f)
+            ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
             repo.git.add("calkit.yaml")
             if project_in.template is None:
                 # Create devcontainer spec from the one bundled with Calkit
@@ -2292,8 +2292,7 @@ def patch_project_contents(
         else:
             ck_info[target_category] = [current_object]
     # Now it's time to write and commit
-    with open(ck_fpath, "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(ck_fpath))
     git_diff = repo.git.diff("calkit.yaml")
     if not git_diff:
         logger.info("No changes to calkit.yaml detected")
@@ -2681,6 +2680,73 @@ def _build_questions_public(
     def _evidence_of(q: str | dict) -> list:
         return q.get("evidence") or [] if isinstance(q, dict) else []
 
+    def check_sign_offs() -> list[tuple[list[Any], list[Any]]]:
+        """Each question's verifications and validations, checked against
+        the history up to ``ref``, cached by the commit it resolves to."""
+        empty: list[tuple[list[Any], list[Any]]] = [
+            ([], []) for _ in questions_ck
+        ]
+        if not any(
+            isinstance(q, dict)
+            and (q.get("verifications") or q.get("validations"))
+            for q in questions_ck
+        ):
+            return empty
+        try:
+            sha = repo.git.rev_parse(f"{ref or 'HEAD'}^{{commit}}")
+        except Exception:
+            return empty
+        # A branch or tag cited by evidence can move without the project's
+        # commit changing, so where each points now is part of the key
+        cited = sorted(
+            {
+                str(ev["git_ref"])
+                for q in questions_ck
+                for ev in _evidence_of(q)
+                if isinstance(ev, dict) and ev.get("git_ref")
+            }
+        )
+        resolved = []
+        for cited_ref in cited:
+            try:
+                resolved.append(repo.git.rev_parse(f"{cited_ref}^{{commit}}"))
+            except Exception:
+                resolved.append("-")
+        key = cache.make_key(
+            "question-sign-offs", str(project.id), sha, *resolved
+        )
+        cached = cache.get_json(key)
+        if isinstance(cached, list) and len(cached) == len(questions_ck):
+            return [(v, a) for v, a in cached]
+        wdir = str(repo.working_dir)
+        history = calkit.questions.CalkitYamlHistory(repo, wdir, sha)
+        # As committed, not as normalized for display, so it compares
+        # cleanly with the history it's checked against
+        raw = history.at(sha) or {}
+        out: list[tuple[list[Any], list[Any]]] = []
+        for q in raw.get("questions") or []:
+            if not isinstance(q, dict):
+                out.append(([], []))
+                continue
+            try:
+                ver, val = calkit.questions.check_sign_offs(
+                    q, raw, wdir, repo, history, ref=sha
+                )
+            except Exception as e:
+                # Best-effort, like evidence staleness
+                logger.warning(f"Could not check question sign-offs: {e}")
+                ver, val = [], []
+            out.append(
+                (
+                    [c.model_dump(mode="json") for c in ver],
+                    [c.model_dump(mode="json") for c in val],
+                )
+            )
+        if len(out) != len(questions_ck):
+            return empty
+        cache.set_json(key, out)
+        return out
+
     def _build_lookups(
         ev_ref: str | None, entries: list[dict]
     ) -> _EvidenceLookups:
@@ -2833,9 +2899,11 @@ def _build_questions_public(
     # wherever the shorter list ended.
     db_by_number = {q.number: q for q in project.questions}
     result_value_cache: dict[tuple[str | None, str], dict | None] = {}
+    sign_offs = check_sign_offs()
     questions_public = []
     for number, q_ck in enumerate(questions_ck, start=1):
         hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
+        approach = q_ck.get("approach") if isinstance(q_ck, dict) else None
         answer = q_ck.get("answer") if isinstance(q_ck, dict) else None
         # Templates are filled from the question's own value evidence, so a
         # number in an answer is read out of the results file rather than
@@ -2849,6 +2917,7 @@ def _build_questions_public(
             cache=result_value_cache,
         )
         hypothesis = _render_template(hypothesis, values)
+        approach = _render_template(approach, values)
         answer = _render_template(answer, values)
         evidence = _build_question_evidence(
             project=project,
@@ -2872,8 +2941,17 @@ def _build_questions_public(
                 number=number,
                 question=app.index.extract_question_text(q_ck),
                 hypothesis=hypothesis,
+                approach=approach,
                 answer=answer,
                 evidence=evidence,
+                verifications=[
+                    QuestionSignOff.model_validate(c)
+                    for c in sign_offs[number - 1][0]
+                ],
+                validations=[
+                    QuestionSignOff.model_validate(c)
+                    for c in sign_offs[number - 1][1]
+                ],
             )
         )
     return questions_public
@@ -2972,8 +3050,7 @@ def post_project_question(
     else:
         ck_questions.append(req.question)
     ck_info["questions"] = ck_questions
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Add question"])
     push_and_expire(project, repo)
@@ -3016,6 +3093,11 @@ def _apply_question_update(
         question["hypothesis"] = req.hypothesis
     else:
         question.pop("hypothesis", None)
+    if "approach" in req.model_fields_set:
+        if req.approach:
+            question["approach"] = req.approach
+        else:
+            question.pop("approach", None)
     unchanged = calkit.questions.is_conditional(question.get("answer")) and (
         req.answer == rendered_answer
     )
@@ -3096,8 +3178,7 @@ def put_project_question(
         existing, req, rendered_answer=rendered_answer
     )
     ck_info["questions"] = ck_questions
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     if repo.is_dirty():
         repo.git.commit(["-m", f"Update question {number}"])
@@ -3142,8 +3223,7 @@ def delete_project_question(
         ck_info["questions"] = ck_questions
     else:
         ck_info.pop("questions", None)
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Delete question {number}"])
     push_and_expire(project, repo)
@@ -3974,7 +4054,21 @@ def get_project_results(
         ref=ref,
         read_only=True,
     )
-    return _build_results(project=project, repo=repo, ref=ref)
+    results = _build_results(project=project, repo=repo, ref=ref)
+    # Whether each is out of date, like a figure or table
+    pipeline = pipeline_at_ref(
+        repo, ref, project.owner_account_name, project.name
+    )
+    for result in results:
+        result.stage = result.stage or find_stage_for_path(
+            result.path, pipeline.dvc_lock, valid_stages=set(pipeline.statuses)
+        )
+        status = pipeline.statuses.get(result.stage) if result.stage else None
+        if status is not None:
+            result.stage_status = StageStatus.model_validate(
+                status.model_dump()
+            )
+    return results
 
 
 # ``figure_path`` takes the path convertor because figures live in nested
@@ -4139,8 +4233,7 @@ def post_project_figure(
             raise HTTPException(422, f"Invalid figure: {e}")
     figures.append(fig_entry)
     ck_info["figures"] = figures
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Make a commit
     repo.git.commit(["-m", f"Add figure {path}"])
@@ -5416,8 +5509,7 @@ def post_project_dataset(
                 outs[0]["path"] = os.path.basename(req.path)
                 outs[0]["remote"] = remote_name
             dvc_import["outs"] = outs
-            with open(os.path.join(wdir, dvc_fpath), "w") as f:
-                ryaml.dump(dvc_import, f)
+            ryaml.dump(dvc_import, Path(wdir, dvc_fpath))
             repo.git.add(dvc_fpath)
             gitignore_path = os.path.join(wdir, ".gitignore")
             existing_ignore = (
@@ -5546,8 +5638,7 @@ def post_project_dataset(
         raise HTTPException(422, f"Invalid dataset: {e}")
     datasets.append(ds)
     ck_info["datasets"] = datasets
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Add dataset {ds['path']}"])
     push_and_expire(project, repo)
@@ -5687,8 +5778,7 @@ def post_project_dataset_upload(
             raise HTTPException(422, f"Invalid dataset: {e}")
     datasets.append(ds)
     ck_info["datasets"] = datasets
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Make a commit
     repo.git.commit(["-m", f"Add dataset {path}"])
@@ -6178,8 +6268,10 @@ def get_project_publication_components(
             if not isinstance(entry, dict) or not entry.get("path"):
                 continue
             entry_path = normalize_artifact_path(str(entry["path"]))
+            # A person can't be the origin of an exported format, e.g., PNG
             if entry.get("created_by"):
-                declared.setdefault(entry_path, "attested")
+                if calkit.provenance.can_be_created_by_person(entry_path):
+                    declared.setdefault(entry_path, "attested")
             elif entry.get("imported_from"):
                 declared.setdefault(entry_path, "imported")
     overleaf_info = calkit.overleaf.get_sync_info(
@@ -6350,7 +6442,14 @@ def post_project_latex_components(
     if not loads:
         return LatexComponents(loads_calkit=False)
     plan = calkit.latex.plan_ck_components(
-        components, is_file=is_file, read_data=read_data, is_outside=is_outside
+        components,
+        is_file=is_file,
+        read_data=read_data,
+        is_outside=is_outside,
+        link_base=(
+            f"{settings.frontend_host.rstrip('/')}/"
+            f"{project.owner_account_name}/{project.name}"
+        ),
     )
     return LatexComponents(
         loads_calkit=True,
@@ -6461,8 +6560,7 @@ def post_project_misc(
     misc = ck_info.get("misc", [])
     misc.append(entry)
     ck_info["misc"] = misc
-    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
     push_and_expire(project, repo)
@@ -6810,8 +6908,7 @@ def post_project_publication(
             )
         )
         ck_info["publications"] = publications
-        with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-            ryaml.dump(ck_info, f)
+        ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
         repo.git.add("calkit.yaml")
     # Make a commit
     repo.git.commit(["-m", f"Add publication {path} ({kind})"])
@@ -7276,8 +7373,7 @@ async def post_project_overleaf_publication(
         with open(os.path.join(repo.working_dir, ".gitignore"), "a") as f:
             f.write("\n.calkit/overleaf/\n")
         repo.git.add(".gitignore")
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     if not import_zip_mode:
         repo.git.add(calkit.overleaf.get_sync_info_fpath())
@@ -8212,8 +8308,7 @@ def put_project_pipeline_stage(
     _validate_ck_stage(stage_map, stage_name)
     stages[stage_name] = stage_map
     ck_info["pipeline"]["stages"] = stages
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
     # read; otherwise the edit sits in calkit.yaml until the next run.
@@ -8305,8 +8400,7 @@ def put_project_pipeline(
     pipeline = _load_ck_pipeline(req.yaml)
     # Written as the user wrote it: same key order, same comments.
     ck_info["pipeline"] = pipeline
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
     # read; otherwise the edit sits in calkit.yaml until the next run.
@@ -9299,8 +9393,7 @@ def post_project_references(
             f.write("")
     references.append({"path": req.path})
     ck_info["references"] = references
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add(req.path)
     repo.git.add("calkit.yaml")
     verb = "Label" if req.label_existing else "Add"
@@ -9351,8 +9444,7 @@ def delete_project_references(
     if len(kept) == len(references) and not os.path.isfile(bib_full_path):
         raise HTTPException(404, "References collection not found")
     ck_info["references"] = kept
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     if os.path.isfile(bib_full_path):
         os.remove(bib_full_path)
@@ -9478,8 +9570,7 @@ def post_project_reference_item(
         ):
             collections.append({"path": req.path})
             ck_info["references"] = collections
-            with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-                ryaml.dump(ck_info, f)
+            ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
             repo.git.add("calkit.yaml")
     if repo.git.diff("--cached", "--name-only").strip():
         message = (
@@ -9841,8 +9932,7 @@ def post_project_zotero_import(
     else:
         references.append({"path": req.bib_path})
     ck_info["references"] = references
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     last_synced = _record_zotero_sync_info(
         repo=repo,
         bib_path=req.bib_path,
@@ -10739,8 +10829,7 @@ def post_project_environment(
     envs[req.name] = new_env
     ck_info["environments"] = envs
     fpath = os.path.join(repo.working_dir, "calkit.yaml")
-    with open(fpath, "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(fpath))
     repo.git.add("calkit.yaml")
     if req.path and req.file_content:
         fpath = os.path.join(repo.working_dir, req.path)

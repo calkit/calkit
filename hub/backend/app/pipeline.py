@@ -23,16 +23,17 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import ruamel.yaml
 from pydantic import BaseModel, Field, ValidationError
 
 import calkit.notebooks
 from app import cache
+from app.core import load_yaml_fast
 from app.dvc import _MD5_RE, get_data_fpath_for_md5
-from app.git import RepoTree
-from app.storage import make_data_fpath
+from app.git import RepoTree, get_repo_tree_for_ref, resolve_commit_sha
+from app.storage import get_object_fs, make_data_fpath
 
 logger = logging.getLogger(__name__)
 
@@ -980,3 +981,45 @@ def find_stage_for_path(
     # Exact beats directory, and a current stage beats a stale one.
     matches.sort(key=lambda m: (not m[0], not m[1]))
     return matches[0][2]
+
+
+class PipelineAtRef(NamedTuple):
+    """A project's pipeline at one ref, and what's stale in it."""
+
+    dvc_yaml: dict[str, Any]
+    dvc_lock: dict[str, Any]
+    statuses: dict[str, StageStatus]
+    frozen: set[str]
+
+
+def pipeline_at_ref(
+    repo: Any, ref: str | None, owner_name: str, project_name: str
+) -> PipelineAtRef:
+    """Read the pipeline at a ref and work out each stage's status.
+
+    Best-effort, so a project whose pipeline can't be read reports nothing
+    rather than failing whatever asked.
+    """
+    dvc_yaml: dict[str, Any] = {}
+    dvc_lock: dict[str, Any] = {}
+    statuses: dict[str, StageStatus] = {}
+    frozen: set[str] = set()
+    try:
+        tree = get_repo_tree_for_ref(repo, ref)
+        if tree.is_file("dvc.lock"):
+            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
+        if tree.is_file("dvc.yaml"):
+            dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
+        statuses = compute_stage_statuses(
+            dvc_yaml=dvc_yaml,
+            dvc_lock=dvc_lock,
+            tree=tree,
+            owner_name=owner_name,
+            project_name=project_name,
+            fs=get_object_fs(),
+            cache_token=resolve_commit_sha(repo, ref),
+        )
+        frozen = find_frozen_tainted_stages(dvc_yaml, dvc_lock, statuses)
+    except Exception as e:
+        logger.warning(f"Failed to compute pipeline status at {ref}: {e}")
+    return PipelineAtRef(dvc_yaml, dvc_lock, statuses, frozen)

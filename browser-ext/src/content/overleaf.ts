@@ -5,11 +5,18 @@ import {
   renderProjectPicker,
 } from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
+import {
+  type Citation,
+  citationAt,
+  citationText,
+  citationCandidates,
+} from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import { isUnsupportedByHub, RequestFailed, send } from "../core/messages";
 import type {
   GithubRepo,
   OverleafLinkPublic,
+  Provenance,
   OverleafSyncStatus,
   OverleafSyncStatusFile,
   ProjectPublic,
@@ -31,6 +38,7 @@ const TOKEN_PANEL_ID = "calkit-overleaf-token-panel";
 const OVERLEAF_GIT_SETTINGS =
   "https://www.overleaf.com/user/settings#git-integration";
 const OVERLEAF_TOKEN_RE = /\bolp_[A-Za-z0-9]{20,}\b/;
+const CARD_ID = "calkit-overleaf-citation-card";
 
 let panel: Panel | null = null;
 let currentProjectId: string | null = null;
@@ -49,6 +57,583 @@ let lastCheck: {
 // that finishes after any of them doesn't draw over it
 let loadGeneration = 0;
 let tokenWatcher: MutationObserver | null = null;
+// The Calkit project this Overleaf project syncs with, once found
+let currentLink: OverleafLinkPublic | null = null;
+const provenanceCache = new Map<string, Promise<Provenance>>();
+
+function provenanceFor(
+  link: OverleafLinkPublic,
+  path: string,
+  key?: string,
+): Promise<Provenance> {
+  const cacheKey = `${link.project_owner_name}/${link.project_name}:${path}:${
+    key ?? ""
+  }`;
+  let cached = provenanceCache.get(cacheKey);
+  if (!cached) {
+    cached = send({
+      type: "project.provenance",
+      owner: link.project_owner_name,
+      project: link.project_name,
+      path,
+      key,
+    });
+    // A failure is worth asking again about next time
+    cached.catch(() => provenanceCache.delete(cacheKey));
+    provenanceCache.set(cacheKey, cached);
+  }
+  return cached;
+}
+
+/**
+ * Where a file the document shows came from, finding it in the project
+ * first, since TeX may find it under a name with an extension added, and
+ * finds a plainly included one relative to the document.
+ */
+async function citationProvenance(
+  link: OverleafLinkPublic,
+  citation: Citation,
+): Promise<Provenance> {
+  if (citation.kind === "value") {
+    return provenanceFor(link, citation.path, citation.key);
+  }
+  const candidates = citationCandidates(link.path, citation);
+  let first: Provenance | null = null;
+  for (const candidate of candidates) {
+    const provenance = await provenanceFor(link, candidate);
+    if (provenance.exists) {
+      return provenance;
+    }
+    first ??= provenance;
+  }
+  return first ?? provenanceFor(link, candidates[0]);
+}
+
+/**
+ * Type into Overleaf's editor at the cursor, as if the user had.
+ *
+ * CodeMirror keeps its selection while the panel has focus and puts it
+ * back when the editor is focused again, and it handles an insertText
+ * command like typing, so the edit lands in Overleaf's history and syncs.
+ * Falls back to the clipboard when there's no editor to type into, e.g.,
+ * with a PDF open instead of a .tex file.
+ */
+async function insertIntoEditor(text: string): Promise<"inserted" | "copied"> {
+  const editor = document.querySelector<HTMLElement>(".cm-content");
+  if (editor) {
+    editor.focus();
+    if (document.execCommand("insertText", false, text)) {
+      return "inserted";
+    }
+  }
+  await navigator.clipboard.writeText(text);
+  return "copied";
+}
+
+/** A value as it reads in a panel row. */
+function valueText(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/**
+ * What produced a figure, table, or value the document shows, and whether
+ * it's current.
+ *
+ * Overleaf can't run the pipeline, so the actions are ways into the
+ * project: the script to edit, and the page in the hub with the rest.
+ */
+function renderProvenance(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+  provenance: Provenance,
+): void {
+  const base = projectUrl(
+    hubWebUrl,
+    link.project_owner_name,
+    link.project_name,
+  );
+  const fileUrl = (path: string) =>
+    `${base}/files?path=${encodeURIComponent(path)}`;
+  // A file is named as the project has it, not as written
+  const path = citation.kind === "value" ? citation.path : provenance.path;
+  const label = citation.key ? `${path}: ${citation.key}` : path;
+  container.append(el("div", { class: "name", text: label }));
+  if (provenance.copied_from) {
+    container.append(
+      el("div", { class: "dim small" }, [
+        document.createTextNode("Copied from "),
+        el("a", {
+          text: provenance.copied_from,
+          href: fileUrl(provenance.copied_from),
+          attrs: { target: "_blank" },
+        }),
+        provenance.copy_stage
+          ? document.createTextNode(` by ${provenance.copy_stage}`)
+          : null,
+      ]),
+    );
+  }
+  if (citation.kind === "value") {
+    container.append(
+      el("div", {
+        style: { fontSize: "18px", fontWeight: "600", margin: "4px 0" },
+        text:
+          provenance.value_error ??
+          (provenance.value === undefined ? "" : valueText(provenance.value)),
+      }),
+    );
+  } else if (!provenance.exists) {
+    container.append(
+      el("div", {
+        class: "dim small",
+        text: "The project doesn't have this file yet.",
+      }),
+    );
+  }
+  if (!provenance.stage && provenance.origin) {
+    container.append(
+      el("div", { class: "small" }, [
+        provenance.origin_url
+          ? el("a", {
+              text: provenance.origin,
+              href: provenance.origin_url,
+              attrs: { target: "_blank" },
+            })
+          : document.createTextNode(provenance.origin),
+        provenance.origin_path
+          ? el("span", {
+              class: "dim",
+              text: ` (recorded for ${provenance.origin_path})`,
+            })
+          : null,
+      ]),
+    );
+  } else if (!provenance.stage) {
+    container.append(
+      el("div", {
+        class: "dim small",
+        text: "No pipeline stage produces this.",
+      }),
+    );
+  } else {
+    const stale = provenance.stale_reason;
+    container.append(
+      el("div", { class: "row" }, [
+        el("div", { class: "grow small" }, [
+          document.createTextNode("Stage "),
+          el("a", {
+            text: provenance.stage,
+            href: `${base}/pipeline?stage=${encodeURIComponent(
+              provenance.stage,
+            )}`,
+            attrs: { target: "_blank" },
+          }),
+          provenance.stage_kind
+            ? el("span", {
+                class: "dim",
+                text: ` \u00b7 ${provenance.stage_kind}`,
+              })
+            : null,
+        ]),
+        stale
+          ? el("span", {
+              class: "badge warn",
+              text: stale === "frozen" ? "frozen" : "stale",
+              title:
+                stale === "frozen"
+                  ? "Frozen, and its inputs or outputs have moved since it ran"
+                  : "Its inputs or code changed since it last ran; run the " +
+                    "pipeline, then sync",
+            })
+          : provenance.stage_status?.status === "up-to-date"
+          ? el("span", { class: "badge ok", text: "current" })
+          : null,
+      ]),
+    );
+    if (provenance.source) {
+      container.append(
+        el("div", { class: "small" }, [
+          document.createTextNode("Edit "),
+          el("a", {
+            text: provenance.source,
+            href: fileUrl(provenance.source),
+            attrs: { target: "_blank" },
+          }),
+          document.createTextNode(" to change it."),
+        ]),
+      );
+    }
+    if (provenance.inputs.length) {
+      const shown = provenance.inputs.slice(0, 4);
+      const more = provenance.inputs.length - shown.length;
+      container.append(
+        el("div", { class: "dim small" }, [
+          document.createTextNode("Reads "),
+          ...shown.flatMap((input, i) => [
+            i ? document.createTextNode(", ") : null,
+            el("a", {
+              text: input,
+              href: fileUrl(input),
+              attrs: { target: "_blank" },
+            }),
+          ]),
+          more ? document.createTextNode(`, and ${more} more`) : null,
+        ]),
+      );
+    }
+  }
+  // Data behind it that nothing records the origin of, which a reader
+  // can't trace however current the pipeline is
+  for (const gap of provenance.gaps ?? []) {
+    const via = gap.steps.flatMap((step) => (step.stage ? [step.stage] : []));
+    container.append(
+      el("div", {
+        class: "small",
+        style: { color: "var(--ck-warning)", marginTop: "4px" },
+        text:
+          `Nothing records where ${gap.path} came from` +
+          (via.length ? ` (via ${via.join(", ")})` : "") +
+          ".",
+        title:
+          "Record it in calkit.yaml with imported_from or created_by, or " +
+          "add the stage that makes it",
+      }),
+    );
+  }
+  container.append(
+    el("div", { class: "small", style: { marginTop: "6px" } }, [
+      el("a", {
+        text: "Open in Calkit",
+        href:
+          citation.kind === "value"
+            ? `${base}/results?path=${encodeURIComponent(path)}` +
+              `&key=${encodeURIComponent(citation.key ?? "")}`
+            : citation.kind === "figure"
+            ? `${base}/figures?path=${encodeURIComponent(
+                provenance.copied_from ?? path,
+              )}`
+            : citation.kind === "table"
+            ? `${base}/tables?path=${encodeURIComponent(path)}`
+            : fileUrl(path),
+        attrs: { target: "_blank" },
+      }),
+    ]),
+  );
+}
+
+/**
+ * Follow the cursor in the editor, and when it's on something the document
+ * shows from the project, whether with a calkit.sty command or a plain
+ * `\\includegraphics` or `\\input`, say where it came from.
+ *
+ * A card rather than the panel, since the panel is about syncing and
+ * mostly closed, while this is about the line being written.
+ */
+function watchCursor(): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let shown: string | null = null;
+  let dismissed: string | null = null;
+  const hide = () => {
+    document.getElementById(CARD_ID)?.remove();
+    shown = null;
+  };
+  const update = async () => {
+    const link = currentLink;
+    const selection = document.getSelection();
+    const anchor = selection?.anchorNode;
+    const line =
+      anchor instanceof Element
+        ? anchor.closest(".cm-line")
+        : anchor?.parentElement?.closest(".cm-line");
+    if (!link || !selection || !anchor || !line) {
+      // Clicking into the card itself moves the selection there
+      if (!document.getElementById(CARD_ID)?.contains(anchor ?? null)) {
+        hide();
+      }
+      return;
+    }
+    // How far into the line the cursor is, in characters
+    const range = document.createRange();
+    range.setStart(line, 0);
+    range.setEnd(anchor, selection.anchorOffset);
+    const citation = citationAt(
+      line.textContent ?? "",
+      range.toString().length,
+    );
+    const id = citation
+      ? citation.included
+        ? `${citation.kind}:${citation.path}`
+        : citationText(citation)
+      : null;
+    if (!citation || !id) {
+      hide();
+      dismissed = null;
+      return;
+    }
+    if (id === shown || id === dismissed) {
+      return;
+    }
+    shown = id;
+    const card = mountPanel({
+      id: CARD_ID,
+      title: "From the project",
+      position: "top-right",
+      onClose: () => {
+        dismissed = id;
+        shown = null;
+      },
+    });
+    card.body.append(loading());
+    try {
+      const provenance = await citationProvenance(link, citation);
+      if (shown !== id) {
+        return;
+      }
+      clear(card.body);
+      renderProvenance(card.body, link, citation, provenance);
+    } catch (e) {
+      clear(card.body).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  };
+  document.addEventListener("selectionchange", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => void update(), 200);
+  });
+}
+
+/**
+ * Insert a figure, table, or value from the project at the cursor.
+ *
+ * What's inserted is a calkit.sty command naming it by its path in the
+ * project. The next sync brings what it cites into the paper's _calkit
+ * folder, so there's nothing to set up: no map-paths or json-to-latex
+ * stage, and no copying files by hand.
+ */
+function renderInsert(
+  link: OverleafLinkPublic,
+  path: string,
+  reload: () => void,
+): HTMLElement {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const list = el("div", { class: "stack", style: { marginTop: "6px" } });
+  const message = el("div", { class: "small" });
+  const format = textInput({ placeholder: "Format, e.g., .2f (optional)" });
+  const insert = async (citation: Citation) => {
+    try {
+      const how = await insertIntoEditor(citationText(citation));
+      const sync = async () => {
+        clear(message).append(loading("Syncing"));
+        // Overleaf saves an edit a moment after it's made, and a sync
+        // started first would miss it
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        try {
+          await send({ type: "overleaf.sync", owner, project, path });
+          reload();
+        } catch (e) {
+          clear(message).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+        }
+      };
+      // Synced right away so it shows up, unless it still has to be pasted
+      if (how === "inserted") {
+        await sync();
+        return;
+      }
+      clear(message).append(
+        el("div", {
+          class: "dim small",
+          text:
+            "Copied; paste it where it should go, then sync to bring it " +
+            "into the paper. The document needs \\usepackage{calkit} in " +
+            "its preamble.",
+        }),
+        el("div", { class: "actions" }, [
+          el("button", {
+            class: "action secondary",
+            text: "Sync now",
+            onClick: (e: Event) => {
+              (e.currentTarget as HTMLButtonElement).disabled = true;
+              void sync();
+            },
+          }),
+        ]),
+      );
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  };
+  const row = (title: string, detail: string, onClick: () => void) =>
+    el("div", { class: "row" }, [
+      el("div", { class: "grow" }, [
+        el("div", { class: "small", text: title }),
+        el("div", { class: "dim small", text: detail }),
+      ]),
+      el("button", {
+        class: "action secondary",
+        text: "Insert",
+        onClick,
+      }),
+    ]);
+  const showFigures = async () => {
+    clear(list).append(loading());
+    try {
+      const page = await send({ type: "project.figures", owner, project });
+      clear(list);
+      for (const figure of page.items) {
+        list.append(
+          row(figure.title, figure.path, () =>
+            insert({
+              kind: "figure",
+              path: figure.path,
+              options: "width=\\linewidth",
+            }),
+          ),
+        );
+      }
+      if (!page.items.length) {
+        list.append(el("div", { class: "dim small", text: "No figures" }));
+      }
+    } catch (e) {
+      clear(list).append(renderFailure(e, { onSignedIn: reload }));
+    }
+  };
+  const showTables = async () => {
+    clear(list).append(loading());
+    try {
+      // \cktable inputs TeX, so a CSV would need a stage to typeset it
+      const tables = (
+        await send({ type: "project.tables", owner, project })
+      ).filter((table) => table.path.endsWith(".tex"));
+      clear(list);
+      for (const table of tables) {
+        list.append(
+          row(table.title, table.path, () =>
+            insert({ kind: "table", path: table.path, options: "" }),
+          ),
+        );
+      }
+      if (!tables.length) {
+        list.append(
+          el("div", {
+            class: "dim small",
+            text: "No tables written as TeX",
+          }),
+        );
+      }
+    } catch (e) {
+      clear(list).append(renderFailure(e, { onSignedIn: reload }));
+    }
+  };
+  // A value is picked from inside a results file, so a file opens to its
+  // keys rather than inserting anything
+  const showValues = async () => {
+    clear(list).append(loading());
+    try {
+      const results = await send({ type: "project.results", owner, project });
+      const paths = [...new Set(results.map((result) => result.path))].filter(
+        (resultPath) => /\.(json|ya?ml|toml)$/i.test(resultPath),
+      );
+      clear(list).append(format);
+      for (const resultPath of paths) {
+        const keys = el("div", { style: { paddingLeft: "10px" } });
+        const open = el("button", {
+          class: "action secondary",
+          text: "Open",
+        });
+        open.addEventListener("click", async () => {
+          open.disabled = true;
+          clear(keys).append(loading());
+          try {
+            const file = await provenanceFor(link, resultPath);
+            clear(keys);
+            if (file.value_error) {
+              keys.append(errorMessage(file.value_error));
+              return;
+            }
+            // Every leaf, by its dotted key, which is what \ckvalue takes
+            const walk = (value: unknown, prefix: string) => {
+              if (value === null || typeof value !== "object") {
+                keys.append(
+                  row(prefix, valueText(value), () =>
+                    insert({
+                      kind: "value",
+                      path: resultPath,
+                      key: prefix,
+                      options: format.value.trim(),
+                    }),
+                  ),
+                );
+                return;
+              }
+              const entries = Array.isArray(value)
+                ? value.map((item, i) => [String(i), item] as const)
+                : Object.entries(value as Record<string, unknown>);
+              for (const [name, item] of entries) {
+                walk(item, prefix ? `${prefix}.${name}` : name);
+              }
+            };
+            walk(file.value, "");
+          } catch (e) {
+            open.disabled = false;
+            clear(keys).append(
+              errorMessage(e instanceof Error ? e.message : String(e)),
+            );
+          }
+        });
+        list.append(
+          el("div", { class: "row" }, [
+            el("div", { class: "grow small", text: resultPath }),
+            open,
+          ]),
+          keys,
+        );
+      }
+      if (!paths.length) {
+        list.append(
+          el("div", {
+            class: "dim small",
+            text: "No JSON, YAML, or TOML results",
+          }),
+        );
+      }
+    } catch (e) {
+      clear(list).append(renderFailure(e, { onSignedIn: reload }));
+    }
+  };
+  return el("div", { style: { marginTop: "10px" } }, [
+    el("div", {
+      class: "small",
+      style: { fontWeight: "600" },
+      text: "Insert from the project",
+    }),
+    el("div", { class: "actions" }, [
+      el("button", {
+        class: "action secondary",
+        text: "Figure",
+        onClick: () => void showFigures(),
+      }),
+      el("button", {
+        class: "action secondary",
+        text: "Table",
+        onClick: () => void showTables(),
+      }),
+      el("button", {
+        class: "action secondary",
+        text: "Value",
+        onClick: () => void showValues(),
+      }),
+    ]),
+    list,
+    message,
+  ]);
+}
 
 /**
  * Whether a failure is about the user's Overleaf Git token, missing or
@@ -1129,9 +1714,11 @@ async function load(overleafProjectId: string): Promise<void> {
     }
     lastTokenProblem = false;
     lastSyncNeeded = !statuses[0].in_sync;
+    currentLink = link;
     lastCheck = { overleafProjectId, hubWebUrl, link, status: statuses[0] };
     renderStatus(content, link, statuses[0], reload);
     showNotice();
+    content.append(renderInsert(link, statuses[0].path, reload));
     if (links.length > 1) {
       content.append(
         el("div", {
@@ -1273,9 +1860,11 @@ function teardown(): void {
   tokenWatcher = null;
   document.getElementById(TOKEN_PANEL_ID)?.remove();
   document.getElementById(LAUNCHER_ID)?.remove();
+  document.getElementById(CARD_ID)?.remove();
   panel?.remove();
   panel = null;
   currentProjectId = null;
+  currentLink = null;
 }
 
 function sync(): void {
@@ -1334,6 +1923,7 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       }
       return;
     }
+    currentLink = link;
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
@@ -1409,6 +1999,7 @@ function watchForSaves(): void {
 }
 
 watchForSaves();
+watchCursor();
 runContentScript({
   id: "overleaf",
   sync,
@@ -1423,6 +2014,8 @@ runContentScript({
     lastSyncNeeded = false;
     lastTokenProblem = false;
     lastUnlinked = false;
+    currentLink = null;
+    provenanceCache.clear();
     lastCheck = null;
     if (panel) {
       void load(overleafProjectId);

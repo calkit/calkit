@@ -2000,6 +2000,33 @@ class DocumentEvidence(Model):
     )
 
 
+class SignOff(Model):
+    """A person's sign-off on a question, as a verification or validation.
+
+    It applies to the question as it was at the commit that added it, which
+    is read from Git rather than written here, so a sign-off can't quietly
+    carry over to something nobody checked.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    by: _Person = Field(
+        description=(
+            "Who signed off. Generative AI tools used are disclosed with "
+            "their ``with_ai``."
+        )
+    )
+    date: date_type | datetime = Field(
+        description=(
+            "When they signed off. Written with the time, so signing off "
+            "again, even on the same day, records a new sign-off."
+        )
+    )
+    notes: str | None = Field(
+        default=None,
+        description="What they checked, or anything they want on record.",
+    )
+
+
 class Question(Model):
     """A question the project hopes to answer.
 
@@ -2017,9 +2044,12 @@ class Question(Model):
 
     An answer is a claim about the evidence as it was when the answer was
     last edited, and Git records when that was. ``calkit check questions``
-    reports a question as stale when any of its evidence has changed since
-    that commit, so editing the question after re-reading it against the
-    new evidence is how to say it still holds.
+    reports evidence that has changed since that commit. People sign off on
+    a question in two ways. A verification says the stages behind the
+    evidence implement the ``approach``, and goes stale when the approach or
+    those stages change. A validation says the approach suits the question
+    and the evidence justifies the answer, and goes stale when the question
+    or its evidence changes.
     """
 
     name: str | None = Field(
@@ -2033,6 +2063,14 @@ class Question(Model):
     )
     question: str
     hypothesis: str | None = None
+    approach: str | None = Field(
+        default=None,
+        description=(
+            "One sentence on how the question is answered, e.g., the method "
+            "the pipeline implements. The stages themselves aren't listed "
+            "here, since they follow from the evidence the pipeline produces."
+        ),
+    )
     answer: str | dict[str, str] | None = Field(
         default=None,
         description=(
@@ -2062,6 +2100,25 @@ class Question(Model):
         ]
         | None
     ) = None
+    verifications: list[SignOff] | None = Field(
+        default=None,
+        description=(
+            "Sign-offs that the pipeline stages behind the evidence implement "
+            "the approach correctly, i.e., the answer was worked out right. "
+            "Stale once the approach or any of those stages changes. One per "
+            "person; signing off again replaces theirs."
+        ),
+    )
+    validations: list[SignOff] | None = Field(
+        default=None,
+        description=(
+            "Sign-offs that the approach suits the question and the evidence "
+            "justifies the answer, i.e., the right thing was worked out. "
+            "Stale once the question, hypothesis, approach, answer, or "
+            "evidence changes. One per person; signing off again replaces "
+            "theirs."
+        ),
+    )
 
     @field_validator("name")
     @classmethod

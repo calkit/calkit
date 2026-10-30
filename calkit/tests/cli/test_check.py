@@ -1272,6 +1272,16 @@ def test_check_repro_literals(tmp_dir):
 def test_check_questions(tmp_dir):
     import json
 
+    def show(*args: str) -> str:
+        # With stderr, where a warning goes so the Markdown stays clean
+        proc = subprocess.run(
+            ["calkit", "show", "q", "1", *args],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return proc.stdout + proc.stderr
+
     subprocess.check_call(["calkit", "init"])
     os.makedirs("results")
     with open("results/findings.json", "w") as f:
@@ -1312,13 +1322,9 @@ def test_check_questions(tmp_dir):
     subprocess.check_call(["git", "commit", "-q", "-am", "Import it"])
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "Answers backed by current evidence: 1/1" in out
-    # Listing renders the placeholder from the results file
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "answer: 8 of eight do." in out
-    out = subprocess.check_output(
-        ["calkit", "list", "questions", "--raw"], text=True
-    )
-    assert "answer: {n_top} of eight do." in out
+    # Showing renders the placeholder from the results file
+    assert "**Answer:** 8 of eight do." in show()
+    assert "**Answer:** {n_top} of eight do." in show("--raw")
     # The pipeline changes the number in a later commit: the report says
     # what it was and when, without failing -- the sentence around a number
     # can still be true -- and the listing already shows 0
@@ -1363,8 +1369,7 @@ def test_check_questions(tmp_dir):
         ["calkit", "status", "-c", "questions"], text=True
     )
     assert "1 question, all answered with current evidence" in out
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "answer: 0 of eight do." in out
+    assert "**Answer:** 0 of eight do." in show()
     # Reviewing the answer is an edit to the question, which clears the
     # note about the value having moved
     ck_info = calkit.load_calkit_info()
@@ -1392,31 +1397,31 @@ def test_check_questions(tmp_dir):
     )
     assert "Questions answered: 1/1" in out
     # A placeholder that names nothing renders as written, which looks
-    # like text somebody meant literally, so the listing says so
+    # like text somebody meant literally, so showing it says so
     ck_info = calkit.load_calkit_info()
     ck_info["questions"][0]["answer"] = "It is {missing} of them."
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    out = show()
     assert "could not be filled" in out
     assert "It is {missing} of them." in out
-    # A conditional answer is listed as the branch that holds, and one with
-    # no branch holding is listed as written, with the same warning
+    # A conditional answer is shown as the branch that holds, and one with
+    # no branch holding is shown as written, with the same warning
     ck_info["questions"][0]["answer"] = {
         "if n_top > 4": "Most do.",
         "else": "{n_top} do.",
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "answer: 0 do." in out
+    out = show()
+    assert "**Answer:** 0 do." in out
     assert "could not be filled" not in out
     del ck_info["questions"][0]["answer"]["else"]
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    out = show()
     assert "could not be filled" in out
-    assert "if n_top > 4: Most do." in out
+    assert "- **if** `n_top > 4`: Most do." in out
     # A project with no questions says so rather than printing nothing
     os.remove("calkit.yaml")
     with open("calkit.yaml", "w") as f:

@@ -80,6 +80,7 @@ import type {
   EmailVerificationConfirm,
   EmailVerificationToken,
   Environment,
+  ExportStagePost,
   ExternalReleasePost,
   FeedbackPatch,
   FeedbackPost,
@@ -377,6 +378,8 @@ import type {
   PostProjectOverleafPublicationResponses,
   PostProjectOverleafSyncErrors,
   PostProjectOverleafSyncResponses,
+  PostProjectPipelineExportStageErrors,
+  PostProjectPipelineExportStageResponses,
   PostProjectPipelineStageErrors,
   PostProjectPipelineStageResponses,
   PostProjectPublicationErrors,
@@ -7759,6 +7762,58 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/pipeline/stages",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Pipeline Export Stage
+   *
+   * Add the stage that exports a figure from the file it's drawn in.
+   *
+   * An app that can do it as the pipeline runs does, unless the person
+   * named another; otherwise it's a manual step.
+   */
+  public static postProjectPipelineExportStage<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      exportStagePost: ExportStagePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPipelineExportStageResponses,
+    PostProjectPipelineExportStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "exportStagePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPipelineExportStageResponses,
+      PostProjectPipelineExportStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/export",
       ...options,
       ...params,
       headers: {

@@ -1,3 +1,4 @@
+import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -24,6 +25,17 @@ def test_get_project_provenance(client: TestClient) -> None:
         "paper/pasted.png": "",
         "paper/diagram.png": "",
         "paper/box.png": "",
+        "paper/from-src.png": "old",
+        "paper/from-git.png": "",
+        # The other project's, which has moved on
+        "figs/plot.png": "new",
+        ".calkit/imports.json": json.dumps(
+            {
+                "paper/from-src.png": {
+                    "hash": "sha256:" + hashlib.sha256(b"old").hexdigest()
+                }
+            }
+        ),
     }
     # In object storage, inside a directory a stage outputs
     stored = {"results/sweep/summary.json": json.dumps({"best": 7})}
@@ -33,6 +45,8 @@ def test_get_project_provenance(client: TestClient) -> None:
         listdir=lambda path: (
             ["a.csv", "notes.csv"] if path == "data/downloaded" else []
         ),
+        read_text=lambda path: files[path],
+        read_bytes=lambda path: files[path].encode(),
     )
     ck_info = {
         "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
@@ -56,6 +70,17 @@ def test_get_project_provenance(client: TestClient) -> None:
             {"path": "paper/exported.png", "created_by": {"name": "Ada"}},
             # Only described, so nobody else can check it
             {"path": "paper/box.png", "imported_from": "Our Box folder"},
+            {
+                "path": "paper/from-src.png",
+                "imported_from": {"project": "o/src", "path": "figs/plot.png"},
+            },
+            {
+                "path": "paper/from-git.png",
+                "imported_from": {
+                    "git_repo_url": "https://github.com/a/b",
+                    "path": "fig.png",
+                },
+            },
         ],
         "pipeline": {
             "stages": {
@@ -252,6 +277,17 @@ def test_get_project_provenance(client: TestClient) -> None:
     body = get("path=paper/box.png")
     assert body["origin"] == "Our Box folder"
     assert [g["unchecked"] for g in body["gaps"]] == [True]
+    assert not body["updatable"]
+    # Imported from another project, which has something newer
+    body = get("path=paper/from-src.png")
+    assert body["origin"] == "Imported from o/src/figs/plot.png"
+    assert body["origin_url"].endswith("/o/src/files?path=figs/plot.png")
+    assert body["updatable"]
+    assert body["update_available"]
+    # Imported from a Git repo, which would have to be cloned to tell
+    body = get("path=paper/from-git.png")
+    assert body["updatable"]
+    assert body["update_available"] is None
     # Nothing produces an authored file
     body = get("path=scripts/analyze.py")
     assert body["exists"]

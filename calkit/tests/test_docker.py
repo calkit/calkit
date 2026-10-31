@@ -343,11 +343,17 @@ def test_is_auth_error():
         "not match expected scopes."
     )
     assert is_auth_error("denied: requested access to the resource is denied")
+    assert is_auth_error(
+        "8b7a0e7328e7: Waiting\nerror from registry: denied\ndenied"
+    )
     assert is_auth_error("unauthorized: authentication required")
     # Anything else has to be reported as-is rather than sending the user
     # off to fix credentials that were fine
     assert not is_auth_error("dial tcp: lookup ghcr.io: no such host")
     assert not is_auth_error("manifest unknown")
+    assert not is_auth_error(
+        "permission denied while trying to connect to the Docker daemon socket"
+    )
     assert not is_auth_error("")
 
 

@@ -1167,6 +1167,8 @@ class ProvenanceGap(SQLModel):
 
     path: str
     steps: list[ProvenanceStep] = Field(default_factory=list)
+    # Imported, but from somewhere only described, which nobody can check
+    unchecked: bool = False
 
 
 class Provenance(SQLModel):

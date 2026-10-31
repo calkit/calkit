@@ -7327,6 +7327,11 @@ export const ProvenanceGapSchema = {
       type: "array",
       title: "Steps",
     },
+    unchecked: {
+      type: "boolean",
+      title: "Unchecked",
+      default: false,
+    },
   },
   type: "object",
   required: ["path"],
@@ -9924,6 +9929,14 @@ export const ReproCheckSchema = {
       title: "Provenance Gaps",
       default: [],
     },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
@@ -10529,16 +10542,13 @@ export const StageFromScriptOrNotebookResponseSchema = {
       ],
       title: "Produces",
     },
-    copy_stage: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Copy Stage",
+    included_in: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Included In",
+      default: [],
     },
     saved: {
       type: "boolean",
@@ -12676,6 +12686,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
       default: [],
     },
     scripts_not_in_pipeline: {

@@ -26,11 +26,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import app.projects
+import calkit.latex
 import calkit.pipeline
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import (
     STAGE_NAME_RE,
     _dump_ck_stage_map,
+    _inside,
     _validate_ck_stage,
 )
 from app.api.routes.projects.figures import _clean_rel_path
@@ -340,10 +342,10 @@ class StageFromScriptOrNotebookResponse(BaseModel):
     outputs: list[str] = []
     # Inputs that aren't in the project and that no stage produces
     missing_inputs: list[str] = []
-    # Which output is what the document shows, and the copy that puts it
-    # there when that's a different path
+    # Which output is what the document shows, and the documents changed
+    # to show it from there with \ckfigure when that's a different path
     produces: str | None = None
-    copy_stage: str | None = None
+    included_in: list[str] = []
     saved: bool = False
     git_repo_url: str
 
@@ -365,7 +367,8 @@ def post_project_stage_from_script_or_notebook(
     paths it opens. That happens in a checkout of its own, so an uploaded
     script isn't left in the project's clone before it's saved. With
     ``save``, the script, its environment, and the stage are committed,
-    with a map-paths copy when the document shows the output elsewhere.
+    with each document that shows the output elsewhere changed to show it
+    with ``\\ckfigure`` from where it's made.
     """
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -395,6 +398,18 @@ def post_project_stage_from_script_or_notebook(
             raise HTTPException(413, "Script is too large")
     elif not os.path.isfile(os.path.join(wdir, script_path)):
         raise HTTPException(404, f"'{script_path}' is not in the project")
+    # An upload never replaces a different file already there
+    existing_path = os.path.join(wdir, script_path)
+    if content is not None and not _inside(wdir, existing_path):
+        raise HTTPException(422, f"'{script_path}' leads outside the project")
+    if content is not None and os.path.isfile(existing_path):
+        with open(existing_path, "rb") as fb:
+            if fb.read() != content:
+                raise HTTPException(
+                    409,
+                    f"'{script_path}' is already in the project; pick it "
+                    "without uploading, or upload under another name",
+                )
     # Read in a checkout of its own, discarded after
     scan_dir = tempfile.mkdtemp(prefix="calkit-xr-")
     os.rmdir(scan_dir)
@@ -402,6 +417,10 @@ def post_project_stage_from_script_or_notebook(
     try:
         if content is not None:
             dest = os.path.join(scan_dir, script_path)
+            if not _inside(scan_dir, dest):
+                raise HTTPException(
+                    422, f"'{script_path}' leads outside the project"
+                )
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with open(dest, "wb") as fb:
                 fb.write(content)
@@ -432,6 +451,26 @@ def post_project_stage_from_script_or_notebook(
     env = detected["environment"]
     stage_name = detected["stage"]["name"]
     stage = detected["stage"]["stage"]
+    ck_info = get_ck_info_from_repo(repo=repo)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # A stage that already runs this script keeps what it declares, with
+    # anything newly found added
+    existing_stage = stages.get(stage_name)
+    if isinstance(existing_stage, dict):
+        merged = dict(existing_stage)
+        for field in ("outputs", "inputs"):
+            items = list(existing_stage.get(field) or [])
+            known = {
+                i.get("path") if isinstance(i, dict) else i for i in items
+            }
+            items += [
+                i
+                for i in stage.get(field) or []
+                if (i["path"] if isinstance(i, dict) else i) not in known
+            ]
+            if items:
+                merged[field] = items
+        stage = merged
     outputs = [
         o["path"] if isinstance(o, dict) else o
         for o in stage.get("outputs") or []
@@ -442,7 +481,6 @@ def post_project_stage_from_script_or_notebook(
         for i in stage.get("inputs") or []
         if isinstance(i, str) or "path" in i
     ]
-    ck_info = get_ck_info_from_repo(repo=repo)
     tree = get_repo_tree_for_ref(repo, None)
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
     missing = [
@@ -452,13 +490,38 @@ def post_project_stage_from_script_or_notebook(
         and i not in dvc_outs
         and calkit.pipeline.get_stage_for_output(i, ck_info) is None
     ]
+
+    def include(shown: str, path: str) -> dict[str, str]:
+        # The new text of each document file that would show it from path
+        documents = [
+            s["target_path"]
+            for s in stages.values()
+            if isinstance(s, dict)
+            and s.get("kind") == "latex"
+            and s.get("target_path")
+        ]
+        for folder in ck_info.get("overleaf_sync") or {}:
+            if os.path.isdir(os.path.join(wdir, folder)):
+                documents += [
+                    os.path.relpath(d, wdir)
+                    for d in calkit.latex.root_documents(
+                        os.path.join(wdir, folder)
+                    )
+                ]
+        changed: dict[str, str] = {}
+        for document in dict.fromkeys(documents):
+            changed.update(
+                calkit.latex.include_figure(document, shown, path, wdir=wdir)
+            )
+        return changed
+
     # The output the document shows: the same path, or the one the user
     # picked, or else the only one with the same file name
     shows = _clean_rel_path(req.shows, "shown") if req.shows else None
     produces = None
     if req.produces is not None:
         produces = _clean_rel_path(req.produces, "output")
-        if produces not in outputs:
+        if produces not in outputs and produces != shows:
             raise HTTPException(
                 422, f"'{script_path}' doesn't write '{produces}'"
             )
@@ -470,17 +533,28 @@ def post_project_stage_from_script_or_notebook(
             for o in outputs
             if os.path.basename(o) == os.path.basename(shows)
         ]
-        if len(same_name) == 1:
+        # Only worth guessing if a document includes it, so it can show it
+        # from there instead
+        if len(same_name) == 1 and include(shows, same_name[0]):
             produces = same_name[0]
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    copy_stage = None
+    # What the document shows is what the stage makes, so if the script
+    # isn't found writing it anywhere, it writes it there
+    if shows is not None and produces is None:
+        produces = shows
+    if produces is not None and produces not in outputs:
+        tracked = bool(repo.git.ls_files("--", produces).strip())
+        stage.setdefault("outputs", []).append(
+            {"path": produces, "storage": "git"} if tracked else produces
+        )
+        outputs.append(produces)
+    included: dict[str, str] = {}
     if shows is not None and produces is not None and produces != shows:
-        copy_stage = _default_stage_name(None, shows)
-        existing = stages.get(copy_stage)
-        if existing is not None and existing.get("kind") != "map-paths":
+        included = include(shows, produces)
+        if not included:
             raise HTTPException(
-                409,
-                f"Stage '{copy_stage}' exists and is not a map-paths stage",
+                422,
+                f"No document includes '{shows}' to show it from "
+                f"'{produces}' instead",
             )
     out = StageFromScriptOrNotebookResponse(
         stage_name=stage_name,
@@ -498,11 +572,20 @@ def post_project_stage_from_script_or_notebook(
         outputs=outputs,
         missing_inputs=missing,
         produces=produces,
-        copy_stage=copy_stage,
+        included_in=sorted(included),
         git_repo_url=project.git_repo_url,
     )
     if not req.save:
         return out
+    # Nothing is written through a symlink that leads out of the project
+    writes = [script_path] if content is not None else []
+    if out.environment_spec_path:
+        writes.append(
+            _clean_rel_path(out.environment_spec_path, "environment")
+        )
+    for path in writes + list(included):
+        if not _inside(wdir, os.path.join(wdir, path)):
+            raise HTTPException(422, f"'{path}' leads outside the project")
     # Written as xr writes them, then committed with the pipeline
     if content is not None:
         dest = os.path.join(wdir, script_path)
@@ -520,18 +603,9 @@ def post_project_stage_from_script_or_notebook(
         ck_info.setdefault("environments", {})[env["name"]] = env["env"]
     _validate_ck_stage(stage, stage_name)
     stages[stage_name] = stage
-    dests = []
-    if copy_stage is not None and produces is not None and shows is not None:
-        copy = stages.get(copy_stage) or {"kind": "map-paths", "paths": []}
-        mapping = MapPathsStage.mapping_from(produces, shows, is_dir=False)
-        paths = copy.setdefault("paths", [])
-        if not any(
-            p.get("src") == produces and p.get("dest") == shows for p in paths
-        ):
-            paths.append(mapping.model_dump())
-        _validate_ck_stage(copy, copy_stage)
-        stages[copy_stage] = copy
-        dests = [p["dest"] for p in paths]
+    for path, text in included.items():
+        with open(os.path.join(wdir, path), "w") as f:
+            f.write(text)
     ck_info.setdefault("pipeline", {})["stages"] = stages
     _commit_pipeline(
         project,
@@ -539,7 +613,7 @@ def post_project_stage_from_script_or_notebook(
         repo,
         ck_info,
         None,
-        dests,
+        [],
         [],
         f"Add stage {stage_name} for {script_path}",
     )

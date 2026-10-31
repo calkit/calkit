@@ -54,6 +54,7 @@ import {
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
+import { canBeCreatedByPerson } from "../../lib/provenance"
 import {
   IMPORTED_FROM_DEFAULTS,
   type ImportSource,
@@ -108,13 +109,6 @@ export function relativeComponentPath(path: string, folder: string): string {
 // in from
 
 type ResolveMode = "figure" | "attest" | "import"
-
-// Formats exported from something else, so a person can't be their origin;
-// mirrors EXPORTED_EXTENSIONS in calkit.provenance
-const EXPORTED_EXTS = [".png", ".gif", ".webp", ".bmp", ".pdf", ".eps"]
-
-const isExported = (path: string) =>
-  EXPORTED_EXTS.some((ext) => path.toLowerCase().endsWith(ext))
 
 interface ResolveTarget {
   ownerName: string
@@ -508,7 +502,7 @@ function ComponentsModal({
                               >
                                 Link figure
                               </Button>
-                              {isExported(item.path) ? null : (
+                              {!canBeCreatedByPerson(item.path) ? null : (
                                 <Button
                                   isActive={expanded === "attest"}
                                   onClick={() => onResolve(item.path, "attest")}

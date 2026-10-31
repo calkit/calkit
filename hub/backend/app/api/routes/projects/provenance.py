@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 import app.projects
+import calkit.environments
 import calkit.pipeline
 import calkit.provenance
 import calkit.questions
@@ -278,6 +279,7 @@ def get_project_provenance(
                     ProvenanceStep(path=step.path, stage=step.stage)
                     for step in gap.steps
                 ],
+                unchecked=gap.unchecked,
             )
             for gap in calkit.provenance.find_provenance_gaps(
                 [path],
@@ -318,13 +320,39 @@ def get_project_provenance(
         dep.get("path") if isinstance(dep, dict) else dep
         for dep in lock_stage.get("deps") or yaml_stage.get("deps") or []
     ]
+    # What its environments run with, e.g., a uv.lock, rather than what it
+    # reads
+    env_files = set()
+    envs = ck_info.get("environments") or {}
+    env_names = str((ck_stage or {}).get("environment") or "").split(
+        calkit.environments.COMPOSITE_ENV_SEP
+    )
+    for env_name in env_names:
+        env = envs.get(env_name)
+        if not isinstance(env, dict):
+            continue
+        lock = calkit.environments.get_env_lock_fpath(
+            env, env_name, for_dvc=True
+        )
+        if lock:
+            env_files.add(posixpath.normpath(lock))
+        if isinstance(env.get("path"), str):
+            spec = posixpath.normpath(env["path"])
+            env_files.add(spec)
+            env_files.add(
+                posixpath.join(posixpath.dirname(spec), ".python-version")
+            )
     for dep in deps:
         if not isinstance(dep, str):
             continue
         dep = posixpath.normpath(posixpath.join(dvc_wdir, dep))
         # Calkit's own bookkeeping, e.g., environment locks, and the source
         # shown on its own
-        if dep.startswith(".calkit/") or dep in (source, "calkit.yaml"):
+        if (
+            dep.startswith(".calkit/")
+            or dep in (source, "calkit.yaml")
+            or dep in env_files
+        ):
             continue
         out.inputs.append(dep)
     return out

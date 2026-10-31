@@ -693,9 +693,12 @@ def build(
 
         for gap in find_project_provenance_gaps(shown, wdir=root):
             msg = str(gap)
-            warn(
-                f"{msg[0].upper()}{msg[1:]}; {how_to_define_origin(gap.path)}"
+            how = (
+                "give its URL, DOI, or Git repo in imported_from"
+                if gap.unchecked
+                else how_to_define_origin(gap.path)
             )
+            warn(f"{msg[0].upper()}{msg[1:]}; {how}")
     if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
         fdb_dir = aux_dir if aux_dir is not None else tex_dir
         fdb_fpath = os.path.join(fdb_dir, stem + ".fdb_latexmk")

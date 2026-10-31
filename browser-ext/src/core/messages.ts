@@ -106,6 +106,7 @@ export type Request =
       base: string;
       head: string;
     } & HubScoped)
+  | { type: "project.contentPaths"; owner: string; project: string }
   | { type: "project.figures"; owner: string; project: string }
   | { type: "project.tables"; owner: string; project: string }
   | { type: "project.results"; owner: string; project: string }
@@ -129,6 +130,15 @@ export type Request =
       /** Which of the script's outputs that is. */
       produces?: string;
       save?: boolean;
+    }
+  | {
+      type: "project.recordOrigin";
+      owner: string;
+      project: string;
+      path: string;
+      /** One of calkit's `imported_from` forms, e.g., `{ url }`. */
+      importedFrom?: Record<string, unknown>;
+      createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
     }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
@@ -208,11 +218,13 @@ export interface ResponseMap {
   "project.contents": ContentsItem;
   "project.dvcOutputs": DvcOutput[];
   "project.textDiff": TextDiff;
+  "project.contentPaths": string[];
   "project.figures": FiguresPage;
   "project.tables": Table[];
   "project.results": Result[];
   "project.provenance": Provenance;
   "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
+  "project.recordOrigin": { path: string };
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

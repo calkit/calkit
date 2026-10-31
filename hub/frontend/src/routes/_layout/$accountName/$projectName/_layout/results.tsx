@@ -188,7 +188,14 @@ function ProvenanceCard({
         )
         return (
           <Text key={gap.path}>
-            Origin not defined for {fileLink(gap.path)}
+            {gap.unchecked ? (
+              <>
+                {fileLink(gap.path)} is imported from somewhere that can't be
+                checked
+              </>
+            ) : (
+              <>Origin not defined for {fileLink(gap.path)}</>
+            )}
             {via.length ? ` (via ${via.join(", ")})` : ""}.
           </Text>
         )

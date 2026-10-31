@@ -30,8 +30,20 @@ def test_post_project_misc(
     (wdir / "photo.jpg").write_bytes(b"jpg")
     (wdir / "logo.png").write_bytes(b"logo")
     (wdir / "notes.txt").write_bytes(b"notes")
+    (wdir / "box.csv").write_bytes(b"a,b")
+    (wdir / "sheet.csv").write_bytes(b"c,d")
     with open(wdir / "calkit.yaml", "w") as f:
-        ryaml.dump({"name": "p", "figures": [{"path": "figures/x.png"}]}, f)
+        ryaml.dump(
+            {
+                "name": "p",
+                "figures": [{"path": "figures/x.png"}],
+                "datasets": [
+                    {"path": "box.csv", "imported_from": "Our Box folder"},
+                    {"path": "sheet.csv", "imported_from": "My laptop"},
+                ],
+            },
+            f,
+        )
     repo.git.add(all=True)
     repo.git.commit("-m", "Initial")
     repo.create_remote("origin", str(origin.working_dir))
@@ -137,12 +149,39 @@ def test_post_project_misc(
             headers=normal_user_token_headers,
         )
         assert resp.status_code in (400, 422), resp.text
-        # Something already declared is edited as what it is
+        # A person can't be the origin of an exported format like PNG
         resp = client.post(
             URL,
             json={
                 "path": "figures/x.png",
                 "created_by": [{"email": "a@example.com"}],
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        # A declared figure without an origin gets one on its own entry,
+        # and after that is edited as what it is
+        resp = client.post(
+            URL,
+            json={
+                "path": "figures/x.png",
+                "imported_from": {"url": "https://example.org/x.png"},
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        with open(wdir / "calkit.yaml") as f:
+            assert ryaml.load(f)["figures"] == [
+                {
+                    "path": "figures/x.png",
+                    "imported_from": {"url": "https://example.org/x.png"},
+                }
+            ]
+        resp = client.post(
+            URL,
+            json={
+                "path": "figures/x.png",
+                "imported_from": {"url": "https://example.org/y.png"},
             },
             headers=normal_user_token_headers,
         )
@@ -158,11 +197,52 @@ def test_post_project_misc(
         )
         assert resp.status_code == 400, resp.text
         assert "misc artifact" in resp.json()["detail"]
+        # An import that only describes where it's from can be given a
+        # source someone can check, or be attested to instead
+        resp = client.post(
+            URL,
+            json={
+                "path": "box.csv",
+                "imported_from": {"url": "https://example.org/box.csv"},
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        resp = client.post(
+            URL,
+            json={
+                "path": "sheet.csv",
+                "created_by": [{"email": "a@example.com"}],
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        with open(wdir / "calkit.yaml") as f:
+            assert ryaml.load(f)["datasets"] == [
+                {
+                    "path": "box.csv",
+                    "imported_from": {"url": "https://example.org/box.csv"},
+                },
+                {
+                    "path": "sheet.csv",
+                    "created_by": [{"email": "a@example.com"}],
+                },
+            ]
+        # Once it's checkable, it's edited as what it is
+        resp = client.post(
+            URL,
+            json={
+                "path": "box.csv",
+                "created_by": [{"email": "a@example.com"}],
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 400, resp.text
         # A path that isn't in the project can't be attributed
         resp = client.post(
             URL,
             json={
-                "path": "missing.png",
+                "path": "missing.jpg",
                 "created_by": [{"email": "a@example.com"}],
             },
             headers=normal_user_token_headers,

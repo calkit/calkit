@@ -209,8 +209,8 @@ export interface StageFromScriptOrNotebookResponse {
   missing_inputs: string[];
   /** Which output is what the document shows. */
   produces?: string | null;
-  /** The map-paths stage copying it to where the document shows it. */
-  copy_stage?: string | null;
+  /** Documents changed to show it from there, with `\ckfigure`. */
+  included_in: string[];
   saved: boolean;
   git_repo_url: string;
 }
@@ -218,6 +218,8 @@ export interface StageFromScriptOrNotebookResponse {
 export interface ProvenanceGap {
   path: string;
   steps: { path: string; stage?: string | null }[];
+  /** Imported, but from somewhere only described, which nobody can check. */
+  unchecked?: boolean;
 }
 
 export interface ReferenceEntry {

@@ -283,12 +283,24 @@ def test_post_project_stage_from_script_or_notebook(
 ) -> None:
     import base64
 
+    paper = (
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "\\includegraphics[width=\\linewidth]{figures/fit}\n"
+        "\\end{document}\n"
+    )
     repo, origin = _make_repo(
         tmp_path,
-        {"name": "p"},
+        {
+            "name": "p",
+            "overleaf_sync": {
+                "paper": {"url": "https://www.overleaf.com/project/abc"}
+            },
+        },
         files={
-            "paper/paper.tex": "\\documentclass{article}\n",
+            "paper/paper.tex": paper,
             "paper/figures/fit.png": "png",
+            "paper/figures/drawn.png": "png",
             "scripts/old.py": "print(1)\n",
         },
     )
@@ -333,7 +345,7 @@ def test_post_project_stage_from_script_or_notebook(
         shows="paper/figures/fit.png",
     )
     # Read, not saved: what it imports, opens, and writes, and that the
-    # paper shows its figure from a copy, with nothing left in the clone
+    # paper will show its figure from there, with nothing left in the clone
     resp = post(**upload)
     assert resp.status_code == 200, resp.text
     data = resp.json()
@@ -346,13 +358,14 @@ def test_post_project_stage_from_script_or_notebook(
     # Nothing has the data the script reads
     assert data["missing_inputs"] == ["data/raw.csv"]
     assert data["produces"] == "figures/fit.png"
-    assert data["copy_stage"] == "map-paths-paper"
+    assert data["included_in"] == ["paper/paper.tex"]
     assert data["git_repo_url"] == "https://github.com/o/p"
     wdir = tmp_path / "repo"
     assert not (wdir / "scripts" / "plot.py").exists()
     assert not repo.is_dirty(untracked_files=True)
     assert repo.git.worktree("list").count("\n") == 0
-    # Saved: the script, its environment, the stage, and the copy, pushed
+    # Saved: the script, its environment, the stage, and the paper citing
+    # the figure where it's made, pushed
     resp = post(**upload, save=True)
     assert resp.status_code == 200, resp.text
     assert resp.json()["saved"]
@@ -360,25 +373,82 @@ def test_post_project_stage_from_script_or_notebook(
     stage = ck["pipeline"]["stages"]["plot"]
     assert stage["script_path"] == "scripts/plot.py"
     assert stage["environment"] in ck["environments"]
-    assert ck["pipeline"]["stages"]["map-paths-paper"]["paths"] == [
-        {
-            "kind": "file-to-file",
-            "src": "figures/fit.png",
-            "dest": "paper/figures/fit.png",
-        }
-    ]
+    assert set(ck["pipeline"]["stages"]) == {"plot"}
+    assert (wdir / "paper" / "paper.tex").read_text() == (
+        "\\documentclass{article}\n"
+        "\\usepackage{calkit}\n"
+        "\\begin{document}\n"
+        "\\ckfigure[width=\\linewidth]{figures/fit.png}\n"
+        "\\end{document}\n"
+    )
     assert (wdir / "scripts" / "plot.py").read_text() == script
     assert (wdir / data["environment_spec_path"]).is_file()
     assert "plot" in yaml.safe_load((wdir / "dvc.yaml").read_text())["stages"]
     assert not repo.is_dirty(untracked_files=True)
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
-    # A script already in the project is read where it is, and an output
-    # can be named for what the paper shows
-    resp = post(script_path="scripts/old.py", shows="paper/figures/fit.png")
+    # A stage that already runs the script keeps what it declares, including
+    # inputs that are objects carrying paths, or aren't paths at all
+    stage["outputs"].append("figures/extra.png")
+    stage["inputs"] = [
+        {"path": "data/raw.csv"},
+        {"path": "data/extra.csv"},
+        {"kind": "env-var", "name": "SEED"},
+    ]
+    (wdir / "calkit.yaml").write_text(yaml.safe_dump(ck))
+    repo.git.add("calkit.yaml")
+    repo.git.commit("-m", "Declare another output and inputs")
+    resp = post(script_path="scripts/plot.py", shows="figures/fit.png")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["produces"] is None
+    assert resp.json()["inputs"] == ["data/raw.csv", "data/extra.csv"]
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["stage_name"] == "plot"
+    assert {"figures/fit.png", "figures/extra.png"} <= set(
+        resp.json()["outputs"]
+    )
+    # An output with the same name elsewhere isn't guessed when nothing
+    # includes what's shown, since nothing could show it from there
+    resp = post(script_path="scripts/plot.py", shows="results/fit.png")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["produces"] == "results/fit.png"
+    assert resp.json()["included_in"] == []
+    # An upload never replaces a different file already there
+    resp = post(**{**upload, "script_path": "scripts/old.py"})
+    assert resp.status_code == 409, resp.text
+    assert (wdir / "scripts" / "old.py").read_text() == "print(1)\n"
+    # A script already in the project is read where it is, and when it
+    # isn't found writing what the paper shows, its stage writes it there
+    resp = post(script_path="scripts/old.py", shows="paper/figures/drawn.png")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["produces"] == "paper/figures/drawn.png"
+    assert "paper/figures/drawn.png" in resp.json()["outputs"]
+    assert resp.json()["included_in"] == []
+    resp = post(
+        script_path="scripts/old.py",
+        shows="paper/figures/drawn.png",
+        save=True,
+    )
+    assert resp.status_code == 200, resp.text
+    ck = yaml.safe_load((wdir / "calkit.yaml").read_text())
+    assert {"path": "paper/figures/drawn.png", "storage": "git"} in ck[
+        "pipeline"
+    ]["stages"][resp.json()["stage_name"]]["outputs"]
     resp = post(script_path="scripts/old.py", produces="figures/x.png")
     assert resp.status_code == 422
+    # Shown from elsewhere only when a document includes it
+    resp = post(
+        script_path="scripts/plot.py",
+        shows="paper/figures/drawn.png",
+        produces="figures/fit.png",
+    )
+    assert resp.status_code == 422, resp.text
+    # Nothing is written through a symlink that leads out of the project
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (wdir / "linked").symlink_to(outside)
+    resp = post(**{**upload, "script_path": "linked/plot.py"})
+    assert resp.status_code == 422, resp.text
+    assert not (outside / "plot.py").exists()
+    (wdir / "linked").unlink()
     # Not a script, or not there to read
     assert post(script_path="paper/paper.tex").status_code == 422
     assert post(script_path="scripts/gone.py").status_code == 404

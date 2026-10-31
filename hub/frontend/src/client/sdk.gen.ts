@@ -7668,7 +7668,8 @@ export class ProjectsService {
    * paths it opens. That happens in a checkout of its own, so an uploaded
    * script isn't left in the project's clone before it's saved. With
    * ``save``, the script, its environment, and the stage are committed,
-   * with a map-paths copy when the document shows the output elsewhere.
+   * with each document that shows the output elsewhere changed to show it
+   * with ``\ckfigure`` from where it's made.
    */
   public static postProjectStageFromScriptOrNotebook<
     ThrowOnError extends boolean = true,

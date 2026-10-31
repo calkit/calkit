@@ -1,9 +1,10 @@
-"""Exporting a figure from the file it's drawn in, e.g., a PNG from an
-Inkscape SVG: by an app as the pipeline runs, if one can, or else by a
-person, as a manual step.
+"""Exporting data and artifacts from various apps, e.g., a PNG from an
+Inkscape SVG.
 
-The apps that can are listed here once, so the CLI, the hub, and anything
-built on them agree on which they are.
+An app that can export from the command line does it as the pipeline runs,
+in a stage of its own kind. Anything else is a manual step. The apps that
+can are listed here once, so the CLI, the hub, and anything built on them
+agree on which they are.
 """
 
 from __future__ import annotations
@@ -11,11 +12,9 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
-import shutil
-from typing import Callable
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class Exporter:
     """An app that exports as the pipeline runs, and its stage kind."""
 
@@ -23,9 +22,24 @@ class Exporter:
     name: str
     kind: str
     app: str
+    # What it exports from, as a person would say it
+    source_desc: str
     source_exts: frozenset[str]
     export_exts: frozenset[str]
-    find_executable: Callable[[], str | None]
+    # Its executable, by name on PATH, or where its installer puts it
+    executables: list[str]
+
+    def find_executable(self) -> str | None:
+        """Its executable here, if it's installed."""
+        import shutil
+
+        for candidate in self.executables:
+            found = shutil.which(candidate)
+            if found:
+                return found
+            if os.path.isabs(candidate) and os.path.isfile(candidate):
+                return candidate
+        return None
 
     def version(self) -> str | None:
         """The version installed here, if it's installed and says."""
@@ -44,34 +58,56 @@ class Exporter:
             return None
         return extract_version(result.stdout or result.stderr or "")
 
+    def check(self, source: str, output: str) -> None:
+        """Raise ``ValueError`` unless it can export ``source`` to
+        ``output``.
+        """
+        if os.path.splitext(source)[1].lower() not in self.source_exts:
+            raise ValueError(
+                f"{self.app} exports from {self.source_desc}, not '{source}'"
+            )
+        if os.path.splitext(output)[1].lower() not in self.export_exts:
+            raise ValueError(
+                f"{self.app} can export to "
+                f"{', '.join(sorted(self.export_exts))}, not '{output}'"
+            )
+
+
+INKSCAPE = Exporter(
+    name="inkscape",
+    kind="inkscape-export",
+    app="Inkscape",
+    source_desc="an SVG",
+    source_exts=frozenset({".svg"}),
+    export_exts=frozenset({".png", ".pdf", ".eps", ".ps"}),
+    executables=[
+        "inkscape",
+        "/Applications/Inkscape.app/Contents/MacOS/inkscape",
+        r"C:\Program Files\Inkscape\bin\inkscape.exe",
+    ],
+)
+GIMP = Exporter(
+    name="gimp",
+    kind="gimp-export",
+    app="GIMP",
+    source_desc="an XCF file",
+    source_exts=frozenset({".xcf"}),
+    export_exts=frozenset({".png", ".jpg", ".jpeg", ".tif", ".tiff"}),
+    # The console binary, since the plain 'gimp' on macOS opens a window
+    # and ignores batch flags
+    executables=[
+        "gimp-console",
+        "gimp-console-3",
+        "gimp-console-2.10",
+        "/Applications/GIMP.app/Contents/MacOS/gimp-console",
+        r"C:\Program Files\GIMP 3\bin\gimp-console-3.0.exe",
+        r"C:\Program Files\GIMP 2\bin\gimp-console-2.10.exe",
+    ],
+)
+
 
 def exporters() -> list[Exporter]:
-    from calkit import gimp, inkscape
-
-    return [
-        Exporter(
-            name=module.__name__.rsplit(".", 1)[-1],
-            kind=module.STAGE_KIND,
-            app=module.APP,
-            source_exts=frozenset(module.SOURCE_EXTS),
-            export_exts=frozenset(module.EXPORT_EXTS),
-            find_executable=module.find_executable,
-        )
-        for module in (inkscape, gimp)
-    ]
-
-
-def find_executable(candidates: list[str]) -> str | None:
-    """The first of an app's candidate executables that's here, whether
-    on PATH or at an absolute path where its installer puts it.
-    """
-    for candidate in candidates:
-        found = shutil.which(candidate)
-        if found:
-            return found
-        if os.path.isabs(candidate) and os.path.isfile(candidate):
-            return candidate
-    return None
+    return [INKSCAPE, GIMP]
 
 
 def exporter_for(

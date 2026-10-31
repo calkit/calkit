@@ -919,7 +919,6 @@ def get_gated_stages(
     import sys
 
     import calkit.environments as envs_mod
-    import calkit.export
 
     if interactive is None:
         from calkit.core import is_tty
@@ -933,7 +932,9 @@ def get_gated_stages(
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
     # The app each export kind needs
-    apps = {e.kind: e for e in calkit.export.exporters()}
+    from calkit.export import exporters
+
+    apps = {e.kind: e for e in exporters()}
 
     def check(key: Any, func: Any) -> tuple[str | None, bool]:
         """Memoize a check, returning its problem and whether it's an error."""

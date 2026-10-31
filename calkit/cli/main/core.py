@@ -100,7 +100,7 @@ app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(
     export_app,
     name="export",
-    help="Export figures from the files they're drawn in.",
+    help="Export data and artifacts from various applications.",
 )
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")

@@ -57,9 +57,7 @@ def test_export_stage():
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Fake app is a script")
 def test_exporter_here(tmp_path, monkeypatch):
-    import calkit.inkscape
-
-    [inkscape] = [e for e in calkit.export.exporters() if e.name == "inkscape"]
+    inkscape = calkit.export.INKSCAPE
     # Found where its installer puts it, and asked its version
     fake = tmp_path / "inkscape"
     fake.write_text(
@@ -67,8 +65,8 @@ def test_exporter_here(tmp_path, monkeypatch):
     )
     fake.chmod(0o755)
     monkeypatch.setattr(
-        calkit.inkscape,
-        "EXECUTABLES",
+        inkscape,
+        "executables",
         ["calkit-test-no-such-inkscape", str(fake)],
     )
     assert inkscape.find_executable() == str(fake)
@@ -80,7 +78,7 @@ def test_exporter_here(tmp_path, monkeypatch):
     assert ManualStepStage(message="Do it").run_properties() == {}
     # Not installed
     monkeypatch.setattr(
-        calkit.inkscape, "EXECUTABLES", ["calkit-test-no-such-inkscape"]
+        inkscape, "executables", ["calkit-test-no-such-inkscape"]
     )
     assert inkscape.find_executable() is None
     assert inkscape.version() is None

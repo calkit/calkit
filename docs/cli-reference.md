@@ -44,7 +44,7 @@
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
-| [`export`](#command-group-export)                | Export figures from the files they're drawn in.                                                              |
+| [`export`](#command-group-export)                | Export data and artifacts from various applications.                                                         |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
@@ -2854,7 +2854,7 @@ Options:
 
 ### `calkit export`
 
-Export figures from the files they're drawn in.
+Export data and artifacts from various applications.
 
 | Command                                   | Description                                 |
 | ----------------------------------------- | ------------------------------------------- |

@@ -407,15 +407,33 @@ function renderExported(
     }
     save.disabled = true;
     message.append(loading(upload ? "Uploading" : "Saving"));
+    const app = appName.value.trim();
+    const stem = (target.split("/").pop() ?? "").replace(/\.[^.]*$/, "");
+    const slug = stem.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     try {
       await send({
-        type: "project.manualExport",
+        type: "project.addStage",
         owner,
         project,
-        path: target,
-        sourcePath,
-        content: upload ? await fileBase64(upload) : undefined,
-        app: appName.value.trim() || undefined,
+        name: `export-${slug.replace(/^-+|-+$/g, "") || "figure"}`,
+        stage: {
+          kind: "manual-step",
+          message: app
+            ? `In ${app}, export ${target} from ${sourcePath}`
+            : `Export ${target} from ${sourcePath}`,
+          // The step opens the source in the app it's exported with
+          ...(app ? { open: { app, path: sourcePath } } : {}),
+          inputs: [sourcePath],
+          outputs: [target],
+        },
+        files: [
+          {
+            path: sourcePath,
+            content: upload ? await fileBase64(upload) : undefined,
+            created_by_me: true,
+          },
+        ],
+        message: `Export ${target} from ${sourcePath} manually`,
       });
       await showDefined(container, link, citation);
     } catch (e) {

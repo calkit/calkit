@@ -651,19 +651,36 @@ function ManualExportForm({
             reader.readAsDataURL(file)
           })
         : null
-      return ProjectsService.postProjectManualExport({
+      const appName = app.trim()
+      const stem = (path.split("/").pop() ?? "").replace(/\.[^.]*$/, "")
+      const slug = stem
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+      const message = appName
+        ? `In ${appName}, export ${path} from ${source}`
+        : `Export ${path} from ${source}`
+      await ProjectsService.postProjectPipelineStage({
         owner_name: ownerName,
         project_name: projectName,
-        manualExportPost: {
-          path,
-          source_path: source,
-          content,
-          app: app.trim() || null,
+        stagePost: {
+          name: `export-${slug || "figure"}`,
+          stage: {
+            kind: "manual-step",
+            message,
+            // The step opens the source in the app it's exported with
+            ...(appName ? { open: { app: appName, path: source } } : {}),
+            inputs: [source],
+            outputs: [path],
+          },
+          files: [{ path: source, content, created_by_me: true }],
+          message: `Export ${path} from ${source} manually`,
         },
-      }).then((response) => response.data)
+      })
+      return message
     },
-    onSuccess: (data) => {
-      showToast("Origin defined", data.message, "success")
+    onSuccess: (message) => {
+      showToast("Origin defined", message, "success")
       onDone()
     },
     onError: (err: AxiosError) => handleError(err, showToast),

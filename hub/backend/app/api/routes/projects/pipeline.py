@@ -764,7 +764,9 @@ def post_project_stage_export(
             "message": message,
             # The step opens the source in the app it's exported with
             **(
-                {"app": app_name, "open_path": source_path} if app_name else {}
+                {"open": {"app": app_name, "path": source_path}}
+                if app_name
+                else {}
             ),
             "inputs": [source_path],
             "outputs": [output],

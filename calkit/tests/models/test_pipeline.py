@@ -125,15 +125,16 @@ def test_manualstage():
     # for it differs between machines
     s = ManualStepStage(
         message="Export figures/wake.png",
-        open_path="figures/src/wake diagram.svg",
-        app="Inkscape",
+        open={"app": "Inkscape", "path": "figures/src/wake diagram.svg"},
     )
     assert s.to_dvc()["cmd"] == (
         "calkit manual-step --message 'Export figures/wake.png' --app "
         "Inkscape --open 'figures/src/wake diagram.svg'"
     )
-    with pytest.raises(ValidationError, match="app to open it with"):
-        ManualStepStage(message="Export it", open_path="wake.svg")
+    s = ManualStepStage(message="Count fish", open={"app": "FishCounter"})
+    assert s.to_dvc()["cmd"].endswith("--app FishCounter")
+    with pytest.raises(ValidationError, match="app"):
+        ManualStepStage(message="Export it", open={"path": "wake.svg"})
 
 
 def test_appexportstage():

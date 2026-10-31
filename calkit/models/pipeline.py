@@ -2272,6 +2272,20 @@ class WordToPdfStage(Stage):
         )
 
 
+class ManualStepOpen(Model):
+    """What a manual step opens.
+
+    The app is always named, since the default app for a file differs
+    between machines, e.g., Illustrator rather than Inkscape for an SVG.
+    """
+
+    app: str = Field(description="App to open, e.g., 'Inkscape'.")
+    path: str | None = Field(
+        default=None,
+        description="File to open in it, e.g., the Inkscape SVG.",
+    )
+
+
 class ManualStepStage(Stage):
     """A step someone does manually, e.g., exporting a figure from
     Photoshop, which the pipeline asks for when its inputs change, e.g.,
@@ -2288,27 +2302,11 @@ class ManualStepStage(Stage):
             "figures/wake-diagram.png'."
         )
     )
-    open_path: str | None = Field(
+    open: ManualStepOpen | None = Field(
         default=None,
-        description="File to open for the step, e.g., the Photoshop file.",
-    )
-    app: str | None = Field(
-        default=None,
-        description=(
-            "App to open it with, e.g., 'Adobe Photoshop 2025'. Required "
-            "with an open path, since the default app differs between "
-            "machines."
-        ),
+        description="App to open for the step, and the file to open in it.",
     )
     environment: str = "_system"
-
-    @model_validator(mode="after")
-    def _app_for_open_path(self) -> "ManualStepStage":
-        if self.open_path is not None and not self.app:
-            raise ValueError(
-                "A manual step that opens a file needs the app to open it with"
-            )
-        return self
 
     @property
     def output_paths(self) -> list[str]:
@@ -2329,10 +2327,10 @@ class ManualStepStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = f"calkit manual-step --message {shlex.quote(self.message)}"
-        if self.app:
-            cmd += f" --app {shlex.quote(self.app)}"
-        if self.open_path is not None:
-            cmd += f" --open {shlex.quote(self.open_path)}"
+        if self.open is not None:
+            cmd += f" --app {shlex.quote(self.open.app)}"
+            if self.open.path is not None:
+                cmd += f" --open {shlex.quote(self.open.path)}"
         for path in self.output_paths:
             cmd += f" --output {shlex.quote(path)}"
         return cmd

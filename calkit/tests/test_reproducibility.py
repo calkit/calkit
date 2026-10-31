@@ -9,6 +9,7 @@ from calkit.reproducibility import (
     ReproCheck,
     check_reproducibility,
     find_retyped_values,
+    find_unattributed_numbers,
 )
 
 
@@ -323,6 +324,9 @@ def test_find_retyped_values():
     assert values(r"\\cite{smith0.42}", project) == []
     assert values(r"\\href{https://x.org/0.42}{link}", project) == []
     assert values("% a comment with 0.42", project) == []
+    # Or on a line marked as not results, whatever else its comment says
+    assert values("Cd is 0.42. % calkit: ignore, a coincidence", project) == []
+    assert values("Cd is 0.42. \\% calkit: ignore", project) != []
     assert values(r"\\setlength{\\parindent}{0.55in}", widths) == []
     # A value has to be distinctive before its appearance means anything:
     # a small integer or a one-digit decimal turns up in every paper
@@ -350,3 +354,20 @@ def test_find_retyped_values():
     assert findings[0]["context"] == "and then 0.42 here"
     assert "results.json:Cd" in findings[0]["reason"]
     assert "json-to-latex" in findings[0]["suggestion"]
+
+
+def test_find_unattributed_numbers():
+    def values(tex, project_values=None):
+        return [
+            (f["value"], f["line"], f["cited"])
+            for f in find_unattributed_numbers(tex, "main.tex", project_values)
+        ]
+
+    tex = (
+        "The deficit was 0.47.\n"
+        "Smith~\\cite{smith} reports 0.52.\n"
+        "The pump draws 1.25 kW. % calkit: ignore, from its datasheet\n"
+    )
+    assert values(tex) == [("0.47", 1, False), ("0.52", 2, True)]
+    # One the project computes is left to find_retyped_values
+    assert values(tex, {"0.47": "results.json:Deficit"}) == [("0.52", 2, True)]

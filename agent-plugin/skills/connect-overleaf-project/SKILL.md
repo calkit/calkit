@@ -1,44 +1,46 @@
 ---
-name: connect-overleaf-paper
-description: Connect an Overleaf paper to a Calkit project and the scripts
-  and data behind it, so its figures and numbers come from a pipeline. Use
-  when the user invokes `/calkit:connect-overleaf-paper`, asks to connect an
-  Overleaf project (often one open in their browser) to Calkit, or asks to
-  make an Overleaf paper reproducible.
+name: connect-overleaf-project
+description: Connect an Overleaf project, e.g., a paper, thesis, or poster,
+  to a Calkit project and the scripts and data behind it, so its figures and
+  numbers come from a pipeline. Use when the user invokes
+  `/calkit:connect-overleaf-project`, asks to connect an Overleaf project
+  (often one open in their browser) to Calkit, or asks to make an Overleaf
+  document reproducible. Not for only signing in to Overleaf.
 ---
 
-# Connect an Overleaf paper to its analysis
+# Connect an Overleaf project to its analysis
 
-The person writes in Overleaf, and their scripts and data are somewhere on
-their machine or a shared drive. The job is to connect the two: a Calkit
-project with the paper in it, stages that make what the paper shows, and the
-paper reading those outputs instead of pasted copies. The writing stays
-theirs. Change only how the paper includes figures and numbers.
+The person writes in Overleaf, e.g., a paper, thesis, or poster, and their
+scripts and data are somewhere on their machine or a shared drive. The job is
+to connect the two: a Calkit project with the document in it, stages that make
+what the document shows, and the document reading those outputs instead of
+pasted copies. The writing stays theirs. Change only how the document includes
+figures and numbers.
 
 Work in two places:
 
 - **The browser**, through the person's own Overleaf session, for what only
-  it can do: connecting the paper, and checking the result in the editor.
+  it can do: connecting the document, and checking the result in the editor.
   This needs a browser tool, e.g., Claude in Chrome.
 - **A local clone**, through the CLI, for everything else.
 
 Never type passwords or tokens. If something asks the person to sign in,
 stop and ask them to do it.
 
-## 1. Connect the paper
+## 1. Connect the document
 
 In the Overleaf tab, open the Calkit panel from the launcher at the bottom
-right, which reads "Calkit: not linked" when the paper isn't connected. It's
+right, which reads "Calkit: not linked" when the document isn't connected. It's
 in a shadow root, so it may not show in the page's accessibility tree; take a
 screenshot to find it.
 
 Click "Make this paper reproducible", check the project name, privacy, and
-folder (`paper` is usual), and create the project. The panel then shows the
-project and "in sync". If the paper should go in a project the person
-already has, use "Use a project I already have" instead.
+folder (e.g., `paper` or `thesis`), and create the project. The panel then
+shows the project and "in sync". If the document should go in a project the
+person already has, use "Use a project I already have" instead.
 
 Without the browser extension, `calkit overleaf import URL paper` adds the
-paper to an existing local project, using Overleaf's Git access.
+document to an existing local project, using Overleaf's Git access.
 
 ## 2. Clone it
 
@@ -48,11 +50,11 @@ calkit clone OWNER/NAME ~/calkit/NAME
 
 `~/calkit/` is the usual place, unless the person keeps projects elsewhere.
 
-## 3. Find what the paper shows and where it came from
+## 3. Find what the document shows and where it came from
 
-Read the paper's `.tex` files and list:
+Read the document's `.tex` files and list:
 
-- figures included from files in the paper's folder, e.g., a pasted
+- figures included from files in the document's folder, e.g., a pasted
   `\includegraphics{drag.png}`
 - numbers typed into the text that are results, e.g., a mean or a fit
   parameter
@@ -80,7 +82,7 @@ calkit xr scripts/plot_drag.py
 Check the detected inputs, outputs, and environment in `calkit.yaml`. Large
 data belongs in DVC; see the conventions skill.
 
-## 5. Have the paper read the outputs
+## 5. Have the document read the outputs
 
 Load the package and swap each pasted figure and typed result for the
 output that makes it:
@@ -93,7 +95,7 @@ The mean drag coefficient was \ckvalue{results/drag.json}{mean_cd}.
 \cktable{results/summary.tex}
 ```
 
-Remove the pasted copies the paper no longer includes, and drop them from
+Remove the pasted copies the document no longer includes, and drop them from
 the LaTeX stage's `inputs`.
 
 ## 6. Say where everything starts

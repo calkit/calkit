@@ -350,7 +350,7 @@ class StageFromScriptOrNotebookResponse(BaseModel):
     # Which output is what the document shows, and the documents changed
     # to show it from there with \ckfigure when that's a different path
     produces: str | None = None
-    cited_in: list[str] = []
+    included_in: list[str] = []
     saved: bool = False
     git_repo_url: str
 
@@ -519,7 +519,7 @@ def post_project_stage_from_script_or_notebook(
             {"path": produces, "storage": "git"} if tracked else produces
         )
         outputs.append(produces)
-    cited: dict[str, str] = {}
+    included: dict[str, str] = {}
     if shows is not None and produces is not None and produces != shows:
         documents = [
             s["target_path"]
@@ -537,10 +537,12 @@ def post_project_stage_from_script_or_notebook(
                     )
                 ]
         for document in dict.fromkeys(documents):
-            cited.update(
-                calkit.latex.cite_figure(document, shows, produces, wdir=wdir)
+            included.update(
+                calkit.latex.include_figure(
+                    document, shows, produces, wdir=wdir
+                )
             )
-        if not cited:
+        if not included:
             raise HTTPException(
                 422,
                 f"No document includes '{shows}' to show it from "
@@ -562,7 +564,7 @@ def post_project_stage_from_script_or_notebook(
         outputs=outputs,
         missing_inputs=missing,
         produces=produces,
-        cited_in=sorted(cited),
+        included_in=sorted(included),
         git_repo_url=project.git_repo_url,
     )
     if not req.save:
@@ -584,7 +586,7 @@ def post_project_stage_from_script_or_notebook(
         ck_info.setdefault("environments", {})[env["name"]] = env["env"]
     _validate_ck_stage(stage, stage_name)
     stages[stage_name] = stage
-    for path, text in cited.items():
+    for path, text in included.items():
         with open(os.path.join(wdir, path), "w") as f:
             f.write(text)
     ck_info.setdefault("pipeline", {})["stages"] = stages

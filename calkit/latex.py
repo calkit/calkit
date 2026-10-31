@@ -691,10 +691,10 @@ def find_shown(document: str, wdir: str | None = None) -> list[str]:
     return list(dict.fromkeys(cited + detect_inputs(document, wdir=wdir)))
 
 
-def cite_figure(
+def include_figure(
     document: str, shown: str, path: str, wdir: str | None = None
 ) -> dict[str, str]:
-    """Show a figure from where the project makes it, rewriting each
+    """Include a figure from the project, rewriting each
     ``\\includegraphics`` of ``shown`` in a document and the files it
     inputs as ``\\ckfigure`` of ``path``, so nothing has to copy it.
 

@@ -6043,9 +6043,9 @@ export type StageFromScriptOrNotebookResponse = {
    */
   produces?: string | null
   /**
-   * Cited In
+   * Included In
    */
-  cited_in?: Array<string>
+  included_in?: Array<string>
   /**
    * Saved
    */

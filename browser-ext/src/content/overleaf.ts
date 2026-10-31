@@ -1543,11 +1543,13 @@ function openDocPath(): string | null {
   return parts.join("/");
 }
 
+// Overleaf's synctex wants an editor ID, but a build in a user's own zone
+// doesn't belong to one, so any will do for those
+const ANY_EDITOR_ID = crypto.randomUUID();
+
 function setBuildParams(params: URLSearchParams, build: PdfBuild): void {
   params.set("buildId", build.buildId);
-  if (build.editorId) {
-    params.set("editorId", build.editorId);
-  }
+  params.set("editorId", build.editorId ?? ANY_EDITOR_ID);
   if (build.clsiServerId) {
     params.set("clsiserverid", build.clsiServerId);
   }
@@ -1828,6 +1830,15 @@ function watchPdf(): void {
     for (const position of code) {
       // A root file in a folder comes back as, e.g., folder/./main.tex
       const at = position.file.replace(/(^|\/)\.\//g, "$1");
+      // What calkit.sty includes, e.g., a \cktable, is typeset from its
+      // copy in _calkit/ beside the document
+      const dir = file.slice(0, file.lastIndexOf("/") + 1);
+      const included = snapshot.items.findIndex(
+        (item) => `${dir}_calkit/${item.citation?.path}` === at,
+      );
+      if (included >= 0) {
+        return { index: included, version: snapshot.version };
+      }
       if (at !== file) {
         continue;
       }

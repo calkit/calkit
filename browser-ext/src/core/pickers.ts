@@ -95,6 +95,8 @@ export async function renderProjectPicker(options: {
   // Focusable, so clicking a row's text doesn't count as leaving the list
   results.tabIndex = -1;
   results.style.outline = "none";
+  // A click keeps focus in the input, so browsing doesn't close the list
+  results.addEventListener("mousedown", (e) => e.preventDefault());
   const message = el("div", { class: "small" });
   const container = el("div", {}, [
     el("label", { text: "Active project" }),
@@ -340,6 +342,8 @@ export function renderPathPicker(options: {
   });
   results.tabIndex = -1;
   results.style.outline = "none";
+  // A click keeps focus in the input, so browsing doesn't close the list
+  results.addEventListener("mousedown", (e) => e.preventDefault());
   const container = el("div", {}, [input, results]);
   let all: Promise<string[]> | null = null;
   let dir = "";
@@ -411,6 +415,9 @@ export function renderPathPicker(options: {
   const browse = (to: string) => {
     dir = to;
     typed = false;
+    // Before the folder's button is replaced, or focus leaves the picker
+    // with it and the list closes
+    input.focus();
     void render();
   };
   const choose = (path: string) => {

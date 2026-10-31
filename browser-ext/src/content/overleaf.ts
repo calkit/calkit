@@ -11,7 +11,6 @@ import {
   type Citation,
   type CitationProblem,
   canBeCreatedByPerson,
-  EXPORT_APPS,
   citationProblems,
   citationText,
   citationCandidates,
@@ -408,33 +407,16 @@ function renderExported(
     }
     save.disabled = true;
     message.append(loading(upload ? "Uploading" : "Saving"));
-    const app = appName.value.trim();
-    const stem = (target.split("/").pop() ?? "").replace(/\.[^.]*$/, "");
-    const slug = stem.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     try {
-      // An app that can export it does so as the pipeline runs, so nobody
-      // has to remember to
-      const ext = sourcePath.slice(sourcePath.lastIndexOf(".")).toLowerCase();
-      const exporter = (
-        (await provenanceFor(link, target)).exporters ?? []
-      ).find((e) => e.source_exts.includes(ext));
+      // Whether an app exports it as the pipeline runs, so nobody has to
+      // remember to, is the hub's to say
       await send({
-        type: "project.addStage",
+        type: "project.addExportStage",
         owner,
         project,
-        name: `export-${slug.replace(/^-+|-+$/g, "") || "figure"}`,
-        stage: exporter
-          ? { kind: exporter.kind, source_path: sourcePath, outputs: [target] }
-          : {
-              kind: "manual-step",
-              message: app
-                ? `In ${app}, export ${target} from ${sourcePath}`
-                : `Export ${target} from ${sourcePath}`,
-              // The step opens the source in the app it's exported with
-              ...(app ? { open: { app, path: sourcePath } } : {}),
-              inputs: [sourcePath],
-              outputs: [target],
-            },
+        source: sourcePath,
+        output: target,
+        app: appName.value.trim() || undefined,
         files: [
           {
             path: sourcePath,
@@ -442,9 +424,6 @@ function renderExported(
             created_by_me: true,
           },
         ],
-        message:
-          `Export ${target} from ${sourcePath}` +
-          (exporter ? ` with ${exporter.app}` : " manually"),
       });
       await showDefined(container, link, citation);
     } catch (e) {
@@ -808,8 +787,8 @@ function renderProvenance(
               lines.push(
                 el("div", { class: "dim" }, [
                   document.createTextNode(
-                    p.stage_kind && EXPORT_APPS[p.stage_kind]
-                      ? `Exported with ${EXPORT_APPS[p.stage_kind]} from `
+                    p.stage_app
+                      ? `Exported with ${p.stage_app} from `
                       : "Runs ",
                   ),
                   el("a", { text: p.source, href: fileUrl(p.source) }),
@@ -958,10 +937,10 @@ function renderProvenance(
         el(
           "div",
           { class: "small" },
-          provenance.stage_kind && EXPORT_APPS[provenance.stage_kind]
+          provenance.stage_app
             ? [
                 document.createTextNode(
-                  `Exported with ${EXPORT_APPS[provenance.stage_kind]} from `,
+                  `Exported with ${provenance.stage_app} from `,
                 ),
                 source,
               ]

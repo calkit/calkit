@@ -2378,11 +2378,11 @@ class AppExportStage(Stage):
     def run_properties(self) -> dict[str, Any]:
         # The app runs from the system, so nothing else says which version
         # made the output
-        import calkit.export
+        from calkit.export import exporters
 
         return {
             f"{e.name}_version": e.version()
-            for e in calkit.export.exporters()
+            for e in exporters()
             if e.kind == self.kind
         }
 
@@ -2400,9 +2400,9 @@ class InkscapeExportStage(AppExportStage):
 
     @model_validator(mode="after")
     def _check_paths(self) -> "InkscapeExportStage":
-        import calkit.inkscape
+        from calkit.export import INKSCAPE
 
-        calkit.inkscape.check_export(self.source_path, self.output_path)
+        INKSCAPE.check(self.source_path, self.output_path)
         return self
 
     @property
@@ -2426,9 +2426,9 @@ class GimpExportStage(AppExportStage):
 
     @model_validator(mode="after")
     def _check_paths(self) -> "GimpExportStage":
-        import calkit.gimp
+        from calkit.export import GIMP
 
-        calkit.gimp.check_export(self.source_path, self.output_path)
+        GIMP.check(self.source_path, self.output_path)
         return self
 
     @property

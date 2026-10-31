@@ -121,6 +121,19 @@ def test_manualstage():
         {"paper/wake.png": {"cache": False, "persist": True}},
     ]
     assert s.environment == "_system"
+    # A file it opens is opened with the app named, since the default app
+    # for it differs between machines
+    s = ManualStepStage(
+        message="Export figures/wake.png",
+        open_path="figures/src/wake diagram.svg",
+        app="Inkscape",
+    )
+    assert s.to_dvc()["cmd"] == (
+        "calkit manual-step --message 'Export figures/wake.png' --app "
+        "Inkscape --open 'figures/src/wake diagram.svg'"
+    )
+    with pytest.raises(ValidationError, match="app to open it with"):
+        ManualStepStage(message="Export it", open_path="wake.svg")
 
 
 def test_appexportstage():

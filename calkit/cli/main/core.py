@@ -4014,6 +4014,14 @@ def manual_step(
     cmd: Annotated[
         str | None, typer.Option("--cmd", help="Command to run.")
     ] = None,
+    app: Annotated[
+        str | None,
+        typer.Option("--app", help="App to open, e.g., 'Inkscape'."),
+    ] = None,
+    open_path: Annotated[
+        str | None,
+        typer.Option("--open", help="File to open with the app."),
+    ] = None,
     outputs: Annotated[
         list[str],
         typer.Option(
@@ -4050,7 +4058,35 @@ def manual_step(
         raise_error(
             f"Needs a manual step, with nobody here to do it: {message}"
         )
+    # The app is named rather than left to the default for the file, which
+    # differs between machines, e.g., Illustrator rather than Inkscape
+    if open_path is not None and app is None:
+        raise_error("Name the app to open it with, with --app")
+    if open_path is not None and not os.path.exists(open_path):
+        raise_error(f"{open_path} doesn't exist")
     before = {path: hash_path(path) for path in outputs}
+    if app is not None:
+        args = [] if open_path is None else [open_path]
+        typer.echo(f"Opening {open_path or app} with {app}")
+        # macOS finds apps by name wherever they're installed
+        exe = shutil.which(app) or shutil.which(app.lower())
+        opened = False
+        if sys.platform == "darwin":
+            opened = (
+                subprocess.run(
+                    ["open", "-a", app, *args], capture_output=True
+                ).returncode
+                == 0
+            )
+        elif exe is not None:
+            subprocess.Popen(
+                [exe, *args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            opened = True
+        if not opened:
+            warn(f"Can't find {app} here; open it yourself")
     if cmd is not None:
         typer.echo(f"Running command: {cmd}")
         subprocess.Popen(

@@ -136,6 +136,13 @@ window.addEventListener("UNSTABLE_editor:extensions", (event) => {
     return {
       update(update: any) {
         if (update.docChanged) {
+          // Kept where they are until the next scan, so marks and hovers
+          // in the meantime land on the right text
+          citations = citations.map((item) => ({
+            ...item,
+            from: update.changes.mapPos(item.from),
+            to: update.changes.mapPos(item.to, 1),
+          }));
           active = { view, mark };
           clearTimeout(timer);
           timer = setTimeout(() => scan(view), 500);

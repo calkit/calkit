@@ -33,6 +33,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import (
     STAGE_NAME_RE,
     _dump_ck_stage_map,
+    _inside,
     _validate_ck_stage,
 )
 from app.api.routes.projects.figures import _clean_rel_path
@@ -403,6 +404,8 @@ def post_project_stage_from_script_or_notebook(
         raise HTTPException(404, f"'{script_path}' is not in the project")
     # An upload never replaces a different file already there
     existing_path = os.path.join(wdir, script_path)
+    if content is not None and not _inside(wdir, existing_path):
+        raise HTTPException(422, f"'{script_path}' leads outside the project")
     if content is not None and os.path.isfile(existing_path):
         with open(existing_path, "rb") as fb:
             if fb.read() != content:
@@ -418,6 +421,10 @@ def post_project_stage_from_script_or_notebook(
     try:
         if content is not None:
             dest = os.path.join(scan_dir, script_path)
+            if not _inside(scan_dir, dest):
+                raise HTTPException(
+                    422, f"'{script_path}' leads outside the project"
+                )
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with open(dest, "wb") as fb:
                 fb.write(content)
@@ -487,6 +494,31 @@ def post_project_stage_from_script_or_notebook(
         and i not in dvc_outs
         and calkit.pipeline.get_stage_for_output(i, ck_info) is None
     ]
+
+    def include(shown: str, path: str) -> dict[str, str]:
+        # The new text of each document file that would show it from path
+        documents = [
+            s["target_path"]
+            for s in stages.values()
+            if isinstance(s, dict)
+            and s.get("kind") == "latex"
+            and s.get("target_path")
+        ]
+        for folder in ck_info.get("overleaf_sync") or {}:
+            if os.path.isdir(os.path.join(wdir, folder)):
+                documents += [
+                    os.path.relpath(d, wdir)
+                    for d in calkit.latex.root_documents(
+                        os.path.join(wdir, folder)
+                    )
+                ]
+        changed: dict[str, str] = {}
+        for document in dict.fromkeys(documents):
+            changed.update(
+                calkit.latex.include_figure(document, shown, path, wdir=wdir)
+            )
+        return changed
+
     # The output the document shows: the same path, or the one the user
     # picked, or else the only one with the same file name
     shows = _clean_rel_path(req.shows, "shown") if req.shows else None
@@ -505,7 +537,9 @@ def post_project_stage_from_script_or_notebook(
             for o in outputs
             if os.path.basename(o) == os.path.basename(shows)
         ]
-        if len(same_name) == 1:
+        # Only worth guessing if a document includes it, so it can show it
+        # from there instead
+        if len(same_name) == 1 and include(shows, same_name[0]):
             produces = same_name[0]
     # What the document shows is what the stage makes, so if the script
     # isn't found writing it anywhere, it writes it there
@@ -519,27 +553,7 @@ def post_project_stage_from_script_or_notebook(
         outputs.append(produces)
     included: dict[str, str] = {}
     if shows is not None and produces is not None and produces != shows:
-        documents = [
-            s["target_path"]
-            for s in stages.values()
-            if isinstance(s, dict)
-            and s.get("kind") == "latex"
-            and s.get("target_path")
-        ]
-        for folder in ck_info.get("overleaf_sync") or {}:
-            if os.path.isdir(os.path.join(wdir, folder)):
-                documents += [
-                    os.path.relpath(d, wdir)
-                    for d in calkit.latex.root_documents(
-                        os.path.join(wdir, folder)
-                    )
-                ]
-        for document in dict.fromkeys(documents):
-            included.update(
-                calkit.latex.include_figure(
-                    document, shows, produces, wdir=wdir
-                )
-            )
+        included = include(shows, produces)
         if not included:
             raise HTTPException(
                 422,
@@ -567,6 +581,15 @@ def post_project_stage_from_script_or_notebook(
     )
     if not req.save:
         return out
+    # Nothing is written through a symlink that leads out of the project
+    writes = [script_path] if content is not None else []
+    if out.environment_spec_path:
+        writes.append(
+            _clean_rel_path(out.environment_spec_path, "environment")
+        )
+    for path in writes + list(included):
+        if not _inside(wdir, os.path.join(wdir, path)):
+            raise HTTPException(422, f"'{path}' leads outside the project")
     # Written as xr writes them, then committed with the pipeline
     if content is not None:
         dest = os.path.join(wdir, script_path)

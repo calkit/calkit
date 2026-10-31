@@ -161,7 +161,6 @@ export function citationText(citation: Citation): string {
   return `\\ck${command}${options}{${citation.path}}`;
 }
 
-/** Something wrong with what a command shows, as a lint message. */
 // Mirrors EXPORTED_EXTENSIONS in calkit/provenance.py: something else
 // writes these, e.g., a script or an image editor saving from its own file
 const EXPORTED_EXTENSIONS = [".png", ".gif", ".webp", ".bmp", ".pdf", ".eps"];
@@ -172,6 +171,7 @@ export function canBeCreatedByPerson(path: string): boolean {
   return !EXPORTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
+/** Something wrong with what a command shows, as a lint message. */
 export interface CitationProblem {
   severity: "error" | "warning";
   kind: "value" | "missing" | "origin" | "stale";

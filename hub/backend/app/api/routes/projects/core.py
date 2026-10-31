@@ -6515,8 +6515,9 @@ def post_project_misc(
         project=project, user=current_user, session=session, ttl=None
     )
     ck_info = get_ck_info_from_repo(repo)
-    # A declared artifact that doesn't say where it came from yet gets the
-    # origin added to its own entry
+    # A declared artifact that doesn't say where it came from yet, or only
+    # describes where it was imported from, gets the origin added to its
+    # own entry
     declared = None
     for section, label in [
         ("figures", "figure"),
@@ -6529,9 +6530,14 @@ def post_project_misc(
                 normalize_artifact_path(str(existing.get("path") or ""))
                 == path
             ):
-                if section == "publications" or any(
-                    existing.get(k) is not None
-                    for k in ("created_by", "imported_from", "stage")
+                imported_from = existing.get("imported_from")
+                if (
+                    section == "publications"
+                    or any(
+                        existing.get(k) is not None
+                        for k in ("created_by", "stage")
+                    )
+                    or calkit.provenance.import_is_checkable(imported_from)
                 ):
                     raise HTTPException(
                         400,
@@ -6573,6 +6579,8 @@ def post_project_misc(
         for k in ("created_by", "imported_from"):
             if k in entry:
                 declared[k] = entry[k]
+            else:
+                declared.pop(k, None)
     else:
         misc = ck_info.get("misc", [])
         misc.append(entry)

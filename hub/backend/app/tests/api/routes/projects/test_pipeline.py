@@ -405,6 +405,12 @@ def test_post_project_stage_from_script_or_notebook(
     assert {"figures/fit.png", "figures/extra.png"} <= set(
         resp.json()["outputs"]
     )
+    # An output with the same name elsewhere isn't guessed when nothing
+    # includes what's shown, since nothing could show it from there
+    resp = post(script_path="scripts/plot.py", shows="results/fit.png")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["produces"] == "results/fit.png"
+    assert resp.json()["included_in"] == []
     # An upload never replaces a different file already there
     resp = post(**{**upload, "script_path": "scripts/old.py"})
     assert resp.status_code == 409, resp.text
@@ -435,6 +441,14 @@ def test_post_project_stage_from_script_or_notebook(
         produces="figures/fit.png",
     )
     assert resp.status_code == 422, resp.text
+    # Nothing is written through a symlink that leads out of the project
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (wdir / "linked").symlink_to(outside)
+    resp = post(**{**upload, "script_path": "linked/plot.py"})
+    assert resp.status_code == 422, resp.text
+    assert not (outside / "plot.py").exists()
+    (wdir / "linked").unlink()
     # Not a script, or not there to read
     assert post(script_path="paper/paper.tex").status_code == 422
     assert post(script_path="scripts/gone.py").status_code == 404

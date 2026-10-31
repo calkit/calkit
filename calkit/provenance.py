@@ -306,6 +306,20 @@ def can_be_created_by_person(path: str) -> bool:
     return posixpath.splitext(path)[1].lower() not in EXPORTED_EXTENSIONS
 
 
+def import_is_checkable(imported_from: object) -> bool:
+    """Whether ``imported_from`` names a source someone else can look at,
+    rather than only describing one.
+    """
+    if isinstance(imported_from, str):
+        try:
+            imported_from = source_from_location(imported_from)
+        except ValueError:
+            return False
+    return isinstance(imported_from, dict) and any(
+        imported_from.get(k) for k in ("git_repo_url", "project", "url", "doi")
+    )
+
+
 def how_to_define_origin(path: str) -> str:
     """Say what defines the origin of ``path``, for a message."""
     if can_be_created_by_person(path):
@@ -955,24 +969,12 @@ def find_provenance_gaps(
                 return name
         return None
 
-    def checkable(imported_from: object) -> bool:
-        # A source someone else can look at, rather than only a description
-        if isinstance(imported_from, str):
-            try:
-                imported_from = source_from_location(imported_from)
-            except ValueError:
-                return False
-        return isinstance(imported_from, dict) and any(
-            imported_from.get(k)
-            for k in ("git_repo_url", "project", "url", "doi")
-        )
-
     def walk(path: str, trail: list[ProvenanceStep]) -> None:
         # Every entry covering the path counts, e.g., a file's and its
         # folder's, whatever order calkit.yaml lists them in
         covering = [e for e in entries if under(path, norm(e["path"]))]
         if any(
-            checkable(e.get("imported_from"))
+            import_is_checkable(e.get("imported_from"))
             or (
                 e.get("created_by") is not None
                 and can_be_created_by_person(path)

@@ -1311,6 +1311,10 @@ function watchPdf(): void {
     const projectId = currentProjectId;
     const snapshot = editorCitations;
     const file = openDocPath();
+    // Only a paper linked to a project has anything to show
+    if (!currentLink) {
+      return null;
+    }
     if (!projectId || !snapshot || !file) {
       console.debug(
         "[Calkit] PDF hover: no .tex file selected in the file tree",

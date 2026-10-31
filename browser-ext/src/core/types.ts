@@ -222,6 +222,21 @@ export interface StageFile {
   created_by_me?: boolean;
 }
 
+/** A pipeline stage, with its body as YAML. */
+export interface PipelineStage {
+  name: string;
+  yaml: string;
+}
+
+/** A file a new stage needs, uploaded or already in the project. */
+export interface StageFile {
+  path: string;
+  /** Uploaded, base64-encoded. */
+  content?: string;
+  /** Recorded as created by whoever adds it, e.g., a Photoshop file. */
+  created_by_me?: boolean;
+}
+
 /** A stage made from a script, as `calkit xr` makes one, maybe saved. */
 export interface StageFromScriptOrNotebookResponse {
   stage_name: string;

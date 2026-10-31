@@ -272,6 +272,20 @@ describe("citationProblems", () => {
     ]);
   });
 
+  test("says when an import's source has something newer", () => {
+    const imported = {
+      ...base,
+      origin: "Imported from o/src",
+      updatable: true,
+    };
+    expect(citationProblems(figure, imported)).toEqual([]);
+    expect(
+      citationProblems(figure, { ...imported, update_available: true }).map(
+        (p) => [p.severity, p.message],
+      ),
+    ).toEqual([["warning", "Its source has a newer version"]]);
+  });
+
   test("names what isn't in the project, or a plain figure's missing origin", () => {
     const missing = { ...base, exists: false, gaps: [self] };
     expect(citationProblems(figure, missing).map((p) => p.message)).toEqual([

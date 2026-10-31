@@ -174,7 +174,7 @@ export function canBeCreatedByPerson(path: string): boolean {
 /** Something wrong with what a command shows, as a lint message. */
 export interface CitationProblem {
   severity: "error" | "warning";
-  kind: "value" | "missing" | "origin" | "stale";
+  kind: "value" | "missing" | "origin" | "update" | "stale";
   message: string;
   /** What it's about, e.g., data a figure is made from. */
   path: string;
@@ -236,6 +236,14 @@ export function citationProblems(
         ? "Origin not defined"
         : `Origin not defined for ${gap.path}, which it's made from${through}`,
       path: gap.path,
+    });
+  }
+  if (provenance.update_available) {
+    problems.push({
+      severity: "warning",
+      kind: "update",
+      message: "Its source has a newer version",
+      path,
     });
   }
   if (provenance.stale_reason) {

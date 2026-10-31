@@ -732,6 +732,8 @@ def post_project_manual_export(
     stage: dict[str, Any] = {
         "kind": "manual-step",
         "message": message,
+        # The step opens the source in the app it's exported with
+        **({"app": app_name, "open_path": source_path} if app_name else {}),
         "inputs": [source_path],
         "outputs": [{"path": path, "storage": "git"} if tracked else path],
     }

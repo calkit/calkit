@@ -609,14 +609,41 @@ function renderRecordOrigin(
 
 type ToRecord = Extract<Request, { type: "project.recordOrigin" }>;
 
-/** The ways to define where a file came from, each opening its form. */
+/**
+ * The ways to define where a file came from, each opening its form.
+ *
+ * A file only Overleaf has is synced into the project first, so what's
+ * recorded about it lands on the file itself.
+ */
 function renderDefineOrigin(
   link: OverleafLinkPublic,
   citation: Citation,
   target: string,
+  onlyInOverleaf = false,
 ): HTMLElement {
+  let synced = !onlyInOverleaf;
   const open = (form: (body: HTMLElement) => HTMLElement) =>
-    showInPanel((body) => body.append(form(body)));
+    showInPanel(async (body) => {
+      if (!synced) {
+        body.append(loading("Syncing from Overleaf"));
+        try {
+          await send({
+            type: "overleaf.sync",
+            owner: link.project_owner_name,
+            project: link.project_name,
+            path: link.path,
+          });
+          synced = true;
+        } catch (e) {
+          clear(body).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+          return;
+        }
+        clear(body);
+      }
+      body.append(form(body));
+    });
   const choices: [string, () => void][] = [
     [
       "Script",
@@ -853,7 +880,16 @@ function renderProvenance(
   for (const problem of problems) {
     container.append(problemLine(problem));
     if (problem.kind === "origin" && link.current_user_access !== "read") {
-      container.append(renderDefineOrigin(link, citation, problem.path));
+      container.append(
+        renderDefineOrigin(
+          link,
+          citation,
+          problem.path,
+          problem.path === provenance.path &&
+            !provenance.exists &&
+            !provenance.stage,
+        ),
+      );
     }
   }
   if (provenance.copied_from) {
@@ -3031,7 +3067,7 @@ function openPanel(
 }
 
 /** Open the panel on something to do, e.g., a fix from a tooltip. */
-function showInPanel(fill: (body: HTMLElement) => void): void {
+function showInPanel(fill: (body: HTMLElement) => void | Promise<void>): void {
   const overleafProjectId = currentProjectId;
   if (!overleafProjectId) {
     return;
@@ -3047,7 +3083,7 @@ function showInPanel(fill: (body: HTMLElement) => void): void {
       }),
       content,
     );
-    fill(content);
+    void fill(content);
   });
 }
 

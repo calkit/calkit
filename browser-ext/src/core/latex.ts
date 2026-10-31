@@ -186,7 +186,8 @@ export interface CitationProblem {
  * Its origin has to be defined, whether by the pipeline, an import, or a
  * person, and so does the origin of everything it's made from. A plainly
  * included file may be a section only Overleaf has yet, so only a
- * calkit.sty command has to name something in the project.
+ * calkit.sty command has to name something in the project. A plainly
+ * included figure only Overleaf has yet has no origin, though.
  */
 export function citationProblems(
   citation: Citation,
@@ -207,6 +208,13 @@ export function citationProblems(
       severity: "error",
       kind: "missing",
       message: `${path} isn't in the project`,
+      path,
+    });
+  } else if (missing && citation.kind === "figure" && !provenance.origin) {
+    problems.push({
+      severity: "error",
+      kind: "origin",
+      message: "Origin not defined",
       path,
     });
   }

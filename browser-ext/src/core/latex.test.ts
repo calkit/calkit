@@ -272,14 +272,26 @@ describe("citationProblems", () => {
     ]);
   });
 
-  test("names what isn't in the project, except a plain include", () => {
+  test("names what isn't in the project, or a plain figure's missing origin", () => {
     const missing = { ...base, exists: false, gaps: [self] };
     expect(citationProblems(figure, missing).map((p) => p.message)).toEqual([
       "figures/a.png isn't in the project",
     ]);
-    expect(citationProblems({ ...figure, included: true }, missing)).toEqual(
-      [],
-    );
+    // A figure only Overleaf has yet has no origin, unless one's declared
+    expect(
+      citationProblems({ ...figure, included: true }, missing).map(
+        (p) => p.message,
+      ),
+    ).toEqual(["Origin not defined"]);
+    expect(
+      citationProblems(
+        { ...figure, included: true },
+        { ...missing, origin: "Imported from https://example.com" },
+      ),
+    ).toEqual([]);
+    expect(
+      citationProblems({ ...figure, kind: "file", included: true }, missing),
+    ).toEqual([]);
     // A value says what's wrong with reading it
     const value = {
       kind: "value",

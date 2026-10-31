@@ -358,7 +358,7 @@ def test_post_project_stage_from_script_or_notebook(
     # Nothing has the data the script reads
     assert data["missing_inputs"] == ["data/raw.csv"]
     assert data["produces"] == "figures/fit.png"
-    assert data["cited_in"] == ["paper/paper.tex"]
+    assert data["included_in"] == ["paper/paper.tex"]
     assert data["git_repo_url"] == "https://github.com/o/p"
     wdir = tmp_path / "repo"
     assert not (wdir / "scripts" / "plot.py").exists()
@@ -415,7 +415,7 @@ def test_post_project_stage_from_script_or_notebook(
     assert resp.status_code == 200, resp.text
     assert resp.json()["produces"] == "paper/figures/drawn.png"
     assert "paper/figures/drawn.png" in resp.json()["outputs"]
-    assert resp.json()["cited_in"] == []
+    assert resp.json()["included_in"] == []
     resp = post(
         script_path="scripts/old.py",
         shows="paper/figures/drawn.png",

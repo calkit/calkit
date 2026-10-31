@@ -1293,7 +1293,7 @@ function watchPdf(): void {
     attributes: true,
     attributeFilter: ["href"],
   });
-  // A citation's provenance on hover, as in the editor. Where each one
+  // A component's provenance on hover, as in the editor. Where each one
   // lands is asked of Overleaf once per build and edit, the first time the
   // pointer rests on the PDF, so moving it around costs nothing, and the
   // PDF still gets every click

@@ -4008,12 +4008,6 @@ def manual_step(
     cmd: Annotated[
         str | None, typer.Option("--cmd", help="Command to run.")
     ] = None,
-    open_path: Annotated[
-        str | None,
-        typer.Option(
-            "--open", help="File to open in its default app, e.g., to export."
-        ),
-    ] = None,
     outputs: Annotated[
         list[str],
         typer.Option(
@@ -4059,18 +4053,6 @@ def manual_step(
             stdout=subprocess.PIPE if not show_stdout else None,
             shell=True,
         )
-    if open_path is not None:
-        typer.echo(f"Opening {open_path}")
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", open_path])
-        elif sys.platform == "win32":
-            os.startfile(open_path)
-        else:
-            subprocess.Popen(
-                ["xdg-open", open_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
     # Each prompt ends its line, since 'calkit run' passes stage output on
     # a line at a time, so a prompt waiting on its line wouldn't show
     while True:

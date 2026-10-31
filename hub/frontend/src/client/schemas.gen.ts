@@ -4189,64 +4189,6 @@ export const LatexComponentsRequestSchema = {
   description: "A LaTeX document to bring calkit.sty's components in for.",
 } as const
 
-export const ManualExportSchema = {
-  properties: {
-    stage_name: {
-      type: "string",
-      title: "Stage Name",
-    },
-    stage_yaml: {
-      type: "string",
-      title: "Stage Yaml",
-    },
-    message: {
-      type: "string",
-      title: "Message",
-    },
-  },
-  type: "object",
-  required: ["stage_name", "stage_yaml", "message"],
-  title: "ManualExport",
-} as const
-
-export const ManualExportPostSchema = {
-  properties: {
-    path: {
-      type: "string",
-      title: "Path",
-    },
-    source_path: {
-      type: "string",
-      title: "Source Path",
-    },
-    content: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Content",
-    },
-    app: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "App",
-    },
-  },
-  type: "object",
-  required: ["path", "source_path"],
-  title: "ManualExportPost",
-} as const
-
 export const MapPathEntrySchema = {
   properties: {
     src: {
@@ -10478,6 +10420,36 @@ export const SoftwareItemSchema = {
   title: "SoftwareItem",
 } as const
 
+export const StageFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    created_by_me: {
+      type: "boolean",
+      title: "Created By Me",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "StageFile",
+  description:
+    "A file a new stage needs, e.g., a script or the file a figure is\nexported from.",
+} as const
+
 export const StageFromScriptOrNotebookPostSchema = {
   properties: {
     script_path: {
@@ -10638,6 +10610,49 @@ export const StageFromScriptOrNotebookResponseSchema = {
     "git_repo_url",
   ],
   title: "StageFromScriptOrNotebookResponse",
+} as const
+
+export const StagePostSchema = {
+  properties: {
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["stage"],
+  title: "StagePost",
 } as const
 
 export const StageStatusSchema = {

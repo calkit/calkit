@@ -2471,46 +2471,6 @@ export type LatexComponentsRequest = {
 }
 
 /**
- * ManualExport
- */
-export type ManualExport = {
-  /**
-   * Stage Name
-   */
-  stage_name: string
-  /**
-   * Stage Yaml
-   */
-  stage_yaml: string
-  /**
-   * Message
-   */
-  message: string
-}
-
-/**
- * ManualExportPost
- */
-export type ManualExportPost = {
-  /**
-   * Path
-   */
-  path: string
-  /**
-   * Source Path
-   */
-  source_path: string
-  /**
-   * Content
-   */
-  content?: string | null
-  /**
-   * App
-   */
-  app?: string | null
-}
-
-/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -5961,6 +5921,27 @@ export type SoftwareItem = {
 }
 
 /**
+ * StageFile
+ *
+ * A file a new stage needs, e.g., a script or the file a figure is
+ * exported from.
+ */
+export type StageFile = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Created By Me
+   */
+  created_by_me?: boolean
+}
+
+/**
  * StageFromScriptOrNotebookPost
  */
 export type StageFromScriptOrNotebookPost = {
@@ -6046,6 +6027,30 @@ export type StageFromScriptOrNotebookResponse = {
    * Git Repo Url
    */
   git_repo_url: string
+}
+
+/**
+ * StagePost
+ */
+export type StagePost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -13879,8 +13884,8 @@ export type PostProjectStageFromScriptOrNotebookResponses = {
 export type PostProjectStageFromScriptOrNotebookResponse =
   PostProjectStageFromScriptOrNotebookResponses[keyof PostProjectStageFromScriptOrNotebookResponses]
 
-export type PostProjectManualExportData = {
-  body: ManualExportPost
+export type PostProjectPipelineStageData = {
+  body: StagePost
   path: {
     /**
      * Owner Name
@@ -13892,28 +13897,28 @@ export type PostProjectManualExportData = {
     project_name: string
   }
   query?: never
-  url: "/projects/{owner_name}/{project_name}/pipeline/stages/manual-export"
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages"
 }
 
-export type PostProjectManualExportErrors = {
+export type PostProjectPipelineStageErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostProjectManualExportError =
-  PostProjectManualExportErrors[keyof PostProjectManualExportErrors]
+export type PostProjectPipelineStageError =
+  PostProjectPipelineStageErrors[keyof PostProjectPipelineStageErrors]
 
-export type PostProjectManualExportResponses = {
+export type PostProjectPipelineStageResponses = {
   /**
    * Successful Response
    */
-  200: ManualExport
+  200: PipelineStage
 }
 
-export type PostProjectManualExportResponse =
-  PostProjectManualExportResponses[keyof PostProjectManualExportResponses]
+export type PostProjectPipelineStageResponse =
+  PostProjectPipelineStageResponses[keyof PostProjectPipelineStageResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

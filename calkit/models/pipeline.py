@@ -2286,7 +2286,27 @@ class ManualStepStage(Stage):
             "figures/wake-diagram.png'."
         )
     )
+    open_path: str | None = Field(
+        default=None,
+        description="File to open for the step, e.g., the Photoshop file.",
+    )
+    app: str | None = Field(
+        default=None,
+        description=(
+            "App to open it with, e.g., 'Adobe Photoshop 2025'. Required "
+            "with an open path, since the default app differs between "
+            "machines."
+        ),
+    )
     environment: str = "_system"
+
+    @model_validator(mode="after")
+    def _app_for_open_path(self) -> "ManualStepStage":
+        if self.open_path is not None and not self.app:
+            raise ValueError(
+                "A manual step that opens a file needs the app to open it with"
+            )
+        return self
 
     @property
     def output_paths(self) -> list[str]:
@@ -2307,6 +2327,10 @@ class ManualStepStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = f"calkit manual-step --message {shlex.quote(self.message)}"
+        if self.app:
+            cmd += f" --app {shlex.quote(self.app)}"
+        if self.open_path is not None:
+            cmd += f" --open {shlex.quote(self.open_path)}"
         for path in self.output_paths:
             cmd += f" --output {shlex.quote(path)}"
         return cmd

@@ -403,6 +403,8 @@ Options:
 | ----------------- | ------- | -------- | ------- | --------------------------------------------------------------------- |
 | `--message`, `-m` | str     | yes      |         | Message to display as a prompt.                                       |
 | `--cmd`           | str     | no       |         | Command to run.                                                       |
+| `--app`           | str     | no       |         | App to open, e.g., 'Inkscape'.                                        |
+| `--open`          | str     | no       |         | File to open with the app.                                            |
 | `--output`, `-o`  | str     | no       |         | File the step writes, which must change for it to be considered done. |
 | `--show-stdout`   | boolean | no       | False   | Show stdout.                                                          |
 | `--show-stderr`   | boolean | no       | False   | Show stderr.                                                          |

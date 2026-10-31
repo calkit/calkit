@@ -3521,6 +3521,19 @@
           "title": "Always Run",
           "type": "boolean"
         },
+        "app": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "App to open it with, e.g., 'Adobe Photoshop 2025'. Required with an open path, since the default app differs between machines.",
+          "title": "App"
+        },
         "description": {
           "anyOf": [
             {
@@ -3627,6 +3640,19 @@
           "default": null,
           "description": "The stage's name, which must match its key if set.",
           "title": "Name"
+        },
+        "open_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "File to open for the step, e.g., the Photoshop file.",
+          "title": "Open Path"
         },
         "outputs": {
           "anyOf": [

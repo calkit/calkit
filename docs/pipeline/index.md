@@ -452,10 +452,12 @@ the Photoshop file.
 Its outputs are kept while it runs, since they're what the person
 replaces, and the step checks that they changed.
 
-| Kind-specific parameter | Type | Required | Default    | Description                                                        |
-| ----------------------- | ---- | -------- | ---------- | ------------------------------------------------------------------ |
-| `environment`           | str  | no       | '\_system' | Name of the environment in which to run this stage.                |
-| `message`               | str  | yes      |            | What to do, e.g., 'In Photoshop, export figures/wake-diagram.png'. |
+| Kind-specific parameter | Type        | Required | Default    | Description                                                                                                                    |
+| ----------------------- | ----------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `environment`           | str         | no       | '\_system' | Name of the environment in which to run this stage.                                                                            |
+| `message`               | str         | yes      |            | What to do, e.g., 'In Photoshop, export figures/wake-diagram.png'.                                                             |
+| `open_path`             | str \| None | no       | null       | File to open for the step, e.g., the Photoshop file.                                                                           |
+| `app`                   | str \| None | no       | null       | App to open it with, e.g., 'Adobe Photoshop 2025'. Required with an open path, since the default app differs between machines. |
 
 ### `map-paths`
 

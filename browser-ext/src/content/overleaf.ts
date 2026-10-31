@@ -2920,14 +2920,17 @@ function showInPanel(fill: (body: HTMLElement) => void): void {
     return;
   }
   openPanel(overleafProjectId, (body) => {
+    // Its own element, so what clears it keeps the way back
+    const content = el("div");
     body.append(
       el("button", {
         class: "action secondary",
         text: "\u2190 Back",
         onClick: () => openPanel(overleafProjectId),
       }),
+      content,
     );
-    fill(body);
+    fill(content);
   });
 }
 

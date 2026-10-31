@@ -372,6 +372,10 @@ function renderAddScript(
       return { output, radio };
     });
     const citeNote = el("div", { class: "dim small" });
+    const unseen = el("div", {
+      class: "small",
+      style: { color: "var(--ck-warning)" },
+    });
     const chosen = () => choices.find((c) => c.radio.checked)?.output;
     const updateNote = () => {
       const output = chosen();
@@ -379,18 +383,26 @@ function renderAddScript(
         output && output !== shows
           ? `The paper will show it from there, with \\ckfigure{${output}}.`
           : "";
+      // Static analysis can miss a path built at run time, so this warns
+      // rather than refuses
+      unseen.textContent =
+        output && !(detected.found_outputs ?? []).includes(output)
+          ? `Calkit didn't see ${request?.scriptPath} write ${output}. ` +
+            "Check that it does, or the stage will fail when it runs."
+          : "";
     };
     if (choices.length) {
       review.append(
         el("div", { class: "small dim", text: `Which output is ${shows}?` }),
         ...choices.map(({ output, radio }) => {
           radio.addEventListener("change", updateNote);
-          return el("label", { class: "small", style: { display: "block" } }, [
+          return el("label", { class: "choice" }, [
             radio,
-            document.createTextNode(` ${output}`),
+            el("span", { class: "name", text: output }),
           ]);
         }),
         citeNote,
+        unseen,
       );
       updateNote();
     } else {

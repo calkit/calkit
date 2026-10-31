@@ -355,6 +355,7 @@ def test_post_project_stage_from_script_or_notebook(
     assert set(data["dependencies"]) == {"matplotlib", "pandas"}
     assert data["inputs"] == ["data/raw.csv"]
     assert data["outputs"] == ["figures/fit.png"]
+    assert data["found_outputs"] == ["figures/fit.png"]
     # Nothing has the data the script reads
     assert data["missing_inputs"] == ["data/raw.csv"]
     assert data["produces"] == "figures/fit.png"
@@ -421,6 +422,8 @@ def test_post_project_stage_from_script_or_notebook(
     assert resp.status_code == 200, resp.text
     assert resp.json()["produces"] == "paper/figures/drawn.png"
     assert "paper/figures/drawn.png" in resp.json()["outputs"]
+    # though nothing says the script writes it
+    assert "paper/figures/drawn.png" not in resp.json()["found_outputs"]
     assert resp.json()["included_in"] == []
     resp = post(
         script_path="scripts/old.py",

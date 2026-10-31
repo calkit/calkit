@@ -359,6 +359,102 @@ function renderAddScript(
   ]);
 }
 
+/**
+ * Record that a figure is exported manually from a file someone made, e.g.,
+ * a PNG from a Photoshop file, so the pipeline asks for a new export
+ * whenever that file changes.
+ */
+function renderExported(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+  target: string,
+): HTMLElement {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const file = el("input", { type: "file" });
+  const { element: picker, input: path } = renderPathPicker({
+    owner,
+    project,
+    placeholder: "Or find it in the project",
+    accept: (p) => p !== target && canBeCreatedByPerson(p),
+  });
+  const appName = textInput({
+    placeholder: "App it's exported with, e.g., Photoshop (optional)",
+  });
+  const save = el("button", { class: "action", text: "Add the export step" });
+  const message = el("div", { class: "small" });
+  const fail = (e: unknown) =>
+    clear(message).append(
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
+  save.addEventListener("click", async () => {
+    clear(message);
+    const upload = file.files?.[0];
+    const typed = path.value.trim();
+    if (!upload && !typed) {
+      fail("Choose the file it's exported from, or find it in the project.");
+      return;
+    }
+    // Kept out of the paper's folder, which syncs to Overleaf
+    const sourcePath = typed || `figures/src/${upload?.name}`;
+    if (!canBeCreatedByPerson(sourcePath)) {
+      fail(
+        `${sourcePath} is exported from something itself; choose the ` +
+          "file it's made from.",
+      );
+      return;
+    }
+    save.disabled = true;
+    message.append(loading(upload ? "Uploading" : "Saving"));
+    const app = appName.value.trim();
+    const stem = (target.split("/").pop() ?? "").replace(/\.[^.]*$/, "");
+    const slug = stem.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    try {
+      await send({
+        type: "project.addStage",
+        owner,
+        project,
+        name: `export-${slug.replace(/^-+|-+$/g, "") || "figure"}`,
+        stage: {
+          kind: "manual-step",
+          message: app
+            ? `In ${app}, export ${target} from ${sourcePath}`
+            : `Export ${target} from ${sourcePath}`,
+          // The step opens the source in the app it's exported with
+          ...(app ? { open: { app, path: sourcePath } } : {}),
+          inputs: [sourcePath],
+          outputs: [target],
+        },
+        files: [
+          {
+            path: sourcePath,
+            content: upload ? await fileBase64(upload) : undefined,
+            created_by_me: true,
+          },
+        ],
+        message: `Export ${target} from ${sourcePath} manually`,
+      });
+      await showDefined(container, link, citation);
+    } catch (e) {
+      fail(e);
+      save.disabled = false;
+    }
+  });
+  return el("div", { class: "stack", style: { marginTop: "6px" } }, [
+    el("div", { class: "small" }, [
+      document.createTextNode("The file "),
+      el("span", { class: "name", text: target }),
+      document.createTextNode(" is exported from"),
+    ]),
+    file,
+    picker,
+    appName,
+    el("div", { class: "actions" }, [save]),
+    message,
+  ]);
+}
+
 /** Show what's cited again, now that an origin is defined. */
 async function showDefined(
   container: HTMLElement,
@@ -542,6 +638,13 @@ function renderDefineOrigin(
         ),
     ],
   ];
+  // Something exported, e.g., a PNG, comes from a file a person made
+  if (!canBeCreatedByPerson(target)) {
+    choices.push([
+      "Exported",
+      () => open((body) => renderExported(body, link, citation, target)),
+    ]);
+  }
   if (canBeCreatedByPerson(target)) {
     choices.push([
       "Created",
@@ -686,7 +789,11 @@ function renderProvenance(
                   : null,
               ]),
             );
-            if (p.source) {
+            if (p.stage_kind === "manual-step" && p.message) {
+              lines.push(
+                el("div", { class: "dim", text: `Manual step: ${p.message}` }),
+              );
+            } else if (p.source) {
               lines.push(
                 el("div", { class: "dim" }, [
                   document.createTextNode("Runs "),
@@ -819,15 +926,23 @@ function renderProvenance(
           : null,
       ]),
     );
-    if (provenance.source) {
+    if (provenance.stage_kind === "manual-step" && provenance.message) {
+      container.append(
+        el("div", {
+          class: "small",
+          text: `Manual step: ${provenance.message}`,
+        }),
+      );
+    } else if (provenance.source) {
+      const source = el("a", {
+        text: provenance.source,
+        href: fileUrl(provenance.source),
+        attrs: { target: "_blank" },
+      });
       container.append(
         el("div", { class: "small" }, [
           document.createTextNode("Edit "),
-          el("a", {
-            text: provenance.source,
-            href: fileUrl(provenance.source),
-            attrs: { target: "_blank" },
-          }),
+          source,
           document.createTextNode(" to change it."),
         ]),
       );

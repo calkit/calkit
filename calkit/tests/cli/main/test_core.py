@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 import dvc.repo
 import git
 import pytest
+import typer
 import yaml
 from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
@@ -3859,3 +3860,127 @@ def test_merge(tmp_dir):
         check_environments=False, clean_notebooks=False
     )
     assert [n.split("@")[0] for n in status.stale_stage_names] == ["a"]
+
+
+def test_manual_step(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import manual_step
+
+    # Status says what a manual stage needs when it's out of date
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "export": {
+                            "kind": "manual-step",
+                            "message": "Export fig.png",
+                            "outputs": ["fig.png"],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    out = subprocess.run(
+        ["calkit", "status"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    ).stdout
+    assert "is a manual step: Export fig.png" in out
+    # With nobody to do it, it says so rather than waiting
+    out = subprocess.run(
+        ["calkit", "manual-step", "-m", "Export fig.png"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode != 0
+    assert "Needs a manual step" in out.stdout + out.stderr
+    assert "Export fig.png" in out.stdout + out.stderr
+    # With someone there, the step isn't done until every output exists
+    # and has changed, or they say keep it as is
+    with open("fig.png", "w") as f:
+        f.write("v1")
+    monkeypatch.setattr(sys, "stdin", Mock(isatty=lambda: True))
+    answers = []
+
+    def answer() -> str:
+        answers.append(capsys.readouterr().out)
+        if len(answers) == 2:
+            with open("new.png", "w") as f:
+                f.write("v1")
+        elif len(answers) == 3:
+            return "n"
+        elif len(answers) == 4:
+            with open("fig.png", "w") as f:
+                f.write("v2")
+        return ""
+
+    monkeypatch.setattr("builtins.input", answer)
+    manual_step(
+        message="Export fig.png and new.png",
+        outputs=["fig.png", "new.png"],
+    )
+    # Every prompt is a whole line, so it shows under 'calkit run'
+    assert answers[0].endswith(
+        "Export fig.png and new.png. Press Enter when done.\n"
+    )
+    assert answers[1].startswith("Not there yet: new.png\n")
+    assert answers[2].endswith("Unchanged: fig.png. Keep as is? [y/N]\n")
+    assert len(answers) == 4
+    assert capsys.readouterr().out.rstrip().endswith("Done")
+    # Input ending says nobody's there too, as an empty stdin on Windows
+    # passes for a terminal
+
+    def no_input() -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", no_input)
+    with pytest.raises(typer.Exit):
+        manual_step(message="Export fig.png", outputs=["fig.png"])
+    assert "nobody here to do it" in capsys.readouterr().err
+    # A long message is wrapped to fit a terminal
+    message = "In Photoshop, export paper/deficit_new.png from " + "x/" * 30
+    monkeypatch.setattr("builtins.input", lambda: "")
+    manual_step(message=message + ".")
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) > 2
+    assert all(len(line) <= 80 for line in lines)
+    assert " ".join(lines[:-1]).endswith("x/. Press Enter when done.")
+    # A file is opened with the app named, never the default for its type,
+    # and a missing app still leaves the step to do
+    with pytest.raises(typer.Exit):
+        manual_step(message="Export fig.png", open_path="fig.png")
+    assert "Name the app" in capsys.readouterr().err
+    with pytest.raises(typer.Exit):
+        manual_step(message="Export x.png", app="GIMP", open_path="x.xcf")
+    assert "x.xcf doesn't exist" in capsys.readouterr().err
+    launched = []
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kw: launched.append(args) or Mock(returncode=0),
+    )
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda args, **kw: launched.append(args)
+    )
+    for platform_name, which, expected in [
+        ("darwin", None, ["open", "-a", "Inkscape", "fig.png"]),
+        ("linux", "/usr/bin/inkscape", ["/usr/bin/inkscape", "fig.png"]),
+        ("win32", None, None),
+    ]:
+        monkeypatch.setattr(sys, "platform", platform_name)
+        monkeypatch.setattr(
+            shutil,
+            "which",
+            lambda name: which if name == "inkscape" else None,
+        )
+        launched.clear()
+        manual_step(
+            message="Export fig.png", app="Inkscape", open_path="fig.png"
+        )
+        assert launched == ([] if expected is None else [expected])
+        out = capsys.readouterr().out
+        assert ("Can't find Inkscape" in out) == (expected is None)

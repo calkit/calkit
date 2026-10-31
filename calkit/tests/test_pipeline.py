@@ -4598,6 +4598,21 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         interactive=False,
     )
     assert gated == {} and errors == {}
+    # A manual step can't run with nobody here to do it, but can when
+    # someone is
+    ck_info["pipeline"]["stages"]["by-hand"] = {
+        "kind": "manual-step",
+        "message": "Export made/by-hand.png",
+        "outputs": ["made/by-hand.png"],
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["by-hand"], interactive=False, manual=False
+    )
+    assert gated == {"by-hand": "needs a manual step: Export made/by-hand.png"}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["by-hand"], interactive=False
+    )
+    assert gated == {} and errors == {}
 
 
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(

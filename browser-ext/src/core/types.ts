@@ -177,6 +177,8 @@ export interface Provenance {
   /** What to edit to change it: the stage's script, notebook, or document. */
   source?: string | null;
   command?: string | null;
+  /** What a manual step says to do. */
+  message?: string | null;
   inputs: string[];
   stage_status?: StageStatus | null;
   stale_reason?: "pipeline" | "frozen" | null;
@@ -192,6 +194,21 @@ export interface Provenance {
   origin_path?: string | null;
   /** Data behind it, however far back, nothing records the origin of. */
   gaps?: ProvenanceGap[];
+}
+
+/** A pipeline stage, with its body as YAML. */
+export interface PipelineStage {
+  name: string;
+  yaml: string;
+}
+
+/** A file a new stage needs, uploaded or already in the project. */
+export interface StageFile {
+  path: string;
+  /** Uploaded, base64-encoded. */
+  content?: string;
+  /** Recorded as created by whoever adds it, e.g., a Photoshop file. */
+  created_by_me?: boolean;
 }
 
 /** A stage made from a script, as `calkit xr` makes one, maybe saved. */

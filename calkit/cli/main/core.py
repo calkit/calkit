@@ -943,11 +943,22 @@ def get_status(
             return
         elif pipeline_status and pipeline_status.is_stale:
             typer.echo("Stale stages:")
+            ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
             for stage_name in pipeline_status.stale_stage_names:
                 stale_stage = pipeline_status.stale_stages.get(stage_name)
                 if stale_stage is None:
                     continue
                 typer.echo(f"        {typer.style(stage_name, fg='yellow')}:")
+                ck_stage = ck_stages.get(stage_name)
+                if (
+                    isinstance(ck_stage, dict)
+                    and ck_stage.get("kind") == "manual-step"
+                ):
+                    warn(
+                        "          is a manual step: "
+                        f"{ck_stage.get('message')}",
+                        prefix="",
+                    )
                 if stale_stage.cannot_run_here:
                     warn(
                         "          can't run on this machine: "
@@ -3053,6 +3064,7 @@ def run(
                 stage_names=stage_names,
                 system_info=system_info,
                 interactive=False if spinner else None,
+                manual=can_ask,
             )
             # A machine that couldn't be reached may only need asking about,
             # e.g., for its host
@@ -3996,6 +4008,25 @@ def manual_step(
     cmd: Annotated[
         str | None, typer.Option("--cmd", help="Command to run.")
     ] = None,
+    app: Annotated[
+        str | None,
+        typer.Option("--app", help="App to open, e.g., 'Inkscape'."),
+    ] = None,
+    open_path: Annotated[
+        str | None,
+        typer.Option("--open", help="File to open with the app."),
+    ] = None,
+    outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "File the step writes, which must change for it to be "
+                "considered done."
+            ),
+        ),
+    ] = [],
     show_stdout: Annotated[
         bool, typer.Option("--show-stdout", help="Show stdout.")
     ] = False,
@@ -4003,6 +4034,53 @@ def manual_step(
         bool, typer.Option("--show-stderr", help="Show stderr.")
     ] = False,
 ) -> None:
+    import textwrap
+
+    from calkit.provenance import hash_path
+
+    def ask() -> str:
+        # Windows calls an empty stdin a terminal, so its end says so too
+        try:
+            return input()
+        except EOFError:
+            raise_error(
+                f"Needs a manual step, with nobody here to do it: {message}"
+            )
+
+    # Waiting for someone who isn't there would hang, e.g., in CI
+    if not sys.stdin.isatty():
+        raise_error(
+            f"Needs a manual step, with nobody here to do it: {message}"
+        )
+    # The app is named rather than left to the default for the file, which
+    # differs between machines, e.g., Illustrator rather than Inkscape
+    if open_path is not None and app is None:
+        raise_error("Name the app to open it with, with --app")
+    if open_path is not None and not os.path.exists(open_path):
+        raise_error(f"{open_path} doesn't exist")
+    before = {path: hash_path(path) for path in outputs}
+    if app is not None:
+        args = [] if open_path is None else [open_path]
+        typer.echo(f"Opening {open_path or app} with {app}")
+        # macOS finds apps by name wherever they're installed
+        exe = shutil.which(app) or shutil.which(app.lower())
+        opened = False
+        if sys.platform == "darwin":
+            opened = (
+                subprocess.run(
+                    ["open", "-a", app, *args], capture_output=True
+                ).returncode
+                == 0
+            )
+        elif exe is not None:
+            subprocess.Popen(
+                [exe, *args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            opened = True
+        if not opened:
+            warn(f"Can't find {app} here; open it yourself")
     if cmd is not None:
         typer.echo(f"Running command: {cmd}")
         subprocess.Popen(
@@ -4011,7 +4089,38 @@ def manual_step(
             stdout=subprocess.PIPE if not show_stdout else None,
             shell=True,
         )
-    input(message + " (press enter to confirm): ")
+    # Each prompt ends its line, since 'calkit run' passes stage output on
+    # a line at a time, so a prompt waiting on its line wouldn't show
+    while True:
+        prompt = f"{message.rstrip('.')}. Press Enter when done."
+        # Paths aren't split, so they can still be copied
+        print(
+            textwrap.fill(
+                prompt,
+                width=80,
+                break_long_words=False,
+                break_on_hyphens=False,
+            ),
+            flush=True,
+        )
+        ask()
+        missing = [path for path in outputs if not os.path.exists(path)]
+        if missing:
+            typer.echo(f"Not there yet: {', '.join(missing)}")
+            continue
+        # Unchanged is fine when it was already done, but is asked about,
+        # since otherwise it's an old output recorded as a new one
+        unchanged = [
+            path for path in outputs if hash_path(path) == before[path]
+        ]
+        if unchanged:
+            print(
+                f"Unchanged: {', '.join(unchanged)}. Keep as is? [y/N]",
+                flush=True,
+            )
+            if ask().strip().lower() not in ("y", "yes"):
+                continue
+        break
     typer.echo("Done")
 
 

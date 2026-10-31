@@ -4171,6 +4171,10 @@ export type Provenance = {
    */
   command?: string | null
   /**
+   * Message
+   */
+  message?: string | null
+  /**
    * Inputs
    */
   inputs?: Array<string>
@@ -5917,6 +5921,27 @@ export type SoftwareItem = {
 }
 
 /**
+ * StageFile
+ *
+ * A file a new stage needs, e.g., a script or the file a figure is
+ * exported from.
+ */
+export type StageFile = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Created By Me
+   */
+  created_by_me?: boolean
+}
+
+/**
  * StageFromScriptOrNotebookPost
  */
 export type StageFromScriptOrNotebookPost = {
@@ -6002,6 +6027,30 @@ export type StageFromScriptOrNotebookResponse = {
    * Git Repo Url
    */
   git_repo_url: string
+}
+
+/**
+ * StagePost
+ */
+export type StagePost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -13834,6 +13883,42 @@ export type PostProjectStageFromScriptOrNotebookResponses = {
 
 export type PostProjectStageFromScriptOrNotebookResponse =
   PostProjectStageFromScriptOrNotebookResponses[keyof PostProjectStageFromScriptOrNotebookResponses]
+
+export type PostProjectPipelineStageData = {
+  body: StagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages"
+}
+
+export type PostProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineStageError =
+  PostProjectPipelineStageErrors[keyof PostProjectPipelineStageErrors]
+
+export type PostProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PostProjectPipelineStageResponse =
+  PostProjectPipelineStageResponses[keyof PostProjectPipelineStageResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

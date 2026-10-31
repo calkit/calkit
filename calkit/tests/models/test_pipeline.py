@@ -10,6 +10,7 @@ from calkit.models.pipeline import (
     JuliaScriptStage,
     JupyterNotebookStage,
     LatexStage,
+    ManualStepStage,
     MapPathsStage,
     MarimoHtmlWasmStage,
     MarkdownStage,
@@ -94,6 +95,44 @@ def test_wordtopdfstage():
     assert sd["cmd"] == (
         'calkit office word-to-pdf "my word doc.docx" -o "my word doc.pdf"'
     )
+
+
+def test_manualstage():
+    s = ManualStepStage(
+        message="In Photoshop, export figures/wake.png",
+        inputs=["figures/src/wake diagram.psd", "fonts/brand.otf"],
+        outputs=[
+            "figures/wake.png",
+            {"path": "paper/wake.png", "storage": "git"},
+        ],
+    )
+    sd = s.to_dvc()
+    # What the person writes is checked
+    assert sd["cmd"] == (
+        "calkit manual-step --message 'In Photoshop, export "
+        "figures/wake.png' --output figures/wake.png --output paper/wake.png"
+    )
+    assert sd["deps"] == ["figures/src/wake diagram.psd", "fonts/brand.otf"]
+    # Outputs are kept while it runs, since the person replaces them
+    assert sd["outs"] == [
+        {"figures/wake.png": {"persist": True}},
+        {"paper/wake.png": {"cache": False, "persist": True}},
+    ]
+    assert s.environment == "_system"
+    # A file it opens is opened with the app named, since the default app
+    # for it differs between machines
+    s = ManualStepStage(
+        message="Export figures/wake.png",
+        open={"app": "Inkscape", "path": "figures/src/wake diagram.svg"},
+    )
+    assert s.to_dvc()["cmd"] == (
+        "calkit manual-step --message 'Export figures/wake.png' --app "
+        "Inkscape --open 'figures/src/wake diagram.svg'"
+    )
+    s = ManualStepStage(message="Count fish", open={"app": "FishCounter"})
+    assert s.to_dvc()["cmd"].endswith("--app FishCounter")
+    with pytest.raises(ValidationError, match="app"):
+        ManualStepStage(message="Export it", open={"path": "wake.svg"})
 
 
 def test_latexstage():

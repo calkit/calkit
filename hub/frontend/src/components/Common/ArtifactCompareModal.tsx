@@ -411,6 +411,12 @@ function FigureInfo({
   })
   const origin = provenanceQuery.data?.origin
   const originUrl = provenanceQuery.data?.origin_url
+  // A figure calkit.yaml doesn't declare can still have a stage that makes it
+  const stage = figure.stage ?? provenanceQuery.data?.stage
+  const manualStep =
+    provenanceQuery.data?.stage_kind === "manual-step"
+      ? provenanceQuery.data.message
+      : null
   const dataLinks: InputLink[] = []
   if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
     const deps = declaredInputs(
@@ -486,18 +492,19 @@ function FigureInfo({
         <Text as="span" fontWeight="semibold">
           Origin:
         </Text>{" "}
-        {figure.stage ? (
+        {stage ? (
           <>
             Stage{" "}
             <Link
               as={RouterLink}
               to={pipelineTo}
-              search={{ stage: figure.stage, ref: gitRef } as any}
+              search={{ stage, ref: gitRef } as any}
             >
               <Code fontSize="xs" cursor="pointer">
-                {figure.stage}
+                {stage}
               </Code>
             </Link>
+            {manualStep ? `, a manual step: ${manualStep}` : null}
           </>
         ) : provenanceQuery.isPending ? (
           <Spinner size="xs" />
@@ -513,7 +520,7 @@ function FigureInfo({
           </Text>
         )}
       </Text>
-      {!figure.stage && provenanceQuery.isSuccess && !origin ? (
+      {!stage && provenanceQuery.isSuccess && !origin ? (
         <DefineFigureOrigin
           ownerName={ownerName}
           projectName={projectName}
@@ -534,7 +541,7 @@ function FigureInfo({
   )
 }
 
-type OriginMode = "script" | "notebook" | "imported" | "created"
+type OriginMode = "script" | "notebook" | "imported" | "exported" | "created"
 
 /** Define where a figure came from, when nothing does yet. */
 function DefineFigureOrigin({
@@ -555,6 +562,8 @@ function DefineFigureOrigin({
     ["notebook", "Notebook"],
     ["imported", "Imported"],
   ]
+  // Something exported, e.g., a PNG, comes from a file a person made
+  if (!canBeCreatedByPerson(path)) modes.push(["exported", "Exported"])
   if (canBeCreatedByPerson(path)) modes.push(["created", "Created"])
   const onDone = () => {
     setMode(null)
@@ -588,6 +597,13 @@ function DefineFigureOrigin({
           kind={mode}
           onDone={onDone}
         />
+      ) : mode === "exported" ? (
+        <ManualExportForm
+          ownerName={ownerName}
+          projectName={projectName}
+          path={path}
+          onDone={onDone}
+        />
       ) : mode ? (
         <RecordOriginForm
           key={mode}
@@ -598,6 +614,118 @@ function DefineFigureOrigin({
           onDone={onDone}
         />
       ) : null}
+    </Box>
+  )
+}
+
+/**
+ * Record that a file is exported manually from one someone made, e.g., a
+ * PNG from a Photoshop file, so the pipeline asks for a new export
+ * whenever that file changes.
+ */
+function ManualExportForm({
+  ownerName,
+  projectName,
+  path,
+  onDone,
+}: {
+  ownerName: string
+  projectName: string
+  path: string
+  onDone: () => void
+}) {
+  const showToast = useCustomToast()
+  const [sourcePath, setSourcePath] = useState("")
+  const [file, setFile] = useState<File | null>(null)
+  const [app, setApp] = useState("")
+  // Kept out of the paper's folder, which may sync to Overleaf
+  const source = sourcePath || (file ? `figures/src/${file.name}` : "")
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const content = file
+        ? await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () =>
+              resolve(String(reader.result).replace(/^data:[^,]*,/, ""))
+            reader.onerror = () => reject(reader.error)
+            reader.readAsDataURL(file)
+          })
+        : null
+      const appName = app.trim()
+      const stem = (path.split("/").pop() ?? "").replace(/\.[^.]*$/, "")
+      const slug = stem
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+      const message = appName
+        ? `In ${appName}, export ${path} from ${source}`
+        : `Export ${path} from ${source}`
+      await ProjectsService.postProjectPipelineStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        stagePost: {
+          name: `export-${slug || "figure"}`,
+          stage: {
+            kind: "manual-step",
+            message,
+            // The step opens the source in the app it's exported with
+            ...(appName ? { open: { app: appName, path: source } } : {}),
+            inputs: [source],
+            outputs: [path],
+          },
+          files: [{ path: source, content, created_by_me: true }],
+          message: `Export ${path} from ${source} manually`,
+        },
+      })
+      return message
+    },
+    onSuccess: (message) => {
+      showToast("Origin defined", message, "success")
+      onDone()
+    },
+    onError: (err: AxiosError) => handleError(err, showToast),
+  })
+  return (
+    <Box mt={2} fontSize="sm">
+      <Text mb={1}>
+        The file <Code fontSize="xs">{path}</Code> is exported from
+      </Text>
+      <Flex gap={2} align="center" wrap="wrap" mb={2}>
+        <PathPicker
+          ownerName={ownerName}
+          projectName={projectName}
+          value={sourcePath}
+          onChange={setSourcePath}
+        />
+        <Input
+          type="file"
+          size="sm"
+          p={1}
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
+      </Flex>
+      <Input
+        size="sm"
+        mb={2}
+        placeholder="App it's exported with, e.g., Photoshop (optional)"
+        value={app}
+        onChange={(e) => setApp(e.target.value)}
+      />
+      {source && !canBeCreatedByPerson(source) ? (
+        <Text fontSize="xs" color="red.500" mb={2}>
+          {source} is exported from something itself; choose the file it's made
+          from.
+        </Text>
+      ) : null}
+      <Button
+        size="xs"
+        variant="primary"
+        isDisabled={!source || !canBeCreatedByPerson(source)}
+        isLoading={saveMutation.isPending}
+        onClick={() => saveMutation.mutate()}
+      >
+        Add the export step
+      </Button>
     </Box>
   )
 }

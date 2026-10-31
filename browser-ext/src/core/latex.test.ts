@@ -234,6 +234,19 @@ describe("citationProblems", () => {
     expect(problems[0].message).toBe(
       "Origin not defined for data/raw.csv, which it's made from (via plot)",
     );
+    // Made manually, so it says what to do
+    expect(
+      citationProblems(figure, {
+        ...base,
+        stage: "export-a",
+        stage_kind: "manual-step",
+        message: "In Photoshop, export figures/a.png",
+        stale_reason: "pipeline",
+      }).map((p) => p.message),
+    ).toEqual([
+      "Needs a manual step, since what it's made from changed: In " +
+        "Photoshop, export figures/a.png",
+    ]);
     // Imported from somewhere only described, which is worth a warning
     expect(
       citationProblems(figure, {

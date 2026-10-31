@@ -3511,6 +3511,288 @@
       "title": "MachineIdEqualsCondition",
       "type": "object"
     },
+    "ManualStepOpen": {
+      "description": "What a manual step opens.\n\nThe app is always named, since the default app for a file differs\nbetween machines, e.g., Illustrator rather than Inkscape for an SVG.",
+      "properties": {
+        "app": {
+          "description": "App to open, e.g., 'Inkscape'.",
+          "title": "App",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "File to open in it, e.g., the Inkscape SVG.",
+          "title": "Path"
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "title": "ManualStepOpen",
+      "type": "object"
+    },
+    "ManualStepStage": {
+      "additionalProperties": false,
+      "description": "A step someone does manually, e.g., exporting a figure from\nPhotoshop, which the pipeline asks for when its inputs change, e.g.,\nthe Photoshop file.\n\nIts outputs are kept while it runs, since they're what the person\nreplaces, and the step checks that they changed.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "manual-step",
+          "default": "manual-step",
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "description": "What to do, e.g., 'In Photoshop, export figures/wake-diagram.png'.",
+          "title": "Message",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "open": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManualStepOpen"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "App to open for the step, and the file to open in it."
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "ManualStepStage",
+      "type": "object"
+    },
     "MapPathsStage": {
       "additionalProperties": false,
       "properties": {
@@ -5583,6 +5865,7 @@
                 "julia-script": "#/$defs/JuliaScriptStage",
                 "jupyter-notebook": "#/$defs/JupyterNotebookStage",
                 "latex": "#/$defs/LatexStage",
+                "manual-step": "#/$defs/ManualStepStage",
                 "map-paths": "#/$defs/MapPathsStage",
                 "marimo-html-wasm": "#/$defs/MarimoHtmlWasmStage",
                 "markdown": "#/$defs/MarkdownStage",
@@ -5639,6 +5922,9 @@
               },
               {
                 "$ref": "#/$defs/WordToPdfStage"
+              },
+              {
+                "$ref": "#/$defs/ManualStepStage"
               },
               {
                 "$ref": "#/$defs/JupyterNotebookStage"

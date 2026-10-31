@@ -895,6 +895,7 @@ def get_gated_stages(
     interactive: bool | None = None,
     system_info: dict | None = None,
     remote: bool = True,
+    manual: bool = True,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -909,7 +910,8 @@ def get_gated_stages(
     and anything the checks print goes to stderr, keeping stdout for,
     e.g., ``calkit status --json``. ``interactive`` only decides whether
     connecting to a machine may prompt. Without ``remote``, nothing is
-    checked on another machine, which would take connecting to it.
+    checked on another machine, which would take connecting to it. Without
+    ``manual``, nobody is there to do a manual step, so those can't run.
     """
     import contextlib
     import json
@@ -1077,6 +1079,9 @@ def get_gated_stages(
         if stage_names is not None and name not in stage_names:
             continue
         if stage.get("frozen"):
+            continue
+        if not manual and stage.get("kind") == "manual-step":
+            gated[name] = f"needs a manual step: {stage.get('message')}"
             continue
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP

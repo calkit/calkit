@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 import app.projects
 import calkit.latex
 import calkit.pipeline
+import calkit.provenance
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import (
     STAGE_NAME_RE,
@@ -35,8 +36,10 @@ from app.api.routes.projects.core import (
     _inside,
     _validate_ck_stage,
 )
-from app.api.routes.projects.figures import _clean_rel_path
+from app.api.routes.projects.figures import _clean_rel_path, _slug
+from app.config import settings
 from app.core import logger, ryaml
+from app.dvc import run_dvc_command
 from app.git import (
     get_ck_info_from_repo,
     get_repo,
@@ -45,6 +48,7 @@ from app.git import (
     record_project_update,
 )
 from app.models import PipelineStage
+from app.storage import get_object_fs, make_data_fpath, remove_gcs_content_type
 from calkit.models.pipeline import MapPathsKind, MapPathsStage
 
 router = APIRouter()
@@ -619,3 +623,188 @@ def post_project_stage_from_script_or_notebook(
     )
     out.saved = True
     return out
+
+
+MAX_FILE_BYTES = 500_000_000
+# A file bigger than this is stored with DVC rather than in Git
+FILE_GIT_MAX_BYTES = 1_000_000
+
+
+class StageFile(BaseModel):
+    """A file a new stage needs, e.g., a script or the file a figure is
+    exported from."""
+
+    path: str
+    # Uploaded, base64-encoded; without it, the file is already in the
+    # project
+    content: str | None = None
+    # Recorded as created by whoever adds it, e.g., a Photoshop file
+    created_by_me: bool = False
+
+
+class StagePost(BaseModel):
+    # A taken name gets a number appended; without one, it's named after
+    # its first output
+    name: str | None = None
+    # As written under the stage's name in calkit.yaml
+    stage: dict[str, Any]
+    files: list[StageFile] = []
+    message: str | None = None
+
+
+@router.post("/projects/{owner_name}/{project_name}/pipeline/stages")
+def post_project_pipeline_stage(
+    owner_name: str,
+    project_name: str,
+    req: StagePost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineStage:
+    """Add a stage, with any files it needs, in one commit.
+
+    An upload never replaces a different file already there, and one too
+    big for Git is stored with DVC. An output another stage already makes
+    is refused, and one already in Git stays there.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    ck_info = get_ck_info_from_repo(repo=repo)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    stage = dict(req.stage)
+    # Outputs are made by one stage only, and one already in Git can't
+    # move to DVC
+    outputs = []
+    for out in stage.get("outputs") or []:
+        path = _clean_rel_path(
+            out["path"] if isinstance(out, dict) else str(out), "output"
+        )
+        producer = calkit.pipeline.get_stage_for_output(path, ck_info)
+        if producer is not None:
+            raise HTTPException(409, f"'{path}' is made by stage '{producer}'")
+        if not isinstance(out, dict):
+            tracked = repo.git.ls_files("--", path).strip()
+            out = {"path": path, "storage": "git"} if tracked else path
+        outputs.append(out)
+    if outputs:
+        stage["outputs"] = outputs
+    first = outputs[0] if outputs else None
+    first_path = first["path"] if isinstance(first, dict) else first
+    base_name = req.name or (
+        _slug(os.path.splitext(os.path.basename(first_path))[0])
+        if first_path
+        else "stage"
+    )
+    if not STAGE_NAME_RE.fullmatch(base_name or ""):
+        raise HTTPException(422, f"Invalid stage name: {req.name!r}")
+    stage_name = base_name
+    n = 2
+    while stage_name in stages:
+        stage_name = f"{base_name}-{n}"
+        n += 1
+    _validate_ck_stage(stage, stage_name)
+    # Files are all checked before any is written
+    uploads: list[tuple[str, bytes]] = []
+    created: list[str] = []
+    for file in req.files:
+        path = _clean_rel_path(file.path, "file")
+        full = os.path.join(wdir, path)
+        if not _inside(wdir, full):
+            raise HTTPException(422, f"'{path}' leads outside the project")
+        if file.created_by_me:
+            if not calkit.provenance.can_be_created_by_person(path):
+                raise HTTPException(
+                    422,
+                    f"'{path}' is exported from something itself, so it "
+                    "can't be created by a person; add the file it's made "
+                    "from, e.g., a Photoshop file",
+                )
+            created.append(path)
+        if file.content is None:
+            if not (os.path.isfile(full) or os.path.isfile(full + ".dvc")):
+                raise HTTPException(404, f"'{path}' is not in the project")
+            continue
+        try:
+            content = base64.b64decode(file.content, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(422, f"Content of '{path}' isn't valid base64")
+        if len(content) > MAX_FILE_BYTES:
+            raise HTTPException(413, f"'{path}' is too large")
+        if os.path.isfile(full):
+            with open(full, "rb") as fb:
+                if fb.read() != content:
+                    raise HTTPException(
+                        409,
+                        f"'{path}' is already in the project; pick it "
+                        "without uploading, or upload under another name",
+                    )
+        uploads.append((path, content))
+    for path, content in uploads:
+        full = os.path.join(wdir, path)
+        os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
+        with open(full, "wb") as fb:
+            fb.write(content)
+        if len(content) <= FILE_GIT_MAX_BYTES:
+            continue
+        if not os.path.isdir(os.path.join(wdir, ".dvc")):
+            run_dvc_command(["init"], wdir=wdir, check=True)
+        run_dvc_command(["add", path], wdir=wdir, check=True)
+        # Put where the hub's DVC remote serves it, by its hash
+        with open(full + ".dvc") as f:
+            md5 = (ryaml.load(f) or {})["outs"][0]["md5"]
+        fpath = make_data_fpath(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            idx=md5[:2],
+            md5=md5[2:],
+        )
+        with get_object_fs().open(fpath, "wb") as f_out:
+            f_out.write(content)
+        if settings.ENVIRONMENT != "local":
+            remove_gcs_content_type(fpath)
+    # What someone made is theirs, unless something already says otherwise
+    person = {"email": current_user.email}
+    if current_user.full_name:
+        person["name"] = current_user.full_name
+    for path in created:
+        entry = next(
+            (
+                e
+                for items in ck_info.values()
+                if isinstance(items, list)
+                for e in items
+                if isinstance(e, dict) and e.get("path") == path
+            ),
+            None,
+        )
+        if entry is None:
+            ck_info.setdefault("misc", []).append(
+                {"path": path, "created_by": [person]}
+            )
+        elif not (
+            entry.get("created_by")
+            or entry.get("imported_from")
+            or entry.get("stage")
+        ):
+            entry["created_by"] = [person]
+    stages[stage_name] = stage
+    ck_info.setdefault("pipeline", {})["stages"] = stages
+    _commit_pipeline(
+        project,
+        session,
+        repo,
+        ck_info,
+        None,
+        [],
+        [],
+        req.message or f"Add stage {stage_name}",
+    )
+    return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage))

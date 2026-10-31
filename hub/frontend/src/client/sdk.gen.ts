@@ -377,6 +377,8 @@ import type {
   PostProjectOverleafPublicationResponses,
   PostProjectOverleafSyncErrors,
   PostProjectOverleafSyncResponses,
+  PostProjectPipelineStageErrors,
+  PostProjectPipelineStageResponses,
   PostProjectPublicationErrors,
   PostProjectPublicationResponses,
   PostProjectPushEventErrors,
@@ -490,6 +492,7 @@ import type {
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
   StageFromScriptOrNotebookPost,
+  StagePost,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -7705,6 +7708,57 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Pipeline Stage
+   *
+   * Add a stage, with any files it needs, in one commit.
+   *
+   * An upload never replaces a different file already there, and one too
+   * big for Git is stored with DVC. An output another stage already makes
+   * is refused, and one already in Git stays there.
+   */
+  public static postProjectPipelineStage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stagePost: StagePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPipelineStageResponses,
+    PostProjectPipelineStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "stagePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPipelineStageResponses,
+      PostProjectPipelineStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages",
       ...options,
       ...params,
       headers: {

@@ -21,6 +21,7 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
+  PipelineStage,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -289,6 +290,19 @@ async function handle(message: Request): Promise<unknown> {
             imported_from: message.importedFrom,
             created_by: message.createdBy,
             message: `Record where ${message.path} came from`,
+          },
+        },
+      );
+    case "project.addStage":
+      return request<PipelineStage>(
+        `${projectPath(message.owner, message.project)}/pipeline/stages`,
+        {
+          method: "POST",
+          body: {
+            name: message.name,
+            stage: message.stage,
+            files: message.files ?? [],
+            message: message.message,
           },
         },
       );

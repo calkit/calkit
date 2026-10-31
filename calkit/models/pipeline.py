@@ -891,6 +891,13 @@ class Stage(Model):
             delete_before_run=False,
         )
 
+    def run_properties(self) -> dict[str, Any]:
+        """What a run of it records about the machine, beyond what every
+        run does, e.g., the version of an app it runs that no environment
+        pins.
+        """
+        return {}
+
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
 
@@ -2367,6 +2374,17 @@ class AppExportStage(Stage):
         if self.source_path not in deps:
             deps = [self.source_path] + deps
         return deps
+
+    def run_properties(self) -> dict[str, Any]:
+        # The app runs from the system, so nothing else says which version
+        # made the output
+        import calkit.export
+
+        return {
+            f"{e.name}_version": e.version()
+            for e in calkit.export.exporters()
+            if e.kind == self.kind
+        }
 
 
 class InkscapeExportStage(AppExportStage):

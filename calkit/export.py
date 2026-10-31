@@ -19,11 +19,30 @@ from typing import Callable
 class Exporter:
     """An app that exports as the pipeline runs, and its stage kind."""
 
+    # As a key, e.g., in 'inkscape_version'
+    name: str
     kind: str
     app: str
     source_exts: frozenset[str]
     export_exts: frozenset[str]
     find_executable: Callable[[], str | None]
+
+    def version(self) -> str | None:
+        """The version installed here, if it's installed and says."""
+        import subprocess
+
+        from calkit.core import extract_version
+
+        exe = self.find_executable()
+        if exe is None:
+            return None
+        try:
+            result = subprocess.run(
+                [exe, "--version"], capture_output=True, text=True, timeout=60
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return extract_version(result.stdout or result.stderr or "")
 
 
 def exporters() -> list[Exporter]:
@@ -31,6 +50,7 @@ def exporters() -> list[Exporter]:
 
     return [
         Exporter(
+            name=module.__name__.rsplit(".", 1)[-1],
             kind=module.STAGE_KIND,
             app=module.APP,
             source_exts=frozenset(module.SOURCE_EXTS),

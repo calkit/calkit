@@ -1,7 +1,13 @@
+import sys
+
 import pytest
 
 import calkit.export
-from calkit.models.pipeline import Pipeline
+from calkit.models.pipeline import (
+    InkscapeExportStage,
+    ManualStepStage,
+    Pipeline,
+)
 
 
 def test_export_stage():
@@ -49,12 +55,33 @@ def test_export_stage():
         assert calkit.export.export_stage_name(output) == name
 
 
-@pytest.mark.parametrize("missing", [True, False])
-def test_find_executable(tmp_path, missing):
-    exe = tmp_path / "app"
-    if not missing:
-        exe.write_text("")
-    found = calkit.export.find_executable(
-        ["calkit-test-no-such-app", str(exe)]
+@pytest.mark.skipif(sys.platform == "win32", reason="Fake app is a script")
+def test_exporter_here(tmp_path, monkeypatch):
+    import calkit.inkscape
+
+    [inkscape] = [e for e in calkit.export.exporters() if e.name == "inkscape"]
+    # Found where its installer puts it, and asked its version
+    fake = tmp_path / "inkscape"
+    fake.write_text(
+        f"#!{sys.executable}\nprint('Inkscape 1.3.2 (091e20e, 2023-11-25)')\n"
     )
-    assert found == (None if missing else str(exe))
+    fake.chmod(0o755)
+    monkeypatch.setattr(
+        calkit.inkscape,
+        "EXECUTABLES",
+        ["calkit-test-no-such-inkscape", str(fake)],
+    )
+    assert inkscape.find_executable() == str(fake)
+    assert inkscape.version() == "1.3.2"
+    # and what a run of its stage records
+    stage = InkscapeExportStage(source_path="a.svg", outputs=["a.png"])
+    assert stage.run_properties() == {"inkscape_version": "1.3.2"}
+    # A stage that runs no such app records nothing more
+    assert ManualStepStage(message="Do it").run_properties() == {}
+    # Not installed
+    monkeypatch.setattr(
+        calkit.inkscape, "EXECUTABLES", ["calkit-test-no-such-inkscape"]
+    )
+    assert inkscape.find_executable() is None
+    assert inkscape.version() is None
+    assert stage.run_properties() == {"inkscape_version": None}

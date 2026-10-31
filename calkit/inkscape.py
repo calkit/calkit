@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 
 # Where its executable can be when it isn't on PATH, e.g., installed on
@@ -13,19 +12,18 @@ EXECUTABLES = [
     "/Applications/Inkscape.app/Contents/MacOS/inkscape",
     r"C:\Program Files\Inkscape\bin\inkscape.exe",
 ]
+APP = "Inkscape"
+# Its stage in calkit.yaml
+STAGE_KIND = "inkscape-export"
 SOURCE_EXTS = {".svg"}
 EXPORT_EXTS = {".png", ".pdf", ".eps", ".ps"}
 
 
 def find_executable() -> str | None:
     """Inkscape's executable here, if it's installed."""
-    for candidate in EXECUTABLES:
-        found = shutil.which(candidate)
-        if found:
-            return found
-        if os.path.isabs(candidate) and os.path.isfile(candidate):
-            return candidate
-    return None
+    import calkit.export
+
+    return calkit.export.find_executable(EXECUTABLES)
 
 
 def check_export(source: str, output: str) -> None:

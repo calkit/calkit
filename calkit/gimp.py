@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 
 # The console binary, since the plain 'gimp' on macOS opens a window and
@@ -16,19 +15,18 @@ EXECUTABLES = [
     r"C:\Program Files\GIMP 3\bin\gimp-console-3.0.exe",
     r"C:\Program Files\GIMP 2\bin\gimp-console-2.10.exe",
 ]
+APP = "GIMP"
+# Its stage in calkit.yaml
+STAGE_KIND = "gimp-export"
 SOURCE_EXTS = {".xcf"}
 EXPORT_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
 
 def find_executable() -> str | None:
     """GIMP's console executable here, if it's installed."""
-    for candidate in EXECUTABLES:
-        found = shutil.which(candidate)
-        if found:
-            return found
-        if os.path.isabs(candidate) and os.path.isfile(candidate):
-            return candidate
-    return None
+    import calkit.export
+
+    return calkit.export.find_executable(EXECUTABLES)
 
 
 def check_export(source: str, output: str) -> None:

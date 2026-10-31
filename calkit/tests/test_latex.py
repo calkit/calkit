@@ -442,7 +442,7 @@ def test_ck_components(tmp_dir):
     assert os.path.isfile("more/calkit.sty")
 
 
-def test_cite_figure(tmp_dir):
+def test_include_figure(tmp_dir):
     os.makedirs("paper/sections")
     with open("paper/main.tex", "w") as f:
         f.write(
@@ -461,7 +461,7 @@ def test_cite_figure(tmp_dir):
         open(path, "w").close()
     # Every use is rewritten, wherever TeX finds it from, except in a
     # comment, and calkit.sty is loaded for it
-    changed = calkit.latex.cite_figure(
+    changed = calkit.latex.include_figure(
         "paper/main.tex", "paper/Figure 3.png", "figures/fig3.png"
     )
     assert changed == {
@@ -490,14 +490,16 @@ def test_cite_figure(tmp_dir):
             "\\includegraphics{other}\n"
             "\\end{document}\n"
         )
-    changed = calkit.latex.cite_figure(
+    changed = calkit.latex.include_figure(
         "paper/main.tex", "paper/other.png", "figures/other.png"
     )
     assert list(changed) == ["paper/main.tex"]
     assert changed["paper/main.tex"].count("calkit") == 1
     assert "\\ckfigure{figures/other.png}" in changed["paper/main.tex"]
     # A figure the document doesn't show changes nothing
-    assert calkit.latex.cite_figure("paper/main.tex", "x.png", "y.png") == {}
+    assert (
+        calkit.latex.include_figure("paper/main.tex", "x.png", "y.png") == {}
+    )
 
 
 def test_expand_ck_components(tmp_dir):

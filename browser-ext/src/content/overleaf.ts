@@ -326,7 +326,7 @@ function renderAddScript(
           save: true,
         });
         // Brings the \ckfigure into the editor
-        if (saved.cited_in.length) {
+        if (saved.included_in.length) {
           clear(message).append(loading("Syncing"));
           await send({
             type: "overleaf.sync",

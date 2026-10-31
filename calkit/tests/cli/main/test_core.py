@@ -3949,3 +3949,38 @@ def test_manual_step(tmp_dir, monkeypatch, capsys):
     assert len(lines) > 2
     assert all(len(line) <= 80 for line in lines)
     assert " ".join(lines[:-1]).endswith("x/. Press Enter when done.")
+    # A file is opened with the app named, never the default for its type,
+    # and a missing app still leaves the step to do
+    with pytest.raises(typer.Exit):
+        manual_step(message="Export fig.png", open_path="fig.png")
+    assert "Name the app" in capsys.readouterr().err
+    with pytest.raises(typer.Exit):
+        manual_step(message="Export x.png", app="GIMP", open_path="x.xcf")
+    assert "x.xcf doesn't exist" in capsys.readouterr().err
+    launched = []
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kw: launched.append(args) or Mock(returncode=0),
+    )
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda args, **kw: launched.append(args)
+    )
+    for platform_name, which, expected in [
+        ("darwin", None, ["open", "-a", "Inkscape", "fig.png"]),
+        ("linux", "/usr/bin/inkscape", ["/usr/bin/inkscape", "fig.png"]),
+        ("win32", None, None),
+    ]:
+        monkeypatch.setattr(sys, "platform", platform_name)
+        monkeypatch.setattr(
+            shutil,
+            "which",
+            lambda name: which if name == "inkscape" else None,
+        )
+        launched.clear()
+        manual_step(
+            message="Export fig.png", app="Inkscape", open_path="fig.png"
+        )
+        assert launched == ([] if expected is None else [expected])
+        out = capsys.readouterr().out
+        assert ("Can't find Inkscape" in out) == (expected is None)

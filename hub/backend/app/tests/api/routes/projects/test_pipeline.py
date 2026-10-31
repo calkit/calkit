@@ -441,6 +441,14 @@ def test_post_project_stage_from_script_or_notebook(
         produces="figures/fit.png",
     )
     assert resp.status_code == 422, resp.text
+    # Nothing is written through a symlink that leads out of the project
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (wdir / "linked").symlink_to(outside)
+    resp = post(**{**upload, "script_path": "linked/plot.py"})
+    assert resp.status_code == 422, resp.text
+    assert not (outside / "plot.py").exists()
+    (wdir / "linked").unlink()
     # Not a script, or not there to read
     assert post(script_path="paper/paper.tex").status_code == 422
     assert post(script_path="scripts/gone.py").status_code == 404

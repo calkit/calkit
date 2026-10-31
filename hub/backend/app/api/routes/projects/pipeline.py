@@ -32,6 +32,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import (
     STAGE_NAME_RE,
     _dump_ck_stage_map,
+    _inside,
     _validate_ck_stage,
 )
 from app.api.routes.projects.figures import _clean_rel_path
@@ -399,6 +400,8 @@ def post_project_stage_from_script_or_notebook(
         raise HTTPException(404, f"'{script_path}' is not in the project")
     # An upload never replaces a different file already there
     existing_path = os.path.join(wdir, script_path)
+    if content is not None and not _inside(wdir, existing_path):
+        raise HTTPException(422, f"'{script_path}' leads outside the project")
     if content is not None and os.path.isfile(existing_path):
         with open(existing_path, "rb") as fb:
             if fb.read() != content:
@@ -414,6 +417,10 @@ def post_project_stage_from_script_or_notebook(
     try:
         if content is not None:
             dest = os.path.join(scan_dir, script_path)
+            if not _inside(scan_dir, dest):
+                raise HTTPException(
+                    422, f"'{script_path}' leads outside the project"
+                )
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with open(dest, "wb") as fb:
                 fb.write(content)
@@ -570,6 +577,15 @@ def post_project_stage_from_script_or_notebook(
     )
     if not req.save:
         return out
+    # Nothing is written through a symlink that leads out of the project
+    writes = [script_path] if content is not None else []
+    if out.environment_spec_path:
+        writes.append(
+            _clean_rel_path(out.environment_spec_path, "environment")
+        )
+    for path in writes + list(included):
+        if not _inside(wdir, os.path.join(wdir, path)):
+            raise HTTPException(422, f"'{path}' leads outside the project")
     # Written as xr writes them, then committed with the pipeline
     if content is not None:
         dest = os.path.join(wdir, script_path)

@@ -58,6 +58,7 @@ import {
   type GitRef,
   type Notebook,
   ProjectsService,
+  type ProvenanceExporter,
   type Publication,
   type StageFromScriptOrNotebookResponse,
 } from "../../client"
@@ -546,6 +547,7 @@ function FigureInfo({
           ownerName={ownerName}
           projectName={projectName}
           path={figure.path}
+          exporters={provenanceQuery.data?.exporters ?? []}
         />
       ) : null}
       <InputsRow label="Data" items={dataLinks} />
@@ -569,10 +571,12 @@ function DefineFigureOrigin({
   ownerName,
   projectName,
   path,
+  exporters,
 }: {
   ownerName: string
   projectName: string
   path: string
+  exporters: ProvenanceExporter[]
 }) {
   const { userHasWriteAccess } = useProject(ownerName, projectName)
   const [mode, setMode] = useState<OriginMode | null>(null)
@@ -623,6 +627,7 @@ function DefineFigureOrigin({
           ownerName={ownerName}
           projectName={projectName}
           path={path}
+          exporters={exporters}
           onDone={onDone}
         />
       ) : mode ? (
@@ -648,11 +653,13 @@ function ManualExportForm({
   ownerName,
   projectName,
   path,
+  exporters,
   onDone,
 }: {
   ownerName: string
   projectName: string
   path: string
+  exporters: ProvenanceExporter[]
   onDone: () => void
 }) {
   const showToast = useCustomToast()
@@ -661,12 +668,12 @@ function ManualExportForm({
   const [app, setApp] = useState("")
   // Kept out of the paper's folder, which may sync to Overleaf
   const source = sourcePath || (file ? `figures/src/${file.name}` : "")
-  // An app that exports it as the pipeline runs, as the hub decides
-  const exporter = source.toLowerCase().endsWith(".svg")
-    ? "Inkscape"
-    : source.toLowerCase().endsWith(".xcf")
-      ? "GIMP"
-      : null
+  // An app that exports it as the pipeline runs, so nobody has to
+  // remember to
+  const ext = source.slice(source.lastIndexOf(".")).toLowerCase()
+  const exporter = source
+    ? exporters.find((e) => e.source_exts.includes(ext))
+    : undefined
   const saveMutation = useMutation({
     mutationFn: async () => {
       const content = file
@@ -678,19 +685,42 @@ function ManualExportForm({
             reader.readAsDataURL(file)
           })
         : null
-      return ProjectsService.postProjectStageExport({
+      const appName = app.trim()
+      const stem = (path.split("/").pop() ?? "").replace(/\.[^.]*$/, "")
+      const slug = stem
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+      const message = exporter
+        ? `Exported from ${source} with ${exporter.app}`
+        : appName
+          ? `In ${appName}, export ${path} from ${source}`
+          : `Export ${path} from ${source}`
+      await ProjectsService.postProjectPipelineStage({
         owner_name: ownerName,
         project_name: projectName,
-        stageExportPost: {
-          path,
-          source_path: source,
-          content,
-          app: app.trim() || null,
+        stagePost: {
+          name: `export-${slug || "figure"}`,
+          stage: exporter
+            ? { kind: exporter.kind, source_path: source, outputs: [path] }
+            : {
+                kind: "manual-step",
+                message,
+                // The step opens the source in the app it's exported with
+                ...(appName ? { open: { app: appName, path: source } } : {}),
+                inputs: [source],
+                outputs: [path],
+              },
+          files: [{ path: source, content, created_by_me: true }],
+          message:
+            `Export ${path} from ${source}` +
+            (exporter ? ` with ${exporter.app}` : " manually"),
         },
-      }).then((response) => response.data)
+      })
+      return message
     },
-    onSuccess: (data) => {
-      showToast("Origin defined", data.message, "success")
+    onSuccess: (message) => {
+      showToast("Origin defined", message, "success")
       onDone()
     },
     onError: (err: AxiosError) => handleError(err, showToast),
@@ -723,7 +753,7 @@ function ManualExportForm({
       />
       {exporter ? (
         <Text fontSize="xs" color="gray.500" mb={2}>
-          {exporter} exports it whenever the pipeline runs.
+          {exporter.app} exports it whenever the pipeline runs.
         </Text>
       ) : null}
       {source && !canBeCreatedByPerson(source) ? (

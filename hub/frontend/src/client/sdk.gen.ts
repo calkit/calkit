@@ -377,6 +377,8 @@ import type {
   PostProjectOverleafPublicationResponses,
   PostProjectOverleafSyncErrors,
   PostProjectOverleafSyncResponses,
+  PostProjectPipelineStageErrors,
+  PostProjectPipelineStageResponses,
   PostProjectPublicationErrors,
   PostProjectPublicationResponses,
   PostProjectPushEventErrors,
@@ -390,8 +392,6 @@ import type {
   PostProjectReleaseErrors,
   PostProjectReleaseResponses,
   PostProjectResponses,
-  PostProjectStageExportErrors,
-  PostProjectStageExportResponses,
   PostProjectStageFromScriptOrNotebookErrors,
   PostProjectStageFromScriptOrNotebookResponses,
   PostProjectStatusErrors,
@@ -491,8 +491,8 @@ import type {
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
-  StageExportPost,
   StageFromScriptOrNotebookPost,
+  StagePost,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -7719,26 +7719,24 @@ export class ProjectsService {
   }
 
   /**
-   * Post Project Stage Export
+   * Post Project Pipeline Stage
    *
-   * Record that a figure is exported from a file someone made, e.g., a
-   * PNG from an Inkscape SVG or a Photoshop file.
+   * Add a stage, with any files it needs, in one commit.
    *
-   * An app that can export it, e.g., Inkscape, does so as the pipeline
-   * runs. Otherwise it's a manual step, which asks someone to export it
-   * again whenever the source changes. Either way the source, uploaded or
-   * already in the project, is recorded as created by the current user.
+   * An upload never replaces a different file already there, and one too
+   * big for Git is stored with DVC. An output another stage already makes
+   * is refused, and one already in Git stays there.
    */
-  public static postProjectStageExport<ThrowOnError extends boolean = true>(
+  public static postProjectPipelineStage<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
-      stageExportPost: StageExportPost
+      stagePost: StagePost
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostProjectStageExportResponses,
-    PostProjectStageExportErrors,
+    PostProjectPipelineStageResponses,
+    PostProjectPipelineStageErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
@@ -7748,19 +7746,19 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
-            { key: "stageExportPost", map: "body" },
+            { key: "stagePost", map: "body" },
           ],
         },
       ],
     )
     return (options?.client ?? client).post<
-      PostProjectStageExportResponses,
-      PostProjectStageExportErrors,
+      PostProjectPipelineStageResponses,
+      PostProjectPipelineStageErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/pipeline/stages/export",
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages",
       ...options,
       ...params,
       headers: {

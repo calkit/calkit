@@ -10651,6 +10651,14 @@ export const StageFromScriptOrNotebookResponseSchema = {
       title: "Outputs",
       default: [],
     },
+    found_outputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Found Outputs",
+      default: [],
+    },
     missing_inputs: {
       items: {
         type: "string",

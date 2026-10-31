@@ -3888,7 +3888,7 @@ def test_manual_step(tmp_dir, monkeypatch, capsys):
         stderr=subprocess.STDOUT,
         text=True,
     ).stdout
-    assert "needs a manual step: Export fig.png" in out
+    assert "is a manual step: Export fig.png" in out
     # With nobody to do it, it says so rather than waiting
     out = subprocess.run(
         ["calkit", "manual-step", "-m", "Export fig.png"],

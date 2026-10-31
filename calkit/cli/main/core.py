@@ -955,7 +955,7 @@ def get_status(
                     and ck_stage.get("kind") == "manual-step"
                 ):
                     warn(
-                        "          needs a manual step: "
+                        "          is a manual step: "
                         f"{ck_stage.get('message')}",
                         prefix="",
                     )
@@ -4019,7 +4019,10 @@ def manual_step(
         typer.Option(
             "--output",
             "-o",
-            help="File the step writes, which must change for it to be done.",
+            help=(
+                "File the step writes, which must change for it to be "
+                "considered done."
+            ),
         ),
     ] = [],
     show_stdout: Annotated[

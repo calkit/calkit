@@ -194,16 +194,32 @@ export interface Provenance {
   origin_path?: string | null;
   /** Data behind it, however far back, nothing records the origin of. */
   gaps?: ProvenanceGap[];
+  /** Apps that could export it as the pipeline runs, and from what. */
+  exporters?: ProvenanceExporter[];
 }
 
-/** A stage exporting a figure from a source file, automatically or as a
- * manual step. */
-export interface StageExport {
-  stage_name: string;
-  stage_yaml: string;
-  /** export when an app does it as the pipeline runs, manual otherwise. */
+/** An app that exports to a file's format, e.g., Inkscape for a PNG. */
+export interface ProvenanceExporter {
+  /** The stage kind that runs it, e.g., inkscape-export. */
   kind: string;
-  message: string;
+  app: string;
+  /** What it exports from, e.g., [".svg"]. */
+  source_exts: string[];
+}
+
+/** A pipeline stage, with its body as YAML. */
+export interface PipelineStage {
+  name: string;
+  yaml: string;
+}
+
+/** A file a new stage needs, uploaded or already in the project. */
+export interface StageFile {
+  path: string;
+  /** Uploaded, base64-encoded. */
+  content?: string;
+  /** Recorded as created by whoever adds it, e.g., a Photoshop file. */
+  created_by_me?: boolean;
 }
 
 /** A stage made from a script, as `calkit xr` makes one, maybe saved. */

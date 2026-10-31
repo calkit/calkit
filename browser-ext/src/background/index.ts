@@ -21,6 +21,7 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
+  PipelineStage,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -32,7 +33,6 @@ import type {
   ReferenceSearchMatch,
   References,
   Result,
-  StageExport,
   StageFromScriptOrNotebookResponse,
   Table,
 } from "../core/types";
@@ -293,17 +293,16 @@ async function handle(message: Request): Promise<unknown> {
           },
         },
       );
-    case "project.stageExport":
-      return request<StageExport>(
-        `${projectPath(message.owner, message.project)}` +
-          "/pipeline/stages/export",
+    case "project.addStage":
+      return request<PipelineStage>(
+        `${projectPath(message.owner, message.project)}/pipeline/stages`,
         {
           method: "POST",
           body: {
-            path: message.path,
-            source_path: message.sourcePath,
-            content: message.content,
-            app: message.app,
+            name: message.name,
+            stage: message.stage,
+            files: message.files ?? [],
+            message: message.message,
           },
         },
       );

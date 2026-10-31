@@ -243,6 +243,11 @@ def test_get_project_provenance(client: TestClient) -> None:
                 "unchecked": False,
             }
         ]
+    # with the apps that could export it as the pipeline runs, and from what
+    assert [(e["kind"], e["source_exts"]) for e in body["exporters"]] == [
+        ("inkscape-export", [".svg"]),
+        ("gimp-export", [".xcf"]),
+    ]
     # Imported from somewhere nobody else can check
     body = get("path=paper/box.png")
     assert body["origin"] == "Our Box folder"
@@ -256,3 +261,5 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["value_error"] is None
     # and code needs no recorded origin
     assert body["gaps"] == []
+    # and no app exports one
+    assert body["exporters"] == []

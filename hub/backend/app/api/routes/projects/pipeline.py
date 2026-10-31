@@ -344,6 +344,9 @@ class StageFromScriptOrNotebookResponse(BaseModel):
     dependencies: list[str] = []
     inputs: list[str] = []
     outputs: list[str] = []
+    # Those found by reading the script, or already declared by its stage,
+    # rather than only added because a document shows them
+    found_outputs: list[str] = []
     # Inputs that aren't in the project and that no stage produces
     missing_inputs: list[str] = []
     # Which output is what the document shows, and the documents changed
@@ -479,6 +482,7 @@ def post_project_stage_from_script_or_notebook(
         o["path"] if isinstance(o, dict) else o
         for o in stage.get("outputs") or []
     ]
+    found_outputs = list(outputs)
     # Env vars, schedules, and other stages' outputs aren't paths
     inputs = [
         i if isinstance(i, str) else i["path"]
@@ -574,6 +578,7 @@ def post_project_stage_from_script_or_notebook(
         dependencies=env.get("dependencies") or [],
         inputs=inputs,
         outputs=outputs,
+        found_outputs=found_outputs,
         missing_inputs=missing,
         produces=produces,
         included_in=sorted(included),

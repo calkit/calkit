@@ -233,6 +233,8 @@ export interface StageFromScriptOrNotebookResponse {
   dependencies: string[];
   inputs: string[];
   outputs: string[];
+  /** Found by reading it or declared by its stage, not just shown. */
+  found_outputs?: string[];
   /** Inputs that aren't in the project and that no stage produces. */
   missing_inputs: string[];
   /** Which output is what the document shows. */

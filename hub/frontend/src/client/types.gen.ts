@@ -6044,6 +6044,10 @@ export type StageFromScriptOrNotebookResponse = {
    */
   outputs?: Array<string>
   /**
+   * Found Outputs
+   */
+  found_outputs?: Array<string>
+  /**
    * Missing Inputs
    */
   missing_inputs?: Array<string>

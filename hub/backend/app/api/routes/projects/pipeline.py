@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import app.projects
+import calkit.export
 import calkit.latex
 import calkit.pipeline
 import calkit.provenance
@@ -813,3 +814,69 @@ def post_project_pipeline_stage(
         req.message or f"Add stage {stage_name}",
     )
     return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage))
+
+
+class ExportStagePost(BaseModel):
+    # The file it's exported from, and the figure it's exported to
+    source: str
+    output: str
+    # The app a person exports it with, e.g., Photoshop
+    app: str | None = None
+    files: list[StageFile] = []
+    # False to see the stage without adding it
+    save: bool = True
+
+
+class ExportStage(BaseModel):
+    name: str
+    stage: dict[str, Any]
+    # The app that exports it as the pipeline runs, if one does
+    exported_by: str | None = None
+    saved: bool = False
+
+
+@router.post("/projects/{owner_name}/{project_name}/pipeline/stages/export")
+def post_project_pipeline_export_stage(
+    owner_name: str,
+    project_name: str,
+    req: ExportStagePost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> ExportStage:
+    """Add the stage that exports a figure from the file it's drawn in.
+
+    An app that can do it as the pipeline runs does, unless the person
+    named another; otherwise it's a manual step.
+    """
+    source = _clean_rel_path(req.source, "source")
+    output = _clean_rel_path(req.output, "output")
+    exporter = calkit.export.exporter_for(source, output, app=req.app)
+    stage = calkit.export.export_stage(source, output, app=req.app)
+    name = calkit.export.export_stage_name(output)
+    if not req.save:
+        return ExportStage(
+            name=name,
+            stage=stage,
+            exported_by=exporter.app if exporter else None,
+        )
+    saved = post_project_pipeline_stage(
+        owner_name=owner_name,
+        project_name=project_name,
+        req=StagePost(
+            name=name,
+            stage=stage,
+            files=req.files,
+            message=(
+                f"Export {output} from {source}"
+                + (f" with {exporter.app}" if exporter else " manually")
+            ),
+        ),
+        current_user=current_user,
+        session=session,
+    )
+    return ExportStage(
+        name=saved.name,
+        stage=stage,
+        exported_by=exporter.app if exporter else None,
+        saved=True,
+    )

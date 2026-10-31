@@ -1171,16 +1171,6 @@ class ProvenanceGap(SQLModel):
     unchecked: bool = False
 
 
-class ProvenanceExporter(SQLModel):
-    """An app that exports to an artifact's format as the pipeline runs."""
-
-    # The stage kind that runs it, e.g., inkscape-export
-    kind: str
-    app: str
-    # What it exports from, e.g., [".svg"]
-    source_exts: list[str]
-
-
 class Provenance(SQLModel):
     """Where an artifact, or one value inside a results file, came from."""
 
@@ -1192,6 +1182,8 @@ class Provenance(SQLModel):
     value_error: str | None = None
     stage: str | None = None
     stage_kind: str | None = None
+    # The app an export stage runs, e.g., Inkscape
+    stage_app: str | None = None
     # What to open to change it: the stage's script, notebook, or document
     source: str | None = None
     command: str | None = None
@@ -1216,9 +1208,6 @@ class Provenance(SQLModel):
     update_available: bool | None = None
     # Data behind it that nothing records the origin of, however far back
     gaps: list[ProvenanceGap] = Field(default_factory=list)
-    # Apps that could export it from a file someone made, so defining its
-    # origin as exported can pick one rather than a manual step
-    exporters: list[ProvenanceExporter] = Field(default_factory=list)
 
 
 class Table(SQLModel):

@@ -58,7 +58,6 @@ import {
   type GitRef,
   type Notebook,
   ProjectsService,
-  type ProvenanceExporter,
   type Publication,
   type StageFromScriptOrNotebookResponse,
 } from "../../client"
@@ -415,13 +414,8 @@ function FigureInfo({
   // A figure calkit.yaml doesn't declare can still have a stage that makes it
   const stage = figure.stage ?? provenanceQuery.data?.stage
   const stageKind = provenanceQuery.data?.stage_kind
-  // The app each export stage kind runs
-  const exportApp = (
-    { "inkscape-export": "Inkscape", "gimp-export": "GIMP" } as Record<
-      string,
-      string
-    >
-  )[stageKind ?? ""]
+  // The app an export stage runs, e.g., Inkscape
+  const exportApp = provenanceQuery.data?.stage_app
   const exportedFrom = exportApp ? provenanceQuery.data?.source : null
   const manualStep =
     stageKind === "manual-step" ? provenanceQuery.data?.message : null
@@ -547,7 +541,6 @@ function FigureInfo({
           ownerName={ownerName}
           projectName={projectName}
           path={figure.path}
-          exporters={provenanceQuery.data?.exporters ?? []}
         />
       ) : null}
       <InputsRow label="Data" items={dataLinks} />
@@ -571,12 +564,10 @@ function DefineFigureOrigin({
   ownerName,
   projectName,
   path,
-  exporters,
 }: {
   ownerName: string
   projectName: string
   path: string
-  exporters: ProvenanceExporter[]
 }) {
   const { userHasWriteAccess } = useProject(ownerName, projectName)
   const [mode, setMode] = useState<OriginMode | null>(null)
@@ -627,7 +618,6 @@ function DefineFigureOrigin({
           ownerName={ownerName}
           projectName={projectName}
           path={path}
-          exporters={exporters}
           onDone={onDone}
         />
       ) : mode ? (
@@ -653,13 +643,11 @@ function ManualExportForm({
   ownerName,
   projectName,
   path,
-  exporters,
   onDone,
 }: {
   ownerName: string
   projectName: string
   path: string
-  exporters: ProvenanceExporter[]
   onDone: () => void
 }) {
   const showToast = useCustomToast()
@@ -668,12 +656,36 @@ function ManualExportForm({
   const [app, setApp] = useState("")
   // Kept out of the paper's folder, which may sync to Overleaf
   const source = sourcePath || (file ? `figures/src/${file.name}` : "")
-  // An app that exports it as the pipeline runs, so nobody has to
-  // remember to
-  const ext = source.slice(source.lastIndexOf(".")).toLowerCase()
-  const exporter = source
-    ? exporters.find((e) => e.source_exts.includes(ext))
-    : undefined
+  // Which app, if any, exports it as the pipeline runs, so nobody has to
+  // remember to, is the hub's to say
+  const [plannedSource] = useDebounce(source, 300)
+  const [plannedApp] = useDebounce(app.trim(), 300)
+  const planned = { source: plannedSource, app: plannedApp }
+  const planQuery = useQuery({
+    queryKey: [
+      "projects",
+      ownerName,
+      projectName,
+      "export-stage",
+      path,
+      planned.source,
+      planned.app,
+    ],
+    queryFn: () =>
+      ProjectsService.postProjectPipelineExportStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        exportStagePost: {
+          source: planned.source,
+          output: path,
+          app: planned.app || null,
+          save: false,
+        },
+      }).then((response) => response.data),
+    enabled: !!planned.source && canBeCreatedByPerson(planned.source),
+    retry: false,
+  })
+  const exportedBy = planQuery.data?.exported_by
   const saveMutation = useMutation({
     mutationFn: async () => {
       const content = file
@@ -685,42 +697,26 @@ function ManualExportForm({
             reader.readAsDataURL(file)
           })
         : null
-      const appName = app.trim()
-      const stem = (path.split("/").pop() ?? "").replace(/\.[^.]*$/, "")
-      const slug = stem
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-      const message = exporter
-        ? `Exported from ${source} with ${exporter.app}`
-        : appName
-          ? `In ${appName}, export ${path} from ${source}`
-          : `Export ${path} from ${source}`
-      await ProjectsService.postProjectPipelineStage({
+      const response = await ProjectsService.postProjectPipelineExportStage({
         owner_name: ownerName,
         project_name: projectName,
-        stagePost: {
-          name: `export-${slug || "figure"}`,
-          stage: exporter
-            ? { kind: exporter.kind, source_path: source, outputs: [path] }
-            : {
-                kind: "manual-step",
-                message,
-                // The step opens the source in the app it's exported with
-                ...(appName ? { open: { app: appName, path: source } } : {}),
-                inputs: [source],
-                outputs: [path],
-              },
+        exportStagePost: {
+          source,
+          output: path,
+          app: app.trim() || null,
           files: [{ path: source, content, created_by_me: true }],
-          message:
-            `Export ${path} from ${source}` +
-            (exporter ? ` with ${exporter.app}` : " manually"),
         },
       })
-      return message
+      return response.data
     },
-    onSuccess: (message) => {
-      showToast("Origin defined", message, "success")
+    onSuccess: (saved) => {
+      showToast(
+        "Origin defined",
+        saved.exported_by
+          ? `Exported from ${source} with ${saved.exported_by}`
+          : String(saved.stage.message ?? `Export ${path} from ${source}`),
+        "success",
+      )
       onDone()
     },
     onError: (err: AxiosError) => handleError(err, showToast),
@@ -751,9 +747,9 @@ function ManualExportForm({
         value={app}
         onChange={(e) => setApp(e.target.value)}
       />
-      {exporter ? (
+      {exportedBy && planned.source === source ? (
         <Text fontSize="xs" color="gray.500" mb={2}>
-          {exporter.app} exports it whenever the pipeline runs.
+          {exportedBy} exports it whenever the pipeline runs.
         </Text>
       ) : null}
       {source && !canBeCreatedByPerson(source) ? (

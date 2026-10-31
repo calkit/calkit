@@ -15,8 +15,7 @@ from fastapi import APIRouter, HTTPException
 
 import app.projects
 import calkit.environments
-import calkit.gimp
-import calkit.inkscape
+import calkit.export
 import calkit.pipeline
 import calkit.provenance
 import calkit.questions
@@ -32,7 +31,6 @@ from app.core import logger
 from app.git import get_repo, get_repo_tree_for_ref
 from app.models import (
     Provenance,
-    ProvenanceExporter,
     ProvenanceGap,
     ProvenanceStep,
     StageStatus,
@@ -186,16 +184,6 @@ def get_project_provenance(
             or path
             in app.projects.dvc_outputs_from_tree(project=project, tree=tree)
         ),
-        exporters=[
-            ProvenanceExporter(
-                kind=kind, app=label, source_exts=sorted(module.SOURCE_EXTS)
-            )
-            for kind, label, module in [
-                ("inkscape-export", "Inkscape", calkit.inkscape),
-                ("gimp-export", "GIMP", calkit.gimp),
-            ]
-            if posixpath.splitext(path)[1].lower() in module.EXPORT_EXTS
-        ],
     )
     if key is not None or path.lower().endswith(RESULTS_EXTS):
         out.value, out.value_error = (
@@ -376,6 +364,14 @@ def get_project_provenance(
     source = None
     if ck_stage is not None:
         out.stage_kind = ck_stage.get("kind")
+        out.stage_app = next(
+            (
+                e.app
+                for e in calkit.export.exporters()
+                if e.kind == out.stage_kind
+            ),
+            None,
+        )
         if out.stage_kind == "manual-step":
             out.message = ck_stage.get("message")
         wdir = ck_stage.get("wdir") or ""

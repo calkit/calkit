@@ -3984,3 +3984,47 @@ def test_manual_step(tmp_dir, monkeypatch, capsys):
         assert launched == ([] if expected is None else [expected])
         out = capsys.readouterr().out
         assert ("Can't find Inkscape" in out) == (expected is None)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Fake app is a script")
+def test_run_records_app_version(tmp_dir):
+    # An app a stage runs from the system has its version recorded, since
+    # no environment pins it
+    bin_dir = os.path.abspath("bin")
+    os.makedirs(bin_dir)
+    fake = os.path.join(bin_dir, "inkscape")
+    with open(fake, "w") as f:
+        f.write(
+            f"#!{sys.executable}\n"
+            "import pathlib, sys\n"
+            "if sys.argv[1] == '--version':\n"
+            "    print('Inkscape 1.3.2 (091e20e, 2023-11-25)')\n"
+            "    sys.exit()\n"
+            "out = [a for a in sys.argv if a.startswith('--export-filename=')]\n"
+            "pathlib.Path(out[0].split('=', 1)[1]).write_text('png')\n"
+        )
+    os.chmod(fake, 0o755)
+    env = {**os.environ, "PATH": bin_dir + os.pathsep + os.environ["PATH"]}
+    subprocess.check_call(["calkit", "init"])
+    with open("setup.svg", "w") as f:
+        f.write("<svg/>")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "export-setup": {
+                            "kind": "inkscape-export",
+                            "source_path": "setup.svg",
+                            "outputs": ["setup.png"],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open(STAGE_RUNS_FPATH) as f:
+        system = json.load(f)["export-setup"]["system"]
+    assert system["inkscape_version"] == "1.3.2"
+    assert system["os"] == platform.system()

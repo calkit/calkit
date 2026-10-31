@@ -105,6 +105,11 @@ def test_get_project_provenance(client: TestClient) -> None:
                     "inputs": ["figs/diagram.psd"],
                     "outputs": ["paper/diagram.png"],
                 },
+                "export-setup": {
+                    "kind": "inkscape-export",
+                    "source_path": "figs/setup.svg",
+                    "outputs": ["paper/setup.png"],
+                },
                 # Puts the plot beside the paper, which includes it there
                 "copy": {
                     "kind": "map-paths",
@@ -257,6 +262,12 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["stage_kind"] == "manual-step"
     assert body["message"] == "In Photoshop, export paper/diagram.png"
     assert body["source"] is None
+    assert body["stage_app"] is None
+    # Exported by an app as the pipeline runs
+    body = get("path=paper/setup.png")
+    assert body["stage_kind"] == "inkscape-export"
+    assert body["stage_app"] == "Inkscape"
+    assert body["source"] == "figs/setup.svg"
     # A figure nothing accounts for is a gap itself
     for path in ["paper/pasted.png", "paper/exported.png"]:
         body = get(f"path={path}")
@@ -268,11 +279,6 @@ def test_get_project_provenance(client: TestClient) -> None:
                 "unchecked": False,
             }
         ]
-    # with the apps that could export it as the pipeline runs, and from what
-    assert [(e["kind"], e["source_exts"]) for e in body["exporters"]] == [
-        ("inkscape-export", [".svg"]),
-        ("gimp-export", [".xcf"]),
-    ]
     # Imported from somewhere nobody else can check
     body = get("path=paper/box.png")
     assert body["origin"] == "Our Box folder"
@@ -297,5 +303,3 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["value_error"] is None
     # and code needs no recorded origin
     assert body["gaps"] == []
-    # and no app exports one
-    assert body["exporters"] == []

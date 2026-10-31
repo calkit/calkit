@@ -3511,17 +3511,15 @@
       "title": "MachineIdEqualsCondition",
       "type": "object"
     },
-    "ManualStepStage": {
-      "additionalProperties": false,
-      "description": "A step someone does manually, e.g., exporting a figure from\nPhotoshop, which the pipeline asks for when its inputs change, e.g.,\nthe Photoshop file.\n\nIts outputs are kept while it runs, since they're what the person\nreplaces, and the step checks that they changed.",
+    "ManualStepOpen": {
+      "description": "What a manual step opens.\n\nThe app is always named, since the default app for a file differs\nbetween machines, e.g., Illustrator rather than Inkscape for an SVG.",
       "properties": {
-        "always_run": {
-          "default": false,
-          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
-          "title": "Always Run",
-          "type": "boolean"
-        },
         "app": {
+          "description": "App to open, e.g., 'Inkscape'.",
+          "title": "App",
+          "type": "string"
+        },
+        "path": {
           "anyOf": [
             {
               "type": "string"
@@ -3531,8 +3529,25 @@
             }
           ],
           "default": null,
-          "description": "App to open it with, e.g., 'Adobe Photoshop 2025'. Required with an open path, since the default app differs between machines.",
-          "title": "App"
+          "description": "File to open in it, e.g., the Inkscape SVG.",
+          "title": "Path"
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "title": "ManualStepOpen",
+      "type": "object"
+    },
+    "ManualStepStage": {
+      "additionalProperties": false,
+      "description": "A step someone does manually, e.g., exporting a figure from\nPhotoshop, which the pipeline asks for when its inputs change, e.g.,\nthe Photoshop file.\n\nIts outputs are kept while it runs, since they're what the person\nreplaces, and the step checks that they changed.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
         },
         "description": {
           "anyOf": [
@@ -3641,18 +3656,17 @@
           "description": "The stage's name, which must match its key if set.",
           "title": "Name"
         },
-        "open_path": {
+        "open": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/ManualStepOpen"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "File to open for the step, e.g., the Photoshop file.",
-          "title": "Open Path"
+          "description": "App to open for the step, and the file to open in it."
         },
         "outputs": {
           "anyOf": [

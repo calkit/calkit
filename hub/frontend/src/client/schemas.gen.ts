@@ -10542,12 +10542,12 @@ export const StageFromScriptOrNotebookResponseSchema = {
       ],
       title: "Produces",
     },
-    cited_in: {
+    included_in: {
       items: {
         type: "string",
       },
       type: "array",
-      title: "Cited In",
+      title: "Included In",
       default: [],
     },
     saved: {

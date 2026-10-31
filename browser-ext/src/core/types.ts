@@ -210,7 +210,7 @@ export interface StageFromScriptOrNotebookResponse {
   /** Which output is what the document shows. */
   produces?: string | null;
   /** Documents changed to show it from there, with `\ckfigure`. */
-  cited_in: string[];
+  included_in: string[];
   saved: boolean;
   git_repo_url: string;
 }

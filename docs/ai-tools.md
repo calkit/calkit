@@ -92,6 +92,9 @@ This gives you these action skills:
   manuscript's TODO comments ask for, working backwards from the writing,
   and keeps the project's questions and answers matching the paper. See
   [writing first](tutorials/writing-first.md).
+- `/calkit:connect-overleaf-paper` — connects an Overleaf paper to a Calkit
+  project and the scripts and data behind it, so its figures and numbers
+  come from the pipeline
 - `/calkit:check-questions` — reviews whether the project's answers still
   follow from their evidence
 - `/calkit:resolve-merge-conflicts` — resolves merge conflicts, choosing

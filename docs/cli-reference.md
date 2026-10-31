@@ -384,6 +384,7 @@ Options:
 | `--no-push`              | boolean | no       | False   | Do not push to Git and DVC after saving.                                                                                                     |
 | `--mock-scheduler`, `-K` | boolean | no       | False   | Run job-scheduler (SLURM/PBS) stages locally instead of submitting them to a real scheduler.                                                 |
 | `--strict`               | boolean | no       | False   | Fail if an out-of-date stage can't run on this machine rather than skipping it, e.g., in CI for a project whose stages should all run there. |
+| `--skip`                 | str     | no       |         | Skip stage, keeping its outputs, e.g., a scheduled one in CI for pull requests.                                                              |
 
 <a id="top-command-manual-step"></a>
 

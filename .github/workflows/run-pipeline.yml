@@ -2,14 +2,25 @@ name: Run pipeline
 
 # Calkit's own pipeline computes claims in its docs, e.g., the LaTeX image's
 # size, so a pull request that makes one stale gets it rerun and committed
-# back, e.g., the one pinning a newly published image
+# back, e.g., the one pinning a newly published image. Stages that collect
+# data once a day, e.g., usage numbers, are skipped there, since they'd add a
+# commit to every pull request, and run daily from main instead, with their
+# results proposed back to it in a pull request.
 on:
   pull_request:
+  schedule:
+    # The start of the UTC day, when those stages' schedule inputs go out of
+    # date
+    - cron: "0 0 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
   id-token: write
+  # For the daily run to open its pull request and start its format check,
+  # which a push with this token doesn't
+  pull-requests: write
+  actions: write
 
 # One per branch, so two runs don't race to push to it
 concurrency:
@@ -21,10 +32,16 @@ jobs:
     name: run
     # A fork's branch can't be pushed to with this repo's token
     if: >-
-      github.event_name == 'workflow_dispatch'
+      github.event_name != 'pull_request'
       || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      # Run on main, by the schedule or by hand, the data stages run too
+      DAILY: ${{ github.event_name != 'pull_request' && github.ref_name == 'main' }}
+      # Where the daily run's results wait for review, since main only takes
+      # changes through pull requests
+      DATA_BRANCH: pipeline-data
     steps:
       - uses: actions/checkout@v7
         with:
@@ -41,6 +58,13 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email \
             '41898282+github-actions[bot]@users.noreply.github.com'
+      # Each day's results go on main as it is, replacing those of a day
+      # whose pull request wasn't merged, so the action's save force pushes
+      - name: Start the data branch from main
+        if: env.DAILY == 'true'
+        run: |
+          git checkout -B "$DATA_BRANCH"
+          git config remote.origin.push "+HEAD:refs/heads/$DATA_BRANCH"
       - name: Setup uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       # Stages use what this branch's Calkit can do, not the last release,
@@ -66,3 +90,33 @@ jobs:
         with:
           # Its Docker environments only pull public images
           login_ghcr: "false"
+          # The stages with a schedule input, which a pull request doesn't
+          # change; what depends on them still runs, from their last results
+          run_args: >-
+            ${{ env.DAILY != 'true'
+            && '--skip find-calkit-projects --skip find-calkit-papers
+            --skip traction' || '' }}
+      # Auto-merge, where the repo allows it, merges once the pull request is
+      # approved and its checks pass
+      - name: Propose the results to main
+        if: env.DAILY == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+            github.run_id }}
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]; then
+            echo "Nothing changed"
+            exit 0
+          fi
+          open=$(gh pr list --head "$DATA_BRANCH" --base main --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -z "$open" ]; then
+            gh pr create --head "$DATA_BRANCH" --base main \
+              --title "Update pipeline data" \
+              --body "The pipeline's daily data stages, run in $RUN_URL."
+          fi
+          gh pr merge "$DATA_BRANCH" --auto --squash \
+            || echo "::notice::Couldn't enable auto-merge"
+          gh workflow run format.yml --ref "$DATA_BRANCH"

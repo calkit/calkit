@@ -3005,6 +3005,17 @@ def run(
             ),
         ),
     ] = False,
+    skip: Annotated[
+        list[str],
+        typer.Option(
+            "--skip",
+            help=(
+                "Skip stage, keeping its outputs, e.g., a scheduled one in CI "
+                "for pull requests."
+            ),
+            shell_complete=complete_stage_names,
+        ),
+    ] = [],
 ) -> dict:
     """Check requirements and run the pipeline."""
     import contextlib
@@ -3067,6 +3078,10 @@ def run(
                 gated |= retried
         except Exception as e:
             raise_error(f"Failed to check stage requirements: {e}")
+        # Those skipped as asked needn't be able to run
+        for name in skip:
+            gated.pop(name, None)
+            errors.pop(name, None)
         for stage_name, reason in errors.items():
             warn(f"Stage '{stage_name}' can't run: {reason}")
         gate_errors.update(errors)
@@ -3175,7 +3190,9 @@ def run(
     calkit.set_env_vars(ck_info=ck_info)
     # Stages that can't run here are skipped, keeping their outputs, and
     # their environments aren't checked
-    gated_stages: dict[str, str] = {}
+    gated_stages: dict[str, str] = {
+        name: calkit.dvc.SKIP_REQUESTED for name in skip
+    }
     gate_errors: dict[str, str] = {}
     # Filled in by the run with the skipped stages that were out of date
     skipped_stale: dict[str, str] = {}
@@ -3260,10 +3277,17 @@ def run(
         # environments are checked, since an environment declared there
         # must be in calkit.yaml before it can be created or entered.
         try:
-            calkit.pipeline.sync_markdown(ck_info=ck_info)
+            markdown = calkit.pipeline.sync_markdown(ck_info=ck_info)
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Failed to read markdown stages: {e}")
+        # A misspelled stage to skip would otherwise run
+        known = set(ck_info.get("pipeline", {}).get("stages", {})) | set(
+            markdown.ck_info.get("pipeline", {}).get("stages", {})
+        )
+        if unknown := [name for name in skip if name not in known]:
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            raise_error(f"No stage to skip named: {', '.join(unknown)}")
         # Stages that can't run here are skipped, keeping their outputs,
         # and their environments aren't checked
         gate(gate_stage_names)
@@ -3667,6 +3691,14 @@ def run(
     # nobody asked for it by name, or for every stage with --strict
     targeted = {t.split("@")[0] for t in targets or []}
     error_reasons = set(gate_errors.values())
+    # Skipped as asked, so not reported with those that can't run here
+    skipped_as_asked = [
+        addressing
+        for addressing, reason in skipped_stale.items()
+        if reason == calkit.dvc.SKIP_REQUESTED
+    ]
+    for addressing in skipped_as_asked:
+        del skipped_stale[addressing]
     for addressing, reason in skipped_stale.items():
         if (
             strict
@@ -3947,6 +3979,8 @@ def run(
     calkit.environments.stage_calkit_files(
         extra_paths=[p for p in written if p != STAGE_RUNS_FPATH]
     )
+    for addressing in skipped_as_asked:
+        typer.echo(f"Skipped out-of-date stage '{addressing}' as asked")
     if failed:
         try:
             calkit.dvc.restore_output_ignores()

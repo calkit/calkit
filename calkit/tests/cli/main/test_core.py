@@ -3888,7 +3888,7 @@ def test_manual_step(tmp_dir, monkeypatch, capsys):
         stderr=subprocess.STDOUT,
         text=True,
     ).stdout
-    assert "needs a manual step: Export fig.png" in out
+    assert "is a manual step: Export fig.png" in out
     # With nobody to do it, it says so rather than waiting
     out = subprocess.run(
         ["calkit", "manual-step", "-m", "Export fig.png"],
@@ -3899,15 +3899,10 @@ def test_manual_step(tmp_dir, monkeypatch, capsys):
     assert out.returncode != 0
     assert "Needs a manual step" in out.stdout + out.stderr
     assert "Export fig.png" in out.stdout + out.stderr
-    # With someone there, the source opens, and the step isn't done until
-    # every output exists and has changed, or they say keep it as is
+    # With someone there, the step isn't done until every output exists
+    # and has changed, or they say keep it as is
     with open("fig.png", "w") as f:
         f.write("v1")
-    opened = []
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(
-        subprocess, "Popen", lambda args, **kwargs: opened.append(args)
-    )
     monkeypatch.setattr(sys, "stdin", Mock(isatty=lambda: True))
     answers = []
 
@@ -3926,10 +3921,8 @@ def test_manual_step(tmp_dir, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", answer)
     manual_step(
         message="Export fig.png and new.png",
-        open_path="src.psd",
         outputs=["fig.png", "new.png"],
     )
-    assert opened == [["xdg-open", "src.psd"]]
     # Every prompt is a whole line, so it shows under 'calkit run'
     assert answers[0].endswith(
         "Export fig.png and new.png. Press Enter when done.\n"

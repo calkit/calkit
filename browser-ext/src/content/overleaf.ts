@@ -1057,11 +1057,13 @@ function openDocPath(): string | null {
   return parts.join("/");
 }
 
+// Overleaf's synctex wants an editor ID, but a build in a user's own zone
+// doesn't belong to one, so any will do for those
+const ANY_EDITOR_ID = crypto.randomUUID();
+
 function setBuildParams(params: URLSearchParams, build: PdfBuild): void {
   params.set("buildId", build.buildId);
-  if (build.editorId) {
-    params.set("editorId", build.editorId);
-  }
+  params.set("editorId", build.editorId ?? ANY_EDITOR_ID);
   if (build.clsiServerId) {
     params.set("clsiserverid", build.clsiServerId);
   }

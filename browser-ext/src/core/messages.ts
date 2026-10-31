@@ -8,6 +8,7 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
+  ImportUpdate,
   PipelineStage,
   StageFile,
   OverleafLookup,
@@ -143,6 +144,12 @@ export type Request =
       createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
     }
   | {
+      type: "project.updateImport";
+      owner: string;
+      project: string;
+      path: string;
+    }
+  | {
       type: "project.addStage";
       owner: string;
       project: string;
@@ -238,6 +245,7 @@ export interface ResponseMap {
   "project.provenance": Provenance;
   "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
   "project.recordOrigin": { path: string };
+  "project.updateImport": ImportUpdate;
   "project.addStage": PipelineStage;
   "content.imageDataUrl": string;
   "content.dataUrl": string;

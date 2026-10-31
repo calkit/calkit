@@ -196,6 +196,9 @@ def fetch_git_path(
     branch's head is used. Returns the commit actually checked out, which
     is what gets recorded: a branch name would drift, a commit doesn't.
     """
+    # Anything else, e.g., a local path or file://, would read the server
+    if not repo_url.startswith("https://"):
+        raise HTTPException(422, "A Git repo is fetched from an https:// URL")
     with tempfile.TemporaryDirectory() as tmp:
         clone = os.path.join(tmp, "src")
         try:

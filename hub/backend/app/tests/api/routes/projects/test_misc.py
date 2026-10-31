@@ -250,3 +250,174 @@ def test_post_project_misc(
         assert resp.status_code == 404, resp.text
     with open(wdir / "calkit.yaml") as f:
         assert len(ryaml.load(f)["misc"]) == 2
+
+
+def test_post_project_import_update(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    import json
+
+    import pytest
+    from fastapi import HTTPException
+
+    import app.imports
+
+    repos = {}
+    for name in ["p", "src"]:
+        origin = git.Repo.init(tmp_path / f"{name}.git", bare=True)
+        repo = git.Repo.init(tmp_path / name)
+        with repo.config_writer() as cw:
+            cw.set_value("user", "name", "Test")
+            cw.set_value("user", "email", "test@example.com")
+        os.makedirs(tmp_path / name / "figures")
+        (tmp_path / name / "figures" / "plot.png").write_bytes(b"v1")
+        (tmp_path / name / "calkit.yaml").write_text(f"name: {name}\n")
+        repo.git.add(all=True)
+        repo.git.commit("-m", "Initial")
+        repo.create_remote("origin", str(origin.working_dir))
+        repo.git.push("origin", repo.active_branch.name)
+        repos[name] = repo
+    repo, src = repos["p"], repos["src"]
+    wdir = tmp_path / "p"
+
+    def project(**kwargs):
+        name = kwargs["project_name"]
+        return SimpleNamespace(
+            owner_account_name="o",
+            name=name,
+            id=uuid.uuid4(),
+            owner_github_name="o",
+            git_repo_url=f"https://github.com/o/{name}",
+        )
+
+    def fetch_git_path(repo_url, rev, src_path, repo_dir, dest):
+        assert (repo_url, rev, src_path) == (
+            "https://github.com/a/b",
+            "main",
+            "fig.png",
+        )
+        Path(repo_dir, dest).write_bytes(b"from git")
+        return "abc1234"
+
+    def locks():
+        return json.loads((wdir / ".calkit" / "imports.json").read_text())
+
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            side_effect=project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            side_effect=lambda project, **kwargs: repos[project.name],
+        ),
+        patch("app.api.routes.projects.core.record_project_update"),
+        patch(
+            "app.api.routes.projects.core.app.imports.fetch_git_path",
+            side_effect=fetch_git_path,
+        ),
+    ):
+        # Imported from another project, which is fetched, even over what
+        # Overleaf had, and recorded at the commit it came from
+        (wdir / "paper").mkdir()
+        (wdir / "paper" / "plot.png").write_bytes(b"pasted")
+        resp = client.post(
+            URL,
+            json={
+                "path": "paper/plot.png",
+                "imported_from": {
+                    "project": "o/src",
+                    "path": "figures/plot.png",
+                },
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert (wdir / "paper" / "plot.png").read_bytes() == b"v1"
+        assert locks()["paper/plot.png"]["rev"] == src.head.commit.hexsha
+        assert not repo.git.status("--porcelain")
+        # Nothing new
+        update = "/projects/o/p/imports/update"
+        resp = client.post(
+            update,
+            json={"path": "paper/plot.png"},
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["changed"] is False
+        assert (
+            repo.head.commit.message.strip()
+            == "Add misc artifact paper/plot.png"
+        )
+        # Something new
+        (tmp_path / "src" / "figures" / "plot.png").write_bytes(b"v2")
+        src.git.commit("-am", "Update plot")
+        resp = client.post(
+            update,
+            json={"path": "paper/plot.png"},
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {
+            "path": "paper/plot.png",
+            "changed": True,
+            "rev": src.head.commit.hexsha,
+        }
+        assert (wdir / "paper" / "plot.png").read_bytes() == b"v2"
+        assert locks()["paper/plot.png"]["rev"] == src.head.commit.hexsha
+        assert repo.head.commit.message.strip() == (
+            "Update paper/plot.png from its source"
+        )
+        # Edited here since, which updating would discard
+        (wdir / "paper" / "plot.png").write_bytes(b"mine")
+        resp = client.post(
+            update,
+            json={"path": "paper/plot.png"},
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 409, resp.text
+        (wdir / "paper" / "plot.png").write_bytes(b"v2")
+        # Imported from a Git repo, which needn't be here yet
+        resp = client.post(
+            URL,
+            json={
+                "path": "paper/fig.png",
+                "imported_from": {
+                    "git_repo_url": "https://github.com/a/b",
+                    "git_ref": "main",
+                    "path": "fig.png",
+                },
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert (wdir / "paper" / "fig.png").read_bytes() == b"from git"
+        assert locks()["paper/fig.png"]["rev"] == "abc1234"
+        # Only a Git repo or project can be updated from
+        resp = client.post(
+            URL,
+            json={
+                "path": "figures/plot.png",
+                "imported_from": {"doi": "10.5281/zenodo.1234567"},
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        resp = client.post(
+            update,
+            json={"path": "figures/plot.png"},
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 422, resp.text
+    # A Git repo has to be fetched over https, not from the server's disk
+    with pytest.raises(HTTPException) as e:
+        app.imports.fetch_git_path(
+            f"file://{tmp_path / 'src'}",
+            None,
+            "figures/plot.png",
+            str(wdir),
+            "x",
+        )
+    assert e.value.status_code == 422

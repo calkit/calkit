@@ -591,63 +591,116 @@ function renderRecordOrigin(
     "type" | "owner" | "project" | "path"
   > | null>;
   if (how === "imported") {
-    const sources = [
-      ["url", "Website", "https://example.org/data/measurements.csv"],
-      ["doi", "DOI", "10.5281/zenodo.1234567"],
-      ["git", "Git repo", "https://github.com/owner/repo"],
-    ] as const;
-    let source: (typeof sources)[number][0] = "url";
-    const where = textInput({ placeholder: sources[0][2] });
-    const rev = textInput({ placeholder: "Commit or tag (optional)" });
-    const repoPath = textInput({ placeholder: "Path in the repo (optional)" });
-    const gitFields = el(
-      "div",
-      { class: "stack", style: { display: "none" } },
-      [rev, repoPath],
-    );
+    const source = el("select", {}, [
+      el("option", { value: "url", text: "Website" }),
+      el("option", { value: "doi", text: "DOI" }),
+      el("option", { value: "git", text: "Git repo" }),
+      el("option", { value: "project", text: "Calkit project" }),
+    ]);
+    const url = textInput({ placeholder: "https://example.org/figure.png" });
+    const doi = textInput({ placeholder: "10.5281/zenodo.1234567" });
     const date = el("input", { type: "date" });
-    const radios = sources.map(([value, text, placeholder]) => {
-      const radio = el("input", {
-        type: "radio",
-        attrs: { name: "ck-import-source", value },
-      });
-      radio.checked = value === source;
-      radio.addEventListener("change", () => {
-        source = value;
-        where.placeholder = placeholder;
-        gitFields.style.display = value === "git" ? "" : "none";
-      });
-      return el("label", { class: "small", style: { display: "inline" } }, [
-        radio,
-        document.createTextNode(` ${text}  `),
-      ]);
-    });
-    fields.append(
-      el("div", {}, radios),
-      where,
-      gitFields,
+    const retrieved = el("div", { class: "stack" }, [
       el("label", { text: "Retrieved (optional)" }),
       date,
-    );
-    read = async () => {
-      const value = where.value.trim();
-      if (!value) {
-        return null;
+    ]);
+    const repoUrl = textInput({ placeholder: "https://github.com/owner/repo" });
+    const repoPath = textInput({ placeholder: "Path in the repo" });
+    const ref = textInput({ placeholder: "Branch or tag (optional)" });
+    // Another project, with its files to pick from once it's named
+    const projects = el("datalist", {
+      attrs: { id: `ck-import-projects-${Date.now()}` },
+    });
+    const otherProject = textInput({ placeholder: "owner/project" });
+    otherProject.setAttribute("list", projects.id);
+    void send({ type: "projects.list", minAccessLevel: "read", limit: 100 })
+      .then((page) =>
+        projects.append(
+          ...page.data.map((p) =>
+            el("option", { value: `${p.owner_account_name}/${p.name}` }),
+          ),
+        ),
+      )
+      .catch(() => undefined);
+    const pickerSlot = el("div");
+    let projectPath: HTMLInputElement | null = null;
+    const showPicker = () => {
+      const [owner, name, ...rest] = otherProject.value.trim().split("/");
+      clear(pickerSlot);
+      projectPath = null;
+      if (owner && name && !rest.length) {
+        const picker = renderPathPicker({
+          owner,
+          project: name,
+          placeholder: "Path in that project",
+        });
+        projectPath = picker.input;
+        pickerSlot.append(picker.element);
       }
+    };
+    otherProject.addEventListener("input", showPicker);
+    const groups: Record<string, HTMLElement> = {
+      url: el("div", { class: "stack" }, [url]),
+      doi: el("div", { class: "stack" }, [doi]),
+      git: el("div", { class: "stack" }, [repoUrl, repoPath, ref]),
+      project: el("div", { class: "stack" }, [
+        otherProject,
+        projects,
+        pickerSlot,
+      ]),
+    };
+    const showSource = () => {
+      for (const [value, group] of Object.entries(groups)) {
+        group.style.display = value === source.value ? "" : "none";
+      }
+      retrieved.style.display = ["url", "doi"].includes(source.value)
+        ? ""
+        : "none";
+    };
+    source.addEventListener("change", showSource);
+    showSource();
+    fields.append(source, ...Object.values(groups), retrieved);
+    read = async () => {
       const when = date.value || null;
-      return {
-        importedFrom:
-          source === "url"
-            ? { url: value, date: when }
-            : source === "doi"
-            ? { doi: value, date: when }
-            : {
-                git_repo_url: value,
-                git_ref: rev.value.trim() || null,
-                path: repoPath.value.trim() || null,
-                date: when,
-              },
-      };
+      switch (source.value) {
+        case "url":
+          return url.value.trim()
+            ? { importedFrom: { url: url.value.trim(), date: when } }
+            : null;
+        case "doi":
+          return doi.value.trim()
+            ? { importedFrom: { doi: doi.value.trim(), date: when } }
+            : null;
+        case "git":
+          if (!repoUrl.value.trim()) {
+            return null;
+          }
+          if (!repoPath.value.trim()) {
+            throw new Error("Say which file in the repo it is.");
+          }
+          return {
+            importedFrom: {
+              git_repo_url: repoUrl.value.trim(),
+              path: repoPath.value.trim(),
+              git_ref: ref.value.trim() || null,
+            },
+          };
+        default: {
+          const path = projectPath?.value.trim();
+          if (!otherProject.value.trim()) {
+            return null;
+          }
+          if (!projectPath) {
+            throw new Error("Name the project as owner/project.");
+          }
+          if (!path) {
+            throw new Error("Say which file in the project it is.");
+          }
+          return {
+            importedFrom: { project: otherProject.value.trim(), path },
+          };
+        }
+      }
     };
   } else {
     const ai = textInput({ placeholder: "Ex: Claude Opus 5" });
@@ -788,19 +841,21 @@ function renderDefineOrigin(
         ),
     ]);
   }
-  return el(
-    "div",
-    {
-      class: "actions",
-      style: { alignItems: "center", flexWrap: "wrap", marginTop: "4px" },
-    },
-    [
-      el("span", { class: "small dim", text: "Define origin:" }),
-      ...choices.map(([text, onClick]) =>
-        el("button", { class: "action secondary", text, onClick }),
+  return el("div", { style: { marginTop: "4px" } }, [
+    el("div", { class: "small dim", text: "Define origin:" }),
+    el(
+      "div",
+      { class: "actions", style: { marginTop: "4px", gap: "4px" } },
+      choices.map(([text, onClick]) =>
+        el("button", {
+          class: "action secondary",
+          text,
+          onClick,
+          style: { padding: "4px 8px" },
+        }),
       ),
-    ],
-  );
+    ),
+  ]);
 }
 
 /** How to run a stage that's never run, since Overleaf can't. */
@@ -1048,6 +1103,50 @@ function renderProvenance(
           : null,
       ]),
     );
+    if (provenance.updatable && link.current_user_access !== "read") {
+      const message = el("div", { class: "small" });
+      const update = el("button", {
+        class: "action secondary",
+        text: "Update",
+        style: { padding: "4px 8px" },
+      });
+      update.addEventListener("click", async () => {
+        update.disabled = true;
+        clear(message).append(loading("Updating"));
+        try {
+          const updated = await send({
+            type: "project.updateImport",
+            owner: link.project_owner_name,
+            project: link.project_name,
+            path: provenance.path,
+          });
+          if (updated.changed) {
+            clear(message).append(loading("Syncing"));
+            await send({
+              type: "overleaf.sync",
+              owner: link.project_owner_name,
+              project: link.project_name,
+              path: link.path,
+            });
+            await showDefined(container, link, citation);
+          } else {
+            clear(message).append(
+              el("span", { class: "dim", text: "Already up to date" }),
+            );
+            update.disabled = false;
+          }
+        } catch (e) {
+          clear(message).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+          update.disabled = false;
+        }
+      });
+      container.append(
+        el("div", { class: "actions", style: { marginTop: "4px" } }, [update]),
+        message,
+      );
+    }
   } else if (provenance.stage) {
     container.append(
       el("div", { class: "row" }, [

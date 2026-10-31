@@ -1210,6 +1210,10 @@ class Provenance(SQLModel):
     origin: str | None = None
     origin_url: str | None = None
     origin_path: str | None = None
+    # Imported from a Git repo or another project, so it can be updated
+    # from there, and whether there's anything newer, if that's known
+    updatable: bool = False
+    update_available: bool | None = None
     # Data behind it that nothing records the origin of, however far back
     gaps: list[ProvenanceGap] = Field(default_factory=list)
     # Apps that could export it from a file someone made, so defining its

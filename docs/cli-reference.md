@@ -44,6 +44,7 @@
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
+| [`export`](#command-group-export)                | Export figures from the files they're drawn in.                                                              |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
@@ -2848,6 +2849,66 @@ Options:
 | Option           | Type | Required | Default | Description                                                                          |
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
+
+<a id="command-group-export"></a>
+
+### `calkit export`
+
+Export figures from the files they're drawn in.
+
+| Command                                   | Description                                 |
+| ----------------------------------------- | ------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                |
+| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file. |
+
+<a id="subcommand-export-inkscape"></a>
+
+#### `calkit export inkscape`
+
+Export a figure from an SVG.
+
+Usage:
+
+```text
+calkit export inkscape [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description         |
+| -------- | ---- | -------- | ------- | ------------------- |
+| `source` | str  | yes      |         | SVG to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                            |
+| ---------------- | ---- | -------- | ------- | -------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or PDF. |
+| `--dpi`          | int  | no       |         | Resolution of a PNG.                   |
+
+<a id="subcommand-export-gimp"></a>
+
+#### `calkit export gimp`
+
+Export a flattened figure from an XCF file.
+
+Usage:
+
+```text
+calkit export gimp [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `source` | str  | yes      |         | XCF file to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                             |
+| ---------------- | ---- | -------- | ------- | --------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
 
 <a id="command-group-update"></a>
 

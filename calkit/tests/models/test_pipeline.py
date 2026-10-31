@@ -5,6 +5,8 @@ from pydantic import ValidationError
 
 from calkit.models.io import PathOutput
 from calkit.models.pipeline import (
+    GimpExportStage,
+    InkscapeExportStage,
     JsonToLatexStage,
     JuliaCommandStage,
     JuliaScriptStage,
@@ -133,6 +135,41 @@ def test_manualstage():
     assert s.to_dvc()["cmd"].endswith("--app FishCounter")
     with pytest.raises(ValidationError, match="app"):
         ManualStepStage(message="Export it", open={"path": "wake.svg"})
+
+
+def test_appexportstage():
+    s = InkscapeExportStage(
+        source_path="figures/src/setup.svg",
+        outputs=[{"path": "paper/setup.png", "storage": "git"}],
+        dpi=150,
+    )
+    sd = s.to_dvc()
+    # The command names the app it needs
+    assert sd["cmd"] == (
+        "calkit export inkscape figures/src/setup.svg -o paper/setup.png "
+        "--dpi 150"
+    )
+    assert sd["deps"] == ["figures/src/setup.svg"]
+    assert sd["outs"] == [
+        {"paper/setup.png": {"cache": False, "persist": False}}
+    ]
+    s = GimpExportStage(
+        source_path="figures/src/photo.xcf", outputs=["paper/photo.tif"]
+    )
+    assert s.to_dvc()["cmd"] == (
+        "calkit export gimp figures/src/photo.xcf -o paper/photo.tif"
+    )
+    # What an app doesn't export from, or to, is refused, as is a stage
+    # with other than one output
+    for model, bad, error in [
+        (InkscapeExportStage, dict(source_path="a.psd"), "from an SVG"),
+        (InkscapeExportStage, dict(outputs=["a.jpg"]), "not 'a.jpg'"),
+        (InkscapeExportStage, dict(outputs=[]), "exactly one output"),
+        (GimpExportStage, dict(source_path="a.svg"), "from an XCF"),
+        (GimpExportStage, dict(source_path="a.xcf", dpi=72), "dpi"),
+    ]:
+        with pytest.raises(ValidationError, match=error):
+            model(**{"source_path": "a.svg", "outputs": ["a.png"], **bad})
 
 
 def test_latexstage():

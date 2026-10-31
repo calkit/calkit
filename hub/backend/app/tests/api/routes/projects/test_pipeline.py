@@ -542,6 +542,28 @@ def test_post_project_pipeline_stage(
         "calkit manual-step"
     )
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
+    # An app that exports as the pipeline runs is a stage kind like any other
+    resp = post(
+        name="export-setup",
+        stage={
+            "kind": "inkscape-export",
+            "source_path": "figures/src/setup.svg",
+            "outputs": ["paper/figures/setup.png"],
+        },
+        files=[
+            {
+                "path": "figures/src/setup.svg",
+                "content": base64.b64encode(b"<svg/>").decode(),
+                "created_by_me": True,
+            }
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    dvc_yaml = yaml.safe_load((tmp_path / "repo" / "dvc.yaml").read_text())
+    assert dvc_yaml["stages"]["export-setup"]["cmd"] == (
+        "calkit export inkscape figures/src/setup.svg "
+        "-o paper/figures/setup.png"
+    )
     # Something made once isn't made twice
     resp = post(stage=stage)
     assert resp.status_code == 409, resp.text

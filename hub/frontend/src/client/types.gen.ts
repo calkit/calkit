@@ -4207,6 +4207,30 @@ export type Provenance = {
    * Gaps
    */
   gaps?: Array<ProvenanceGap>
+  /**
+   * Exporters
+   */
+  exporters?: Array<ProvenanceExporter>
+}
+
+/**
+ * ProvenanceExporter
+ *
+ * An app that exports to an artifact's format as the pipeline runs.
+ */
+export type ProvenanceExporter = {
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * App
+   */
+  app: string
+  /**
+   * Source Exts
+   */
+  source_exts: Array<string>
 }
 
 /**

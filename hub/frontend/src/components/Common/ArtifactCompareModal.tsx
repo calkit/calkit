@@ -58,6 +58,7 @@ import {
   type GitRef,
   type Notebook,
   ProjectsService,
+  type ProvenanceExporter,
   type Publication,
   type StageFromScriptOrNotebookResponse,
 } from "../../client"
@@ -413,10 +414,17 @@ function FigureInfo({
   const originUrl = provenanceQuery.data?.origin_url
   // A figure calkit.yaml doesn't declare can still have a stage that makes it
   const stage = figure.stage ?? provenanceQuery.data?.stage
+  const stageKind = provenanceQuery.data?.stage_kind
+  // The app each export stage kind runs
+  const exportApp = (
+    { "inkscape-export": "Inkscape", "gimp-export": "GIMP" } as Record<
+      string,
+      string
+    >
+  )[stageKind ?? ""]
+  const exportedFrom = exportApp ? provenanceQuery.data?.source : null
   const manualStep =
-    provenanceQuery.data?.stage_kind === "manual-step"
-      ? provenanceQuery.data.message
-      : null
+    stageKind === "manual-step" ? provenanceQuery.data?.message : null
   const dataLinks: InputLink[] = []
   if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
     const deps = declaredInputs(
@@ -504,6 +512,20 @@ function FigureInfo({
                 {stage}
               </Code>
             </Link>
+            {exportedFrom ? (
+              <>
+                , exported with {exportApp} from{" "}
+                <Link
+                  as={RouterLink}
+                  to={filesTo}
+                  search={{ path: exportedFrom, ref: gitRef } as any}
+                >
+                  <Code fontSize="xs" cursor="pointer">
+                    {exportedFrom}
+                  </Code>
+                </Link>
+              </>
+            ) : null}
             {manualStep ? `, a manual step: ${manualStep}` : null}
           </>
         ) : provenanceQuery.isPending ? (
@@ -525,6 +547,7 @@ function FigureInfo({
           ownerName={ownerName}
           projectName={projectName}
           path={figure.path}
+          exporters={provenanceQuery.data?.exporters ?? []}
         />
       ) : null}
       <InputsRow label="Data" items={dataLinks} />
@@ -548,10 +571,12 @@ function DefineFigureOrigin({
   ownerName,
   projectName,
   path,
+  exporters,
 }: {
   ownerName: string
   projectName: string
   path: string
+  exporters: ProvenanceExporter[]
 }) {
   const { userHasWriteAccess } = useProject(ownerName, projectName)
   const [mode, setMode] = useState<OriginMode | null>(null)
@@ -602,6 +627,7 @@ function DefineFigureOrigin({
           ownerName={ownerName}
           projectName={projectName}
           path={path}
+          exporters={exporters}
           onDone={onDone}
         />
       ) : mode ? (
@@ -627,11 +653,13 @@ function ManualExportForm({
   ownerName,
   projectName,
   path,
+  exporters,
   onDone,
 }: {
   ownerName: string
   projectName: string
   path: string
+  exporters: ProvenanceExporter[]
   onDone: () => void
 }) {
   const showToast = useCustomToast()
@@ -640,6 +668,12 @@ function ManualExportForm({
   const [app, setApp] = useState("")
   // Kept out of the paper's folder, which may sync to Overleaf
   const source = sourcePath || (file ? `figures/src/${file.name}` : "")
+  // An app that exports it as the pipeline runs, so nobody has to
+  // remember to
+  const ext = source.slice(source.lastIndexOf(".")).toLowerCase()
+  const exporter = source
+    ? exporters.find((e) => e.source_exts.includes(ext))
+    : undefined
   const saveMutation = useMutation({
     mutationFn: async () => {
       const content = file
@@ -657,24 +691,30 @@ function ManualExportForm({
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "")
-      const message = appName
-        ? `In ${appName}, export ${path} from ${source}`
-        : `Export ${path} from ${source}`
+      const message = exporter
+        ? `Exported from ${source} with ${exporter.app}`
+        : appName
+          ? `In ${appName}, export ${path} from ${source}`
+          : `Export ${path} from ${source}`
       await ProjectsService.postProjectPipelineStage({
         owner_name: ownerName,
         project_name: projectName,
         stagePost: {
           name: `export-${slug || "figure"}`,
-          stage: {
-            kind: "manual-step",
-            message,
-            // The step opens the source in the app it's exported with
-            ...(appName ? { open: { app: appName, path: source } } : {}),
-            inputs: [source],
-            outputs: [path],
-          },
+          stage: exporter
+            ? { kind: exporter.kind, source_path: source, outputs: [path] }
+            : {
+                kind: "manual-step",
+                message,
+                // The step opens the source in the app it's exported with
+                ...(appName ? { open: { app: appName, path: source } } : {}),
+                inputs: [source],
+                outputs: [path],
+              },
           files: [{ path: source, content, created_by_me: true }],
-          message: `Export ${path} from ${source} manually`,
+          message:
+            `Export ${path} from ${source}` +
+            (exporter ? ` with ${exporter.app}` : " manually"),
         },
       })
       return message
@@ -711,6 +751,11 @@ function ManualExportForm({
         value={app}
         onChange={(e) => setApp(e.target.value)}
       />
+      {exporter ? (
+        <Text fontSize="xs" color="gray.500" mb={2}>
+          {exporter.app} exports it whenever the pipeline runs.
+        </Text>
+      ) : null}
       {source && !canBeCreatedByPerson(source) ? (
         <Text fontSize="xs" color="red.500" mb={2}>
           {source} is exported from something itself; choose the file it's made

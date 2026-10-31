@@ -7317,12 +7317,44 @@ export const ProvenanceSchema = {
       type: "array",
       title: "Gaps",
     },
+    exporters: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceExporter",
+      },
+      type: "array",
+      title: "Exporters",
+    },
   },
   type: "object",
   required: ["path"],
   title: "Provenance",
   description:
     "Where an artifact, or one value inside a results file, came from.",
+} as const
+
+export const ProvenanceExporterSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    app: {
+      type: "string",
+      title: "App",
+    },
+    source_exts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Source Exts",
+    },
+  },
+  type: "object",
+  required: ["kind", "app", "source_exts"],
+  title: "ProvenanceExporter",
+  description:
+    "An app that exports to an artifact's format as the pipeline runs.",
 } as const
 
 export const ProvenanceGapSchema = {

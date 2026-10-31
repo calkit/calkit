@@ -56,6 +56,7 @@ from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.export import export_app
 from calkit.cli.fix import (
     OursOpt,
     PreferOpt,
@@ -96,6 +97,11 @@ app.add_typer(show_app, name="show", help="Show Calkit objects.")
 app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
+app.add_typer(
+    export_app,
+    name="export",
+    help="Export figures from the files they're drawn in.",
+)
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")

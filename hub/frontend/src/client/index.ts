@@ -1084,6 +1084,7 @@ export type {
   ProjectStatus,
   ProjectStatusPost,
   Provenance,
+  ProvenanceExporter,
   ProvenanceGap,
   ProvenanceStep,
   Publication,

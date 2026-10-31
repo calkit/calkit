@@ -1170,11 +1170,13 @@ function openDocPath(): string | null {
   return parts.join("/");
 }
 
+// Overleaf's synctex wants an editor ID, but a build in a user's own zone
+// doesn't belong to one, so any will do for those
+const ANY_EDITOR_ID = crypto.randomUUID();
+
 function setBuildParams(params: URLSearchParams, build: PdfBuild): void {
   params.set("buildId", build.buildId);
-  if (build.editorId) {
-    params.set("editorId", build.editorId);
-  }
+  params.set("editorId", build.editorId ?? ANY_EDITOR_ID);
   if (build.clsiServerId) {
     params.set("clsiserverid", build.clsiServerId);
   }
@@ -1404,15 +1406,22 @@ function watchPdf(): void {
     attributes: true,
     attributeFilter: ["href"],
   });
-  // A citation's provenance on hover, as in the editor. Overleaf says
-  // which line of which file is under the pointer, as for a double click,
-  // so the PDF still gets every click
+  // A component's provenance on hover, as in the editor. Where each one
+  // lands is asked of Overleaf once per build and edit, the first time the
+  // pointer rests on the PDF, so moving it around costs nothing, and the
+  // PDF still gets every click
   let shown: { index: number; version: number; host: HTMLElement } | null =
     null;
   let showing: ReturnType<typeof setTimeout> | undefined;
   let hiding: ReturnType<typeof setTimeout> | undefined;
   let lookups = 0;
   let tips = 0;
+  let landed: {
+    build: PdfBuild;
+    snapshot: NonNullable<typeof editorCitations>;
+    file: string;
+    boxes: Promise<{ index: number; box: SynctexBox }[]>;
+  } | null = null;
   const hide = () => {
     clearTimeout(hiding);
     hiding = undefined;
@@ -1425,60 +1434,53 @@ function watchPdf(): void {
     const snapshot = editorCitations;
     const file = openDocPath();
     // Only a paper linked to a project has anything to show
-    if (!currentLink) {
+    if (!currentLink || !build || !projectId || !snapshot || !file) {
       return null;
     }
-    if (!projectId || !snapshot || !file) {
-      console.debug(
-        "[Calkit] PDF hover: no .tex file selected in the file tree",
-      );
-      return null;
+    if (
+      landed?.build !== build ||
+      landed.snapshot !== snapshot ||
+      landed.file !== file
+    ) {
+      // One at a time, and cached by line, so an edit only asks again
+      // about what moved
+      const boxes = (async () => {
+        const found: { index: number; box: SynctexBox }[] = [];
+        for (const [index, item] of snapshot.items.entries()) {
+          if (!item.citation) {
+            continue;
+          }
+          for (const box of await synctex(
+            projectId,
+            build,
+            file,
+            item.line,
+            item.column,
+          )) {
+            found.push({ index, box });
+          }
+        }
+        return found;
+      })();
+      landed = { build, snapshot, file, boxes };
     }
-    const params = new URLSearchParams({
-      page: String(page),
-      h: h.toFixed(2),
-      v: v.toFixed(2),
-    });
-    if (!build) {
-      console.debug("[Calkit] PDF hover: no PDF build found yet");
-      return null;
-    }
-    setBuildParams(params, build);
-    // Each pointer position is new, so there's nothing worth caching
-    const code: { file: string; line: number; column?: number }[] = await fetch(
-      `/project/${projectId}/sync/pdf?${params}`,
-      { headers: { Accept: "application/json" } },
-    )
-      .then((response) => (response.ok ? response.json() : { code: [] }))
-      .then((data) => data.code ?? [])
-      .catch(() => []);
-    for (const position of code) {
-      // A root file in a folder comes back as, e.g., folder/./main.tex
-      const at = position.file.replace(/(^|\/)\.\//g, "$1");
-      if (at !== file) {
-        continue;
+    // The smallest box under the pointer, e.g., a figure's rather than the
+    // line's around it; a box's v is its bottom
+    let best: { index: number; area: number } | null = null;
+    for (const { index, box } of await landed.boxes) {
+      const area = box.width * box.height;
+      if (
+        box.page === page &&
+        h >= box.h &&
+        h <= box.h + box.width &&
+        v >= box.v - box.height &&
+        v <= box.v &&
+        (!best || area < best.area)
+      ) {
+        best = { index, area };
       }
-      const onLine = snapshot.items.flatMap((item, index) =>
-        item.line === position.line ? [{ item, index }] : [],
-      );
-      if (!onLine.length) {
-        continue;
-      }
-      // Usually there's no column, but when there is, take the nearest
-      const column = position.column ?? -1;
-      const best =
-        column < 0
-          ? onLine[0]
-          : onLine.reduce((a, b) =>
-              Math.abs(b.item.column - column) <
-              Math.abs(a.item.column - column)
-                ? b
-                : a,
-            );
-      return { index: best.index, version: snapshot.version };
     }
-    console.debug("[Calkit] PDF hover: no citation in", file, "at", code);
-    return null;
+    return best ? { index: best.index, version: snapshot.version } : null;
   };
   const show = (
     found: { index: number; version: number },

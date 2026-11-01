@@ -4029,17 +4029,20 @@ function watchRail(): void {
       background-color: transparent !important;
       color: inherit !important;
     }
-    #${RAIL_TAB_ID} img {
+    body.calkit-rail-open
+      .ide-rail-tab-link.active:not(#${RAIL_TAB_ID})::after {
+      display: none !important;
+    }
+    #${RAIL_TAB_ID} svg {
       width: 20px;
       height: 20px;
       display: block;
       margin: 0 auto;
+      color: #009688;
     }
+    #${RAIL_TAB_ID}.active svg { color: #fff; }
   `;
   document.head.append(style);
-  const icon = `data:image/svg+xml,${encodeURIComponent(
-    calkitLogo.replace(/currentColor/g, "#009688"),
-  )}`;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const ensure = () => {
     const first = document.getElementById("ide-rail-tabs-tab-file-tree");
@@ -4049,20 +4052,18 @@ function watchRail(): void {
     }
     let tab = document.getElementById(RAIL_TAB_ID);
     if (!tab) {
-      tab = el(
-        "button",
-        {
-          class: "ide-rail-tab-link nav-link",
-          attrs: {
-            id: RAIL_TAB_ID,
-            type: "button",
-            role: "tab",
-            title: "Calkit",
-            "aria-label": "Calkit",
-          },
+      tab = el("button", {
+        class: "ide-rail-tab-link nav-link",
+        attrs: {
+          id: RAIL_TAB_ID,
+          type: "button",
+          role: "tab",
+          title: "Calkit",
+          "aria-label": "Calkit",
         },
-        [el("img", { attrs: { src: icon, alt: "" } })],
-      );
+      });
+      // Inline, so it takes the tab's color: white while ours is open
+      tab.innerHTML = calkitLogo;
       tab.addEventListener("click", () => setRail(!railOpen));
       const separated = tabs.querySelector(".separated-rail-tab");
       if (separated) {
@@ -4090,7 +4091,9 @@ function watchRail(): void {
         true,
       );
     }
+    // Overleaf underlines the tab whose pane is open by open-rail
     tab.classList.toggle("active", railOpen);
+    tab.classList.toggle("open-rail", railOpen);
     tab.setAttribute("aria-selected", String(railOpen));
     if (railOpen) {
       placeRailPane();
@@ -4107,6 +4110,7 @@ function setRail(open: boolean): void {
   document.body.classList.toggle("calkit-rail-open", open);
   const tab = document.getElementById(RAIL_TAB_ID);
   tab?.classList.toggle("active", open);
+  tab?.classList.toggle("open-rail", open);
   tab?.setAttribute("aria-selected", String(open));
   if (!open) {
     document

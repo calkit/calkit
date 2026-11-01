@@ -3,6 +3,7 @@ import {
   AlertDescription,
   AlertIcon,
   AlertTitle,
+  Badge,
   Box,
   Button,
   Flex,
@@ -10,9 +11,18 @@ import {
   Icon,
   IconButton,
   Link,
+  Spinner,
+  Table,
+  TableContainer,
+  Tbody,
+  Td,
   Text,
+  Th,
+  Thead,
+  Tr,
 } from "@chakra-ui/react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { AxiosError } from "axios"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   type ReactNode,
@@ -30,7 +40,7 @@ import { z } from "zod"
 
 import { FaExclamationTriangle } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
-import { ProjectsService } from "../../../../../client"
+import { type PipelineRun, ProjectsService } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import Mermaid, {
@@ -41,7 +51,9 @@ import StageEditorModal from "../../../../../components/Pipeline/StageEditorModa
 import useProject, {
   useProjectEnvironments,
 } from "../../../../../hooks/useProject"
+import useCustomToast from "../../../../../hooks/useCustomToast"
 import { dataOrNull } from "../../../../../lib/api"
+import { handleError } from "../../../../../lib/errors"
 import {
   extractEnvRefs,
   extractFilePaths,
@@ -355,6 +367,155 @@ const pipelineSearchSchema = z.object({
   show_full_yaml: z.boolean().optional(),
 })
 
+const RUN_STATUS_COLORS: Record<PipelineRun["status"], string> = {
+  queued: "gray",
+  running: "blue",
+  succeeded: "green",
+  failed: "red",
+  cancelled: "gray",
+}
+
+/**
+ * Recent runs of the pipeline, e.g., on GitHub Actions, and a button to
+ * start one, checked again every 15 seconds while one is going.
+ */
+function PipelineRuns({
+  ownerName,
+  projectName,
+  canStart,
+}: {
+  ownerName: string
+  projectName: string
+  canStart: boolean
+}) {
+  const queryClient = useQueryClient()
+  const showToast = useCustomToast()
+  // When one was started here, since GitHub takes a moment to list it
+  const [startedAt, setStartedAt] = useState<number | null>(null)
+  const queryKey = ["projects", ownerName, projectName, "pipeline", "runs"]
+  const runsQuery = useQuery({
+    queryKey,
+    queryFn: () =>
+      ProjectsService.getProjectPipelineRuns({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    refetchInterval: (query) => {
+      const latest = query.state.data?.runs?.[0]
+      const going =
+        latest && (latest.status === "queued" || latest.status === "running")
+      const waiting =
+        startedAt !== null &&
+        Date.now() - startedAt < 120_000 &&
+        !(
+          latest?.started_at &&
+          Date.parse(latest.started_at) >= startedAt - 30_000
+        )
+      return going || waiting ? 15_000 : false
+    },
+  })
+  const startMutation = useMutation({
+    mutationFn: () =>
+      ProjectsService.postProjectPipelineRun({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    onSuccess: () => {
+      setStartedAt(Date.now())
+      showToast(
+        "Started",
+        "The pipeline is running on GitHub Actions.",
+        "success",
+      )
+      queryClient.invalidateQueries({ queryKey })
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+  })
+  const runs = runsQuery.data?.runs ?? []
+  const latest = runs[0]
+  const going =
+    latest?.status === "queued" ||
+    latest?.status === "running" ||
+    (startedAt !== null &&
+      Date.now() - startedAt < 120_000 &&
+      !(
+        latest?.started_at &&
+        Date.parse(latest.started_at) >= startedAt - 30_000
+      ))
+  return (
+    <Box mt={6}>
+      <Flex align="center" gap={3} mb={2}>
+        <Heading size="md">Runs</Heading>
+        {canStart && (
+          <Button
+            size="sm"
+            isLoading={startMutation.isPending}
+            isDisabled={!runsQuery.data?.can_start || going}
+            title={runsQuery.data?.cannot_start_reason ?? undefined}
+            onClick={() => startMutation.mutate()}
+          >
+            Run on GitHub Actions
+          </Button>
+        )}
+        {going && <Spinner size="sm" />}
+      </Flex>
+      {runsQuery.isPending ? (
+        <Spinner size="sm" />
+      ) : runs.length === 0 ? (
+        <Text fontSize="sm" color="ui.dim">
+          {runsQuery.data?.github_workflow
+            ? "No runs yet."
+            : "Not run on GitHub Actions yet. Starting a run adds a " +
+              "workflow that only runs when started."}
+        </Text>
+      ) : (
+        <TableContainer>
+          <Table size="sm">
+            <Thead>
+              <Tr>
+                <Th>Status</Th>
+                <Th>Where</Th>
+                <Th>Started</Th>
+                <Th>By</Th>
+                <Th>Commit</Th>
+                <Th />
+              </Tr>
+            </Thead>
+            <Tbody>
+              {runs.map((run, i) => (
+                <Tr key={run.id ?? i}>
+                  <Td>
+                    <Badge colorScheme={RUN_STATUS_COLORS[run.status]}>
+                      {run.status}
+                    </Badge>
+                  </Td>
+                  <Td>GitHub Actions</Td>
+                  <Td>
+                    {run.started_at
+                      ? new Date(run.started_at).toLocaleString()
+                      : ""}
+                  </Td>
+                  <Td>{run.started_by ?? ""}</Td>
+                  <Td fontFamily="mono">{run.commit?.slice(0, 7) ?? ""}</Td>
+                  <Td>
+                    {run.url && (
+                      <Link isExternal variant="blue" href={run.url}>
+                        View
+                      </Link>
+                    )}
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </TableContainer>
+      )}
+    </Box>
+  )
+}
+
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/pipeline",
 )({
@@ -587,6 +748,13 @@ function ProjectPipeline() {
             </Alert>
           )}
         </Flex>
+      )}
+      {pipelineQuery.data && !ref && (
+        <PipelineRuns
+          ownerName={accountName}
+          projectName={projectName}
+          canStart={userHasWriteAccess}
+        />
       )}
       {pipeline_editor_open && canEditPipeline && (
         <PipelineEditorModal

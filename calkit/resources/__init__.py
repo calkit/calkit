@@ -141,13 +141,14 @@ def render_github_actions_workflow(
     return txt
 
 
-def find_run_workflow(wdir: str | None = None) -> tuple[str, str] | None:
-    """Return the name and text of a project's workflow that runs the
-    Calkit action, if it has one.
+def find_run_workflows(wdir: str | None = None) -> list[tuple[str, str]]:
+    """Return the names and text of a project's workflows that run the
+    Calkit action.
     """
     workflows_dir = os.path.join(wdir or ".", ".github", "workflows")
     if not os.path.isdir(workflows_dir):
-        return None
+        return []
+    found = []
     for fname in sorted(os.listdir(workflows_dir)):
         if fname.endswith(".yaml") or fname.endswith(".yml"):
             with open(
@@ -155,8 +156,16 @@ def find_run_workflow(wdir: str | None = None) -> tuple[str, str] | None:
             ) as f:
                 txt = f.read()
             if uses_run_action(txt):
-                return fname, txt
-    return None
+                found.append((fname, txt))
+    return found
+
+
+def find_run_workflow(wdir: str | None = None) -> tuple[str, str] | None:
+    """Return the name and text of a project's first workflow that runs the
+    Calkit action, if it has one.
+    """
+    found = find_run_workflows(wdir)
+    return found[0] if found else None
 
 
 def can_start_workflow(workflow_txt: str) -> bool:

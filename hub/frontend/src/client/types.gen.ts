@@ -3293,6 +3293,10 @@ export type PipelineRun = {
    * Started By
    */
   started_by?: string | null
+  /**
+   * Workflow
+   */
+  workflow?: string | null
 }
 
 /**

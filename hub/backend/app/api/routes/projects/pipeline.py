@@ -890,6 +890,10 @@ def post_project_pipeline_export_stage(
     )
 
 
+# Runs listed, newest first, across a project's workflows
+MAX_PIPELINE_RUNS = 10
+
+
 class PipelineRun(BaseModel):
     """A run of the pipeline, wherever it ran."""
 
@@ -902,18 +906,21 @@ class PipelineRun(BaseModel):
     commit: str | None = None
     branch: str | None = None
     started_by: str | None = None
+    # The GitHub Actions workflow it ran in, by file name
+    workflow: str | None = None
 
 
 class PipelineRuns(BaseModel):
     runs: list[PipelineRun] = []
-    # The workflow that runs it on GitHub Actions, if the project has one
+    # The workflow that starting a run on GitHub Actions uses, if the project
+    # has one
     github_workflow: str | None = None
     # Whether it can be started from here, and if not, why
     can_start: bool = False
     cannot_start_reason: str | None = None
 
 
-def _github_run(run: dict[str, Any]) -> PipelineRun:
+def _github_run(run: dict[str, Any], workflow: str) -> PipelineRun:
     """A run as GitHub's API lists it."""
     status = run.get("status")
     conclusion = run.get("conclusion")
@@ -935,6 +942,7 @@ def _github_run(run: dict[str, Any]) -> PipelineRun:
         commit=run.get("head_sha"),
         branch=run.get("head_branch"),
         started_by=(run.get("triggering_actor") or {}).get("login"),
+        workflow=workflow,
     )
 
 
@@ -947,8 +955,8 @@ def get_project_pipeline_runs(
 ) -> PipelineRuns:
     """Recent runs of the pipeline, and whether one can be started here.
 
-    Only runs on GitHub Actions so far, by the workflow that runs the
-    Calkit action.
+    Only runs on GitHub Actions so far, by every workflow that runs the
+    Calkit action, however each run was started.
     """
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -966,42 +974,49 @@ def get_project_pipeline_runs(
         ttl=DEFAULT_REPO_TTL,
         read_only=True,
     )
-    found = calkit.resources.find_run_workflow(str(repo.working_dir))
-    if found is None:
+    found = calkit.resources.find_run_workflows(str(repo.working_dir))
+    if not found:
         # Starting it adds the workflow first
         return PipelineRuns(can_start=True)
-    fname, txt = found
-    can_start = calkit.resources.can_start_workflow(txt)
+    startable = [
+        fname
+        for fname, txt in found
+        if calkit.resources.can_start_workflow(txt)
+    ]
     runs = []
     token = _github_token_for_repo(session, current_user, project.github_repo)
-    try:
-        resp = requests.get(
-            f"https://api.github.com/repos/{project.github_repo}"
-            f"/actions/workflows/{fname}/runs",
-            params={"per_page": 5},
-            headers={"Accept": "application/vnd.github+json"}
-            | ({"Authorization": f"Bearer {token}"} if token else {}),
-            timeout=10,
-        )
+    for fname, _ in found:
+        try:
+            resp = requests.get(
+                f"https://api.github.com/repos/{project.github_repo}"
+                f"/actions/workflows/{fname}/runs",
+                params={"per_page": MAX_PIPELINE_RUNS},
+                headers={"Accept": "application/vnd.github+json"}
+                | ({"Authorization": f"Bearer {token}"} if token else {}),
+                timeout=10,
+            )
+        except requests.RequestException as e:
+            logger.warning(f"Could not list runs of {fname}: {e}")
+            continue
         if resp.ok:
-            runs = [
-                _github_run(r) for r in resp.json().get("workflow_runs", [])
+            runs += [
+                _github_run(r, workflow=fname)
+                for r in resp.json().get("workflow_runs", [])
             ]
         else:
             logger.warning(
                 f"Could not list runs of {fname} for {project.github_repo}: "
                 f"{resp.status_code} {resp.text}"
             )
-    except requests.RequestException as e:
-        logger.warning(f"Could not list runs of {fname}: {e}")
+    # Newest first across workflows
+    runs.sort(key=lambda run: run.started_at or "", reverse=True)
+    names = ", ".join(fname for fname, _ in found)
     return PipelineRuns(
-        runs=runs,
-        github_workflow=fname,
-        can_start=can_start,
+        runs=runs[:MAX_PIPELINE_RUNS],
+        github_workflow=startable[0] if startable else found[0][0],
+        can_start=bool(startable),
         cannot_start_reason=(
-            None
-            if can_start
-            else f"{fname} doesn't have a workflow_dispatch trigger"
+            None if startable else f"No workflow_dispatch trigger in {names}"
         ),
     )
 
@@ -1032,13 +1047,13 @@ def post_project_pipeline_run(
     )
     wdir = str(repo.working_dir)
     branch = get_default_branch(repo)
-    found = calkit.resources.find_run_workflow(wdir)
-    if found is None:
+    found = calkit.resources.find_run_workflows(wdir)
+    if not found:
         subprocess.check_call(
             ["calkit", "update", "github-actions", "--on-demand"], cwd=wdir
         )
-        found = calkit.resources.find_run_workflow(wdir)
-        assert found is not None
+        found = calkit.resources.find_run_workflows(wdir)
+        assert found
         try:
             push_and_expire(project, repo)
         except GitCommandError as e:
@@ -1051,11 +1066,15 @@ def post_project_pipeline_run(
                 )
             raise
         record_project_update(project, repo, session)
-    fname, txt = found
-    if not calkit.resources.can_start_workflow(txt):
-        raise HTTPException(
-            409, f"{fname} doesn't have a workflow_dispatch trigger"
-        )
+    startable = [
+        fname
+        for fname, txt in found
+        if calkit.resources.can_start_workflow(txt)
+    ]
+    if not startable:
+        names = ", ".join(fname for fname, _ in found)
+        raise HTTPException(409, f"No workflow_dispatch trigger in {names}")
+    fname = startable[0]
     token = _github_token_for_repo(session, current_user, project.github_repo)
     if token is None:
         raise HTTPException(403, "No GitHub access to start a run")
@@ -1091,6 +1110,7 @@ def post_project_pipeline_run(
         url=f"https://github.com/{project.github_repo}/actions/workflows/{fname}",
         branch=branch,
         started_by=current_user.github_username,
+        workflow=fname,
     )
 
 

@@ -48,11 +48,12 @@ The tutorial starts from a small paper put together the usual way, so you
 can try everything on something that isn't your own work first.
 Download the two starter files:
 
-- `starter-paper.zip`, the Overleaf project: a short paper about the drag
-  on a cylinder towed through a tank.
+- `starter-paper.zip`, the Overleaf project: a short paper about how fast a
+  dye fades in solution at different temperatures.
 - `starter-analysis.zip`, what's behind it, as it might be on your laptop:
-  a script that plots the drag measurements, the measurements themselves,
-  and the PowerPoint file the diagram of the setup was drawn in.
+  a script that fits the fading measured at each temperature, the
+  measurements themselves, and the PowerPoint file the diagram of the setup
+  was drawn in.
 
 On Overleaf, click **New Project**, then **Upload Project**, and pick
 `starter-paper.zip`. Unzip `starter-analysis.zip` somewhere on your
@@ -60,11 +61,11 @@ computer.
 
 The paper shows three kinds of things, and each was made a different way:
 
-- Figure 1, a diagram of the setup, drawn in PowerPoint, exported as a PNG,
-  and uploaded.
-- Figure 2, a plot of drag coefficient against Reynolds number, made by
-  `plot_drag.py` and uploaded.
-- Numbers in the text, e.g., the mean drag coefficient, which the script
+- Figure 1, a diagram of the spectrophotometer setup, drawn in PowerPoint,
+  exported as a PNG, and uploaded.
+- Figure 2, the absorbance measured over time at each temperature, with a
+  fitted exponential decay, made by `fit_rates.py` and uploaded.
+- Numbers in the text, e.g., the rate constant at 25 °C, which the script
   printed and someone typed in.
 
 <!-- Screenshot: img/overleaf-paper/starter-paper.png
@@ -106,8 +107,8 @@ Clicking an item jumps to it in the paper and shows what's known about it.
 ### The plot: made by a script
 
 Hover over the plot's `\includegraphics` line, or click it in the sidebar,
-and click **Define origin**. Choose **Script**, then upload `plot_drag.py`
-and the measurements it reads, `drag_data.csv`.
+and click **Define origin**. Choose **Script**, then upload `fit_rates.py`
+and the measurements it reads, `absorbance.csv`.
 
 <!-- Screenshot: img/overleaf-paper/define-origin-script.png
 Defining the plot's origin by uploading the script and its data. -->
@@ -120,7 +121,7 @@ the script saves the plot, so you don't have to rename or copy anything.
 
 The measurements need an origin too, since a plot is only as traceable as
 the data it was made from. You took them, so open the card's **Reads** list,
-click **Define origin** on `drag_data.csv`, choose **Created**, and say who
+click **Define origin** on `absorbance.csv`, choose **Created**, and say who
 took them.
 
 ### The diagram: exported from PowerPoint
@@ -136,32 +137,37 @@ exported by hand.
 
 ### The numbers: saved by the script
 
-The script printed the mean drag coefficient, and someone copied it into the
-paper. A printed number has nothing to point back to, so the script needs to
-save it to a results file instead.
+The script printed the rate constants it fit, and someone copied one into
+the paper. A printed number has nothing to point back to, so the script
+needs to save them to a results file instead.
 
-On calkit.io, open `plot_drag.py` from the project's **All files** page,
-click **Edit file**, and add two lines where the script prints the mean:
+On calkit.io, open `fit_rates.py` from the project's **All files** page,
+click **Edit file**, and add two lines where the script prints the rate
+constants:
 
 ```python
 import json
 
-json.dump({"mean_cd": float(mean_cd)}, open("results/drag.json", "w"))
+json.dump(rates, open("results/rates.json", "w"))
 ```
+
+Here `rates` maps each temperature to its rate constant, e.g.,
+`{"25C": 0.0042, "35C": 0.0089}`.
 
 Then, back on Overleaf, click **Run and sync** on any red item. Calkit runs
 the pipeline on GitHub Actions, which makes the plot, the diagram, and the
 new results file, and syncs them to your paper when it's done. The sidebar
 shows it running, then syncing.
 
-Now hover over the typed mean drag coefficient. Calkit finds the value in
-`results/drag.json` that matches it, and offers to use it instead:
+Now hover over the typed rate constant. Calkit finds the value in
+`results/rates.json` that matches it, and offers to use it instead:
 
 ```latex
 % Before
-The mean drag coefficient was 1.13.
+At 25 °C, the rate constant was 0.0042 s$^{-1}$.
 % After
-The mean drag coefficient was \ckvalue[.2f]{results/drag.json}{mean_cd}.
+At 25 °C, the rate constant was \ckvalue[.4f]{results/rates.json}{25C}
+s$^{-1}$.
 ```
 
 `\ckvalue` comes from `calkit.sty`, which Calkit adds to your Overleaf
@@ -177,16 +183,17 @@ can be left as is: add `% calkit: ignore` to the end of its line.
 Now everything in the paper is accounted for, try changing what's behind
 it.
 
-1. New measurements came in: on calkit.io, upload a new version of
-   `drag_data.csv` with a few more rows.
-2. The setup changed: open `setup.pptx` in PowerPoint, move the camera, and
-   upload the new version from the diagram's card on Overleaf.
+1. You repeated the run at 25 °C: on calkit.io, upload a new version of
+   `absorbance.csv` with the new measurements.
+2. You added a water bath to the setup: open `setup.pptx` in PowerPoint,
+   draw it in, and upload the new version from the diagram's card on
+   Overleaf.
 
-On Overleaf, the plot, the diagram, and the mean drag coefficient are all
+On Overleaf, the plot, the diagram, and the rate constant are all
 marked out of date, since what they're made from has changed.
 Click **Run and sync** once. The pipeline reruns only what's out of date,
 and when it finishes, the paper has the new plot, the new diagram, and the
-new mean, without you exporting, uploading, or retyping anything.
+new rate constant, without you exporting, uploading, or retyping anything.
 
 <!-- Screenshot: img/overleaf-paper/out-of-date.png
 The plot, diagram, and number marked out of date, and the "Run and sync"
@@ -194,19 +201,22 @@ button on one of their cards. -->
 
 ## Add a second analysis
 
-Papers grow. Say you now want to show how the wake behind the cylinder
-recovers downstream, from a new script, `plot_wake.py`, that makes a figure
-of velocity profiles and saves the velocity deficit at the last station.
+Papers grow. Say you now want to know how the rate depends on temperature,
+from a new script, `arrhenius.py`, that reads the rate constants
+`fit_rates.py` saved, plots their logarithm against inverse temperature,
+and fits a line to get the activation energy.
 
 On calkit.io, go to the project's **Pipeline** page and add a stage from
-`plot_wake.py`, uploading the script and the data it reads. Calkit finds
-what the script writes, i.e., the figure and the results file, and lists
-them as the stage's outputs. Click **Run** to make them.
+`arrhenius.py`, uploading the script. Calkit finds what the script reads and
+writes, i.e., `results/rates.json`, the Arrhenius plot, and a results file
+with the activation energy, and lists them as the stage's inputs and
+outputs. Since it reads what the first script writes, it runs after it, and
+reruns whenever the rate constants change. Click **Run** to make them.
 
 Back on Overleaf, put the cursor where the figure goes, right-click, and
-choose **Insert from Calkit**. Pick the wake figure, and Calkit inserts a
+choose **Insert from Calkit**. Pick the Arrhenius plot, and Calkit inserts a
 `\ckfigure` for it and syncs it into the paper. Do the same in the text for
-the velocity deficit, which inserts a `\ckvalue`.
+the activation energy, which inserts a `\ckvalue`.
 
 <!-- Screenshot: img/overleaf-paper/insert-from-calkit.png
 The "Insert from Calkit" picker listing the new figure and value. -->

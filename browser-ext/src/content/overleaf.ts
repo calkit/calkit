@@ -1085,7 +1085,12 @@ function drawRuns(): void {
     const canWrite = ["write", "admin", "owner"].includes(
       link.current_user_access ?? "",
     );
-    if (!offer && latest?.status !== "failed") {
+    // Something the document shows being out of date is reason to run
+    // too, even when Overleaf has what the project has
+    const staleShown = editorProblems?.found.some((problems) =>
+      problems.some((p) => p.kind === "stale"),
+    );
+    if (!offer && !staleShown && latest?.status !== "failed") {
       continue;
     }
     const start = el("button", {
@@ -1530,6 +1535,7 @@ async function checkCitations(): Promise<void> {
     return;
   }
   editorProblems = { version: snapshot.version, found };
+  drawRuns();
   toEditor({
     type: "problems",
     version: snapshot.version,

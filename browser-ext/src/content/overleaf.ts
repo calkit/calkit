@@ -39,6 +39,7 @@ import type {
   OverleafLinkPublic,
   Provenance,
   StageFromScriptOrNotebookResponse,
+  OverleafSyncResponse,
   OverleafSyncStatus,
   OverleafSyncStatusFile,
   PipelineRun,
@@ -438,12 +439,7 @@ function renderAddScript(
         // Brings the \ckfigure into the editor
         if (saved.included_in.length) {
           clear(message).append(loading("Syncing"));
-          await send({
-            type: "overleaf.sync",
-            owner,
-            project,
-            path: link.path,
-          });
+          await syncOverleaf(owner, project, link.path);
         }
         await showDefined(container, link, citation);
         container.append(renderRunIt(saved, link));
@@ -976,9 +972,43 @@ async function refreshRuns(link: OverleafLinkPublic): Promise<void> {
     }
   }
   drawRuns();
+  drawRail();
   if (!panel && currentProjectId) {
     const id = currentProjectId;
     mountLauncher(() => openPanel(id), launcherTone());
+  }
+}
+
+/** Sync the paper with its project, showing that it's going meanwhile. */
+async function syncOverleaf(
+  owner: string,
+  project: string,
+  path: string,
+): Promise<OverleafSyncResponse> {
+  syncing = true;
+  drawRail();
+  if (!panel && currentProjectId) {
+    const id = currentProjectId;
+    mountLauncher(() => openPanel(id), launcherTone());
+  }
+  try {
+    return await send({ type: "overleaf.sync", owner, project, path });
+  } finally {
+    syncing = false;
+    drawRail();
+  }
+}
+
+/** Look again at what's synced and shown, now that a sync changed it. */
+function afterSync(): void {
+  provenanceCache.clear();
+  if (!currentProjectId) {
+    return;
+  }
+  if (panel) {
+    void load(currentProjectId);
+  } else {
+    void checkSyncStatus(currentProjectId);
   }
 }
 
@@ -1006,12 +1036,7 @@ async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
   );
   if (canWrite) {
     try {
-      await send({
-        type: "overleaf.sync",
-        owner: link.project_owner_name,
-        project: link.project_name,
-        path: link.path,
-      });
+      await syncOverleaf(link.project_owner_name, link.project_name, link.path);
       pipelineRuns.notice =
         "The pipeline finished on GitHub Actions, and its results were " +
         "synced here.";
@@ -1021,14 +1046,7 @@ async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
         (e instanceof Error ? e.message : String(e));
     }
   }
-  if (!currentProjectId) {
-    return;
-  }
-  if (panel) {
-    void load(currentProjectId);
-  } else {
-    void checkSyncStatus(currentProjectId);
-  }
+  afterSync();
 }
 
 /**
@@ -1975,19 +1993,13 @@ function bringUpToDate(
       button.disabled = true;
       clear(message).append(loading("Syncing"));
       try {
-        await send({
-          type: "overleaf.sync",
-          owner: link.project_owner_name,
-          project: link.project_name,
-          path: link.path,
-        });
+        await syncOverleaf(
+          link.project_owner_name,
+          link.project_name,
+          link.path,
+        );
         clear(message).append(el("div", { class: "dim", text: "Synced." }));
-        provenanceCache.clear();
-        if (currentProjectId) {
-          void (panel
-            ? load(currentProjectId)
-            : checkSyncStatus(currentProjectId));
-        }
+        afterSync();
       } catch (e) {
         button.disabled = false;
         clear(message).append(
@@ -2494,7 +2506,7 @@ function renderInsert(
         // started first would miss it
         await new Promise((resolve) => setTimeout(resolve, 3000));
         try {
-          await send({ type: "overleaf.sync", owner, project, path });
+          await syncOverleaf(owner, project, path);
           reload();
         } catch (e) {
           clear(message).append(
@@ -3036,12 +3048,11 @@ function renderStatus(
     syncButton.disabled = true;
     clear(message).append(loading("Syncing"));
     try {
-      const result = await send({
-        type: "overleaf.sync",
-        owner: link.project_owner_name,
-        project: link.project_name,
-        path: status.path,
-      });
+      const result = await syncOverleaf(
+        link.project_owner_name,
+        link.project_name,
+        status.path,
+      );
       // Shown as in sync straight away, since that's what a sync leaves,
       // while the hub confirms it
       lastSyncNeeded = false;
@@ -3856,7 +3867,13 @@ async function load(overleafProjectId: string): Promise<void> {
  * without the panel opening on top of the document uninvited. A paper
  * not in any project gets it too, since linking it is the first step.
  */
-type LauncherTone = "idle" | "attention" | "reconnect" | "unlinked" | "running";
+type LauncherTone =
+  | "idle"
+  | "attention"
+  | "reconnect"
+  | "unlinked"
+  | "running"
+  | "syncing";
 
 function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
   document.getElementById(LAUNCHER_ID)?.remove();
@@ -3892,8 +3909,9 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
       reconnect: "Calkit: reconnect Overleaf",
       unlinked: "Calkit: not linked",
       running: "Calkit: running",
+      syncing: "Calkit: syncing",
     }[tone],
-    class: ["idle", "running"].includes(tone) ? "" : "attention",
+    class: ["idle", "running", "syncing"].includes(tone) ? "" : "attention",
   });
   button.addEventListener("click", onClick);
   root.append(style, button);
@@ -3902,6 +3920,8 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
 
 // Remembered so a closed panel can still show that something is waiting
 let lastSyncNeeded = false;
+// A sync from here is going, which the sidebar and launcher show
+let syncing = false;
 let lastTokenProblem = false;
 let lastUnlinked = false;
 
@@ -3911,6 +3931,9 @@ function launcherTone(): LauncherTone {
   }
   if (lastUnlinked) {
     return "unlinked";
+  }
+  if (syncing) {
+    return "syncing";
   }
   if (activeRun()) {
     return "running";
@@ -4054,6 +4077,7 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     lastCheck = statuses.length
       ? { overleafProjectId, hubWebUrl: hub, link, status: statuses[0] }
       : null;
+    drawRail();
     // Nothing to say if the panel was opened in the meantime, or if the
     // page moved on to another project
     if (panel || currentProjectId !== overleafProjectId) {
@@ -4279,6 +4303,8 @@ function placeRailPane(): void {
       .dot.warning { background: var(--ck-warning); }
       .dot.error { background: var(--ck-danger); }
       .dot.unknown { background: var(--ck-dim); }
+      .item .spinner { width: 8px; height: 8px; border-width: 1.5px;
+        flex: none; }
       .card {
         margin: 2px 0 8px 14px; padding: 6px 8px; font-size: 12px;
         border-left: 2px solid var(--ck-border);
@@ -4347,6 +4373,67 @@ function drawRail(): void {
       attrs: { target: "_blank" },
     }),
   );
+  // What's going on between the paper and its project
+  const running = activeRun();
+  const status =
+    lastCheck && linkKey(lastCheck.link) === linkKey(link)
+      ? lastCheck.status
+      : null;
+  if (syncing) {
+    body.append(loading("Syncing with the project"));
+  } else if (running) {
+    body.append(
+      loading(
+        running.status === "running"
+          ? "Running on GitHub Actions"
+          : "Waiting to run on GitHub Actions",
+      ),
+    );
+  } else if (status?.in_sync) {
+    body.append(
+      el("div", { class: "row small" }, [
+        el("span", { class: "dot" }),
+        el("span", { text: "In sync with the project" }),
+      ]),
+    );
+  } else if (status) {
+    const canWrite = ["write", "admin", "owner"].includes(
+      link.current_user_access ?? "",
+    );
+    const message = el("div", { class: "small" });
+    const button = el("button", {
+      class: "action secondary",
+      text: "Sync now",
+      disabled: !canWrite,
+      title: canWrite
+        ? "Push project files to Overleaf and pull Overleaf edits back"
+        : "You need write access to this project to sync",
+    });
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await syncOverleaf(
+          link.project_owner_name,
+          link.project_name,
+          status.path,
+        );
+        afterSync();
+      } catch (e) {
+        button.disabled = false;
+        clear(message).append(
+          errorMessage(e instanceof Error ? e.message : String(e)),
+        );
+      }
+    });
+    body.append(
+      el("div", { class: "row small" }, [
+        el("span", { class: "dot warning" }),
+        el("span", { class: "grow", text: "Changes to sync" }),
+        button,
+      ]),
+      message,
+    );
+  }
   // Components the open document shows, each with what's wrong with it
   body.append(el("h3", { text: "Components" }));
   const items = editorCitations?.items ?? [];
@@ -4439,6 +4526,8 @@ function drawRail(): void {
   }
   for (const name of pipeline?.ck_stages ?? []) {
     const status = pipeline?.stage_statuses[name]?.status ?? "unknown";
+    // What a run going now will run
+    const toRun = Boolean(running) && ["stale", "not-run"].includes(status);
     body.append(
       el(
         "a",
@@ -4449,18 +4538,23 @@ function drawRail(): void {
           title: status,
         },
         [
-          el("span", {
-            class: `dot ${
-              status === "up-to-date"
-                ? ""
-                : ["stale", "not-run"].includes(status)
-                ? "warning"
-                : "unknown"
-            }`,
-          }),
+          toRun
+            ? el("span", { class: "spinner" })
+            : el("span", {
+                class: `dot ${
+                  status === "up-to-date"
+                    ? ""
+                    : ["stale", "not-run"].includes(status)
+                    ? "warning"
+                    : "unknown"
+                }`,
+              }),
           el("span", { class: "grow small", text: name }),
           status !== "up-to-date"
-            ? el("span", { class: "dim small", text: status })
+            ? el("span", {
+                class: "dim small",
+                text: toRun ? "running" : status,
+              })
             : null,
         ],
       ),

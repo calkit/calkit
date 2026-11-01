@@ -8,7 +8,7 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
-  PipelineStage,
+  ExportStage,
   StageFile,
   OverleafLookup,
   OverleafSyncResponse,
@@ -143,15 +143,15 @@ export type Request =
       createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
     }
   | {
-      type: "project.addStage";
+      type: "project.addExportStage";
       owner: string;
       project: string;
-      /** Gets a number appended if taken. */
-      name?: string;
-      /** As written under its name in calkit.yaml. */
-      stage: Record<string, unknown>;
+      /** The file it's exported from, and the figure it's exported to. */
+      source: string;
+      output: string;
+      /** The app a person exports it with, e.g., Photoshop. */
+      app?: string;
       files?: StageFile[];
-      message?: string;
     }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
@@ -238,7 +238,7 @@ export interface ResponseMap {
   "project.provenance": Provenance;
   "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
   "project.recordOrigin": { path: string };
-  "project.addStage": PipelineStage;
+  "project.addExportStage": ExportStage;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

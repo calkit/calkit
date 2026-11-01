@@ -56,6 +56,7 @@ from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.export import export_app
 from calkit.cli.fix import (
     OursOpt,
     PreferOpt,
@@ -96,6 +97,11 @@ app.add_typer(show_app, name="show", help="Show Calkit objects.")
 app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
+app.add_typer(
+    export_app,
+    name="export",
+    help="Export data and artifacts from various applications.",
+)
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
@@ -3931,6 +3937,27 @@ def run(
                 }
                 if isinstance(props.get("memory_gb"), (int, float)):
                     entry["system"]["memory_gb"] = round(props["memory_gb"], 1)
+            # What the stage itself says to record, e.g., the version of an
+            # app it runs, read here, so only for a run on this machine
+            base_name = lock_name.split("@")[0]
+            ck_stage = (
+                run_stages.get(base_name)
+                if lock_dir is None and machine_info[outer] is None
+                else None
+            )
+            if isinstance(ck_stage, dict):
+                from calkit.models.pipeline import Pipeline
+
+                try:
+                    model = Pipeline.model_validate(
+                        {"stages": {base_name: ck_stage}}
+                    ).stages[base_name]
+                    extra = model.run_properties()
+                except Exception as e:
+                    warn(f"Couldn't read what {stage_name} records: {e}")
+                    extra = {}
+                if extra:
+                    entry.setdefault("system", {}).update(extra)
             stage_runs[lock_dir][lock_name] = entry
             # Replacing a record made from here, from before a subproject's
             # were kept with it

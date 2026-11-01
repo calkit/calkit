@@ -23,6 +23,8 @@ import type {
   GithubRepo,
   ExportStage,
   ImportUpdate,
+  PipelineRun,
+  PipelineRuns,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -298,6 +300,15 @@ async function handle(message: Request): Promise<unknown> {
       return request<ImportUpdate>(
         `${projectPath(message.owner, message.project)}/imports/update`,
         { method: "POST", body: { path: message.path } },
+      );
+    case "project.pipelineRuns":
+      return request<PipelineRuns>(
+        `${projectPath(message.owner, message.project)}/pipeline/runs`,
+      );
+    case "project.startPipelineRun":
+      return request<PipelineRun>(
+        `${projectPath(message.owner, message.project)}/pipeline/runs`,
+        { method: "POST" },
       );
     case "project.addExportStage":
       return request<ExportStage>(

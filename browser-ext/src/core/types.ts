@@ -251,6 +251,27 @@ export interface StageFromScriptOrNotebookResponse {
   git_repo_url: string;
 }
 
+/** A run of the pipeline, wherever it ran. */
+export interface PipelineRun {
+  where: "github-actions";
+  /** Unknown for a run just started, until GitHub lists it. */
+  id?: string | null;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  started_at?: string | null;
+  url?: string | null;
+  commit?: string | null;
+  branch?: string | null;
+  started_by?: string | null;
+}
+
+export interface PipelineRuns {
+  /** Newest first. */
+  runs: PipelineRun[];
+  github_workflow?: string | null;
+  can_start: boolean;
+  cannot_start_reason?: string | null;
+}
+
 export interface ProvenanceGap {
   path: string;
   steps: { path: string; stage?: string | null }[];

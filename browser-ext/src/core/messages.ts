@@ -10,6 +10,8 @@ import type {
   GithubRepo,
   ExportStage,
   ImportUpdate,
+  PipelineRun,
+  PipelineRuns,
   StageFile,
   OverleafLookup,
   OverleafSyncResponse,
@@ -143,6 +145,8 @@ export type Request =
       importedFrom?: Record<string, unknown>;
       createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
     }
+  | { type: "project.pipelineRuns"; owner: string; project: string }
+  | { type: "project.startPipelineRun"; owner: string; project: string }
   | {
       type: "project.updateImport";
       owner: string;
@@ -247,6 +251,8 @@ export interface ResponseMap {
   "project.recordOrigin": { path: string };
   "project.updateImport": ImportUpdate;
   "project.addExportStage": ExportStage;
+  "project.pipelineRuns": PipelineRuns;
+  "project.startPipelineRun": PipelineRun;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

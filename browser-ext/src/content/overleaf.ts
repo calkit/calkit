@@ -41,6 +41,8 @@ import type {
   StageFromScriptOrNotebookResponse,
   OverleafSyncStatus,
   OverleafSyncStatusFile,
+  PipelineRun,
+  PipelineRuns,
   ProjectPublic,
 } from "../core/types";
 import {
@@ -443,7 +445,7 @@ function renderAddScript(
           });
         }
         await showDefined(container, link, citation);
-        container.append(renderRunIt(saved, `${owner}/${project}`));
+        container.append(renderRunIt(saved, link));
       } catch (e) {
         fail(e);
         save.disabled = false;
@@ -852,7 +854,7 @@ function renderDefineOrigin(
 /** How to run a stage that's never run, since Overleaf can't. */
 function renderRunIt(
   saved: StageFromScriptOrNotebookResponse,
-  spec: string,
+  link: OverleafLinkPublic,
 ): HTMLElement {
   const folder = saved.git_repo_url
     .replace(/\.git$/, "")
@@ -860,7 +862,7 @@ function renderRunIt(
     .pop();
   const commands = [
     "curl -LsSf install.calkit.org | sh",
-    `calkit clone ${spec}`,
+    `calkit clone ${link.project_owner_name}/${link.project_name}`,
     `cd ${folder}`,
     "calkit run --save --overleaf",
   ].join("\n");
@@ -873,8 +875,15 @@ function renderRunIt(
     el("div", {
       class: "small",
       text:
-        `Added stage ${saved.stage_name}. It hasn't run yet. To run it ` +
-        "and bring the result into this paper, on your computer:",
+        `Added stage ${saved.stage_name}. It hasn't run yet. Run it on ` +
+        "GitHub Actions, and its results come into this paper when it " +
+        "finishes:",
+    }),
+    renderRuns(link, true),
+    el("div", {
+      class: "small",
+      style: { marginTop: "6px" },
+      text: "Or on your computer:",
     }),
     el("pre", {
       class: "name",
@@ -883,6 +892,234 @@ function renderRunIt(
     }),
     el("div", { class: "actions" }, [copy]),
   ]);
+}
+
+// The project's pipeline runs, checked again while one is going, so a
+// finished run syncs to Overleaf even with the panel closed
+let pipelineRuns: {
+  key: string;
+  runs: PipelineRuns;
+  // When one was started here, since GitHub takes a moment to list it
+  startedAt: number | null;
+  // What the last finished run did here
+  notice?: string;
+} | null = null;
+let runsTimer: ReturnType<typeof setTimeout> | undefined;
+// Where the open panel shows them, redrawn as they change
+const runsBoxes = new Set<{
+  box: HTMLElement;
+  link: OverleafLinkPublic;
+  offer: boolean;
+}>();
+
+function linkKey(link: OverleafLinkPublic): string {
+  return `${link.project_owner_name}/${link.project_name}`;
+}
+
+/** The run going now, if there is one. */
+function activeRun(): PipelineRun | null {
+  if (!pipelineRuns) {
+    return null;
+  }
+  const latest = pipelineRuns.runs.runs[0];
+  if (latest && ["queued", "running"].includes(latest.status)) {
+    return latest;
+  }
+  const startedAt = pipelineRuns.startedAt;
+  const listed =
+    latest?.started_at &&
+    startedAt !== null &&
+    Date.parse(latest.started_at) >= startedAt - 30_000;
+  if (startedAt !== null && !listed && Date.now() - startedAt < 120_000) {
+    return { where: "github-actions", status: "queued" };
+  }
+  return null;
+}
+
+/** Check the project's runs, and keep checking while one is going. */
+async function refreshRuns(link: OverleafLinkPublic): Promise<void> {
+  clearTimeout(runsTimer);
+  const key = linkKey(link);
+  const known = pipelineRuns?.key === key ? pipelineRuns : null;
+  const wasRunning = Boolean(known && activeRun());
+  let runs: PipelineRuns;
+  try {
+    runs = await send({
+      type: "project.pipelineRuns",
+      owner: link.project_owner_name,
+      project: link.project_name,
+    });
+  } catch {
+    return;
+  }
+  if (currentLink && linkKey(currentLink) !== key) {
+    return;
+  }
+  pipelineRuns = {
+    key,
+    runs,
+    startedAt: known?.startedAt ?? null,
+    notice: known?.notice,
+  };
+  if (activeRun()) {
+    runsTimer = setTimeout(() => void refreshRuns(link), 15_000);
+  } else if (wasRunning) {
+    pipelineRuns.startedAt = null;
+    if (runs.runs[0]?.status === "succeeded") {
+      await syncAfterRun(link);
+    } else {
+      pipelineRuns.notice = undefined;
+    }
+  }
+  drawRuns();
+  if (!panel && currentProjectId) {
+    const id = currentProjectId;
+    mountLauncher(() => openPanel(id), launcherTone());
+  }
+}
+
+/** Bring what a finished run made into this paper. */
+async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
+  if (!pipelineRuns) {
+    return;
+  }
+  const canWrite = ["write", "admin", "owner"].includes(
+    link.current_user_access ?? "",
+  );
+  if (canWrite) {
+    try {
+      await send({
+        type: "overleaf.sync",
+        owner: link.project_owner_name,
+        project: link.project_name,
+        path: link.path,
+      });
+      pipelineRuns.notice =
+        "The pipeline finished on GitHub Actions, and its results were " +
+        "synced here.";
+    } catch (e) {
+      pipelineRuns.notice =
+        "The pipeline finished on GitHub Actions, but syncing failed: " +
+        (e instanceof Error ? e.message : String(e));
+    }
+  }
+  if (!currentProjectId) {
+    return;
+  }
+  if (panel) {
+    void load(currentProjectId);
+  } else {
+    void checkSyncStatus(currentProjectId);
+  }
+}
+
+/**
+ * The pipeline's latest run, and a button to start one when ``offer``
+ * says there's something to run.
+ */
+function renderRuns(link: OverleafLinkPublic, offer: boolean): HTMLElement {
+  const box = el("div", { style: { marginTop: "6px" } });
+  runsBoxes.add({ box, link, offer });
+  if (pipelineRuns?.key === linkKey(link)) {
+    drawRuns();
+  } else {
+    void refreshRuns(link);
+  }
+  return box;
+}
+
+function drawRuns(): void {
+  for (const entry of runsBoxes) {
+    const { box, link, offer } = entry;
+    if (!box.isConnected && box.dataset.drawn) {
+      runsBoxes.delete(entry);
+      continue;
+    }
+    box.dataset.drawn = "1";
+    clear(box);
+    if (pipelineRuns?.key !== linkKey(link)) {
+      continue;
+    }
+    const { runs, notice } = pipelineRuns;
+    const run = activeRun();
+    const latest = runs.runs[0];
+    const view = (r: PipelineRun, text: string) =>
+      r.url
+        ? el("a", { text, href: r.url, attrs: { target: "_blank" } })
+        : null;
+    if (run) {
+      const since = run.started_at
+        ? ` since ${new Date(run.started_at).toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+          })}`
+        : "";
+      box.append(
+        el("div", { class: "row" }, [
+          el("span", { class: "spinner" }),
+          el("div", {
+            class: "grow small",
+            text:
+              run.status === "running"
+                ? `Running on GitHub Actions${since}`
+                : "Waiting to run on GitHub Actions",
+          }),
+          view(run, "View"),
+        ]),
+      );
+      continue;
+    }
+    if (notice) {
+      box.append(el("div", { class: "dim small", text: notice }));
+    } else if (latest?.status === "failed") {
+      box.append(
+        el("div", { class: "row" }, [
+          el("div", {
+            class: "grow small",
+            text: "The last run on GitHub Actions failed.",
+          }),
+          view(latest, "See why"),
+        ]),
+      );
+    }
+    const canWrite = ["write", "admin", "owner"].includes(
+      link.current_user_access ?? "",
+    );
+    if (!offer && latest?.status !== "failed") {
+      continue;
+    }
+    const start = el("button", {
+      class: "action",
+      text: "Run on GitHub Actions",
+      disabled: !canWrite || !runs.can_start,
+      title: !canWrite
+        ? "You need write access to this project to run it"
+        : runs.cannot_start_reason ?? "Run the pipeline on GitHub Actions",
+    });
+    const message = el("div", { class: "small" });
+    start.addEventListener("click", async () => {
+      start.disabled = true;
+      clear(message).append(loading("Starting"));
+      try {
+        await send({
+          type: "project.startPipelineRun",
+          owner: link.project_owner_name,
+          project: link.project_name,
+        });
+        if (pipelineRuns) {
+          pipelineRuns.startedAt = Date.now();
+          pipelineRuns.notice = undefined;
+        }
+        await refreshRuns(link);
+      } catch (e) {
+        start.disabled = false;
+        clear(message).append(
+          errorMessage(e instanceof Error ? e.message : String(e)),
+        );
+      }
+    });
+    box.append(el("div", { class: "actions" }, [start]), message);
+  }
 }
 
 /** A file's contents, base64-encoded, as the hub takes an upload. */
@@ -2644,6 +2881,11 @@ function renderStatus(
       }),
     );
   }
+  // Something stale is what a run would fix
+  const stale = [...status.files_to_push, ...status.files_to_delete].some(
+    (f) => f.stage_status && f.stage_status.status !== "up-to-date",
+  );
+  body.append(renderRuns(link, stale));
   const syncButton = el("button", {
     class: "action",
     text: "Sync now",
@@ -3478,7 +3720,7 @@ async function load(overleafProjectId: string): Promise<void> {
  * without the panel opening on top of the document uninvited. A paper
  * not in any project gets it too, since linking it is the first step.
  */
-type LauncherTone = "idle" | "attention" | "reconnect" | "unlinked";
+type LauncherTone = "idle" | "attention" | "reconnect" | "unlinked" | "running";
 
 function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
   document.getElementById(LAUNCHER_ID)?.remove();
@@ -3513,8 +3755,9 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
       attention: "Calkit: sync needed",
       reconnect: "Calkit: reconnect Overleaf",
       unlinked: "Calkit: not linked",
+      running: "Calkit: running",
     }[tone],
-    class: tone === "idle" ? "" : "attention",
+    class: ["idle", "running"].includes(tone) ? "" : "attention",
   });
   button.addEventListener("click", onClick);
   root.append(style, button);
@@ -3526,6 +3769,19 @@ let lastSyncNeeded = false;
 let lastTokenProblem = false;
 let lastUnlinked = false;
 
+function launcherTone(): LauncherTone {
+  if (lastTokenProblem) {
+    return "reconnect";
+  }
+  if (lastUnlinked) {
+    return "unlinked";
+  }
+  if (activeRun()) {
+    return "running";
+  }
+  return lastSyncNeeded ? "attention" : "idle";
+}
+
 function openPanel(
   overleafProjectId: string,
   fill?: (body: HTMLElement) => void,
@@ -3536,16 +3792,7 @@ function openPanel(
     title: "Calkit",
     onClose: () => {
       panel = null;
-      mountLauncher(
-        () => openPanel(overleafProjectId),
-        lastTokenProblem
-          ? "reconnect"
-          : lastUnlinked
-          ? "unlinked"
-          : lastSyncNeeded
-          ? "attention"
-          : "idle",
-      );
+      mountLauncher(() => openPanel(overleafProjectId), launcherTone());
     },
   });
   if (fill) {
@@ -3648,6 +3895,9 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     hubWebUrl = hub;
     currentLink = link;
     void checkCitations();
+    if (pipelineRuns?.key !== linkKey(link)) {
+      void refreshRuns(link);
+    }
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
@@ -3669,10 +3919,7 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     if (panel || currentProjectId !== overleafProjectId) {
       return;
     }
-    mountLauncher(
-      () => openPanel(overleafProjectId),
-      lastSyncNeeded ? "attention" : "idle",
-    );
+    mountLauncher(() => openPanel(overleafProjectId), launcherTone());
   } catch (e) {
     if (!(await current())) {
       return;

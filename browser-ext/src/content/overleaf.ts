@@ -3692,8 +3692,8 @@ function drawRail(): void {
       attrs: { target: "_blank" },
     }),
   );
-  // What the open document shows, each with what's wrong with it
-  body.append(el("h3", { text: "In this file" }));
+  // Components the open document shows, each with what's wrong with it
+  body.append(el("h3", { text: "Components" }));
   const items = editorCitations?.items ?? [];
   const checked =
     editorProblems && editorProblems.version === editorCitations?.version

@@ -74,6 +74,10 @@ def read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
         return None
 
 
+# Past this many arrows, labeling them hides the graph they're on
+MAX_LABELED_EDGES = 30
+
+
 def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
     """Create a Mermaid diagram from a pipeline file (typically ``dvc.yaml``).
 
@@ -120,7 +124,9 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
             ]
         graph = nx.relabel_nodes(graph, lambda stage: stage.name)
     # As DVC writes it, so node IDs and order match ``dvc dag --mermaid``,
-    # with the arrows labeled
+    # with the arrows labeled by file name, a couple at most, unless there
+    # are so many arrows that labels would bury the graph
+    labeled = len(carried) <= MAX_LABELED_EDGES
     mermaid = "flowchart TD"
     total_nodes = 0
     for pipeline_graph in get_pipelines(graph):
@@ -131,15 +137,12 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
             mermaid += f'\n\t{node_ids[node]}["{node}"]'
         edges = sorted((str(a), str(b)) for b, a in pipeline_graph.edges)
         for a, b in edges:
-            paths = carried.get((a, b), [])
-            label = "<br>".join(paths[:3]) + (
-                f"<br>+{len(paths) - 3} more" if len(paths) > 3 else ""
+            names = [os.path.basename(p) or p for p in carried.get((a, b), [])]
+            label = "<br>".join(names[:2]) + (
+                f"<br>+{len(names) - 2} more" if len(names) > 2 else ""
             )
-            arrow = (
-                f'-->|"{label.replace(chr(34), "#quot;")}"|'
-                if label
-                else "-->"
-            )
+            label = label.replace('"', "#quot;")
+            arrow = f'-->|"{label}"|' if labeled and label else "-->"
             mermaid += f"\n\t{node_ids[a]}{arrow}{node_ids[b]}"
     return mermaid
 

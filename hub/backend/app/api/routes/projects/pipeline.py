@@ -17,6 +17,7 @@ import base64
 import binascii
 import json
 import os
+import re
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -1086,3 +1087,111 @@ def post_project_pipeline_run(
         branch=branch,
         started_by=current_user.github_username,
     )
+
+
+class PipelineRunStep(BaseModel):
+    name: str
+    status: str
+    conclusion: str | None = None
+
+
+class PipelineRunJob(BaseModel):
+    name: str
+    status: str
+    conclusion: str | None = None
+    steps: list[PipelineRunStep] = []
+    # Only once the job finishes, since GitHub keeps it until then
+    log: str | None = None
+    # The start was cut, keeping the end, which is where failures are
+    log_truncated: bool = False
+
+
+class PipelineRunLogs(BaseModel):
+    jobs: list[PipelineRunJob] = []
+
+
+MAX_RUN_LOG_CHARS = 200_000
+# GitHub's timestamp on every line, and its markers for folding sections
+_LOG_TIMESTAMP_RE = re.compile(r"^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?", re.M)
+_LOG_GROUP_RE = re.compile(r"^##\[(group|endgroup)\]", re.M)
+
+
+@router.get(
+    "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs"
+)
+def get_project_pipeline_run_logs(
+    owner_name: str,
+    project_name: str,
+    run_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineRunLogs:
+    """A run's jobs, their steps, and each finished job's log."""
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    if not project.github_repo:
+        raise HTTPException(422, "This project isn't on GitHub")
+    if not run_id.isdigit():
+        raise HTTPException(422, "Not a GitHub Actions run ID")
+    token = _github_token_for_repo(session, current_user, project.github_repo)
+    headers = {"Accept": "application/vnd.github+json"} | (
+        {"Authorization": f"Bearer {token}"} if token else {}
+    )
+    base = f"https://api.github.com/repos/{project.github_repo}/actions"
+    try:
+        resp = requests.get(
+            f"{base}/runs/{run_id}/jobs", headers=headers, timeout=10
+        )
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Could not reach GitHub: {e}")
+    if not resp.ok:
+        raise HTTPException(
+            404 if resp.status_code == 404 else 502,
+            f"GitHub didn't list the run's jobs: {resp.reason}",
+        )
+    jobs = []
+    for job in resp.json().get("jobs", []):
+        log = None
+        truncated = False
+        if job.get("status") == "completed":
+            try:
+                # Redirects to storage, which doesn't get the token
+                log_resp = requests.get(
+                    f"{base}/jobs/{job['id']}/logs",
+                    headers=headers,
+                    timeout=20,
+                )
+                if log_resp.ok:
+                    log = _LOG_GROUP_RE.sub(
+                        "", _LOG_TIMESTAMP_RE.sub("", log_resp.text)
+                    )
+                    if len(log) > MAX_RUN_LOG_CHARS:
+                        log = log[-MAX_RUN_LOG_CHARS:]
+                        truncated = True
+            except requests.RequestException as e:
+                logger.warning(
+                    f"Could not get the log of job {job['id']}: {e}"
+                )
+        jobs.append(
+            PipelineRunJob(
+                name=job.get("name") or "",
+                status=job.get("status") or "",
+                conclusion=job.get("conclusion"),
+                steps=[
+                    PipelineRunStep(
+                        name=step.get("name") or "",
+                        status=step.get("status") or "",
+                        conclusion=step.get("conclusion"),
+                    )
+                    for step in job.get("steps") or []
+                ],
+                log=log,
+                log_truncated=truncated,
+            )
+        )
+    return PipelineRunLogs(jobs=jobs)

@@ -163,7 +163,7 @@ stages:
       md5: 4960953114330139033d7281122861de
       size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8 
       --attendees=25 --supported=60 --indirect-rate=0
     deps:
     - path: .python-version
@@ -216,8 +216,8 @@ stages:
       md5: 1078d8d6187e0e072d20f488176ff71e
       size: 50208
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/latex-word-round-trip.py --engine=libreoffice
+    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
+      --engine=libreoffice
     deps:
     - path: .python-version
       hash: md5
@@ -305,6 +305,76 @@ stages:
       hash: md5
       md5: 050df5f87097cc2a733a4985c9c49f3b
       size: 335
+  find-calkit-projects:
+    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
+    deps:
+    - path: .calkit/local/current-periods/1-day-utc.txt
+      hash: md5
+      md5: dc02e941aa297ba7f915c89d7a63aead
+      size: 11
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/find-calkit-projects.py
+      hash: md5
+      md5: f2ad6eafecd8555fc49762b503b81e82
+      size: 9233
+    - path: uv.lock
+      hash: md5
+      md5: b5d0e9511259dec7553283d5727fe0c1
+      size: 1727624
+    outs:
+    - path: data/calkit-projects/projects.csv
+      hash: md5
+      md5: 3dd251619178e99cebb662d6c94abbeb
+      size: 11725
+  find-calkit-papers:
+    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
+    deps:
+    - path: .calkit/local/current-periods/1-day-utc.txt
+      hash: md5
+      md5: dc02e941aa297ba7f915c89d7a63aead
+      size: 11
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: data/calkit-projects/projects.csv
+      hash: md5
+      md5: 3dd251619178e99cebb662d6c94abbeb
+      size: 11725
+    - path: scripts/find-calkit-papers.py
+      hash: md5
+      md5: 47c5738cb38a674825999afa124c74c8
+      size: 6400
+    - path: uv.lock
+      hash: md5
+      md5: b5d0e9511259dec7553283d5727fe0c1
+      size: 1727624
+    outs:
+    - path: data/calkit-projects/papers.csv
+      hash: md5
+      md5: 8922d813a4e72bf1600400fd0d6f38d8
+      size: 5368
+  one-pager-font:
+    cmd: calkit xenv -n tex --no-check -- sh 
+      .calkit/stage-commands/one-pager-font.sh
+    deps:
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: b2d28555a90965646645402d6964aa46.dir
+      size: 2832
+      nfiles: 2
+    - path: .calkit/stage-commands/one-pager-font.sh
+      hash: md5
+      md5: ec8d7395661d6af8e24623c6b1840985
+      size: 59
+    outs:
+    - path: docs/one-pager/texgyreheros-regular.otf
+      hash: md5
+      md5: 46896831ad260afebc87cd85a7ea159a
+      size: 133600
   one-pager/pdf:
     cmd: calkit latex from-markdown docs/one-pager/main.md -o 
       docs/one-pager/main.pdf -e tex --no-check --template 
@@ -382,73 +452,3 @@ stages:
       hash: md5
       md5: 2166ba045769646e4b97a78db9e84aa4
       size: 539
-  find-calkit-projects:
-    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
-    deps:
-    - path: .calkit/local/current-periods/1-day-utc.txt
-      hash: md5
-      md5: dc02e941aa297ba7f915c89d7a63aead
-      size: 11
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: scripts/find-calkit-projects.py
-      hash: md5
-      md5: f2ad6eafecd8555fc49762b503b81e82
-      size: 9233
-    - path: uv.lock
-      hash: md5
-      md5: b5d0e9511259dec7553283d5727fe0c1
-      size: 1727624
-    outs:
-    - path: data/calkit-projects/projects.csv
-      hash: md5
-      md5: 3dd251619178e99cebb662d6c94abbeb
-      size: 11725
-  find-calkit-papers:
-    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
-    deps:
-    - path: .calkit/local/current-periods/1-day-utc.txt
-      hash: md5
-      md5: dc02e941aa297ba7f915c89d7a63aead
-      size: 11
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: data/calkit-projects/projects.csv
-      hash: md5
-      md5: 3dd251619178e99cebb662d6c94abbeb
-      size: 11725
-    - path: scripts/find-calkit-papers.py
-      hash: md5
-      md5: 47c5738cb38a674825999afa124c74c8
-      size: 6400
-    - path: uv.lock
-      hash: md5
-      md5: b5d0e9511259dec7553283d5727fe0c1
-      size: 1727624
-    outs:
-    - path: data/calkit-projects/papers.csv
-      hash: md5
-      md5: 8922d813a4e72bf1600400fd0d6f38d8
-      size: 5368
-  one-pager-font:
-    cmd: calkit xenv -n tex --no-check -- sh 
-      .calkit/stage-commands/one-pager-font.sh
-    deps:
-    - path: .calkit/env-locks/tex
-      hash: md5
-      md5: b2d28555a90965646645402d6964aa46.dir
-      size: 2832
-      nfiles: 2
-    - path: .calkit/stage-commands/one-pager-font.sh
-      hash: md5
-      md5: ec8d7395661d6af8e24623c6b1840985
-      size: 59
-    outs:
-    - path: docs/one-pager/texgyreheros-regular.otf
-      hash: md5
-      md5: 46896831ad260afebc87cd85a7ea159a
-      size: 133600

@@ -159,8 +159,19 @@ def test_sync_ck_components(tmp_dir):
     ck_info["overleaf_sync"] = {
         "paper": {"url": "https://www.overleaf.com/project/abc123"}
     }
+    ck_info["environments"] = {"tex": {"kind": "docker", "image": "texlive"}}
+    ck_info["pipeline"] = {
+        "stages": {
+            "build-paper": {
+                "kind": "latex",
+                "environment": "tex",
+                "target_path": "paper/main.tex",
+            }
+        }
+    }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(write=True)
     _commit_all(repo, "Link paper")
     overleaf_dir = tmp_dir / "overleaf"
     os.makedirs(overleaf_dir)
@@ -219,6 +230,11 @@ def test_sync_ck_components(tmp_dir):
     with open(overleaf_dir / "_calkit" / "values.tex") as f:
         assert "{1.5}" in f.read()
     assert status()["in_sync"]
+    # The paper's stage reads what it now shows, committed with the sync
+    with open("dvc.yaml") as f:
+        deps = calkit.ryaml.load(f)["stages"]["build-paper"]["deps"]
+    assert {"figures/plot.png", "results/m.json"} <= set(deps)
+    assert not repo.git.status("--porcelain", "--", "dvc.yaml")
     # What Calkit writes is pushed, but kept out of the project's Git
     assert "paper/calkit.sty" not in calkit.git.ls_files(repo)
     assert repo.ignored("paper/calkit.sty")

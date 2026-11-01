@@ -5504,6 +5504,99 @@ export const PipelineRunSchema = {
   description: "A run of the pipeline, wherever it ran.",
 } as const
 
+export const PipelineRunJobSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      title: "Status",
+    },
+    conclusion: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Conclusion",
+    },
+    steps: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunStep",
+      },
+      type: "array",
+      title: "Steps",
+      default: [],
+    },
+    log: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Log",
+    },
+    log_truncated: {
+      type: "boolean",
+      title: "Log Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunJob",
+} as const
+
+export const PipelineRunLogsSchema = {
+  properties: {
+    jobs: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunJob",
+      },
+      type: "array",
+      title: "Jobs",
+      default: [],
+    },
+  },
+  type: "object",
+  title: "PipelineRunLogs",
+} as const
+
+export const PipelineRunStepSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      title: "Status",
+    },
+    conclusion: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Conclusion",
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunStep",
+} as const
+
 export const PipelineRunsSchema = {
   properties: {
     runs: {

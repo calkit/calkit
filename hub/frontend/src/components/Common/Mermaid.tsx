@@ -5,6 +5,7 @@ import {
   type ZoomBehavior,
   zoom,
   zoomIdentity,
+  zoomTransform,
 } from "d3-zoom"
 import { useEffect, useRef, useState } from "react"
 import { FaExclamationTriangle, FaExpandAlt, FaHome } from "react-icons/fa"
@@ -28,7 +29,7 @@ interface MermaidProps {
   setIsOversizedShown?: (shown: boolean) => void
   /** Pan/zoom the diagram to center the node for this pipeline stage. */
   zoomToStage?: string
-  /** Outline that stage without moving the view, e.g., once it's clicked. */
+  /** Only center that stage, at the current zoom, e.g., once it's clicked. */
   isZoomSkipped?: boolean
   /**
    * Called with the stage name when a stage node is clicked. The diagram also
@@ -219,7 +220,6 @@ const Mermaid = ({
     if (!match) return
     // Outline the node (fill is left alone so it still shows staleness).
     match.classList.add("ck-stage-highlight")
-    if (isZoomSkipped) return
     const gCTM = gEl.getCTM()
     const nCTM = match.getCTM()
     if (!gCTM || !nCTM) return
@@ -237,15 +237,18 @@ const Mermaid = ({
     const vbH = hasVb ? vb.height : svgEl.clientHeight
     const cx = (hasVb ? vb.x : 0) + vbW / 2
     const cy = (hasVb ? vb.y : 0) + vbH / 2
-    // Scale so the node fills ~45% of the view, clamped to a sane range.
-    const k = Math.max(
-      1,
-      Math.min(
-        2.5,
-        (vbW * 0.45) / (bbox.width || 1),
-        (vbH * 0.45) / (bbox.height || 1),
-      ),
-    )
+    // Scale so the node fills ~45% of the view, clamped to a sane range,
+    // unless it was clicked, where the view only moves to center it
+    const k = isZoomSkipped
+      ? zoomTransform(svgEl).k
+      : Math.max(
+          1,
+          Math.min(
+            2.5,
+            (vbW * 0.45) / (bbox.width || 1),
+            (vbH * 0.45) / (bbox.height || 1),
+          ),
+        )
     const tx = cx - k * pt.x
     const ty = cy - k * pt.y
     select<Element, unknown>(svgEl).call(

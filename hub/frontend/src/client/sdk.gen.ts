@@ -185,6 +185,8 @@ import type {
   GetProjectOverleafSyncStatusResponses,
   GetProjectPipelineErrors,
   GetProjectPipelineResponses,
+  GetProjectPipelineRunLogsErrors,
+  GetProjectPipelineRunLogsResponses,
   GetProjectPipelineRunsErrors,
   GetProjectPipelineRunsResponses,
   GetProjectPipelineStageErrors,
@@ -7909,6 +7911,48 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/pipeline/runs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Pipeline Run Logs
+   *
+   * A run's jobs, their steps, and each finished job's log.
+   */
+  public static getProjectPipelineRunLogs<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      run_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPipelineRunLogsResponses,
+    GetProjectPipelineRunLogsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "run_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPipelineRunLogsResponses,
+      GetProjectPipelineRunLogsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs",
       ...options,
       ...params,
     })

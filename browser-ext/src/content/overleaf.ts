@@ -2966,6 +2966,16 @@ function renderStatus(
           class: "dim small",
           text: `Synced folder: ${status.path}`,
         }),
+        // Where to work on what the paper shows, without installing
+        // anything; the Codespace opens on the paper
+        link.github_repo
+          ? el("a", {
+              class: "small",
+              text: "Open in Codespaces",
+              href: `https://codespaces.new/${link.github_repo}?quickstart=1`,
+              title: "Work on the project in a GitHub Codespace",
+            })
+          : null,
       ]),
       status.in_sync
         ? el("span", { class: "badge ok", text: "in sync" })
@@ -4370,11 +4380,22 @@ function drawRail(): void {
     link.project_name,
   );
   body.append(
-    el("a", {
-      text: linkKey(link),
-      href: base,
-      attrs: { target: "_blank" },
-    }),
+    el("div", { class: "row" }, [
+      el("a", {
+        class: "grow",
+        text: linkKey(link),
+        href: base,
+        attrs: { target: "_blank" },
+      }),
+      link.github_repo
+        ? el("a", {
+            class: "small",
+            text: "Open in Codespaces",
+            href: `https://codespaces.new/${link.github_repo}?quickstart=1`,
+            title: "Work on the project in a GitHub Codespace",
+          })
+        : null,
+    ]),
   );
   // What's going on between the paper and its project
   const running = activeRun();

@@ -128,6 +128,10 @@ def test_record_overleaf_links_and_lookup(
     assert data[0]["project_name"] == project.name
     assert data[0]["path"] == "paper"
     assert data[0]["current_user_access"] == "owner"
+    # Where it's on GitHub, e.g., to open it in a Codespace
+    assert data[0]["github_repo"] == project.git_repo_url.removeprefix(
+        "https://github.com/"
+    )
     # An unrelated user gets nothing back for the same private project
     resp = client.get(
         "/user/overleaf-syncs/ol333",

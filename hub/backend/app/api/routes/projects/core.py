@@ -7611,6 +7611,11 @@ async def post_project_overleaf_publication(
     repo.git.add("dvc.yaml")
     if os.path.isfile(os.path.join(repo.working_dir, ".gitattributes")):
         repo.git.add(".gitattributes")
+    # A Codespace opens on the document too
+    if calkit.resources.set_devcontainer_open_files(
+        repo.working_dir, ck_info=ck_info
+    ):
+        repo.git.add(".devcontainer")
     if auto_build:
         workflow_dir = os.path.join(repo.working_dir, ".github", "workflows")
         os.makedirs(workflow_dir, exist_ok=True)
@@ -7914,6 +7919,8 @@ class OverleafLinkPublic(BaseModel):
     project_name: str
     project_title: str
     current_user_access: Literal["read", "write", "admin", "owner"] | None
+    # Its GitHub repo, e.g., to open it in a Codespace, if it's on GitHub
+    github_repo: str | None = None
 
 
 def _indexed_overleaf_links(
@@ -7946,6 +7953,7 @@ def _indexed_overleaf_links(
                 project_name=project.name,
                 project_title=project.title,
                 current_user_access=project.current_user_access,
+                github_repo=project.github_repo,
             )
         )
     return resp

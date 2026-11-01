@@ -19,10 +19,13 @@ import json
 import os
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+import requests
 from fastapi import APIRouter, HTTPException
+from git import GitCommandError
 from pydantic import BaseModel, Field
 
 import app.projects
@@ -30,10 +33,13 @@ import calkit.export
 import calkit.latex
 import calkit.pipeline
 import calkit.provenance
+import calkit.resources
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import (
+    DEFAULT_REPO_TTL,
     STAGE_NAME_RE,
     _dump_ck_stage_map,
+    _github_token_for_repo,
     _inside,
     _validate_ck_stage,
 )
@@ -43,6 +49,7 @@ from app.core import logger, ryaml
 from app.dvc import run_dvc_command
 from app.git import (
     get_ck_info_from_repo,
+    get_default_branch,
     get_repo,
     get_repo_tree_for_ref,
     push_and_expire,
@@ -874,4 +881,208 @@ def post_project_pipeline_export_stage(
         stage=stage,
         exported_by=exporter.app if exporter else None,
         saved=True,
+    )
+
+
+class PipelineRun(BaseModel):
+    """A run of the pipeline, wherever it ran."""
+
+    where: Literal["github-actions"] = "github-actions"
+    # Unknown for a run just started, until GitHub lists it
+    id: str | None = None
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    started_at: str | None = None
+    url: str | None = None
+    commit: str | None = None
+    branch: str | None = None
+    started_by: str | None = None
+
+
+class PipelineRuns(BaseModel):
+    runs: list[PipelineRun] = []
+    # The workflow that runs it on GitHub Actions, if the project has one
+    github_workflow: str | None = None
+    # Whether it can be started from here, and if not, why
+    can_start: bool = False
+    cannot_start_reason: str | None = None
+
+
+def _github_run(run: dict[str, Any]) -> PipelineRun:
+    """A run as GitHub's API lists it."""
+    status = run.get("status")
+    conclusion = run.get("conclusion")
+    if status == "in_progress":
+        state = "running"
+    elif status != "completed":
+        state = "queued"
+    elif conclusion == "success":
+        state = "succeeded"
+    elif conclusion in ("cancelled", "skipped", "stale", "neutral"):
+        state = "cancelled"
+    else:
+        state = "failed"
+    return PipelineRun(
+        id=str(run.get("id")),
+        status=state,  # type: ignore[arg-type]
+        started_at=run.get("run_started_at") or run.get("created_at"),
+        url=run.get("html_url"),
+        commit=run.get("head_sha"),
+        branch=run.get("head_branch"),
+        started_by=(run.get("triggering_actor") or {}).get("login"),
+    )
+
+
+@router.get("/projects/{owner_name}/{project_name}/pipeline/runs")
+def get_project_pipeline_runs(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineRuns:
+    """Recent runs of the pipeline, and whether one can be started here.
+
+    Only runs on GitHub Actions so far, by the workflow that runs the
+    Calkit action.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    if not project.github_repo:
+        return PipelineRuns(cannot_start_reason="This project isn't on GitHub")
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        read_only=True,
+    )
+    found = calkit.resources.find_run_workflow(str(repo.working_dir))
+    if found is None:
+        # Starting it adds the workflow first
+        return PipelineRuns(can_start=True)
+    fname, txt = found
+    can_start = calkit.resources.can_start_workflow(txt)
+    runs = []
+    token = _github_token_for_repo(session, current_user, project.github_repo)
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{project.github_repo}"
+            f"/actions/workflows/{fname}/runs",
+            params={"per_page": 5},
+            headers={"Accept": "application/vnd.github+json"}
+            | ({"Authorization": f"Bearer {token}"} if token else {}),
+            timeout=10,
+        )
+        if resp.ok:
+            runs = [
+                _github_run(r) for r in resp.json().get("workflow_runs", [])
+            ]
+        else:
+            logger.warning(
+                f"Could not list runs of {fname} for {project.github_repo}: "
+                f"{resp.status_code} {resp.text}"
+            )
+    except requests.RequestException as e:
+        logger.warning(f"Could not list runs of {fname}: {e}")
+    return PipelineRuns(
+        runs=runs,
+        github_workflow=fname,
+        can_start=can_start,
+        cannot_start_reason=(
+            None
+            if can_start
+            else f"{fname} doesn't have a workflow_dispatch trigger"
+        ),
+    )
+
+
+@router.post("/projects/{owner_name}/{project_name}/pipeline/runs")
+def post_project_pipeline_run(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineRun:
+    """Start the pipeline on GitHub Actions, on the default branch.
+
+    A project without a workflow that runs the Calkit action gets one that
+    only runs when started, since every Overleaf sync is a push.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    if not project.github_repo:
+        raise HTTPException(422, "This project isn't on GitHub")
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    branch = get_default_branch(repo)
+    found = calkit.resources.find_run_workflow(wdir)
+    if found is None:
+        subprocess.check_call(
+            ["calkit", "update", "github-actions", "--on-demand"], cwd=wdir
+        )
+        found = calkit.resources.find_run_workflow(wdir)
+        assert found is not None
+        try:
+            push_and_expire(project, repo)
+        except GitCommandError as e:
+            repo.git.reset(["--hard", "HEAD~1"])
+            if "workflow" in str(e):
+                raise HTTPException(
+                    403,
+                    "Calkit's GitHub App needs permission to add workflows "
+                    "to add the one that runs the pipeline",
+                )
+            raise
+        record_project_update(project, repo, session)
+    fname, txt = found
+    if not calkit.resources.can_start_workflow(txt):
+        raise HTTPException(
+            409, f"{fname} doesn't have a workflow_dispatch trigger"
+        )
+    token = _github_token_for_repo(session, current_user, project.github_repo)
+    if token is None:
+        raise HTTPException(403, "No GitHub access to start a run")
+    try:
+        resp = requests.post(
+            f"https://api.github.com/repos/{project.github_repo}"
+            f"/actions/workflows/{fname}/dispatches",
+            json={"ref": branch},
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+            },
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Could not reach GitHub: {e}")
+    if not resp.ok:
+        logger.warning(
+            f"Could not start {fname} for {project.github_repo}: "
+            f"{resp.status_code} {resp.text}"
+        )
+        try:
+            reason = resp.json().get("message") or resp.reason
+        except ValueError:
+            reason = resp.reason
+        raise HTTPException(
+            403 if resp.status_code in (403, 404) else 502,
+            f"GitHub didn't start {fname}: {reason}",
+        )
+    return PipelineRun(
+        status="queued",
+        started_at=datetime.now(timezone.utc).isoformat(),
+        url=f"https://github.com/{project.github_repo}/actions/workflows/{fname}",
+        branch=branch,
+        started_by=current_user.github_username,
     )

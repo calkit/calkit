@@ -648,3 +648,169 @@ def test_post_project_pipeline_stage(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["name"] == "big-2"
+
+
+def test_project_pipeline_runs(
+    client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
+) -> None:
+    from git import GitCommandError
+
+    import calkit.resources
+
+    repo, origin = _make_repo(tmp_path, {"name": "p"})
+    branch = repo.active_branch.name
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+        github_repo="o/p",
+    )
+    module = "app.api.routes.projects.pipeline"
+    github = SimpleNamespace(get=[], post=[])
+
+    def respond(status: int, body: dict | None = None):
+        return SimpleNamespace(
+            ok=status < 400,
+            status_code=status,
+            reason="Nope",
+            text="",
+            content=b"x" if body is not None else b"",
+            json=lambda: body,
+        )
+
+    def call(method: str, project=fake_project, get=None, post=None, **kw):
+        with (
+            patch(f"{module}.app.projects.get_project", return_value=project),
+            patch(f"{module}.get_repo", return_value=repo),
+            patch(f"{module}._github_token_for_repo", return_value="t"),
+            patch(
+                f"{module}.requests.get",
+                side_effect=lambda url, **k: (
+                    github.get.append((url, k)) or get or respond(200, {})
+                ),
+            ),
+            patch(
+                f"{module}.requests.post",
+                side_effect=lambda url, **k: (
+                    github.post.append((url, k)) or post or respond(204)
+                ),
+            ),
+        ):
+            for name, value in kw.items():
+                patch(f"{module}.{name}", value).start()
+            try:
+                return getattr(client, method)(
+                    "/projects/o/p/pipeline/runs",
+                    headers=normal_user_token_headers,
+                )
+            finally:
+                patch.stopall()
+
+    # Without a workflow, one can still be started, which adds it
+    resp = call("get")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["can_start"]
+    assert resp.json()["github_workflow"] is None
+    assert resp.json()["runs"] == []
+    assert github.get == []
+    # Starting adds one that only runs when started, pushes it, and then
+    # starts it on the default branch
+    resp = call("post")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "queued"
+    assert resp.json()["branch"] == branch
+    found = calkit.resources.find_run_workflow(str(repo.working_dir))
+    assert found is not None
+    fname, txt = found
+    assert txt == calkit.resources.render_github_actions_workflow(
+        on_demand=True
+    )
+    assert origin.head.commit == repo.head.commit
+    url, kw = github.post[-1]
+    assert url.endswith(f"/repos/o/p/actions/workflows/{fname}/dispatches")
+    assert kw["json"] == {"ref": branch}
+    # A second start uses the workflow it has
+    head = repo.head.commit
+    assert call("post").status_code == 200
+    assert repo.head.commit == head
+    # Runs as GitHub lists them
+    runs = [
+        {"id": 1, "status": "queued", "conclusion": None},
+        {"id": 2, "status": "in_progress", "conclusion": None},
+        {"id": 3, "status": "completed", "conclusion": "success"},
+        {"id": 4, "status": "completed", "conclusion": "failure"},
+        {"id": 5, "status": "completed", "conclusion": "cancelled"},
+        {
+            "id": 6,
+            "status": "completed",
+            "conclusion": "timed_out",
+            "run_started_at": "2026-10-31T12:00:00Z",
+            "html_url": "https://github.com/o/p/actions/runs/6",
+            "head_sha": "abc",
+            "head_branch": "main",
+            "triggering_actor": {"login": "ada"},
+        },
+    ]
+    resp = call("get", get=respond(200, {"workflow_runs": runs}))
+    body = resp.json()
+    assert body["github_workflow"] == fname
+    assert body["can_start"]
+    assert [r["status"] for r in body["runs"]] == [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "failed",
+    ]
+    assert body["runs"][-1] == {
+        "where": "github-actions",
+        "id": "6",
+        "status": "failed",
+        "started_at": "2026-10-31T12:00:00Z",
+        "url": "https://github.com/o/p/actions/runs/6",
+        "commit": "abc",
+        "branch": "main",
+        "started_by": "ada",
+    }
+    # GitHub being unavailable leaves no runs rather than failing
+    resp = call("get", get=respond(500, {}))
+    assert resp.status_code == 200
+    assert resp.json()["runs"] == []
+    # GitHub refusing to start it says why
+    resp = call("post", post=respond(403, {"message": "No access"}))
+    assert resp.status_code == 403
+    assert "No access" in resp.json()["detail"]
+    # A workflow that can't be started from here says so
+    path = tmp_path / "repo" / ".github" / "workflows" / fname
+    path.write_text(txt.replace("workflow_dispatch:", "push:"))
+    resp = call("get")
+    assert not resp.json()["can_start"]
+    assert "workflow_dispatch" in resp.json()["cannot_start_reason"]
+    assert call("post").status_code == 409
+    # Without permission to push a workflow, nothing is left committed
+    path.unlink()
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Remove workflow")
+    head = repo.head.commit
+
+    def refuse(project, repo):
+        raise GitCommandError(
+            "git push",
+            1,
+            stderr="refusing to allow a GitHub App to create "
+            "or update workflow without `workflows` permission",
+        )
+
+    resp = call("post", push_and_expire=refuse)
+    assert resp.status_code == 403
+    assert "permission" in resp.json()["detail"]
+    assert repo.head.commit == head
+    assert calkit.resources.find_run_workflow(str(repo.working_dir)) is None
+    # A project that isn't on GitHub can't
+    elsewhere = SimpleNamespace(**vars(fake_project) | {"github_repo": None})
+    resp = call("get", project=elsewhere)
+    assert not resp.json()["can_start"]
+    assert resp.json()["cannot_start_reason"]
+    assert call("post", project=elsewhere).status_code == 422

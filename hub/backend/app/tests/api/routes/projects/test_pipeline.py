@@ -809,8 +809,8 @@ def test_project_pipeline_runs(
     assert [(r["id"], r["workflow"]) for r in body["runs"][:4]] == [
         ("1", fname),
         ("2", fname),
-        ("3", fname),
         ("7", "push.yml"),
+        ("3", fname),
     ]
     assert len(body["runs"]) == 7
     assert call("post").status_code == 200

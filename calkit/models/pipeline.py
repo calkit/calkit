@@ -1560,7 +1560,7 @@ class LatexStage(Stage):
         for rel in calkit.latex.detect_inputs(
             self.target_path,
             wdir=os.path.join(project_dir or "", wdir),
-            has=lambda p: is_input(posixpath.join(wdir, p)),
+            is_output=lambda p: is_output(posixpath.join(wdir, p)),
         ):
             paths.append(posixpath.normpath(posixpath.join(wdir, rel)))
         self._component_paths = list(dict.fromkeys(paths))

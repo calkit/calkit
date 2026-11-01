@@ -10,7 +10,7 @@ from app import mixpanel, users
 from app.api.routes import login
 from app.config import settings
 from app.core import utcnow
-from app.models import DeviceAuth, RefreshToken, User, UserCreate
+from app.models import DeviceAuth, RefreshToken, User, UserCreate, UserToken
 from app.security import (
     generate_email_verification_token,
     generate_password_reset_token,
@@ -173,9 +173,18 @@ def test_sign_out(client: TestClient, db: Session) -> None:
             assert (r.status_code == 200) == live
         return live
 
-    # Signing out ends only that sign-in, and clears its second factor
+    # Signing out ends only that sign-in, and clears its second factor, and
+    # a CLI login it authorized that no CLI has picked up yet
     first, first_refresh = sign_in()
     second, second_refresh = sign_in()
+    r = client.post("/login/device")
+    device_code = r.json()["device_code"]
+    r = client.post(
+        "/login/device/authorize",
+        headers=first,
+        json={"device_code": device_code},
+    )
+    assert r.status_code == 200, r.text
     r = client.post("/logout", headers=first)
     assert r.status_code == 200, r.text
     cookie = r.headers["set-cookie"]
@@ -183,6 +192,8 @@ def test_sign_out(client: TestClient, db: Session) -> None:
     assert "Max-Age=0" in cookie and "Path=/" in cookie
     assert not is_live(first, first_refresh)
     assert is_live(second)
+    r = client.post("/login/device/token", json={"device_code": device_code})
+    assert r.status_code == 404
     # So does signing out with just the refresh token, e.g., once the access
     # token has expired
     r = client.post("/logout", json={"refresh_token": second_refresh})
@@ -563,6 +574,25 @@ def test_login_with_google_recovers_unverified_account(
         },
     )
     assert user.email_verified is False
+    # Along with tokens and a CLI login they made
+    db.add(
+        UserToken(
+            user_id=user.id,
+            expires=utcnow() + timedelta(days=1),
+            is_active=True,
+            selector=uuid.uuid4().hex[:16],
+            hashed_verifier=uuid.uuid4().hex,
+        )
+    )
+    device_code = f"squat-{uuid.uuid4().hex}"
+    db.add(
+        DeviceAuth(
+            device_code=device_code,
+            expires=utcnow() + timedelta(minutes=5),
+            user_id=user.id,
+        )
+    )
+    db.commit()
     # Its owner signing in with Google takes it back, GitHub link included
     with (
         patch(
@@ -599,6 +629,11 @@ def test_login_with_google_recovers_unverified_account(
         is None
     )
     assert not verify_password("squatter-password", user.hashed_password)
+    # Deleted, so they can't be turned back on
+    tokens = db.exec(select(UserToken).where(UserToken.user_id == user.id))
+    assert tokens.all() == []
+    r = client.post("/login/device/token", json={"device_code": device_code})
+    assert r.status_code == 404
     # An account made through GitHub before emails were checked keeps all
     # of it, since its GitHub account verified the address
     email = f"gh-old-{uuid.uuid4().hex[:8]}@example.com"

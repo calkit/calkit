@@ -1103,6 +1103,19 @@ def test_post_user_github_auth_links_without_renaming(
         client=client, email=fresh.email, db=db
     )
     username = f"GhFresh{suffix}"
+    # Only a signed-in session can link one, not a token, which may have
+    # leaked, since the GitHub account can then sign in
+    r = client.post(
+        "/user/tokens",
+        headers=headers,
+        json={"expires_days": 1, "scope": None},
+    )
+    assert r.status_code == 200, r.text
+    pat = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = _github_auth(client, pat, username)
+    assert r.status_code == 403
+    db.refresh(fresh)
+    assert fresh.account.github_name is None
     r = _github_auth(client, headers, username)
     assert r.status_code == 200, r.text
     db.refresh(fresh)
@@ -1319,6 +1332,13 @@ def test_email_verification(client: TestClient, db: Session) -> None:
     token = generate_email_verification_token(
         user_id=user.id, email=user.email
     )
+    # Nor is the link's token a login, even where DVC's scoped ones work
+    r = client.post(
+        f"/projects/verify{suffix}/p/dvc/files/md5/ab/cdef",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"] == "Invalid token"
     r = client.post(verify_url, json={"token": token})
     assert r.status_code == 200, r.text
     db.refresh(user)
@@ -1705,10 +1725,11 @@ def test_totp(
     from datetime import timedelta
 
     import jwt
+    from sqlmodel import col
 
     from app.core import utcnow
     from app.main import app
-    from app.models import UserTOTP
+    from app.models import UserDailyCount, UserTOTP
     from app.security import (
         TOTP_PERIOD_SECONDS,
         get_totp_code,
@@ -1730,6 +1751,24 @@ def test_totp(
     if existing is not None:
         db.delete(existing)
         db.commit()
+
+    def reset_counts() -> None:
+        for row in db.exec(
+            select(UserDailyCount).where(UserDailyCount.user_id == user.id)
+        ).all():
+            db.delete(row)
+        db.commit()
+
+    def allow_reuse() -> None:
+        # So a code that worked can be entered again
+        db.expire_all()
+        totp = db.get(UserTOTP, user.id)
+        assert totp is not None
+        totp.last_used_step = None
+        db.add(totp)
+        db.commit()
+
+    reset_counts()
     # The setup code is emailed, so the address has to be the user's
     user.email_verified_at = None
     db.add(user)
@@ -1864,48 +1903,72 @@ def test_totp(
     )
     assert r.json()["verified"]
     assert r.cookies[users.SECOND_FACTOR_COOKIE] != expired
-    # Repeated wrong codes lock it for a while, even for right ones, longer
-    # each time, and the user hears about it
+    # Wrong codes are limited per day for the sign-in entering them, even
+    # for right ones after, and the user hears about it
+    reset_counts()
+    right = get_totp_code(secret, step)
+    verify = "/user/totp/verify"
+    with patch("app.users.send_email") as send:
+        for _ in range(users.TOTP_MAX_FAILED_ATTEMPTS):
+            r = client.post(verify, headers=h, json={"code": "000000"})
+            assert r.status_code == 400
+    send.assert_called_once()
+    assert send.call_args.kwargs["email_to"] == user.email
+    allow_reuse()
+    r = client.post(verify, headers=h, json={"code": right})
+    assert r.status_code == 429
+    # That only locks that sign-in, so a stolen one can't lock out the owner
+    r = client.post(verify, headers=other, json={"code": right})
+    assert r.status_code == 200, r.text
+    # And for the account, so signing in again doesn't give more guesses
+    count = db.exec(
+        select(UserDailyCount)
+        .where(UserDailyCount.user_id == user.id)
+        .where(UserDailyCount.kind == "wrong-totp-codes")
+    ).one()
+    assert count.count == users.TOTP_MAX_FAILED_ATTEMPTS
+    count.count = users.WRONG_TOTP_CODES_PER_DAY - 1
+    db.add(count)
+    db.commit()
+    fresh = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    with patch("app.users.send_email") as send:
+        r = client.post(verify, headers=fresh, json={"code": "000000"})
+    assert r.status_code == 400
+    send.assert_called_once()
+    allow_reuse()
+    for headers in [
+        other,
+        authentication_token_from_email(
+            client=client, email=user.email, db=db
+        ),
+    ]:
+        r = client.post(verify, headers=headers, json={"code": right})
+        assert r.status_code == 429
+        assert "tomorrow" in r.json()["detail"]
+    # Counts start over the next day, and a right code clears its sign-in's
+    # and other sign-ins' old ones
+    db.expire_all()
+    for row in db.exec(
+        select(UserDailyCount).where(UserDailyCount.user_id == user.id)
+    ).all():
+        row.day -= timedelta(days=1)
+        db.add(row)
+    db.commit()
+    allow_reuse()
+    r = client.post(verify, headers=h, json={"code": right})
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    left = db.exec(
+        select(UserDailyCount)
+        .where(UserDailyCount.user_id == user.id)
+        .where(col(UserDailyCount.kind).startswith("totp:"))
+    ).all()
+    assert left == []
     totp = db.get(UserTOTP, user.id)
     assert totp is not None
-    for minutes in [5, 10, 20]:
-        with patch("app.users.send_email") as send:
-            for _ in range(users.TOTP_MAX_FAILED_ATTEMPTS):
-                r = client.post(
-                    "/user/totp/verify", headers=h, json={"code": "000000"}
-                )
-                assert r.status_code == 400
-        assert send.call_args.kwargs["email_to"] == user.email
-        assert str(minutes) in send.call_args.kwargs["html_content"]
-        r = client.post(
-            "/user/totp/verify",
-            headers=h,
-            json={"code": get_totp_code(secret, step)},
-        )
-        assert r.status_code == 429
-        db.refresh(totp)
-        assert totp.locked_until is not None
-        locked_for = totp.locked_until - utcnow()
-        assert timedelta(minutes=minutes - 1) < locked_for
-        assert locked_for <= timedelta(minutes=minutes)
-        totp.locked_until = utcnow()
-        db.add(totp)
-        db.commit()
-    # A right code starts the lockouts over
-    totp.last_used_step = None
-    db.add(totp)
-    db.commit()
-    r = client.post(
-        "/user/totp/verify",
-        headers=h,
-        json={"code": get_totp_code(secret, step)},
-    )
-    assert r.status_code == 200, r.text
-    db.refresh(totp)
-    assert totp.lockouts == 0
-    totp.last_used_step = None
-    db.add(totp)
-    db.commit()
+    allow_reuse()
     encrypted_secret = totp.secret
     # Turning it off takes a current code, signs out every other session, and
     # proof from before it was set up again doesn't count afterwards
@@ -1983,6 +2046,90 @@ def test_pat_hashing(
     assert client.get("/user", headers=bad).status_code == 403
 
 
+def test_user_token_credentials(client: TestClient, db: Session) -> None:
+    import secrets
+    from datetime import timedelta
+
+    from app.core import utcnow
+    from app.models import Machine, UserToken
+    from app.security import hash_token_verifier
+
+    password = random_lower_string()
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(email=random_email(), password=password),
+    )
+    h = user_authentication_headers(
+        client=client, email=user.email, password=password
+    )
+    r = client.post(
+        "/user/tokens", headers=h, json={"expires_days": 1, "scope": None}
+    )
+    assert r.status_code == 200, r.text
+    pat = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = client.post(
+        "/user/tokens", headers=pat, json={"expires_days": 1, "scope": "dvc"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["machine_id"] is None
+    dvc_id = r.json()["id"]
+    # A token can turn one off, but turning it back on takes a signed-in
+    # session, since it may have been turned off for leaking
+    r = client.patch(
+        f"/user/tokens/{dvc_id}", headers=pat, json={"is_active": False}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["is_active"] is False
+    r = client.patch(
+        f"/user/tokens/{dvc_id}", headers=pat, json={"is_active": True}
+    )
+    assert r.status_code == 403
+    r = client.patch(
+        f"/user/tokens/{dvc_id}", headers=h, json={"is_active": True}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["is_active"] is True
+    # One made with a machine's CLI token is the machine's too, so revoking
+    # the machine turns it off, and a machine's tokens can't be turned back
+    # on
+    machine = Machine(
+        user_id=user.id,
+        name="tokens",
+        selector=uuid.uuid4().hex,
+        hashed_verifier=uuid.uuid4().hex,
+    )
+    db.add(machine)
+    db.commit()
+    selector = secrets.token_hex(8)
+    verifier = secrets.token_hex(24)
+    db.add(
+        UserToken(
+            user_id=user.id,
+            expires=utcnow() + timedelta(days=1),
+            is_active=True,
+            selector=selector,
+            hashed_verifier=hash_token_verifier(verifier),
+            machine_id=machine.id,
+        )
+    )
+    db.commit()
+    cli = {"Authorization": f"Bearer ckp_{selector}{verifier}"}
+    r = client.post(
+        "/user/tokens", headers=cli, json={"expires_days": 365, "scope": "dvc"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["machine_id"] == str(machine.id)
+    machine_dvc_id = r.json()["id"]
+    r = client.patch(
+        f"/user/tokens/{machine_dvc_id}", headers=h, json={"is_active": False}
+    )
+    assert r.status_code == 200, r.text
+    r = client.patch(
+        f"/user/tokens/{machine_dvc_id}", headers=h, json={"is_active": True}
+    )
+    assert r.status_code == 409
+
+
 def test_end_other_sessions(
     client: TestClient, db: Session, superuser_token_headers: dict[str, str]
 ) -> None:
@@ -2011,10 +2158,22 @@ def test_end_other_sessions(
     r = client.post("/user/sessions/end-others", headers=pat)
     assert r.status_code == 403
     assert is_live(other)
+    # Along with CLI logins authorized but not yet picked up, since one of
+    # the sessions ending may have authorized them
+    r = client.post("/login/device")
+    device_code = r.json()["device_code"]
+    r = client.post(
+        "/login/device/authorize",
+        headers=other,
+        json={"device_code": device_code},
+    )
+    assert r.status_code == 200, r.text
     r = client.post("/user/sessions/end-others", headers=this)
     assert r.status_code == 200, r.text
     assert is_live(this)
     assert not is_live(other) and not is_live(another)
+    r = client.post("/login/device/token", json={"device_code": device_code})
+    assert r.status_code == 404
     # Deactivating a user signs them out everywhere
     r = client.patch(
         f"/users/{user.id}",

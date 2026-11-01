@@ -387,6 +387,13 @@ class Settings(BaseSettings):
                 warnings.warn(message, stacklevel=1)
             else:
                 raise ValueError(message)
+        # Otherwise the relay, which holds its key, could sign logins
+        if self.RELAY_SECRET_KEY == self.SECRET_KEY:
+            message = "RELAY_SECRET_KEY must differ from SECRET_KEY"
+            if self.ENVIRONMENT == "local":
+                warnings.warn(message, stacklevel=1)
+            else:
+                raise ValueError(message)
         self._check_default_secret("POSTGRES_PASSWORD", self.POSTGRES_PASSWORD)
         self._check_default_secret(
             "FIRST_SUPERUSER_PASSWORD", self.FIRST_SUPERUSER_PASSWORD

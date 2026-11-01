@@ -32,12 +32,12 @@ import {
   useClipboard,
 } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import mixpanel from "mixpanel-browser"
 import {
   createFileRoute,
   redirect,
   useRouterState,
 } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
 import { useEffect, useState } from "react"
 import { FiPlus } from "react-icons/fi"
 import { z } from "zod"
@@ -251,11 +251,16 @@ function Workspaces() {
           : undefined,
       }),
     })
-  const openPane = (machineId: string, session: string) => {
-    if (!panes.some((p) => p.session === session)) {
-      setPanes([...panes, { machineId, session }])
-    }
-  }
+  // From the search as it is then, since it may have changed while a
+  // session was opening
+  const openPane = (machineId: string, session: string) =>
+    navigate({
+      search: (prev) => {
+        const prevPanes = prev.panes ?? []
+        if (prevPanes.some((p) => p.split(":")[1] === session)) return prev
+        return { ...prev, panes: [...prevPanes, `${machineId}:${session}`] }
+      },
+    })
   const getLabel = (pane: Pane) =>
     sessions[pane.machineId]?.find((s) => s.id === pane.session)?.label ??
     "shell"
@@ -722,10 +727,26 @@ function CreateWorkspace({
               <Spinner size="sm" />
               Checking {machine.name}
             </Flex>
+          ) : conn.error ? (
+            // Shown here, since the page's own is behind the modal
+            <SecondFactorPrompt
+              error={conn.error}
+              onVerified={() => {
+                conn.retryNow()
+                setupQuery.refetch()
+              }}
+            />
           ) : setupQuery.error ? (
-            <Text fontSize="sm" color="red.400">
-              {setupQuery.error.message}
-            </Text>
+            <Flex align="center" gap={2} fontSize="sm">
+              <Text color="red.400">{setupQuery.error.message}</Text>
+              <Button
+                size="xs"
+                isLoading={setupQuery.isFetching}
+                onClick={() => setupQuery.refetch()}
+              >
+                Try again
+              </Button>
+            </Flex>
           ) : setup ? (
             <>
               {setup.repo.error && (

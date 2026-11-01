@@ -103,6 +103,41 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     # in one unpacked from an archive rather than cloned
     ran = os.path.join(home, "ran")
     if sys.platform != "win32":
+        # Nor its filters, which status runs on files whose stat data no
+        # longer matches the index, including a submodule's, and one named
+        # so it can't be emptied keeps its repo's status from running
+        sub = os.path.join(home, "sub")
+        _init_project(sub, name="sub")
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                sub,
+                "s",
+            ],
+            cwd=os.path.join(home, "dev", "odd"),
+            check=True,
+        )
+        touch = f"touch {shlex.quote(ran)}; cat"
+        for repo, name in [
+            ("dev/odd", "x"),
+            ("dev/odd/s", "y"),
+            ("dev/tool", "a=b"),
+        ]:
+            path = os.path.join(home, repo)
+            with open(os.path.join(path, ".gitattributes"), "w") as f:
+                f.write(f"* filter={name}\n")
+            subprocess.run(
+                ["git", "config", f"filter.{name}.clean", touch],
+                cwd=path,
+                check=True,
+            )
+            os.utime(os.path.join(path, "calkit.yaml"), (0, 0))
+        # Set last, since the test's own Git would run it
         hook = os.path.join(home, "fsmonitor.sh")
         with open(hook, "w") as f:
             f.write(f"#!/bin/sh\ntouch {shlex.quote(ran)}\n")
@@ -139,6 +174,19 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     # the first time, for browsers to check replies with
     assert posted[0]["public_key"] == hub_link.get_link_public_jwk()
     assert posted[1]["public_key"] == posted[0]["public_key"]
+    # Past what the hub takes, it's told of ones in use first, then the
+    # latest
+    keys = iter(["key2"])
+    many = [
+        {"path": f"/w/{i:03d}", "last_activity": f"2026-01-01T00:{i:03d}"}
+        for i in range(hub_link.MAX_CHECK_IN_WORKSPACES + 5)
+    ]
+    many[0]["running"] = True
+    hub_link.check_in(cfg, many, "service")
+    sent = [ws["path"] for ws in posted[-1]["workspaces"]]
+    assert len(sent) == hub_link.MAX_CHECK_IN_WORKSPACES
+    assert sent[:2] == ["/w/000", f"/w/{len(many) - 1:03d}"]
+    assert "/w/001" not in sent
     # A hub that has another key for it is refused, and installing again
     # registers it anew
     response = SimpleNamespace(status_code=409)
@@ -172,6 +220,12 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     _init_project(other_hub, name="other-hub")
     with open(os.path.join(other_hub, "calkit.yaml"), "a") as f:
         f.write("hub: https://hub.example\n")
+    # Nor is one whose hub makes no sense, which doesn't keep the rest from
+    # this one
+    bad_hub = os.path.join(home, "dev", "bad-hub")
+    _init_project(bad_hub, name="bad-hub")
+    with open(os.path.join(bad_hub, "calkit.yaml"), "a") as f:
+        f.write('hub: "http://h:b:c"\n')
     this_hub = os.path.join(home, "dev", "this-hub")
     _init_project(this_hub, name="this-hub")
     with open(os.path.join(this_hub, "calkit.yaml"), "a") as f:
@@ -223,6 +277,9 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     assert [w["path"] for w in found] == [os.path.realpath(local)]
     monkeypatch.setattr(hub_link, "_hub_url", "https://calkit.io")
     assert workspaces["dev/odd"]["project"] is None
+    if sys.platform != "win32":
+        assert len(workspaces["dev/odd"]["commit"]) == 40
+        assert "commit" not in workspaces["dev/tool"]
     assert workspaces["dev/this-hub"]["project"] == "carol/fork"
     with open(os.path.join(this_hub, ".dvc", "config.local"), "w") as f:
         f.write(
@@ -1547,7 +1604,13 @@ def test_cron_and_lock(tmp_path, monkeypatch):
     assert stat.S_IMODE(os.stat(log).st_mode) == 0o600
     assert stat.S_IMODE(os.stat(os.path.dirname(log)).st_mode) == 0o700
     assert "cron" in hub_link.get_service_status()
-    hub_link.uninstall_service()
+    # Uninstalling also stops the running link, e.g., one cron started, so
+    # a service installed next doesn't find it holding the lock
+    stopped_keys: list[str | None] = []
+    with monkeypatch.context() as m:
+        m.setattr(hub_link, "_stop_running_link", stopped_keys.append)
+        hub_link.uninstall_service()
+    assert stopped_keys == [None]
     assert table.read_text().splitlines() == ["0 * * * * echo mine"]
     assert hub_link.get_service_status() is None
     # In cron mode, starting checks in now and stopping ends the running one
@@ -1571,7 +1634,25 @@ def test_cron_and_lock(tmp_path, monkeypatch):
     with open(hub_link._pid_path()) as f:
         assert f.read() == str(os.getpid())
     assert hub_link.acquire_lock() is None
-    lock.close()
+    # A service waits a while for the one holding it, then gives up, so it
+    # exits as failed and its manager starts it again, where cron's don't
+    # wait, since cron starts another soon
+    import threading
+    import time
+
+    monkeypatch.setattr(hub_link.HubLink, "run", lambda self: asyncio.sleep(0))
+    # Left alone, so SIGTERM still ends the tests that follow
+    monkeypatch.setattr("signal.signal", lambda *args: None)
+    monkeypatch.setattr(hub_link, "LOCK_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr(hub_link, "LOCK_WAIT_SECONDS", 0.2)
+    cfg = {"name": "box", "workspaces": []}
+    for mode, waited in [("cron", False), ("service", True)]:
+        start = time.monotonic()
+        assert not hub_link.run(cfg, mode=mode)
+        assert (time.monotonic() - start >= 0.2) == waited
+    monkeypatch.setattr(hub_link, "LOCK_WAIT_SECONDS", 30)
+    threading.Timer(0.1, lock.close).start()
+    assert hub_link.run(cfg, mode="service")
     second = hub_link.acquire_lock()
     assert second is not None
     second.close()
@@ -2700,6 +2781,47 @@ async def test_relay_connection(monkeypatch):
     # next regular check-in
     assert sent == [{"type": "auth", "token": "tok"}]
     assert check_ins == [True]
+    # Reconnecting backs off while the relay fails or drops it, though the
+    # hub answers, until a connection stays up, and at random, so machines
+    # cut off together don't come back together
+    monkeypatch.setattr(hub_link, "RECONNECT_MAX_DELAY_SECONDS", 8)
+    monkeypatch.setattr(hub_link, "RECONNECT_RESET_SECONDS", 0.05)
+    monkeypatch.setattr(hub_link, "check_in", lambda *args: {})
+    sleep = asyncio.sleep
+    slept: list[float] = []
+
+    # Only the backoff's, which are scaled down, are cut short
+    async def record_sleep(seconds: float) -> None:
+        slept.append(seconds)
+        await sleep(0 if seconds < 1 else seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", record_sleep)
+    jitter: list[tuple[float, float]] = []
+    monkeypatch.setattr(
+        "random.uniform", lambda a, b: jitter.append((a, b)) or 0.001
+    )
+    outcomes = ["fail", "close", "fail", "fail", "stay", "fail", "revoked"]
+
+    async def connect(resp: dict) -> None:
+        outcome = outcomes.pop(0)
+        if outcome == "fail":
+            raise ConnectionError("Relay refused")
+        if outcome == "stay":
+            await sleep(0.1)
+        if outcome == "revoked":
+            raise hub_link.LinkRevoked("403")
+
+    async def keep_checking_in() -> None:
+        await sleep(3600)
+
+    monkeypatch.setattr(op, "connect", connect)
+    monkeypatch.setattr(op, "keep_checking_in", keep_checking_in)
+    with pytest.raises(hub_link.LinkRevoked):
+        await op.run()
+    # Less the restart check's
+    backoff = [s for s in slept if s < 1]
+    assert backoff == pytest.approx([0.002, 0.004, 0.008, 0.008, 0.001, 0.002])
+    assert set(jitter) == {(0.5, 1.0)}
 
 
 def test_restarts(tmp_path, monkeypatch):

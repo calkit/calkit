@@ -1535,9 +1535,13 @@ def test_run(tmp_dir):
 def test_run_dvc_repro_tolerates_teardown_failure(monkeypatch, capsys):
     import dvc.cli
 
-    # Normal invocation returns DVC's exit code unchanged
+    # Normal invocation returns DVC's exit code unchanged, after clearing the
+    # hub's token from remotes off the hub, since --pull sends it
+    clear = Mock(return_value=[])
+    monkeypatch.setattr(calkit.dvc, "clear_off_hub_auth", clear)
     monkeypatch.setattr(dvc.cli, "main", Mock(return_value=7))
-    assert _run_dvc_repro(["repro", "my-stage"]) == 7
+    assert _run_dvc_repro(["repro", "--pull", "my-stage"]) == 7
+    clear.assert_called_once_with()
     # DVC lazily imports ``dvc.daemon`` and ``dvc.repo.open_repo`` for
     # analytics/cleanup only after the command has already run. On a broken
     # install those imports fail (issue #1018), crashing the run once the

@@ -74,7 +74,13 @@ export default function SecondFactorPrompt({
             value={code}
             onChange={(e) => setCode(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && code.length >= 6) verifyMutation.mutate()
+              if (
+                e.key === "Enter" &&
+                code.length >= 6 &&
+                !verifyMutation.isPending
+              ) {
+                verifyMutation.mutate()
+              }
             }}
             inputMode="numeric"
             autoComplete="one-time-code"

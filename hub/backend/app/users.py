@@ -34,6 +34,7 @@ from app.messaging import (
 )
 from app.models import (
     Account,
+    DeviceAuth,
     RefreshToken,
     User,
     UserCreate,
@@ -545,6 +546,21 @@ def end_sign_in_sessions(
         if keep is None or token.session_id != keep:
             token.is_active = False
             session.add(token)
+    forget_device_authorizations(session=session, user_id=user.id)
+
+
+def forget_device_authorizations(
+    *, session: Session, user_id: uuid.UUID
+) -> None:
+    """Drop CLI logins the user authorized but no CLI has picked up yet,
+    since the session ending may be the one that authorized them, which
+    isn't recorded.
+    """
+    pending = session.exec(
+        select(DeviceAuth).where(DeviceAuth.user_id == user_id)
+    ).all()
+    for auth_request in pending:
+        session.delete(auth_request)
 
 
 def end_sign_in_session(
@@ -560,6 +576,7 @@ def end_sign_in_session(
     for token in tokens:
         token.is_active = False
         session.add(token)
+    forget_device_authorizations(session=session, user_id=user_id)
 
 
 def confirm_email_verification_token(*, session: Session, token: str) -> User:
@@ -1257,10 +1274,9 @@ def check_user_subscription_active(session: Session, user: User) -> bool:
 SECOND_FACTOR_HOURS = 12
 # The HttpOnly cookie that holds a session's proof of entering one
 SECOND_FACTOR_COOKIE = "second_factor"
+# Wrong authenticator codes a day, per sign-in and per account
 TOTP_MAX_FAILED_ATTEMPTS = 5
-# The first lockout's length, which doubles with each one after, up to a day
-TOTP_LOCKOUT_MINUTES = 5
-TOTP_MAX_LOCKOUT_MINUTES = 24 * 60
+WRONG_TOTP_CODES_PER_DAY = 20
 # Error details the frontend recognizes, to prompt for a code or set one up
 SECOND_FACTOR_SETUP_REQUIRED = "Two-factor authentication setup required"
 SECOND_FACTOR_REQUIRED = "Two-factor authentication code required"
@@ -1348,40 +1364,60 @@ def check_totp_setup_email_code(
         raise HTTPException(400, "The emailed code isn't right")
 
 
-def check_totp_code(session: Session, totp: UserTOTP, code: str) -> None:
+def check_totp_code(
+    session: Session,
+    user: User,
+    totp: UserTOTP,
+    code: str,
+    session_id: uuid.UUID,
+) -> None:
     """Check an authenticator code, recording it as used if it's valid.
 
-    Codes are six digits, so wrong guesses lock the user out for a while,
-    longer each time until a right one, and the user hears about it, and a
-    code can't be used twice, so one seen over a shoulder or in a log is
-    worthless.
+    Codes are six digits, so wrong ones are limited per day for the sign-in
+    entering them, which locks only that sign-in, so a stolen one can't
+    lock out the owner, and for the account, so signing in again doesn't
+    give more guesses. The user hears when either runs out. A code can't be
+    used twice, so one seen over a shoulder or in a log is worthless.
     """
-    now = utcnow()
     # Locked, so parallel guesses can't all get in under the limit, and a
     # code can't be used twice at once
     session.refresh(totp, with_for_update=True)
-    if totp.locked_until is not None and totp.locked_until > now:
-        raise HTTPException(429, "Too many attempts; try again later")
+    wrong_today = get_daily_count(
+        session,
+        user,
+        "wrong-totp-codes",
+        WRONG_TOTP_CODES_PER_DAY,
+        "Too many wrong codes today; try again tomorrow",
+    )
+    wrong_here = get_daily_count(
+        session,
+        user,
+        f"totp:{session_id.hex[:27]}",
+        TOTP_MAX_FAILED_ATTEMPTS,
+        "Too many wrong codes; sign in again to try more",
+    )
     step = match_totp_step(decrypt_secret(totp.secret), code)
     if step is None or (
         totp.last_used_step is not None and step <= totp.last_used_step
     ):
-        totp.failed_attempts += 1
-        lockout_minutes = None
-        if totp.failed_attempts >= TOTP_MAX_FAILED_ATTEMPTS:
-            totp.failed_attempts = 0
-            totp.lockouts += 1
-            lockout_minutes = min(
-                TOTP_LOCKOUT_MINUTES * 2 ** min(totp.lockouts - 1, 16),
-                TOTP_MAX_LOCKOUT_MINUTES,
-            )
-            totp.locked_until = now + timedelta(minutes=lockout_minutes)
-        session.add(totp)
+        wrong_today.count += 1
+        wrong_here.count += 1
+        locked = (
+            wrong_today.count >= WRONG_TOTP_CODES_PER_DAY
+            or wrong_here.count >= TOTP_MAX_FAILED_ATTEMPTS
+        )
+        session.add(wrong_today)
+        session.add(wrong_here)
         session.commit()
-        user = session.get(User, totp.user_id)
-        if lockout_minutes and user is not None and settings.emails_enabled:
+        if locked and settings.emails_enabled:
+            # Counts start over at midnight UTC
+            now = utcnow()
+            tomorrow = datetime.combine(
+                now.date() + timedelta(days=1), datetime.min.time()
+            )
             email_data = generate_two_factor_locked_email(
-                email_to=user.email, minutes=lockout_minutes
+                email_to=user.email,
+                minutes=int((tomorrow - now).total_seconds() // 60) + 1,
             )
             send_email(
                 email_to=user.email,
@@ -1389,11 +1425,19 @@ def check_totp_code(session: Session, totp: UserTOTP, code: str) -> None:
                 html_content=email_data.html_content,
             )
         raise HTTPException(400, "Invalid code")
+    # This sign-in starts over, and other sign-ins' counts from before
+    # today are done with
+    session.delete(wrong_here)
+    stale = session.exec(
+        select(UserDailyCount)
+        .where(UserDailyCount.user_id == user.id)
+        .where(col(UserDailyCount.kind).startswith("totp:"))
+        .where(UserDailyCount.day < utcnow().date())
+    ).all()
+    for row in stale:
+        session.delete(row)
     totp.last_used_step = step
-    totp.failed_attempts = 0
-    totp.lockouts = 0
-    totp.locked_until = None
-    totp.last_verified_at = now
+    totp.last_verified_at = utcnow()
     session.add(totp)
     session.commit()
 

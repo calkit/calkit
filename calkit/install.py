@@ -241,7 +241,6 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "conda": _MINIFORGE_INSTALLER,
     "R": _R_INSTALLER,
-    # Converts equations for Word exports of LaTeX documents
     # Converts LaTeX documents to Word without Word, with its Math
     # component, which Linux distributions package separately and without
     # which equations come out empty
@@ -271,6 +270,7 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "binary": "soffice",
         },
     },
+    # Converts equations for Word exports of LaTeX documents
     "pandoc": {
         "mac": {
             "script": "brew install pandoc",

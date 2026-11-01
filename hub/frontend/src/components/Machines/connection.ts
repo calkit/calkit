@@ -402,14 +402,27 @@ export class MachineConnection {
     if (!this.closed) this.connect()
   }
 
-  async waitUntilConnected(timeoutMs = 10000) {
-    const start = Date.now()
-    while (!this.connected) {
-      if (Date.now() - start > timeoutMs) {
-        throw new Error("Could not connect to machine")
+  // Until the link accepts the channel, or the user has to do something
+  // first, e.g., enter a code. The default allows for the link's own wait.
+  waitUntilConnected(timeoutMs = READY_TIMEOUT_MS + 10000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const finish = (e?: Error) => {
+        clearTimeout(timer)
+        this.statusListeners.delete(check)
+        if (e) reject(e)
+        else resolve()
       }
-      await new Promise((resolve) => setTimeout(resolve, 200))
-    }
+      const check = () => {
+        if (this.connected) finish()
+        else if (this.error) finish(new Error(this.error))
+      }
+      const timer = setTimeout(
+        () => finish(new Error("Could not connect to machine")),
+        timeoutMs,
+      )
+      this.statusListeners.add(check)
+      check()
+    })
   }
 
   // Until opened again, e.g., when the machine comes back online

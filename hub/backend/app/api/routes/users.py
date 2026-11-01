@@ -18,12 +18,14 @@ import app.projects
 import app.stripe
 from app import mixpanel, users, zotero
 from app.api.deps import (
+    PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
     PAT_VERIFIER_LENGTH_BYTES,
     CurrentSession,
     CurrentUser,
     NoMachineSessionToken,
     SessionDep,
+    SessionUser,
     SignedIn,
     TokenDep,
     get_current_active_superuser,
@@ -802,6 +804,17 @@ def post_user_token(
     """
     if req.scope is None:
         get_current_session(session, access_token)
+    # One made with a machine's CLI token is the machine's too, so revoking
+    # the machine revokes it
+    machine_id = None
+    if access_token.startswith("ckp_"):
+        caller = session.exec(
+            select(UserToken).where(
+                UserToken.selector == access_token[4:PAT_SELECTOR_END_CHAR_IDX]
+            )
+        ).first()
+        if caller is not None:
+            machine_id = caller.machine_id
     # Generate a random token and hash it
     # Prepend 'ckp_' to indicate it's a Calkit user personal access token
     selector = secrets.token_hex(PAT_SELECTOR_LENGTH_BYTES)
@@ -816,6 +829,7 @@ def post_user_token(
         selector=selector,
         hashed_verifier=hashed_verifier,
         description=req.description,
+        machine_id=machine_id,
     )
     session.add(token)
     session.commit()
@@ -834,6 +848,7 @@ class TokenPatch(BaseModel):
 def patch_user_token(
     session: SessionDep,
     current_user: CurrentUser,
+    access_token: TokenDep,
     token_id: uuid.UUID,
     req: TokenPatch,
 ) -> UserTokenPublic:
@@ -842,6 +857,13 @@ def patch_user_token(
         raise HTTPException(404)
     if token.user_id != current_user.id:
         raise HTTPException(403, "Not your token")
+    # Turning one back on takes a signed-in session, since it may have been
+    # turned off for leaking, and a machine's stay off, since they're turned
+    # off when it's revoked or issued a new one
+    if req.is_active and not token.is_active:
+        get_current_session(session, access_token)
+        if token.machine_id is not None:
+            raise HTTPException(409, "A machine's token can't be turned on")
     token.is_active = req.is_active
     session.commit()
     session.refresh(token)
@@ -1141,7 +1163,7 @@ def post_user_google_auth(
 @router.post("/user/github-auth")
 def post_user_github_auth(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: SessionUser,
     req: OAuthCodeExchange,
 ) -> Message:
     """Link a GitHub account to the signed-in user.
@@ -1150,6 +1172,8 @@ def post_user_github_auth(
     GitHub identity; logging in through GitHub is a separate flow that
     resolves an account rather than attaching to one.
     """
+    # It takes a signed-in session, not a token, since the GitHub account
+    # can then sign in
     logger.info(f"Received GitHub auth request for user {current_user.email}")
     resp = requests.get(
         "https://github.com/login/oauth/access_token",
@@ -1578,7 +1602,9 @@ def post_user_totp_confirm(
     users.check_totp_setup_email_code(
         session, current_user, totp, req.email_code
     )
-    users.check_totp_code(session, totp, req.code)
+    users.check_totp_code(
+        session, current_user, totp, req.code, signed_in.session_id
+    )
     totp.confirmed_at = utcnow()
     totp.email_code_hash = None
     session.add(totp)
@@ -1601,7 +1627,9 @@ def post_user_totp_verify(
     totp = current_user.totp
     if totp is None or totp.confirmed_at is None:
         raise HTTPException(404, "Two-factor authentication isn't set up")
-    users.check_totp_code(session, totp, req.code)
+    users.check_totp_code(
+        session, current_user, totp, req.code, signed_in.session_id
+    )
     session.refresh(current_user)
     return _totp_status_with_cookie(signed_in, response)
 
@@ -1617,7 +1645,9 @@ def delete_user_totp(
     totp = current_user.totp
     if totp is None or totp.confirmed_at is None:
         raise HTTPException(404, "Two-factor authentication isn't set up")
-    users.check_totp_code(session, totp, req.code)
+    users.check_totp_code(
+        session, current_user, totp, req.code, signed_in.session_id
+    )
     session.delete(totp)
     users.end_sign_in_sessions(
         session=session, user=current_user, keep=signed_in.session_id

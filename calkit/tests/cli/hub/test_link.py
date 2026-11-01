@@ -84,6 +84,20 @@ def test_link(tmp_path, monkeypatch):
     assert "Machine 'box' is already registered" in result.output
     assert asked[0]["auth"] is False
     assert asked[0]["headers"] == {"Authorization": "Bearer ckm_m1"}
+    # Finding another link running fails only as a service, so its manager
+    # starts it again rather than leaving it stopped
+    with monkeypatch.context() as m:
+        m.setattr(hub_link, "run", lambda cfg, mode: False)
+        for mode, code, said in [
+            ("foreground", 0, True),
+            ("cron", 0, False),
+            ("service", 1, True),
+        ]:
+            result = CliRunner().invoke(
+                hub_app, ["link", "start", "--mode", mode]
+            )
+            assert result.exit_code == code, result.output
+            assert ("already running" in result.output) == said
     # Sessions would be root shells, so it never runs as root, sudo or not
     if hasattr(os, "geteuid"):
         monkeypatch.setattr(hub_link.os, "geteuid", lambda: 0)

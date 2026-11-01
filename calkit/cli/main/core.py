@@ -2535,6 +2535,8 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
     """
     from dvc.cli import main as dvc_cli_main
 
+    # A pull here sends the remotes' auth, so gate it as run_dvc_command does
+    calkit.dvc.clear_off_hub_auth()
     try:
         return int(dvc_cli_main(argv))
     except ModuleNotFoundError as e:

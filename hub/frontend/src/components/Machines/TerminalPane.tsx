@@ -41,6 +41,8 @@ export default function TerminalPane({
   const fitRef = useRef<FitAddon | null>(null)
   const [exited, setExited] = useState<number | null | undefined>(undefined)
   const headerBg = useColorModeValue("gray.100", "gray.700")
+  // Hidden or ended with a button, which tells the machine itself
+  const leftRef = useRef(false)
   // The terminal lives as long as the pane
   useEffect(() => {
     const term = new Terminal({
@@ -114,6 +116,13 @@ export default function TerminalPane({
         rows: term.rows,
       })
       .catch((e) => term.write(`\r\n[${e.message}]\r\n`))
+    // Unmounted, e.g., by switching sessions, so the machine stops sending
+    // its output here
+    return () => {
+      if (!leftRef.current) {
+        conn.send({ type: "sessions.detach", session: pane.session })
+      }
+    }
   }, [conn, connected, pane.session])
   return (
     <Box borderWidth={1} borderRadius="md" overflow="hidden" mb={3}>
@@ -130,7 +139,10 @@ export default function TerminalPane({
             icon={<FiMinus />}
             size="xs"
             variant="ghost"
-            onClick={onDetach}
+            onClick={() => {
+              leftRef.current = true
+              onDetach()
+            }}
           />
         </Tooltip>
         <Tooltip label="End session">
@@ -139,7 +151,10 @@ export default function TerminalPane({
             icon={<FiX />}
             size="xs"
             variant="ghost"
-            onClick={onClose}
+            onClick={() => {
+              leftRef.current = true
+              onClose()
+            }}
           />
         </Tooltip>
       </Flex>

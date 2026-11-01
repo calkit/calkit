@@ -624,11 +624,6 @@ class UserTOTP(SQLModel, table=True):
     last_used_step: int | None = Field(
         default=None, sa_type=sqlalchemy.BigInteger
     )
-    failed_attempts: int = 0
-    locked_until: datetime | None = Field(default=None)
-    # Lockouts since the last right code, each twice as long as the one
-    # before
-    lockouts: int = Field(default=0, sa_column_kwargs=dict(server_default="0"))
     # A code emailed when setting it up, so a leaked token alone can't add an
     # attacker's app; stored as an HMAC like email verification codes
     email_code_hash: str | None = Field(default=None, max_length=64)

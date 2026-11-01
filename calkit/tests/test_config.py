@@ -371,7 +371,8 @@ def test_write_keeps_secrets_it_never_read(
 
     monkeypatch.setattr(fake_keyring, "set_password", refuse)
     reread.access_token = "access-secret"
-    reread.write()
+    with pytest.warns(UserWarning, match="access_token.*config.yaml"):
+        reread.write()
     with open(tmp_path / "config.yaml") as f:
         assert yaml.safe_load(f)["access_token"] == "access-secret"
     # Only the user can read it, where permissions say so

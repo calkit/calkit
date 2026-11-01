@@ -312,6 +312,10 @@ def get_current_user_with_token_scope(
             token_scope = payload.get("scope")
             if token_scope is not None and token_scope != scope:
                 raise HTTPException(403, "Invalid token scope")
+            # Tokens for emailed links, e.g., to verify an address, aren't
+            # logins
+            if "purpose" in payload:
+                raise HTTPException(403, "Invalid token")
             if "token_id" in payload:
                 token_id = payload["token_id"]
                 token_in_db = session.get(UserToken, token_id)

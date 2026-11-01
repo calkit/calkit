@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { MachinesService } from "../../client"
 import {
   MachineConnection,
+  SECOND_FACTOR_REQUIRED,
   importMachineKey,
   openReply,
   replyText,
@@ -231,8 +232,10 @@ describe("MachineConnection", () => {
     conn.send({ type: "sessions.input", session: "s1", data: "x" })
     const reply = (seq: number, msg: object) =>
       signReply(machine.privateKey, "g1", seq, msg)
+    const waiting = conn.waitUntilConnected()
     ws.onmessage?.({ data: await reply(1, { type: "channel.ready" }) })
-    await vi.waitFor(() => expect(conn.connected).toBe(true))
+    await waiting
+    expect(conn.connected).toBe(true)
     // Requests are signed with the key named in the grant, in sequence
     const request = conn.request("sessions.list")
     await vi.waitFor(() => expect(ws.sent).toHaveLength(2))
@@ -263,5 +266,34 @@ describe("MachineConnection", () => {
     expect(output).toHaveLength(1)
     expect(conn.retryTimer).toBeDefined()
     conn.close()
+  })
+  it("stops waiting once connecting is refused or takes too long", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket)
+    const relayToken = vi.mocked(MachinesService.postMachineRelayToken)
+    relayToken.mockRejectedValue({
+      response: { data: { detail: SECOND_FACTOR_REQUIRED } },
+    })
+    // Refused for want of a code, which retrying won't fix, so it says so
+    // rather than waiting out the timeout
+    const conn = new MachineConnection("m1")
+    conn.open()
+    await expect(conn.waitUntilConnected(60000)).rejects.toThrow(
+      SECOND_FACTOR_REQUIRED,
+    )
+    // As it does when already refused
+    await expect(conn.waitUntilConnected(60000)).rejects.toThrow(
+      SECOND_FACTOR_REQUIRED,
+    )
+    expect(conn.statusListeners.size).toBe(0)
+    conn.close()
+    // Never answered
+    relayToken.mockReturnValue(new Promise(() => {}) as any)
+    const slow = new MachineConnection("m2")
+    slow.open()
+    await expect(slow.waitUntilConnected(50)).rejects.toThrow(
+      "Could not connect",
+    )
+    expect(slow.statusListeners.size).toBe(0)
+    slow.close()
   })
 })

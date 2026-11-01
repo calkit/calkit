@@ -24,6 +24,7 @@ from app.models import (
     Project,
     RefreshToken,
     User,
+    UserDailyCount,
     UserProjectAccess,
     UserToken,
     UserTOTP,
@@ -106,6 +107,14 @@ def test_machines(
     me = client.get("/user", headers=normal_user_token_headers).json()
     user = db.get(User, uuid.UUID(me["id"]))
     assert user is not None
+    # Registrations are limited per day, which reruns shouldn't run into
+    for count in db.exec(
+        select(UserDailyCount)
+        .where(UserDailyCount.user_id == user.id)
+        .where(UserDailyCount.kind == "machine-registrations")
+    ).all():
+        db.delete(count)
+    db.commit()
     user.email_verified_at = None
     db.add(user)
     db.commit()
@@ -214,18 +223,29 @@ def test_machines(
     )
     assert r.status_code == 200, r.text
     check_in = r.json()
-    # Numbers that don't fit are refused
+    # Numbers that don't fit are refused, as are too many workspaces
     for bad in [
-        {"path": "/x", "ahead": -1},
-        {"path": "/x", "behind": 2**31},
-        {"path": "/x", "agents": [{"tool": "claude", "pid": 2**40}]},
+        [{"path": "/x", "ahead": -1}],
+        [{"path": "/x", "behind": 2**31}],
+        [{"path": "/x", "agents": [{"tool": "claude", "pid": 2**40}]}],
+        [{"path": "/x", "in_use_by": "x" * 257}],
+        [{"path": f"/x/{n}"} for n in range(201)],
     ]:
         r = client.post(
             "/machines/check-in",
             headers=op_headers,
-            json={"workspaces": [bad]},
+            json={"workspaces": bad},
         )
         assert r.status_code == 422, bad
+    # As is a check-in too big to read
+    from app.api.routes.machines import MAX_CHECK_IN_BYTES
+
+    r = client.post(
+        "/machines/check-in",
+        headers=op_headers | {"Content-Type": "application/json"},
+        content=b'{"workspaces": []' + b" " * MAX_CHECK_IN_BYTES + b"}",
+    )
+    assert r.status_code == 413, r.text
     assert check_in["relay_url"] == settings.relay_url
     payload = jwt.decode(
         check_in["relay_token"],
@@ -669,6 +689,23 @@ def test_machines(
         r = client.get(path, headers=session_headers)
         assert r.status_code == 403, path
         assert r.json()["detail"] == "A hub session's token can't do this"
+    # Nor register a machine, which would get a token that never expires,
+    # nor can a machine's CLI token, though the user's own tokens can
+    for headers, status in [
+        (session_headers, 403),
+        ({"Authorization": f"Bearer {cli_token}"}, 403),
+        (pat_headers, 200),
+    ]:
+        with patch("app.api.routes.machines.send_email"):
+            r = client.post(
+                "/machines", headers=headers, json={"hostname": hostname}
+            )
+        assert r.status_code == status, r.text
+    with patch("app.api.routes.machines.send_email"):
+        r = client.delete(
+            f"/machines/{r.json()['id']}", headers=normal_user_token_headers
+        )
+    assert r.status_code == 200, r.text
     # Nor does one come once the second factor is set up again
     confirmed = totp.confirmed_at
     totp.confirmed_at = utcnow() + timedelta(minutes=1)
@@ -1108,8 +1145,29 @@ def test_machine_owner_limits(
     r = client.post("/machines", headers=headers, json={"name": "first"})
     assert r.status_code == 200, r.text
     op_headers = {"Authorization": f"Bearer {r.json()['token']}"}
+    # Or register so many a day, revoked or not, so registering and revoking
+    # can't loop forever, emailing each time
+    from app.api.routes.machines import MACHINE_REGISTRATIONS_PER_DAY
+
+    count = db.exec(
+        select(UserDailyCount)
+        .where(UserDailyCount.user_id == user.id)
+        .where(UserDailyCount.kind == "machine-registrations")
+    ).one()
+    assert count.count == 1
+    count.count = MACHINE_REGISTRATIONS_PER_DAY
+    db.add(count)
+    db.commit()
+    r = client.post("/machines", headers=headers, json={"name": "second"})
+    assert r.status_code == 429
+    assert "today" in r.json()["detail"]
+    count.day -= timedelta(days=1)
+    db.add(count)
+    db.commit()
+    r = client.post("/machines", headers=headers, json={"name": "second"})
+    assert r.status_code == 200, r.text
     # A user can only have so many active machines
-    for n in range(49):
+    for n in range(48):
         db.add(
             Machine(
                 user_id=user.id,
@@ -1271,6 +1329,30 @@ def test_relay(monkeypatch: pytest.MonkeyPatch) -> None:
             with client.websocket_connect("/machine") as ws:
                 ws.receive_text()
         assert e.value.code == relay.CLOSE_TRY_AGAIN
+        monkeypatch.setattr(relay, "MAX_UNAUTHENTICATED", 1000)
+        # As are too many from one address, as Traefik adds it to the end of
+        # X-Forwarded-For, grouping IPv6 ones by /64
+        monkeypatch.setattr(relay, "MAX_UNAUTHENTICATED_PER_ADDRESS", 1)
+        assert relay.client_address(
+            Mock(headers={"x-forwarded-for": "1.2.3.4, 2001:db8::1"})
+        ) == relay.client_address(
+            Mock(headers={"x-forwarded-for": "2001:db8::2"})
+        )
+        with client.websocket_connect(
+            "/machine", headers={"x-forwarded-for": "1.2.3.4, 203.0.113.1"}
+        ):
+            with pytest.raises(WebSocketDisconnect) as e:
+                with client.websocket_connect(
+                    "/browser", headers={"x-forwarded-for": "203.0.113.1"}
+                ) as ws:
+                    ws.receive_text()
+            assert e.value.code == relay.CLOSE_TRY_AGAIN
+            # Another address still gets in, and is refused only for its
+            # token
+            with pytest.raises(WebSocketDisconnect) as e:
+                with connect(client, "/browser", "nope") as ws:
+                    ws.receive_text()
+            assert e.value.code == relay.CLOSE_UNAUTHORIZED
         monkeypatch.undo()
         monkeypatch.setenv("RELAY_SECRET_KEY", settings.RELAY_SECRET_KEY)
         with connect(client, "/machine", token("machine")) as op_ws:

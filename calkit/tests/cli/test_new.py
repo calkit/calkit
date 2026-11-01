@@ -2414,6 +2414,65 @@ def test_new_workspace(tmp_dir):
         ]
     )
     assert os.listdir(target) == []
+    # A branch only on a remote tracks it, preferring origin's, rather than
+    # starting over from here
+    parent = os.path.dirname(root)
+    head = git_out("rev-parse", "HEAD")
+    feat = git_out("commit-tree", "HEAD^{tree}", "-p", head, "-m", "Feat")
+    up_feat = git_out("commit-tree", "HEAD^{tree}", "-p", head, "-m", "Up")
+    for name, sha in [("origin", feat), ("upstream", up_feat)]:
+        url = os.path.join(parent, f"{name}.git")
+        git_out("init", "-q", "--bare", url)
+        git_out("remote", "add", name, url)
+        git_out("push", "-q", name, f"{sha}:refs/heads/feat")
+        git_out("push", "-q", name, f"{sha}:refs/heads/{name}-only")
+        git_out("fetch", "-q", name)
+    for branch, sha, upstream in [
+        ("feat", feat, "origin/feat"),
+        ("upstream-only", up_feat, "upstream/upstream-only"),
+    ]:
+        dest = os.path.join(parent, f"ws-{branch}")
+        subprocess.check_call(
+            ["calkit", "new", "workspace", branch, "--path", dest]
+        )
+        ws = git.Repo(dest)
+        assert ws.head.commit.hexsha == sha
+        tracking = ws.active_branch.tracking_branch()
+        assert tracking is not None and tracking.name == upstream
+    # Unless told where to start from
+    dest = os.path.join(parent, "ws-origin-only")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "workspace",
+            "origin-only",
+            "--path",
+            dest,
+            "--from",
+            head,
+        ]
+    )
+    ws = git.Repo(dest)
+    assert ws.head.commit.hexsha == head
+    assert ws.active_branch.tracking_branch() is None
+    # In a submodule, it goes beside the submodule's checkout, not inside
+    # the superproject's .git
+    sub_src = os.path.join(parent, "sub-src")
+    git_out("init", "-q", sub_src)
+    git_out("-C", sub_src, "commit", "-q", "--allow-empty", "-m", "Init")
+    git_out(
+        "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub_src
+    )
+    sub = os.path.join(root, "sub-src")
+    subprocess.check_call(["calkit", "new", "workspace", "s1"], cwd=sub)
+    assert git.Repo(f"{sub}-s1").active_branch.name == "s1"
+    # Also from one of its workspaces
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "s2"], cwd=f"{sub}-s1"
+    )
+    assert git.Repo(f"{sub}-s2").active_branch.name == "s2"
+    assert not os.path.exists(os.path.join(root, ".git", "modules-s1"))
 
 
 def test_new_comment(tmp_dir):

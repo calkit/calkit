@@ -7,11 +7,14 @@ import re
 import secrets
 import time
 import uuid
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import requests
-from fastapi import APIRouter, Cookie, Depends, HTTPException
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
+from fastapi.responses import Response
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from sqlmodel import col, func, select
 
@@ -23,6 +26,7 @@ from app.api.deps import (
     PAT_VERIFIER_LENGTH_BYTES,
     CurrentSession,
     CurrentUser,
+    NoMachineSessionToken,
     SessionDep,
     TokenDep,
 )
@@ -72,6 +76,10 @@ CLI_TOKEN_DAYS = 365
 # the session open does
 SESSION_TOKEN_MINUTES = 15
 MAX_ACTIVE_MACHINES = 50
+# Counting revoked ones, so registering and revoking can't loop forever,
+# emailing each time
+MACHINE_REGISTRATIONS_PER_DAY = 20
+MAX_CHECK_IN_BYTES = 1024 * 1024
 NAME_PATTERN = r"^[a-z0-9][a-z0-9-]{0,63}$"
 # Hub names for an owner and project, as a machine reports them
 PROJECT_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,255}/[A-Za-z0-9._-]{1,255}$")
@@ -237,11 +245,35 @@ class MachineRegistered(MachineOut):
     grant_public_key: str
 
 
-@router.post("/machines")
+def refuse_machine_cli_token(session: SessionDep, token: TokenDep) -> None:
+    """Refuse a CLI token issued to a linked machine, where a route would
+    let one machine register another.
+
+    The route's own authentication verifies the token, so this only reads
+    it.
+    """
+    if not token.startswith("ckp_"):
+        return
+    selector = token[4:PAT_SELECTOR_END_CHAR_IDX]
+    machine_id = session.exec(
+        select(UserToken.machine_id).where(UserToken.selector == selector)
+    ).first()
+    if machine_id is not None:
+        raise HTTPException(403, "A linked machine's token can't do this")
+
+
+@router.post(
+    "/machines",
+    dependencies=[NoMachineSessionToken, Depends(refuse_machine_cli_token)],
+)
 def post_machine(
     session: SessionDep, current_user: CurrentUser, req: MachinePost
 ) -> MachineRegistered:
-    """Register a machine as one of the user's."""
+    """Register a machine as one of the user's.
+
+    This issues a token that doesn't expire, so a token from a linked
+    machine, i.e., one of its sessions' or its CLI token, can't.
+    """
     if not current_user.can_link_machines:
         raise HTTPException(
             403,
@@ -278,6 +310,15 @@ def post_machine(
     while name in taken:
         name = f"{base}-{n}"
         n += 1
+    registrations = users.get_daily_count(
+        session,
+        current_user,
+        "machine-registrations",
+        MACHINE_REGISTRATIONS_PER_DAY,
+        "Too many machines registered today; try again tomorrow",
+    )
+    registrations.count += 1
+    session.add(registrations)
     selector = secrets.token_hex(PAT_SELECTOR_LENGTH_BYTES)
     verifier = secrets.token_hex(PAT_VERIFIER_LENGTH_BYTES)
     machine = Machine(
@@ -438,7 +479,7 @@ class WorkspaceInfo(BaseModel):
     last_run: LastRun | None = None
     # Another hub this machine is linked to that's using it, which
     # keeps this one out until it's done
-    in_use_by: str | None = Field(default=None, max_length=2048)
+    in_use_by: str | None = Field(default=None, max_length=256)
     # When it last changed, e.g., a commit, a checkout, or a run ending
     last_activity: str | None = Field(default=None, max_length=64)
     agents: list[AgentInfo] = Field(default=[], max_length=20)
@@ -453,7 +494,7 @@ class CheckIn(BaseModel):
     connected: bool = True
     # Whether it will restart once idle, e.g., after Calkit was upgraded
     restart_pending: bool = False
-    workspaces: list[WorkspaceInfo] = Field(default=[], max_length=1000)
+    workspaces: list[WorkspaceInfo] = Field(default=[], max_length=200)
     # The sign-ins its open channels came from, to hear which have ended
     channel_sessions: list[uuid.UUID] = Field(default=[], max_length=100)
     # Its own key, which is stored if the hub has none yet, and otherwise
@@ -500,7 +541,31 @@ def _ended_sessions(
     return sorted(set(session_ids) - set(live), key=str)
 
 
-@router.post("/machines/check-in")
+class CheckInRoute(APIRoute):
+    """A route that refuses a body over MAX_CHECK_IN_BYTES before parsing
+    it, however it's sent.
+    """
+
+    def get_route_handler(
+        self,
+    ) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def limited(request: Request) -> Response:
+            chunks = []
+            size = 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_CHECK_IN_BYTES:
+                    raise HTTPException(413, "Check-in too large")
+                chunks.append(chunk)
+            # Where Starlette keeps a body it has read, for the handler
+            request._body = b"".join(chunks)
+            return await handler(request)
+
+        return limited
+
+
 def post_machine_check_in(
     session: SessionDep, machine: CurrentMachine, req: CheckIn
 ) -> CheckInResp:
@@ -594,6 +659,15 @@ def post_machine_check_in(
         grant_public_key=get_machine_grant_public_key(),
         ended_sessions=_ended_sessions(session, machine, req.channel_sessions),
     )
+
+
+# Added rather than decorated, since decorators can't set the route class
+router.add_api_route(
+    "/machines/check-in",
+    post_machine_check_in,
+    methods=["POST"],
+    route_class_override=CheckInRoute,
+)
 
 
 @router.post("/machines/{machine_id}/wake")
@@ -746,9 +820,12 @@ def post_machine_cli_token(
         raise HTTPException(403, "No token was requested")
     machine.cli_token_requested_at = None
     session.add(machine)
+    # Only CLI tokens, so DVC tokens the old one minted keep working until
+    # the machine is revoked
     earlier = session.exec(
         select(UserToken)
         .where(UserToken.machine_id == machine.id)
+        .where(UserToken.scope.is_(None))  # type: ignore[union-attr]
         .where(UserToken.is_active)
     ).all()
     for token in earlier:

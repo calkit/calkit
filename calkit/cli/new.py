@@ -4453,7 +4453,7 @@ def new_workspace(
         typer.Argument(
             help=(
                 "The branch to work on there, created from the current "
-                "commit unless it exists."
+                "commit unless it exists here or on a remote."
             )
         ),
     ],
@@ -4487,7 +4487,7 @@ def new_workspace(
     root = str(repo.working_dir)
     # The main checkout, which differs when this is a worktree itself, so
     # every workspace is named after it and shares its DVC cache
-    main_root = os.path.dirname(os.path.abspath(repo.common_dir))
+    main_root = calkit.git.get_main_worktree_dir(repo) or root
     if path is None:
         name = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-.")
         path = os.path.join(
@@ -4496,10 +4496,27 @@ def new_workspace(
     path = os.path.abspath(path)
     if os.path.exists(path):
         raise_error(f"{path} already exists")
+    # A branch only on a remote, e.g., pushed from another machine, tracks it
+    # rather than starting over from here
+    remote_ref = None
+    if branch not in repo.heads and start_point is None:
+        remotes = sorted(
+            (r.name for r in repo.remotes), key=lambda n: n != "origin"
+        )
+        for remote in remotes:
+            ref = f"refs/remotes/{remote}/{branch}"
+            try:
+                repo.git.rev_parse("--verify", "--quiet", ref)
+            except Exception:
+                continue
+            remote_ref = ref
+            break
     if branch in repo.heads:
         if start_point is not None:
             raise_error(f"Branch '{branch}' exists, so it can't start --from")
         args = ["--", path, branch]
+    elif remote_ref is not None:
+        args = ["--track", "-b", branch, "--", path, remote_ref]
     else:
         # Positionals after --, so none can be taken as an option
         args = ["-b", branch, "--", path]

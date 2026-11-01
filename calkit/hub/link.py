@@ -46,6 +46,12 @@ OUTPUT_COALESCE_SECONDS = 0.02
 # well under the relay's message limit
 OUTPUT_CHUNK_CHARS = 16 * 1024
 RECONNECT_MAX_DELAY_SECONDS = 60
+# A relay connection up this long resets the backoff
+RECONNECT_RESET_SECONDS = 60
+# How long a service waits for another link to let go of the lock, and
+# how often it tries, before failing so its manager starts it again
+LOCK_WAIT_SECONDS = 60
+LOCK_RETRY_SECONDS = 2
 # Messages from the relay are at most 256 KiB, plus its wrapping
 MAX_FRAME_BYTES = 1024 * 1024
 # What the relay takes in one message, with room to spare
@@ -71,6 +77,8 @@ MAX_INPUT_BUFFER_BYTES = 1024 * 1024
 CRON_IDLE_EXIT_SECONDS = 900
 # So a file a repo committed as a link isn't followed out of it
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+# Workspaces the hub takes in a check-in
+MAX_CHECK_IN_WORKSPACES = 200
 # Folders in the home directory whose Calkit projects are workspaces
 WORKSPACE_ROOTS = ["calkit", "dev"]
 # How often to check whether Calkit was upgraded or a restart was asked for
@@ -708,9 +716,46 @@ def discover_workspaces(cfg: dict) -> list[dict]:
 
     def _git_status(path: str) -> dict:
         """Branch, commit, dirtiness, and divergence of a checkout."""
+        # Status runs filter drivers, e.g., on files whose stat data no
+        # longer matches the index, so each one Git's config defines is
+        # emptied, which reading the config doesn't run
         try:
+            defined = subprocess.run(
+                [*SAFE_GIT, "config", "-z", "--get-regexp", r"^filter\."],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return {}
+        # 1 means there are none
+        if defined.returncode not in (0, 1):
+            return {}
+        names = set()
+        for entry in defined.stdout.split("\0"):
+            key = entry.split("\n", 1)[0]
+            if key.count(".") >= 2:
+                names.add(key.split(".", 1)[1].rsplit(".", 1)[0])
+        args = list(SAFE_GIT)
+        for name in sorted(names):
+            # One that -c would read as another key can't be emptied
+            if "=" in name:
+                return {}
+            for var in ("clean", "smudge", "process"):
+                args += ["-c", f"filter.{name}.{var}="]
+            args += ["-c", f"filter.{name}.required=false"]
+        try:
+            # Not looking inside submodules, which Git would do with their
+            # own configs' filters
             out = subprocess.run(
-                [*SAFE_GIT, "status", "--porcelain=v2", "--branch"],
+                [
+                    *args,
+                    "status",
+                    "--porcelain=v2",
+                    "--branch",
+                    "--ignore-submodules=dirty",
+                ],
                 cwd=path,
                 capture_output=True,
                 text=True,
@@ -810,12 +855,16 @@ def discover_workspaces(cfg: dict) -> list[dict]:
             continue
         # Only this hub's projects, so other hubs never hear of them, unless
         # one was added on purpose
-        if (
-            kind == "personal"
-            and path not in added
-            and not is_on_this_hub(path)
-        ):
-            continue
+        if kind == "personal" and path not in added:
+            # One with a hub that makes no sense doesn't keep the rest from
+            # this one
+            try:
+                on_this_hub = is_on_this_hub(path)
+            except Exception as e:
+                logger.warning(f"Skipping workspace {path}: {e}")
+                continue
+            if not on_this_hub:
+                continue
         found[path] = kind
 
     def data_project(path: str) -> str | None:
@@ -923,6 +972,27 @@ def check_in(
 
     from calkit.hub import core as hub
 
+    # As many as the hub takes, ones in use first, then the latest
+    if len(workspaces) > MAX_CHECK_IN_WORKSPACES:
+        logger.warning(
+            f"Telling the hub of only {MAX_CHECK_IN_WORKSPACES} of "
+            f"{len(workspaces)} workspaces"
+        )
+        workspaces = sorted(
+            workspaces,
+            key=lambda ws: ws.get("last_activity") or "",
+            reverse=True,
+        )
+        workspaces = sorted(
+            workspaces,
+            key=lambda ws: (
+                not (
+                    ws.get("running")
+                    or ws.get("agents")
+                    or ws.get("in_use_by")
+                )
+            ),
+        )[:MAX_CHECK_IN_WORKSPACES]
     try:
         resp: dict = hub._request(
             "post",
@@ -2498,7 +2568,7 @@ def new_workspace(wdir: str, branch: str) -> dict:
     main = wdir
     try:
         repo = git.Repo(wdir)
-        main = os.path.dirname(os.path.abspath(repo.common_dir))
+        main = calkit.git.get_main_worktree_dir(repo) or wdir
     except (git.InvalidGitRepositoryError, git.NoSuchPathError):
         pass
     parent = os.path.dirname(os.path.realpath(main))
@@ -3714,19 +3784,23 @@ class HubLink:
                 return
 
     async def run(self) -> None:
+        import random
+
         checker: asyncio.Task | None = None
         idle: asyncio.Task | None = None
         if self.idle_exit_seconds is not None:
             idle = asyncio.create_task(self.wait_until_idle())
         restart = asyncio.create_task(self.wait_to_restart())
+        loop = asyncio.get_running_loop()
         delay = 1.0
         try:
             while True:
+                connected_at: float | None = None
                 try:
                     resp = await self.check_in()
                     if checker is None:
                         checker = asyncio.create_task(self.keep_checking_in())
-                    delay = 1.0
+                    connected_at = loop.time()
                     connection = asyncio.create_task(self.connect(resp))
                     waiting = [connection, checker, restart]
                     if idle is not None:
@@ -3746,8 +3820,17 @@ class HubLink:
                     raise
                 except Exception as e:
                     logger.warning(f"Connection failed: {e}")
+                # Backing off until a connection stays up, since the hub
+                # answering doesn't mean the relay will, and at random, so
+                # machines cut off together don't all come back at once
+                if (
+                    connected_at is not None
+                    and loop.time() - connected_at >= RECONNECT_RESET_SECONDS
+                ):
+                    delay = 1.0
+                else:
                     delay = min(delay * 2, RECONNECT_MAX_DELAY_SECONDS)
-                await asyncio.sleep(delay)
+                await asyncio.sleep(delay * random.uniform(0.5, 1.0))
         finally:
             for task in [checker, idle, restart]:
                 if task is not None:
@@ -3896,9 +3979,17 @@ def run(cfg: dict, mode: str = "foreground") -> bool:
     Returns False if another link is already running.
     """
     import signal
+    import time
 
     refuse_root()
     lock = acquire_lock()
+    # A service started while another link runs, e.g., the one it replaces
+    # or one in tmux, waits a while for it
+    if mode == "service":
+        deadline = time.monotonic() + LOCK_WAIT_SECONDS
+        while lock is None and time.monotonic() < deadline:
+            time.sleep(LOCK_RETRY_SECONDS)
+            lock = acquire_lock()
     if lock is None:
         return False
     trim_log()
@@ -4344,30 +4435,32 @@ def install_service(login: bool = False) -> list[str]:
     return notes
 
 
-def _stop_running_link() -> None:
+def _stop_running_link(key: str | None = None) -> None:
     import psutil
 
-    pid = get_running_pid()
+    pid = get_running_pid(key)
     if pid is None:
         return
-    proc = psutil.Process(pid)
-    proc.terminate()
-    # So one started right after doesn't find the lock still held
     try:
-        proc.wait(timeout=30)
-    except psutil.TimeoutExpired:
-        proc.kill()
+        proc = psutil.Process(pid)
+        proc.terminate()
+        # So one started right after doesn't find the lock still held
+        try:
+            proc.wait(timeout=30)
+        except psutil.TimeoutExpired:
+            proc.kill()
+    except psutil.NoSuchProcess:
+        pass
 
 
 def uninstall_service(key: str | None = None) -> None:
     """Remove the selected hub's link service, or the one for the hub
-    with this key.
+    with this key, and stop its link, however it was started.
     """
     if platform.system() == "Windows":
         if os.path.isfile(_windows_startup_path(key)):
             os.remove(_windows_startup_path(key))
-        if key is None:
-            _stop_running_link()
+        _stop_running_link(key)
         return
     if _cron_installed(key):
         _write_crontab(
@@ -4412,6 +4505,9 @@ def uninstall_service(key: str | None = None) -> None:
                     f"run 'sudo launchctl bootout {target}' and "
                     f"'sudo rm {daemon}'"
                 )
+    # E.g., one cron started, or one in tmux, which a new service would
+    # otherwise wait on
+    _stop_running_link(key)
 
 
 def get_service_status() -> str | None:

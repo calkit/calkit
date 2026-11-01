@@ -255,6 +255,10 @@ def start(
                 typer.echo(
                     "Another hub link to this hub is already running here"
                 )
+            # A failure, so the service manager tries again later rather
+            # than leaving it stopped
+            if mode == "service":
+                raise typer.Exit(1)
     except hub_link.LinkKeyRejected:
         # Already logged, and a clean exit, so a service manager doesn't
         # restart it

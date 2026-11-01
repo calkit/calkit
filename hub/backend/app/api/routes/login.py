@@ -659,12 +659,15 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
                     session.delete(external)
             if user.github_token is not None:
                 session.delete(user.github_token)
+            # Deleted, so turning them back on can't revive them
             tokens = session.exec(
                 select(UserToken).where(UserToken.user_id == user.id)
             ).all()
-            for credential in [*tokens, *user.machines]:
-                credential.is_active = False
-                session.add(credential)
+            for token in tokens:
+                session.delete(token)
+            for machine in user.machines:
+                machine.is_active = False
+                session.add(machine)
             session.commit()
             session.refresh(user)
     if not user.is_active:

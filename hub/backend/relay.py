@@ -9,6 +9,7 @@ docs/dev/hub-link-protocol.md.
 """
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -26,9 +27,11 @@ logging.basicConfig(level=logging.INFO)
 
 MAX_MESSAGE_BYTES = 256 * 1024
 # How long a new connection has to send its token
-AUTH_TIMEOUT_SECONDS = 10
-# How many connections may be waiting to send one at once
-MAX_UNAUTHENTICATED = 200
+AUTH_TIMEOUT_SECONDS = 3
+# How many connections may be waiting to send one at once, from one
+# address, so a few can't hold every slot, and from all
+MAX_UNAUTHENTICATED_PER_ADDRESS = 10
+MAX_UNAUTHENTICATED = 1000
 METER_LOG_INTERVAL_SECONDS = 60
 # Close codes
 CLOSE_UNSUPPORTED = 1003
@@ -69,6 +72,28 @@ class Closed(Exception):
     """The relay closed a socket itself, so it mustn't close it again."""
 
 
+def client_address(ws: WebSocket) -> str:
+    """Where a connection came from, as Traefik saw it, which adds that to
+    the end of X-Forwarded-For.
+
+    That's only trustworthy because deployed relays are only reachable
+    through Traefik. IPv6 addresses are grouped by /64, since one host
+    usually has that many.
+    """
+    forwarded = ws.headers.get("x-forwarded-for")
+    if forwarded:
+        address = forwarded.rsplit(",", 1)[-1].strip()
+    else:
+        address = ws.client.host if ws.client else ""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    if ip.version == 6:
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
+
+
 async def authenticate(
     ws: WebSocket, kind: Literal["machine", "browser"]
 ) -> dict | None:
@@ -78,10 +103,18 @@ async def authenticate(
     access logs.
     """
     global unauthenticated
-    if unauthenticated >= MAX_UNAUTHENTICATED:
+    address = client_address(ws)
+    if (
+        unauthenticated >= MAX_UNAUTHENTICATED
+        or unauthenticated_by_address.get(address, 0)
+        >= MAX_UNAUTHENTICATED_PER_ADDRESS
+    ):
         await ws.close(CLOSE_TRY_AGAIN)
         return None
     unauthenticated += 1
+    unauthenticated_by_address[address] = (
+        unauthenticated_by_address.get(address, 0) + 1
+    )
     try:
         await ws.accept()
         async with asyncio.timeout(AUTH_TIMEOUT_SECONDS):
@@ -92,6 +125,9 @@ async def authenticate(
         msg = {}
     finally:
         unauthenticated -= 1
+        unauthenticated_by_address[address] -= 1
+        if not unauthenticated_by_address[address]:
+            del unauthenticated_by_address[address]
     token = msg.get("token")
     payload = (
         decode_relay_token(token, kind) if isinstance(token, str) else None
@@ -111,8 +147,9 @@ class Machine:
 
 
 machines: dict[str, Machine] = {}
-# Connections that haven't sent a token yet
+# Connections that haven't sent a token yet, in all and by address
 unauthenticated = 0
+unauthenticated_by_address: dict[str, int] = {}
 # IDs of relay tokens already used, with when they expire
 used_tokens: dict[str, float] = {}
 # Bytes relayed per machine since the last log, as (to machine, from it)

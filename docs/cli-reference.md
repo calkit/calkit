@@ -1762,9 +1762,9 @@ calkit new|create workspace [OPTIONS] BRANCH
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                                                                    |
-| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------ |
-| `branch` | str  | yes      |         | The branch to work on there, created from the current commit unless it exists. |
+| Argument | Type | Required | Default | Description                                                                                        |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `branch` | str  | yes      |         | The branch to work on there, created from the current commit unless it exists here or on a remote. |
 
 Options:
 

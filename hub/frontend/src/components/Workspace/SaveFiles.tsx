@@ -43,7 +43,8 @@ const SaveFiles = ({
   request,
   onDone,
 }: SaveFilesProps) => {
-  const allPaths = changedFiles.concat(stagedFiles)
+  // A key, since the lists are new arrays on each render
+  const pathsKey = changedFiles.concat(stagedFiles).join("\n")
   const showToast = useCustomToast()
   const {
     register,
@@ -55,12 +56,15 @@ const SaveFiles = ({
   } = useForm<CommitPost>({
     mode: "onBlur",
     criteriaMode: "all",
-    defaultValues: {
-      paths: allPaths,
-      commit_message: `Update ${allPaths}`,
-      push: true,
-    },
+    defaultValues: { paths: [], commit_message: "", push: true },
   })
+  // Everything selected on opening, and once the status loads if it opens
+  // first, e.g., from a link
+  useEffect(() => {
+    if (!isOpen) return
+    const paths = pathsKey ? pathsKey.split("\n") : []
+    reset({ paths, commit_message: `Update ${paths.join(", ")}`, push: true })
+  }, [isOpen, pathsKey, reset])
   const mutation = useMutation({
     mutationFn: (data: CommitPost) => {
       return request("workspace.save", {

@@ -283,9 +283,10 @@ without permessage-deflate, so larger ones are refused before they're
 buffered.
 A reply too large to send becomes an error reply to its request, and is
 dropped if it isn't one.
-New connections close with code 1013 while 200 are waiting to send their
-tokens, and a Traefik `inFlightReq` middleware allows each client address
-50 connections at once.
+A connection has 3 seconds to send its token.
+New connections close with code 1013 while 1000 are waiting to send theirs,
+or 10 from the same client address (IPv6 grouped by /64), and a Traefik
+`inFlightReq` middleware allows each client address 50 connections at once.
 The relay counts bytes in each direction per machine and logs them every
 minute.
 

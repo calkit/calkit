@@ -801,10 +801,14 @@ class Settings(BaseSettings):
                     if secret_val is not None:
                         try:
                             set_secret(key, secret_val)
-                        except keyring.errors.KeyringError:
+                        except keyring.errors.KeyringError as e:
                             # E.g., a service started at boot can't reach
                             # the login keychain, so it stays in this file,
                             # as it would with no keyring at all
+                            warnings.warn(
+                                f"Couldn't store {key} in the keyring ({e}); "
+                                f"saving it in {fpath} instead"
+                            )
                             cfg[key] = secret_val
                     else:
                         try:

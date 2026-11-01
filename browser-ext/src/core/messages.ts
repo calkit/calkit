@@ -9,6 +9,8 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  PipelineRun,
+  PipelineRuns,
   StageFile,
   OverleafLookup,
   OverleafSyncResponse,
@@ -142,6 +144,8 @@ export type Request =
       importedFrom?: Record<string, unknown>;
       createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
     }
+  | { type: "project.pipelineRuns"; owner: string; project: string }
+  | { type: "project.startPipelineRun"; owner: string; project: string }
   | {
       type: "project.addExportStage";
       owner: string;
@@ -239,6 +243,8 @@ export interface ResponseMap {
   "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
   "project.recordOrigin": { path: string };
   "project.addExportStage": ExportStage;
+  "project.pipelineRuns": PipelineRuns;
+  "project.startPipelineRun": PipelineRun;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

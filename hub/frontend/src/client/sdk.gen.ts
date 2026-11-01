@@ -185,6 +185,8 @@ import type {
   GetProjectOverleafSyncStatusResponses,
   GetProjectPipelineErrors,
   GetProjectPipelineResponses,
+  GetProjectPipelineRunsErrors,
+  GetProjectPipelineRunsResponses,
   GetProjectPipelineStageErrors,
   GetProjectPipelineStageResponses,
   GetProjectPresentationsErrors,
@@ -380,6 +382,8 @@ import type {
   PostProjectOverleafSyncResponses,
   PostProjectPipelineExportStageErrors,
   PostProjectPipelineExportStageResponses,
+  PostProjectPipelineRunErrors,
+  PostProjectPipelineRunResponses,
   PostProjectPipelineStageErrors,
   PostProjectPipelineStageResponses,
   PostProjectPublicationErrors,
@@ -7821,6 +7825,92 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Project Pipeline Runs
+   *
+   * Recent runs of the pipeline, and whether one can be started here.
+   *
+   * Only runs on GitHub Actions so far, by the workflow that runs the
+   * Calkit action.
+   */
+  public static getProjectPipelineRuns<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPipelineRunsResponses,
+    GetProjectPipelineRunsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPipelineRunsResponses,
+      GetProjectPipelineRunsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/runs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Pipeline Run
+   *
+   * Start the pipeline on GitHub Actions, on the default branch.
+   *
+   * A project without a workflow that runs the Calkit action gets one that
+   * only runs when started, since every Overleaf sync is a push.
+   */
+  public static postProjectPipelineRun<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPipelineRunResponses,
+    PostProjectPipelineRunErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPipelineRunResponses,
+      PostProjectPipelineRunErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/runs",
+      ...options,
+      ...params,
     })
   }
 

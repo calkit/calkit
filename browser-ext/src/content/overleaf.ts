@@ -792,6 +792,20 @@ async function refreshRuns(link: OverleafLinkPublic): Promise<void> {
   }
 }
 
+/** Start the pipeline on GitHub Actions, which syncs here when it's done. */
+async function startRun(link: OverleafLinkPublic): Promise<void> {
+  await send({
+    type: "project.startPipelineRun",
+    owner: link.project_owner_name,
+    project: link.project_name,
+  });
+  if (pipelineRuns?.key === linkKey(link)) {
+    pipelineRuns.startedAt = Date.now();
+    pipelineRuns.notice = undefined;
+  }
+  await refreshRuns(link);
+}
+
 /** Bring what a finished run made into this paper. */
 async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
   if (!pipelineRuns) {
@@ -920,16 +934,7 @@ function drawRuns(): void {
       start.disabled = true;
       clear(message).append(loading("Starting"));
       try {
-        await send({
-          type: "project.startPipelineRun",
-          owner: link.project_owner_name,
-          project: link.project_name,
-        });
-        if (pipelineRuns) {
-          pipelineRuns.startedAt = Date.now();
-          pipelineRuns.notice = undefined;
-        }
-        await refreshRuns(link);
+        await startRun(link);
       } catch (e) {
         start.disabled = false;
         clear(message).append(
@@ -1364,11 +1369,119 @@ async function fillCard(
     const provenance = await citationProvenance(link, item.citation);
     clear(body);
     renderProvenance(body, link, item.citation, provenance);
+    body.append(bringUpToDate(link, item.citation, provenance));
   } catch (e) {
     clear(body).append(
       errorMessage(e instanceof Error ? e.message : String(e)),
     );
   }
+}
+
+/**
+ * A way to bring what the document shows up to date from its card: syncing
+ * what the project already has, or running what's stale first, which syncs
+ * when it's done.
+ */
+function bringUpToDate(
+  link: OverleafLinkPublic,
+  citation: Citation,
+  provenance: Provenance,
+): HTMLElement {
+  const box = el("div", { style: { marginTop: "6px" } });
+  const canWrite = ["write", "admin", "owner"].includes(
+    link.current_user_access ?? "",
+  );
+  const path = provenance.path;
+  // What the next sync would bring, by where Overleaf gets its copy
+  const status =
+    lastCheck && linkKey(lastCheck.link) === linkKey(link)
+      ? lastCheck.status
+      : null;
+  const waiting = (status?.files_to_push ?? []).some(
+    (f) =>
+      f.project_path === path ||
+      f.project_path.endsWith(`/_calkit/${path}`) ||
+      (citation.kind === "value" &&
+        f.project_path.endsWith("/_calkit/values.tex")),
+  );
+  // A frozen stage won't rerun, and a manual step needs a person
+  const stale =
+    provenance.stale_reason === "pipeline" &&
+    provenance.stage_kind !== "manual-step";
+  const message = el("div", { class: "small" });
+  if (stale && activeRun()) {
+    box.append(
+      el("div", {
+        class: "dim small",
+        text: "Running on GitHub Actions. It syncs here when it's done.",
+      }),
+    );
+  } else if (stale) {
+    const runs = pipelineRuns?.key === linkKey(link) ? pipelineRuns.runs : null;
+    const button = el("button", {
+      class: "action",
+      text: "Run and sync",
+      disabled: !canWrite || runs?.can_start === false,
+      title: !canWrite
+        ? "You need write access to this project to run it"
+        : runs?.cannot_start_reason ??
+          "Run the pipeline on GitHub Actions, then sync what it makes here",
+    });
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      clear(message).append(loading("Starting"));
+      try {
+        await startRun(link);
+        clear(message).append(
+          el("div", {
+            class: "dim",
+            text: "Started on GitHub Actions. It syncs here when it's done.",
+          }),
+        );
+      } catch (e) {
+        button.disabled = false;
+        clear(message).append(
+          errorMessage(e instanceof Error ? e.message : String(e)),
+        );
+      }
+    });
+    box.append(el("div", { class: "actions" }, [button]), message);
+  } else if (waiting) {
+    const button = el("button", {
+      class: "action",
+      text: "Sync now",
+      disabled: !canWrite,
+      title: canWrite
+        ? "Bring the project's latest version here"
+        : "You need write access to this project to sync",
+    });
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      clear(message).append(loading("Syncing"));
+      try {
+        await send({
+          type: "overleaf.sync",
+          owner: link.project_owner_name,
+          project: link.project_name,
+          path: link.path,
+        });
+        clear(message).append(el("div", { class: "dim", text: "Synced." }));
+        provenanceCache.clear();
+        if (currentProjectId) {
+          void (panel
+            ? load(currentProjectId)
+            : checkSyncStatus(currentProjectId));
+        }
+      } catch (e) {
+        button.disabled = false;
+        clear(message).append(
+          errorMessage(e instanceof Error ? e.message : String(e)),
+        );
+      }
+    });
+    box.append(el("div", { class: "actions" }, [button]), message);
+  }
+  return box;
 }
 
 /**

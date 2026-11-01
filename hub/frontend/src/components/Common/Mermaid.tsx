@@ -67,6 +67,9 @@ const Mermaid = ({
   // Bumped each time the diagram finishes rendering so the zoom-to-stage
   // effect can re-run against the freshly drawn SVG.
   const [renderTick, setRenderTick] = useState(0)
+  // The drawing's own width over height, so a wide, shallow pipeline gets a
+  // box its shape rather than a square that's mostly empty
+  const [drawnAspect, setDrawnAspect] = useState(1)
   // Set when mermaid refuses to draw the graph, so a pipeline too big for it
   // says so instead of leaving an empty box on the page.
   const [renderError, setRenderError] = useState<string | null>(null)
@@ -118,6 +121,13 @@ const Mermaid = ({
 
         svgSelection.call(zoomBehavior)
         zoomBehaviorRef.current = zoomBehavior
+        const viewBox = (svgSelection.node() as SVGSVGElement | null)?.viewBox
+          .baseVal
+        setDrawnAspect(
+          viewBox && viewBox.height > 0
+            ? Math.min(3, Math.max(1, viewBox.width / viewBox.height))
+            : 1,
+        )
         setRenderTick((t) => t + 1)
       } catch (error) {
         console.error("Error rendering Mermaid diagram:", error)
@@ -168,7 +178,7 @@ const Mermaid = ({
       // its textContent, which a <title> child would join.
       node.setAttribute("tabindex", "0")
       node.setAttribute("role", "button")
-      node.setAttribute("aria-label", `Edit stage ${name}`)
+      node.setAttribute("aria-label", `Select stage ${name}`)
       node.style.cursor = "pointer"
       cleanups.push(() => {
         node.removeEventListener("click", handler)
@@ -244,7 +254,7 @@ const Mermaid = ({
     <Box
       borderRadius="lg"
       borderWidth={1}
-      aspectRatio={isDiagramExpanded ? 2 / 1 : 1 / 1}
+      aspectRatio={isDiagramExpanded ? 2 / 1 : drawnAspect}
       boxSizing="border-box"
       overflow={"hidden"}
       px={3}

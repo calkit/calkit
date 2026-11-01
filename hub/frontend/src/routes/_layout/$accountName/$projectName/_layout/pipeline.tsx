@@ -445,7 +445,7 @@ function PipelineRuns({
         Date.parse(latest.started_at) >= startedAt - 30_000
       ))
   return (
-    <Box mt={6}>
+    <Box mt={4}>
       <Flex align="center" gap={3} mb={2}>
         <Heading size="md">Runs</Heading>
         {canStart && (
@@ -597,6 +597,12 @@ function ProjectPipeline() {
       }),
     [navigate],
   )
+  // Clicking a stage only points it out; editing is a step after that
+  const selectStage = useCallback(
+    (stageName: string) =>
+      navigate({ search: (prev) => ({ ...prev, stage: stageName }) }),
+    [navigate],
+  )
   const closeStageEditor = () =>
     navigate({ search: (prev) => ({ ...prev, stage_editor_open: undefined }) })
   const openPipelineEditor = () =>
@@ -665,17 +671,24 @@ function ProjectPipeline() {
                       isOversizedShown={show_diagram}
                       setIsOversizedShown={setIsDiagramShown}
                       zoomToStage={stage}
-                      stageNames={canEditStages ? stageNames : undefined}
-                      onStageClick={canEditStages ? openStageEditor : undefined}
+                      stageNames={stageNames}
+                      onStageClick={selectStage}
                     >
                       {String(pipelineQuery.data.mermaid)}
                     </Mermaid>
-                    {canEditStages && isDiagramDrawn && (
+                    {isDiagramDrawn && stageNames.size > 0 && (
                       <Text mt={1} fontSize="xs" color="ui.dim">
-                        Click a stage to edit it.
+                        Click a stage to find it in calkit.yaml.
                       </Text>
                     )}
                   </>
+                )}
+                {!ref && (
+                  <PipelineRuns
+                    ownerName={accountName}
+                    projectName={projectName}
+                    canStart={userHasWriteAccess}
+                  />
                 )}
               </Box>
               <Box flex={1} minW={0}>
@@ -694,6 +707,16 @@ function ProjectPipeline() {
                           size="xs"
                           onClick={openPipelineEditor}
                         />
+                      )}
+                      {stage && canEditStages && stageNames.has(stage) && (
+                        <Button
+                          size="xs"
+                          ml="auto"
+                          leftIcon={<MdEdit />}
+                          onClick={() => openStageEditor(stage)}
+                        >
+                          Edit {stage}
+                        </Button>
                       )}
                     </Flex>
                     <LinkedYaml
@@ -748,13 +771,6 @@ function ProjectPipeline() {
             </Alert>
           )}
         </Flex>
-      )}
-      {pipelineQuery.data && !ref && (
-        <PipelineRuns
-          ownerName={accountName}
-          projectName={projectName}
-          canStart={userHasWriteAccess}
-        />
       )}
       {pipeline_editor_open && canEditPipeline && (
         <PipelineEditorModal

@@ -37,7 +37,7 @@ https://github.com/petebachant/clima-local-geometry,petebachant,clima-local-geom
 https://github.com/petebachant/clima-perf,petebachant,clima-perf,CliMA performance,github-search+hub,main,True,False,2026-01-13,2026-10-31,True,False
 https://github.com/petebachant/climaatmos-opt,petebachant,climaatmos-opt,ClimaAtmos optimization,github-search+hub,main,True,False,2026-03-30,2026-04-06,True,False
 https://github.com/petebachant/climaatmos-repro,petebachant,climaatmos-repro,ClimaAtmos reproducibility,github-search+hub,main,True,False,2026-08-06,2026-08-09,True,True
-https://github.com/petebachant/example-basic,petebachant,example-basic,Basic Calkit example,github-search+hub,main,True,False,2025-04-04,2026-06-03,True,True
+https://github.com/petebachant/example-basic,petebachant,example-basic,Basic Calkit example,github-search+hub,main,True,False,2025-04-04,2026-11-01,True,True
 https://github.com/petebachant/human-control-systems-cycling-power-regulation,petebachant,human-control-systems-cycling-power-regulation,Human control systems: Cycling power regulation,github-search+hub,main,True,False,2025-02-08,2025-02-17,True,False
 https://github.com/petebachant/LES_CNBL_analysis,petebachant,LES_CNBL_analysis,Reproducing Kirby et al. (2025) 'Turbine- and farm-scale power losses in wind farms',hub,main,True,True,2025-03-28,2025-03-28,True,False
 https://github.com/petebachant/NACAFoil-OpenFOAM,petebachant,NACAFoil-OpenFOAM,Simulating a NACA airfoil with OpenFOAM,datacite+github-search+hub,master,True,False,2015-08-14,2026-08-15,True,False

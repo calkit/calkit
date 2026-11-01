@@ -76,13 +76,13 @@
     }
   },
   "latex-image-readme/sizes": {
-    "start_time": "2026-10-31T00:27:59.910000",
-    "end_time": "2026-10-31T00:28:12.585000",
-    "git_rev": "41de276515229c36fbed36595f6db32f0321a13c",
+    "start_time": "2026-11-01T02:47:28.418000",
+    "end_time": "2026-11-01T02:47:40.317000",
+    "git_rev": "31fdbaaf19a223c5b61026a6eb77a76773eb8793",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:f066c72f4260224a4889caadfb7ad917f42f54d197a1e3eafd675271016c6b6e",
-    "calkit_version": "0.50.4.dev197+gb58bc9200",
-    "calkit_git_rev": "41de276515229c36fbed36595f6db32f0321a13c",
+    "dvc_lock_hash": "sha256:cb292e06359af685a1bbb61969e48c9ab39f9d86e84cd7bacc8353f824804013",
+    "calkit_version": "0.50.5.dev0+g0220a6df0.d20261101",
+    "calkit_git_rev": "31fdbaaf19a223c5b61026a6eb77a76773eb8793",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
@@ -94,22 +94,22 @@
     }
   },
   "latex-word-round-trip": {
-    "start_time": "2026-10-31T22:35:22.354000",
-    "end_time": "2026-10-31T22:35:38.465000",
+    "start_time": "2026-11-01T02:47:05.420000",
+    "end_time": "2026-11-01T02:47:28.372000",
     "environment": "dev",
-    "git_rev": "4fcdd5af364905290ab7df0b167df4a019ae931b",
+    "git_rev": "31fdbaaf19a223c5b61026a6eb77a76773eb8793",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:9fbe10ef8ed6f5b5e810aacaa603893dd6f2f8750544c6d301de05ee92e542d8",
-    "calkit_version": "0.50.4.dev15+g4fcdd5af",
-    "calkit_git_rev": "4fcdd5af364905290ab7df0b167df4a019ae931b",
+    "dvc_lock_hash": "sha256:aec064428826312e3b754bd4447e7a59756f82013046e9fb5b42467fc8920f1d",
+    "calkit_version": "0.50.5.dev0+g0220a6df0.d20261101",
+    "calkit_git_rev": "31fdbaaf19a223c5b61026a6eb77a76773eb8793",
     "system": {
-      "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
-      "os_version": "25.6.0",
+      "os_version": "27.0.0",
       "machine": "arm64",
       "processor": "arm",
-      "cpu_count": 14,
-      "memory_gb": 24.0
+      "cpu_count": 10,
+      "memory_gb": 64.0
     }
   },
   "latex-word-round-trip-figure": {

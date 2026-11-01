@@ -15,6 +15,7 @@ import {
   Heading,
   Icon,
   IconButton,
+  Input,
   Link,
   Modal,
   ModalBody,
@@ -22,7 +23,10 @@ import {
   ModalContent,
   ModalHeader,
   ModalOverlay,
+  Radio,
+  RadioGroup,
   Spinner,
+  Stack,
   Tab,
   TabList,
   TabPanel,
@@ -34,8 +38,10 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
+import type { AxiosError } from "axios"
 import { Suspense, lazy, useEffect, useRef, useState } from "react"
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued"
+import { useForm } from "react-hook-form"
 import {
   FaChevronLeft,
   FaChevronRight,
@@ -53,13 +59,34 @@ import {
   type Notebook,
   ProjectsService,
   type Publication,
+  type StageFromScriptOrNotebookResponse,
 } from "../../client"
 import useAuth from "../../hooks/useAuth"
+import useCustomToast from "../../hooks/useCustomToast"
+import useProject from "../../hooks/useProject"
 import { httpStatus } from "../../lib/api"
-import { declaredInputs, matchDepsToDatasets } from "../../lib/provenance"
+import { handleError } from "../../lib/errors"
+import {
+  canBeCreatedByPerson,
+  declaredInputs,
+  matchDepsToDatasets,
+} from "../../lib/provenance"
+import {
+  IMPORTED_FROM_DEFAULTS,
+  type ImportSource,
+  ImportedFromFields,
+  type ImportedFromForm,
+  buildImportedFrom,
+} from "../Datasets/NewDataset"
 import FigureEditLauncher from "../Figures/FigureEditLauncher"
 import FigureView from "../Figures/FigureView"
+import {
+  AttestationFields,
+  type AttestationForm,
+  creatorFromUser,
+} from "../Figures/UploadFigure"
 import FileContent from "../Files/FileContent"
+import PathPicker from "../Releases/PathPicker"
 import SharedCommentsPanel, {
   projectCommentToPanelComment,
 } from "./CommentsPanel"
@@ -119,11 +146,23 @@ function ArtifactContent({
   kind,
   path,
   data,
+  missing,
+  atRef,
 }: {
   kind: ArtifactKind
   path: string
   data: Figure | Publication | Notebook | ContentsItem | undefined
+  /** Whether the hub said there's nothing at this path. */
+  missing?: boolean
+  /** The version shown, when it isn't the current one. */
+  atRef?: string
 }) {
+  if (!data && missing)
+    return (
+      <Text color="gray.500">
+        This {kind} does not exist{atRef ? " at this version" : ""}.
+      </Text>
+    )
   if (!data) return <Text color="gray.500">Not available at this version.</Text>
 
   if (kind === "file") {
@@ -351,6 +390,36 @@ function FigureInfo({
     enabled: Boolean(figure.stage),
     retry: false,
   })
+  // Where it came from when no stage makes it, e.g., an import or a person
+  const provenanceQuery = useQuery({
+    queryKey: [
+      "projects",
+      ownerName,
+      projectName,
+      "provenance",
+      figure.path,
+      gitRef,
+    ],
+    queryFn: () =>
+      ProjectsService.getProjectProvenance({
+        owner_name: ownerName,
+        project_name: projectName,
+        path: figure.path,
+        ref: gitRef,
+      }).then((response) => response.data),
+    enabled: !figure.stage,
+    retry: false,
+  })
+  const origin = provenanceQuery.data?.origin
+  const originUrl = provenanceQuery.data?.origin_url
+  // A figure calkit.yaml doesn't declare can still have a stage that makes it
+  const stage = figure.stage ?? provenanceQuery.data?.stage
+  const stageKind = provenanceQuery.data?.stage_kind
+  // The app an export stage runs, e.g., Inkscape
+  const exportApp = provenanceQuery.data?.stage_app
+  const exportedFrom = exportApp ? provenanceQuery.data?.source : null
+  const manualStep =
+    stageKind === "manual-step" ? provenanceQuery.data?.message : null
   const dataLinks: InputLink[] = []
   if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
     const deps = declaredInputs(
@@ -424,24 +493,57 @@ function FigureInfo({
       </Text>
       <Text fontSize="sm" mb={1}>
         <Text as="span" fontWeight="semibold">
-          Pipeline stage:
+          Origin:
         </Text>{" "}
-        {figure.stage ? (
-          <Link
-            as={RouterLink}
-            to={pipelineTo}
-            search={{ stage: figure.stage, ref: gitRef } as any}
-          >
-            <Code fontSize="xs" cursor="pointer">
-              {figure.stage}
-            </Code>
+        {stage ? (
+          <>
+            Stage{" "}
+            <Link
+              as={RouterLink}
+              to={pipelineTo}
+              search={{ stage, ref: gitRef } as any}
+            >
+              <Code fontSize="xs" cursor="pointer">
+                {stage}
+              </Code>
+            </Link>
+            {exportedFrom ? (
+              <>
+                , exported with {exportApp} from{" "}
+                <Link
+                  as={RouterLink}
+                  to={filesTo}
+                  search={{ path: exportedFrom, ref: gitRef } as any}
+                >
+                  <Code fontSize="xs" cursor="pointer">
+                    {exportedFrom}
+                  </Code>
+                </Link>
+              </>
+            ) : null}
+            {manualStep ? `, a manual step: ${manualStep}` : null}
+          </>
+        ) : provenanceQuery.isPending ? (
+          <Spinner size="xs" />
+        ) : origin && originUrl ? (
+          <Link href={originUrl} isExternal>
+            {origin}
           </Link>
+        ) : origin ? (
+          <Text as="span">{origin}</Text>
         ) : (
           <Text as="span" color="red.500">
-            Not in pipeline
+            Not defined
           </Text>
         )}
       </Text>
+      {!stage && provenanceQuery.isSuccess && !origin ? (
+        <DefineFigureOrigin
+          ownerName={ownerName}
+          projectName={projectName}
+          path={figure.path}
+        />
+      ) : null}
       <InputsRow label="Data" items={dataLinks} />
       {/* Back into the code that made it, when there is some: last, after
           the facts, and set off from them */}
@@ -452,6 +554,467 @@ function FigureInfo({
         isOpen={editOpen}
         onOpenChange={onEditOpenChange}
       />
+    </Box>
+  )
+}
+
+type OriginMode = "script" | "notebook" | "imported" | "exported" | "created"
+
+/** Define where a figure came from, when nothing does yet. */
+function DefineFigureOrigin({
+  ownerName,
+  projectName,
+  path,
+}: {
+  ownerName: string
+  projectName: string
+  path: string
+}) {
+  const { userHasWriteAccess } = useProject(ownerName, projectName)
+  const [mode, setMode] = useState<OriginMode | null>(null)
+  const queryClient = useQueryClient()
+  if (!userHasWriteAccess) return null
+  const modes: [OriginMode, string][] = [
+    ["script", "Script"],
+    ["notebook", "Notebook"],
+    ["imported", "Imported"],
+  ]
+  // Something exported, e.g., a PNG, comes from a file a person made
+  if (!canBeCreatedByPerson(path)) modes.push(["exported", "Exported"])
+  if (canBeCreatedByPerson(path)) modes.push(["created", "Created"])
+  const onDone = () => {
+    setMode(null)
+    queryClient.invalidateQueries({
+      queryKey: ["projects", ownerName, projectName],
+    })
+  }
+  return (
+    <Box mb={2}>
+      <Flex gap={1} align="center" wrap="wrap">
+        <Text fontSize="xs" color="gray.500" mr={1}>
+          Define origin:
+        </Text>
+        {modes.map(([value, label]) => (
+          <Button
+            key={value}
+            size="xs"
+            variant={mode === value ? "primary" : "outline"}
+            onClick={() => setMode(mode === value ? null : value)}
+          >
+            {label}
+          </Button>
+        ))}
+      </Flex>
+      {mode === "script" || mode === "notebook" ? (
+        <StageFromScriptForm
+          key={mode}
+          ownerName={ownerName}
+          projectName={projectName}
+          shows={path}
+          kind={mode}
+          onDone={onDone}
+        />
+      ) : mode === "exported" ? (
+        <ManualExportForm
+          ownerName={ownerName}
+          projectName={projectName}
+          path={path}
+          onDone={onDone}
+        />
+      ) : mode ? (
+        <RecordOriginForm
+          key={mode}
+          ownerName={ownerName}
+          projectName={projectName}
+          path={path}
+          how={mode}
+          onDone={onDone}
+        />
+      ) : null}
+    </Box>
+  )
+}
+
+/**
+ * Record that a file is exported manually from one someone made, e.g., a
+ * PNG from a Photoshop file, so the pipeline asks for a new export
+ * whenever that file changes.
+ */
+function ManualExportForm({
+  ownerName,
+  projectName,
+  path,
+  onDone,
+}: {
+  ownerName: string
+  projectName: string
+  path: string
+  onDone: () => void
+}) {
+  const showToast = useCustomToast()
+  const [sourcePath, setSourcePath] = useState("")
+  const [file, setFile] = useState<File | null>(null)
+  const [app, setApp] = useState("")
+  // Kept out of the paper's folder, which may sync to Overleaf
+  const source = sourcePath || (file ? `figures/src/${file.name}` : "")
+  // Which app, if any, exports it as the pipeline runs, so nobody has to
+  // remember to, is the hub's to say
+  const [plannedSource] = useDebounce(source, 300)
+  const [plannedApp] = useDebounce(app.trim(), 300)
+  const planned = { source: plannedSource, app: plannedApp }
+  const planQuery = useQuery({
+    queryKey: [
+      "projects",
+      ownerName,
+      projectName,
+      "export-stage",
+      path,
+      planned.source,
+      planned.app,
+    ],
+    queryFn: () =>
+      ProjectsService.postProjectPipelineExportStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        exportStagePost: {
+          source: planned.source,
+          output: path,
+          app: planned.app || null,
+          save: false,
+        },
+      }).then((response) => response.data),
+    enabled: !!planned.source && canBeCreatedByPerson(planned.source),
+    retry: false,
+  })
+  const exportedBy = planQuery.data?.exported_by
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const content = file
+        ? await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () =>
+              resolve(String(reader.result).replace(/^data:[^,]*,/, ""))
+            reader.onerror = () => reject(reader.error)
+            reader.readAsDataURL(file)
+          })
+        : null
+      const response = await ProjectsService.postProjectPipelineExportStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        exportStagePost: {
+          source,
+          output: path,
+          app: app.trim() || null,
+          files: [{ path: source, content, created_by_me: true }],
+        },
+      })
+      return response.data
+    },
+    onSuccess: (saved) => {
+      showToast(
+        "Origin defined",
+        saved.exported_by
+          ? `Exported from ${source} with ${saved.exported_by}`
+          : String(saved.stage.message ?? `Export ${path} from ${source}`),
+        "success",
+      )
+      onDone()
+    },
+    onError: (err: AxiosError) => handleError(err, showToast),
+  })
+  return (
+    <Box mt={2} fontSize="sm">
+      <Text mb={1}>
+        The file <Code fontSize="xs">{path}</Code> is exported from
+      </Text>
+      <Flex gap={2} align="center" wrap="wrap" mb={2}>
+        <PathPicker
+          ownerName={ownerName}
+          projectName={projectName}
+          value={sourcePath}
+          onChange={setSourcePath}
+        />
+        <Input
+          type="file"
+          size="sm"
+          p={1}
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
+      </Flex>
+      <Input
+        size="sm"
+        mb={2}
+        placeholder="App it's exported with, e.g., Photoshop (optional)"
+        value={app}
+        onChange={(e) => setApp(e.target.value)}
+      />
+      {exportedBy && planned.source === source ? (
+        <Text fontSize="xs" color="gray.500" mb={2}>
+          {exportedBy} exports it whenever the pipeline runs.
+        </Text>
+      ) : null}
+      {source && !canBeCreatedByPerson(source) ? (
+        <Text fontSize="xs" color="red.500" mb={2}>
+          {source} is exported from something itself; choose the file it's made
+          from.
+        </Text>
+      ) : null}
+      <Button
+        size="xs"
+        variant="primary"
+        isDisabled={!source || !canBeCreatedByPerson(source)}
+        isLoading={saveMutation.isPending}
+        onClick={() => saveMutation.mutate()}
+      >
+        Add the export step
+      </Button>
+    </Box>
+  )
+}
+
+/** Make the stage that produces a file from the script that writes it. */
+function StageFromScriptForm({
+  ownerName,
+  projectName,
+  shows,
+  kind,
+  onDone,
+}: {
+  ownerName: string
+  projectName: string
+  shows: string
+  kind: "script" | "notebook"
+  onDone: () => void
+}) {
+  const showToast = useCustomToast()
+  const [scriptPath, setScriptPath] = useState("")
+  const [file, setFile] = useState<File | null>(null)
+  const [detected, setDetected] =
+    useState<StageFromScriptOrNotebookResponse | null>(null)
+  const [produces, setProduces] = useState<string | undefined>()
+  const exts =
+    kind === "notebook" ? [".ipynb"] : [".py", ".r", ".jl", ".m", ".sh"]
+  const post = async (save: boolean) => {
+    const content = file
+      ? await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () =>
+            resolve(String(reader.result).replace(/^data:[^,]*,/, ""))
+          reader.onerror = () => reject(reader.error)
+          reader.readAsDataURL(file)
+        })
+      : null
+    return ProjectsService.postProjectStageFromScriptOrNotebook({
+      owner_name: ownerName,
+      project_name: projectName,
+      stageFromScriptOrNotebookPost: {
+        // An upload goes where it's named, or with others of its kind
+        script_path: scriptPath || (file ? `${kind}s/${file.name}` : ""),
+        content,
+        shows,
+        produces: save ? produces : null,
+        save,
+      },
+    }).then((response) => response.data)
+  }
+  const readMutation = useMutation({
+    mutationFn: () => post(false),
+    onSuccess: (data) => {
+      setDetected(data)
+      setProduces(data.produces ?? data.outputs?.[0])
+    },
+    onError: (err: AxiosError) => handleError(err, showToast),
+  })
+  const saveMutation = useMutation({
+    mutationFn: () => post(true),
+    onSuccess: (data) => {
+      showToast(
+        "Origin defined",
+        `Added stage ${data.stage_name}. It hasn't run yet; run it with calkit run --save.`,
+        "success",
+      )
+      onDone()
+    },
+    onError: (err: AxiosError) => handleError(err, showToast),
+  })
+  return (
+    <Box mt={2} fontSize="sm">
+      <Text mb={1}>
+        The {kind} that makes <Code fontSize="xs">{shows}</Code>
+      </Text>
+      <Flex gap={2} align="center" wrap="wrap" mb={2}>
+        <PathPicker
+          ownerName={ownerName}
+          projectName={projectName}
+          value={scriptPath}
+          onChange={(value) => {
+            setScriptPath(value)
+            setDetected(null)
+          }}
+        />
+        <Input
+          type="file"
+          size="sm"
+          p={1}
+          accept={exts.join(",")}
+          onChange={(e) => {
+            setFile(e.target.files?.[0] ?? null)
+            setDetected(null)
+          }}
+        />
+      </Flex>
+      <Button
+        size="xs"
+        isDisabled={!scriptPath && !file}
+        isLoading={readMutation.isPending}
+        onClick={() => readMutation.mutate()}
+      >
+        Read the {kind}
+      </Button>
+      {detected ? (
+        <Box mt={2}>
+          <Text>
+            Stage <Code fontSize="xs">{detected.stage_name}</Code> runs in{" "}
+            {detected.environment}
+            {detected.environment_is_new ? " (a new environment)" : ""}
+          </Text>
+          {detected.inputs?.length ? (
+            <Text color="gray.500">Reads {detected.inputs.join(", ")}</Text>
+          ) : null}
+          {detected.missing_inputs?.length ? (
+            <Text color="orange.400">
+              Not in the project yet: {detected.missing_inputs.join(", ")}
+            </Text>
+          ) : null}
+          {detected.outputs?.length ? (
+            <RadioGroup value={produces} onChange={setProduces} mt={1}>
+              <Text color="gray.500">
+                Which output is <Code fontSize="xs">{shows}</Code>?
+              </Text>
+              <Stack spacing={0}>
+                {detected.outputs.map((output) => (
+                  <Radio key={output} value={output} size="sm">
+                    <Code fontSize="xs">{output}</Code>
+                  </Radio>
+                ))}
+              </Stack>
+            </RadioGroup>
+          ) : (
+            <Text color="gray.500">
+              Calkit didn't find anything the {kind} writes.
+            </Text>
+          )}
+          <Button
+            size="xs"
+            variant="primary"
+            mt={2}
+            isDisabled={!produces}
+            isLoading={saveMutation.isPending}
+            onClick={() => saveMutation.mutate()}
+          >
+            Add to the pipeline
+          </Button>
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
+interface RecordOriginValues extends AttestationForm, ImportedFromForm {}
+
+/** Record that a file was imported, or made by the signed-in user. */
+function RecordOriginForm({
+  ownerName,
+  projectName,
+  path,
+  how,
+  onDone,
+}: {
+  ownerName: string
+  projectName: string
+  path: string
+  how: "imported" | "created"
+  onDone: () => void
+}) {
+  const showToast = useCustomToast()
+  const { user } = useAuth()
+  const [source, setSource] = useState<ImportSource>("url")
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<RecordOriginValues>({
+    mode: "onBlur",
+    defaultValues: { created_with_ai: "", ...IMPORTED_FROM_DEFAULTS },
+  })
+  const mutation = useMutation({
+    mutationFn: (data: RecordOriginValues) =>
+      ProjectsService.postProjectMisc({
+        owner_name: ownerName,
+        project_name: projectName,
+        miscArtifactPost: {
+          path,
+          message: `Record where ${path} came from`,
+          ...(how === "created"
+            ? { created_by: [creatorFromUser(user, data.created_with_ai)] }
+            : { imported_from: buildImportedFrom(source, data) }),
+        },
+      }).then((response) => response.data),
+    onSuccess: () => {
+      showToast("Origin defined", `${path} is now accounted for.`, "success")
+      onDone()
+    },
+    onError: (err: AxiosError) => handleError(err, showToast),
+  })
+  return (
+    <Box
+      as="form"
+      autoComplete="off"
+      mt={2}
+      onSubmit={handleSubmit((data) => mutation.mutateAsync(data))}
+    >
+      {how === "created" ? (
+        <AttestationFields
+          register={register}
+          user={user}
+          subject="This figure"
+          mt={0}
+        />
+      ) : (
+        <>
+          <RadioGroup
+            value={source}
+            onChange={(value) => setSource(value as ImportSource)}
+            mb={2}
+          >
+            <Stack direction="row" spacing={3}>
+              <Radio value="url" size="sm">
+                Website
+              </Radio>
+              <Radio value="doi" size="sm">
+                DOI
+              </Radio>
+              <Radio value="git_repo" size="sm">
+                Git repo
+              </Radio>
+            </Stack>
+          </RadioGroup>
+          <ImportedFromFields
+            source={source}
+            register={register}
+            errors={errors}
+          />
+        </>
+      )}
+      <Button
+        size="xs"
+        variant="primary"
+        type="submit"
+        mt={2}
+        isLoading={isSubmitting || mutation.isPending}
+      >
+        Save
+      </Button>
     </Box>
   )
 }
@@ -712,6 +1275,10 @@ export function ArtifactCompareModal({
     kind === "file" || ref1 || !initialIsDisplayable
       ? artifact1Query.isPending
       : false
+  const missing1 =
+    Boolean(kind === "file" || ref1 || !initialIsDisplayable) &&
+    httpStatus(artifact1Query.error) === 404
+  const missing2 = httpStatus(artifact2Query.error) === 404
 
   const isComparing = Boolean(ref2)
   // LaTeX diffs are kept with the publication at each version, so the two
@@ -1102,6 +1669,8 @@ export function ArtifactCompareModal({
                             kind={kind}
                             path={path}
                             data={displayData1}
+                            missing={missing1}
+                            atRef={ref1}
                           />
                         )}
                       </Box>
@@ -1118,6 +1687,8 @@ export function ArtifactCompareModal({
                             kind={kind}
                             path={path}
                             data={artifact2Query.data}
+                            missing={missing2}
+                            atRef={ref2}
                           />
                         )}
                       </Box>
@@ -1169,6 +1740,8 @@ export function ArtifactCompareModal({
                           kind={kind}
                           path={path}
                           data={displayData1}
+                          missing={missing1}
+                          atRef={ref1}
                         />
                       )}
                     </Box>

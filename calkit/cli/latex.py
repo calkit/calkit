@@ -660,6 +660,26 @@ def build(
     """
     import time
 
+    def rel_to_tex_dir(path: str) -> str:
+        """Express a current-directory-relative path from the .tex file's
+        directory.
+
+        Pure path arithmetic, since ``os.path.relpath`` resolves names like
+        ``aux`` to devices on Windows.
+        """
+        cwd = os.getcwd()
+        target = Path(os.path.normpath(os.path.join(cwd, path)))
+        start = Path(os.path.normpath(os.path.join(cwd, tex_dir)))
+        # On another drive, there's no relative path
+        if os.path.normcase(target.anchor) != os.path.normcase(start.anchor):
+            return target.as_posix()
+        t = [os.path.normcase(p) for p in target.parts]
+        s = [os.path.normcase(p) for p in start.parts]
+        n = 0
+        while n < min(len(t), len(s)) and t[n] == s[n]:
+            n += 1
+        return "/".join([".."] * (len(s) - n) + list(target.parts[n:])) or "."
+
     # latexmk records a failed run in its file database and then refuses
     # to try again, reporting "Nothing to do" and exiting non-zero with no
     # PDF. Running it again is the first thing anyone does after a
@@ -693,9 +713,12 @@ def build(
 
         for gap in find_project_provenance_gaps(shown, wdir=root):
             msg = str(gap)
-            warn(
-                f"{msg[0].upper()}{msg[1:]}; {how_to_define_origin(gap.path)}"
+            how = (
+                "give its URL, DOI, or Git repo in imported_from"
+                if gap.unchecked
+                else how_to_define_origin(gap.path)
             )
+            warn(f"{msg[0].upper()}{msg[1:]}; {how}")
     if not os.path.isfile(os.path.join(pdf_dir, stem + ".pdf")):
         fdb_dir = aux_dir if aux_dir is not None else tex_dir
         fdb_fpath = os.path.join(fdb_dir, stem + ".fdb_latexmk")
@@ -717,11 +740,9 @@ def build(
     # file's directory; convert the (current-directory-relative) Calkit paths
     # into that frame.
     if output_dir is not None:
-        rel = Path(os.path.relpath(output_dir, tex_dir)).as_posix()
-        latexmk_cmd.append(f"-outdir={rel}")
+        latexmk_cmd.append(f"-outdir={rel_to_tex_dir(output_dir)}")
     if aux_dir is not None:
-        rel = Path(os.path.relpath(aux_dir, tex_dir)).as_posix()
-        latexmk_cmd.append(f"-auxdir={rel}")
+        latexmk_cmd.append(f"-auxdir={rel_to_tex_dir(aux_dir)}")
     latexmk_cmd.append("-interaction=nonstopmode")
     latexmk_cmd.append(f"-usepretex={calkit.latex.PDF_PRETEX}")
     # User pass-through args come last so they can override Calkit's defaults.

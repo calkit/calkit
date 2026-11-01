@@ -12,6 +12,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 import app.projects
+import calkit.environments
+import calkit.export
 import calkit.pipeline
 import calkit.provenance
 import calkit.questions
@@ -39,7 +41,7 @@ router = APIRouter()
 MAX_VALUE_BYTES = 100_000
 RESULTS_EXTS = (".json", ".yaml", ".yml", ".toml")
 # The stage fields that name what someone edits to change its output
-SOURCE_FIELDS = ("script_path", "notebook_path", "target_path")
+SOURCE_FIELDS = ("script_path", "notebook_path", "target_path", "source_path")
 
 
 def _read_value(
@@ -278,6 +280,7 @@ def get_project_provenance(
                     ProvenanceStep(path=step.path, stage=step.stage)
                     for step in gap.steps
                 ],
+                unchecked=gap.unchecked,
             )
             for gap in calkit.provenance.find_provenance_gaps(
                 [path],
@@ -303,6 +306,16 @@ def get_project_provenance(
     source = None
     if ck_stage is not None:
         out.stage_kind = ck_stage.get("kind")
+        out.stage_app = next(
+            (
+                e.app
+                for e in calkit.export.exporters()
+                if e.kind == out.stage_kind
+            ),
+            None,
+        )
+        if out.stage_kind == "manual-step":
+            out.message = ck_stage.get("message")
         wdir = ck_stage.get("wdir") or ""
         field = next((f for f in SOURCE_FIELDS if ck_stage.get(f)), None)
         if field is not None:
@@ -318,13 +331,39 @@ def get_project_provenance(
         dep.get("path") if isinstance(dep, dict) else dep
         for dep in lock_stage.get("deps") or yaml_stage.get("deps") or []
     ]
+    # What its environments run with, e.g., a uv.lock, rather than what it
+    # reads
+    env_files = set()
+    envs = ck_info.get("environments") or {}
+    env_names = str((ck_stage or {}).get("environment") or "").split(
+        calkit.environments.COMPOSITE_ENV_SEP
+    )
+    for env_name in env_names:
+        env = envs.get(env_name)
+        if not isinstance(env, dict):
+            continue
+        lock = calkit.environments.get_env_lock_fpath(
+            env, env_name, for_dvc=True
+        )
+        if lock:
+            env_files.add(posixpath.normpath(lock))
+        if isinstance(env.get("path"), str):
+            spec = posixpath.normpath(env["path"])
+            env_files.add(spec)
+            env_files.add(
+                posixpath.join(posixpath.dirname(spec), ".python-version")
+            )
     for dep in deps:
         if not isinstance(dep, str):
             continue
         dep = posixpath.normpath(posixpath.join(dvc_wdir, dep))
         # Calkit's own bookkeeping, e.g., environment locks, and the source
         # shown on its own
-        if dep.startswith(".calkit/") or dep in (source, "calkit.yaml"):
+        if (
+            dep.startswith(".calkit/")
+            or dep in (source, "calkit.yaml")
+            or dep in env_files
+        ):
             continue
         out.inputs.append(dep)
     return out

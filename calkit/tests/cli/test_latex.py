@@ -555,6 +555,53 @@ def test_build_localizes_synctex(tmp_dir, monkeypatch):
     assert f"Input:1:{here}" in text
 
 
+def test_build_dirs_relative_to_tex_dir(
+    tmp_dir: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from calkit.cli import latex as cli_latex
+
+    os.makedirs("pubs/paper")
+    with open("pubs/paper/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    with open("main.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    cmds: list[list[str]] = []
+    monkeypatch.setattr(cli_latex, "_tex_cmd", lambda cmd, **kwargs: cmd)
+    monkeypatch.setattr(
+        cli_latex, "_run_latexmk", lambda cmd, **kwargs: cmds.append(cmd)
+    )
+    # Like Windows, which resolves 'aux' to a DOS device
+    relpath = os.path.relpath
+
+    def device_relpath(path: str, start: str = os.curdir) -> str:
+        if os.path.basename(os.path.normpath(path)).lower() == "aux":
+            raise ValueError("path is on mount '\\\\.\\aux', start on 'C:'")
+        return relpath(path, start)
+
+    monkeypatch.setattr(os.path, "relpath", device_relpath)
+    for tex, output_dir, aux_dir, expected in [
+        ("pubs/paper/main.tex", None, "aux", ["-auxdir=../../aux"]),
+        (
+            "pubs/paper/main.tex",
+            "pubs/paper/build",
+            "pubs/paper/aux",
+            ["-outdir=build", "-auxdir=aux"],
+        ),
+        (
+            "pubs/paper/main.tex",
+            "pubs/paper",
+            "pubs/other/aux",
+            ["-outdir=.", "-auxdir=../other/aux"],
+        ),
+        ("main.tex", "build", "aux", ["-outdir=build", "-auxdir=aux"]),
+        ("main.tex", None, "./AUX/", ["-auxdir=AUX"]),
+    ]:
+        cmds.clear()
+        cli_latex.build(tex, output_dir=output_dir, aux_dir=aux_dir)
+        dirs = [a for a in cmds[0] if a.startswith(("-outdir=", "-auxdir="))]
+        assert dirs == expected, (tex, output_dir, aux_dir)
+
+
 def _commit(message: str) -> None:
     subprocess.check_call(["git", "add", "-A"])
     subprocess.check_call(

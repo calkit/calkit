@@ -865,6 +865,26 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
                 "command": "make plain",
                 "environment": "gpu",
             },
+            # Each shell skips the user's startup files its own way, and a
+            # POSIX sh, which reads none here, takes no options for it
+            "posix": {
+                "kind": "shell-command",
+                "command": "make posix",
+                "environment": "gpu",
+                "shell": "sh",
+            },
+            "z": {
+                "kind": "shell-command",
+                "command": "make z",
+                "environment": "gpu",
+                "shell": "zsh",
+            },
+            "script": {
+                "kind": "shell-script",
+                "script_path": "run.sh",
+                "environment": "gpu",
+                "shell": "sh",
+            },
             # Written the old way, under the scheduler block
             "legacy": {
                 "kind": "shell-command",
@@ -882,6 +902,9 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
         prefix = stages[name]["cmd"].split(" -- ")[0]
         assert "'" not in prefix and '"' not in prefix, name
         assert "--env-default-setup" not in stages[name]["cmd"], name
+    assert stages["posix"]["cmd"].endswith(' -- sh -c "make posix"')
+    assert stages["z"]["cmd"].endswith(' -- zsh -f -c "make z"')
+    assert stages["script"]["cmd"].endswith(" -- sh run.sh")
     assert stages["build"]["cmd"].startswith(
         "calkit xenv -n gpu --no-check "
         "--setup-file .calkit/stage-setup/build.json --"
@@ -3071,11 +3094,37 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert _ensure_latex_aux_gitignore(stage)
     with open(gitignore_path) as f:
         assert "!/aux/*.pdf" in f.read()
+    # One outside it ignores itself, keeping anything else in its .gitignore
     stage.output_dir = None
     stage.aux_dir = "build/aux"
+    os.makedirs("build/aux")
+    with open("build/aux/.gitignore", "w") as f:
+        f.write("mine\n")
     assert _ensure_latex_aux_gitignore(stage)
     with open(gitignore_path) as f:
         assert "aux/*" not in f.read()
+    with open("build/aux/.gitignore") as f:
+        contents = f.read()
+    assert contents.startswith("mine\n")
+    assert "\n*\n" in contents
+    assert "!*.pdf" not in contents
+    assert _ensure_latex_aux_gitignore(stage) is False
+    # Including one above the source directory, created if need be
+    for aux_dir, output_dir in [("aux", None), ("aux", "aux")]:
+        stage.aux_dir = aux_dir
+        stage.output_dir = output_dir
+        assert _ensure_latex_aux_gitignore(stage)
+        with open("aux/.gitignore") as f:
+            contents = f.read()
+        assert "\n*\n" in contents
+        assert ("!*.pdf" in contents) == (output_dir is not None)
+    # But not the project itself or one outside it
+    stage.output_dir = None
+    for aux_dir in [".", "build/../", "..", "../aux", "/aux", "C:\\aux"]:
+        stage.aux_dir = aux_dir
+        assert _ensure_latex_aux_gitignore(stage) is False
+    assert not os.path.exists(".gitignore")
+    assert not os.path.exists("../aux")
     # Nor the source directory itself
     stage.aux_dir = "paper"
     assert _ensure_latex_aux_gitignore(stage) is False
@@ -4580,6 +4629,48 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         ck_info,
         stage_names=["needs-token", "in-lab", "queued"],
         interactive=False,
+    )
+    assert gated == {} and errors == {}
+    # A manual step can't run with nobody here to do it, but can when
+    # someone is
+    ck_info["pipeline"]["stages"]["by-hand"] = {
+        "kind": "manual-step",
+        "message": "Export made/by-hand.png",
+        "outputs": ["made/by-hand.png"],
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["by-hand"], interactive=False, manual=False
+    )
+    assert gated == {"by-hand": "needs a manual step: Export made/by-hand.png"}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["by-hand"], interactive=False
+    )
+    assert gated == {} and errors == {}
+    # An export needs its app installed where it runs
+    from calkit.export import GIMP, INKSCAPE
+
+    ck_info["pipeline"]["stages"]["drawn"] = {
+        "kind": "inkscape-export",
+        "source_path": "made/drawn.svg",
+        "outputs": ["made/drawn.png"],
+    }
+    ck_info["pipeline"]["stages"]["photo"] = {
+        "kind": "gimp-export",
+        "source_path": "made/photo.xcf",
+        "outputs": ["made/photo.png"],
+    }
+    monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
+    monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["drawn", "photo"], interactive=False
+    )
+    assert gated == {
+        "drawn": "needs Inkscape installed to export made/drawn.svg",
+        "photo": "needs GIMP installed to export made/photo.xcf",
+    }
+    monkeypatch.setattr(INKSCAPE, "executables", [sys.executable])
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["drawn"], interactive=False
     )
     assert gated == {} and errors == {}
 

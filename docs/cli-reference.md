@@ -43,6 +43,7 @@
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
+| [`export`](#command-group-export)                | Export data and artifacts from various applications.                                                         |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
@@ -386,12 +387,15 @@ calkit manual-step [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description                     |
-| ----------------- | ------- | -------- | ------- | ------------------------------- |
-| `--message`, `-m` | str     | yes      |         | Message to display as a prompt. |
-| `--cmd`           | str     | no       |         | Command to run.                 |
-| `--show-stdout`   | boolean | no       | False   | Show stdout.                    |
-| `--show-stderr`   | boolean | no       | False   | Show stderr.                    |
+| Option            | Type    | Required | Default | Description                                                           |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------------------------- |
+| `--message`, `-m` | str     | yes      |         | Message to display as a prompt.                                       |
+| `--cmd`           | str     | no       |         | Command to run.                                                       |
+| `--app`           | str     | no       |         | App to open, e.g., 'Inkscape'.                                        |
+| `--open`          | str     | no       |         | File to open with the app.                                            |
+| `--output`, `-o`  | str     | no       |         | File the step writes, which must change for it to be considered done. |
+| `--show-stdout`   | boolean | no       | False   | Show stdout.                                                          |
+| `--show-stderr`   | boolean | no       | False   | Show stderr.                                                          |
 
 <a id="top-command-xenv-runenv"></a>
 
@@ -2865,6 +2869,66 @@ Options:
 | Option           | Type | Required | Default | Description                                                                          |
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
+
+<a id="command-group-export"></a>
+
+### `calkit export`
+
+Export data and artifacts from various applications.
+
+| Command                                   | Description                                 |
+| ----------------------------------------- | ------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                |
+| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file. |
+
+<a id="subcommand-export-inkscape"></a>
+
+#### `calkit export inkscape`
+
+Export a figure from an SVG.
+
+Usage:
+
+```text
+calkit export inkscape [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description         |
+| -------- | ---- | -------- | ------- | ------------------- |
+| `source` | str  | yes      |         | SVG to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                            |
+| ---------------- | ---- | -------- | ------- | -------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or PDF. |
+| `--dpi`          | int  | no       |         | Resolution of a PNG.                   |
+
+<a id="subcommand-export-gimp"></a>
+
+#### `calkit export gimp`
+
+Export a flattened figure from an XCF file.
+
+Usage:
+
+```text
+calkit export gimp [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `source` | str  | yes      |         | XCF file to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                             |
+| ---------------- | ---- | -------- | ------- | --------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
 
 <a id="command-group-update"></a>
 

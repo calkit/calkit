@@ -174,9 +174,13 @@ export interface Provenance {
   value_error?: string | null;
   stage?: string | null;
   stage_kind?: string | null;
+  /** The app an export stage runs, e.g., Inkscape. */
+  stage_app?: string | null;
   /** What to edit to change it: the stage's script, notebook, or document. */
   source?: string | null;
   command?: string | null;
+  /** What a manual step says to do. */
+  message?: string | null;
   inputs: string[];
   stage_status?: StageStatus | null;
   stale_reason?: "pipeline" | "frozen" | null;
@@ -194,9 +198,51 @@ export interface Provenance {
   gaps?: ProvenanceGap[];
 }
 
+/** The stage exporting a figure from the file it's drawn in. */
+export interface ExportStage {
+  name: string;
+  /** As written under its name in calkit.yaml. */
+  stage: Record<string, unknown>;
+  /** The app that exports it as the pipeline runs, if one does. */
+  exported_by?: string | null;
+  saved: boolean;
+}
+
+/** A file a new stage needs, uploaded or already in the project. */
+export interface StageFile {
+  path: string;
+  /** Uploaded, base64-encoded. */
+  content?: string;
+  /** Recorded as created by whoever adds it, e.g., a Photoshop file. */
+  created_by_me?: boolean;
+}
+
+/** A stage made from a script, as `calkit xr` makes one, maybe saved. */
+export interface StageFromScriptOrNotebookResponse {
+  stage_name: string;
+  stage_yaml: string;
+  environment: string;
+  environment_is_new: boolean;
+  environment_spec_path?: string | null;
+  environment_spec_content?: string | null;
+  dependencies: string[];
+  inputs: string[];
+  outputs: string[];
+  /** Inputs that aren't in the project and that no stage produces. */
+  missing_inputs: string[];
+  /** Which output is what the document shows. */
+  produces?: string | null;
+  /** Documents changed to show it from there, with `\ckfigure`. */
+  included_in: string[];
+  saved: boolean;
+  git_repo_url: string;
+}
+
 export interface ProvenanceGap {
   path: string;
   steps: { path: string; stage?: string | null }[];
+  /** Imported, but from somewhere only described, which nobody can check. */
+  unchecked?: boolean;
 }
 
 export interface ReferenceEntry {

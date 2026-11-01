@@ -898,6 +898,7 @@ def get_gated_stages(
     interactive: bool | None = None,
     system_info: dict | None = None,
     remote: bool = True,
+    manual: bool = True,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -912,7 +913,8 @@ def get_gated_stages(
     and anything the checks print goes to stderr, keeping stdout for,
     e.g., ``calkit status --json``. ``interactive`` only decides whether
     connecting to a machine may prompt. Without ``remote``, nothing is
-    checked on another machine, which would take connecting to it.
+    checked on another machine, which would take connecting to it. Without
+    ``manual``, nobody is there to do a manual step, so those can't run.
     """
     import contextlib
     import json
@@ -932,6 +934,10 @@ def get_gated_stages(
     cache: dict[str, tuple[str | None, bool]] = {}
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
+    # The app each export kind needs
+    from calkit.export import exporters
+
+    apps = {e.kind: e for e in exporters()}
 
     def check(key: Any, func: Any) -> tuple[str | None, bool]:
         """Memoize a check, returning its problem and whether it's an error."""
@@ -1081,6 +1087,17 @@ def get_gated_stages(
             continue
         if stage.get("frozen"):
             continue
+        if not manual and stage.get("kind") == "manual-step":
+            gated[name] = f"needs a manual step: {stage.get('message')}"
+            continue
+        if stage.get("kind") in apps:
+            exporter = apps[stage["kind"]]
+            if exporter.find_executable() is None:
+                source = stage.get("source_path")
+                gated[name] = (
+                    f"needs {exporter.app} installed to export {source}"
+                )
+                continue
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )
@@ -2073,7 +2090,8 @@ def _ensure_latex_aux_gitignore(
     so aux files are caught wherever latexmk writes them relative to the
     source -- next to it, or in an ``aux``/output subdirectory via
     ``$aux_dir``/``$out_dir``/``output_dir``. A stage's own ``aux_dir`` is
-    also ignored whole. ``*.pdf`` is never ignored so the compiled output
+    also ignored whole, from its own ``.gitignore`` if it's outside the
+    source directory. ``*.pdf`` is never ignored so the compiled output
     stays tracked.
 
     Returns True if ``.gitignore`` was modified.
@@ -2140,27 +2158,40 @@ def _ensure_latex_aux_gitignore(
     source_dir = os.path.dirname(stage.target_path)
     gitignore_path = os.path.join(base, source_dir, ".gitignore")
     # An aux dir is ignored whole, since packages like glossaries write
-    # files with extensions no list could anticipate. One outside the
-    # source directory can't be named from its .gitignore. Pure path
+    # files with extensions no list could anticipate. Pure path
     # arithmetic, since os.path.relpath resolves 'aux' to a device on
     # Windows.
+    aux_dir_changed = False
     if stage.aux_dir is not None:
         aux = norm(stage.aux_dir)
         src = norm(source_dir or ".")
-        if src == ".":
-            inside = aux != "." and not aux.startswith(("../", "/"))
-            rel = aux
-        else:
-            inside = aux.startswith(src + "/")
-            rel = aux[len(src) + 1 :]
-        if inside:
+        # Unless the PDF goes there too
+        pdf_there = (
+            stage.output_dir is not None and norm(stage.output_dir) == aux
+        )
+        if (
+            aux in (".", "..")
+            or aux.startswith(("../", "/"))
+            or re.match(r"[A-Za-z]:", aux)
+        ):
+            # The project itself, or outside it
+            pass
+        elif src == "." or aux.startswith(src + "/"):
+            rel = aux if src == "." else aux[len(src) + 1 :]
             aux_globs.append(f"/{rel}/*")
-            # Unless the PDF goes there too
-            if stage.output_dir is not None and norm(stage.output_dir) == aux:
+            if pdf_there:
                 aux_globs.append(f"!/{rel}/*.pdf")
-    return _write_managed_gitignore_block(
+        elif not (src + "/").startswith(aux + "/"):
+            # The source's .gitignore can't name it, so it ignores itself
+            aux_dir_changed = _write_managed_gitignore_block(
+                os.path.join(base, aux, ".gitignore"),
+                marker="calkit latex aux files",
+                lines=["*"] + (["!*.pdf"] if pdf_there else []),
+            )
+    source_changed = _write_managed_gitignore_block(
         gitignore_path, marker="calkit latex aux files", lines=aux_globs
     )
+    return source_changed or aux_dir_changed
 
 
 def sync_markdown(

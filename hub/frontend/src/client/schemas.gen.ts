@@ -2342,6 +2342,79 @@ export const ExistsResultSchema = {
   title: "ExistsResult",
 } as const
 
+export const ExportStageSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    exported_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Exported By",
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "stage"],
+  title: "ExportStage",
+} as const
+
+export const ExportStagePostSchema = {
+  properties: {
+    source: {
+      type: "string",
+      title: "Source",
+    },
+    output: {
+      type: "string",
+      title: "Output",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: true,
+    },
+  },
+  type: "object",
+  required: ["source", "output"],
+  title: "ExportStagePost",
+} as const
+
 export const ExternalReleasePostSchema = {
   properties: {
     name: {
@@ -7948,6 +8021,17 @@ export const ProvenanceSchema = {
       ],
       title: "Stage Kind",
     },
+    stage_app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage App",
+    },
     source: {
       anyOf: [
         {
@@ -7969,6 +8053,17 @@ export const ProvenanceSchema = {
         },
       ],
       title: "Command",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
     },
     inputs: {
       items: {
@@ -8081,6 +8176,11 @@ export const ProvenanceGapSchema = {
       },
       type: "array",
       title: "Steps",
+    },
+    unchecked: {
+      type: "boolean",
+      title: "Unchecked",
+      default: false,
     },
   },
   type: "object",
@@ -10746,6 +10846,14 @@ export const ReproCheckSchema = {
       title: "Provenance Gaps",
       default: [],
     },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
@@ -11231,6 +11339,241 @@ export const SoftwareItemSchema = {
   type: "object",
   required: ["title", "path"],
   title: "SoftwareItem",
+} as const
+
+export const StageFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    created_by_me: {
+      type: "boolean",
+      title: "Created By Me",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "StageFile",
+  description:
+    "A file a new stage needs, e.g., a script or the file a figure is\nexported from.",
+} as const
+
+export const StageFromScriptOrNotebookPostSchema = {
+  properties: {
+    script_path: {
+      type: "string",
+      title: "Script Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    shows: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Shows",
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["script_path"],
+  title: "StageFromScriptOrNotebookPost",
+} as const
+
+export const StageFromScriptOrNotebookResponseSchema = {
+  properties: {
+    stage_name: {
+      type: "string",
+      title: "Stage Name",
+    },
+    stage_yaml: {
+      type: "string",
+      title: "Stage Yaml",
+    },
+    environment: {
+      type: "string",
+      title: "Environment",
+    },
+    environment_is_new: {
+      type: "boolean",
+      title: "Environment Is New",
+    },
+    environment_spec_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Path",
+    },
+    environment_spec_content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Content",
+    },
+    dependencies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Dependencies",
+      default: [],
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+      default: [],
+    },
+    outputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Outputs",
+      default: [],
+    },
+    missing_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Missing Inputs",
+      default: [],
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    included_in: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Included In",
+      default: [],
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+    git_repo_url: {
+      type: "string",
+      title: "Git Repo Url",
+    },
+  },
+  type: "object",
+  required: [
+    "stage_name",
+    "stage_yaml",
+    "environment",
+    "environment_is_new",
+    "git_repo_url",
+  ],
+  title: "StageFromScriptOrNotebookResponse",
+} as const
+
+export const StagePostSchema = {
+  properties: {
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["stage"],
+  title: "StagePost",
 } as const
 
 export const StageStatusSchema = {
@@ -13843,6 +14186,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
       default: [],
     },
     scripts_not_in_pipeline: {

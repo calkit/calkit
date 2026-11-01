@@ -1241,6 +1241,8 @@ _AUTH_ERROR_MARKERS = [
     "unauthorized",
     "authentication required",
     "denied:",
+    # Newer Docker clients report a GHCR refusal with nothing after it
+    "error from registry: denied",
     "requested access to the resource is denied",
 ]
 # Creating a classic token with exactly what pushing an image needs

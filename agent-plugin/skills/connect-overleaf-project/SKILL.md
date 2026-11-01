@@ -35,11 +35,14 @@ in a shadow root, so it may not show in the page's accessibility tree; take a
 screenshot to find it.
 
 Click "Make this paper reproducible", check the project name, privacy, and
-folder (e.g., `paper` or `thesis`), and create the project. The panel then
+folder, and create the project. Name the folder for what the document is,
+e.g., `paper` only for a paper, and `thesis` for a thesis. A project with
+several publications may keep them under `pubs`, e.g., `pubs/paper-1` and
+`pubs/thesis`, and presentations under `presentations`. The panel then
 shows the project and "in sync". If the document should go in a project the
 person already has, use "Use a project I already have" instead.
 
-Without the browser extension, `calkit overleaf import URL paper` adds the
+Without the browser extension, `calkit overleaf import URL SUBFOLDER` adds the
 document to an existing local project, using Overleaf's Git access.
 
 ## 2. Clone it
@@ -48,7 +51,8 @@ document to an existing local project, using Overleaf's Git access.
 calkit clone OWNER/NAME ~/calkit/NAME
 ```
 
-`~/calkit/` is the usual place, unless the person keeps projects elsewhere.
+`~/calkit/` is the usual place, unless the person keeps projects elsewhere,
+e.g., `~/research` or `~/dev`.
 
 ## 3. Find what the document shows and where it came from
 

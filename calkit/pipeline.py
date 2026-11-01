@@ -931,6 +931,10 @@ def get_gated_stages(
     cache: dict[str, tuple[str | None, bool]] = {}
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
+    # The app each export kind needs
+    from calkit.export import exporters
+
+    apps = {e.kind: e for e in exporters()}
 
     def check(key: Any, func: Any) -> tuple[str | None, bool]:
         """Memoize a check, returning its problem and whether it's an error."""
@@ -1083,6 +1087,14 @@ def get_gated_stages(
         if not manual and stage.get("kind") == "manual-step":
             gated[name] = f"needs a manual step: {stage.get('message')}"
             continue
+        if stage.get("kind") in apps:
+            exporter = apps[stage["kind"]]
+            if exporter.find_executable() is None:
+                source = stage.get("source_path")
+                gated[name] = (
+                    f"needs {exporter.app} installed to export {source}"
+                )
+                continue
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )

@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 
 import app.projects
 import calkit.environments
+import calkit.export
 import calkit.pipeline
 import calkit.provenance
 import calkit.questions
@@ -363,6 +364,14 @@ def get_project_provenance(
     source = None
     if ck_stage is not None:
         out.stage_kind = ck_stage.get("kind")
+        out.stage_app = next(
+            (
+                e.app
+                for e in calkit.export.exporters()
+                if e.kind == out.stage_kind
+            ),
+            None,
+        )
         if out.stage_kind == "manual-step":
             out.message = ck_stage.get("message")
         wdir = ck_stage.get("wdir") or ""

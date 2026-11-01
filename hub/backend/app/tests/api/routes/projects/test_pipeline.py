@@ -466,6 +466,9 @@ def test_post_project_pipeline_stage(
 
     import fsspec
 
+    import calkit.export
+    from calkit.models.pipeline import InkscapeExportStage
+
     repo, origin = _make_repo(
         tmp_path,
         {"name": "p"},
@@ -483,7 +486,7 @@ def test_post_project_pipeline_stage(
     )
     store = fsspec.filesystem("memory")
 
-    def post(**body):
+    def post(url: str = "/projects/o/p/pipeline/stages", **body):
         with (
             patch(
                 "app.api.routes.projects.pipeline.app.projects.get_project",
@@ -499,9 +502,7 @@ def test_post_project_pipeline_stage(
             patch("app.api.routes.projects.pipeline.FILE_GIT_MAX_BYTES", 10),
         ):
             return client.post(
-                "/projects/o/p/pipeline/stages",
-                json=body,
-                headers=normal_user_token_headers,
+                url, json=body, headers=normal_user_token_headers
             )
 
     def ck_info() -> dict:
@@ -545,6 +546,49 @@ def test_post_project_pipeline_stage(
         "calkit manual-step"
     )
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
+    # Exporting a figure is up to the library: an app that can does it as
+    # the pipeline runs, unless the person exports it with another
+    export_url = "/projects/o/p/pipeline/stages/export"
+    svg = {
+        "source": "figures/src/setup.svg",
+        "output": "paper/figures/setup.png",
+    }
+    resp = post(export_url, **svg, app="Illustrator", save=False)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["stage"] == calkit.export.export_stage(
+        **svg, app="Illustrator"
+    )
+    assert resp.json()["exported_by"] is None
+    assert not resp.json()["saved"]
+    resp = post(
+        export_url,
+        **svg,
+        files=[
+            {
+                "path": "figures/src/setup.svg",
+                "content": base64.b64encode(b"<svg/>").decode(),
+                "created_by_me": True,
+            }
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "export-setup"
+    assert resp.json()["exported_by"] == "Inkscape"
+    assert resp.json()["saved"]
+    assert ck_info()["pipeline"]["stages"]["export-setup"]["kind"] == (
+        "inkscape-export"
+    )
+    assert repo.head.commit.message.strip() == (
+        "Export paper/figures/setup.png from figures/src/setup.svg with "
+        "Inkscape"
+    )
+    dvc_yaml = yaml.safe_load((tmp_path / "repo" / "dvc.yaml").read_text())
+    assert dvc_yaml["stages"]["export-setup"]["cmd"] == (
+        InkscapeExportStage(
+            source_path="figures/src/setup.svg",
+            outputs=["paper/figures/setup.png"],
+        ).dvc_cmd
+    )
     # Something made once isn't made twice
     resp = post(stage=stage)
     assert resp.status_code == 409, resp.text

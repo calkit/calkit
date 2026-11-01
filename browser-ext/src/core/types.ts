@@ -174,6 +174,8 @@ export interface Provenance {
   value_error?: string | null;
   stage?: string | null;
   stage_kind?: string | null;
+  /** The app an export stage runs, e.g., Inkscape. */
+  stage_app?: string | null;
   /** What to edit to change it: the stage's script, notebook, or document. */
   source?: string | null;
   command?: string | null;
@@ -207,10 +209,14 @@ export interface ImportUpdate {
   rev?: string | null;
 }
 
-/** A pipeline stage, with its body as YAML. */
-export interface PipelineStage {
+/** The stage exporting a figure from the file it's drawn in. */
+export interface ExportStage {
   name: string;
-  yaml: string;
+  /** As written under its name in calkit.yaml. */
+  stage: Record<string, unknown>;
+  /** The app that exports it as the pipeline runs, if one does. */
+  exported_by?: string | null;
+  saved: boolean;
 }
 
 /** A file a new stage needs, uploaded or already in the project. */

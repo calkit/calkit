@@ -1345,8 +1345,21 @@ async function fillTooltip(
   const root = host.attachShadow({ mode: "open" });
   const style = document.createElement("style");
   style.textContent = STYLES + TOOLTIP_STYLES;
-  const body = el("div", { class: "tip" }, [loading()]);
+  const body = el("div", { class: "tip" });
   root.append(style, body);
+  await fillCard(body, link, item);
+}
+
+/**
+ * Where something the document shows came from, and how to fix what's
+ * wrong with it, as its hover card and the sidebar show it.
+ */
+async function fillCard(
+  body: HTMLElement,
+  link: OverleafLinkPublic,
+  item: EditorCitation,
+): Promise<void> {
+  clear(body).append(loading());
   try {
     const provenance = await citationProvenance(link, item.citation);
     clear(body);
@@ -3470,6 +3483,9 @@ const RAIL_PANE_ID = "calkit-rail-pane";
 // Whether Calkit's tab is the one showing in Overleaf's sidebar
 let railOpen = false;
 let railPane: { host: HTMLElement; body: HTMLElement } | null = null;
+// The component opened in the sidebar, kept through redraws, which come
+// with every edit
+let railCard: { key: string; element: HTMLElement } | null = null;
 let railPipeline: {
   key: string;
   pipeline?: ProjectPipeline;
@@ -3628,6 +3644,10 @@ function placeRailPane(): void {
       .dot.warning { background: var(--ck-warning); }
       .dot.error { background: var(--ck-danger); }
       .dot.unknown { background: var(--ck-dim); }
+      .card {
+        margin: 2px 0 8px 14px; padding: 6px 8px; font-size: 12px;
+        border-left: 2px solid var(--ck-border);
+      }
     `;
     const body = el("div", { class: "rail" });
     root.append(style, body);
@@ -3707,8 +3727,14 @@ function drawRail(): void {
       }),
     );
   }
+  const seen = new Map<string, number>();
   items.forEach((item, index) => {
     const problems = checked?.[index];
+    // What it shows, and which time, since its line moves with edits
+    const text = citationText(item.citation);
+    const nth = (seen.get(text) ?? 0) + 1;
+    seen.set(text, nth);
+    const key = `${text}#${nth}`;
     const label = item.citation.key
       ? `${item.citation.path} · ${item.citation.key}`
       : item.citation.path;
@@ -3720,8 +3746,17 @@ function drawRail(): void {
           title: problems?.length
             ? problems.map((p) => p.message).join("\n")
             : `Line ${item.line}`,
-          onClick: () =>
-            toEditor({ type: "goto", line: item.line, column: item.column }),
+          onClick: () => {
+            toEditor({ type: "goto", line: item.line, column: item.column });
+            if (railCard?.key === key) {
+              railCard = null;
+            } else {
+              const element = el("div", { class: "card" });
+              railCard = { key, element };
+              void fillCard(element, link, item);
+            }
+            drawRail();
+          },
         },
         [
           el("span", {
@@ -3740,6 +3775,9 @@ function drawRail(): void {
         ],
       ),
     );
+    if (railCard?.key === key) {
+      body.append(railCard.element);
+    }
   });
   // The pipeline's stages, and running it
   body.append(el("h3", { text: "Pipeline" }));

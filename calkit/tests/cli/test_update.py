@@ -224,6 +224,21 @@ def test_update_github_actions(tmp_dir):
     with open(old_fpath) as f:
         assert f.read() == updated_txt
     assert not repo.git.status("--porcelain")
+    # A new workflow can run only when started, and stays that way when
+    # it's updated later
+    os.remove(old_fpath)
+    on_demand_txt = calkit.resources.render_github_actions_workflow(
+        on_demand=True
+    )
+    assert (
+        runner.invoke(update_app, ["github-actions", "--on-demand"]).exit_code
+        == 0
+    )
+    with open(out_fpath) as f:
+        assert f.read() == on_demand_txt
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    with open(out_fpath) as f:
+        assert f.read() == on_demand_txt
 
 
 def test_update_uv_env(tmp_dir):

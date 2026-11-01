@@ -387,6 +387,15 @@ def update_github_actions(
             help="Do not create a Git commit for the updated GitHub Actions.",
         ),
     ] = False,
+    on_demand: Annotated[
+        bool,
+        typer.Option(
+            "--on-demand",
+            help=(
+                "For a new workflow, run only when started, not on every push."
+            ),
+        ),
+    ] = False,
 ):
     """Update a project's GitHub Actions to match this version of Calkit's
     recommendations.
@@ -404,23 +413,18 @@ def update_github_actions(
     txt_out = None
     out_dir = os.path.join(wdir or ".", ".github", "workflows")
     os.makedirs(out_dir, exist_ok=True)
-    for fname in sorted(os.listdir(out_dir)):
-        if fname.endswith(".yaml") or fname.endswith(".yml"):
-            fpath = os.path.join(out_dir, fname)
-            with open(fpath, encoding="utf-8") as f:
-                txt = f.read()
-            if calkit_resources.uses_run_action(txt):
-                fname_out = fname
-                # A workflow that's still the example gets replaced outright,
-                # picking up any other improvements to it, but one that's been
-                # customized only has its action ref updated
-                if not calkit_resources.is_default_github_actions_workflow(
-                    txt
-                ):
-                    txt_out = calkit_resources.set_action_ref(txt)
-                break
+    existing = calkit_resources.find_run_workflow(wdir)
+    if existing is not None:
+        fname_out, txt = existing
+        # A workflow that's still the example gets replaced outright, picking
+        # up any other improvements to it, but one that's been customized
+        # only has its action ref updated
+        if not calkit_resources.is_default_github_actions_workflow(txt):
+            txt_out = calkit_resources.set_action_ref(txt)
     if txt_out is None:
-        txt_out = calkit_resources.render_github_actions_workflow()
+        txt_out = calkit_resources.render_github_actions_workflow(
+            on_demand=on_demand
+        )
     out_fpath = os.path.join(out_dir, fname_out)
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w", encoding="utf-8") as f:

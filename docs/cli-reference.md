@@ -3043,6 +3043,7 @@ Options:
 | ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
 | `--wdir`      | str     | no       |         | Working directory. By default will run current working directory. |
 | `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.        |
+| `--on-demand` | boolean | no       | False   | For a new workflow, run only when started, not on every push.     |
 
 <a id="subcommand-update-notebook"></a>
 

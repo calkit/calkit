@@ -111,6 +111,29 @@ def test_github_actions_workflow():
     assert not calkit.resources.is_default_github_actions_workflow(
         pinned + "\n      - run: echo custom\n"
     )
+    # One that only runs when started has that as its only trigger, and
+    # is otherwise the example
+    on_demand = calkit.resources.render_github_actions_workflow(on_demand=True)
+    assert calkit.ryaml.load(on_demand)["on"] == {"workflow_dispatch": None}
+    assert (
+        calkit.ryaml.load(on_demand)["jobs"]
+        == calkit.ryaml.load(
+            calkit.resources.render_github_actions_workflow()
+        )["jobs"]
+    )
+    assert not calkit.resources.is_default_github_actions_workflow(on_demand)
+    # Whether a workflow can be started, however its triggers are written
+    for txt, can in [
+        (pinned, True),
+        (on_demand, True),
+        ("on: workflow_dispatch\n", True),
+        ("on: [push, workflow_dispatch]\n", True),
+        ("'on':\n  push:\n", False),
+        ("on: push\n", False),
+        ("jobs: {}\n", False),
+        ("{{ not yaml\n", False),
+    ]:
+        assert calkit.resources.can_start_workflow(txt) is can, txt
     # The bundled copy is generated from the action's own example, which is
     # only present in the repo, not in an installed package
     repo_copy = os.path.join(

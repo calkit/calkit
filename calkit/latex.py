@@ -468,7 +468,11 @@ def _project_has(base: Path, rel: str) -> bool:
     return (base / rel).is_file() or (base / f"{rel}.dvc").is_file()
 
 
-def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
+def detect_inputs(
+    target_path: str,
+    wdir: str | None = None,
+    has: Callable[[str], bool] | None = None,
+) -> list[str]:
     """Find the project files a LaTeX document reads.
 
     A document's class, style, bibliography, and figure files are inputs
@@ -489,8 +493,16 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
     Paths are returned relative to ``wdir`` -- the same frame as
     ``target_path`` and the rest of a stage's paths -- sorted, and with
     the target itself excluded (it's already a dependency).
+
+    ``has`` says whether the project has a file, e.g., one a stage makes
+    that isn't there yet, taking paths in that frame.
     """
     base = Path(wdir) if wdir else Path(".")
+    if has is None:
+
+        def has(rel: str) -> bool:
+            return _project_has(base, rel)
+
     root = Path(target_path)
     found: set[str] = set()
     # Source files whose own inputs still need collecting, and everything
@@ -524,7 +536,7 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
                 ]
                 for candidate in candidates:
                     rel = Path(os.path.normpath(candidate)).as_posix()
-                    if rel.startswith("..") or not _project_has(base, rel):
+                    if rel.startswith("..") or not has(rel):
                         continue
                     if rel != root.as_posix():
                         found.add(rel)

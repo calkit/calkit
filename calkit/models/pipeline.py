@@ -1554,6 +1554,15 @@ class LatexStage(Stage):
                 and not is_output(rel)
             ):
                 copied.append(rel)
+        # What it includes plainly, e.g., with \includegraphics, is as much
+        # an input, e.g., a figure a stage exports
+        wdir = self.wdir or ""
+        for rel in calkit.latex.detect_inputs(
+            self.target_path,
+            wdir=os.path.join(project_dir or "", wdir),
+            has=lambda p: is_input(posixpath.join(wdir, p)),
+        ):
+            paths.append(posixpath.normpath(posixpath.join(wdir, rel)))
         self._component_paths = list(dict.fromkeys(paths))
         self._copied_paths = list(dict.fromkeys(copied))
         if write_files and self._loads_calkit:

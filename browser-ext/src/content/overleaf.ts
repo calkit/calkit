@@ -1131,11 +1131,12 @@ function drawRuns(): void {
     }
     const start = el("button", {
       class: "action",
-      text: "Run on GitHub Actions",
+      text: "Run and sync",
       disabled: !canWrite || !runs.can_start,
       title: !canWrite
         ? "You need write access to this project to run it"
-        : runs.cannot_start_reason ?? "Run the pipeline on GitHub Actions",
+        : runs.cannot_start_reason ??
+          "Run the pipeline on GitHub Actions, then sync what it makes here",
     });
     const message = el("div", { class: "small" });
     start.addEventListener("click", async () => {
@@ -3082,9 +3083,11 @@ function renderStatus(
       );
     }
   });
+  // Nothing to sync while it's in sync, e.g., when what's out of date
+  // needs a run first
   body.append(
     el("div", { class: "actions" }, [
-      syncButton,
+      status.in_sync ? null : syncButton,
       el("button", {
         class: "action secondary",
         text: "Refresh",

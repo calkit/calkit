@@ -341,6 +341,7 @@ def import_publication(
     ] = False,
 ):
     """Import a publication from an Overleaf project."""
+    import calkit.resources
     from calkit.cli.main import ignore as git_ignore
     from calkit.cli.new import new_latex_stage
 
@@ -515,15 +516,17 @@ def import_publication(
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
-    if not no_commit and repo.git.diff(["--staged", "--", "calkit.yaml"]):
+    changed = ["calkit.yaml"]
+    # A Codespace opens on the document too
+    if calkit.resources.set_devcontainer_open_files(ck_info=ck_info):
+        changed.append(".devcontainer/devcontainer.json")
+        repo.git.add(changed[-1])
+    if not no_commit and repo.git.diff(["--staged", "--"] + changed):
         # Commit any necessary changes
         typer.echo("Committing changes")
         repo.git.commit(
-            [
-                "calkit.yaml",
-                "-m",
-                f"Import Overleaf project ID {overleaf_project_id}",
-            ]
+            changed
+            + ["-m", f"Import Overleaf project ID {overleaf_project_id}"]
         )
     # Sync the project. The build stage was just created and so has never
     # run, and linking a document isn't the moment to insist on a current

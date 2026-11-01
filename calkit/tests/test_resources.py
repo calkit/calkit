@@ -1,5 +1,6 @@
 """Tests for ``resources``."""
 
+import json
 import os
 import re
 
@@ -198,3 +199,47 @@ def test_devcontainer_image_sources():
     assert hooks
     for hook in hooks:
         assert hook.split("$INIT_SCRIPTS_DIR/")[-1].strip() in scripts
+
+
+def test_set_devcontainer_open_files(tmp_path):
+    wdir = str(tmp_path)
+    stages = {
+        "build-paper": {
+            "kind": "latex",
+            "target_path": "main.tex",
+            "wdir": "paper",
+        },
+        "build-thesis": {"kind": "latex", "target_path": "thesis/main.tex"},
+        "plot": {"kind": "python-script", "script_path": "plot.py"},
+    }
+    ck_info = {"pipeline": {"stages": stages}}
+    # Without a dev container, there's nothing to change
+    assert not calkit.resources.set_devcontainer_open_files(wdir, ck_info)
+    fpath = tmp_path / ".devcontainer" / "devcontainer.json"
+    fpath.parent.mkdir()
+    # Files a person listed are kept, and the documents come after them
+    fpath.write_text(
+        json.dumps(
+            {
+                "image": "x",
+                "customizations": {"codespaces": {"openFiles": ["README.md"]}},
+            }
+        )
+    )
+    assert calkit.resources.set_devcontainer_open_files(wdir, ck_info)
+    spec = json.loads(fpath.read_text())
+    assert spec["image"] == "x"
+    assert spec["customizations"]["codespaces"]["openFiles"] == [
+        "README.md",
+        "paper/main.tex",
+        "thesis/main.tex",
+    ]
+    # Doing it again changes nothing
+    assert not calkit.resources.set_devcontainer_open_files(wdir, ck_info)
+    # Nor does a project without documents, or a spec with comments, which
+    # JSON can't read and so isn't rewritten
+    assert not calkit.resources.set_devcontainer_open_files(wdir, {})
+    commented = '// Ours\n{"image": "x"}\n'
+    fpath.write_text(commented)
+    assert not calkit.resources.set_devcontainer_open_files(wdir, ck_info)
+    assert fpath.read_text() == commented

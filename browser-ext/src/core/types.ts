@@ -69,6 +69,8 @@ export interface OverleafLinkPublic {
   project_name: string;
   project_title: string;
   current_user_access?: "read" | "write" | "admin" | "owner" | null;
+  /** Its GitHub repo, e.g., ``owner/name``, if it's on GitHub. */
+  github_repo?: string | null;
 }
 
 export interface OverleafLookup {

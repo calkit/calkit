@@ -3022,6 +3022,10 @@ export type OverleafLinkPublic = {
    * Current User Access
    */
   current_user_access: "read" | "write" | "admin" | "owner" | null
+  /**
+   * Github Repo
+   */
+  github_repo?: string | null
 }
 
 /**

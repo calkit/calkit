@@ -125,9 +125,24 @@ def test_get_project_provenance(client: TestClient) -> None:
         },
     }
     pipeline = PipelineAtRef(
-        dvc_yaml={},
+        dvc_yaml={
+            "stages": {
+                # Reads a folder, relative to its wdir
+                "summarize": {
+                    "cmd": "python summarize.py",
+                    "wdir": "figs",
+                    "deps": ["summarize.py", "../data/downloaded"],
+                },
+                # Iterated, so what it reads is only concrete in dvc.lock
+                "sweep": {
+                    "foreach": ["a"],
+                    "do": {"cmd": "run ${item}", "deps": ["${item}.csv"]},
+                },
+            }
+        },
         dvc_lock={
             "stages": {
+                "sweep@a": {"deps": [{"path": "data/raw.csv"}]},
                 "analyze": {
                     "deps": [
                         {"path": "scripts/analyze.py"},
@@ -139,7 +154,7 @@ def test_get_project_provenance(client: TestClient) -> None:
                         {"path": ".python-version"},
                     ],
                     "outs": [{"path": "results/metrics.json"}],
-                }
+                },
             }
         },
         statuses={
@@ -303,3 +318,8 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["value_error"] is None
     # and code needs no recorded origin
     assert body["gaps"] == []
+    # The stages that read something, or a folder it's in
+    assert body["used_by"] == ["analyze"]
+    assert get("path=data/raw.csv")["used_by"] == ["sweep", "analyze"]
+    assert get("path=data/downloaded/a.csv")["used_by"] == ["summarize"]
+    assert get("path=results/metrics.json")["used_by"] == []

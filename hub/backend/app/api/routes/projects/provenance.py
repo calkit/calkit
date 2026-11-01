@@ -291,6 +291,28 @@ def get_project_provenance(
             )
             if stage_for(gap.path) is None
         ]
+    # The stages that read it, or a folder it's in, as run if they have
+    # been, since an iterated stage's deps are only concrete in dvc.lock
+    yaml_stages = pipeline.dvc_yaml.get("stages") or {}
+    lock_stages = pipeline.dvc_lock.get("stages") or {}
+    stage_deps = {
+        name: (lock_stages.get(name) or {}).get("deps")
+        or (yaml_stages.get(name.split("@")[0]) or {}).get("deps")
+        or []
+        for name in list(lock_stages) + list(yaml_stages)
+    }
+    for name, deps in stage_deps.items():
+        base = name.split("@")[0]
+        dvc_wdir = (yaml_stages.get(base) or {}).get("wdir") or ""
+        for dep in deps:
+            dep = dep.get("path") if isinstance(dep, dict) else dep
+            if not isinstance(dep, str) or "${" in dep:
+                continue
+            dep = posixpath.normpath(posixpath.join(dvc_wdir, dep))
+            if path == dep or path.startswith(dep + "/"):
+                out.used_by.append(base)
+                break
+    out.used_by = list(dict.fromkeys(out.used_by))
     if stage is None:
         return out
     out.stage = stage

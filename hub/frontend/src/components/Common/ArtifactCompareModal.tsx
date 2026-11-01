@@ -413,10 +413,12 @@ function FigureInfo({
   const originUrl = provenanceQuery.data?.origin_url
   // A figure calkit.yaml doesn't declare can still have a stage that makes it
   const stage = figure.stage ?? provenanceQuery.data?.stage
+  const stageKind = provenanceQuery.data?.stage_kind
+  // The app an export stage runs, e.g., Inkscape
+  const exportApp = provenanceQuery.data?.stage_app
+  const exportedFrom = exportApp ? provenanceQuery.data?.source : null
   const manualStep =
-    provenanceQuery.data?.stage_kind === "manual-step"
-      ? provenanceQuery.data.message
-      : null
+    stageKind === "manual-step" ? provenanceQuery.data?.message : null
   const dataLinks: InputLink[] = []
   if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
     const deps = declaredInputs(
@@ -504,6 +506,20 @@ function FigureInfo({
                 {stage}
               </Code>
             </Link>
+            {exportedFrom ? (
+              <>
+                , exported with {exportApp} from{" "}
+                <Link
+                  as={RouterLink}
+                  to={filesTo}
+                  search={{ path: exportedFrom, ref: gitRef } as any}
+                >
+                  <Code fontSize="xs" cursor="pointer">
+                    {exportedFrom}
+                  </Code>
+                </Link>
+              </>
+            ) : null}
             {manualStep ? `, a manual step: ${manualStep}` : null}
           </>
         ) : provenanceQuery.isPending ? (
@@ -640,6 +656,36 @@ function ManualExportForm({
   const [app, setApp] = useState("")
   // Kept out of the paper's folder, which may sync to Overleaf
   const source = sourcePath || (file ? `figures/src/${file.name}` : "")
+  // Which app, if any, exports it as the pipeline runs, so nobody has to
+  // remember to, is the hub's to say
+  const [plannedSource] = useDebounce(source, 300)
+  const [plannedApp] = useDebounce(app.trim(), 300)
+  const planned = { source: plannedSource, app: plannedApp }
+  const planQuery = useQuery({
+    queryKey: [
+      "projects",
+      ownerName,
+      projectName,
+      "export-stage",
+      path,
+      planned.source,
+      planned.app,
+    ],
+    queryFn: () =>
+      ProjectsService.postProjectPipelineExportStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        exportStagePost: {
+          source: planned.source,
+          output: path,
+          app: planned.app || null,
+          save: false,
+        },
+      }).then((response) => response.data),
+    enabled: !!planned.source && canBeCreatedByPerson(planned.source),
+    retry: false,
+  })
+  const exportedBy = planQuery.data?.exported_by
   const saveMutation = useMutation({
     mutationFn: async () => {
       const content = file
@@ -651,36 +697,26 @@ function ManualExportForm({
             reader.readAsDataURL(file)
           })
         : null
-      const appName = app.trim()
-      const stem = (path.split("/").pop() ?? "").replace(/\.[^.]*$/, "")
-      const slug = stem
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-      const message = appName
-        ? `In ${appName}, export ${path} from ${source}`
-        : `Export ${path} from ${source}`
-      await ProjectsService.postProjectPipelineStage({
+      const response = await ProjectsService.postProjectPipelineExportStage({
         owner_name: ownerName,
         project_name: projectName,
-        stagePost: {
-          name: `export-${slug || "figure"}`,
-          stage: {
-            kind: "manual-step",
-            message,
-            // The step opens the source in the app it's exported with
-            ...(appName ? { open: { app: appName, path: source } } : {}),
-            inputs: [source],
-            outputs: [path],
-          },
+        exportStagePost: {
+          source,
+          output: path,
+          app: app.trim() || null,
           files: [{ path: source, content, created_by_me: true }],
-          message: `Export ${path} from ${source} manually`,
         },
       })
-      return message
+      return response.data
     },
-    onSuccess: (message) => {
-      showToast("Origin defined", message, "success")
+    onSuccess: (saved) => {
+      showToast(
+        "Origin defined",
+        saved.exported_by
+          ? `Exported from ${source} with ${saved.exported_by}`
+          : String(saved.stage.message ?? `Export ${path} from ${source}`),
+        "success",
+      )
       onDone()
     },
     onError: (err: AxiosError) => handleError(err, showToast),
@@ -711,6 +747,11 @@ function ManualExportForm({
         value={app}
         onChange={(e) => setApp(e.target.value)}
       />
+      {exportedBy && planned.source === source ? (
+        <Text fontSize="xs" color="gray.500" mb={2}>
+          {exportedBy} exports it whenever the pipeline runs.
+        </Text>
+      ) : null}
       {source && !canBeCreatedByPerson(source) ? (
         <Text fontSize="xs" color="red.500" mb={2}>
           {source} is exported from something itself; choose the file it's made

@@ -1187,6 +1187,56 @@ export type ExistsResult = {
 }
 
 /**
+ * ExportStage
+ */
+export type ExportStage = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Exported By
+   */
+  exported_by?: string | null
+  /**
+   * Saved
+   */
+  saved?: boolean
+}
+
+/**
+ * ExportStagePost
+ */
+export type ExportStagePost = {
+  /**
+   * Source
+   */
+  source: string
+  /**
+   * Output
+   */
+  output: string
+  /**
+   * App
+   */
+  app?: string | null
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
  * ExternalReleasePost
  *
  * A release declared as published to an external venue.
@@ -4162,6 +4212,10 @@ export type Provenance = {
    * Stage Kind
    */
   stage_kind?: string | null
+  /**
+   * Stage App
+   */
+  stage_app?: string | null
   /**
    * Source
    */
@@ -13919,6 +13973,42 @@ export type PostProjectPipelineStageResponses = {
 
 export type PostProjectPipelineStageResponse =
   PostProjectPipelineStageResponses[keyof PostProjectPipelineStageResponses]
+
+export type PostProjectPipelineExportStageData = {
+  body: ExportStagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/export"
+}
+
+export type PostProjectPipelineExportStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineExportStageError =
+  PostProjectPipelineExportStageErrors[keyof PostProjectPipelineExportStageErrors]
+
+export type PostProjectPipelineExportStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExportStage
+}
+
+export type PostProjectPipelineExportStageResponse =
+  PostProjectPipelineExportStageResponses[keyof PostProjectPipelineExportStageResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

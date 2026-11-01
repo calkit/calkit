@@ -442,6 +442,8 @@ function PipelineRuns({
     },
   })
   const runs = runsQuery.data?.runs ?? []
+  // Named only when there's more than one to tell apart
+  const manyWorkflows = new Set(runs.map((run) => run.workflow)).size > 1
   const latest = runs[0]
   const going =
     latest?.status === "queued" ||
@@ -499,7 +501,15 @@ function PipelineRuns({
                       {run.status}
                     </Badge>
                   </Td>
-                  <Td>GitHub Actions</Td>
+                  <Td>
+                    GitHub Actions
+                    {manyWorkflows && run.workflow && (
+                      <Text as="span" color="ui.dim">
+                        {" "}
+                        ({run.workflow})
+                      </Text>
+                    )}
+                  </Td>
                   <Td>
                     {run.started_at
                       ? new Date(run.started_at).toLocaleString()

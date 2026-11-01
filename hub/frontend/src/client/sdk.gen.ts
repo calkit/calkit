@@ -7835,8 +7835,8 @@ export class ProjectsService {
    *
    * Recent runs of the pipeline, and whether one can be started here.
    *
-   * Only runs on GitHub Actions so far, by the workflow that runs the
-   * Calkit action.
+   * Only runs on GitHub Actions so far, by every workflow that runs the
+   * Calkit action, however each run was started.
    */
   public static getProjectPipelineRuns<ThrowOnError extends boolean = true>(
     parameters: {

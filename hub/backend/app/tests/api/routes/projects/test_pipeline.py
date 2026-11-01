@@ -687,7 +687,9 @@ def test_project_pipeline_runs(
             patch(
                 f"{module}.requests.get",
                 side_effect=lambda url, **k: (
-                    github.get.append((url, k)) or get or respond(200, {})
+                    github.get.append((url, k))
+                    or (get(url) if callable(get) else get)
+                    or respond(200, {})
                 ),
             ),
             patch(
@@ -736,11 +738,16 @@ def test_project_pipeline_runs(
     assert repo.head.commit == head
     # Runs as GitHub lists them
     runs = [
-        {"id": 1, "status": "queued", "conclusion": None},
-        {"id": 2, "status": "in_progress", "conclusion": None},
-        {"id": 3, "status": "completed", "conclusion": "success"},
-        {"id": 4, "status": "completed", "conclusion": "failure"},
-        {"id": 5, "status": "completed", "conclusion": "cancelled"},
+        {"id": i, "status": status, "conclusion": conclusion}
+        | {"created_at": f"2026-10-31T12:0{6 - i}:00Z"}
+        for i, status, conclusion in [
+            (1, "queued", None),
+            (2, "in_progress", None),
+            (3, "completed", "success"),
+            (4, "completed", "failure"),
+            (5, "completed", "cancelled"),
+        ]
+    ] + [
         {
             "id": 6,
             "status": "completed",
@@ -773,7 +780,39 @@ def test_project_pipeline_runs(
         "commit": "abc",
         "branch": "main",
         "started_by": "ada",
+        "workflow": fname,
     }
+    # Runs of another workflow that runs the action, e.g., on push, are
+    # listed too, newest first with the others, but starting one uses the
+    # workflow that can be
+    push_path = tmp_path / "repo" / ".github" / "workflows" / "push.yml"
+    push_path.write_text(txt.replace("workflow_dispatch:", "push:"))
+    pushed = {
+        "id": 7,
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-31T12:03:30Z",
+    }
+
+    def by_workflow(url):
+        if url.endswith("/workflows/push.yml/runs"):
+            return respond(200, {"workflow_runs": [pushed]})
+        return respond(200, {"workflow_runs": runs})
+
+    resp = call("get", get=by_workflow)
+    body = resp.json()
+    assert body["github_workflow"] == fname
+    assert body["can_start"]
+    assert [(r["id"], r["workflow"]) for r in body["runs"][:4]] == [
+        ("1", fname),
+        ("2", fname),
+        ("3", fname),
+        ("7", "push.yml"),
+    ]
+    assert len(body["runs"]) == 7
+    assert call("post").status_code == 200
+    assert github.post[-1][0].endswith(f"/workflows/{fname}/dispatches")
+    push_path.unlink()
     # GitHub being unavailable leaves no runs rather than failing
     resp = call("get", get=respond(500, {}))
     assert resp.status_code == 200
@@ -788,6 +827,7 @@ def test_project_pipeline_runs(
     resp = call("get")
     assert not resp.json()["can_start"]
     assert "workflow_dispatch" in resp.json()["cannot_start_reason"]
+    assert fname in resp.json()["cannot_start_reason"]
     assert call("post").status_code == 409
     # Without permission to push a workflow, nothing is left committed
     path.unlink()

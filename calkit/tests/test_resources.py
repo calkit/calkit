@@ -58,7 +58,7 @@ def test_resources(monkeypatch):
     assert merged["settings"] == customizations["settings"]
 
 
-def test_github_actions_workflow():
+def test_github_actions_workflow(tmp_path):
     workflow = calkit.ryaml.load(
         calkit.resources.read_text(
             "github-actions", calkit.resources.GITHUB_ACTIONS_FNAME
@@ -134,6 +134,24 @@ def test_github_actions_workflow():
         ("{{ not yaml\n", False),
     ]:
         assert calkit.resources.can_start_workflow(txt) is can, txt
+    # Every workflow that runs the action is found, in name order, but not
+    # others
+    assert calkit.resources.find_run_workflows(str(tmp_path)) == []
+    assert calkit.resources.find_run_workflow(str(tmp_path)) is None
+    workflows_dir = tmp_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True)
+    (workflows_dir / "tests.yml").write_text(other)
+    (workflows_dir / "run.yaml").write_text(pinned)
+    (workflows_dir / "on-demand.yml").write_text(on_demand)
+    (workflows_dir / "notes.txt").write_text(pinned)
+    assert calkit.resources.find_run_workflows(str(tmp_path)) == [
+        ("on-demand.yml", on_demand),
+        ("run.yaml", pinned),
+    ]
+    assert calkit.resources.find_run_workflow(str(tmp_path)) == (
+        "on-demand.yml",
+        on_demand,
+    )
     # The bundled copy is generated from the action's own example, which is
     # only present in the repo, not in an installed package
     repo_copy = os.path.join(

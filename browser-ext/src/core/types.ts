@@ -258,6 +258,8 @@ export interface PipelineRun {
   commit?: string | null;
   branch?: string | null;
   started_by?: string | null;
+  /** The GitHub Actions workflow it ran in, by file name. */
+  workflow?: string | null;
 }
 
 export interface PipelineRuns {

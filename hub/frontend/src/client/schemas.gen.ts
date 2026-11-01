@@ -5497,6 +5497,17 @@ export const PipelineRunSchema = {
       ],
       title: "Started By",
     },
+    workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Workflow",
+    },
   },
   type: "object",
   required: ["status"],

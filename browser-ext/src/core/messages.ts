@@ -11,6 +11,7 @@ import type {
   ExportStage,
   ImportUpdate,
   PipelineRun,
+  ProjectPipeline,
   PipelineRuns,
   StageFile,
   OverleafLookup,
@@ -145,6 +146,7 @@ export type Request =
       importedFrom?: Record<string, unknown>;
       createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
     }
+  | { type: "project.pipeline"; owner: string; project: string }
   | { type: "project.pipelineRuns"; owner: string; project: string }
   | { type: "project.startPipelineRun"; owner: string; project: string }
   | {
@@ -251,6 +253,7 @@ export interface ResponseMap {
   "project.recordOrigin": { path: string };
   "project.updateImport": ImportUpdate;
   "project.addExportStage": ExportStage;
+  "project.pipeline": ProjectPipeline;
   "project.pipelineRuns": PipelineRuns;
   "project.startPipelineRun": PipelineRun;
   "content.imageDataUrl": string;

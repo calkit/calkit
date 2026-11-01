@@ -43,6 +43,7 @@ import type {
   OverleafSyncStatusFile,
   PipelineRun,
   PipelineRuns,
+  ProjectPipeline,
   ProjectPublic,
 } from "../core/types";
 import {
@@ -965,6 +966,9 @@ async function refreshRuns(link: OverleafLinkPublic): Promise<void> {
     runsTimer = setTimeout(() => void refreshRuns(link), 15_000);
   } else if (wasRunning) {
     pipelineRuns.startedAt = null;
+    if (railOpen) {
+      void refreshRailPipeline(link);
+    }
     if (runs.runs[0]?.status === "succeeded") {
       await syncAfterRun(link);
     } else {
@@ -1536,6 +1540,7 @@ async function checkCitations(): Promise<void> {
   }
   editorProblems = { version: snapshot.version, found };
   drawRuns();
+  drawRail();
   toEditor({
     type: "problems",
     version: snapshot.version,
@@ -1887,6 +1892,7 @@ function watchEditor(): void {
     const message = event.data as FromEditor;
     if (message.type === "citations") {
       editorCitations = { version: message.version, items: message.items };
+      drawRail();
       void checkCitations();
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
@@ -3901,6 +3907,10 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     hubWebUrl = hub;
     currentLink = link;
     void checkCitations();
+    drawRail();
+    if (railOpen && railPipeline?.key !== linkKey(link)) {
+      void refreshRailPipeline(link);
+    }
     if (pipelineRuns?.key !== linkKey(link)) {
       void refreshRuns(link);
     }
@@ -3973,6 +3983,324 @@ function watchForSaves(): void {
     },
     true,
   );
+}
+
+const RAIL_TAB_ID = "calkit-rail-tab";
+const RAIL_PANE_ID = "calkit-rail-pane";
+// Whether Calkit's tab is the one showing in Overleaf's sidebar
+let railOpen = false;
+let railPane: { host: HTMLElement; body: HTMLElement } | null = null;
+let railPipeline: {
+  key: string;
+  pipeline?: ProjectPipeline;
+  error?: string;
+} | null = null;
+
+/**
+ * A Calkit tab in Overleaf's sidebar, listing what the open document shows
+ * from the project and the pipeline's stages, with a button to run it.
+ *
+ * Overleaf renders only its active tab's pane, so this one is put in the
+ * sidebar's content area while it's open, with Overleaf's pane hidden,
+ * rather than being a tab Overleaf knows about.
+ */
+function watchRail(): void {
+  const style = document.createElement("style");
+  style.textContent = `
+    .ide-rail-tab-content.calkit-open > :not(#${RAIL_PANE_ID}) {
+      display: none !important;
+    }
+    #${RAIL_PANE_ID} { height: 100%; overflow-y: auto; }
+    body.calkit-rail-open .ide-rail-tab-link.active:not(#${RAIL_TAB_ID}) {
+      background-color: transparent !important;
+      color: inherit !important;
+    }
+    #${RAIL_TAB_ID} img { width: 20px; height: 20px; display: block; }
+  `;
+  document.head.append(style);
+  const icon = `data:image/svg+xml,${encodeURIComponent(
+    calkitLogo.replace(/currentColor/g, "#009688"),
+  )}`;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const ensure = () => {
+    const first = document.getElementById("ide-rail-tabs-tab-file-tree");
+    const tabs = first?.parentElement;
+    if (!tabs || !currentProjectId) {
+      return;
+    }
+    let tab = document.getElementById(RAIL_TAB_ID);
+    if (!tab) {
+      tab = el(
+        "button",
+        {
+          class: "ide-rail-tab-link nav-link",
+          attrs: {
+            id: RAIL_TAB_ID,
+            type: "button",
+            role: "tab",
+            title: "Calkit",
+            "aria-label": "Calkit",
+          },
+        },
+        [el("img", { attrs: { src: icon, alt: "" } })],
+      );
+      tab.addEventListener("click", () => setRail(!railOpen));
+      const separated = tabs.querySelector(".separated-rail-tab");
+      if (separated) {
+        separated.before(tab);
+      } else {
+        tabs.append(tab);
+      }
+      // One of Overleaf's own tabs brings its pane back. The one it thinks
+      // is showing would otherwise close the sidebar instead.
+      tabs.addEventListener(
+        "click",
+        (event) => {
+          const target = (event.target as HTMLElement).closest(
+            ".ide-rail-tab-link",
+          );
+          if (!railOpen || !target || target.id === RAIL_TAB_ID) {
+            return;
+          }
+          if (target.classList.contains("active")) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+          setRail(false);
+        },
+        true,
+      );
+    }
+    tab.classList.toggle("active", railOpen);
+    tab.setAttribute("aria-selected", String(railOpen));
+    if (railOpen) {
+      placeRailPane();
+    }
+  };
+  new MutationObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(ensure, 100);
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+function setRail(open: boolean): void {
+  railOpen = open;
+  document.body.classList.toggle("calkit-rail-open", open);
+  const tab = document.getElementById(RAIL_TAB_ID);
+  tab?.classList.toggle("active", open);
+  tab?.setAttribute("aria-selected", String(open));
+  if (!open) {
+    document
+      .querySelector(".ide-rail-tab-content")
+      ?.classList.remove("calkit-open");
+    railPane?.host.remove();
+    return;
+  }
+  // A closed sidebar has no content area to show it in, so open it on the
+  // file tree first
+  const content = document.querySelector(".ide-rail-tab-content");
+  if (!content || content.getBoundingClientRect().width < 20) {
+    document.getElementById("ide-rail-tabs-tab-file-tree")?.click();
+    setTimeout(placeRailPane, 50);
+  } else {
+    placeRailPane();
+  }
+  drawRail();
+  if (currentLink) {
+    void refreshRailPipeline(currentLink);
+  }
+}
+
+/** Put the pane in the sidebar, where Overleaf may have redrawn it away. */
+function placeRailPane(): void {
+  const content = document.querySelector(".ide-rail-tab-content");
+  if (!content) {
+    return;
+  }
+  if (!railPane) {
+    const host = el("div", { attrs: { id: RAIL_PANE_ID } });
+    const root = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent =
+      STYLES +
+      `
+      .rail { padding: 10px 12px; color: var(--ck-fg); }
+      .rail h3 {
+        font-size: 12px; font-weight: 600; margin: 14px 0 4px;
+        text-transform: uppercase; letter-spacing: 0.04em;
+        color: var(--ck-dim);
+      }
+      .item {
+        display: flex; align-items: center; gap: 6px; width: 100%;
+        padding: 3px 4px; border: 0; border-radius: 4px; text-align: left;
+        background: none; color: inherit; cursor: pointer;
+      }
+      .item:hover { background: var(--ck-subtle-bg); }
+      .item .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+        background: var(--ck-success); }
+      .dot.warning { background: var(--ck-warning); }
+      .dot.error { background: var(--ck-danger); }
+      .dot.unknown { background: var(--ck-dim); }
+    `;
+    const body = el("div", { class: "rail" });
+    root.append(style, body);
+    railPane = { host, body };
+    drawRail();
+  }
+  if (railPane.host.parentElement !== content) {
+    content.append(railPane.host);
+  }
+  content.classList.add("calkit-open");
+}
+
+/** Ask the hub for the pipeline's stages, then show them. */
+async function refreshRailPipeline(link: OverleafLinkPublic): Promise<void> {
+  try {
+    const pipeline = await send({
+      type: "project.pipeline",
+      owner: link.project_owner_name,
+      project: link.project_name,
+    });
+    railPipeline = { key: linkKey(link), pipeline };
+  } catch (e) {
+    railPipeline = {
+      key: linkKey(link),
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+  drawRail();
+}
+
+function drawRail(): void {
+  if (!railPane) {
+    return;
+  }
+  const body = clear(railPane.body);
+  const link = currentLink;
+  if (!link) {
+    body.append(
+      el("div", {
+        class: "small",
+        text: "This paper isn't linked to a Calkit project yet.",
+      }),
+      el("div", { class: "actions" }, [
+        el("button", {
+          class: "action",
+          text: "Link it",
+          onClick: () => currentProjectId && openPanel(currentProjectId),
+        }),
+      ]),
+    );
+    return;
+  }
+  const base = projectUrl(
+    hubWebUrl,
+    link.project_owner_name,
+    link.project_name,
+  );
+  body.append(
+    el("a", {
+      text: linkKey(link),
+      href: base,
+      attrs: { target: "_blank" },
+    }),
+  );
+  // What the open document shows, each with what's wrong with it
+  body.append(el("h3", { text: "In this file" }));
+  const items = editorCitations?.items ?? [];
+  const checked =
+    editorProblems && editorProblems.version === editorCitations?.version
+      ? editorProblems.found
+      : null;
+  if (!items.length) {
+    body.append(
+      el("div", {
+        class: "dim small",
+        text: "Nothing from the project here yet.",
+      }),
+    );
+  }
+  items.forEach((item, index) => {
+    const problems = checked?.[index];
+    const label = item.citation
+      ? item.citation.key
+        ? `${item.citation.path} · ${item.citation.key}`
+        : item.citation.path
+      : item.typed
+      ? `Typed number ${item.typed.text}`
+      : "Typed table";
+    body.append(
+      el(
+        "button",
+        {
+          class: "item",
+          title: problems?.length
+            ? problems.map((p) => p.message).join("\n")
+            : `Line ${item.line}`,
+          onClick: () =>
+            toEditor({ type: "goto", line: item.line, column: item.column }),
+        },
+        [
+          el("span", {
+            class: `dot ${
+              problems === undefined
+                ? "unknown"
+                : problems.some((p) => p.severity === "error")
+                ? "error"
+                : problems.length
+                ? "warning"
+                : ""
+            }`,
+          }),
+          el("span", { class: "grow small", text: label }),
+          el("span", { class: "dim small", text: `${item.line}` }),
+        ],
+      ),
+    );
+  });
+  // The pipeline's stages, and running it
+  body.append(el("h3", { text: "Pipeline" }));
+  const known = railPipeline?.key === linkKey(link) ? railPipeline : null;
+  const pipeline = known?.pipeline;
+  if (known?.error) {
+    body.append(errorMessage(known.error));
+  } else if (!pipeline) {
+    body.append(loading());
+  } else if (!pipeline.ck_stages.length) {
+    body.append(el("div", { class: "dim small", text: "No stages yet." }));
+  }
+  for (const name of pipeline?.ck_stages ?? []) {
+    const status = pipeline?.stage_statuses[name]?.status ?? "unknown";
+    body.append(
+      el(
+        "a",
+        {
+          class: "item",
+          href: `${base}/pipeline?stage=${encodeURIComponent(name)}`,
+          attrs: { target: "_blank" },
+          title: status,
+        },
+        [
+          el("span", {
+            class: `dot ${
+              status === "up-to-date"
+                ? ""
+                : ["stale", "not-run"].includes(status)
+                ? "warning"
+                : "unknown"
+            }`,
+          }),
+          el("span", { class: "grow small", text: name }),
+          status !== "up-to-date"
+            ? el("span", { class: "dim small", text: status })
+            : null,
+        ],
+      ),
+    );
+  }
+  body.append(renderRuns(link, true));
 }
 
 /**
@@ -4114,6 +4442,7 @@ watchForSaves();
 watchEditor();
 watchPdf();
 watchIntegrations();
+watchRail();
 watchContextMenu();
 runContentScript({
   id: "overleaf",

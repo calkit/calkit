@@ -24,6 +24,7 @@ import type {
   ExportStage,
   ImportUpdate,
   PipelineRun,
+  ProjectPipeline,
   PipelineRuns,
   OverleafLookup,
   OverleafSyncResponse,
@@ -300,6 +301,10 @@ async function handle(message: Request): Promise<unknown> {
       return request<ImportUpdate>(
         `${projectPath(message.owner, message.project)}/imports/update`,
         { method: "POST", body: { path: message.path } },
+      );
+    case "project.pipeline":
+      return request<ProjectPipeline>(
+        `${projectPath(message.owner, message.project)}/pipeline`,
       );
     case "project.pipelineRuns":
       return request<PipelineRuns>(

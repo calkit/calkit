@@ -3495,7 +3495,12 @@ function watchRail(): void {
       background-color: transparent !important;
       color: inherit !important;
     }
-    #${RAIL_TAB_ID} img { width: 20px; height: 20px; display: block; }
+    #${RAIL_TAB_ID} img {
+      width: 20px;
+      height: 20px;
+      display: block;
+      margin: 0 auto;
+    }
   `;
   document.head.append(style);
   const icon = `data:image/svg+xml,${encodeURIComponent(

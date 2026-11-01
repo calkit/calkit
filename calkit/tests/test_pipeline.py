@@ -4598,6 +4598,48 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         interactive=False,
     )
     assert gated == {} and errors == {}
+    # A manual step can't run with nobody here to do it, but can when
+    # someone is
+    ck_info["pipeline"]["stages"]["by-hand"] = {
+        "kind": "manual-step",
+        "message": "Export made/by-hand.png",
+        "outputs": ["made/by-hand.png"],
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["by-hand"], interactive=False, manual=False
+    )
+    assert gated == {"by-hand": "needs a manual step: Export made/by-hand.png"}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["by-hand"], interactive=False
+    )
+    assert gated == {} and errors == {}
+    # An export needs its app installed where it runs
+    from calkit.export import GIMP, INKSCAPE
+
+    ck_info["pipeline"]["stages"]["drawn"] = {
+        "kind": "inkscape-export",
+        "source_path": "made/drawn.svg",
+        "outputs": ["made/drawn.png"],
+    }
+    ck_info["pipeline"]["stages"]["photo"] = {
+        "kind": "gimp-export",
+        "source_path": "made/photo.xcf",
+        "outputs": ["made/photo.png"],
+    }
+    monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
+    monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["drawn", "photo"], interactive=False
+    )
+    assert gated == {
+        "drawn": "needs Inkscape installed to export made/drawn.svg",
+        "photo": "needs GIMP installed to export made/photo.xcf",
+    }
+    monkeypatch.setattr(INKSCAPE, "executables", [sys.executable])
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["drawn"], interactive=False
+    )
+    assert gated == {} and errors == {}
 
 
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(

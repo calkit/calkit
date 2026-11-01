@@ -1187,6 +1187,56 @@ export type ExistsResult = {
 }
 
 /**
+ * ExportStage
+ */
+export type ExportStage = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Exported By
+   */
+  exported_by?: string | null
+  /**
+   * Saved
+   */
+  saved?: boolean
+}
+
+/**
+ * ExportStagePost
+ */
+export type ExportStagePost = {
+  /**
+   * Source
+   */
+  source: string
+  /**
+   * Output
+   */
+  output: string
+  /**
+   * App
+   */
+  app?: string | null
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
  * ExternalReleasePost
  *
  * A release declared as published to an external venue.
@@ -4163,6 +4213,10 @@ export type Provenance = {
    */
   stage_kind?: string | null
   /**
+   * Stage App
+   */
+  stage_app?: string | null
+  /**
    * Source
    */
   source?: string | null
@@ -4170,6 +4224,10 @@ export type Provenance = {
    * Command
    */
   command?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
   /**
    * Inputs
    */
@@ -5917,6 +5975,27 @@ export type SoftwareItem = {
 }
 
 /**
+ * StageFile
+ *
+ * A file a new stage needs, e.g., a script or the file a figure is
+ * exported from.
+ */
+export type StageFile = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Created By Me
+   */
+  created_by_me?: boolean
+}
+
+/**
  * StageFromScriptOrNotebookPost
  */
 export type StageFromScriptOrNotebookPost = {
@@ -6002,6 +6081,30 @@ export type StageFromScriptOrNotebookResponse = {
    * Git Repo Url
    */
   git_repo_url: string
+}
+
+/**
+ * StagePost
+ */
+export type StagePost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -13834,6 +13937,78 @@ export type PostProjectStageFromScriptOrNotebookResponses = {
 
 export type PostProjectStageFromScriptOrNotebookResponse =
   PostProjectStageFromScriptOrNotebookResponses[keyof PostProjectStageFromScriptOrNotebookResponses]
+
+export type PostProjectPipelineStageData = {
+  body: StagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages"
+}
+
+export type PostProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineStageError =
+  PostProjectPipelineStageErrors[keyof PostProjectPipelineStageErrors]
+
+export type PostProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PostProjectPipelineStageResponse =
+  PostProjectPipelineStageResponses[keyof PostProjectPipelineStageResponses]
+
+export type PostProjectPipelineExportStageData = {
+  body: ExportStagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/export"
+}
+
+export type PostProjectPipelineExportStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineExportStageError =
+  PostProjectPipelineExportStageErrors[keyof PostProjectPipelineExportStageErrors]
+
+export type PostProjectPipelineExportStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExportStage
+}
+
+export type PostProjectPipelineExportStageResponse =
+  PostProjectPipelineExportStageResponses[keyof PostProjectPipelineExportStageResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

@@ -1182,9 +1182,13 @@ class Provenance(SQLModel):
     value_error: str | None = None
     stage: str | None = None
     stage_kind: str | None = None
+    # The app an export stage runs, e.g., Inkscape
+    stage_app: str | None = None
     # What to open to change it: the stage's script, notebook, or document
     source: str | None = None
     command: str | None = None
+    # What a manual step says to do
+    message: str | None = None
     inputs: list[str] = Field(default_factory=list)
     stage_status: StageStatus | None = None
     stale_reason: Literal["pipeline", "frozen"] | None = None

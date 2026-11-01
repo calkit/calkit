@@ -8,6 +8,8 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
+  ExportStage,
+  StageFile,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -140,6 +142,17 @@ export type Request =
       importedFrom?: Record<string, unknown>;
       createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
     }
+  | {
+      type: "project.addExportStage";
+      owner: string;
+      project: string;
+      /** The file it's exported from, and the figure it's exported to. */
+      source: string;
+      output: string;
+      /** The app a person exports it with, e.g., Photoshop. */
+      app?: string;
+      files?: StageFile[];
+    }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
   | {
@@ -225,6 +238,7 @@ export interface ResponseMap {
   "project.provenance": Provenance;
   "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
   "project.recordOrigin": { path: string };
+  "project.addExportStage": ExportStage;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

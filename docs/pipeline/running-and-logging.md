@@ -22,6 +22,9 @@ This records when it ran, in which environment
 (and which option any `switch` environment used),
 with which version of Calkit,
 and on which machine.
+A stage that runs an app no environment pins,
+e.g., an Inkscape export,
+also records which version of that app it ran.
 The entry is replaced each time the stage runs,
 so the file describes how the current outputs were made,
 and its Git history is the stage's run history.

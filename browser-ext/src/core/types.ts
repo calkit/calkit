@@ -174,9 +174,13 @@ export interface Provenance {
   value_error?: string | null;
   stage?: string | null;
   stage_kind?: string | null;
+  /** The app an export stage runs, e.g., Inkscape. */
+  stage_app?: string | null;
   /** What to edit to change it: the stage's script, notebook, or document. */
   source?: string | null;
   command?: string | null;
+  /** What a manual step says to do. */
+  message?: string | null;
   inputs: string[];
   stage_status?: StageStatus | null;
   stale_reason?: "pipeline" | "frozen" | null;
@@ -192,6 +196,25 @@ export interface Provenance {
   origin_path?: string | null;
   /** Data behind it, however far back, nothing records the origin of. */
   gaps?: ProvenanceGap[];
+}
+
+/** The stage exporting a figure from the file it's drawn in. */
+export interface ExportStage {
+  name: string;
+  /** As written under its name in calkit.yaml. */
+  stage: Record<string, unknown>;
+  /** The app that exports it as the pipeline runs, if one does. */
+  exported_by?: string | null;
+  saved: boolean;
+}
+
+/** A file a new stage needs, uploaded or already in the project. */
+export interface StageFile {
+  path: string;
+  /** Uploaded, base64-encoded. */
+  content?: string;
+  /** Recorded as created by whoever adds it, e.g., a Photoshop file. */
+  created_by_me?: boolean;
 }
 
 /** A stage made from a script, as `calkit xr` makes one, maybe saved. */

@@ -441,6 +441,23 @@ Model class: `LatexStage`
 | `latexdiff_args`        | list[str]                      | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--type=CFONT'. Changed figures are shown old and new unless '--graphics-markup' is set here. |
 | `diff_filter`           | PythonScriptDiffFilter \| None | no       | null    | Script each marked-up document is piped through before it's built, e.g., to drop changes that don't change the rendered text.                                                 |
 
+### `manual-step`
+
+Model class: `ManualStepStage`
+
+A step someone does manually, e.g., exporting a figure from
+Photoshop, which the pipeline asks for when its inputs change, e.g.,
+the Photoshop file.
+
+Its outputs are kept while it runs, since they're what the person
+replaces, and the step checks that they changed.
+
+| Kind-specific parameter | Type                   | Required | Default    | Description                                                        |
+| ----------------------- | ---------------------- | -------- | ---------- | ------------------------------------------------------------------ |
+| `environment`           | str                    | no       | '\_system' | Name of the environment in which to run this stage.                |
+| `message`               | str                    | yes      |            | What to do, e.g., 'In Photoshop, export figures/wake-diagram.png'. |
+| `open`                  | ManualStepOpen \| None | no       | null       | App to open for the step, and the file to open in it.              |
+
 ### `map-paths`
 
 Model class: `MapPathsStage`
@@ -919,6 +936,18 @@ A Python script each marked-up document is piped through.
 | `script_path` | str                      | yes      |         | Path to the Python script to run.                                                                                                 |
 | `environment` | str \| None              | no       | null    | Environment to run the script in. Defaults to Calkit's own Python, which has only the standard library and Calkit's dependencies. |
 | `args`        | list[str]                | no       |         | Arguments passed to the script, each item one argument.                                                                           |
+
+#### `ManualStepOpen`
+
+What a manual step opens.
+
+The app is always named, since the default app for a file differs
+between machines, e.g., Illustrator rather than Inkscape for an SVG.
+
+| Parameter | Type        | Required | Default | Description                                 |
+| --------- | ----------- | -------- | ------- | ------------------------------------------- |
+| `app`     | str         | yes      |         | App to open, e.g., 'Inkscape'.              |
+| `path`    | str \| None | no       | null    | File to open in it, e.g., the Inkscape SVG. |
 
 #### `CopyFileToFile`
 

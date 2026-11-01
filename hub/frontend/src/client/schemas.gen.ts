@@ -2106,6 +2106,79 @@ export const ExistsResultSchema = {
   title: "ExistsResult",
 } as const
 
+export const ExportStageSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    exported_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Exported By",
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "stage"],
+  title: "ExportStage",
+} as const
+
+export const ExportStagePostSchema = {
+  properties: {
+    source: {
+      type: "string",
+      title: "Source",
+    },
+    output: {
+      type: "string",
+      title: "Output",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: true,
+    },
+  },
+  type: "object",
+  required: ["source", "output"],
+  title: "ExportStagePost",
+} as const
+
 export const ExternalReleasePostSchema = {
   properties: {
     name: {
@@ -7193,6 +7266,17 @@ export const ProvenanceSchema = {
       ],
       title: "Stage Kind",
     },
+    stage_app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage App",
+    },
     source: {
       anyOf: [
         {
@@ -7214,6 +7298,17 @@ export const ProvenanceSchema = {
         },
       ],
       title: "Command",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
     },
     inputs: {
       items: {
@@ -10409,6 +10504,36 @@ export const SoftwareItemSchema = {
   title: "SoftwareItem",
 } as const
 
+export const StageFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    created_by_me: {
+      type: "boolean",
+      title: "Created By Me",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "StageFile",
+  description:
+    "A file a new stage needs, e.g., a script or the file a figure is\nexported from.",
+} as const
+
 export const StageFromScriptOrNotebookPostSchema = {
   properties: {
     script_path: {
@@ -10569,6 +10694,49 @@ export const StageFromScriptOrNotebookResponseSchema = {
     "git_repo_url",
   ],
   title: "StageFromScriptOrNotebookResponse",
+} as const
+
+export const StagePostSchema = {
+  properties: {
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["stage"],
+  title: "StagePost",
 } as const
 
 export const StageStatusSchema = {

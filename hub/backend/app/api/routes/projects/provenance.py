@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 
 import app.projects
 import calkit.environments
+import calkit.export
 import calkit.pipeline
 import calkit.provenance
 import calkit.questions
@@ -40,7 +41,7 @@ router = APIRouter()
 MAX_VALUE_BYTES = 100_000
 RESULTS_EXTS = (".json", ".yaml", ".yml", ".toml")
 # The stage fields that name what someone edits to change its output
-SOURCE_FIELDS = ("script_path", "notebook_path", "target_path")
+SOURCE_FIELDS = ("script_path", "notebook_path", "target_path", "source_path")
 
 
 def _read_value(
@@ -305,6 +306,16 @@ def get_project_provenance(
     source = None
     if ck_stage is not None:
         out.stage_kind = ck_stage.get("kind")
+        out.stage_app = next(
+            (
+                e.app
+                for e in calkit.export.exporters()
+                if e.kind == out.stage_kind
+            ),
+            None,
+        )
+        if out.stage_kind == "manual-step":
+            out.message = ck_stage.get("message")
         wdir = ck_stage.get("wdir") or ""
         field = next((f for f in SOURCE_FIELDS if ck_stage.get(f)), None)
         if field is not None:

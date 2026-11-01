@@ -3256,6 +3256,68 @@ export type PipelinePut = {
 }
 
 /**
+ * PipelineRun
+ *
+ * A run of the pipeline, wherever it ran.
+ */
+export type PipelineRun = {
+  /**
+   * Where
+   */
+  where?: "github-actions"
+  /**
+   * Id
+   */
+  id?: string | null
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+  /**
+   * Started At
+   */
+  started_at?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Commit
+   */
+  commit?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Started By
+   */
+  started_by?: string | null
+}
+
+/**
+ * PipelineRuns
+ */
+export type PipelineRuns = {
+  /**
+   * Runs
+   */
+  runs?: Array<PipelineRun>
+  /**
+   * Github Workflow
+   */
+  github_workflow?: string | null
+  /**
+   * Can Start
+   */
+  can_start?: boolean
+  /**
+   * Cannot Start Reason
+   */
+  cannot_start_reason?: string | null
+}
+
+/**
  * PipelineStage
  *
  * One stage of the Calkit pipeline, as editable YAML.
@@ -14085,6 +14147,78 @@ export type PostProjectPipelineExportStageResponses = {
 
 export type PostProjectPipelineExportStageResponse =
   PostProjectPipelineExportStageResponses[keyof PostProjectPipelineExportStageResponses]
+
+export type GetProjectPipelineRunsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type GetProjectPipelineRunsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunsError =
+  GetProjectPipelineRunsErrors[keyof GetProjectPipelineRunsErrors]
+
+export type GetProjectPipelineRunsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRuns
+}
+
+export type GetProjectPipelineRunsResponse =
+  GetProjectPipelineRunsResponses[keyof GetProjectPipelineRunsResponses]
+
+export type PostProjectPipelineRunData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type PostProjectPipelineRunErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineRunError =
+  PostProjectPipelineRunErrors[keyof PostProjectPipelineRunErrors]
+
+export type PostProjectPipelineRunResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRun
+}
+
+export type PostProjectPipelineRunResponse =
+  PostProjectPipelineRunResponses[keyof PostProjectPipelineRunResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

@@ -5457,6 +5457,134 @@ export const PipelinePutSchema = {
   title: "PipelinePut",
 } as const
 
+export const PipelineRunSchema = {
+  properties: {
+    where: {
+      type: "string",
+      const: "github-actions",
+      title: "Where",
+      default: "github-actions",
+    },
+    id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Id",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "cancelled"],
+      title: "Status",
+    },
+    started_at: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started At",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    commit: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Commit",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    started_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started By",
+    },
+  },
+  type: "object",
+  required: ["status"],
+  title: "PipelineRun",
+  description: "A run of the pipeline, wherever it ran.",
+} as const
+
+export const PipelineRunsSchema = {
+  properties: {
+    runs: {
+      items: {
+        $ref: "#/components/schemas/PipelineRun",
+      },
+      type: "array",
+      title: "Runs",
+      default: [],
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    can_start: {
+      type: "boolean",
+      title: "Can Start",
+      default: false,
+    },
+    cannot_start_reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Cannot Start Reason",
+    },
+  },
+  type: "object",
+  title: "PipelineRuns",
+} as const
+
 export const PipelineStageSchema = {
   properties: {
     name: {

@@ -2062,7 +2062,8 @@ def _ensure_latex_aux_gitignore(
     so aux files are caught wherever latexmk writes them relative to the
     source -- next to it, or in an ``aux``/output subdirectory via
     ``$aux_dir``/``$out_dir``/``output_dir``. A stage's own ``aux_dir`` is
-    also ignored whole. ``*.pdf`` is never ignored so the compiled output
+    also ignored whole, from its own ``.gitignore`` if it's outside the
+    source directory. ``*.pdf`` is never ignored so the compiled output
     stays tracked.
 
     Returns True if ``.gitignore`` was modified.
@@ -2129,27 +2130,40 @@ def _ensure_latex_aux_gitignore(
     source_dir = os.path.dirname(stage.target_path)
     gitignore_path = os.path.join(base, source_dir, ".gitignore")
     # An aux dir is ignored whole, since packages like glossaries write
-    # files with extensions no list could anticipate. One outside the
-    # source directory can't be named from its .gitignore. Pure path
+    # files with extensions no list could anticipate. Pure path
     # arithmetic, since os.path.relpath resolves 'aux' to a device on
     # Windows.
+    aux_dir_changed = False
     if stage.aux_dir is not None:
         aux = norm(stage.aux_dir)
         src = norm(source_dir or ".")
-        if src == ".":
-            inside = aux != "." and not aux.startswith(("../", "/"))
-            rel = aux
-        else:
-            inside = aux.startswith(src + "/")
-            rel = aux[len(src) + 1 :]
-        if inside:
+        # Unless the PDF goes there too
+        pdf_there = (
+            stage.output_dir is not None and norm(stage.output_dir) == aux
+        )
+        if (
+            aux in (".", "..")
+            or aux.startswith(("../", "/"))
+            or re.match(r"[A-Za-z]:", aux)
+        ):
+            # The project itself, or outside it
+            pass
+        elif src == "." or aux.startswith(src + "/"):
+            rel = aux if src == "." else aux[len(src) + 1 :]
             aux_globs.append(f"/{rel}/*")
-            # Unless the PDF goes there too
-            if stage.output_dir is not None and norm(stage.output_dir) == aux:
+            if pdf_there:
                 aux_globs.append(f"!/{rel}/*.pdf")
-    return _write_managed_gitignore_block(
+        elif not (src + "/").startswith(aux + "/"):
+            # The source's .gitignore can't name it, so it ignores itself
+            aux_dir_changed = _write_managed_gitignore_block(
+                os.path.join(base, aux, ".gitignore"),
+                marker="calkit latex aux files",
+                lines=["*"] + (["!*.pdf"] if pdf_there else []),
+            )
+    source_changed = _write_managed_gitignore_block(
         gitignore_path, marker="calkit latex aux files", lines=aux_globs
     )
+    return source_changed or aux_dir_changed
 
 
 def sync_markdown(

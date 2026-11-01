@@ -1,4 +1,11 @@
-import { Box, Flex, Icon, Text, useColorModeValue } from "@chakra-ui/react"
+import {
+  Box,
+  Flex,
+  Icon,
+  Spinner,
+  Text,
+  useColorModeValue,
+} from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
 import type { IconType } from "react-icons"
@@ -107,6 +114,27 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     refetchOnWindowFocus: false,
   })
   const pipelineIsStale = pipelineQuery.data?.status === "stale"
+  // Whether it's running somewhere, e.g., on GitHub Actions. Same key as
+  // the pipeline page's runs, checked more often while one is going.
+  const runsQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "pipeline-runs"],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineRuns({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(user) && !currentRef,
+    retry: false,
+    refetchInterval: (query) => {
+      const latest = query.state.data?.runs?.[0]
+      return latest?.status === "queued" || latest?.status === "running"
+        ? 15_000
+        : 60_000
+    },
+  })
+  const latestRun = runsQuery.data?.runs?.[0]
+  const pipelineIsRunning =
+    latestRun?.status === "queued" || latestRun?.status === "running"
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {
@@ -142,7 +170,18 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
           alignSelf="center"
         />
         <Text ml={2}>{title}</Text>
-        {title === "Pipeline" && pipelineIsStale ? (
+        {title === "Pipeline" && pipelineIsRunning ? (
+          <Tooltip label="The pipeline is running on GitHub Actions">
+            <Spinner
+              ml="auto"
+              mr={1}
+              size="xs"
+              alignSelf="center"
+              flexShrink={0}
+              aria-label="Pipeline is running"
+            />
+          </Tooltip>
+        ) : title === "Pipeline" && pipelineIsStale ? (
           <Tooltip label="The pipeline has changed since it was last run">
             <Box
               // Pushed to the far edge rather than trailing the label, so

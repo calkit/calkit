@@ -817,3 +817,64 @@ def test_project_pipeline_runs(
     assert not resp.json()["can_start"]
     assert resp.json()["cannot_start_reason"]
     assert call("post", project=elsewhere).status_code == 422
+
+    # A run's jobs and steps, with a finished job's log less GitHub's
+    # timestamps and folding markers
+    def github_get(url, **kw):
+        if url.endswith("/actions/runs/6/jobs"):
+            return respond(
+                200,
+                {
+                    "jobs": [
+                        {
+                            "id": 9,
+                            "name": "Run",
+                            "status": "completed",
+                            "conclusion": "failure",
+                            "steps": [
+                                {
+                                    "name": "Run Calkit",
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                }
+                            ],
+                        },
+                        {"id": 10, "name": "Later", "status": "in_progress"},
+                    ]
+                },
+            )
+        assert url.endswith("/actions/jobs/9/logs"), url
+        return SimpleNamespace(
+            ok=True,
+            text=(
+                "2026-11-01T02:12:43.3679898Z ##[group]Run calkit\n"
+                "2026-11-01T02:12:46.5Z Error: Pipeline failed\n"
+            ),
+        )
+
+    with (
+        patch(f"{module}.app.projects.get_project", return_value=fake_project),
+        patch(f"{module}._github_token_for_repo", return_value="t"),
+        patch(f"{module}.requests.get", side_effect=github_get),
+    ):
+        resp = client.get(
+            "/projects/o/p/pipeline/runs/6/logs",
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        jobs = resp.json()["jobs"]
+        assert jobs[0]["log"] == "Run calkit\nError: Pipeline failed\n"
+        assert jobs[0]["steps"] == [
+            {
+                "name": "Run Calkit",
+                "status": "completed",
+                "conclusion": "failure",
+            }
+        ]
+        assert jobs[1]["log"] is None
+        # Only a run's number names a run
+        resp = client.get(
+            "/projects/o/p/pipeline/runs/abc/logs",
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 422

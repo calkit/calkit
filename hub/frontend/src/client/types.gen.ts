@@ -3296,6 +3296,64 @@ export type PipelineRun = {
 }
 
 /**
+ * PipelineRunJob
+ */
+export type PipelineRunJob = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: string
+  /**
+   * Conclusion
+   */
+  conclusion?: string | null
+  /**
+   * Steps
+   */
+  steps?: Array<PipelineRunStep>
+  /**
+   * Log
+   */
+  log?: string | null
+  /**
+   * Log Truncated
+   */
+  log_truncated?: boolean
+}
+
+/**
+ * PipelineRunLogs
+ */
+export type PipelineRunLogs = {
+  /**
+   * Jobs
+   */
+  jobs?: Array<PipelineRunJob>
+}
+
+/**
+ * PipelineRunStep
+ */
+export type PipelineRunStep = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: string
+  /**
+   * Conclusion
+   */
+  conclusion?: string | null
+}
+
+/**
  * PipelineRuns
  */
 export type PipelineRuns = {
@@ -14219,6 +14277,46 @@ export type PostProjectPipelineRunResponses = {
 
 export type PostProjectPipelineRunResponse =
   PostProjectPipelineRunResponses[keyof PostProjectPipelineRunResponses]
+
+export type GetProjectPipelineRunLogsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Run Id
+     */
+    run_id: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs"
+}
+
+export type GetProjectPipelineRunLogsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunLogsError =
+  GetProjectPipelineRunLogsErrors[keyof GetProjectPipelineRunLogsErrors]
+
+export type GetProjectPipelineRunLogsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRunLogs
+}
+
+export type GetProjectPipelineRunLogsResponse =
+  GetProjectPipelineRunLogsResponses[keyof GetProjectPipelineRunLogsResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

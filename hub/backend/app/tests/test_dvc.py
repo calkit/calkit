@@ -99,8 +99,26 @@ def test_make_mermaid_diagram(
             }
         }
     )
-    assert '\n\tnode1-->|"a.csv<br>b.csv<br>c.csv<br>+1 more"|' in mm
+    assert '\n\tnode1-->|"a.csv<br>b.csv<br>+2 more"|' in mm
     assert '-->|"figs"|' in mm
+    # By file name, since the full paths are in calkit.yaml
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                "a": {"cmd": "x", "outs": ["results/deep/x.json"]},
+                "b": {"cmd": "y", "deps": ["results/deep/x.json"]},
+            }
+        }
+    )
+    assert mm.endswith('node1-->|"x.json"|node2')
+    # Too many arrows to label
+    mm = make_mermaid_diagram(
+        {
+            "stages": {"src": {"cmd": "x", "outs": ["o"]}}
+            | {f"s{i}": {"cmd": "y", "deps": ["o"]} for i in range(31)}
+        }
+    )
+    assert "|" not in mm
     # Neither the working directory nor its contents change
     assert os.getcwd() == str(wdir)
     assert os.listdir(wdir) == []

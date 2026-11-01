@@ -11,6 +11,12 @@ import {
   Icon,
   IconButton,
   Link,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalHeader,
+  ModalOverlay,
   Spinner,
   Table,
   TableContainer,
@@ -392,7 +398,9 @@ function PipelineRuns({
   const showToast = useCustomToast()
   // When one was started here, since GitHub takes a moment to list it
   const [startedAt, setStartedAt] = useState<number | null>(null)
-  const queryKey = ["projects", ownerName, projectName, "pipeline", "runs"]
+  // Shared with the sidebar, which shows when one is going
+  const queryKey = ["projects", ownerName, projectName, "pipeline-runs"]
+  const [logsRun, setLogsRun] = useState<PipelineRun | null>(null)
   const runsQuery = useQuery({
     queryKey,
     queryFn: () =>
@@ -500,11 +508,22 @@ function PipelineRuns({
                   <Td>{run.started_by ?? ""}</Td>
                   <Td fontFamily="mono">{run.commit?.slice(0, 7) ?? ""}</Td>
                   <Td>
-                    {run.url && (
-                      <Link isExternal variant="blue" href={run.url}>
-                        View
-                      </Link>
-                    )}
+                    <Flex gap={3}>
+                      {run.id && (
+                        <Button
+                          size="xs"
+                          variant="link"
+                          onClick={() => setLogsRun(run)}
+                        >
+                          Logs
+                        </Button>
+                      )}
+                      {run.url && (
+                        <Link isExternal variant="blue" href={run.url}>
+                          GitHub
+                        </Link>
+                      )}
+                    </Flex>
                   </Td>
                 </Tr>
               ))}
@@ -512,7 +531,117 @@ function PipelineRuns({
           </Table>
         </TableContainer>
       )}
+      {logsRun?.id && (
+        <RunLogsModal
+          ownerName={ownerName}
+          projectName={projectName}
+          run={{ ...logsRun, id: logsRun.id }}
+          onClose={() => setLogsRun(null)}
+        />
+      )}
     </Box>
+  )
+}
+
+/** A run's steps, and its log once it has one, kept current while it runs. */
+function RunLogsModal({
+  ownerName,
+  projectName,
+  run,
+  onClose,
+}: {
+  ownerName: string
+  projectName: string
+  run: PipelineRun & { id: string }
+  onClose: () => void
+}) {
+  const logsQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "pipeline-runs", run.id],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineRunLogs({
+        owner_name: ownerName,
+        project_name: projectName,
+        run_id: run.id,
+      }).then((response) => response.data),
+    refetchInterval: (query) =>
+      query.state.data?.jobs?.some((job) => job.status !== "completed")
+        ? 10_000
+        : false,
+  })
+  const stepColor = (conclusion?: string | null) =>
+    conclusion === "success"
+      ? "green"
+      : conclusion === "failure"
+        ? "red"
+        : "gray"
+  return (
+    <Modal isOpen onClose={onClose} size="6xl" scrollBehavior="inside">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>
+          Run on GitHub Actions{" "}
+          <Badge colorScheme={RUN_STATUS_COLORS[run.status]}>
+            {run.status}
+          </Badge>
+        </ModalHeader>
+        <ModalCloseButton />
+        <ModalBody pb={6}>
+          {logsQuery.isPending ? (
+            <Spinner size="sm" />
+          ) : logsQuery.isError ? (
+            <Text color="ui.danger">{String(logsQuery.error)}</Text>
+          ) : (
+            logsQuery.data?.jobs?.map((job) => (
+              <Box key={job.name} mb={4}>
+                <Flex align="center" gap={2} mb={2}>
+                  <Heading size="sm">{job.name}</Heading>
+                  <Badge colorScheme={stepColor(job.conclusion)}>
+                    {job.conclusion ?? job.status}
+                  </Badge>
+                  {job.status !== "completed" && <Spinner size="xs" />}
+                </Flex>
+                <Flex wrap="wrap" gap={1} mb={2}>
+                  {job.steps?.map((step) => (
+                    <Badge
+                      key={step.name}
+                      variant="outline"
+                      colorScheme={stepColor(step.conclusion)}
+                      textTransform="none"
+                    >
+                      {step.name}
+                    </Badge>
+                  ))}
+                </Flex>
+                {job.log ? (
+                  <Box
+                    as="pre"
+                    fontSize="xs"
+                    bg="gray.900"
+                    color="gray.100"
+                    p={3}
+                    borderRadius="md"
+                    maxH="60vh"
+                    overflow="auto"
+                    whiteSpace="pre-wrap"
+                    // Opens on the end, which is where a failure is
+                    ref={(el: HTMLElement | null) => {
+                      if (el) el.scrollTop = el.scrollHeight
+                    }}
+                  >
+                    {job.log_truncated ? "[earlier lines left out]\n" : ""}
+                    {job.log}
+                  </Box>
+                ) : (
+                  <Text fontSize="sm" color="ui.dim">
+                    The log shows up once this job finishes.
+                  </Text>
+                )}
+              </Box>
+            ))
+          )}
+        </ModalBody>
+      </ModalContent>
+    </Modal>
   )
 }
 

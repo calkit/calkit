@@ -28,6 +28,8 @@ interface MermaidProps {
   setIsOversizedShown?: (shown: boolean) => void
   /** Pan/zoom the diagram to center the node for this pipeline stage. */
   zoomToStage?: string
+  /** Outline that stage without moving the view, e.g., once it's clicked. */
+  isZoomSkipped?: boolean
   /**
    * Called with the stage name when a stage node is clicked. The diagram also
    * contains file nodes, so `stageNames` decides which nodes are clickable.
@@ -55,6 +57,7 @@ const Mermaid = ({
   isOversizedShown,
   setIsOversizedShown,
   zoomToStage,
+  isZoomSkipped,
   onStageClick,
   stageNames,
 }: MermaidProps) => {
@@ -125,7 +128,7 @@ const Mermaid = ({
           .baseVal
         setDrawnAspect(
           viewBox && viewBox.height > 0
-            ? Math.min(3, Math.max(1, viewBox.width / viewBox.height))
+            ? Math.min(2, Math.max(1, viewBox.width / viewBox.height))
             : 1,
         )
         setRenderTick((t) => t + 1)
@@ -216,6 +219,7 @@ const Mermaid = ({
     if (!match) return
     // Outline the node (fill is left alone so it still shows staleness).
     match.classList.add("ck-stage-highlight")
+    if (isZoomSkipped) return
     const gCTM = gEl.getCTM()
     const nCTM = match.getCTM()
     if (!gCTM || !nCTM) return
@@ -248,7 +252,7 @@ const Mermaid = ({
       zoomBehaviorRef.current.transform,
       zoomIdentity.translate(tx, ty).scale(k),
     )
-  }, [zoomToStage, renderTick])
+  }, [zoomToStage, isZoomSkipped, renderTick])
 
   return (
     <Box

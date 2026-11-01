@@ -597,10 +597,14 @@ function ProjectPipeline() {
       }),
     [navigate],
   )
-  // Clicking a stage only points it out; editing is a step after that
+  // Clicking a stage only points it out; editing is a step after that. The
+  // view stays put, since it's already showing what was clicked.
+  const [clickedStage, setClickedStage] = useState<string | null>(null)
   const selectStage = useCallback(
-    (stageName: string) =>
-      navigate({ search: (prev) => ({ ...prev, stage: stageName }) }),
+    (stageName: string) => {
+      setClickedStage(stageName)
+      navigate({ search: (prev) => ({ ...prev, stage: stageName }) })
+    },
     [navigate],
   )
   const closeStageEditor = () =>
@@ -671,6 +675,7 @@ function ProjectPipeline() {
                       isOversizedShown={show_diagram}
                       setIsOversizedShown={setIsDiagramShown}
                       zoomToStage={stage}
+                      isZoomSkipped={stage === clickedStage}
                       stageNames={stageNames}
                       onStageClick={selectStage}
                     >

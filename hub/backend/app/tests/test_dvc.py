@@ -77,10 +77,30 @@ def test_make_mermaid_diagram(
         '\n\tnode2["do-something-else"]'
         '\n\tnode3["loop@1"]'
         '\n\tnode4["loop@2"]'
-        "\n\tnode1-->node2"
-        "\n\tnode2-->node3"
-        "\n\tnode2-->node4"
+        '\n\tnode1-->|"something.png"|node2'
+        '\n\tnode2-->|"else.pdf"|node3'
+        '\n\tnode2-->|"else.pdf"|node4'
     )
+    # An arrow carries every output read downstream, including through a
+    # directory either side names, and a few at most
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                "make": {
+                    "cmd": "x",
+                    "outs": ["a.csv", "b.csv", "c.csv", "d.csv", "figs"],
+                },
+                "use": {
+                    "cmd": "y",
+                    "deps": ["a.csv", "b.csv", "c.csv", "d.csv"],
+                },
+                "plot": {"cmd": "z", "deps": ["figs/one.png"]},
+                "nothing": {"cmd": "w", "deps": ["other.txt"]},
+            }
+        }
+    )
+    assert '\n\tnode1-->|"a.csv<br>b.csv<br>c.csv<br>+1 more"|' in mm
+    assert '-->|"figs"|' in mm
     # Neither the working directory nor its contents change
     assert os.getcwd() == str(wdir)
     assert os.listdir(wdir) == []

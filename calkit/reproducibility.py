@@ -103,6 +103,7 @@ DETAIL_CATEGORIES = {
     "environments": "stages_without_env",
     "provenance": "misc_needing_provenance",
     "gaps": "provenance_gaps",
+    "imports": "unchecked_imports",
 }
 
 
@@ -139,6 +140,10 @@ class ReproCheck(BaseModel):
     # lead back to something nothing records the origin of, e.g., a figure
     # made from a dataset with no source
     provenance_gaps: list[str] = []
+    # Where they lead back to an import from somewhere only described, e.g.,
+    # a folder on someone's computer. Advisory, since it is recorded, but
+    # nobody else can check it.
+    unchecked_imports: list[str] = []
     # Paths of Git-tracked scripts no pipeline stage refers to, which the
     # pipeline therefore can't be reproducing
     scripts_not_in_pipeline: list[str] = []
@@ -360,6 +365,12 @@ class ReproCheck(BaseModel):
             f"{self._tag('retyped')}\n"
         )
         # No check mark either way: these are worth a look, not a verdict
+        if self.unchecked_imports:
+            txt += (
+                "Imported from somewhere that can't be checked: "
+                f"{len(self.unchecked_imports)} (worth a look)"
+                f"{self._tag('imports')}\n"
+            )
         if self.unattributed_numbers:
             txt += (
                 "Numbers with nothing recorded behind them: "
@@ -907,12 +918,11 @@ def check_reproducibility(
         )
         if os.path.isfile(os.path.join(wdir, target)):
             shown += calkit.latex.find_shown(target, wdir=wdir)
-    res["provenance_gaps"] = [
-        str(gap)
-        for gap in find_project_provenance_gaps(
-            list(dict.fromkeys(shown)), wdir=wdir, ck_info=ck_info
-        )
-    ]
+    gaps = find_project_provenance_gaps(
+        list(dict.fromkeys(shown)), wdir=wdir, ck_info=ck_info
+    )
+    res["provenance_gaps"] = [str(gap) for gap in gaps if not gap.unchecked]
+    res["unchecked_imports"] = [str(gap) for gap in gaps if gap.unchecked]
     res["scripts_not_in_pipeline"] = find_scripts_not_in_pipeline(
         wdir=wdir, ck_info=ck_info, pipeline=pipeline
     )

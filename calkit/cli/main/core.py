@@ -42,6 +42,7 @@ from calkit.cli import (
     raise_error,
     run_cmd,
     warn,
+    warn_app_control,
 )
 from calkit.cli.check import (
     check_app,
@@ -55,6 +56,7 @@ from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.export import export_app
 from calkit.cli.fix import (
     OursOpt,
     PreferOpt,
@@ -95,6 +97,11 @@ app.add_typer(show_app, name="show", help="Show Calkit objects.")
 app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
+app.add_typer(
+    export_app,
+    name="export",
+    help="Export data and artifacts from various applications.",
+)
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
@@ -942,11 +949,22 @@ def get_status(
             return
         elif pipeline_status and pipeline_status.is_stale:
             typer.echo("Stale stages:")
+            ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
             for stage_name in pipeline_status.stale_stage_names:
                 stale_stage = pipeline_status.stale_stages.get(stage_name)
                 if stale_stage is None:
                     continue
                 typer.echo(f"        {typer.style(stage_name, fg='yellow')}:")
+                ck_stage = ck_stages.get(stage_name)
+                if (
+                    isinstance(ck_stage, dict)
+                    and ck_stage.get("kind") == "manual-step"
+                ):
+                    warn(
+                        "          is a manual step: "
+                        f"{ck_stage.get('message')}",
+                        prefix="",
+                    )
                 if stale_stage.cannot_run_here:
                     warn(
                         "          can't run on this machine: "
@@ -3052,6 +3070,7 @@ def run(
                 stage_names=stage_names,
                 system_info=system_info,
                 interactive=False if spinner else None,
+                manual=can_ask,
             )
             # A machine that couldn't be reached may only need asking about,
             # e.g., for its host
@@ -3918,6 +3937,27 @@ def run(
                 }
                 if isinstance(props.get("memory_gb"), (int, float)):
                     entry["system"]["memory_gb"] = round(props["memory_gb"], 1)
+            # What the stage itself says to record, e.g., the version of an
+            # app it runs, read here, so only for a run on this machine
+            base_name = lock_name.split("@")[0]
+            ck_stage = (
+                run_stages.get(base_name)
+                if lock_dir is None and machine_info[outer] is None
+                else None
+            )
+            if isinstance(ck_stage, dict):
+                from calkit.models.pipeline import Pipeline
+
+                try:
+                    model = Pipeline.model_validate(
+                        {"stages": {base_name: ck_stage}}
+                    ).stages[base_name]
+                    extra = model.run_properties()
+                except Exception as e:
+                    warn(f"Couldn't read what {stage_name} records: {e}")
+                    extra = {}
+                if extra:
+                    entry.setdefault("system", {}).update(extra)
             stage_runs[lock_dir][lock_name] = entry
             # Replacing a record made from here, from before a subproject's
             # were kept with it
@@ -3951,6 +3991,7 @@ def run(
             calkit.dvc.restore_output_ignores()
         except Exception as e:
             warn(f"Failed to re-ignore pipeline outputs: {e}")
+        warn_app_control(output=log_content)
         raise_error("Pipeline failed")
     elif skipped_stale:
         for addressing, reason in skipped_stale.items():
@@ -3994,6 +4035,25 @@ def manual_step(
     cmd: Annotated[
         str | None, typer.Option("--cmd", help="Command to run.")
     ] = None,
+    app: Annotated[
+        str | None,
+        typer.Option("--app", help="App to open, e.g., 'Inkscape'."),
+    ] = None,
+    open_path: Annotated[
+        str | None,
+        typer.Option("--open", help="File to open with the app."),
+    ] = None,
+    outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "File the step writes, which must change for it to be "
+                "considered done."
+            ),
+        ),
+    ] = [],
     show_stdout: Annotated[
         bool, typer.Option("--show-stdout", help="Show stdout.")
     ] = False,
@@ -4001,6 +4061,53 @@ def manual_step(
         bool, typer.Option("--show-stderr", help="Show stderr.")
     ] = False,
 ) -> None:
+    import textwrap
+
+    from calkit.provenance import hash_path
+
+    def ask() -> str:
+        # Windows calls an empty stdin a terminal, so its end says so too
+        try:
+            return input()
+        except EOFError:
+            raise_error(
+                f"Needs a manual step, with nobody here to do it: {message}"
+            )
+
+    # Waiting for someone who isn't there would hang, e.g., in CI
+    if not sys.stdin.isatty():
+        raise_error(
+            f"Needs a manual step, with nobody here to do it: {message}"
+        )
+    # The app is named rather than left to the default for the file, which
+    # differs between machines, e.g., Illustrator rather than Inkscape
+    if open_path is not None and app is None:
+        raise_error("Name the app to open it with, with --app")
+    if open_path is not None and not os.path.exists(open_path):
+        raise_error(f"{open_path} doesn't exist")
+    before = {path: hash_path(path) for path in outputs}
+    if app is not None:
+        args = [] if open_path is None else [open_path]
+        typer.echo(f"Opening {open_path or app} with {app}")
+        # macOS finds apps by name wherever they're installed
+        exe = shutil.which(app) or shutil.which(app.lower())
+        opened = False
+        if sys.platform == "darwin":
+            opened = (
+                subprocess.run(
+                    ["open", "-a", app, *args], capture_output=True
+                ).returncode
+                == 0
+            )
+        elif exe is not None:
+            subprocess.Popen(
+                [exe, *args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            opened = True
+        if not opened:
+            warn(f"Can't find {app} here; open it yourself")
     if cmd is not None:
         typer.echo(f"Running command: {cmd}")
         subprocess.Popen(
@@ -4009,7 +4116,38 @@ def manual_step(
             stdout=subprocess.PIPE if not show_stdout else None,
             shell=True,
         )
-    input(message + " (press enter to confirm): ")
+    # Each prompt ends its line, since 'calkit run' passes stage output on
+    # a line at a time, so a prompt waiting on its line wouldn't show
+    while True:
+        prompt = f"{message.rstrip('.')}. Press Enter when done."
+        # Paths aren't split, so they can still be copied
+        print(
+            textwrap.fill(
+                prompt,
+                width=80,
+                break_long_words=False,
+                break_on_hyphens=False,
+            ),
+            flush=True,
+        )
+        ask()
+        missing = [path for path in outputs if not os.path.exists(path)]
+        if missing:
+            typer.echo(f"Not there yet: {', '.join(missing)}")
+            continue
+        # Unchanged is fine when it was already done, but is asked about,
+        # since otherwise it's an old output recorded as a new one
+        unchanged = [
+            path for path in outputs if hash_path(path) == before[path]
+        ]
+        if unchanged:
+            print(
+                f"Unchanged: {', '.join(unchanged)}. Keep as is? [y/N]",
+                flush=True,
+            )
+            if ask().strip().lower() not in ("y", "yes"):
+                continue
+        break
     typer.echo("Done")
 
 
@@ -4429,7 +4567,8 @@ def run_in_env(
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, cwd=wdir)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in Conda environment")
     elif env["kind"] == "pixi":
         env_cmd = []
@@ -4443,7 +4582,8 @@ def run_in_env(
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, cwd=wdir)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in Pixi environment")
     elif env["kind"] == "uv":
         env_dir = os.path.dirname(os.path.abspath(env["path"]))
@@ -4452,7 +4592,8 @@ def run_in_env(
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, cwd=wdir)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            warn_app_control(returncode=e.returncode)
             raise_error("Failed to run in uv environment")
     elif (kind := env["kind"]) in ["uv-venv", "venv"]:
         if "path" not in env:
@@ -4490,7 +4631,8 @@ def run_in_env(
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, shell=True, cwd=wdir)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            warn_app_control(returncode=e.returncode)
             raise_error(f"Failed to run in {kind}")
     elif env["kind"] == "julia":
         if not no_check:

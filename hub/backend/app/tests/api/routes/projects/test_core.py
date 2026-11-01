@@ -5250,6 +5250,7 @@ def test_post_project_dataset_provenance(
                 return_value=existing_path,
             ),
             patch("builtins.open", new_callable=lambda: _fake_open),
+            patch("pathlib.Path.write_text"),
             patch("app.api.routes.projects.core.mixpanel.track"),
         ):
             resp = client.post(url, headers=headers, json=body)

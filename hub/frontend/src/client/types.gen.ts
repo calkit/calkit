@@ -1187,6 +1187,56 @@ export type ExistsResult = {
 }
 
 /**
+ * ExportStage
+ */
+export type ExportStage = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Exported By
+   */
+  exported_by?: string | null
+  /**
+   * Saved
+   */
+  saved?: boolean
+}
+
+/**
+ * ExportStagePost
+ */
+export type ExportStagePost = {
+  /**
+   * Source
+   */
+  source: string
+  /**
+   * Output
+   */
+  output: string
+  /**
+   * App
+   */
+  app?: string | null
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
  * ExternalReleasePost
  *
  * A release declared as published to an external venue.
@@ -4163,6 +4213,10 @@ export type Provenance = {
    */
   stage_kind?: string | null
   /**
+   * Stage App
+   */
+  stage_app?: string | null
+  /**
    * Source
    */
   source?: string | null
@@ -4170,6 +4224,10 @@ export type Provenance = {
    * Command
    */
   command?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
   /**
    * Inputs
    */
@@ -4219,6 +4277,10 @@ export type ProvenanceGap = {
    * Steps
    */
   steps?: Array<ProvenanceStep>
+  /**
+   * Unchecked
+   */
+  unchecked?: boolean
 }
 
 /**
@@ -5640,6 +5702,10 @@ export type ReproCheck = {
    */
   provenance_gaps?: Array<string>
   /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
+  /**
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
@@ -5906,6 +5972,139 @@ export type SoftwareItem = {
    * Description
    */
   description?: string | null
+}
+
+/**
+ * StageFile
+ *
+ * A file a new stage needs, e.g., a script or the file a figure is
+ * exported from.
+ */
+export type StageFile = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Created By Me
+   */
+  created_by_me?: boolean
+}
+
+/**
+ * StageFromScriptOrNotebookPost
+ */
+export type StageFromScriptOrNotebookPost = {
+  /**
+   * Script Path
+   */
+  script_path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Shows
+   */
+  shows?: string | null
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
+ * StageFromScriptOrNotebookResponse
+ */
+export type StageFromScriptOrNotebookResponse = {
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Stage Yaml
+   */
+  stage_yaml: string
+  /**
+   * Environment
+   */
+  environment: string
+  /**
+   * Environment Is New
+   */
+  environment_is_new: boolean
+  /**
+   * Environment Spec Path
+   */
+  environment_spec_path?: string | null
+  /**
+   * Environment Spec Content
+   */
+  environment_spec_content?: string | null
+  /**
+   * Dependencies
+   */
+  dependencies?: Array<string>
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Outputs
+   */
+  outputs?: Array<string>
+  /**
+   * Missing Inputs
+   */
+  missing_inputs?: Array<string>
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Included In
+   */
+  included_in?: Array<string>
+  /**
+   * Saved
+   */
+  saved?: boolean
+  /**
+   * Git Repo Url
+   */
+  git_repo_url: string
+}
+
+/**
+ * StagePost
+ */
+export type StagePost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -7186,6 +7385,10 @@ export type ReproCheckWritable = {
    * Provenance Gaps
    */
   provenance_gaps?: Array<string>
+  /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
   /**
    * Scripts Not In Pipeline
    */
@@ -13698,6 +13901,114 @@ export type PostProjectMapPathsResponses = {
 
 export type PostProjectMapPathsResponse =
   PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
+
+export type PostProjectStageFromScriptOrNotebookData = {
+  body: StageFromScriptOrNotebookPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook"
+}
+
+export type PostProjectStageFromScriptOrNotebookErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectStageFromScriptOrNotebookError =
+  PostProjectStageFromScriptOrNotebookErrors[keyof PostProjectStageFromScriptOrNotebookErrors]
+
+export type PostProjectStageFromScriptOrNotebookResponses = {
+  /**
+   * Successful Response
+   */
+  200: StageFromScriptOrNotebookResponse
+}
+
+export type PostProjectStageFromScriptOrNotebookResponse =
+  PostProjectStageFromScriptOrNotebookResponses[keyof PostProjectStageFromScriptOrNotebookResponses]
+
+export type PostProjectPipelineStageData = {
+  body: StagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages"
+}
+
+export type PostProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineStageError =
+  PostProjectPipelineStageErrors[keyof PostProjectPipelineStageErrors]
+
+export type PostProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PostProjectPipelineStageResponse =
+  PostProjectPipelineStageResponses[keyof PostProjectPipelineStageResponses]
+
+export type PostProjectPipelineExportStageData = {
+  body: ExportStagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/export"
+}
+
+export type PostProjectPipelineExportStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineExportStageError =
+  PostProjectPipelineExportStageErrors[keyof PostProjectPipelineExportStageErrors]
+
+export type PostProjectPipelineExportStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExportStage
+}
+
+export type PostProjectPipelineExportStageResponse =
+  PostProjectPipelineExportStageResponses[keyof PostProjectPipelineExportStageResponses]
 
 export type GetProjectProvenanceData = {
   body?: never

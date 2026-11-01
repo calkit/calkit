@@ -691,6 +691,69 @@ def find_shown(document: str, wdir: str | None = None) -> list[str]:
     return list(dict.fromkeys(cited + detect_inputs(document, wdir=wdir)))
 
 
+def include_figure(
+    document: str, shown: str, path: str, wdir: str | None = None
+) -> dict[str, str]:
+    """Include a figure from the project, rewriting each
+    ``\\includegraphics`` of ``shown`` in a document and the files it
+    inputs as ``\\ckfigure`` of ``path``, so nothing has to copy it.
+
+    Returns the new text of each file that changed, relative to ``wdir``
+    like ``document``, with ``\\usepackage{calkit}`` added to the document
+    if it doesn't load it already.
+    """
+
+    def replace(m: re.Match, parents: list[Path]) -> str:
+        raw = m["name"].strip()
+        names = [raw] + [raw + ext for ext in _GRAPHICS_EXTS]
+        for parent in parents:
+            for name in names:
+                if posixpath.normpath((parent / name).as_posix()) == shown:
+                    opts = f"[{m['opts']}]" if m["opts"] else ""
+                    return f"\\ckfigure{opts}{{{path}}}"
+        return m[0]
+
+    base = Path(wdir or ".")
+    root = Path(document)
+    graphics = re.compile(
+        r"\\includegraphics\s*(?:\[(?P<opts>[^\]]*)\])?\s*\{(?P<name>[^}]*)\}"
+    )
+    changed: dict[str, str] = {}
+    for source in [document] + [
+        p for p in detect_inputs(document, wdir=wdir) if p.endswith(".tex")
+    ]:
+        text = _read_leniently(str(base / source))
+        if text is None:
+            continue
+        # TeX looks beside the document, and a nested file is often
+        # written as if it looked beside itself
+        parents = list(dict.fromkeys([root.parent, Path(source).parent]))
+        lines = []
+        for line in text.splitlines(keepends=True):
+            comment = re.search(r"(?<!\\)%", line)
+            cut = comment.start() if comment else len(line)
+            lines.append(
+                graphics.sub(lambda m: replace(m, parents), line[:cut])
+                + line[cut:]
+            )
+        if "".join(lines) != text:
+            changed[source] = "".join(lines)
+    if not changed:
+        return changed
+    # calkit.sty has to be loaded for \ckfigure
+    text = changed.get(document) or _read_leniently(str(base / root)) or ""
+    loaded = [
+        name.strip()
+        for names in _PACKAGE_RE.findall(_strip_comments(text))
+        for name in names.split(",")
+    ]
+    begin = re.search(r"^[ \t]*\\begin\{document\}", text, re.M)
+    if "calkit" not in loaded and begin is not None:
+        at = begin.start()
+        changed[document] = text[:at] + "\\usepackage{calkit}\n" + text[at:]
+    return changed
+
+
 def root_documents(folder: str) -> list[str]:
     """The documents directly in a folder, i.e., ``.tex`` files with a
     ``\\documentclass``, rather than the files they input.

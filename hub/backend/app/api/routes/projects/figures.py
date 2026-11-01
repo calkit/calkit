@@ -12,6 +12,7 @@ import logging
 import os
 import posixpath
 import re
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -368,8 +369,7 @@ def post_project_figure_script(
     else:
         figures.append(entry)
     ck_info["figures"] = figures
-    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # The project page reads the committed dvc.yaml, so the stage has to be
     # compiled into it here rather than waiting for the next `calkit run`.

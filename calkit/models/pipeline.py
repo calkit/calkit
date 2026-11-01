@@ -316,6 +316,9 @@ class Stage(Model):
         "julia-script",
         "julia-command",
         "word-to-pdf",
+        "manual-step",
+        "inkscape-export",
+        "gimp-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -887,6 +890,13 @@ class Stage(Model):
             storage=self.scheduler.log_storage,
             delete_before_run=False,
         )
+
+    def run_properties(self) -> dict[str, Any]:
+        """What a run of it records about the machine, beyond what every
+        run does, e.g., the version of an app it runs that no environment
+        pins.
+        """
+        return {}
 
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
@@ -1802,6 +1812,10 @@ class MatlabCommandStage(Stage):
         return cmd
 
 
+# What a shell takes to skip the user's startup files
+NORC_ARGS = {"bash": " --noprofile --norc", "zsh": " -f", "sh": ""}
+
+
 class ShellCommandStage(Stage):
     kind: Literal["shell-command"]
     command: str = Field(description="Shell command to run.")
@@ -1854,17 +1868,16 @@ class ShellCommandStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = self.xenv_cmd
-        if self.shell == "zsh":
-            norc_args = "-f"
-        else:
-            norc_args = "--noprofile --norc"
+        # Without startup files; a POSIX sh run like this reads none anyway,
+        # and refuses Bash's options for skipping them
+        norc_args = NORC_ARGS[self.shell]
         command_file = self.command_file_path
         if command_file is not None:
             command_file = self.path_from_wdir(command_file)
-            cmd += f" {self.shell} {norc_args} {command_file}"
+            cmd += f" {self.shell}{norc_args} {command_file}"
             return cmd.strip()
         shell_cmd = self.command.replace('"', '\\"')
-        cmd += f' {self.shell} {norc_args} -c "{shell_cmd}"'
+        cmd += f' {self.shell}{norc_args} -c "{shell_cmd}"'
         return cmd.strip()
 
 
@@ -1904,11 +1917,7 @@ class ShellScriptStage(Stage):
                 cmd = cmd.replace(dep_txt, "")
             return cmd
         cmd = self.xenv_cmd
-        if self.shell == "zsh":
-            norc_args = "-f"
-        else:
-            norc_args = "--noprofile --norc"
-        cmd += f" {self.shell} {norc_args} {self.script_path}"
+        cmd += f" {self.shell}{NORC_ARGS[self.shell]} {self.script_path}"
         for arg in self.args:
             cmd += f" {quote_arg(arg)}"
         return cmd.strip()
@@ -2267,6 +2276,166 @@ class WordToPdfStage(Stage):
         return (
             f'calkit office word-to-pdf "{self.word_doc_path}" '
             f'-o "{self.out_path}"'
+        )
+
+
+class ManualStepOpen(Model):
+    """What a manual step opens.
+
+    The app is always named, since the default app for a file differs
+    between machines, e.g., Illustrator rather than Inkscape for an SVG.
+    """
+
+    app: str = Field(description="App to open, e.g., 'Inkscape'.")
+    path: str | None = Field(
+        default=None,
+        description="File to open in it, e.g., the Inkscape SVG.",
+    )
+
+
+class ManualStepStage(Stage):
+    """A step someone does manually, e.g., exporting a figure from
+    Photoshop, which the pipeline asks for when its inputs change, e.g.,
+    the Photoshop file.
+
+    Its outputs are kept while it runs, since they're what the person
+    replaces, and the step checks that they changed.
+    """
+
+    kind: Literal["manual-step"] = "manual-step"
+    message: str = Field(
+        description=(
+            "What to do, e.g., 'In Photoshop, export "
+            "figures/wake-diagram.png'."
+        )
+    )
+    open: ManualStepOpen | None = Field(
+        default=None,
+        description="App to open for the step, and the file to open in it.",
+    )
+    environment: str = "_system"
+
+    @property
+    def output_paths(self) -> list[str]:
+        return [o if isinstance(o, str) else o.path for o in self.outputs]
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs: list[str | dict] = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(persist=True)})
+            else:
+                outs.append(
+                    {out.path: dict(cache=out.storage == "dvc", persist=True)}
+                )
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit manual-step --message {shlex.quote(self.message)}"
+        if self.open is not None:
+            cmd += f" --app {shlex.quote(self.open.app)}"
+            if self.open.path is not None:
+                cmd += f" --open {shlex.quote(self.open.path)}"
+        for path in self.output_paths:
+            cmd += f" --output {shlex.quote(path)}"
+        return cmd
+
+
+class AppExportStage(Stage):
+    """A figure an app exports from the file it's drawn in, e.g., a PNG
+    from an Inkscape SVG. Each app is its own kind, since what it takes and
+    what it needs installed differ.
+
+    A source no app can export without a person, e.g., a Photoshop file, is
+    a manual step instead.
+    """
+
+    source_path: RelativeChildPathString = Field(
+        description="The file to export from."
+    )
+    environment: str = "_system"
+
+    @property
+    def output_path(self) -> str:
+        out = self.outputs[0]
+        return out if isinstance(out, str) else out.path
+
+    @model_validator(mode="after")
+    def _check_one_output(self) -> "AppExportStage":
+        if len(self.outputs) != 1:
+            raise ValueError("An export stage has exactly one output")
+        return self
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = super().dvc_deps
+        if self.source_path not in deps:
+            deps = [self.source_path] + deps
+        return deps
+
+    def run_properties(self) -> dict[str, Any]:
+        # The app runs from the system, so nothing else says which version
+        # made the output
+        from calkit.export import exporters
+
+        return {
+            f"{e.name}_version": e.version()
+            for e in exporters()
+            if e.kind == self.kind
+        }
+
+
+class InkscapeExportStage(AppExportStage):
+    """A figure Inkscape exports from an SVG, e.g., a PNG or PDF."""
+
+    kind: Literal["inkscape-export"] = "inkscape-export"
+    source_path: RelativeChildPathString = Field(
+        description="The SVG to export from."
+    )
+    dpi: int | None = Field(
+        default=None, description="Resolution of an exported PNG."
+    )
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "InkscapeExportStage":
+        from calkit.export import INKSCAPE
+
+        INKSCAPE.check(self.source_path, self.output_path)
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            f"calkit export inkscape {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(self.output_path)}"
+        )
+        if self.dpi is not None:
+            cmd += f" --dpi {self.dpi}"
+        return cmd
+
+
+class GimpExportStage(AppExportStage):
+    """A figure GIMP exports, flattened, from an XCF file, e.g., a PNG."""
+
+    kind: Literal["gimp-export"] = "gimp-export"
+    source_path: RelativeChildPathString = Field(
+        description="The XCF file to export from."
+    )
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "GimpExportStage":
+        from calkit.export import GIMP
+
+        GIMP.check(self.source_path, self.output_path)
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        return (
+            f"calkit export gimp {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(self.output_path)}"
         )
 
 
@@ -2678,6 +2847,9 @@ class Pipeline(Model):
                 | CommandStage
                 | RScriptStage
                 | WordToPdfStage
+                | ManualStepStage
+                | InkscapeExportStage
+                | GimpExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

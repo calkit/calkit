@@ -1,5 +1,6 @@
-"""Map-paths stages: copying project paths to where something expects them.
+"""Routes for managing project pipelines.
 
+Map-paths stages copy project paths to where something expects them.
 A file or directory often needs to be somewhere other than where it lives,
 e.g., a paper wants figures from the root ``figures`` directory under its
 own, where LaTeX can find them without ``../``. A symlink would do that on
@@ -7,24 +8,39 @@ one machine, but doesn't survive Git on every platform; a map-paths stage
 is the reproducible, cross-platform stand-in, making the copy part of the
 pipeline so it's always current and any stage that reads it can depend on
 it.
+
+A stage can also be made from a script, as ``calkit xr`` makes one locally,
+e.g., for a figure a paper includes that nothing in the pipeline produces.
 """
 
+import base64
+import binascii
+import json
 import os
+import subprocess
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import app.projects
+import calkit.export
+import calkit.latex
 import calkit.pipeline
+import calkit.provenance
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import (
     STAGE_NAME_RE,
     _dump_ck_stage_map,
+    _inside,
     _validate_ck_stage,
 )
-from app.api.routes.projects.figures import _clean_rel_path
-from app.core import ryaml
+from app.api.routes.projects.figures import _clean_rel_path, _slug
+from app.config import settings
+from app.core import logger, ryaml
+from app.dvc import run_dvc_command
 from app.git import (
     get_ck_info_from_repo,
     get_repo,
@@ -33,6 +49,7 @@ from app.git import (
     record_project_update,
 )
 from app.models import PipelineStage
+from app.storage import get_object_fs, make_data_fpath, remove_gcs_content_type
 from calkit.models.pipeline import MapPathsKind, MapPathsStage
 
 router = APIRouter()
@@ -275,8 +292,7 @@ def _commit_pipeline(
     ``to_dvc`` carries the stage over rather than compiling it.
     """
     wdir = str(repo.working_dir)
-    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     try:
         calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
@@ -287,8 +303,7 @@ def _commit_pipeline(
             target = dvc_yaml["stages"][legacy_target]
             deps = [d for d in (target.get("deps") or []) if d not in removed]
             target["deps"] = deps + [d for d in dests if d not in deps]
-            with open(dvc_path, "w") as f:
-                ryaml.dump(dvc_yaml, f)
+            ryaml.dump(dvc_yaml, Path(dvc_path))
         repo.git.add("-A")
     except Exception as e:
         repo.git.checkout("--", ".")
@@ -298,3 +313,565 @@ def _commit_pipeline(
         repo.git.commit(["-m", message])
         push_and_expire(project, repo)
         record_project_update(project, repo, session)
+
+
+# What calkit xr makes a script stage from, by extension
+SCRIPT_EXTS = (".py", ".r", ".jl", ".m", ".ipynb", ".sh")
+MAX_SCRIPT_BYTES = 1_000_000
+
+
+class StageFromScriptOrNotebookPost(BaseModel):
+    # Where the script is in the project, or goes, when it's uploaded
+    script_path: str
+    # An uploaded script, base64-encoded
+    content: str | None = None
+    # What a document shows, e.g., a figure a paper includes, and which of
+    # the script's outputs that is, when the script writes it elsewhere
+    shows: str | None = None
+    produces: str | None = None
+    # Without it, nothing is written, so the user can see what would be
+    save: bool = False
+
+
+class StageFromScriptOrNotebookResponse(BaseModel):
+    stage_name: str
+    stage_yaml: str
+    environment: str
+    environment_is_new: bool
+    # A spec file written for a new environment, e.g., a pyproject.toml
+    # listing the packages the script imports
+    environment_spec_path: str | None = None
+    environment_spec_content: str | None = None
+    dependencies: list[str] = []
+    inputs: list[str] = []
+    outputs: list[str] = []
+    # Inputs that aren't in the project and that no stage produces
+    missing_inputs: list[str] = []
+    # Which output is what the document shows, and the documents changed
+    # to show it from there with \ckfigure when that's a different path
+    produces: str | None = None
+    included_in: list[str] = []
+    saved: bool = False
+    git_repo_url: str
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook"
+)
+def post_project_stage_from_script_or_notebook(
+    owner_name: str,
+    project_name: str,
+    req: StageFromScriptOrNotebookPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> StageFromScriptOrNotebookResponse:
+    """Make a stage from a script, uploaded or already in the project.
+
+    The script is read, not run, as ``calkit xr --dry-run`` reads it: its
+    environment from what it imports, and its inputs and outputs from the
+    paths it opens. That happens in a checkout of its own, so an uploaded
+    script isn't left in the project's clone before it's saved. With
+    ``save``, the script, its environment, and the stage are committed,
+    with each document that shows the output elsewhere changed to show it
+    with ``\\ckfigure`` from where it's made.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    script_path = _clean_rel_path(req.script_path, "script")
+    if not script_path.lower().endswith(SCRIPT_EXTS):
+        raise HTTPException(
+            422,
+            "Scripts can be Python, R, Julia, MATLAB, shell, or Jupyter "
+            "notebooks",
+        )
+    content = None
+    if req.content is not None:
+        try:
+            content = base64.b64decode(req.content, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(422, "Script content isn't valid base64")
+        if len(content) > MAX_SCRIPT_BYTES:
+            raise HTTPException(413, "Script is too large")
+    elif not os.path.isfile(os.path.join(wdir, script_path)):
+        raise HTTPException(404, f"'{script_path}' is not in the project")
+    # An upload never replaces a different file already there
+    existing_path = os.path.join(wdir, script_path)
+    if content is not None and not _inside(wdir, existing_path):
+        raise HTTPException(422, f"'{script_path}' leads outside the project")
+    if content is not None and os.path.isfile(existing_path):
+        with open(existing_path, "rb") as fb:
+            if fb.read() != content:
+                raise HTTPException(
+                    409,
+                    f"'{script_path}' is already in the project; pick it "
+                    "without uploading, or upload under another name",
+                )
+    # Read in a checkout of its own, discarded after
+    scan_dir = tempfile.mkdtemp(prefix="calkit-xr-")
+    os.rmdir(scan_dir)
+    repo.git.worktree("add", "--detach", scan_dir, "HEAD")
+    try:
+        if content is not None:
+            dest = os.path.join(scan_dir, script_path)
+            if not _inside(scan_dir, dest):
+                raise HTTPException(
+                    422, f"'{script_path}' leads outside the project"
+                )
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as fb:
+                fb.write(content)
+        try:
+            result = subprocess.run(
+                ["calkit", "xr", "--dry-run", "--json", script_path],
+                cwd=scan_dir,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, f"Reading '{script_path}' took too long")
+    finally:
+        repo.git.worktree("remove", "--force", scan_dir)
+    # Anything printed before the JSON is xr saying what it chose
+    start = result.stdout.find("\n{")
+    if result.returncode != 0 or not result.stdout.strip():
+        lines = [x.strip() for x in result.stderr.splitlines() if x.strip()]
+        detail = lines[-1].removeprefix("Error: ") if lines else ""
+        logger.info(f"xr --dry-run on {script_path} failed: {result.stderr}")
+        raise HTTPException(422, detail or f"Can't read '{script_path}'")
+    detected = json.loads(
+        result.stdout
+        if result.stdout.startswith("{")
+        else result.stdout[start + 1 :]
+    )
+    env = detected["environment"]
+    stage_name = detected["stage"]["name"]
+    stage = detected["stage"]["stage"]
+    ck_info = get_ck_info_from_repo(repo=repo)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # A stage that already runs this script keeps what it declares, with
+    # anything newly found added
+    existing_stage = stages.get(stage_name)
+    if isinstance(existing_stage, dict):
+        merged = dict(existing_stage)
+        for field in ("outputs", "inputs"):
+            items = list(existing_stage.get(field) or [])
+            known = {
+                i.get("path") if isinstance(i, dict) else i for i in items
+            }
+            items += [
+                i
+                for i in stage.get(field) or []
+                if (i["path"] if isinstance(i, dict) else i) not in known
+            ]
+            if items:
+                merged[field] = items
+        stage = merged
+    outputs = [
+        o["path"] if isinstance(o, dict) else o
+        for o in stage.get("outputs") or []
+    ]
+    # Env vars, schedules, and other stages' outputs aren't paths
+    inputs = [
+        i if isinstance(i, str) else i["path"]
+        for i in stage.get("inputs") or []
+        if isinstance(i, str) or "path" in i
+    ]
+    tree = get_repo_tree_for_ref(repo, None)
+    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    missing = [
+        i
+        for i in inputs
+        if not os.path.exists(os.path.join(wdir, i))
+        and i not in dvc_outs
+        and calkit.pipeline.get_stage_for_output(i, ck_info) is None
+    ]
+
+    def include(shown: str, path: str) -> dict[str, str]:
+        # The new text of each document file that would show it from path
+        documents = [
+            s["target_path"]
+            for s in stages.values()
+            if isinstance(s, dict)
+            and s.get("kind") == "latex"
+            and s.get("target_path")
+        ]
+        for folder in ck_info.get("overleaf_sync") or {}:
+            if os.path.isdir(os.path.join(wdir, folder)):
+                documents += [
+                    os.path.relpath(d, wdir)
+                    for d in calkit.latex.root_documents(
+                        os.path.join(wdir, folder)
+                    )
+                ]
+        changed: dict[str, str] = {}
+        for document in dict.fromkeys(documents):
+            changed.update(
+                calkit.latex.include_figure(document, shown, path, wdir=wdir)
+            )
+        return changed
+
+    # The output the document shows: the same path, or the one the user
+    # picked, or else the only one with the same file name
+    shows = _clean_rel_path(req.shows, "shown") if req.shows else None
+    produces = None
+    if req.produces is not None:
+        produces = _clean_rel_path(req.produces, "output")
+        if produces not in outputs and produces != shows:
+            raise HTTPException(
+                422, f"'{script_path}' doesn't write '{produces}'"
+            )
+    elif shows in outputs:
+        produces = shows
+    elif shows is not None:
+        same_name = [
+            o
+            for o in outputs
+            if os.path.basename(o) == os.path.basename(shows)
+        ]
+        # Only worth guessing if a document includes it, so it can show it
+        # from there instead
+        if len(same_name) == 1 and include(shows, same_name[0]):
+            produces = same_name[0]
+    # What the document shows is what the stage makes, so if the script
+    # isn't found writing it anywhere, it writes it there
+    if shows is not None and produces is None:
+        produces = shows
+    if produces is not None and produces not in outputs:
+        tracked = bool(repo.git.ls_files("--", produces).strip())
+        stage.setdefault("outputs", []).append(
+            {"path": produces, "storage": "git"} if tracked else produces
+        )
+        outputs.append(produces)
+    included: dict[str, str] = {}
+    if shows is not None and produces is not None and produces != shows:
+        included = include(shows, produces)
+        if not included:
+            raise HTTPException(
+                422,
+                f"No document includes '{shows}' to show it from "
+                f"'{produces}' instead",
+            )
+    out = StageFromScriptOrNotebookResponse(
+        stage_name=stage_name,
+        stage_yaml=_dump_ck_stage_map(stage),
+        environment=env["name"],
+        environment_is_new=not env["exists"],
+        environment_spec_path=(
+            env["spec_path"] if env["created_from_dependencies"] else None
+        ),
+        environment_spec_content=(
+            env["spec_content"] if env["created_from_dependencies"] else None
+        ),
+        dependencies=env.get("dependencies") or [],
+        inputs=inputs,
+        outputs=outputs,
+        missing_inputs=missing,
+        produces=produces,
+        included_in=sorted(included),
+        git_repo_url=project.git_repo_url,
+    )
+    if not req.save:
+        return out
+    # Nothing is written through a symlink that leads out of the project
+    writes = [script_path] if content is not None else []
+    if out.environment_spec_path:
+        writes.append(
+            _clean_rel_path(out.environment_spec_path, "environment")
+        )
+    for path in writes + list(included):
+        if not _inside(wdir, os.path.join(wdir, path)):
+            raise HTTPException(422, f"'{path}' leads outside the project")
+    # Written as xr writes them, then committed with the pipeline
+    if content is not None:
+        dest = os.path.join(wdir, script_path)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fb:
+            fb.write(content)
+    if out.environment_spec_path and out.environment_spec_content is not None:
+        spec_path = os.path.join(
+            wdir, _clean_rel_path(out.environment_spec_path, "environment")
+        )
+        os.makedirs(os.path.dirname(spec_path) or wdir, exist_ok=True)
+        with open(spec_path, "w") as f:
+            f.write(out.environment_spec_content)
+    if out.environment_is_new:
+        ck_info.setdefault("environments", {})[env["name"]] = env["env"]
+    _validate_ck_stage(stage, stage_name)
+    stages[stage_name] = stage
+    for path, text in included.items():
+        with open(os.path.join(wdir, path), "w") as f:
+            f.write(text)
+    ck_info.setdefault("pipeline", {})["stages"] = stages
+    _commit_pipeline(
+        project,
+        session,
+        repo,
+        ck_info,
+        None,
+        [],
+        [],
+        f"Add stage {stage_name} for {script_path}",
+    )
+    out.saved = True
+    return out
+
+
+MAX_FILE_BYTES = 500_000_000
+# A file bigger than this is stored with DVC rather than in Git
+FILE_GIT_MAX_BYTES = 1_000_000
+
+
+class StageFile(BaseModel):
+    """A file a new stage needs, e.g., a script or the file a figure is
+    exported from."""
+
+    path: str
+    # Uploaded, base64-encoded; without it, the file is already in the
+    # project
+    content: str | None = None
+    # Recorded as created by whoever adds it, e.g., a Photoshop file
+    created_by_me: bool = False
+
+
+class StagePost(BaseModel):
+    # A taken name gets a number appended; without one, it's named after
+    # its first output
+    name: str | None = None
+    # As written under the stage's name in calkit.yaml
+    stage: dict[str, Any]
+    files: list[StageFile] = []
+    message: str | None = None
+
+
+@router.post("/projects/{owner_name}/{project_name}/pipeline/stages")
+def post_project_pipeline_stage(
+    owner_name: str,
+    project_name: str,
+    req: StagePost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineStage:
+    """Add a stage, with any files it needs, in one commit.
+
+    An upload never replaces a different file already there, and one too
+    big for Git is stored with DVC. An output another stage already makes
+    is refused, and one already in Git stays there.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    ck_info = get_ck_info_from_repo(repo=repo)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    stage = dict(req.stage)
+    # Outputs are made by one stage only, and one already in Git can't
+    # move to DVC
+    outputs = []
+    for out in stage.get("outputs") or []:
+        path = _clean_rel_path(
+            out["path"] if isinstance(out, dict) else str(out), "output"
+        )
+        producer = calkit.pipeline.get_stage_for_output(path, ck_info)
+        if producer is not None:
+            raise HTTPException(409, f"'{path}' is made by stage '{producer}'")
+        if not isinstance(out, dict):
+            tracked = repo.git.ls_files("--", path).strip()
+            out = {"path": path, "storage": "git"} if tracked else path
+        outputs.append(out)
+    if outputs:
+        stage["outputs"] = outputs
+    first = outputs[0] if outputs else None
+    first_path = first["path"] if isinstance(first, dict) else first
+    base_name = req.name or (
+        _slug(os.path.splitext(os.path.basename(first_path))[0])
+        if first_path
+        else "stage"
+    )
+    if not STAGE_NAME_RE.fullmatch(base_name or ""):
+        raise HTTPException(422, f"Invalid stage name: {req.name!r}")
+    stage_name = base_name
+    n = 2
+    while stage_name in stages:
+        stage_name = f"{base_name}-{n}"
+        n += 1
+    _validate_ck_stage(stage, stage_name)
+    # Files are all checked before any is written
+    uploads: list[tuple[str, bytes]] = []
+    created: list[str] = []
+    for file in req.files:
+        path = _clean_rel_path(file.path, "file")
+        full = os.path.join(wdir, path)
+        if not _inside(wdir, full):
+            raise HTTPException(422, f"'{path}' leads outside the project")
+        if file.created_by_me:
+            if not calkit.provenance.can_be_created_by_person(path):
+                raise HTTPException(
+                    422,
+                    f"'{path}' is exported from something itself, so it "
+                    "can't be created by a person; add the file it's made "
+                    "from, e.g., a Photoshop file",
+                )
+            created.append(path)
+        if file.content is None:
+            if not (os.path.isfile(full) or os.path.isfile(full + ".dvc")):
+                raise HTTPException(404, f"'{path}' is not in the project")
+            continue
+        try:
+            content = base64.b64decode(file.content, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(422, f"Content of '{path}' isn't valid base64")
+        if len(content) > MAX_FILE_BYTES:
+            raise HTTPException(413, f"'{path}' is too large")
+        if os.path.isfile(full):
+            with open(full, "rb") as fb:
+                if fb.read() != content:
+                    raise HTTPException(
+                        409,
+                        f"'{path}' is already in the project; pick it "
+                        "without uploading, or upload under another name",
+                    )
+        uploads.append((path, content))
+    for path, content in uploads:
+        full = os.path.join(wdir, path)
+        os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
+        with open(full, "wb") as fb:
+            fb.write(content)
+        if len(content) <= FILE_GIT_MAX_BYTES:
+            continue
+        if not os.path.isdir(os.path.join(wdir, ".dvc")):
+            run_dvc_command(["init"], wdir=wdir, check=True)
+        run_dvc_command(["add", path], wdir=wdir, check=True)
+        # Put where the hub's DVC remote serves it, by its hash
+        with open(full + ".dvc") as f:
+            md5 = (ryaml.load(f) or {})["outs"][0]["md5"]
+        fpath = make_data_fpath(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            idx=md5[:2],
+            md5=md5[2:],
+        )
+        with get_object_fs().open(fpath, "wb") as f_out:
+            f_out.write(content)
+        if settings.ENVIRONMENT != "local":
+            remove_gcs_content_type(fpath)
+    # What someone made is theirs, unless something already says otherwise
+    person = {"email": current_user.email}
+    if current_user.full_name:
+        person["name"] = current_user.full_name
+    for path in created:
+        entry = next(
+            (
+                e
+                for items in ck_info.values()
+                if isinstance(items, list)
+                for e in items
+                if isinstance(e, dict) and e.get("path") == path
+            ),
+            None,
+        )
+        if entry is None:
+            ck_info.setdefault("misc", []).append(
+                {"path": path, "created_by": [person]}
+            )
+        elif not (
+            entry.get("created_by")
+            or entry.get("imported_from")
+            or entry.get("stage")
+        ):
+            entry["created_by"] = [person]
+    stages[stage_name] = stage
+    ck_info.setdefault("pipeline", {})["stages"] = stages
+    _commit_pipeline(
+        project,
+        session,
+        repo,
+        ck_info,
+        None,
+        [],
+        [],
+        req.message or f"Add stage {stage_name}",
+    )
+    return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage))
+
+
+class ExportStagePost(BaseModel):
+    # The file it's exported from, and the figure it's exported to
+    source: str
+    output: str
+    # The app a person exports it with, e.g., Photoshop
+    app: str | None = None
+    files: list[StageFile] = []
+    # False to see the stage without adding it
+    save: bool = True
+
+
+class ExportStage(BaseModel):
+    name: str
+    stage: dict[str, Any]
+    # The app that exports it as the pipeline runs, if one does
+    exported_by: str | None = None
+    saved: bool = False
+
+
+@router.post("/projects/{owner_name}/{project_name}/pipeline/stages/export")
+def post_project_pipeline_export_stage(
+    owner_name: str,
+    project_name: str,
+    req: ExportStagePost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> ExportStage:
+    """Add the stage that exports a figure from the file it's drawn in.
+
+    An app that can do it as the pipeline runs does, unless the person
+    named another; otherwise it's a manual step.
+    """
+    source = _clean_rel_path(req.source, "source")
+    output = _clean_rel_path(req.output, "output")
+    exporter = calkit.export.exporter_for(source, output, app=req.app)
+    stage = calkit.export.export_stage(source, output, app=req.app)
+    name = calkit.export.export_stage_name(output)
+    if not req.save:
+        return ExportStage(
+            name=name,
+            stage=stage,
+            exported_by=exporter.app if exporter else None,
+        )
+    saved = post_project_pipeline_stage(
+        owner_name=owner_name,
+        project_name=project_name,
+        req=StagePost(
+            name=name,
+            stage=stage,
+            files=req.files,
+            message=(
+                f"Export {output} from {source}"
+                + (f" with {exporter.app}" if exporter else " manually")
+            ),
+        ),
+        current_user=current_user,
+        session=session,
+    )
+    return ExportStage(
+        name=saved.name,
+        stage=stage,
+        exported_by=exporter.app if exporter else None,
+        saved=True,
+    )

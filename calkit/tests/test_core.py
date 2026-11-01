@@ -558,6 +558,30 @@ def test_ryaml_dump_leaves_no_trailing_whitespace():
         assert calkit.ryaml.load(buf.getvalue()) == data
 
 
+def test_ryaml_dump_failure(tmp_path):
+    import io
+
+    from ruamel.yaml.representer import RepresenterError
+
+    import calkit
+
+    # A failed dump doesn't send later ones to its stream, which emptied
+    # calkit.yaml on the hub
+    with pytest.raises(RepresenterError):
+        calkit.ryaml.dump({"a": object()}, io.StringIO())
+    buf = io.StringIO()
+    calkit.ryaml.dump({"questions": ["q1", "q2"]}, buf)
+    assert calkit.ryaml.load(buf.getvalue()) == {"questions": ["q1", "q2"]}
+    # A path is only written once the dump succeeds
+    fpath = tmp_path / "calkit.yaml"
+    fpath.write_text("name: proj\n")
+    with pytest.raises(RepresenterError):
+        calkit.ryaml.dump({"a": object()}, fpath)
+    assert fpath.read_text() == "name: proj\n"
+    calkit.ryaml.dump({"name": "proj", "questions": ["q1"]}, fpath)
+    assert calkit.ryaml.load(fpath) == {"name": "proj", "questions": ["q1"]}
+
+
 def test_ryaml_dump_keeps_significant_trailing_whitespace():
     # In a block scalar a trailing space is content, not formatting.
     import io

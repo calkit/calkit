@@ -8,6 +8,8 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
+  ExportStage,
+  StageFile,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -19,6 +21,7 @@ import type {
   ReferenceSearchMatch,
   References,
   Result,
+  StageFromScriptOrNotebookResponse,
   Table,
 } from "./types";
 
@@ -105,6 +108,7 @@ export type Request =
       base: string;
       head: string;
     } & HubScoped)
+  | { type: "project.contentPaths"; owner: string; project: string }
   | { type: "project.figures"; owner: string; project: string }
   | { type: "project.tables"; owner: string; project: string }
   | { type: "project.results"; owner: string; project: string }
@@ -115,6 +119,39 @@ export type Request =
       path: string;
       /** A value in a results file; without one, the file comes back whole. */
       key?: string;
+    }
+  | {
+      type: "project.stageFromScriptOrNotebook";
+      owner: string;
+      project: string;
+      scriptPath: string;
+      /** An uploaded script, base64-encoded. */
+      content?: string;
+      /** What the document shows, e.g., the figure at the cursor. */
+      shows?: string;
+      /** Which of the script's outputs that is. */
+      produces?: string;
+      save?: boolean;
+    }
+  | {
+      type: "project.recordOrigin";
+      owner: string;
+      project: string;
+      path: string;
+      /** One of calkit's `imported_from` forms, e.g., `{ url }`. */
+      importedFrom?: Record<string, unknown>;
+      createdBy?: { email: string; name?: string | null; with_ai?: string[] }[];
+    }
+  | {
+      type: "project.addExportStage";
+      owner: string;
+      project: string;
+      /** The file it's exported from, and the figure it's exported to. */
+      source: string;
+      output: string;
+      /** The app a person exports it with, e.g., Photoshop. */
+      app?: string;
+      files?: StageFile[];
     }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
@@ -194,10 +231,14 @@ export interface ResponseMap {
   "project.contents": ContentsItem;
   "project.dvcOutputs": DvcOutput[];
   "project.textDiff": TextDiff;
+  "project.contentPaths": string[];
   "project.figures": FiguresPage;
   "project.tables": Table[];
   "project.results": Result[];
   "project.provenance": Provenance;
+  "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
+  "project.recordOrigin": { path: string };
+  "project.addExportStage": ExportStage;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

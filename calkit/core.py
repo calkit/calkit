@@ -138,6 +138,10 @@ class _ThreadLocalYAML(threading.local):
     """
 
     def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        """Replace this thread's ``YAML`` with a freshly configured one."""
         self.yaml = ruamel.yaml.YAML()
         self.yaml.indent(mapping=2, sequence=4, offset=2)
         self.yaml.preserve_quotes = True
@@ -194,14 +198,26 @@ class _ThreadLocalYAMLProxy:
         content. Rather than trying to tell the cases apart while
         emitting, the cleaned text is parsed back and only used if it
         still means the same thing.
+
+        A ``Path`` is only written once the dump has succeeded, so a
+        failure can't leave the file empty, as opening it with ``"w"``
+        first would.
         """
         import io
+        from pathlib import Path
 
         yaml = _yaml_local.yaml
-        if stream is None:
-            return yaml.dump(data, stream, **kwargs)
         buf = io.StringIO()
-        yaml.dump(data, buf, **kwargs)
+        try:
+            if stream is None:
+                return yaml.dump(data, stream, **kwargs)
+            yaml.dump(data, buf, **kwargs)
+        except BaseException:
+            # ruamel only clears the output it's dumping to on success, so
+            # after a failure every later dump on this thread would go to
+            # the old stream, e.g., leaving calkit.yaml empty
+            _yaml_local.reset()
+            raise
         text = buf.getvalue()
         if " \n" in text:
             cleaned = "".join(
@@ -212,7 +228,10 @@ class _ThreadLocalYAMLProxy:
                     text = cleaned
             except Exception:
                 pass
-        stream.write(text)
+        if isinstance(stream, Path):
+            stream.write_text(text, encoding="utf-8")
+        else:
+            stream.write(text)
         return None
 
 

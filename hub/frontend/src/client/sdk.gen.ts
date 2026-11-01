@@ -80,6 +80,7 @@ import type {
   EmailVerificationConfirm,
   EmailVerificationToken,
   Environment,
+  ExportStagePost,
   ExternalReleasePost,
   FeedbackPatch,
   FeedbackPost,
@@ -377,6 +378,10 @@ import type {
   PostProjectOverleafPublicationResponses,
   PostProjectOverleafSyncErrors,
   PostProjectOverleafSyncResponses,
+  PostProjectPipelineExportStageErrors,
+  PostProjectPipelineExportStageResponses,
+  PostProjectPipelineStageErrors,
+  PostProjectPipelineStageResponses,
   PostProjectPublicationErrors,
   PostProjectPublicationResponses,
   PostProjectPushEventErrors,
@@ -390,6 +395,8 @@ import type {
   PostProjectReleaseErrors,
   PostProjectReleaseResponses,
   PostProjectResponses,
+  PostProjectStageFromScriptOrNotebookErrors,
+  PostProjectStageFromScriptOrNotebookResponses,
   PostProjectStatusErrors,
   PostProjectStatusResponses,
   PostProjectSyncErrors,
@@ -487,6 +494,8 @@ import type {
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
+  StageFromScriptOrNotebookPost,
+  StagePost,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -7645,6 +7654,166 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/pipeline/map-paths",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Stage From Script Or Notebook
+   *
+   * Make a stage from a script, uploaded or already in the project.
+   *
+   * The script is read, not run, as ``calkit xr --dry-run`` reads it: its
+   * environment from what it imports, and its inputs and outputs from the
+   * paths it opens. That happens in a checkout of its own, so an uploaded
+   * script isn't left in the project's clone before it's saved. With
+   * ``save``, the script, its environment, and the stage are committed,
+   * with each document that shows the output elsewhere changed to show it
+   * with ``\ckfigure`` from where it's made.
+   */
+  public static postProjectStageFromScriptOrNotebook<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stageFromScriptOrNotebookPost: StageFromScriptOrNotebookPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectStageFromScriptOrNotebookResponses,
+    PostProjectStageFromScriptOrNotebookErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "stageFromScriptOrNotebookPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectStageFromScriptOrNotebookResponses,
+      PostProjectStageFromScriptOrNotebookErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Pipeline Stage
+   *
+   * Add a stage, with any files it needs, in one commit.
+   *
+   * An upload never replaces a different file already there, and one too
+   * big for Git is stored with DVC. An output another stage already makes
+   * is refused, and one already in Git stays there.
+   */
+  public static postProjectPipelineStage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stagePost: StagePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPipelineStageResponses,
+    PostProjectPipelineStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "stagePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPipelineStageResponses,
+      PostProjectPipelineStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Pipeline Export Stage
+   *
+   * Add the stage that exports a figure from the file it's drawn in.
+   *
+   * An app that can do it as the pipeline runs does, unless the person
+   * named another; otherwise it's a manual step.
+   */
+  public static postProjectPipelineExportStage<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      exportStagePost: ExportStagePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPipelineExportStageResponses,
+    PostProjectPipelineExportStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "exportStagePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPipelineExportStageResponses,
+      PostProjectPipelineExportStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/export",
       ...options,
       ...params,
       headers: {

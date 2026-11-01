@@ -21,6 +21,7 @@ import type {
   TextDiff,
   FiguresPage,
   GithubRepo,
+  ExportStage,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -32,6 +33,7 @@ import type {
   ReferenceSearchMatch,
   References,
   Result,
+  StageFromScriptOrNotebookResponse,
   Table,
 } from "../core/types";
 
@@ -224,6 +226,10 @@ async function handle(message: Request): Promise<unknown> {
           hub: hubFor(message),
         },
       );
+    case "project.contentPaths":
+      return request<string[]>(
+        `${projectPath(message.owner, message.project)}/contents-paths`,
+      );
     case "project.figures": {
       // The hub pages at most 100 figures, so gather paths and titles only
       const items: FiguresPage["items"] = [];
@@ -256,6 +262,49 @@ async function handle(message: Request): Promise<unknown> {
       return request<Provenance>(
         `${projectPath(message.owner, message.project)}/provenance`,
         { query: { path: message.path, key: message.key } },
+      );
+    case "project.stageFromScriptOrNotebook":
+      return request<StageFromScriptOrNotebookResponse>(
+        `${projectPath(message.owner, message.project)}` +
+          "/pipeline/stages/from-script-or-notebook",
+        {
+          method: "POST",
+          body: {
+            script_path: message.scriptPath,
+            content: message.content,
+            shows: message.shows,
+            produces: message.produces,
+            save: message.save ?? false,
+          },
+        },
+      );
+    case "project.recordOrigin":
+      // Recorded as a misc artifact, which the hub only takes for a path
+      // nothing else declares
+      return request<{ path: string }>(
+        `${projectPath(message.owner, message.project)}/misc`,
+        {
+          method: "POST",
+          body: {
+            path: message.path,
+            imported_from: message.importedFrom,
+            created_by: message.createdBy,
+            message: `Record where ${message.path} came from`,
+          },
+        },
+      );
+    case "project.addExportStage":
+      return request<ExportStage>(
+        `${projectPath(message.owner, message.project)}/pipeline/stages/export`,
+        {
+          method: "POST",
+          body: {
+            source: message.source,
+            output: message.output,
+            app: message.app || null,
+            files: message.files ?? [],
+          },
+        },
       );
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });

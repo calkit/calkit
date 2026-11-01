@@ -22,6 +22,8 @@ def test_get_project_provenance(client: TestClient) -> None:
         "paper/drawn.svg": "",
         "paper/exported.png": "",
         "paper/pasted.png": "",
+        "paper/diagram.png": "",
+        "paper/box.png": "",
     }
     # In object storage, inside a directory a stage outputs
     stored = {"results/sweep/summary.json": json.dumps({"best": 7})}
@@ -33,6 +35,7 @@ def test_get_project_provenance(client: TestClient) -> None:
         ),
     )
     ck_info = {
+        "environments": {"py": {"kind": "uv", "path": "pyproject.toml"}},
         "datasets": [
             {
                 "path": "data/downloaded",
@@ -51,6 +54,8 @@ def test_get_project_provenance(client: TestClient) -> None:
             },
             # Exported from something, so a person can't be its origin
             {"path": "paper/exported.png", "created_by": {"name": "Ada"}},
+            # Only described, so nobody else can check it
+            {"path": "paper/box.png", "imported_from": "Our Box folder"},
         ],
         "pipeline": {
             "stages": {
@@ -67,6 +72,18 @@ def test_get_project_provenance(client: TestClient) -> None:
                     "environment": "py",
                     "wdir": "figs",
                     "outputs": ["out.png"],
+                },
+                # Exported manually from a file someone made
+                "export-diagram": {
+                    "kind": "manual-step",
+                    "message": "In Photoshop, export paper/diagram.png",
+                    "inputs": ["figs/diagram.psd"],
+                    "outputs": ["paper/diagram.png"],
+                },
+                "export-setup": {
+                    "kind": "inkscape-export",
+                    "source_path": "figs/setup.svg",
+                    "outputs": ["paper/setup.png"],
                 },
                 # Puts the plot beside the paper, which includes it there
                 "copy": {
@@ -91,6 +108,10 @@ def test_get_project_provenance(client: TestClient) -> None:
                         {"path": "scripts/analyze.py"},
                         {"path": "data/raw.csv"},
                         {"path": ".calkit/env-locks/py.json"},
+                        # The environment's, which aren't what it reads
+                        {"path": "uv.lock"},
+                        {"path": "pyproject.toml"},
+                        {"path": ".python-version"},
                     ],
                     "outs": [{"path": "results/metrics.json"}],
                 }
@@ -151,6 +172,7 @@ def test_get_project_provenance(client: TestClient) -> None:
                 {"path": "results/metrics.json", "stage": "analyze"},
                 {"path": "data/raw.csv", "stage": None},
             ],
+            "unchecked": False,
         }
     ]
     assert body["origin"] is None
@@ -209,13 +231,33 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["origin_url"] is None
     assert body["origin_path"] is None
     assert body["gaps"] == []
+    # A figure exported manually says what to do, and what it's from
+    body = get("path=paper/diagram.png")
+    assert body["stage"] == "export-diagram"
+    assert body["stage_kind"] == "manual-step"
+    assert body["message"] == "In Photoshop, export paper/diagram.png"
+    assert body["source"] is None
+    assert body["stage_app"] is None
+    # Exported by an app as the pipeline runs
+    body = get("path=paper/setup.png")
+    assert body["stage_kind"] == "inkscape-export"
+    assert body["stage_app"] == "Inkscape"
+    assert body["source"] == "figs/setup.svg"
     # A figure nothing accounts for is a gap itself
     for path in ["paper/pasted.png", "paper/exported.png"]:
         body = get(f"path={path}")
         assert body["origin"] is None
         assert body["gaps"] == [
-            {"path": path, "steps": [{"path": path, "stage": None}]}
+            {
+                "path": path,
+                "steps": [{"path": path, "stage": None}],
+                "unchecked": False,
+            }
         ]
+    # Imported from somewhere nobody else can check
+    body = get("path=paper/box.png")
+    assert body["origin"] == "Our Box folder"
+    assert [g["unchecked"] for g in body["gaps"]] == [True]
     # Nothing produces an authored file
     body = get("path=scripts/analyze.py")
     assert body["exists"]

@@ -2,27 +2,30 @@
 
 import concurrent.futures
 import glob
+import io
 import json
 import logging
 import os
 import re
 import subprocess
 import sys
-import tempfile
 from functools import lru_cache
 from typing import Any
 
-import ruamel.yaml
+import networkx as nx
 from dvc.commands import dag
+from dvc.exceptions import DvcException
+from dvc.fs import MemoryFileSystem
 from dvc.repo import Repo
+from dvc.utils import relpath
 
 import calkit.dvc
+from app.core import ryaml
 from app.storage import get_object_fs, make_data_fpath
 
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
-yaml = ruamel.yaml.YAML()
 
 # Teach DVC about the ck:// remote scheme, which projects use by default.
 # This must happen before anything in this process validates a DVC config,
@@ -74,29 +77,35 @@ def read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
 def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
     """Create a Mermaid diagram from a pipeline file (typically ``dvc.yaml``).
 
-    This is a little hacky since we need to create a Git and DVC repo in order
-    to run the commands in DVC.
+    DVC reads the pipeline from an in-memory filesystem, so nothing is
+    written to disk and the process's working directory is left alone.
     """
-    wd_orig = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            os.chdir(tmpdirname)
-            with open("dvc.yaml", "w") as f:
-                yaml.dump(pipeline, f)
-            if params is not None:
-                with open("params.yaml", "w") as f:
-                    yaml.dump(params, f)
-            with Repo.init(
-                ".",
-                no_scm=True,
-                force=False,
-                subdir=False,
-            ) as repo:
-                d = dag._build(repo)
-            mm = dag._show_mermaid(d, markdown=False)
-    finally:
-        os.chdir(wd_orig)
-    return mm
+
+    class RootedMemoryFileSystem(MemoryFileSystem):  # type: ignore[misc]
+        # DVC resolves relative paths against this, so it has to be the
+        # in-memory repo's root rather than the server's directory
+        def getcwd(self) -> str:
+            return "/"
+
+    files = {"/dvc.yaml": pipeline}
+    if params is not None:
+        files["/params.yaml"] = params
+    fs = RootedMemoryFileSystem(global_store=False)
+    for fpath, content in files.items():
+        buf = io.StringIO()
+        ryaml.dump(content, buf)
+        fs.pipe_file(fpath, buf.getvalue().encode())
+    with Repo("/", fs=fs, uninitialized=True) as repo:
+        try:
+            graph = repo.index.graph
+        except DvcException as e:
+            # DVC names stages by their file's path relative to the
+            # process's working directory, e.g., ../../dvc.yaml:name
+            e.args = (str(e).replace(f"{relpath('/dvc.yaml')}:", ""),)
+            raise
+        graph = nx.relabel_nodes(graph, lambda stage: stage.name)
+    mermaid: str = dag._show_mermaid(graph, markdown=False)
+    return mermaid
 
 
 def output_from_pipeline(

@@ -238,6 +238,15 @@ export interface StageFromScriptOrNotebookResponse {
   git_repo_url: string;
 }
 
+/** The project's pipeline, as the hub summarizes it. */
+export interface ProjectPipeline {
+  /** Stages calkit.yaml declares, in its order. */
+  ck_stages: string[];
+  stage_statuses: Record<string, StageStatus>;
+  status: "up-to-date" | "stale" | "unknown";
+  error?: string | null;
+}
+
 /** A run of the pipeline, wherever it ran. */
 export interface PipelineRun {
   where: "github-actions";

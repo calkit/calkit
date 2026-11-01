@@ -23,6 +23,7 @@ import type {
   GithubRepo,
   ExportStage,
   PipelineRun,
+  ProjectPipeline,
   PipelineRuns,
   OverleafLookup,
   OverleafSyncResponse,
@@ -294,6 +295,10 @@ async function handle(message: Request): Promise<unknown> {
             message: `Record where ${message.path} came from`,
           },
         },
+      );
+    case "project.pipeline":
+      return request<ProjectPipeline>(
+        `${projectPath(message.owner, message.project)}/pipeline`,
       );
     case "project.pipelineRuns":
       return request<PipelineRuns>(

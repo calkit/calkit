@@ -1599,13 +1599,22 @@ class LatexStage(Stage):
         ] + [posixpath.join(components_dir, p) for p in self._copied_paths]
 
     @property
+    def found_paths(self) -> list[str]:
+        """What the document reads that preprocessing found, relative to the
+        stage's ``wdir``.
+        """
+        return [self.path_from_wdir(p) for p in self._component_paths]
+
+    @property
     def dvc_deps(self) -> list[str]:
         # The copies the document reads, and what they're copied from, so it
-        # builds after the stages making them
+        # builds after the stages making them, unless in a folder it declares
+        declared = super().dvc_deps
+        folders = tuple(d.rstrip("/") + "/" for d in declared)
         deps = (
             [self.target_path]
-            + super().dvc_deps
-            + [self.path_from_wdir(p) for p in self._component_paths]
+            + declared
+            + [p for p in self.found_paths if not p.startswith(folders)]
             + self.component_copies
         )
         if self.latexmkrc_path is not None:

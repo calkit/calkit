@@ -1802,7 +1802,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         with open(f"results/{name}.json", "w") as f:
             f.write(content)
     # Components kept in other ways, in a document of their own
-    os.makedirs("extra")
+    os.makedirs("extra/plots")
     with open("extra/main.tex", "w") as f:
         f.write(
             "\\documentclass{article}\n\\usepackage{calkit}\n"
@@ -1810,13 +1810,18 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\ckfigure{maps/world}\n\\ckfigure{maps/typo.png}\n"
             "\\ckfigure{photos/cat}\n\\ckfigure{images/logo.png}\n"
             "\\ckfigure{figures/fit_1.5}\n\\ckfigure{figures/sweep-2}\n"
+            "\\includegraphics{plots/a}\n"
             "\\end{document}\n"
         )
     os.makedirs("images")
     for path in ["images/logo.png", "images/logo.png.dvc", "photos.dvc"]:
         with open(path, "w") as f:
             f.write("x")
-    for path in ["figures/fit_1.5.pdf", "figures/sweep-2.png"]:
+    for path in [
+        "figures/fit_1.5.pdf",
+        "figures/sweep-2.png",
+        "extra/plots/a.png",
+    ]:
         with open(path, "w") as f:
             f.write("x")
     # Tracked by DVC but not pulled
@@ -1877,10 +1882,17 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "outputs": ["figures/sweep-{n}.png"],
                     "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
                 },
+                "plots": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "mkdir -p extra/plots",
+                    "outputs": ["extra/plots"],
+                },
                 "build-extra": {
                     "kind": "latex",
                     "environment": "tex",
                     "target_path": "extra/main.tex",
+                    "inputs": [{"from_stage_outputs": "plots"}],
                 },
                 # Paths in a stage are relative to its wdir, while component
                 # paths are relative to the project
@@ -1889,6 +1901,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "environment": "tex",
                     "wdir": "paper",
                     "target_path": "main.tex",
+                    "inputs": ["figures/"],
                 },
             }
         },
@@ -1963,6 +1976,9 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     assert {"figures/fit_1.5.pdf", "extra/_calkit/figures/fit_1.5.pdf"} <= set(
         deps
     )
+    # What's in a folder it reads from another stage is already covered
+    assert "extra/plots" in deps
+    assert "extra/plots/a.png" not in deps
     deps = stages["build-paper-wdir"]["deps"]
     assert {
         "../figures/plot.png",
@@ -1971,6 +1987,9 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         "_calkit/figures/photo.png",
         "calkit.sty",
     } <= set(deps)
+    # And so is what's in a folder it declares
+    assert "figures/" in deps
+    assert not any(d.startswith("figures/") and d != "figures/" for d in deps)
     # A document that doesn't load calkit.sty depends on no copies
     os.makedirs("plain")
     with open("plain/main.tex", "w") as f:
@@ -1994,6 +2013,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         "build-extra",
         "export",
         "render",
+        "plots",
     ]:
         del ck_info["pipeline"]["stages"][name]
     del ck_info["pipeline"]["stages"]["build-plain"]

@@ -879,6 +879,7 @@ def test_project_pipeline_runs(
     assert calkit.resources.find_run_workflows(str(repo.working_dir)) == []
     assert not repo.untracked_files
     # A run-calkit.yml that doesn't run the action isn't replaced
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("on: push\n")
     assert call("post").status_code == 409
     assert path.read_text() == "on: push\n"

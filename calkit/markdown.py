@@ -2548,11 +2548,26 @@ _VALUES_RE = re.compile(r"<!--\s*calkit values\b(?P<attrs>.*?)-->")
 # 'calkit values' directive above it, so nothing has to be implied from
 # elsewhere in the document.
 _CKVALUE_RE = re.compile(
-    r"<!--\s*ckvalue\s*(?:\[(?P<option>[^\]]*)\])?"
-    r"\s+(?P<source>[^\s>]+)(?:\s+(?P<ckkey>[^\s>]+))?\s*-->"
+    r"<!--\s*ckvalue\b(?P<args>.*?)-->"
     r"(?P<ctext>.*?)"
     r"<!--\s*/ckvalue\s*-->"
 )
+# One argument of a compact marker: `key=value`, with the value optionally
+# quoted so a format can hold spaces, or a bare positional.
+_CKARG_RE = re.compile(
+    r"(?P<key>[A-Za-z_][\w-]*)=(?P<val>\"[^\"]*\"|'[^']*'|\S+)"
+    r"|(?P<pos>\"[^\"]*\"|'[^']*'|\S+)"
+)
+# Read like a Python call: source, key, format, each giveable positionally or
+# by name. `name=` and `path=` fill the same slot as the first positional and
+# say which kind it is, which the bare form has to infer.
+_CKVALUE_PARAMS = ("source", "key", "format")
+_CKVALUE_KEYWORDS = {
+    "name": "source",
+    "path": "source",
+    "key": "key",
+    "format": "format",
+}
 # Both forms in one pattern, because three functions walk the markers of a
 # line and pair them positionally with what extract_values returned. Two
 # patterns walked separately would pair them by form rather than by position,
@@ -2619,8 +2634,86 @@ def results_by_name(ck_info: dict) -> dict[str, str]:
     return out
 
 
+def _unquote(text: str) -> str:
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    return text
+
+
+def _ckvalue_args(args_text: str, path: str, line: int) -> dict:
+    """A compact marker's arguments, by the rules a Python call follows.
+
+    Positional arguments fill source, key and format in that order, and may
+    be given by name instead; a positional after a keyword, a slot filled
+    twice, or a name that is not a parameter is an error rather than a
+    silently dropped argument.
+    """
+    got: dict[str, str] = {}
+    kind: str | None = None
+    seen_keyword = False
+    n_positional = 0
+    for m in _CKARG_RE.finditer(args_text):
+        if m.group("key") is not None:
+            seen_keyword = True
+            name = m.group("key")
+            slot = _CKVALUE_KEYWORDS.get(name)
+            if slot is None:
+                raise MarkdownParseError(
+                    f"'ckvalue' got an unexpected argument '{name}'; it "
+                    "takes name or path, key, and format",
+                    path=path,
+                    line=line,
+                )
+            if slot in got:
+                raise MarkdownParseError(
+                    f"'ckvalue' got multiple values for {slot}",
+                    path=path,
+                    line=line,
+                )
+            got[slot] = _unquote(m.group("val"))
+            if name in ("name", "path"):
+                kind = name
+        else:
+            if seen_keyword:
+                raise MarkdownParseError(
+                    "'ckvalue' got a positional argument after a keyword "
+                    "one; positional arguments come first",
+                    path=path,
+                    line=line,
+                )
+            if n_positional >= len(_CKVALUE_PARAMS):
+                raise MarkdownParseError(
+                    "'ckvalue' takes at most 3 arguments (a results file or "
+                    "result name, a key, and a format)",
+                    path=path,
+                    line=line,
+                )
+            got[_CKVALUE_PARAMS[n_positional]] = _unquote(m.group("pos"))
+            n_positional += 1
+    if "source" not in got:
+        raise MarkdownParseError(
+            "'ckvalue' names no results file; give one positionally or as "
+            "'path=results.json' or 'name=metrics'",
+            path=path,
+            line=line,
+        )
+    if "key" not in got:
+        raise MarkdownParseError(
+            f"'ckvalue {got['source']}' names no key; give one positionally "
+            "or as 'key=rms'",
+            path=path,
+            line=line,
+        )
+    got["kind"] = kind or ""
+    return got
+
+
 def _resolve_source(
-    source: str, results: dict[str, str] | None, path: str, line: int
+    source: str,
+    results: dict[str, str] | None,
+    path: str,
+    line: int,
+    kind: str = "",
 ) -> str:
     """The results file a compact marker's source names.
 
@@ -2629,6 +2722,17 @@ def _resolve_source(
     a path. A bare word that is neither is the likely typo, so it is named
     as one rather than reported as a missing file later.
     """
+    if kind == "path":
+        return Path(source).as_posix()
+    if kind == "name":
+        if not (results and source in results):
+            known = ", ".join(sorted(results)) if results else "none declared"
+            raise MarkdownParseError(
+                f"no result is named '{source}' (declared names: {known})",
+                path=path,
+                line=line,
+            )
+        return Path(results[source]).as_posix()
     if results and source in results:
         return Path(results[source]).as_posix()
     looks_like_path = "/" in source or "." in Path(source).name
@@ -2644,9 +2748,10 @@ def _resolve_source(
 
 
 def _ck_format(option: str | None) -> str | None:
-    """A compact marker's format, which calkit.sty writes as a bare Python
-    format spec, e.g. ``.2f``. The long form writes a whole replacement
-    field, so both are accepted and a bare spec is wrapped into one."""
+    """A compact marker's format, written as a bare Python format spec, e.g.
+    ``.2f``, the way ``calkit.sty`` writes it. The long form writes a whole
+    replacement field, so both are accepted and a bare spec is wrapped into
+    one."""
     if option is None:
         return None
     option = option.strip()
@@ -2706,24 +2811,21 @@ def extract_values(
             if m.group("ctext") is not None:
                 # The compact form names its source on the marker, so the
                 # 'calkit values' default does not apply to it.
-                source = m.group("source")
-                ckkey = m.group("ckkey")
-                if ckkey is None:
-                    raise MarkdownParseError(
-                        f"'ckvalue {source}' names no key; a compact marker "
-                        "takes a results file or result name and then a key, "
-                        f"e.g. 'ckvalue {source} rms'",
-                        path=path,
-                        line=i + 1,
-                    )
+                got = _ckvalue_args(m.group("args"), path, i + 1)
                 values.append(
                     MarkdownValue(
-                        key=ckkey,
-                        path=_resolve_source(source, results, path, i + 1),
+                        key=got["key"],
+                        path=_resolve_source(
+                            got["source"],
+                            results,
+                            path,
+                            i + 1,
+                            kind=got["kind"],
+                        ),
                         text=m.group("ctext"),
-                        format=_ck_format(m.group("option")),
+                        format=_ck_format(got.get("format")),
                         line=i + 1,
-                        source=source,
+                        source=got["source"],
                     )
                 )
                 continue

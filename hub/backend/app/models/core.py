@@ -939,7 +939,9 @@ class ProjectPipelineRun(SQLModel, table=True):
         sqlalchemy.UniqueConstraint("project_id", "github_run_id"),
     )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    project_id: uuid.UUID = Field(foreign_key="project.id", index=True)
+    project_id: uuid.UUID = Field(
+        foreign_key="project.id", index=True, ondelete="CASCADE"
+    )
     location: str = "github-actions"
     status: str = "queued"
     created: datetime = Field(default_factory=utcnow)

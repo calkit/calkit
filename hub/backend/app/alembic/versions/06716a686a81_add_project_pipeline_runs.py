@@ -45,7 +45,9 @@ def upgrade():
             nullable=True,
         ),
         sa.Column('github_run_id', sa.BigInteger(), nullable=True),
-        sa.ForeignKeyConstraint(['project_id'], ['project.id']),
+        sa.ForeignKeyConstraint(
+            ['project_id'], ['project.id'], ondelete='CASCADE'
+        ),
         sa.ForeignKeyConstraint(
             ['started_by_user_id'], ['user.id'], ondelete='SET NULL'
         ),

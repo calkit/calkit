@@ -1764,6 +1764,8 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\ckfigure{figures/photo.png}\n"
             "\\ckvalue{data/summary.json}{n}\n"
             "\\ckvalue{../outside.json}{secret}\n"
+            "\\includegraphics{figures/drawn}\n"
+            "\\includegraphics{figures/exported.png}\n"
             "\\end{document}\n"
         )
     with open("paper/sections/results.tex", "w") as f:
@@ -1778,10 +1780,13 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\begin{document}\n"
             "\\ckvalue{results/other.json}{x}\n\\end{document}\n"
         )
-    # A figure no stage makes
+    # A figure no stage makes, and one included plainly, beside the paper
     os.makedirs("figures")
     with open("figures/photo.png", "wb") as fb:
         fb.write(b"photo")
+    os.makedirs("paper/figures")
+    with open("paper/figures/drawn.png", "wb") as fb:
+        fb.write(b"drawn")
     os.makedirs("results")
     for name, content in [
         ("metrics", '{"rmse": 0.123}'),
@@ -1826,6 +1831,14 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "kind": "latex",
                     "environment": "tex",
                     "target_path": "paper/main.tex",
+                },
+                # Exports a figure the paper includes plainly, which isn't
+                # there until it runs
+                "export": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo png > paper/figures/exported.png",
+                    "outputs": ["paper/figures/exported.png"],
                 },
                 "build-other": {
                     "kind": "latex",
@@ -1875,6 +1888,13 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         "data/summary.json",
     } <= set(deps)
     assert not any("typo" in d or "outside" in d for d in deps)
+    # What it includes plainly is read just the same, whether it's there or
+    # a stage makes it, and so is a file it inputs
+    assert {
+        "paper/figures/drawn.png",
+        "paper/figures/exported.png",
+        "paper/sections/results.tex",
+    } <= set(deps)
     # And on the copies it reads, like a cleaned notebook, so a new value or
     # calkit.sty rebuilds it, except a figure a stage makes, which is copied
     # only after DVC checks the stage's dependencies are there
@@ -1932,7 +1952,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     )
     # Compiling for a run or check maps the components in, kept out of Git,
     # with one stage building each PDF, as DVC requires
-    for name in ["build-paper-wdir", "maps", "sweep", "build-extra"]:
+    for name in ["build-paper-wdir", "maps", "sweep", "build-extra", "export"]:
         del ck_info["pipeline"]["stages"][name]
     del ck_info["pipeline"]["stages"]["build-plain"]
     with open("figures/plot.png", "wb") as fb:
@@ -3087,11 +3107,37 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert _ensure_latex_aux_gitignore(stage)
     with open(gitignore_path) as f:
         assert "!/aux/*.pdf" in f.read()
+    # One outside it ignores itself, keeping anything else in its .gitignore
     stage.output_dir = None
     stage.aux_dir = "build/aux"
+    os.makedirs("build/aux")
+    with open("build/aux/.gitignore", "w") as f:
+        f.write("mine\n")
     assert _ensure_latex_aux_gitignore(stage)
     with open(gitignore_path) as f:
         assert "aux/*" not in f.read()
+    with open("build/aux/.gitignore") as f:
+        contents = f.read()
+    assert contents.startswith("mine\n")
+    assert "\n*\n" in contents
+    assert "!*.pdf" not in contents
+    assert _ensure_latex_aux_gitignore(stage) is False
+    # Including one above the source directory, created if need be
+    for aux_dir, output_dir in [("aux", None), ("aux", "aux")]:
+        stage.aux_dir = aux_dir
+        stage.output_dir = output_dir
+        assert _ensure_latex_aux_gitignore(stage)
+        with open("aux/.gitignore") as f:
+            contents = f.read()
+        assert "\n*\n" in contents
+        assert ("!*.pdf" in contents) == (output_dir is not None)
+    # But not the project itself or one outside it
+    stage.output_dir = None
+    for aux_dir in [".", "build/../", "..", "../aux", "/aux", "C:\\aux"]:
+        stage.aux_dir = aux_dir
+        assert _ensure_latex_aux_gitignore(stage) is False
+    assert not os.path.exists(".gitignore")
+    assert not os.path.exists("../aux")
     # Nor the source directory itself
     stage.aux_dir = "paper"
     assert _ensure_latex_aux_gitignore(stage) is False

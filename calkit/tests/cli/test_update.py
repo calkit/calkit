@@ -244,13 +244,15 @@ def test_update_github_actions(tmp_dir):
         assert f.read() == updated_txt
     assert not repo.git.status("--porcelain")
     # A new workflow can run only when started, and stays that way when
-    # it's updated later
+    # it's updated later without saying what runs it
     os.remove(old_fpath)
     on_demand_txt = calkit.resources.render_github_actions_workflow(
-        on_demand=True
+        on=["workflow_dispatch"]
     )
     assert (
-        runner.invoke(update_app, ["github-actions", "--on-demand"]).exit_code
+        runner.invoke(
+            update_app, ["github-actions", "--on", "workflow_dispatch"]
+        ).exit_code
         == 0
     )
     with open(out_fpath) as f:
@@ -258,6 +260,20 @@ def test_update_github_actions(tmp_dir):
     assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
     with open(out_fpath) as f:
         assert f.read() == on_demand_txt
+    # A customized one can have what runs it changed too
+    with open(out_fpath, "w") as f:
+        f.write(custom_txt.replace("jobs:", "on: push\njobs:"))
+    assert (
+        runner.invoke(
+            update_app,
+            ["github-actions", "--on", "push", "--on", "workflow_dispatch"],
+        ).exit_code
+        == 0
+    )
+    with open(out_fpath) as f:
+        workflow = calkit.ryaml.load(f)
+    assert workflow["on"] == {"push": None, "workflow_dispatch": None}
+    assert workflow["jobs"]["main"]["steps"][-1] == {"run": "echo custom"}
 
 
 def test_update_uv_env(tmp_dir):

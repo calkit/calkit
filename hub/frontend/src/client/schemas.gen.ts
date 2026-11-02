@@ -7317,6 +7317,13 @@ export const ProvenanceSchema = {
       type: "array",
       title: "Inputs",
     },
+    input_to_stages: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Input To Stages",
+    },
     stage_status: {
       anyOf: [
         {

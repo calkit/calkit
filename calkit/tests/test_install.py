@@ -112,6 +112,17 @@ def test_prompt_and_install(monkeypatch):
         mock.patch("calkit.install.install", return_value=True),
     ):
         assert install.prompt_and_install("pixi", interactive=True) is True
+    # Under WSL, Docker Desktop on Windows is offered as the alternative to
+    # installing Docker Engine, but nowhere else
+    for wsl in [True, False]:
+        monkeypatch.setattr("calkit.core.is_wsl", lambda: wsl)
+        with (
+            mock.patch("builtins.input", return_value="n"),
+            mock.patch("builtins.print") as m_print,
+        ):
+            install.prompt_and_install("docker", interactive=True)
+        printed = " ".join(str(c.args[0]) for c in m_print.call_args_list)
+        assert ("WSL integration" in printed) is wsl
     # Unknown app -> no installer -> False.
     monkeypatch.setattr("calkit.install.get_installer", lambda app: None)
     assert install.prompt_and_install("nope", interactive=True) is False

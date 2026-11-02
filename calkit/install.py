@@ -216,9 +216,12 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "requires": ["brew"],
         },
         "linux": {
-            # Docker's convenience script; it needs root, and afterward the
-            # user may still need adding to the docker group
-            "script": "curl -fsSL https://get.docker.com | sudo sh",
+            # Docker's convenience script, which needs root, then joining
+            # the docker group so Docker can be used without it
+            "script": (
+                "curl -fsSL https://get.docker.com | sudo sh "
+                '&& sudo usermod -aG docker "$USER"'
+            ),
             "path_add": "/usr/bin",
         },
         "windows": {
@@ -465,6 +468,19 @@ def prompt_and_install(app: str, *, interactive: bool) -> bool:
             print(f"'{app}' is installed with '{req}', which is missing.")
             if not prompt_and_install(req, interactive=interactive):
                 return False
+    if app == "docker":
+        from calkit.core import is_wsl
+
+        # Docker Desktop on Windows can serve WSL too, and then the same
+        # Docker works on both sides
+        if is_wsl():
+            print(
+                "  Docker Desktop on Windows can also provide Docker here: "
+                "install it in Windows, then enable this distro in its "
+                "Settings > Resources > WSL integration. "
+                "Otherwise, Docker Engine can be installed in WSL, "
+                "which needs systemd enabled."
+            )
     # Shown before the question rather than after a refusal: agreeing to a
     # command you haven't been shown isn't agreeing to much, and this is
     # often the first thing Calkit asks anyone

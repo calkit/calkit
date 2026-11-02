@@ -797,6 +797,17 @@ def is_tty() -> bool:
         return False
 
 
+def is_wsl() -> bool:
+    """Whether this is Linux running under the Windows Subsystem for Linux."""
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
+        return False
+
+
 def is_mintty(stream: Any) -> bool:
     """True when a stream is a Git Bash or Cygwin (mintty) terminal.
 

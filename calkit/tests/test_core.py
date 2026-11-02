@@ -126,6 +126,18 @@ def test_encode_safe() -> None:
     )
 
 
+def test_is_wsl(monkeypatch) -> None:
+    for platform, version, expected in [
+        ("linux", "Linux version 6.6.87.2-microsoft-standard-WSL2", True),
+        ("linux", "Linux version 6.8.0-45-generic (buildd@lcy02)", False),
+        # Only Linux reads /proc at all
+        ("darwin", "microsoft", False),
+    ]:
+        monkeypatch.setattr("sys.platform", platform)
+        with mock.patch("builtins.open", mock.mock_open(read_data=version)):
+            assert calkit.core.is_wsl() is expected, version
+
+
 def test_is_mintty() -> None:
     import sys
 

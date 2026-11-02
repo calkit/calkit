@@ -99,7 +99,9 @@ const Mermaid = ({
         mermaid.initialize({
           startOnLoad: false,
           theme: "dark",
-          securityLevel: "loose",
+          // Stage names come from the project, so they can't add click
+          // handlers; ours are attached below
+          securityLevel: "strict",
           fontFamily: "monospace",
           // Mermaid's own default is 500, past which it throws instead of
           // drawing anything. A real pipeline crosses that easily -- a

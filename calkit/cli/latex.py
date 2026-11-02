@@ -1992,6 +1992,27 @@ def _build_diff(
             os.remove(diff_tex_fpath)
 
 
+@latex_app.command(name="to-arxiv")
+def to_arxiv(
+    target_folder: Annotated[
+        str, typer.Argument(help="The folder to include in the arxiv upload.")
+    ],
+    tex_file: Annotated[
+        str, typer.Argument(help="The main .tex file for the arxiv upload.")
+    ],
+) -> None:
+    import sysconfig
+
+    scripts_dir = Path(sysconfig.get_path("scripts"))
+    cli_path = scripts_dir / "latex2arxiv"
+    output_folder = str(Path(target_folder) / tex_file) + "_arxiv.zip"
+
+    subprocess.run(
+        [str(cli_path), target_folder, output_folder, "--main", tex_file],
+        check=True,
+    )
+
+
 @latex_app.command(name="to-docx")
 def to_docx(
     pdf_path: Annotated[str, typer.Argument(help="Compiled PDF to export.")],

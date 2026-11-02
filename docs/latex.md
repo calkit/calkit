@@ -96,9 +96,12 @@ Pass `--no-detect-inputs` to turn this off, and `--input` to add more.
 `calkit xr` detects the same inputs when the command it wraps builds a
 document.
 
-Undeclared inputs mean editing the class file doesn't rebuild the paper, and
-the web app's in-browser editor, which loads exactly what the stage declares,
-can't compile the document at all.
+The stage also depends on whatever the document includes this way when the
+pipeline is compiled, declared or not,
+so a figure added later, e.g., on Overleaf, rebuilds the paper when it
+changes.
+Declaring them still matters for the web app's in-browser editor,
+which loads exactly what the stage declares.
 
 ## Including project components
 

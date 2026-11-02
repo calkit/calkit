@@ -4360,6 +4360,10 @@ export type Provenance = {
    * Inputs
    */
   inputs?: Array<string>
+  /**
+   * Input To Stages
+   */
+  input_to_stages?: Array<string>
   stage_status?: StageStatus | null
   /**
    * Stale Reason

@@ -8041,8 +8041,8 @@ def get_project_pipeline(
     # commit identifies it. Building the diagram walks the whole graph
     # through DVC, which is over a second on a pipeline of any size.
     commit_sha = resolve_commit_sha(repo, ref)
+    # Versioned, so diagrams drawn before arrows were labeled go
     mermaid_key = (
-        # Versioned, so diagrams drawn before arrows were labeled go
         cache.make_key(
             "mermaid-v2", f"{owner_name}/{project_name}".lower(), commit_sha
         )

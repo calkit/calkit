@@ -119,6 +119,20 @@ def test_make_mermaid_diagram(
         }
     )
     assert "|" not in mm
+    # A name can't end its label and add statements, e.g., a click handler
+    evil = 'a"]\n\tclick node1 call alert(1)\n\tnodeX["b'
+    mm = make_mermaid_diagram(
+        {
+            "stages": {
+                evil: {"cmd": "x", "outs": ['o"\nclick']},
+                "b": {"cmd": "y", "deps": ['o"\nclick']},
+            }
+        }
+    )
+    lines = mm.split("\n")
+    assert len(lines) == 4
+    assert lines[1].startswith('\tnode1["a#quot;] ')
+    assert not any(line.strip().startswith("click") for line in lines)
     # Neither the working directory nor its contents change
     assert os.getcwd() == str(wdir)
     assert os.listdir(wdir) == []

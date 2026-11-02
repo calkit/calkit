@@ -3039,11 +3039,11 @@ calkit update github-actions [OPTIONS]
 
 Options:
 
-| Option        | Type    | Required | Default | Description                                                       |
-| ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
-| `--wdir`      | str     | no       |         | Working directory. By default will run current working directory. |
-| `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.        |
-| `--on-demand` | boolean | no       | False   | For a new workflow, run only when started, not on every push.     |
+| Option        | Type    | Required | Default | Description                                                                                                                   |
+| ------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--wdir`      | str     | no       |         | Working directory. By default will run current working directory.                                                             |
+| `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.                                                                    |
+| `--on`        | str     | no       |         | Event that runs the workflow, e.g., push or workflow_dispatch; repeat for more. An existing workflow's are kept if not given. |
 
 <a id="subcommand-update-notebook"></a>
 

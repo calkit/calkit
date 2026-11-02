@@ -392,7 +392,8 @@ def update_github_actions(
         typer.Option(
             "--on-demand",
             help=(
-                "For a new workflow, run only when started, not on every push."
+                "Run only when started, not on every push "
+                "(not applied to a customized workflow)."
             ),
         ),
     ] = False,
@@ -413,9 +414,9 @@ def update_github_actions(
     txt_out = None
     out_dir = os.path.join(wdir or ".", ".github", "workflows")
     os.makedirs(out_dir, exist_ok=True)
-    existing = calkit_resources.find_run_workflow(wdir)
-    if existing is not None:
-        fname_out, txt = existing
+    existing = calkit_resources.find_run_workflows(wdir)
+    if existing:
+        fname_out, txt = existing[0]
         # A workflow that's still the example gets replaced outright, picking
         # up any other improvements to it, but one that's been customized
         # only has its action ref updated

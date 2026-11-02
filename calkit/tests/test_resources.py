@@ -132,26 +132,35 @@ def test_github_actions_workflow(tmp_path):
         ("on: push\n", False),
         ("jobs: {}\n", False),
         ("{{ not yaml\n", False),
+        ("just text\n", False),
+        ("- on\n", False),
     ]:
         assert calkit.resources.can_start_workflow(txt) is can, txt
     # Every workflow that runs the action is found, in name order, but not
     # others
     assert calkit.resources.find_run_workflows(str(tmp_path)) == []
-    assert calkit.resources.find_run_workflow(str(tmp_path)) is None
     workflows_dir = tmp_path / ".github" / "workflows"
     workflows_dir.mkdir(parents=True)
     (workflows_dir / "tests.yml").write_text(other)
     (workflows_dir / "run.yaml").write_text(pinned)
     (workflows_dir / "on-demand.yml").write_text(on_demand)
     (workflows_dir / "notes.txt").write_text(pinned)
+    # Nor symlinks, which could point anywhere, or files too big to be one
+    outside = tmp_path / "outside.yml"
+    outside.write_text(pinned)
+    (workflows_dir / "link.yml").symlink_to(outside)
+    (workflows_dir / "huge.yml").write_text(
+        pinned + "#" * calkit.resources.MAX_WORKFLOW_BYTES
+    )
     assert calkit.resources.find_run_workflows(str(tmp_path)) == [
         ("on-demand.yml", on_demand),
         ("run.yaml", pinned),
     ]
-    assert calkit.resources.find_run_workflow(str(tmp_path)) == (
-        "on-demand.yml",
-        on_demand,
-    )
+    # A workflows folder that's a symlink out of the project is skipped too
+    other_project = tmp_path / "other"
+    (other_project / ".github").mkdir(parents=True)
+    (other_project / ".github" / "workflows").symlink_to(workflows_dir)
+    assert calkit.resources.find_run_workflows(str(other_project)) == []
     # The bundled copy is generated from the action's own example, which is
     # only present in the repo, not in an installed package
     repo_copy = os.path.join(

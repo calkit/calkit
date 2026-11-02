@@ -252,7 +252,7 @@ export interface PipelineRun {
   where: "github-actions";
   /** Unknown for a run just started, until GitHub lists it. */
   id?: string | null;
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   started_at?: string | null;
   url?: string | null;
   commit?: string | null;

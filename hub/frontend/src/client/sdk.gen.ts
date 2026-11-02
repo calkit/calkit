@@ -7833,10 +7833,11 @@ export class ProjectsService {
   /**
    * Get Project Pipeline Runs
    *
-   * Recent runs of the pipeline, and whether one can be started here.
+   * Recent runs of the pipeline on the default branch, and whether one
+   * can be started here.
    *
    * Only runs on GitHub Actions so far, by every workflow that runs the
-   * Calkit action, however each run was started.
+   * Calkit action, when started or pushed.
    */
   public static getProjectPipelineRuns<ThrowOnError extends boolean = true>(
     parameters: {
@@ -7919,13 +7920,15 @@ export class ProjectsService {
   /**
    * Get Project Pipeline Run Logs
    *
-   * A run's jobs, their steps, and each finished job's log.
+   * A pipeline run's jobs, their steps, and each finished job's log.
+   *
+   * Only for runs of a workflow that runs the Calkit action.
    */
   public static getProjectPipelineRunLogs<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
-      run_id: string
+      run_id: number
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<

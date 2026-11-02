@@ -667,7 +667,7 @@ def test_project_pipeline_runs(
         github_repo="o/p",
     )
     module = "app.api.routes.projects.pipeline"
-    github = SimpleNamespace(get=[], post=[])
+    github = SimpleNamespace(get=[], post=[], minted=[])
 
     def respond(status: int, body: dict | None = None):
         return SimpleNamespace(
@@ -679,11 +679,19 @@ def test_project_pipeline_runs(
             json=lambda: body,
         )
 
-    def call(method: str, project=fake_project, get=None, post=None, **kw):
+    def call(
+        method: str, project=fake_project, get=None, post=None, token="t", **kw
+    ):
         with (
             patch(f"{module}.app.projects.get_project", return_value=project),
             patch(f"{module}.get_repo", return_value=repo),
-            patch(f"{module}._github_token_for_repo", return_value="t"),
+            patch(f"{module}._github_token_for_repo", return_value=token),
+            patch(f"{module}.app.cache.get_json", return_value=None),
+            patch(f"{module}.app.cache.set_json"),
+            patch(
+                f"{module}.app.github.get_app_installation_token",
+                side_effect=lambda *a, **k: github.minted.append(k) or "w",
+            ),
             patch(
                 f"{module}.requests.get",
                 side_effect=lambda url, **k: (
@@ -722,13 +730,17 @@ def test_project_pipeline_runs(
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "queued"
     assert resp.json()["branch"] == branch
-    found = calkit.resources.find_run_workflow(str(repo.working_dir))
-    assert found is not None
-    fname, txt = found
+    [(fname, txt)] = calkit.resources.find_run_workflows(str(repo.working_dir))
     assert txt == calkit.resources.render_github_actions_workflow(
         on_demand=True
     )
     assert origin.head.commit == repo.head.commit
+    # Pushed with a token that can push workflows, which the App's usual
+    # one can't
+    assert github.minted[-1]["permissions"] == {
+        "contents": "write",
+        "workflows": "write",
+    }
     url, kw = github.post[-1]
     assert url.endswith(f"/repos/o/p/actions/workflows/{fname}/dispatches")
     assert kw["json"] == {"ref": branch}
@@ -739,7 +751,7 @@ def test_project_pipeline_runs(
     # Runs as GitHub lists them
     runs = [
         {"id": i, "status": status, "conclusion": conclusion}
-        | {"created_at": f"2026-10-31T12:0{6 - i}:00Z"}
+        | {"created_at": f"2026-10-31T12:0{6 - i}:00Z", "event": "push"}
         for i, status, conclusion in [
             (1, "queued", None),
             (2, "in_progress", None),
@@ -757,10 +769,14 @@ def test_project_pipeline_runs(
             "head_sha": "abc",
             "head_branch": "main",
             "triggering_actor": {"login": "ada"},
+            "event": "workflow_dispatch",
         },
+        # Not a run of the pipeline on the default branch
+        {"id": 8, "status": "queued", "event": "pull_request"},
     ]
     resp = call("get", get=respond(200, {"workflow_runs": runs}))
     body = resp.json()
+    assert github.get[-1][1]["params"]["branch"] == branch
     assert body["github_workflow"] == fname
     assert body["can_start"]
     assert [r["status"] for r in body["runs"]] == [
@@ -768,7 +784,7 @@ def test_project_pipeline_runs(
         "running",
         "succeeded",
         "failed",
-        "cancelled",
+        "canceled",
         "failed",
     ]
     assert body["runs"][-1] == {
@@ -792,6 +808,7 @@ def test_project_pipeline_runs(
         "status": "completed",
         "conclusion": "success",
         "created_at": "2026-10-31T12:03:30Z",
+        "event": "push",
     }
 
     def by_workflow(url):
@@ -813,6 +830,13 @@ def test_project_pipeline_runs(
     assert call("post").status_code == 200
     assert github.post[-1][0].endswith(f"/workflows/{fname}/dispatches")
     push_path.unlink()
+    # Without access to GitHub, nothing is asked of it unauthenticated, and
+    # nothing is pushed before a start is refused
+    calls = len(github.get)
+    resp = call("get", token=None)
+    assert resp.json()["runs"] == []
+    assert resp.json()["cannot_start_reason"]
+    assert len(github.get) == calls
     # GitHub being unavailable leaves no runs rather than failing
     resp = call("get", get=respond(500, {}))
     assert resp.status_code == 200
@@ -833,9 +857,14 @@ def test_project_pipeline_runs(
     path.unlink()
     repo.git.add(all=True)
     repo.git.commit("-m", "Remove workflow")
+    repo.git.push("origin", branch)
     head = repo.head.commit
 
-    def refuse(project, repo):
+    resp = call("post", token=None)
+    assert resp.status_code == 403
+    assert repo.head.commit == head
+
+    def refuse(project, repo, branch=None):
         raise GitCommandError(
             "git push",
             1,
@@ -847,7 +876,13 @@ def test_project_pipeline_runs(
     assert resp.status_code == 403
     assert "permission" in resp.json()["detail"]
     assert repo.head.commit == head
-    assert calkit.resources.find_run_workflow(str(repo.working_dir)) is None
+    assert calkit.resources.find_run_workflows(str(repo.working_dir)) == []
+    assert not repo.untracked_files
+    # A run-calkit.yml that doesn't run the action isn't replaced
+    path.write_text("on: push\n")
+    assert call("post").status_code == 409
+    assert path.read_text() == "on: push\n"
+    path.unlink()
     # A project that isn't on GitHub can't
     elsewhere = SimpleNamespace(**vars(fake_project) | {"github_repo": None})
     resp = call("get", project=elsewhere)
@@ -856,8 +891,33 @@ def test_project_pipeline_runs(
     assert call("post", project=elsewhere).status_code == 422
 
     # A run's jobs and steps, with a finished job's log less GitHub's
-    # timestamps and folding markers
+    # timestamps and folding markers, read as a stream
+    workflows_dir = tmp_path / "repo" / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "run.yml").write_text(txt)
+
+    class LogResp:
+        def __init__(self, text):
+            self.text = text
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, size):
+            data = self.text.encode()
+            return (data[i : i + 4] for i in range(0, len(data), 4))
+
     def github_get(url, **kw):
+        if url.endswith("/actions/runs/6"):
+            return respond(200, {"path": ".github/workflows/run.yml"})
+        if url.endswith("/actions/runs/7"):
+            return respond(200, {"path": ".github/workflows/tests.yml"})
         if url.endswith("/actions/runs/6/jobs"):
             return respond(
                 200,
@@ -881,23 +941,28 @@ def test_project_pipeline_runs(
                 },
             )
         assert url.endswith("/actions/jobs/9/logs"), url
-        return SimpleNamespace(
-            ok=True,
-            text=(
-                "2026-11-01T02:12:43.3679898Z ##[group]Run calkit\n"
-                "2026-11-01T02:12:46.5Z Error: Pipeline failed\n"
-            ),
+        assert kw["stream"]
+        return LogResp(
+            "2026-11-01T02:12:43.3679898Z ##[group]Run calkit\n"
+            "2026-11-01T02:12:46.5Z Error: Pipeline failed\n"
         )
 
     with (
         patch(f"{module}.app.projects.get_project", return_value=fake_project),
+        patch(f"{module}.get_repo", return_value=repo),
         patch(f"{module}._github_token_for_repo", return_value="t"),
+        patch(f"{module}.app.cache.get_json", return_value=None),
+        patch(f"{module}.app.cache.set_json") as cache_set,
         patch(f"{module}.requests.get", side_effect=github_get),
     ):
-        resp = client.get(
-            "/projects/o/p/pipeline/runs/6/logs",
-            headers=normal_user_token_headers,
-        )
+
+        def logs(run_id):
+            return client.get(
+                f"/projects/o/p/pipeline/runs/{run_id}/logs",
+                headers=normal_user_token_headers,
+            )
+
+        resp = logs(6)
         assert resp.status_code == 200, resp.text
         jobs = resp.json()["jobs"]
         assert jobs[0]["log"] == "Run calkit\nError: Pipeline failed\n"
@@ -909,9 +974,16 @@ def test_project_pipeline_runs(
             }
         ]
         assert jobs[1]["log"] is None
+        # Kept only once every job has finished
+        cache_set.assert_not_called()
+        # Only the end of a long log is kept
+        with patch(f"{module}.MAX_RUN_LOG_BYTES", 8):
+            jobs = logs(6).json()["jobs"]
+        assert jobs[0]["log_truncated"]
+        assert jobs[0]["log"].endswith("failed\n")
+        assert len(jobs[0]["log"].encode()) <= 12
+        # Not the logs of another workflow's runs
+        assert logs(7).status_code == 404
         # Only a run's number names a run
-        resp = client.get(
-            "/projects/o/p/pipeline/runs/abc/logs",
-            headers=normal_user_token_headers,
-        )
-        assert resp.status_code == 422
+        assert logs("abc").status_code == 422
+    (workflows_dir / "run.yml").unlink()

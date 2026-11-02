@@ -20,15 +20,19 @@ import os
 import re
 import subprocess
 import tempfile
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 import requests
 from fastapi import APIRouter, HTTPException
 from git import GitCommandError
 from pydantic import BaseModel, Field
 
+import app.cache
+import app.github
 import app.projects
 import calkit.export
 import calkit.latex
@@ -49,6 +53,7 @@ from app.config import settings
 from app.core import logger, ryaml
 from app.dvc import run_dvc_command
 from app.git import (
+    _make_git_auth_env,
     get_ck_info_from_repo,
     get_default_branch,
     get_repo,
@@ -887,6 +892,12 @@ def post_project_pipeline_export_stage(
 
 # Runs listed, newest first, across a project's workflows
 MAX_PIPELINE_RUNS = 10
+# How long GitHub's lists of runs are reused, so everyone watching a project
+# shares one request
+RUNS_CACHE_TTL_S = 10
+# Runs of the pipeline on the default branch, not, e.g., a pull request's
+RUN_EVENTS = ("workflow_dispatch", "push")
+RunStatus = Literal["queued", "running", "succeeded", "failed", "canceled"]
 
 
 class PipelineRun(BaseModel):
@@ -895,7 +906,7 @@ class PipelineRun(BaseModel):
     where: Literal["github-actions"] = "github-actions"
     # Unknown for a run just started, until GitHub lists it
     id: str | None = None
-    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    status: RunStatus
     started_at: str | None = None
     url: str | None = None
     commit: str | None = None
@@ -915,30 +926,8 @@ class PipelineRuns(BaseModel):
     cannot_start_reason: str | None = None
 
 
-def _github_run(run: dict[str, Any], workflow: str) -> PipelineRun:
-    """A run as GitHub's API lists it."""
-    status = run.get("status")
-    conclusion = run.get("conclusion")
-    if status == "in_progress":
-        state = "running"
-    elif status != "completed":
-        state = "queued"
-    elif conclusion == "success":
-        state = "succeeded"
-    elif conclusion in ("cancelled", "skipped", "stale", "neutral"):
-        state = "cancelled"
-    else:
-        state = "failed"
-    return PipelineRun(
-        id=str(run.get("id")),
-        status=state,  # type: ignore[arg-type]
-        started_at=run.get("run_started_at") or run.get("created_at"),
-        url=run.get("html_url"),
-        commit=run.get("head_sha"),
-        branch=run.get("head_branch"),
-        started_by=(run.get("triggering_actor") or {}).get("login"),
-        workflow=workflow,
-    )
+def _runs_cache_key(github_repo: str, fname: str, branch: str) -> str:
+    return app.cache.make_key("pipeline-runs", github_repo, fname, branch)
 
 
 @router.get("/projects/{owner_name}/{project_name}/pipeline/runs")
@@ -948,11 +937,38 @@ def get_project_pipeline_runs(
     current_user: CurrentUser,
     session: SessionDep,
 ) -> PipelineRuns:
-    """Recent runs of the pipeline, and whether one can be started here.
+    """Recent runs of the pipeline on the default branch, and whether one
+    can be started here.
 
     Only runs on GitHub Actions so far, by every workflow that runs the
-    Calkit action, however each run was started.
+    Calkit action, when started or pushed.
     """
+
+    def github_run(run: dict[str, Any], workflow: str) -> PipelineRun:
+        status = run.get("status")
+        conclusion = run.get("conclusion")
+        state: RunStatus
+        if status == "in_progress":
+            state = "running"
+        elif status != "completed":
+            state = "queued"
+        elif conclusion == "success":
+            state = "succeeded"
+        elif conclusion in ("cancelled", "skipped", "stale", "neutral"):
+            state = "canceled"
+        else:
+            state = "failed"
+        return PipelineRun(
+            id=str(run.get("id")),
+            status=state,
+            started_at=run.get("run_started_at") or run.get("created_at"),
+            url=run.get("html_url"),
+            commit=run.get("head_sha"),
+            branch=run.get("head_branch"),
+            started_by=(run.get("triggering_actor") or {}).get("login"),
+            workflow=workflow,
+        )
+
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -978,31 +994,47 @@ def get_project_pipeline_runs(
         for fname, txt in found
         if calkit.resources.can_start_workflow(txt)
     ]
+    token = _github_token_for_repo(
+        session,
+        current_user,
+        project.github_repo,
+        permissions={"actions": "read"},
+    )
+    if token is None:
+        return PipelineRuns(cannot_start_reason="No GitHub access to its runs")
+    branch = get_default_branch(repo)
     runs = []
-    token = _github_token_for_repo(session, current_user, project.github_repo)
     for fname, _ in found:
-        try:
-            resp = requests.get(
-                f"https://api.github.com/repos/{project.github_repo}"
-                f"/actions/workflows/{fname}/runs",
-                params={"per_page": MAX_PIPELINE_RUNS},
-                headers={"Accept": "application/vnd.github+json"}
-                | ({"Authorization": f"Bearer {token}"} if token else {}),
-                timeout=10,
-            )
-        except requests.RequestException as e:
-            logger.warning(f"Could not list runs of {fname}: {e}")
-            continue
-        if resp.ok:
-            runs += [
-                _github_run(r, workflow=fname)
+        key = _runs_cache_key(project.github_repo, fname, branch)
+        listed = app.cache.get_json(key)
+        if listed is None:
+            try:
+                resp = requests.get(
+                    f"https://api.github.com/repos/{project.github_repo}"
+                    f"/actions/workflows/{quote(fname, safe='')}/runs",
+                    params={"per_page": MAX_PIPELINE_RUNS, "branch": branch},
+                    headers={
+                        "Accept": "application/vnd.github+json",
+                        "Authorization": f"Bearer {token}",
+                    },
+                    timeout=10,
+                )
+            except requests.RequestException as e:
+                logger.warning(f"Could not list runs of {fname}: {e}")
+                continue
+            if not resp.ok:
+                logger.warning(
+                    f"Could not list runs of {fname} for "
+                    f"{project.github_repo}: {resp.status_code} {resp.text}"
+                )
+                continue
+            listed = [
+                github_run(r, workflow=fname).model_dump()
                 for r in resp.json().get("workflow_runs", [])
+                if r.get("event") in RUN_EVENTS
             ]
-        else:
-            logger.warning(
-                f"Could not list runs of {fname} for {project.github_repo}: "
-                f"{resp.status_code} {resp.text}"
-            )
+            app.cache.set_json(key, listed, ttl=RUNS_CACHE_TTL_S)
+        runs += [PipelineRun.model_validate(r) for r in listed]
     # Newest first across workflows
     runs.sort(key=lambda run: run.started_at or "", reverse=True)
     names = ", ".join(fname for fname, _ in found)
@@ -1037,6 +1069,15 @@ def post_project_pipeline_run(
     )
     if not project.github_repo:
         raise HTTPException(422, "This project isn't on GitHub")
+    # Before anything's pushed, so a refusal leaves the project as it was
+    token = _github_token_for_repo(
+        session,
+        current_user,
+        project.github_repo,
+        permissions={"actions": "write"},
+    )
+    if token is None:
+        raise HTTPException(403, "No GitHub access to start a run")
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
@@ -1044,23 +1085,73 @@ def post_project_pipeline_run(
     branch = get_default_branch(repo)
     found = calkit.resources.find_run_workflows(wdir)
     if not found:
-        subprocess.check_call(
-            ["calkit", "update", "github-actions", "--on-demand"], cwd=wdir
-        )
-        found = calkit.resources.find_run_workflows(wdir)
-        assert found
+        rel_path = os.path.join(".github", "workflows", "run-calkit.yml")
+        if not _inside(wdir, os.path.join(wdir, os.path.dirname(rel_path))):
+            raise HTTPException(
+                409, ".github/workflows links out of the project"
+            )
+        if os.path.lexists(os.path.join(wdir, rel_path)):
+            raise HTTPException(
+                409, f"{rel_path} doesn't run the Calkit action"
+            )
         try:
-            push_and_expire(project, repo)
-        except GitCommandError as e:
-            repo.git.reset(["--hard", "HEAD~1"])
-            if "workflow" in str(e):
+            subprocess.check_call(
+                [
+                    "calkit",
+                    "update",
+                    "github-actions",
+                    "--on-demand",
+                    "--no-commit",
+                ],
+                cwd=wdir,
+            )
+            repo.git.add(rel_path)
+            repo.git.commit(
+                [rel_path, "-m", "Add a workflow that runs the pipeline"]
+            )
+            if current_user.account.github_name is None:
+                # The App's usual token can't push workflows, so its holder
+                # can't push one that reads the repo's secrets
+                gh_owner, gh_repo = project.github_repo.split("/", 1)
+                with repo.git.custom_environment(
+                    **_make_git_auth_env(
+                        app.github.get_app_installation_token(
+                            gh_owner,
+                            gh_repo,
+                            permissions={
+                                "contents": "write",
+                                "workflows": "write",
+                            },
+                        )
+                    )
+                ):
+                    push_and_expire(project, repo, branch)
+            else:
+                push_and_expire(project, repo, branch)
+        except (
+            subprocess.CalledProcessError,
+            GitCommandError,
+            HTTPException,
+            app.github.GitHubAppNotConfigured,
+        ) as e:
+            repo.git.reset(["--hard", f"origin/{branch}"])
+            repo.git.clean(["-fd"])
+            logger.warning(
+                f"Could not add a workflow to {project.github_repo}: {e}"
+            )
+            if isinstance(e, HTTPException) or (
+                "without `workflows` permission" in str(e)
+            ):
                 raise HTTPException(
                     403,
                     "Calkit's GitHub App needs permission to add workflows "
                     "to add the one that runs the pipeline",
                 )
-            raise
+            raise HTTPException(
+                502, "Could not add the workflow that runs the pipeline"
+            )
         record_project_update(project, repo, session)
+        found = calkit.resources.find_run_workflows(wdir)
     startable = [
         fname
         for fname, txt in found
@@ -1070,13 +1161,10 @@ def post_project_pipeline_run(
         names = ", ".join(fname for fname, _ in found)
         raise HTTPException(409, f"No workflow_dispatch trigger in {names}")
     fname = startable[0]
-    token = _github_token_for_repo(session, current_user, project.github_repo)
-    if token is None:
-        raise HTTPException(403, "No GitHub access to start a run")
     try:
         resp = requests.post(
             f"https://api.github.com/repos/{project.github_repo}"
-            f"/actions/workflows/{fname}/dispatches",
+            f"/actions/workflows/{quote(fname, safe='')}/dispatches",
             json={"ref": branch},
             headers={
                 "Accept": "application/vnd.github+json",
@@ -1099,6 +1187,8 @@ def post_project_pipeline_run(
             403 if resp.status_code in (403, 404) else 502,
             f"GitHub didn't start {fname}: {reason}",
         )
+    # So the next listing has it as soon as GitHub does
+    app.cache.delete(_runs_cache_key(project.github_repo, fname, branch))
     return PipelineRun(
         status="queued",
         started_at=datetime.now(timezone.utc).isoformat(),
@@ -1131,6 +1221,12 @@ class PipelineRunLogs(BaseModel):
 
 
 MAX_RUN_LOG_CHARS = 200_000
+# Of a job's log, the end, which is where failures are, is all that's read
+MAX_RUN_LOG_BYTES = 1_000_000
+# Jobs whose logs are read, of those GitHub lists first
+MAX_LOGGED_JOBS = 10
+# A finished run's logs don't change, so they're kept this long
+RUN_LOGS_CACHE_TTL_S = 24 * 3600
 # GitHub's timestamp on every line, and its markers for folding sections
 _LOG_TIMESTAMP_RE = re.compile(r"^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?", re.M)
 _LOG_GROUP_RE = re.compile(r"^##\[(group|endgroup)\]", re.M)
@@ -1142,11 +1238,38 @@ _LOG_GROUP_RE = re.compile(r"^##\[(group|endgroup)\]", re.M)
 def get_project_pipeline_run_logs(
     owner_name: str,
     project_name: str,
-    run_id: str,
+    run_id: int,
     current_user: CurrentUser,
     session: SessionDep,
 ) -> PipelineRunLogs:
-    """A run's jobs, their steps, and each finished job's log."""
+    """A pipeline run's jobs, their steps, and each finished job's log.
+
+    Only for runs of a workflow that runs the Calkit action.
+    """
+
+    def read_log(url: str) -> tuple[str, bool]:
+        # Redirects to storage, which doesn't get the token, and only the
+        # end is kept, without holding all of a huge log at once
+        chunks: deque[bytes] = deque()
+        kept = 0
+        truncated = False
+        with requests.get(
+            url, headers=headers, timeout=20, stream=True
+        ) as resp:
+            resp.raise_for_status()
+            for chunk in resp.iter_content(64 * 1024):
+                chunks.append(chunk)
+                kept += len(chunk)
+                while kept - len(chunks[0]) >= MAX_RUN_LOG_BYTES:
+                    kept -= len(chunks.popleft())
+                    truncated = True
+        log = b"".join(chunks).decode("utf-8", errors="replace")
+        log = _LOG_GROUP_RE.sub("", _LOG_TIMESTAMP_RE.sub("", log))
+        if len(log) > MAX_RUN_LOG_CHARS:
+            log = log[-MAX_RUN_LOG_CHARS:]
+            truncated = True
+        return log, truncated
+
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -1156,13 +1279,52 @@ def get_project_pipeline_run_logs(
     )
     if not project.github_repo:
         raise HTTPException(422, "This project isn't on GitHub")
-    if not run_id.isdigit():
-        raise HTTPException(422, "Not a GitHub Actions run ID")
-    token = _github_token_for_repo(session, current_user, project.github_repo)
-    headers = {"Accept": "application/vnd.github+json"} | (
-        {"Authorization": f"Bearer {token}"} if token else {}
+    cache_key = app.cache.make_key(
+        "pipeline-run-logs", project.github_repo, str(run_id)
     )
+    cached = app.cache.get_json(cache_key)
+    if cached is not None:
+        return PipelineRunLogs.model_validate(cached)
+    token = _github_token_for_repo(
+        session,
+        current_user,
+        project.github_repo,
+        permissions={"actions": "read"},
+    )
+    if token is None:
+        raise HTTPException(403, "No GitHub access to its runs")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+    }
     base = f"https://api.github.com/repos/{project.github_repo}/actions"
+    # Only the pipeline's runs, not those of the repo's other workflows
+    try:
+        resp = requests.get(
+            f"{base}/runs/{run_id}", headers=headers, timeout=10
+        )
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Could not reach GitHub: {e}")
+    if not resp.ok:
+        raise HTTPException(
+            404 if resp.status_code == 404 else 502,
+            f"GitHub didn't find the run: {resp.reason}",
+        )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        read_only=True,
+    )
+    workflows = {
+        fname
+        for fname, _ in calkit.resources.find_run_workflows(
+            str(repo.working_dir)
+        )
+    }
+    if os.path.basename(resp.json().get("path") or "") not in workflows:
+        raise HTTPException(404, "Not a run of the pipeline")
     try:
         resp = requests.get(
             f"{base}/runs/{run_id}/jobs", headers=headers, timeout=10
@@ -1175,24 +1337,12 @@ def get_project_pipeline_run_logs(
             f"GitHub didn't list the run's jobs: {resp.reason}",
         )
     jobs = []
-    for job in resp.json().get("jobs", []):
+    for i, job in enumerate(resp.json().get("jobs", [])):
         log = None
         truncated = False
-        if job.get("status") == "completed":
+        if job.get("status") == "completed" and i < MAX_LOGGED_JOBS:
             try:
-                # Redirects to storage, which doesn't get the token
-                log_resp = requests.get(
-                    f"{base}/jobs/{job['id']}/logs",
-                    headers=headers,
-                    timeout=20,
-                )
-                if log_resp.ok:
-                    log = _LOG_GROUP_RE.sub(
-                        "", _LOG_TIMESTAMP_RE.sub("", log_resp.text)
-                    )
-                    if len(log) > MAX_RUN_LOG_CHARS:
-                        log = log[-MAX_RUN_LOG_CHARS:]
-                        truncated = True
+                log, truncated = read_log(f"{base}/jobs/{job['id']}/logs")
             except requests.RequestException as e:
                 logger.warning(
                     f"Could not get the log of job {job['id']}: {e}"
@@ -1214,4 +1364,11 @@ def get_project_pipeline_run_logs(
                 log_truncated=truncated,
             )
         )
-    return PipelineRunLogs(jobs=jobs)
+    out = PipelineRunLogs(jobs=jobs)
+    if jobs and all(
+        job.status == "completed" and job.log is not None for job in jobs
+    ):
+        app.cache.set_json(
+            cache_key, out.model_dump(), ttl=RUN_LOGS_CACHE_TTL_S
+        )
+    return out

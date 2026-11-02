@@ -378,7 +378,7 @@ const RUN_STATUS_COLORS: Record<PipelineRun["status"], string> = {
   running: "blue",
   succeeded: "green",
   failed: "red",
-  cancelled: "gray",
+  canceled: "gray",
 }
 
 /**
@@ -571,7 +571,7 @@ function RunLogsModal({
       ProjectsService.getProjectPipelineRunLogs({
         owner_name: ownerName,
         project_name: projectName,
-        run_id: run.id,
+        run_id: Number(run.id),
       }).then((response) => response.data),
     refetchInterval: (query) =>
       query.state.data?.jobs?.some((job) => job.status !== "completed")

@@ -338,10 +338,10 @@ function SelectedItemInfo({
           </Text>
         </Text>
       ) : null}
-      {provenance?.used_by?.length ? (
+      {provenance?.input_to_stages?.length ? (
         <Text>
           Input to:{" "}
-          {provenance.used_by.map((name, i) => (
+          {provenance.input_to_stages.map((name, i) => (
             <span key={name}>
               {i > 0 ? ", " : ""}
               <Link

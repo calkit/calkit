@@ -319,7 +319,9 @@ def test_get_project_provenance(client: TestClient) -> None:
     # and code needs no recorded origin
     assert body["gaps"] == []
     # The stages that read something, or a folder it's in
-    assert body["used_by"] == ["analyze"]
-    assert get("path=data/raw.csv")["used_by"] == ["sweep", "analyze"]
-    assert get("path=data/downloaded/a.csv")["used_by"] == ["summarize"]
-    assert get("path=results/metrics.json")["used_by"] == []
+    assert body["input_to_stages"] == ["analyze"]
+    assert get("path=data/raw.csv")["input_to_stages"] == ["sweep", "analyze"]
+    assert get("path=data/downloaded/a.csv")["input_to_stages"] == [
+        "summarize"
+    ]
+    assert get("path=results/metrics.json")["input_to_stages"] == []

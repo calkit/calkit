@@ -28,8 +28,8 @@ import {
   Tr,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { AxiosError } from "axios"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import type { AxiosError } from "axios"
 import {
   type ReactNode,
   useCallback,
@@ -52,12 +52,17 @@ import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Mermaid, {
   MAX_READABLE_STAGES,
 } from "../../../../../components/Common/Mermaid"
+import Tooltip from "../../../../../components/Common/Tooltip"
 import PipelineEditorModal from "../../../../../components/Pipeline/PipelineEditorModal"
 import StageEditorModal from "../../../../../components/Pipeline/StageEditorModal"
-import useProject, {
-  useProjectEnvironments,
-} from "../../../../../hooks/useProject"
+import useAuth from "../../../../../hooks/useAuth"
 import useCustomToast from "../../../../../hooks/useCustomToast"
+import useProject, {
+  isRunGoing,
+  PIPELINE_RUNS_SHOWN,
+  useProjectEnvironments,
+  useProjectPipelineRuns,
+} from "../../../../../hooks/useProject"
 import { dataOrNull } from "../../../../../lib/api"
 import { handleError } from "../../../../../lib/errors"
 import {
@@ -65,6 +70,7 @@ import {
   extractFilePaths,
   findStageLineRange,
 } from "../../../../../lib/pipelineYaml"
+import { formatTimestamp } from "../../../../../lib/strings"
 
 SyntaxHighlighter.registerLanguage("yaml", yaml)
 
@@ -371,6 +377,10 @@ const pipelineSearchSchema = z.object({
   show_diagram: z.boolean().optional(),
   // Render every line of a pipeline file too long to show at once.
   show_full_yaml: z.boolean().optional(),
+  // The run whose logs are open
+  run_logs: z.string().optional(),
+  // How many runs are listed, more than the first page once asked for
+  runs_shown: z.number().int().positive().optional(),
 })
 
 const RUN_STATUS_COLORS: Record<PipelineRun["status"], string> = {
@@ -381,11 +391,12 @@ const RUN_STATUS_COLORS: Record<PipelineRun["status"], string> = {
   canceled: "gray",
 }
 
-/**
- * Recent runs of the pipeline, e.g., on GitHub Actions, and a button to
- * start one, checked again every 15 seconds while one is going.
- */
-function PipelineRuns({
+const RUN_LOCATIONS: Record<PipelineRun["location"], string> = {
+  "github-actions": "GitHub Actions",
+}
+
+/** The pipeline's runs, wherever they ran, and a button to start one. */
+function PipelineRunsSection({
   ownerName,
   projectName,
   canStart,
@@ -396,86 +407,69 @@ function PipelineRuns({
 }) {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  // When one was started here, since GitHub takes a moment to list it
-  const [startedAt, setStartedAt] = useState<number | null>(null)
-  // Shared with the sidebar, which shows when one is going
-  const queryKey = ["projects", ownerName, projectName, "pipeline-runs"]
-  const [logsRun, setLogsRun] = useState<PipelineRun | null>(null)
-  const runsQuery = useQuery({
-    queryKey,
-    queryFn: () =>
-      ProjectsService.getProjectPipelineRuns({
-        owner_name: ownerName,
-        project_name: projectName,
-      }).then((response) => response.data),
-    refetchInterval: (query) => {
-      const latest = query.state.data?.runs?.[0]
-      const going =
-        latest && (latest.status === "queued" || latest.status === "running")
-      const waiting =
-        startedAt !== null &&
-        Date.now() - startedAt < 120_000 &&
-        !(
-          latest?.started_at &&
-          Date.parse(latest.started_at) >= startedAt - 30_000
-        )
-      return going || waiting ? 15_000 : false
-    },
+  const { run_logs: logsRunId, runs_shown: shown = PIPELINE_RUNS_SHOWN } =
+    Route.useSearch()
+  const navigate = useNavigate({ from: Route.fullPath })
+  const { runsRequest } = useProjectPipelineRuns(ownerName, projectName, {
+    limit: shown,
   })
   const startMutation = useMutation({
     mutationFn: () =>
       ProjectsService.postProjectPipelineRun({
         owner_name: ownerName,
         project_name: projectName,
+        pipelineRunPost: { location: "github-actions" },
       }).then((response) => response.data),
     onSuccess: () => {
-      setStartedAt(Date.now())
       showToast(
         "Started",
         "The pipeline is running on GitHub Actions.",
         "success",
       )
-      queryClient.invalidateQueries({ queryKey })
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "pipeline-runs"],
+      })
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })
-  const runs = runsQuery.data?.runs ?? []
+  const runs = runsRequest.data?.runs ?? []
+  const total = runsRequest.data?.total ?? 0
   // Named only when there's more than one to tell apart
-  const manyWorkflows = new Set(runs.map((run) => run.workflow)).size > 1
-  const latest = runs[0]
-  const going =
-    latest?.status === "queued" ||
-    latest?.status === "running" ||
-    (startedAt !== null &&
-      Date.now() - startedAt < 120_000 &&
-      !(
-        latest?.started_at &&
-        Date.parse(latest.started_at) >= startedAt - 30_000
-      ))
+  const manyWorkflows = new Set(runs.map((run) => run.github_workflow)).size > 1
+  const going = isRunGoing(runs[0])
+  const logsRun = runs.find((run) => run.id === logsRunId)
   return (
     <Box mt={4}>
       <Flex align="center" gap={3} mb={2}>
         <Heading size="md">Runs</Heading>
         {canStart && (
-          <Button
-            size="sm"
-            isLoading={startMutation.isPending}
-            isDisabled={!runsQuery.data?.can_start || going}
-            title={runsQuery.data?.cannot_start_reason ?? undefined}
-            onClick={() => startMutation.mutate()}
+          <Tooltip
+            label={runsRequest.data?.cannot_start_reason ?? undefined}
+            isDisabled={!runsRequest.data?.cannot_start_reason}
           >
-            Run on GitHub Actions
-          </Button>
+            <Button
+              size="sm"
+              isLoading={startMutation.isPending}
+              isDisabled={!runsRequest.data?.can_start || going}
+              onClick={() => startMutation.mutate()}
+            >
+              Run on GitHub Actions
+            </Button>
+          </Tooltip>
         )}
         {going && <Spinner size="sm" />}
       </Flex>
-      {runsQuery.isPending ? (
+      {runsRequest.isPending ? (
         <Spinner size="sm" />
+      ) : runsRequest.isError ? (
+        <Text fontSize="sm" color="ui.danger">
+          Failed to load runs. Try refreshing.
+        </Text>
       ) : runs.length === 0 ? (
         <Text fontSize="sm" color="ui.dim">
-          {runsQuery.data?.github_workflow
+          {runsRequest.data?.github_workflow
             ? "No runs yet."
             : "Not run on GitHub Actions yet. Starting a run adds a " +
               "workflow that only runs when started."}
@@ -486,7 +480,7 @@ function PipelineRuns({
             <Thead>
               <Tr>
                 <Th>Status</Th>
-                <Th>Where</Th>
+                <Th>Location</Th>
                 <Th>Started</Th>
                 <Th>By</Th>
                 <Th>Commit</Th>
@@ -494,40 +488,38 @@ function PipelineRuns({
               </Tr>
             </Thead>
             <Tbody>
-              {runs.map((run, i) => (
-                <Tr key={run.id ?? i}>
+              {runs.map((run) => (
+                <Tr key={run.id}>
                   <Td>
                     <Badge colorScheme={RUN_STATUS_COLORS[run.status]}>
                       {run.status}
                     </Badge>
                   </Td>
                   <Td>
-                    GitHub Actions
-                    {manyWorkflows && run.workflow && (
+                    {RUN_LOCATIONS[run.location]}
+                    {manyWorkflows && run.github_workflow && (
                       <Text as="span" color="ui.dim">
                         {" "}
-                        ({run.workflow})
+                        ({run.github_workflow})
                       </Text>
                     )}
                   </Td>
-                  <Td>
-                    {run.started_at
-                      ? new Date(run.started_at).toLocaleString()
-                      : ""}
-                  </Td>
+                  <Td>{formatTimestamp(run.started ?? run.created)}</Td>
                   <Td>{run.started_by ?? ""}</Td>
-                  <Td fontFamily="mono">{run.commit?.slice(0, 7) ?? ""}</Td>
+                  <Td fontFamily="mono">{run.git_rev?.slice(0, 7) ?? ""}</Td>
                   <Td>
                     <Flex gap={3}>
-                      {run.id && (
-                        <Button
-                          size="xs"
-                          variant="link"
-                          onClick={() => setLogsRun(run)}
-                        >
-                          Logs
-                        </Button>
-                      )}
+                      <Button
+                        size="xs"
+                        variant="link"
+                        onClick={() =>
+                          navigate({
+                            search: (prev) => ({ ...prev, run_logs: run.id }),
+                          })
+                        }
+                      >
+                        Logs
+                      </Button>
                       {run.url && (
                         <Link isExternal variant="blue" href={run.url}>
                           GitHub
@@ -541,88 +533,116 @@ function PipelineRuns({
           </Table>
         </TableContainer>
       )}
-      {logsRun?.id && (
+      {total > runs.length && (
+        <Button
+          size="xs"
+          variant="link"
+          mt={2}
+          onClick={() =>
+            navigate({
+              search: (prev) => ({
+                ...prev,
+                runs_shown: shown + PIPELINE_RUNS_SHOWN,
+              }),
+            })
+          }
+        >
+          Show more
+        </Button>
+      )}
+      {logsRunId && (
         <RunLogsModal
           ownerName={ownerName}
           projectName={projectName}
-          run={{ ...logsRun, id: logsRun.id }}
-          onClose={() => setLogsRun(null)}
+          runId={logsRunId}
+          run={logsRun}
+          onClose={() =>
+            navigate({ search: (prev) => ({ ...prev, run_logs: undefined }) })
+          }
         />
       )}
     </Box>
   )
 }
 
-/** A run's steps, and its log once it has one, kept current while it runs. */
+/** A run's logs, in parts, kept current while it runs. */
 function RunLogsModal({
   ownerName,
   projectName,
+  runId,
   run,
   onClose,
 }: {
   ownerName: string
   projectName: string
-  run: PipelineRun & { id: string }
+  runId: string
+  run?: PipelineRun
   onClose: () => void
 }) {
   const logsQuery = useQuery({
-    queryKey: ["projects", ownerName, projectName, "pipeline-runs", run.id],
+    queryKey: ["projects", ownerName, projectName, "pipeline-run-logs", runId],
     queryFn: () =>
       ProjectsService.getProjectPipelineRunLogs({
         owner_name: ownerName,
         project_name: projectName,
-        run_id: Number(run.id),
+        run_id: runId,
       }).then((response) => response.data),
-    refetchInterval: (query) =>
-      query.state.data?.jobs?.some((job) => job.status !== "completed")
+    refetchInterval: (query) => {
+      const parts = query.state.data?.parts
+      return !parts?.length || parts.some((part) => isRunGoing(part))
         ? 10_000
-        : false,
+        : false
+    },
   })
-  const stepColor = (conclusion?: string | null) =>
-    conclusion === "success"
-      ? "green"
-      : conclusion === "failure"
-        ? "red"
-        : "gray"
+  const detail = (logsQuery.error as AxiosError<{ detail?: string }> | null)
+    ?.response?.data?.detail
   return (
     <Modal isOpen onClose={onClose} size="6xl" scrollBehavior="inside">
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>
-          Run on GitHub Actions{" "}
-          <Badge colorScheme={RUN_STATUS_COLORS[run.status]}>
-            {run.status}
-          </Badge>
+          {run ? `Run on ${RUN_LOCATIONS[run.location]} ` : "Run "}
+          {run && (
+            <Badge colorScheme={RUN_STATUS_COLORS[run.status]}>
+              {run.status}
+            </Badge>
+          )}
         </ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={6}>
           {logsQuery.isPending ? (
             <Spinner size="sm" />
           ) : logsQuery.isError ? (
-            <Text color="ui.danger">{String(logsQuery.error)}</Text>
+            <Text color="ui.danger">
+              {typeof detail === "string" ? detail : "Failed to load logs."}
+            </Text>
+          ) : !logsQuery.data?.parts?.length ? (
+            <Text fontSize="sm" color="ui.dim">
+              No logs yet.
+            </Text>
           ) : (
-            logsQuery.data?.jobs?.map((job) => (
-              <Box key={job.name} mb={4}>
+            logsQuery.data.parts.map((part) => (
+              <Box key={part.name} mb={4}>
                 <Flex align="center" gap={2} mb={2}>
-                  <Heading size="sm">{job.name}</Heading>
-                  <Badge colorScheme={stepColor(job.conclusion)}>
-                    {job.conclusion ?? job.status}
+                  <Heading size="sm">{part.name}</Heading>
+                  <Badge colorScheme={RUN_STATUS_COLORS[part.status]}>
+                    {part.status}
                   </Badge>
-                  {job.status !== "completed" && <Spinner size="xs" />}
+                  {isRunGoing(part) && <Spinner size="xs" />}
                 </Flex>
                 <Flex wrap="wrap" gap={1} mb={2}>
-                  {job.steps?.map((step) => (
+                  {part.phases?.map((phase) => (
                     <Badge
-                      key={step.name}
+                      key={phase.name}
                       variant="outline"
-                      colorScheme={stepColor(step.conclusion)}
+                      colorScheme={RUN_STATUS_COLORS[phase.status]}
                       textTransform="none"
                     >
-                      {step.name}
+                      {phase.name}
                     </Badge>
                   ))}
                 </Flex>
-                {job.log ? (
+                {part.log ? (
                   <Box
                     as="pre"
                     fontSize="xs"
@@ -633,17 +653,21 @@ function RunLogsModal({
                     maxH="60vh"
                     overflow="auto"
                     whiteSpace="pre-wrap"
-                    // Opens on the end, which is where a failure is
+                    // Opens on the end, which is where a failure is, but
+                    // only once, so rereading it doesn't jump
                     ref={(el: HTMLElement | null) => {
-                      if (el) el.scrollTop = el.scrollHeight
+                      if (el && !el.dataset.scrolled) {
+                        el.scrollTop = el.scrollHeight
+                        el.dataset.scrolled = "1"
+                      }
                     }}
                   >
-                    {job.log_truncated ? "[earlier lines left out]\n" : ""}
-                    {job.log}
+                    {part.log_truncated ? "[earlier lines left out]\n" : ""}
+                    {part.log}
                   </Box>
                 ) : (
                   <Text fontSize="sm" color="ui.dim">
-                    The log shows up once this job finishes.
+                    The log shows up once this part finishes.
                   </Text>
                 )}
               </Box>
@@ -674,6 +698,7 @@ function ProjectPipeline() {
   } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
+  const { user } = useAuth()
   const pipelineQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "pipeline", ref],
     queryFn: () =>
@@ -827,8 +852,8 @@ function ProjectPipeline() {
                     )}
                   </>
                 )}
-                {!ref && (
-                  <PipelineRuns
+                {!ref && user && (
+                  <PipelineRunsSection
                     ownerName={accountName}
                     projectName={projectName}
                     canStart={userHasWriteAccess}

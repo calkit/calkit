@@ -460,6 +460,7 @@ def detect_inputs(
     target_path: str,
     wdir: str | None = None,
     is_output: Callable[[str], bool] | None = None,
+    is_exact_output: Callable[[str], bool] | None = None,
 ) -> list[str]:
     """Find the project files a LaTeX document reads.
 
@@ -485,6 +486,8 @@ def detect_inputs(
     ``is_output`` says if the file is created by a pipeline stage, taking paths
     in that frame. Such a figure is an input even before the stage first
     makes it, e.g., on a fresh clone, when it isn't in the project yet.
+    ``is_exact_output`` says if a stage declares it as is, rather than by
+    matching an iterated stage's output pattern.
     """
     base = Path(wdir) if wdir else Path(".")
     # Each folder is listed once, since most names tried aren't there, e.g.,
@@ -551,9 +554,18 @@ def detect_inputs(
                     for parent in parents
                 ]
                 candidates = [c for c in candidates if not c.startswith("..")]
-                # A file that's there wins over one a stage might make, since
-                # an iterated stage's outputs are patterns matching most names
-                rel = next((c for c in candidates if is_project_file(c)), None)
+                # A name a stage only might make, by matching an iterated
+                # stage's output pattern, is tried last, since such a pattern
+                # can match most names
+                rel = next(
+                    (
+                        c
+                        for c in candidates
+                        if is_project_file(c)
+                        or (is_exact_output is not None and is_exact_output(c))
+                    ),
+                    None,
+                )
                 if rel is None and is_output is not None:
                     rel = next((c for c in candidates if is_output(c)), None)
                 if rel is None:

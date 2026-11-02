@@ -1766,6 +1766,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\ckvalue{../outside.json}{secret}\n"
             "\\includegraphics{figures/drawn}\n"
             "\\includegraphics{figures/exported.png}\n"
+            "\\includegraphics{figures/rebuilt}\n"
             "\\newcommand{\\fig}[1]{\\includegraphics{figures/#1}}\n"
             "\\includegraphics{\\figdir/macro}\n"
             "\\includegraphics{figures/missing.jpeg}\n"
@@ -1790,6 +1791,9 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     os.makedirs("paper/figures")
     with open("paper/figures/drawn.png", "wb") as fb:
         fb.write(b"drawn")
+    # Left over from before a stage made it as a PDF
+    with open("paper/figures/rebuilt.png", "wb") as fb:
+        fb.write(b"rebuilt")
     os.makedirs("results")
     for name, content in [
         ("metrics", '{"rmse": 0.123}'),
@@ -1841,7 +1845,10 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "kind": "command",
                     "environment": "_system",
                     "command": "echo png > paper/figures/exported.png",
-                    "outputs": ["paper/figures/exported.png"],
+                    "outputs": [
+                        "paper/figures/exported.png",
+                        "paper/figures/rebuilt.pdf",
+                    ],
                 },
                 # Its outputs are a pattern matching most figure names
                 "render": {
@@ -1904,16 +1911,23 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     assert {
         "paper/figures/drawn.png",
         "paper/figures/exported.png",
+        "paper/figures/rebuilt.pdf",
         "paper/sections/results.tex",
     } <= set(deps)
     # But not a macro's parameter, a name built from macros, an extension
     # added to one already there, or a file that's not there in place of
-    # one that is, just since an iterated stage's outputs match them
+    # one that is, just since an iterated stage's outputs match them, though
+    # one a stage declares wins as TeX would pick it
     assert not [
         d
         for d in deps
         if d.startswith("paper/figures/")
-        and d not in ["paper/figures/drawn.png", "paper/figures/exported.png"]
+        and d
+        not in [
+            "paper/figures/drawn.png",
+            "paper/figures/exported.png",
+            "paper/figures/rebuilt.pdf",
+        ]
     ]
     assert not any("#" in d or "macro" in d for d in deps)
     # And on the copies it reads, like a cleaned notebook, so a new value or

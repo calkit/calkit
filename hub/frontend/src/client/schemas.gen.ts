@@ -5489,7 +5489,7 @@ export const PipelineRunSchema = {
     },
     status: {
       type: "string",
-      enum: ["queued", "running", "succeeded", "failed", "cancelled"],
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
       title: "Status",
     },
     started_at: {

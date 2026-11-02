@@ -166,7 +166,18 @@ def test_get_app_installation_token(monkeypatch) -> None:
     def fake_get(url, headers=None, timeout=None):
         calls["get_url"] = url
         calls["get_auth"] = headers["Authorization"]
-        return _FakeResp(200, {"id": 12345})
+        return _FakeResp(
+            200,
+            {
+                "id": 12345,
+                "permissions": {
+                    "contents": "write",
+                    "issues": "write",
+                    "actions": "write",
+                    "workflows": "write",
+                },
+            },
+        )
 
     def fake_post(url, headers=None, json=None, timeout=None):
         calls["post_url"] = url
@@ -180,7 +191,22 @@ def test_get_app_installation_token(monkeypatch) -> None:
     assert calls["get_url"].endswith("/repos/owner-acct/my-repo/installation")
     assert calls["get_auth"] == "Bearer fake-jwt"
     assert "/app/installations/12345/access_tokens" in calls["post_url"]
-    assert calls["post_json"] == {"repositories": ["my-repo"]}
+    # Without workflows or actions, which anyone with write access could use
+    # to run a workflow with the repo's secrets
+    assert calls["post_json"] == {
+        "repositories": ["my-repo"],
+        "permissions": {"contents": "write", "issues": "write"},
+    }
+    # Unless asked for, and then only what's asked for
+    token = app.github.get_app_installation_token(
+        "owner-acct", "my-repo", permissions={"actions": "read"}
+    )
+    assert calls["post_json"] == {
+        "repositories": ["my-repo"],
+        "permissions": {"actions": "read"},
+    }
+    app.github.get_app_installation_token("owner-acct", "my-repo", True)
+    assert calls["post_json"]["permissions"] == {"contents": "read"}
 
 
 def test_get_app_installation_token_caches(monkeypatch) -> None:

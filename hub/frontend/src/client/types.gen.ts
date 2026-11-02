@@ -3276,7 +3276,7 @@ export type PipelineRun = {
   /**
    * Status
    */
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
   /**
    * Started At
    */
@@ -14304,7 +14304,7 @@ export type GetProjectPipelineRunLogsData = {
     /**
      * Run Id
      */
-    run_id: string
+    run_id: number
   }
   query?: never
   url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs"

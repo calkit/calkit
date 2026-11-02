@@ -16,10 +16,13 @@ import json
 import os
 import posixpath
 import re
+import stat
 
 DEVCONTAINER_FNAME = "devcontainer.json"
 VSCODE_FNAMES = ["settings.json", "extensions.json"]
 GITHUB_ACTIONS_FNAME = "example.yml"
+# Bigger than any workflow, so a file this size isn't read as one
+MAX_WORKFLOW_BYTES = 1_000_000
 ACTION_PATH = "calkit/calkit/actions/run"
 # The ref the example workflow ships with, which gets pinned to a released
 # version of Calkit when there is one to pin to
@@ -176,9 +179,9 @@ def render_github_actions_workflow(
 ) -> str:
     """Return the example workflow, pinning the action to a Calkit version.
 
-    One ``on_demand`` only runs when started, e.g., from the hub, rather
-    than on every push, which for a paper synced from Overleaf is every
-    sync.
+    With ``on_demand``, it only runs when started, e.g., from the hub,
+    rather than on every push, which for a paper synced from Overleaf is
+    every sync.
     """
     txt = set_action_ref(
         read_text("github-actions", GITHUB_ACTIONS_FNAME), version=version
@@ -197,28 +200,30 @@ def render_github_actions_workflow(
 def find_run_workflows(wdir: str | None = None) -> list[tuple[str, str]]:
     """Return the names and text of a project's workflows that run the
     Calkit action.
+
+    Symlinks, anything that isn't a regular file, and files too big to be
+    a workflow are skipped, since the hub reads these from repos anyone can
+    push to.
     """
-    workflows_dir = os.path.join(wdir or ".", ".github", "workflows")
+    root = os.path.realpath(wdir or ".")
+    workflows_dir = os.path.join(root, ".github", "workflows")
+    if not os.path.realpath(workflows_dir).startswith(root + os.sep):
+        return []
     if not os.path.isdir(workflows_dir):
         return []
     found = []
     for fname in sorted(os.listdir(workflows_dir)):
-        if fname.endswith(".yaml") or fname.endswith(".yml"):
-            with open(
-                os.path.join(workflows_dir, fname), encoding="utf-8"
-            ) as f:
-                txt = f.read()
-            if uses_run_action(txt):
-                found.append((fname, txt))
+        fpath = os.path.join(workflows_dir, fname)
+        if not (fname.endswith(".yaml") or fname.endswith(".yml")):
+            continue
+        st = os.lstat(fpath)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_WORKFLOW_BYTES:
+            continue
+        with open(fpath, encoding="utf-8", errors="replace") as f:
+            txt = f.read()
+        if uses_run_action(txt):
+            found.append((fname, txt))
     return found
-
-
-def find_run_workflow(wdir: str | None = None) -> tuple[str, str] | None:
-    """Return the name and text of a project's first workflow that runs the
-    Calkit action, if it has one.
-    """
-    found = find_run_workflows(wdir)
-    return found[0] if found else None
 
 
 def can_start_workflow(workflow_txt: str) -> bool:
@@ -228,8 +233,10 @@ def can_start_workflow(workflow_txt: str) -> bool:
     from calkit.core import ryaml
 
     try:
-        workflow = ryaml.load(workflow_txt) or {}
+        workflow = ryaml.load(workflow_txt)
     except Exception:
+        return False
+    if not isinstance(workflow, dict):
         return False
     # YAML 1.1 parsers read the key as true, so a workflow written by one
     # might have it quoted either way

@@ -1766,6 +1766,9 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\ckvalue{../outside.json}{secret}\n"
             "\\includegraphics{figures/drawn}\n"
             "\\includegraphics{figures/exported.png}\n"
+            "\\newcommand{\\fig}[1]{\\includegraphics{figures/#1}}\n"
+            "\\includegraphics{\\figdir/macro}\n"
+            "\\includegraphics{figures/missing.jpeg}\n"
             "\\end{document}\n"
         )
     with open("paper/sections/results.tex", "w") as f:
@@ -1840,6 +1843,14 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "command": "echo png > paper/figures/exported.png",
                     "outputs": ["paper/figures/exported.png"],
                 },
+                # Its outputs are a pattern matching most figure names
+                "render": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo {n} > paper/figures/{n}.pdf",
+                    "outputs": ["paper/figures/{n}.pdf"],
+                    "iterate_over": [{"arg_name": "n", "values": ["a", "b"]}],
+                },
                 "build-other": {
                     "kind": "latex",
                     "environment": "tex",
@@ -1895,6 +1906,16 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         "paper/figures/exported.png",
         "paper/sections/results.tex",
     } <= set(deps)
+    # But not a macro's parameter, a name built from macros, an extension
+    # added to one already there, or a file that's not there in place of
+    # one that is, just since an iterated stage's outputs match them
+    assert not [
+        d
+        for d in deps
+        if d.startswith("paper/figures/")
+        and d not in ["paper/figures/drawn.png", "paper/figures/exported.png"]
+    ]
+    assert not any("#" in d or "macro" in d for d in deps)
     # And on the copies it reads, like a cleaned notebook, so a new value or
     # calkit.sty rebuilds it, except a figure a stage makes, which is copied
     # only after DVC checks the stage's dependencies are there
@@ -1952,7 +1973,14 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     )
     # Compiling for a run or check maps the components in, kept out of Git,
     # with one stage building each PDF, as DVC requires
-    for name in ["build-paper-wdir", "maps", "sweep", "build-extra", "export"]:
+    for name in [
+        "build-paper-wdir",
+        "maps",
+        "sweep",
+        "build-extra",
+        "export",
+        "render",
+    ]:
         del ck_info["pipeline"]["stages"][name]
     del ck_info["pipeline"]["stages"]["build-plain"]
     with open("figures/plot.png", "wb") as fb:

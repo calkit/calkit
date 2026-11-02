@@ -504,9 +504,7 @@ def detect_inputs(
         listed = listings[folder]
         if name in listed and (base / rel).is_file():
             return True
-        return f"{name}.dvc" in listed or (
-            is_output is not None and is_output(rel)
-        )
+        return f"{name}.dvc" in listed
 
     root = posixpath.normpath(Path(target_path).as_posix())
     found: set[str] = set()
@@ -532,26 +530,32 @@ def detect_inputs(
         )
         for command, arg in _INPUT_RE.findall(tex):
             for raw in [n.strip() for n in arg.split(",")]:
-                if not raw or raw.startswith(("http://", "https://")):
+                # A macro's parameter, e.g., #1, or a name built from macros
+                # isn't a file
+                if (
+                    not raw
+                    or "#" in raw
+                    or "\\" in raw
+                    or raw.startswith(("http://", "https://"))
+                ):
                     continue
-                # Names as written come first, since a reference can already
-                # carry its extension
-                names = [raw] + [
-                    raw + ext for ext in _INPUT_COMMANDS[command] if ext
-                ]
-                candidates = (
+                # Names as written come first, and TeX doesn't add an
+                # extension to one already carrying one it would try
+                exts = _INPUT_COMMANDS[command]
+                names = [raw]
+                if posixpath.splitext(raw)[1] not in exts:
+                    names += [raw + ext for ext in exts if ext]
+                candidates = [
                     posixpath.normpath(posixpath.join(parent, name))
                     for name in names
                     for parent in parents
-                )
-                rel = next(
-                    (
-                        c
-                        for c in candidates
-                        if not c.startswith("..") and is_project_file(c)
-                    ),
-                    None,
-                )
+                ]
+                candidates = [c for c in candidates if not c.startswith("..")]
+                # A file that's there wins over one a stage might make, since
+                # an iterated stage's outputs are patterns matching most names
+                rel = next((c for c in candidates if is_project_file(c)), None)
+                if rel is None and is_output is not None:
+                    rel = next((c for c in candidates if is_output(c)), None)
                 if rel is None:
                     continue
                 if rel != root:

@@ -482,7 +482,7 @@ def detect_inputs(
     ``target_path`` and the rest of a stage's paths -- sorted, and with
     the target itself excluded (it's already a dependency).
 
-    ``is_output`` says whether a pipeline stage makes a file, taking paths
+    ``is_output`` says if the file is created by a pipeline stage, taking paths
     in that frame. Such a figure is an input even before the stage first
     makes it, e.g., on a fresh clone, when it isn't in the project yet.
     """

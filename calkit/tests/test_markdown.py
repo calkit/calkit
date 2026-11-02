@@ -1517,6 +1517,96 @@ def test_values(tmp_path, monkeypatch):
         parse_markdown("```python calkit value key=rms\npass\n```\n")
 
 
+def test_compact_value_markers(tmp_path, monkeypatch):
+    from calkit.markdown import (
+        MarkdownParseError,
+        extract_values,
+        results_by_name,
+        set_values,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "results.json").write_text(
+        '{"rms": 0.29330001, "n": 401, "fit": {"coeffs": [1.974, 0.1]}}'
+    )
+    (tmp_path / "other.json").write_text('{"n": 7}')
+    declared = {"metrics": "results.json"}
+    text = (
+        "# Title\n\n"
+        "The RMS is <!-- ckvalue[.4f] results.json rms -->?"
+        "<!-- /ckvalue --> over <!-- ckvalue metrics n -->?"
+        "<!-- /ckvalue --> samples.\n\n"
+        "Nested: <!-- ckvalue metrics fit.coeffs.0 -->stale"
+        "<!-- /ckvalue -->.\n\n"
+        "````md\n"
+        "<!-- ckvalue results.json rms -->example<!-- /ckvalue -->\n"
+        "````\n"
+    )
+    values = extract_values(text, "README.md", results=declared)
+    # A name resolves to the declared path; a fenced marker is an example
+    assert [(v.key, v.path, v.source, v.format, v.line) for v in values] == [
+        ("rms", "results.json", "results.json", "{:.4f}", 3),
+        ("n", "results.json", "metrics", None, 3),
+        ("fit.coeffs.0", "results.json", "metrics", None, 5),
+    ]
+    new, changed = set_values(text, "README.md", results=declared)
+    assert changed
+    assert (
+        "The RMS is <!-- ckvalue[.4f] results.json rms -->0.2933"
+        "<!-- /ckvalue --> over <!-- ckvalue metrics n -->401"
+        "<!-- /ckvalue --> samples."
+    ) in new
+    assert "Nested: <!-- ckvalue metrics fit.coeffs.0 -->1.974" in new
+    assert "<!-- ckvalue results.json rms -->example<!-- /ckvalue -->" in new
+    assert set_values(new, "README.md", results=declared) == (new, False)
+    # A whole replacement field is accepted as well as a bare format spec
+    (text2, _) = set_values(
+        "x <!-- ckvalue[{value:,.1f}] results.json n -->?<!-- /ckvalue -->\n",
+        "README.md",
+    )
+    assert "-->401.0<!-- /ckvalue -->" in text2
+    # Both forms on one line stay paired with their own sources, which two
+    # patterns walked separately would not
+    mixed = (
+        "<!-- calkit values path=other.json -->\n"
+        "L <!-- calkit value key=n -->?<!-- /calkit value --> "
+        "C <!-- ckvalue results.json n -->?<!-- /ckvalue -->\n"
+    )
+    out, _ = set_values(mixed, "README.md")
+    assert "L <!-- calkit value key=n -->7<!-- /calkit value -->" in out
+    assert "C <!-- ckvalue results.json n -->401<!-- /ckvalue -->" in out
+    # The long form's default never applies to a compact marker
+    assert extract_values(mixed, "README.md")[1].path == "results.json"
+    for bad, match in [
+        ("<!-- ckvalue results.json -->x<!-- /ckvalue -->", "names no key"),
+        ("<!-- ckvalue nope n -->x<!-- /ckvalue -->", "not a declared result"),
+        ("<!-- ckvalue results.json no -->x<!-- /ckvalue -->", "has no key"),
+        (
+            "<!-- ckvalue missing.json n -->x<!-- /ckvalue -->",
+            "does not exist",
+        ),
+    ]:
+        with pytest.raises(MarkdownParseError, match=match):
+            set_values(
+                "Intro.\n\n" + bad + "\n", "README.md", results=declared
+            )
+    # Results without a name are skipped rather than keyed on None
+    assert results_by_name(
+        {"results": [{"path": "a.json"}, {"name": "b", "path": "b.json"}]}
+    ) == {"b": "b.json"}
+    assert results_by_name({}) == {}
+    # One name for two files would make which is quoted depend on order
+    with pytest.raises(ValueError, match="Two results are named"):
+        results_by_name(
+            {
+                "results": [
+                    {"name": "x", "path": "a.json"},
+                    {"name": "x", "path": "b.json"},
+                ]
+            }
+        )
+
+
 def test_expand_ck_info_one_stage_per_file(tmp_path, monkeypatch):
     from calkit.markdown import expand_ck_info
 

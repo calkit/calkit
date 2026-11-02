@@ -2334,13 +2334,16 @@ def _inject_markdown_values() -> list[str]:
     import calkit.markdown
 
     ck_info = calkit.load_calkit_info()
+    results = calkit.markdown.results_by_name(ck_info)
     changed_paths = []
     for md_path in set(calkit.markdown.get_markdown_stages(ck_info).values()):
         if not os.path.isfile(md_path):
             continue
         with open(md_path, encoding="utf-8") as f:
             text = f.read()
-        new_text, changed = calkit.markdown.set_values(text, md_path)
+        new_text, changed = calkit.markdown.set_values(
+            text, md_path, results=results
+        )
         if changed:
             with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(new_text)

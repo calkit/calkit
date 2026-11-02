@@ -32,6 +32,7 @@ import { TiFlowMerge } from "react-icons/ti"
 import { ProjectsService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import { useLocalServer } from "../../hooks/useOnboarding"
+import { isRunGoing, useProjectPipelineRuns } from "../../hooks/useProject"
 import Tooltip from "./Tooltip"
 
 export interface ProjectNavItem {
@@ -114,27 +115,12 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     refetchOnWindowFocus: false,
   })
   const pipelineIsStale = pipelineQuery.data?.status === "stale"
-  // Whether it's running somewhere, e.g., on GitHub Actions. Same key as
-  // the pipeline page's runs, checked more often while one is going.
-  const runsQuery = useQuery({
-    queryKey: ["projects", accountName, projectName, "pipeline-runs"],
-    queryFn: () =>
-      ProjectsService.getProjectPipelineRuns({
-        owner_name: accountName,
-        project_name: projectName,
-      }).then((response) => response.data),
+  // Whether it's running somewhere, e.g., on GitHub Actions, shared with
+  // the pipeline page
+  const { runsRequest } = useProjectPipelineRuns(accountName, projectName, {
     enabled: Boolean(user) && !currentRef,
-    retry: false,
-    refetchInterval: (query) => {
-      const latest = query.state.data?.runs?.[0]
-      return latest?.status === "queued" || latest?.status === "running"
-        ? 15_000
-        : 60_000
-    },
   })
-  const latestRun = runsQuery.data?.runs?.[0]
-  const pipelineIsRunning =
-    latestRun?.status === "queued" || latestRun?.status === "running"
+  const pipelineIsRunning = isRunGoing(runsRequest.data?.runs?.[0])
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {

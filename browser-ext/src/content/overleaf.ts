@@ -891,17 +891,22 @@ function renderRunIt(
   ]);
 }
 
-// The project's pipeline runs, checked again while one is going, so a
-// finished run syncs to Overleaf even with the panel closed
+// The project's pipeline runs, checked often while one is going, so a
+// finished run syncs to Overleaf even with the panel closed, and now and
+// then otherwise, to see ones started elsewhere
 let pipelineRuns: {
   key: string;
   runs: PipelineRuns;
-  // When one was started here, since GitHub takes a moment to list it
-  startedAt: number | null;
   // What the last finished run did here
   notice?: string;
 } | null = null;
 let runsTimer: ReturnType<typeof setTimeout> | undefined;
+// The check going now, which others wait on rather than repeat
+let runsRequest: { key: string; promise: Promise<void> } | null = null;
+// Checks that failed in a row, which space the next ones out
+let runsFailures = 0;
+// A start from a run button, kept across their redraws
+let starting: { key: string; busy: boolean; error?: string } | null = null;
 // Where the open panel shows them, redrawn as they change
 const runsBoxes = new Set<{
   box: HTMLElement;
@@ -913,70 +918,94 @@ function linkKey(link: OverleafLinkPublic): string {
   return `${link.project_owner_name}/${link.project_name}`;
 }
 
-/** The run going now, if there is one. */
-function activeRun(): PipelineRun | null {
-  if (!pipelineRuns) {
-    return null;
-  }
-  const latest = pipelineRuns.runs.runs[0];
-  if (latest && ["queued", "running"].includes(latest.status)) {
-    return latest;
-  }
-  const startedAt = pipelineRuns.startedAt;
-  const listed =
-    latest?.started_at &&
-    startedAt !== null &&
-    Date.parse(latest.started_at) >= startedAt - 30_000;
-  if (startedAt !== null && !listed && Date.now() - startedAt < 120_000) {
-    return { where: "github-actions", status: "queued" };
-  }
-  return null;
+/** Whether the user can change the project, e.g., run or sync it. */
+function canWrite(link: OverleafLinkPublic): boolean {
+  return ["write", "admin", "owner"].includes(link.current_user_access ?? "");
 }
 
-/** Check the project's runs, and keep checking while one is going. */
-async function refreshRuns(link: OverleafLinkPublic): Promise<void> {
-  clearTimeout(runsTimer);
-  const key = linkKey(link);
-  const known = pipelineRuns?.key === key ? pipelineRuns : null;
-  const wasRunning = Boolean(known && activeRun());
-  let runs: PipelineRuns;
-  try {
-    runs = await send({
-      type: "project.pipelineRuns",
-      owner: link.project_owner_name,
-      project: link.project_name,
-    });
-  } catch {
-    return;
-  }
-  if (currentLink && linkKey(currentLink) !== key) {
-    return;
-  }
-  pipelineRuns = {
-    key,
-    runs,
-    startedAt: known?.startedAt ?? null,
-    notice: known?.notice,
-  };
-  if (activeRun()) {
-    runsTimer = setTimeout(() => void refreshRuns(link), 15_000);
-  } else if (wasRunning) {
-    pipelineRuns.startedAt = null;
-    if (railOpen) {
-      void refreshRailPipeline(link);
-    }
-    if (runs.runs[0]?.status === "succeeded") {
-      await syncAfterRun(link);
-    } else {
-      pipelineRuns.notice = undefined;
-    }
-  }
-  drawRuns();
-  drawRail();
+/** The run going now, if there is one. */
+function activeRun(): PipelineRun | null {
+  const latest = pipelineRuns?.runs.runs[0];
+  return latest && ["queued", "running"].includes(latest.status)
+    ? latest
+    : null;
+}
+
+/** Show what's going on on the launcher, while the panel is closed. */
+function remountLauncher(): void {
   if (!panel && currentProjectId) {
     const id = currentProjectId;
     mountLauncher(() => openPanel(id), launcherTone());
   }
+}
+
+/**
+ * Check the project's runs, and keep checking: often while one is going,
+ * now and then otherwise, less often after failures, and not while the tab
+ * is hidden. A check already going is waited on rather than repeated.
+ */
+function refreshRuns(link: OverleafLinkPublic): Promise<void> {
+  const key = linkKey(link);
+  const schedule = () => {
+    clearTimeout(runsTimer);
+    const delay = runsFailures
+      ? Math.min(15_000 * 2 ** runsFailures, 300_000)
+      : activeRun()
+      ? 15_000
+      : 60_000;
+    runsTimer = setTimeout(() => {
+      if (document.hidden) {
+        schedule();
+      } else {
+        void refreshRuns(link);
+      }
+    }, delay);
+  };
+  const check = async () => {
+    const known = pipelineRuns?.key === key ? pipelineRuns : null;
+    const wasRunning = Boolean(known && activeRun());
+    let runs: PipelineRuns;
+    try {
+      runs = await send({
+        type: "project.pipelineRuns",
+        owner: link.project_owner_name,
+        project: link.project_name,
+      });
+      runsFailures = 0;
+    } catch {
+      runsFailures++;
+      schedule();
+      return;
+    }
+    if (currentLink && linkKey(currentLink) !== key) {
+      return;
+    }
+    pipelineRuns = { key, runs, notice: known?.notice };
+    if (!activeRun() && wasRunning) {
+      if (railOpen) {
+        void refreshRailPipeline(link);
+      }
+      if (runs.runs[0]?.status === "succeeded") {
+        await syncAfterRun(link);
+      } else {
+        pipelineRuns.notice = undefined;
+      }
+    }
+    schedule();
+    drawRuns();
+    drawRail();
+    remountLauncher();
+  };
+  if (runsRequest?.key === key) {
+    return runsRequest.promise;
+  }
+  const promise = check().finally(() => {
+    if (runsRequest?.promise === promise) {
+      runsRequest = null;
+    }
+  });
+  runsRequest = { key, promise };
+  return promise;
 }
 
 /** Sync the paper with its project, showing that it's going meanwhile. */
@@ -987,15 +1016,13 @@ async function syncOverleaf(
 ): Promise<OverleafSyncResponse> {
   syncing = true;
   drawRail();
-  if (!panel && currentProjectId) {
-    const id = currentProjectId;
-    mountLauncher(() => openPanel(id), launcherTone());
-  }
+  remountLauncher();
   try {
     return await send({ type: "overleaf.sync", owner, project, path });
   } finally {
     syncing = false;
     drawRail();
+    remountLauncher();
   }
 }
 
@@ -1012,18 +1039,75 @@ function afterSync(): void {
   }
 }
 
+// Why the last sync from a Sync now button failed, kept across redraws
+let syncError: string | undefined;
+
+/** A Sync now button, for where a sync is all that's needed. */
+function syncNow(
+  link: OverleafLinkPublic,
+  path: string,
+  secondary = false,
+): { button: HTMLElement; message: HTMLElement } {
+  const message = el("div", { class: "small" }, [
+    syncError ? errorMessage(syncError) : null,
+  ]);
+  const button = el("button", {
+    class: secondary ? "action secondary" : "action",
+    text: "Sync now",
+    disabled: !canWrite(link) || syncing,
+    title: canWrite(link)
+      ? "Push project files to Overleaf and pull Overleaf edits back"
+      : "You need write access to this project to sync",
+  });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    syncError = undefined;
+    clear(message).append(loading("Syncing"));
+    try {
+      await syncOverleaf(link.project_owner_name, link.project_name, path);
+      clear(message).append(el("div", { class: "dim", text: "Synced." }));
+      afterSync();
+    } catch (e) {
+      syncError = e instanceof Error ? e.message : String(e);
+      button.disabled = false;
+      clear(message).append(errorMessage(syncError));
+    }
+  });
+  return { button, message };
+}
+
 /** Start the pipeline on GitHub Actions, which syncs here when it's done. */
 async function startRun(link: OverleafLinkPublic): Promise<void> {
-  await send({
-    type: "project.startPipelineRun",
-    owner: link.project_owner_name,
-    project: link.project_name,
-  });
-  if (pipelineRuns?.key === linkKey(link)) {
-    pipelineRuns.startedAt = Date.now();
-    pipelineRuns.notice = undefined;
+  const key = linkKey(link);
+  starting = { key, busy: true };
+  drawRuns();
+  try {
+    const run = await send({
+      type: "project.startPipelineRun",
+      owner: link.project_owner_name,
+      project: link.project_name,
+    });
+    starting = null;
+    // Listed as soon as it's recorded, before GitHub lists it
+    if (pipelineRuns?.key === key) {
+      pipelineRuns.runs.runs.unshift(run);
+      pipelineRuns.notice = undefined;
+    }
+  } catch (e) {
+    starting = {
+      key,
+      busy: false,
+      error: e instanceof Error ? e.message : String(e),
+    };
   }
-  await refreshRuns(link);
+  drawRuns();
+  drawRail();
+  remountLauncher();
+  if (!starting) {
+    // One that was already going may not have it yet
+    await runsRequest?.promise;
+    await refreshRuns(link);
+  }
 }
 
 /** Bring what a finished run made into this paper. */
@@ -1031,10 +1115,7 @@ async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
   if (!pipelineRuns) {
     return;
   }
-  const canWrite = ["write", "admin", "owner"].includes(
-    link.current_user_access ?? "",
-  );
-  if (canWrite) {
+  if (canWrite(link)) {
     try {
       await syncOverleaf(link.project_owner_name, link.project_name, link.path);
       pipelineRuns.notice =
@@ -1058,7 +1139,8 @@ function renderRuns(link: OverleafLinkPublic, offer: boolean): HTMLElement {
   runsBoxes.add({ box, link, offer });
   if (pipelineRuns?.key === linkKey(link)) {
     drawRuns();
-  } else {
+  } else if (!runsFailures) {
+    // Failed checks are retried on a timer instead
     void refreshRuns(link);
   }
   return box;
@@ -1084,8 +1166,8 @@ function drawRuns(): void {
         ? el("a", { text, href: r.url, attrs: { target: "_blank" } })
         : null;
     if (run) {
-      const since = run.started_at
-        ? ` since ${new Date(run.started_at).toLocaleTimeString([], {
+      const since = run.started
+        ? ` since ${new Date(run.started).toLocaleTimeString([], {
             hour: "numeric",
             minute: "2-digit",
           })}`
@@ -1118,9 +1200,6 @@ function drawRuns(): void {
         ]),
       );
     }
-    const canWrite = ["write", "admin", "owner"].includes(
-      link.current_user_access ?? "",
-    );
     // Something the document shows being out of date is reason to run
     // too, even when Overleaf has what the project has
     const staleShown = editorProblems?.found.some((problems) =>
@@ -1129,29 +1208,25 @@ function drawRuns(): void {
     if (!offer && !staleShown && latest?.status !== "failed") {
       continue;
     }
+    const mine = starting?.key === linkKey(link) ? starting : null;
     const start = el("button", {
       class: "action",
       text: "Run and sync",
-      disabled: !canWrite || !runs.can_start,
-      title: !canWrite
+      disabled: !canWrite(link) || !runs.can_start || Boolean(mine?.busy),
+      title: !canWrite(link)
         ? "You need write access to this project to run it"
         : runs.cannot_start_reason ??
           "Run the pipeline on GitHub Actions, then sync what it makes here",
+      onClick: () => void startRun(link),
     });
-    const message = el("div", { class: "small" });
-    start.addEventListener("click", async () => {
-      start.disabled = true;
-      clear(message).append(loading("Starting"));
-      try {
-        await startRun(link);
-      } catch (e) {
-        start.disabled = false;
-        clear(message).append(
-          errorMessage(e instanceof Error ? e.message : String(e)),
-        );
-      }
-    });
-    box.append(el("div", { class: "actions" }, [start]), message);
+    box.append(
+      el("div", { class: "actions" }, [start]),
+      mine?.busy
+        ? loading("Starting")
+        : mine?.error
+        ? errorMessage(mine.error)
+        : el("div"),
+    );
   }
 }
 
@@ -1922,10 +1997,6 @@ function bringUpToDate(
   citation: Citation,
   provenance: Provenance,
 ): HTMLElement {
-  const box = el("div", { style: { marginTop: "6px" } });
-  const canWrite = ["write", "admin", "owner"].includes(
-    link.current_user_access ?? "",
-  );
   const path = provenance.path;
   // What the next sync would bring, by where Overleaf gets its copy
   const status =
@@ -1943,71 +2014,12 @@ function bringUpToDate(
   const stale =
     provenance.stale_reason === "pipeline" &&
     provenance.stage_kind !== "manual-step";
-  const message = el("div", { class: "small" });
-  if (stale && activeRun()) {
-    box.append(
-      el("div", {
-        class: "dim small",
-        text: "Running on GitHub Actions. It syncs here when it's done.",
-      }),
-    );
-  } else if (stale) {
-    const runs = pipelineRuns?.key === linkKey(link) ? pipelineRuns.runs : null;
-    const button = el("button", {
-      class: "action",
-      text: "Run and sync",
-      disabled: !canWrite || runs?.can_start === false,
-      title: !canWrite
-        ? "You need write access to this project to run it"
-        : runs?.cannot_start_reason ??
-          "Run the pipeline on GitHub Actions, then sync what it makes here",
-    });
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      clear(message).append(loading("Starting"));
-      try {
-        await startRun(link);
-        clear(message).append(
-          el("div", {
-            class: "dim",
-            text: "Started on GitHub Actions. It syncs here when it's done.",
-          }),
-        );
-      } catch (e) {
-        button.disabled = false;
-        clear(message).append(
-          errorMessage(e instanceof Error ? e.message : String(e)),
-        );
-      }
-    });
-    box.append(el("div", { class: "actions" }, [button]), message);
-  } else if (waiting) {
-    const button = el("button", {
-      class: "action",
-      text: "Sync now",
-      disabled: !canWrite,
-      title: canWrite
-        ? "Bring the project's latest version here"
-        : "You need write access to this project to sync",
-    });
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      clear(message).append(loading("Syncing"));
-      try {
-        await syncOverleaf(
-          link.project_owner_name,
-          link.project_name,
-          link.path,
-        );
-        clear(message).append(el("div", { class: "dim", text: "Synced." }));
-        afterSync();
-      } catch (e) {
-        button.disabled = false;
-        clear(message).append(
-          errorMessage(e instanceof Error ? e.message : String(e)),
-        );
-      }
-    });
+  if (stale) {
+    return renderRuns(link, true);
+  }
+  const box = el("div", { style: { marginTop: "6px" } });
+  if (waiting) {
+    const { button, message } = syncNow(link, link.path);
     box.append(el("div", { class: "actions" }, [button]), message);
   }
   return box;
@@ -2948,9 +2960,6 @@ function renderStatus(
   clear(body);
   const figures = status.files_to_push.filter((f) => f.figure);
   const others = status.files_to_push.filter((f) => !f.figure);
-  const canWrite = ["write", "admin", "owner"].includes(
-    link.current_user_access ?? "",
-  );
   body.append(
     el("div", { class: "row" }, [
       el("div", { class: "grow" }, [
@@ -3048,8 +3057,8 @@ function renderStatus(
   const syncButton = el("button", {
     class: "action",
     text: "Sync now",
-    disabled: !canWrite || status.in_sync,
-    title: canWrite
+    disabled: !canWrite(link) || status.in_sync,
+    title: canWrite(link)
       ? "Push project files to Overleaf and pull Overleaf edits back"
       : "You need write access to this project to sync",
   });
@@ -4193,6 +4202,25 @@ function watchRail(): void {
     #${RAIL_TAB_ID}.active svg { color: #fff; }
   `;
   document.head.append(style);
+  // One of Overleaf's own tabs brings its pane back. The one it thinks is
+  // showing would otherwise close the sidebar instead.
+  document.addEventListener(
+    "click",
+    (event) => {
+      const target = (event.target as Element | null)?.closest?.(
+        ".ide-rail-tab-link",
+      );
+      if (!railOpen || !target || target.id === RAIL_TAB_ID) {
+        return;
+      }
+      if (target.classList.contains("active")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      setRail(false);
+    },
+    true,
+  );
   let timer: ReturnType<typeof setTimeout> | undefined;
   const ensure = () => {
     const first = document.getElementById("ide-rail-tabs-tab-file-tree");
@@ -4221,25 +4249,6 @@ function watchRail(): void {
       } else {
         tabs.append(tab);
       }
-      // One of Overleaf's own tabs brings its pane back. The one it thinks
-      // is showing would otherwise close the sidebar instead.
-      tabs.addEventListener(
-        "click",
-        (event) => {
-          const target = (event.target as HTMLElement).closest(
-            ".ide-rail-tab-link",
-          );
-          if (!railOpen || !target || target.id === RAIL_TAB_ID) {
-            return;
-          }
-          if (target.classList.contains("active")) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-          setRail(false);
-        },
-        true,
-      );
     }
     // Overleaf underlines the tab whose pane is open by open-rail
     tab.classList.toggle("active", railOpen);
@@ -4273,8 +4282,8 @@ function setRail(open: boolean): void {
   // file tree first
   const content = document.querySelector(".ide-rail-tab-content");
   if (!content || content.getBoundingClientRect().width < 20) {
+    // Its pane is put there once it's drawn, as Overleaf redraws
     document.getElementById("ide-rail-tabs-tab-file-tree")?.click();
-    setTimeout(placeRailPane, 50);
   } else {
     placeRailPane();
   }
@@ -4283,6 +4292,39 @@ function setRail(open: boolean): void {
     void refreshRailPipeline(currentLink);
   }
 }
+
+// The Calkit pane in Overleaf's sidebar, which brings its own background,
+// since its colors follow the system's theme rather than Overleaf's
+const RAIL_STYLES = `
+  .rail {
+    padding: 10px 12px; min-height: 100%; box-sizing: border-box;
+    color: var(--ck-fg); background: var(--ck-bg);
+  }
+  .rail h3 {
+    font-size: 12px; font-weight: 600; margin: 14px 0 4px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ck-dim);
+  }
+  .item {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 3px 4px; border: 0; border-radius: 4px; text-align: left;
+    background: none; color: inherit; cursor: pointer;
+  }
+  .item:hover { background: var(--ck-subtle-bg); }
+  .item .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+    background: var(--ck-success); }
+  .dot.warning { background: var(--ck-warning); }
+  .dot.error { background: var(--ck-danger); }
+  .dot.unknown { background: var(--ck-dim); }
+  .item .spinner { width: 8px; height: 8px; border-width: 1.5px;
+    flex: none; }
+  .card {
+    margin: 2px 0 8px 14px; padding: 6px 8px; font-size: 12px;
+    border-left: 2px solid var(--ck-border);
+  }
+`;
 
 /** Put the pane in the sidebar, where Overleaf may have redrawn it away. */
 function placeRailPane(): void {
@@ -4294,35 +4336,7 @@ function placeRailPane(): void {
     const host = el("div", { attrs: { id: RAIL_PANE_ID } });
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent =
-      STYLES +
-      `
-      .rail { padding: 10px 12px; color: var(--ck-fg); }
-      .rail h3 {
-        font-size: 12px; font-weight: 600; margin: 14px 0 4px;
-        text-transform: uppercase; letter-spacing: 0.04em;
-        color: var(--ck-dim);
-      }
-      .item {
-        display: flex; align-items: center; gap: 6px; width: 100%;
-        padding: 3px 4px; border: 0; border-radius: 4px; text-align: left;
-        background: none; color: inherit; cursor: pointer;
-      }
-      .item:hover { background: var(--ck-subtle-bg); }
-      .item .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis;
-        white-space: nowrap; }
-      .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
-        background: var(--ck-success); }
-      .dot.warning { background: var(--ck-warning); }
-      .dot.error { background: var(--ck-danger); }
-      .dot.unknown { background: var(--ck-dim); }
-      .item .spinner { width: 8px; height: 8px; border-width: 1.5px;
-        flex: none; }
-      .card {
-        margin: 2px 0 8px 14px; padding: 6px 8px; font-size: 12px;
-        border-left: 2px solid var(--ck-border);
-      }
-    `;
+    style.textContent = STYLES + RAIL_STYLES;
     const body = el("div", { class: "rail" });
     root.append(style, body);
     railPane = { host, body };
@@ -4421,34 +4435,7 @@ function drawRail(): void {
       ]),
     );
   } else if (status) {
-    const canWrite = ["write", "admin", "owner"].includes(
-      link.current_user_access ?? "",
-    );
-    const message = el("div", { class: "small" });
-    const button = el("button", {
-      class: "action secondary",
-      text: "Sync now",
-      disabled: !canWrite,
-      title: canWrite
-        ? "Push project files to Overleaf and pull Overleaf edits back"
-        : "You need write access to this project to sync",
-    });
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      try {
-        await syncOverleaf(
-          link.project_owner_name,
-          link.project_name,
-          status.path,
-        );
-        afterSync();
-      } catch (e) {
-        button.disabled = false;
-        clear(message).append(
-          errorMessage(e instanceof Error ? e.message : String(e)),
-        );
-      }
-    });
+    const { button, message } = syncNow(link, status.path, true);
     body.append(
       el("div", { class: "row small" }, [
         el("span", { class: "dot warning" }),
@@ -4550,8 +4537,9 @@ function drawRail(): void {
   }
   for (const name of pipeline?.ck_stages ?? []) {
     const status = pipeline?.stage_statuses[name]?.status ?? "unknown";
+    const due = ["stale", "not-run"].includes(status);
     // What a run going now will run
-    const toRun = Boolean(running) && ["stale", "not-run"].includes(status);
+    const toRun = Boolean(running) && due;
     body.append(
       el(
         "a",
@@ -4566,11 +4554,7 @@ function drawRail(): void {
             ? el("span", { class: "spinner" })
             : el("span", {
                 class: `dot ${
-                  status === "up-to-date"
-                    ? ""
-                    : ["stale", "not-run"].includes(status)
-                    ? "warning"
-                    : "unknown"
+                  status === "up-to-date" ? "" : due ? "warning" : "unknown"
                 }`,
               }),
           el("span", { class: "grow small", text: name }),

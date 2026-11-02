@@ -3042,6 +3042,32 @@ export const FsOpResponseSchema = {
     "Response describing how to perform a file system operation\n(get/put/exists/list) for a given path within the project.",
 } as const
 
+export const GitHubActionsRunOptionsSchema = {
+  properties: {
+    workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Workflow",
+    },
+    inputs: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Inputs",
+      default: {},
+    },
+  },
+  type: "object",
+  title: "GitHubActionsRunOptions",
+} as const
+
 export const GitHubInstallationsSchema = {
   properties: {
     total_count: {
@@ -5470,38 +5496,49 @@ export const PipelinePutSchema = {
 
 export const PipelineRunSchema = {
   properties: {
-    where: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    location: {
       type: "string",
       const: "github-actions",
-      title: "Where",
-      default: "github-actions",
-    },
-    id: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Id",
+      title: "Location",
     },
     status: {
       type: "string",
       enum: ["queued", "running", "succeeded", "failed", "canceled"],
       title: "Status",
     },
-    started_at: {
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    started: {
       anyOf: [
         {
           type: "string",
+          format: "date-time",
         },
         {
           type: "null",
         },
       ],
-      title: "Started At",
+      title: "Started",
+    },
+    finished: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Finished",
     },
     url: {
       anyOf: [
@@ -5514,7 +5551,7 @@ export const PipelineRunSchema = {
       ],
       title: "Url",
     },
-    commit: {
+    git_rev: {
       anyOf: [
         {
           type: "string",
@@ -5523,7 +5560,7 @@ export const PipelineRunSchema = {
           type: "null",
         },
       ],
-      title: "Commit",
+      title: "Git Rev",
     },
     branch: {
       anyOf: [
@@ -5547,7 +5584,7 @@ export const PipelineRunSchema = {
       ],
       title: "Started By",
     },
-    workflow: {
+    github_workflow: {
       anyOf: [
         {
           type: "string",
@@ -5556,16 +5593,27 @@ export const PipelineRunSchema = {
           type: "null",
         },
       ],
-      title: "Workflow",
+      title: "Github Workflow",
+    },
+    github_run_id: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Run Id",
     },
   },
   type: "object",
-  required: ["status"],
+  required: ["id", "location", "status", "created"],
   title: "PipelineRun",
   description: "A run of the pipeline, wherever it ran.",
 } as const
 
-export const PipelineRunJobSchema = {
+export const PipelineRunLogPartSchema = {
   properties: {
     name: {
       type: "string",
@@ -5573,25 +5621,15 @@ export const PipelineRunJobSchema = {
     },
     status: {
       type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
       title: "Status",
     },
-    conclusion: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Conclusion",
-    },
-    steps: {
+    phases: {
       items: {
-        $ref: "#/components/schemas/PipelineRunStep",
+        $ref: "#/components/schemas/PipelineRunLogPhase",
       },
       type: "array",
-      title: "Steps",
+      title: "Phases",
       default: [],
     },
     log: {
@@ -5613,25 +5651,11 @@ export const PipelineRunJobSchema = {
   },
   type: "object",
   required: ["name", "status"],
-  title: "PipelineRunJob",
+  title: "PipelineRunLogPart",
+  description: "Part of a run's log, e.g., a GitHub Actions job's.",
 } as const
 
-export const PipelineRunLogsSchema = {
-  properties: {
-    jobs: {
-      items: {
-        $ref: "#/components/schemas/PipelineRunJob",
-      },
-      type: "array",
-      title: "Jobs",
-      default: [],
-    },
-  },
-  type: "object",
-  title: "PipelineRunLogs",
-} as const
-
-export const PipelineRunStepSchema = {
+export const PipelineRunLogPhaseSchema = {
   properties: {
     name: {
       type: "string",
@@ -5639,23 +5663,44 @@ export const PipelineRunStepSchema = {
     },
     status: {
       type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
       title: "Status",
-    },
-    conclusion: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Conclusion",
     },
   },
   type: "object",
   required: ["name", "status"],
-  title: "PipelineRunStep",
+  title: "PipelineRunLogPhase",
+} as const
+
+export const PipelineRunLogsSchema = {
+  properties: {
+    parts: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPart",
+      },
+      type: "array",
+      title: "Parts",
+      default: [],
+    },
+  },
+  type: "object",
+  title: "PipelineRunLogs",
+} as const
+
+export const PipelineRunPostSchema = {
+  properties: {
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+      default: "github-actions",
+    },
+    github_actions: {
+      $ref: "#/components/schemas/GitHubActionsRunOptions",
+    },
+  },
+  type: "object",
+  title: "PipelineRunPost",
 } as const
 
 export const PipelineRunsSchema = {
@@ -5667,6 +5712,11 @@ export const PipelineRunsSchema = {
       type: "array",
       title: "Runs",
       default: [],
+    },
+    total: {
+      type: "integer",
+      title: "Total",
+      default: 0,
     },
     github_workflow: {
       anyOf: [

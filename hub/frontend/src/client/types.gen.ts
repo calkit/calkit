@@ -1741,6 +1741,22 @@ export type FsOpResponse = {
 }
 
 /**
+ * GitHubActionsRunOptions
+ */
+export type GitHubActionsRunOptions = {
+  /**
+   * Workflow
+   */
+  workflow?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: {
+    [key: string]: string
+  }
+}
+
+/**
  * GitHubInstallations
  */
 export type GitHubInstallations = {
@@ -3266,29 +3282,37 @@ export type PipelinePut = {
  */
 export type PipelineRun = {
   /**
-   * Where
-   */
-  where?: "github-actions"
-  /**
    * Id
    */
-  id?: string | null
+  id: string
+  /**
+   * Location
+   */
+  location: "github-actions"
   /**
    * Status
    */
   status: "queued" | "running" | "succeeded" | "failed" | "canceled"
   /**
-   * Started At
+   * Created
    */
-  started_at?: string | null
+  created: string
+  /**
+   * Started
+   */
+  started?: string | null
+  /**
+   * Finished
+   */
+  finished?: string | null
   /**
    * Url
    */
   url?: string | null
   /**
-   * Commit
+   * Git Rev
    */
-  commit?: string | null
+  git_rev?: string | null
   /**
    * Branch
    */
@@ -3298,15 +3322,21 @@ export type PipelineRun = {
    */
   started_by?: string | null
   /**
-   * Workflow
+   * Github Workflow
    */
-  workflow?: string | null
+  github_workflow?: string | null
+  /**
+   * Github Run Id
+   */
+  github_run_id?: number | null
 }
 
 /**
- * PipelineRunJob
+ * PipelineRunLogPart
+ *
+ * Part of a run's log, e.g., a GitHub Actions job's.
  */
-export type PipelineRunJob = {
+export type PipelineRunLogPart = {
   /**
    * Name
    */
@@ -3314,15 +3344,11 @@ export type PipelineRunJob = {
   /**
    * Status
    */
-  status: string
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
   /**
-   * Conclusion
+   * Phases
    */
-  conclusion?: string | null
-  /**
-   * Steps
-   */
-  steps?: Array<PipelineRunStep>
+  phases?: Array<PipelineRunLogPhase>
   /**
    * Log
    */
@@ -3334,19 +3360,9 @@ export type PipelineRunJob = {
 }
 
 /**
- * PipelineRunLogs
+ * PipelineRunLogPhase
  */
-export type PipelineRunLogs = {
-  /**
-   * Jobs
-   */
-  jobs?: Array<PipelineRunJob>
-}
-
-/**
- * PipelineRunStep
- */
-export type PipelineRunStep = {
+export type PipelineRunLogPhase = {
   /**
    * Name
    */
@@ -3354,11 +3370,28 @@ export type PipelineRunStep = {
   /**
    * Status
    */
-  status: string
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+}
+
+/**
+ * PipelineRunLogs
+ */
+export type PipelineRunLogs = {
   /**
-   * Conclusion
+   * Parts
    */
-  conclusion?: string | null
+  parts?: Array<PipelineRunLogPart>
+}
+
+/**
+ * PipelineRunPost
+ */
+export type PipelineRunPost = {
+  /**
+   * Location
+   */
+  location?: "github-actions"
+  github_actions?: GitHubActionsRunOptions
 }
 
 /**
@@ -3369,6 +3402,10 @@ export type PipelineRuns = {
    * Runs
    */
   runs?: Array<PipelineRun>
+  /**
+   * Total
+   */
+  total?: number
   /**
    * Github Workflow
    */
@@ -14230,7 +14267,16 @@ export type GetProjectPipelineRunsData = {
      */
     project_name: string
   }
-  query?: never
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+    /**
+     * Offset
+     */
+    offset?: number
+  }
   url: "/projects/{owner_name}/{project_name}/pipeline/runs"
 }
 
@@ -14255,7 +14301,7 @@ export type GetProjectPipelineRunsResponse =
   GetProjectPipelineRunsResponses[keyof GetProjectPipelineRunsResponses]
 
 export type PostProjectPipelineRunData = {
-  body?: never
+  body: PipelineRunPost
   path: {
     /**
      * Owner Name
@@ -14304,7 +14350,7 @@ export type GetProjectPipelineRunLogsData = {
     /**
      * Run Id
      */
-    run_id: number
+    run_id: string
   }
   query?: never
   url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs"

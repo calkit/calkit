@@ -316,6 +316,7 @@ import type {
   PatchUserTokenErrors,
   PatchUserTokenResponses,
   PipelinePut,
+  PipelineRunPost,
   PipelineStageEdit,
   PipelineStagePut,
   PostDiscountCodeErrors,
@@ -7886,16 +7887,19 @@ export class ProjectsService {
   /**
    * Get Project Pipeline Runs
    *
-   * Recent runs of the pipeline on the default branch, and whether one
-   * can be started here.
+   * The pipeline's runs, newest first, and whether one can be started
+   * here.
    *
-   * Only runs on GitHub Actions so far, by every workflow that runs the
-   * Calkit action, when started or pushed.
+   * Only on GitHub Actions so far, where the default branch's runs of every
+   * workflow that runs the Calkit action are recorded, however each was
+   * started.
    */
   public static getProjectPipelineRuns<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
+      limit?: number
+      offset?: number
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -7910,6 +7914,8 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "offset" },
           ],
         },
       ],
@@ -7930,15 +7936,17 @@ export class ProjectsService {
   /**
    * Post Project Pipeline Run
    *
-   * Start the pipeline on GitHub Actions, on the default branch.
+   * Start the pipeline, on the default branch.
    *
-   * A project without a workflow that runs the Calkit action gets one that
-   * only runs when started, since every Overleaf sync is a push.
+   * Only on GitHub Actions so far, where a project without a workflow that
+   * runs the Calkit action gets one that only runs when started, since
+   * every Overleaf sync is a push.
    */
   public static postProjectPipelineRun<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
+      pipelineRunPost: PipelineRunPost
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -7953,6 +7961,7 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
+            { key: "pipelineRunPost", map: "body" },
           ],
         },
       ],
@@ -7967,21 +7976,25 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/pipeline/runs",
       ...options,
       ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
   /**
    * Get Project Pipeline Run Logs
    *
-   * A pipeline run's jobs, their steps, and each finished job's log.
-   *
-   * Only for runs of a workflow that runs the Calkit action.
+   * A pipeline run's logs, in parts, e.g., one per GitHub Actions job,
+   * with what each did.
    */
   public static getProjectPipelineRunLogs<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
-      run_id: number
+      run_id: string
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<

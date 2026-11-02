@@ -667,19 +667,25 @@ def test_project_pipeline_runs(
 
     import calkit.resources
     from app import users
-    from app.config import settings
-    from app.models import Project, ProjectPipelineRun
+    from app.models import Project, ProjectPipelineRun, UserCreate
 
     repo, origin = _make_repo(tmp_path, {"name": "p"})
     branch = repo.active_branch.name
-    user = users.get_user_by_email(session=db, email=settings.EMAIL_TEST_USER)
-    assert user is not None
     suffix = uuid.uuid4().hex[:8]
+    owner = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"owner-{suffix}@example.com",
+            password="ownerpassword123",
+            account_name=f"o{suffix}",
+            github_username=f"o{suffix}",
+        ),
+    )
     project = Project(
         name=f"p-{suffix}",
         title="Runs",
-        git_repo_url=f"https://github.com/o/p-{suffix}",
-        owner_account_id=user.account.id,
+        git_repo_url=f"https://github.com/o{suffix}/p",
+        owner_account_id=owner.account.id,
     )
     db.add(project)
     db.commit()

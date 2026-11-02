@@ -7317,12 +7317,12 @@ export const ProvenanceSchema = {
       type: "array",
       title: "Inputs",
     },
-    used_by: {
+    input_to_stages: {
       items: {
         type: "string",
       },
       type: "array",
-      title: "Used By",
+      title: "Input To Stages",
     },
     stage_status: {
       anyOf: [

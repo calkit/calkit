@@ -1190,8 +1190,8 @@ class Provenance(SQLModel):
     # What a manual step says to do
     message: str | None = None
     inputs: list[str] = Field(default_factory=list)
-    # The stages that read it
-    used_by: list[str] = Field(default_factory=list)
+    # The stages that use it as an input or DVC dep
+    input_to_stages: list[str] = Field(default_factory=list)
     stage_status: StageStatus | None = None
     stale_reason: Literal["pipeline", "frozen"] | None = None
     # Where a copy, e.g., one a map-paths stage put beside a document, came

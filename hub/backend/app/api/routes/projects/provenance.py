@@ -310,9 +310,9 @@ def get_project_provenance(
                 continue
             dep = posixpath.normpath(posixpath.join(dvc_wdir, dep))
             if path == dep or path.startswith(dep + "/"):
-                out.used_by.append(base)
+                out.input_to_stages.append(base)
                 break
-    out.used_by = list(dict.fromkeys(out.used_by))
+    out.input_to_stages = list(dict.fromkeys(out.input_to_stages))
     if stage is None:
         return out
     out.stage = stage

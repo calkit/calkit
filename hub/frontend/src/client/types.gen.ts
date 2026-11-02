@@ -4233,9 +4233,9 @@ export type Provenance = {
    */
   inputs?: Array<string>
   /**
-   * Used By
+   * Input To Stages
    */
-  used_by?: Array<string>
+  input_to_stages?: Array<string>
   stage_status?: StageStatus | null
   /**
    * Stale Reason

@@ -682,6 +682,13 @@ def image_exists_locally(ref: str) -> bool:
         return False
 
 
+NO_PERMISSION_MESSAGE = (
+    "Docker is installed, but this user isn't allowed to use it. "
+    "Add yourself to the 'docker' group with "
+    "'sudo usermod -aG docker $USER', then log out and back in."
+)
+
+
 def ensure_image_available(ref: str, platform: str | None = None) -> None:
     """Make sure an image can be run, or say why it can't.
 
@@ -695,6 +702,8 @@ def ensure_image_available(ref: str, platform: str | None = None) -> None:
     success, output = pull_image(ref, platform=platform)
     if success:
         return
+    if "permission denied" in output.lower():
+        raise ValueError(f"{NO_PERMISSION_MESSAGE}\n{output.strip()[-500:]}")
     # Docker announces what it's pulling before it fetches anything, so a
     # pull that produced nothing at all never reached the registry. That
     # is local: most often a credential helper that doesn't answer, which
@@ -793,12 +802,7 @@ def ensure_ready(interactive: bool = False) -> None:
     if error is None:
         return
     if "permission denied" in error.lower():
-        raise DockerNotReadyError(
-            "Docker is installed, but this user isn't allowed to use it. "
-            "Add yourself to the 'docker' group with "
-            "'sudo usermod -aG docker $USER', then log out and back in.\n"
-            + error
-        )
+        raise DockerNotReadyError(f"{NO_PERMISSION_MESSAGE}\n{error}")
     start_cmd = get_desktop_start_cmd()
     if start_cmd is not None and interactive:
         try:

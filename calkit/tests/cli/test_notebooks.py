@@ -182,6 +182,7 @@ def test_execute_notebook(tmp_dir):
 # Both install and build IJulia in the shared depot, and one precompiling it
 # while the other builds it fails with "IJulia not properly installed"
 @pytest.mark.xdist_group("ijulia")
+@pytest.mark.needs("juliaup")
 def test_execute_notebook_julia(tmp_dir):
     subprocess.check_call(
         [
@@ -224,6 +225,7 @@ def test_execute_notebook_julia(tmp_dir):
 # Both install and build IJulia in the shared depot, and one precompiling it
 # while the other builds it fails with "IJulia not properly installed"
 @pytest.mark.xdist_group("ijulia")
+@pytest.mark.needs("juliaup")
 def test_check_env_kernel_julia(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -311,11 +313,10 @@ def test_execute_notebook_auto_env(tmp_dir):
     sys.platform == "win32",
     reason="Docker Linux images are unavailable on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_execute_notebook_docker(tmp_dir):
     # A Docker environment runs the kernel inside the container, so we execute
     # with Papermill inside the container rather than registering a host kernel
-    if shutil.which("docker") is None:
-        pytest.skip("Docker is not available")
     image = "calkit-nb-docker-test:latest"
     # Bake ipykernel and Papermill into the image so execution is deterministic
     with open("Dockerfile", "w") as f:

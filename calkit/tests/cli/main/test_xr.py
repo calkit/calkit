@@ -82,6 +82,7 @@ print("Processing complete")
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_xr_shell_command(tmp_dir):
     """Test xr command with shell command."""
     subprocess.check_call(["calkit", "init"])

@@ -186,6 +186,7 @@ def test_init(tmp_dir):
 
 
 @skipif_windows_docker
+@pytest.mark.needs("docker")
 def test_run_in_env(tmp_dir):
     # If running on Windows we need to set stdin for the subprocesses to
     # ensure sys.stdin.isatty() is False, otherwise we will run docker with
@@ -421,6 +422,7 @@ def test_run_in_venv(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+@pytest.mark.needs("juliaup")
 def test_run_in_julia_env(tmp_dir):
     subprocess.check_call("calkit init", shell=True)
     subprocess.check_call(
@@ -1332,6 +1334,7 @@ def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "stage", "--help"])
 
 
+@pytest.mark.needs("juliaup")
 def test_run(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -3292,6 +3295,7 @@ def test_save_new_files_in_git_stored_output_dir(tmp_dir):
 
 
 @skipif_windows_docker
+@pytest.mark.needs("docker")
 def test_xenv_env_var(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = calkit.load_calkit_info()

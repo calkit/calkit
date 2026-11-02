@@ -365,6 +365,7 @@ def test_update_conda_env(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+@pytest.mark.needs("juliaup")
 def test_update_environment(tmp_dir):
     # Test we can update an environment
     subprocess.check_call(["calkit", "init"])

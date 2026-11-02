@@ -540,6 +540,17 @@ def test_ensure_image_available() -> None:
         ):
             with pytest.raises(ValueError, match="never reached the registry"):
                 calkit.docker.ensure_image_available("some/image:1")
+        # Nor is a credential helper to blame when the daemon refused us
+        with mock.patch(
+            "calkit.docker.pull_image",
+            return_value=(
+                False,
+                "permission denied while trying to connect to the docker "
+                "API at unix:///var/run/docker.sock",
+            ),
+        ):
+            with pytest.raises(ValueError, match="'docker' group"):
+                calkit.docker.ensure_image_available("some/image:1")
         # One that got as far as talking to the registry is about the image
         with mock.patch(
             "calkit.docker.pull_image",

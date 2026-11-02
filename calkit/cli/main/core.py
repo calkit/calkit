@@ -2083,6 +2083,9 @@ def push(
                 "--tags",
             }.intersection(git_args):
                 git_cmd.append("--follow-tags")
+            git_cmd += calkit.git.get_set_upstream_args(
+                calkit.git.get_repo(), git_args
+            )
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
             raise_error("Git push failed")

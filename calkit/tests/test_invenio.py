@@ -1,5 +1,8 @@
 """Tests for the ``invenio`` module."""
 
+import pytest
+import requests
+
 import calkit
 
 
@@ -11,7 +14,12 @@ def test_get_base_url():
 
 
 def test_get_token():
-    token = calkit.invenio.get_token("zenodo")
+    # CI sets a token, and a maintainer may run a local hub to ask for one;
+    # anyone else has neither
+    try:
+        token = calkit.invenio.get_token("zenodo")
+    except requests.ConnectionError:
+        pytest.skip("No Zenodo token, and no local hub to fetch one from")
     assert isinstance(token, str)
 
 

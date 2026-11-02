@@ -65,6 +65,36 @@ def get_default_branch(repo: git.Repo) -> str | None:
     return None
 
 
+def get_set_upstream_args(
+    repo: git.Repo, push_args: list[str] | None = None
+) -> list[str]:
+    """Arguments that let a plain ``git push`` publish a new branch.
+
+    Git refuses to push a branch with no upstream unless
+    ``push.autoSetupRemote`` is on, so the first push of a project, e.g.,
+    right after connecting it to a hub, would fail. Returns nothing when
+    the branch already tracks one, ``push_args`` name where to push, or
+    there's no obvious remote to choose.
+    """
+    if any(not a.startswith("-") for a in push_args or []):
+        return []
+    try:
+        branch = repo.active_branch
+    except TypeError:
+        # Detached HEAD
+        return []
+    if branch.tracking_branch() is not None:
+        return []
+    remote_names = [r.name for r in repo.remotes]
+    if "origin" in remote_names:
+        remote = "origin"
+    elif len(remote_names) == 1:
+        remote = remote_names[0]
+    else:
+        return []
+    return ["--set-upstream", remote, branch.name]
+
+
 def check_branch_is_current(
     repo: git.Repo, branch: str | None = None, fetch: bool = True
 ) -> str | None:

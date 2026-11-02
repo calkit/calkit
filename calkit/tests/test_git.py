@@ -577,6 +577,40 @@ def test_check_branch_is_current(tmp_dir):
     assert f"'origin/{default_branch}'" in msg
 
 
+def test_get_set_upstream_args(tmp_dir: Path) -> None:
+    repo = git.Repo.init()
+    # Without push.autoSetupRemote, a plain push of a new branch fails
+    repo.git.config("push.autoSetupRemote", "false")
+    Path("a.txt").write_text("a")
+    repo.git.add("a.txt")
+    repo.git.commit(["-m", "First commit"])
+    branch = repo.active_branch.name
+    # Nowhere to push yet
+    assert calkit.git.get_set_upstream_args(repo) == []
+    # A lone remote is used whatever its name, so the first push works
+    git.Repo.init("remote.git", bare=True)
+    repo.git.remote(["add", "hub", "remote.git"])
+    args = calkit.git.get_set_upstream_args(repo)
+    assert args == ["--set-upstream", "hub", branch]
+    # Several remotes are ambiguous unless one is origin
+    git.Repo.init("other.git", bare=True)
+    repo.git.remote(["add", "other", "other.git"])
+    assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.remote(["rename", "other", "origin"])
+    args = calkit.git.get_set_upstream_args(repo)
+    assert args == ["--set-upstream", "origin", branch]
+    # Naming where to push leaves that to the caller, but flags don't
+    assert calkit.git.get_set_upstream_args(repo, ["hub"]) == []
+    assert calkit.git.get_set_upstream_args(repo, ["--force"]) == args
+    repo.git.push(*args)
+    # Once the branch tracks one, a plain push is fine
+    assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.push()
+    # A detached HEAD has no branch to set up
+    repo.git.checkout(["--detach"])
+    assert calkit.git.get_set_upstream_args(repo) == []
+
+
 def _install_stripping_filter(repo: git.Repo, pattern: str = "*.ipynb"):
     """Configure a clean filter that mangles content, the way nbstripout does.
 

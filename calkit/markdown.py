@@ -1497,7 +1497,7 @@ def expand_ck_info(
             # link to
             inputs = (
                 list(md_cfg.get("inputs") or [])
-                + pdf_inputs(text, md_path)
+                + pdf_inputs(text, md_path, results=results_by_name(ck_info))
                 + ["calkit.yaml"]
             )
             sub = {
@@ -2541,6 +2541,47 @@ _VALUE_RE = re.compile(
     r"<!--\s*/calkit value\s*-->"
 )
 _VALUES_RE = re.compile(r"<!--\s*calkit values\b(?P<attrs>.*?)-->")
+# The compact form, spelled to match calkit.sty's \ckvalue[opt]{source}{key}
+# so a project's LaTeX and Markdown read the same way. The source is a results
+# file path or a declared result's name, given on every marker: with a short
+# name this is still fewer characters than the long form needs with a
+# 'calkit values' directive above it, so nothing has to be implied from
+# elsewhere in the document.
+_CKVALUE_RE = re.compile(
+    r"<!--\s*ckvalue\b(?P<args>.*?)-->"
+    r"(?P<ctext>.*?)"
+    r"<!--\s*/ckvalue\s*-->"
+)
+# One argument of a compact marker: `key=value`, with the value optionally
+# quoted so a format can hold spaces, or a bare positional.
+_CKARG_RE = re.compile(
+    r"(?P<key>[A-Za-z_][\w-]*)=(?P<val>\"[^\"]*\"|'[^']*'|\S+)"
+    r"|(?P<pos>\"[^\"]*\"|'[^']*'|\S+)"
+)
+# Read like a Python call: source, key, format, each giveable positionally or
+# by name. `name=` and `path=` fill the same slot as the first positional and
+# say which kind it is, which the bare form has to infer.
+_CKVALUE_PARAMS = ("source", "key", "format")
+_CKVALUE_KEYWORDS = {
+    "name": "source",
+    "path": "source",
+    "key": "key",
+    "format": "format",
+}
+# Both forms in one pattern, because three functions walk the markers of a
+# line and pair them positionally with what extract_values returned. Two
+# patterns walked separately would pair them by form rather than by position,
+# so a line mixing the two would render each value into the other's marker.
+_ANY_VALUE_RE = re.compile(
+    _VALUE_RE.pattern.replace("(?P<text>", "(?P<ltext>")
+    + "|"
+    + _CKVALUE_RE.pattern
+)
+
+
+def _marker_text_group(m: re.Match) -> str:
+    """Which group holds the shown text, for whichever form matched."""
+    return "ctext" if m.group("ctext") is not None else "ltext"
 
 
 @dataclass
@@ -2554,6 +2595,10 @@ class MarkdownValue:
     format: str | None = None
     # 1-indexed line the marker is on
     line: int = 0
+    # What a compact marker named as its source, a path or a result's name,
+    # kept so an error can quote what was written rather than what it resolved
+    # to. None for the long form, which names its path outright.
+    source: str | None = None
 
 
 def _value_attrs(attrs_text: str, path: str | None, line: int) -> dict:
@@ -2563,13 +2608,176 @@ def _value_attrs(attrs_text: str, path: str | None, line: int) -> dict:
         raise MarkdownParseError(str(e), path=path, line=line)
 
 
-def extract_values(text: str, markdown_path: str) -> list[MarkdownValue]:
+def results_by_name(ck_info: dict) -> dict[str, str]:
+    """A project's declared results keyed by name, for the compact markers
+    that refer to one.
+
+    Results without a name are skipped, since a compact marker can still
+    name their path. A name used twice is an error rather than a silent
+    choice between them: which file a document quotes would then depend on
+    the order entries happen to sit in.
+    """
+    out: dict[str, str] = {}
+    for entry in ck_info.get("results") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        path = entry.get("path")
+        if not name or not path:
+            continue
+        if name in out and out[name] != path:
+            raise ValueError(
+                f"Two results are named '{name}' ('{out[name]}' and "
+                f"'{path}'); names must be unique to refer to one"
+            )
+        out[name] = Path(str(path)).as_posix()
+    return out
+
+
+def _unquote(text: str) -> str:
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    return text
+
+
+def _ckvalue_args(args_text: str, path: str, line: int) -> dict:
+    """A compact marker's arguments, by the rules a Python call follows.
+
+    Positional arguments fill source, key and format in that order, and may
+    be given by name instead; a positional after a keyword, a slot filled
+    twice, or a name that is not a parameter is an error rather than a
+    silently dropped argument.
+    """
+    got: dict[str, str] = {}
+    kind: str | None = None
+    seen_keyword = False
+    n_positional = 0
+    for m in _CKARG_RE.finditer(args_text):
+        if m.group("key") is not None:
+            seen_keyword = True
+            name = m.group("key")
+            slot = _CKVALUE_KEYWORDS.get(name)
+            if slot is None:
+                raise MarkdownParseError(
+                    f"'ckvalue' got an unexpected argument '{name}'; it "
+                    "takes name or path, key, and format",
+                    path=path,
+                    line=line,
+                )
+            if slot in got:
+                raise MarkdownParseError(
+                    f"'ckvalue' got multiple values for {slot}",
+                    path=path,
+                    line=line,
+                )
+            got[slot] = _unquote(m.group("val"))
+            if name in ("name", "path"):
+                kind = name
+        else:
+            if seen_keyword:
+                raise MarkdownParseError(
+                    "'ckvalue' got a positional argument after a keyword "
+                    "one; positional arguments come first",
+                    path=path,
+                    line=line,
+                )
+            if n_positional >= len(_CKVALUE_PARAMS):
+                raise MarkdownParseError(
+                    "'ckvalue' takes at most 3 arguments (a results file or "
+                    "result name, a key, and a format)",
+                    path=path,
+                    line=line,
+                )
+            got[_CKVALUE_PARAMS[n_positional]] = _unquote(m.group("pos"))
+            n_positional += 1
+    if "source" not in got:
+        raise MarkdownParseError(
+            "'ckvalue' names no results file; give one positionally or as "
+            "'path=results.json' or 'name=metrics'",
+            path=path,
+            line=line,
+        )
+    if "key" not in got:
+        raise MarkdownParseError(
+            f"'ckvalue {got['source']}' names no key; give one positionally "
+            "or as 'key=rms'",
+            path=path,
+            line=line,
+        )
+    got["kind"] = kind or ""
+    return got
+
+
+def _resolve_source(
+    source: str,
+    results: dict[str, str] | None,
+    path: str,
+    line: int,
+    kind: str = "",
+) -> str:
+    """The results file a compact marker's source names.
+
+    A declared result's name wins over a path that happens to look like it,
+    since a name is the thing a project controls; anything else is taken as
+    a path. A bare word that is neither is the likely typo, so it is named
+    as one rather than reported as a missing file later.
+    """
+    if kind == "path":
+        return Path(source).as_posix()
+    if kind == "name":
+        if not (results and source in results):
+            known = ", ".join(sorted(results)) if results else "none declared"
+            raise MarkdownParseError(
+                f"no result is named '{source}' (declared names: {known})",
+                path=path,
+                line=line,
+            )
+        return Path(results[source]).as_posix()
+    if results and source in results:
+        return Path(results[source]).as_posix()
+    looks_like_path = "/" in source or "." in Path(source).name
+    if not looks_like_path:
+        known = ", ".join(sorted(results)) if results else "none declared"
+        raise MarkdownParseError(
+            f"'{source}' is not a declared result name and does not look "
+            f"like a path to a results file (declared names: {known})",
+            path=path,
+            line=line,
+        )
+    return Path(source).as_posix()
+
+
+def _ck_format(option: str | None) -> str | None:
+    """A compact marker's format, written as a bare Python format spec, e.g.
+    ``.2f``, the way ``calkit.sty`` writes it. The long form writes a whole
+    replacement field, so both are accepted and a bare spec is wrapped into
+    one."""
+    if option is None:
+        return None
+    option = option.strip()
+    if not option:
+        return None
+    return option if "{" in option else "{:" + option + "}"
+
+
+def extract_values(
+    text: str,
+    markdown_path: str,
+    results: dict[str, str] | None = None,
+) -> list[MarkdownValue]:
     """Find the value markers in Markdown text, in document order.
 
-    A ``calkit values path=...`` directive sets the results file for the
-    markers after it, so a file drawing on one results file needn't name
-    it on every value. Markers inside fenced code are examples, not
-    values, and are left alone.
+    Two forms are accepted. The compact ``ckvalue`` marker names its
+    source on the marker itself, as a results file path or as the name of
+    a result the project declares, mirroring how ``\\ckvalue`` reads in
+    LaTeX. The longer ``calkit value`` marker takes ``key=`` and
+    ``path=``, and a ``calkit values path=...`` directive sets the file
+    for the long markers after it, so a file drawing on one results file
+    needn't name it on every value; that default never applies to a
+    compact marker, which is always self-contained.
+
+    Markers inside fenced code are examples, not values, and are left
+    alone.
     """
     path = Path(markdown_path).as_posix()
     values: list[MarkdownValue] = []
@@ -2599,7 +2807,28 @@ def extract_values(text: str, markdown_path: str) -> list[MarkdownValue]:
                     line=i + 1,
                 )
             default_path = Path(str(attrs["path"])).as_posix()
-        for m in _VALUE_RE.finditer(line):
+        for m in _ANY_VALUE_RE.finditer(line):
+            if m.group("ctext") is not None:
+                # The compact form names its source on the marker, so the
+                # 'calkit values' default does not apply to it.
+                got = _ckvalue_args(m.group("args"), path, i + 1)
+                values.append(
+                    MarkdownValue(
+                        key=got["key"],
+                        path=_resolve_source(
+                            got["source"],
+                            results,
+                            path,
+                            i + 1,
+                            kind=got["kind"],
+                        ),
+                        text=m.group("ctext"),
+                        format=_ck_format(got.get("format")),
+                        line=i + 1,
+                        source=got["source"],
+                    )
+                )
+                continue
             attrs = _value_attrs(m.group("attrs"), path, i + 1)
             key = attrs.pop("key", None)
             if key is None:
@@ -2630,7 +2859,7 @@ def extract_values(text: str, markdown_path: str) -> list[MarkdownValue]:
                 MarkdownValue(
                     key=str(key),
                     path=Path(str(results_path)).as_posix(),
-                    text=m.group("text"),
+                    text=m.group("ltext"),
                     format=None if fmt is None else str(fmt),
                     line=i + 1,
                 )
@@ -2669,7 +2898,10 @@ def format_value(value: Any, fmt: str | None = None) -> str:
 
 
 def set_values(
-    text: str, markdown_path: str, wdir: str | None = None
+    text: str,
+    markdown_path: str,
+    wdir: str | None = None,
+    results: dict[str, str] | None = None,
 ) -> tuple[str, bool]:
     """Rewrite each value marker's text from its results file.
 
@@ -2681,7 +2913,7 @@ def set_values(
     """
     import json
 
-    values = extract_values(text, markdown_path)
+    values = extract_values(text, markdown_path, results=results)
     if not values:
         return text, False
     path = Path(markdown_path).as_posix()
@@ -2746,14 +2978,15 @@ def set_values(
         if fm is not None:
             fence = fm.group("fence")
             continue
-        matches = list(_VALUE_RE.finditer(bare))
+        matches = list(_ANY_VALUE_RE.finditer(bare))
         if not matches:
             continue
         # Replace from the right so earlier offsets stay valid
         for m in reversed(matches):
             new = rendered[n + matches.index(m)]
-            if new != m.group("text"):
-                bare = bare[: m.start("text")] + new + bare[m.end("text") :]
+            group = _marker_text_group(m)
+            if new != m.group(group):
+                bare = bare[: m.start(group)] + new + bare[m.end(group) :]
                 changed = True
         n += len(matches)
         lines[i] = bare + line[len(line.rstrip("\r\n")) :]
@@ -2780,12 +3013,16 @@ def _is_local_path(path: str) -> bool:
     )
 
 
-def pdf_inputs(text: str, markdown_path: str) -> list[str]:
+def pdf_inputs(
+    text: str, markdown_path: str, results: dict[str, str] | None = None
+) -> list[str]:
     """What building a Markdown file into a PDF reads besides the file:
     the results files its values come from and the images it shows, as
     paths from the project root."""
     md_dir = os.path.dirname(markdown_path)
-    paths = [v.path for v in extract_values(text, markdown_path)]
+    paths = [
+        v.path for v in extract_values(text, markdown_path, results=results)
+    ]
     # Only what renders: not code, whether fenced or inline
     prose = []
     fence: str | None = None
@@ -2837,11 +3074,16 @@ def image_prefix_filter(prefix: str) -> str:
     )
 
 
-def prepare_for_pdf(text: str, markdown_path: str, link: Any = None) -> str:
+def prepare_for_pdf(
+    text: str,
+    markdown_path: str,
+    link: Any = None,
+    results: dict[str, str] | None = None,
+) -> str:
     """Markdown as pandoc should see it: each value marker becomes the value
     it shows, which ``set_values`` will have brought up to date, as a link
     where ``link`` gives a URL for it."""
-    values = extract_values(text, markdown_path)
+    values = extract_values(text, markdown_path, results=results)
     lines = text.splitlines(keepends=True)
     n = 0
     fence: str | None = None
@@ -2860,7 +3102,7 @@ def prepare_for_pdf(text: str, markdown_path: str, link: Any = None) -> str:
         if fm is not None:
             fence = fm.group("fence")
             continue
-        matches = list(_VALUE_RE.finditer(bare))
+        matches = list(_ANY_VALUE_RE.finditer(bare))
         for m in reversed(matches):
             value = values[n + matches.index(m)]
             url = link(value) if link is not None else None

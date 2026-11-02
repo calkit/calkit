@@ -251,21 +251,83 @@ and the prose refers to values in it by key, between a pair of markers
 that are invisible when rendered:
 
 ```md
-The RMS is <!-- calkit value key=rms path=results.json format="{:.4f}" -->0.2933<!-- /calkit value -->
-over <!-- calkit value key=n path=results.json -->401<!-- /calkit value --> samples.
+The RMS is <!-- ckvalue results.json rms .4f -->0.2933<!-- /ckvalue -->
+over <!-- ckvalue results.json n -->401<!-- /ckvalue --> samples.
 ```
 
+A marker reads like a call: a results file, a key, and optionally a
+format. The spelling matches [`\ckvalue`](../latex.md) in LaTeX, so the
+two sides of a project look the same.
 After every run, the text between each pair is rewritten from the results
 file, so the file says what was actually computed.
 Keys can be dotted to reach into nested objects and lists, e.g.,
 `fit.coeffs.0`.
-`format` is a Python format string applied to the value,
-e.g., `format="{:.2%}"` or `format="{value:,}"`;
+The format is a Python format spec like `.2%`, or a whole replacement
+field like `{value:,}`, quoted if it holds spaces;
 without one, numbers read exactly as the results file has them.
-A `calkit values path=results.json` directive sets the results file for
-every marker after it, so a file drawing on one results file needn't name
-it each time.
 Markers inside fenced code are examples and are left alone.
+
+### Arguments, positionally or by name
+
+The three arguments behave like a Python call's: positional in the order
+above, or given by name, or positional ones first and then named. These
+are the same value:
+
+```md
+<!-- ckvalue metrics rms .4f -->0.2933<!-- /ckvalue -->
+<!-- ckvalue metrics rms format=.4f -->0.2933<!-- /ckvalue -->
+<!-- ckvalue name=metrics key=rms format=.4f -->0.2933<!-- /ckvalue -->
+```
+
+The first argument is `path` or `name`, which fill the same slot. Giving
+it positionally leaves Calkit to tell which it is: a declared result's
+name wins, and anything else is read as a path. Naming it says outright,
+so `path=metrics` is a file called `metrics` even when a result is named
+that, and `name=metrics` fails if no result has the name rather than
+looking for a file.
+
+Filling a slot twice, putting a positional argument after a named one, or
+naming an argument that is not one of the three is an error, so a mistake
+is reported rather than quietly dropped.
+
+### Naming a result instead of its path
+
+A marker can name a result the project declares rather than its path:
+
+```yaml
+results:
+  - name: metrics
+    path: results.json
+    stage: analysis
+```
+
+```md
+The RMS is <!-- ckvalue[.4f] metrics rms -->0.2933<!-- /ckvalue -->.
+```
+
+The name is shorter than the path, so repeating it on every marker costs
+less than it saves, and it keeps each marker self-contained: what a value
+comes from is readable where the value is, not inferred from something
+above it.
+It also survives the file being renamed, and says which stage produces
+the number.
+
+### The longer form
+
+The original spelling still works, taking `key=` and `path=` as
+attributes, with `format=` as a whole replacement field. Note that its
+arguments are all named, and that its `format` is a replacement field
+rather than a bare spec:
+
+```md
+The RMS is <!-- calkit value key=rms path=results.json format="{:.4f}" -->0.2933<!-- /calkit value -->
+```
+
+A `calkit values path=results.json` directive sets the results file for
+every `calkit value` marker after it, so a file drawing on one results
+file needn't name it each time.
+That default never applies to a `ckvalue` marker, which always names its
+own source.
 
 ## Running
 

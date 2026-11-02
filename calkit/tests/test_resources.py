@@ -111,17 +111,35 @@ def test_github_actions_workflow(tmp_path):
     assert not calkit.resources.is_default_github_actions_workflow(
         pinned + "\n      - run: echo custom\n"
     )
-    # One that only runs when started has that as its only trigger, and
-    # is otherwise the example
-    on_demand = calkit.resources.render_github_actions_workflow(on_demand=True)
+    # Its triggers can be replaced, leaving the rest as it was, given as
+    # event names or GitHub's mapping
+    on_demand = calkit.resources.render_github_actions_workflow(
+        on=["workflow_dispatch"]
+    )
     assert calkit.ryaml.load(on_demand)["on"] == {"workflow_dispatch": None}
-    assert (
-        calkit.ryaml.load(on_demand)["jobs"]
-        == calkit.ryaml.load(
-            calkit.resources.render_github_actions_workflow()
-        )["jobs"]
+    assert "\non:\n  workflow_dispatch:\n\npermissions:" in on_demand
+    default = calkit.resources.render_github_actions_workflow()
+    assert on_demand.replace("  workflow_dispatch:\n", "") == default.replace(
+        "  push:\n    branches:\n      - main\n  pull_request:\n"
+        "  workflow_dispatch:\n",
+        "",
     )
     assert not calkit.resources.is_default_github_actions_workflow(on_demand)
+    for on, expected in [
+        ("push", {"push": None}),
+        (["push", "pull_request"], {"push": None, "pull_request": None}),
+        ({"push": {"branches": ["main"]}}, {"push": {"branches": ["main"]}}),
+    ]:
+        txt = calkit.resources.set_workflow_triggers(on_demand, on)
+        assert calkit.ryaml.load(txt)["on"] == expected
+    # Even when a YAML 1.1 writer quoted the key
+    quoted = calkit.resources.set_workflow_triggers(
+        "'on': push\njobs: {}\n", "workflow_dispatch"
+    )
+    assert calkit.ryaml.load(quoted) == {
+        "on": {"workflow_dispatch": None},
+        "jobs": {},
+    }
     # Whether a workflow can be started, however its triggers are written
     for txt, can in [
         (pinned, True),

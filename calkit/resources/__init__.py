@@ -12,10 +12,12 @@ editing ``vscode/*.json`` or ``devcontainer/base.json``.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
 import stat
+from typing import Any
 
 DEVCONTAINER_FNAME = "devcontainer.json"
 VSCODE_FNAMES = ["settings.json", "extensions.json"]
@@ -121,26 +123,51 @@ def set_action_ref(workflow_txt: str, version: str | None = None) -> str:
     )
 
 
+def set_workflow_triggers(
+    workflow_txt: str, on: str | list[str] | dict[str, Any]
+) -> str:
+    """Return a workflow with its ``on`` triggers replaced, keeping the rest
+    as it was.
+
+    Event names become a mapping with no settings for each, e.g.,
+    ``workflow_dispatch:``, which is how GitHub's docs write them. A mapping
+    is used as is, e.g., ``{"push": {"branches": ["main"]}}``.
+    """
+    from ruamel.yaml.comments import CommentedMap
+
+    from calkit.core import ryaml
+
+    workflow = ryaml.load(workflow_txt)
+    if isinstance(on, str):
+        on = [on]
+    triggers = (
+        CommentedMap(on)
+        if isinstance(on, dict)
+        else CommentedMap((name, None) for name in on)
+    )
+    # YAML 1.1 parsers read the key as true, so it might be quoted either way
+    key: Any = True if True in workflow and "on" not in workflow else "on"
+    workflow[key] = triggers
+    buf = io.StringIO()
+    ryaml.dump(workflow, buf)
+    return buf.getvalue()
+
+
 def render_github_actions_workflow(
-    version: str | None = None, on_demand: bool = False
+    version: str | None = None,
+    on: str | list[str] | dict[str, Any] | None = None,
 ) -> str:
     """Return the example workflow, pinning the action to a Calkit version.
 
-    With ``on_demand``, it only runs when started, e.g., from the hub,
-    rather than on every push, which for a paper synced from Overleaf is
-    every sync.
+    ``on`` replaces its triggers, e.g., ``["workflow_dispatch"]`` for one
+    that only runs when started, e.g., from the hub, rather than on every
+    push, which for a paper synced from Overleaf is every sync.
     """
     txt = set_action_ref(
         read_text("github-actions", GITHUB_ACTIONS_FNAME), version=version
     )
-    if on_demand:
-        txt = re.sub(
-            r"(?m)^on:\n(?:[ \t].*\n)+",
-            "# Runs only when started, e.g., from Calkit\non:\n"
-            "  workflow_dispatch:\n",
-            txt,
-            count=1,
-        )
+    if on is not None:
+        txt = set_workflow_triggers(txt, on)
     return txt
 
 

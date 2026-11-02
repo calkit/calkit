@@ -249,22 +249,26 @@ export interface ProjectPipeline {
 
 /** A run of the pipeline, wherever it ran. */
 export interface PipelineRun {
-  where: "github-actions";
-  /** Unknown for a run just started, until GitHub lists it. */
-  id?: string | null;
+  id: string;
+  location: "github-actions";
   status: "queued" | "running" | "succeeded" | "failed" | "canceled";
-  started_at?: string | null;
+  created: string;
+  started?: string | null;
+  finished?: string | null;
   url?: string | null;
-  commit?: string | null;
+  git_rev?: string | null;
   branch?: string | null;
   started_by?: string | null;
-  /** The GitHub Actions workflow it ran in, by file name. */
-  workflow?: string | null;
+  /** By file name. */
+  github_workflow?: string | null;
+  /** Unknown for one just started, until GitHub lists it. */
+  github_run_id?: number | null;
 }
 
 export interface PipelineRuns {
   /** Newest first. */
   runs: PipelineRun[];
+  total: number;
   github_workflow?: string | null;
   can_start: boolean;
   cannot_start_reason?: string | null;

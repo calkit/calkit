@@ -307,7 +307,7 @@ async function handle(message: Request): Promise<unknown> {
     case "project.startPipelineRun":
       return request<PipelineRun>(
         `${projectPath(message.owner, message.project)}/pipeline/runs`,
-        { method: "POST" },
+        { method: "POST", body: { location: "github-actions" } },
       );
     case "project.addExportStage":
       return request<ExportStage>(

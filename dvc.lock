@@ -163,7 +163,7 @@ stages:
       md5: 4960953114330139033d7281122861de
       size: 135957
   budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8
+    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8 
       --attendees=25 --supported=60 --indirect-rate=0
     deps:
     - path: .python-version
@@ -216,8 +216,8 @@ stages:
       md5: 1078d8d6187e0e072d20f488176ff71e
       size: 50208
   latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/latex-word-round-trip.py --engine=libreoffice
+    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
+      --engine=libreoffice
     deps:
     - path: .python-version
       hash: md5
@@ -233,8 +233,8 @@ stages:
       size: 96829
     - path: calkit/latex.py
       hash: md5
-      md5: 3fb5e2e224a129022a5c5ed6b4776bf6
-      size: 125373
+      md5: 22b41310259a9e1d530a01ee7b7bd482
+      size: 126205
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -294,8 +294,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: 3fb5e2e224a129022a5c5ed6b4776bf6
-      size: 125373
+      md5: 22b41310259a9e1d530a01ee7b7bd482
+      size: 126205
     - path: uv.lock
       hash: md5
       md5: b5d0e9511259dec7553283d5727fe0c1
@@ -303,26 +303,8 @@ stages:
     outs:
     - path: images/latex/sizes.json
       hash: md5
-      md5: 050df5f87097cc2a733a4985c9c49f3b
+      md5: ec9ac7c3ade85e066f0568af2a892eeb
       size: 335
-  one-pager-font:
-    cmd: calkit xenv -n tex --no-check -- sh 
-      .calkit/stage-commands/one-pager-font.sh
-    deps:
-    - path: .calkit/env-locks/tex
-      hash: md5
-      md5: b2d28555a90965646645402d6964aa46.dir
-      size: 2832
-      nfiles: 2
-    - path: .calkit/stage-commands/one-pager-font.sh
-      hash: md5
-      md5: ec8d7395661d6af8e24623c6b1840985
-      size: 59
-    outs:
-    - path: docs/one-pager/texgyreheros-regular.otf
-      hash: md5
-      md5: 46896831ad260afebc87cd85a7ea159a
-      size: 133600
   one-pager/pdf:
     cmd: calkit latex from-markdown docs/one-pager/main.md -o 
       docs/one-pager/main.pdf -e tex --no-check --template 
@@ -400,6 +382,24 @@ stages:
       hash: md5
       md5: a158b62821cca9b21bef681e6eb94469
       size: 539
+  one-pager-font:
+    cmd: calkit xenv -n tex --no-check -- sh 
+      .calkit/stage-commands/one-pager-font.sh
+    deps:
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: b2d28555a90965646645402d6964aa46.dir
+      size: 2832
+      nfiles: 2
+    - path: .calkit/stage-commands/one-pager-font.sh
+      hash: md5
+      md5: ec8d7395661d6af8e24623c6b1840985
+      size: 59
+    outs:
+    - path: docs/one-pager/texgyreheros-regular.otf
+      hash: md5
+      md5: 46896831ad260afebc87cd85a7ea159a
+      size: 133600
   find-calkit-projects:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
     deps:
@@ -422,7 +422,7 @@ stages:
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 6ec477d26e99483d4ead007cdcc2c99b
+      md5: eceeb613d582d02c0eb53d0b4a20e1c2
       size: 11725
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
@@ -437,7 +437,7 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 6ec477d26e99483d4ead007cdcc2c99b
+      md5: eceeb613d582d02c0eb53d0b4a20e1c2
       size: 11725
     - path: scripts/find-calkit-papers.py
       hash: md5

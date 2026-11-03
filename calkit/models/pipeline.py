@@ -1337,7 +1337,7 @@ class LatexStage(Stage):
         desc,
         inputs,
         revision_key,
-    ) -> tuple(dict, str):
+    ) -> tuple[dict, str]:
         name = calkit.latex.get_diff_stage_name(
             str(self.name), from_ref, to_ref
         )

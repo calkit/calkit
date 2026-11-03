@@ -737,19 +737,24 @@ def get_repo(
                             remote_ref: str | None = (
                                 f"refs/remotes/origin/{branch_name}"
                             )
-                            if remote_ref not in [r.path for r in repo.refs]:
+                            fetched = [
+                                r.path
+                                for r in repo.refs
+                                if r.path.startswith("refs/remotes/origin/")
+                            ]
+                            if not fetched:
+                                logger.info(f"{repo_label} is still empty")
+                                remote_ref = None
+                            elif remote_ref not in fetched:
                                 # The first push may have been to another
                                 # branch, which GitHub then made the default
-                                try:
-                                    repo.git.remote(
-                                        ["set-head", "origin", "--auto"]
-                                    )
-                                    remote_ref = repo.git.symbolic_ref(
-                                        "refs/remotes/origin/HEAD"
-                                    )
-                                except GitCommandError:
-                                    logger.info(f"{repo_label} is still empty")
-                                    remote_ref = None
+                                repo.git.remote(
+                                    ["set-head", "origin", "--auto"],
+                                    kill_after_timeout=GIT_FETCH_TIMEOUT,
+                                )
+                                remote_ref = repo.git.symbolic_ref(
+                                    "refs/remotes/origin/HEAD"
+                                )
                             if remote_ref is not None:
                                 branch_name = remote_ref.removeprefix(
                                     "refs/remotes/origin/"

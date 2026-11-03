@@ -1431,6 +1431,11 @@ def test_get_repo_picks_up_the_first_push_to_an_empty_repo(
         seed.git.checkout(["-b", "master"])
         first = _commit(seed, "notes.txt", "one")
         seed.git.push(["origin", "master"])
+        # Until the remote can say which branch is the default, the refresh
+        # fails rather than reporting an empty tree as current
+        with pytest.raises(HTTPException) as excinfo:
+            read(project)
+        assert excinfo.value.status_code == 502
         git.Repo(str(origin_dir)).git.symbolic_ref(
             ["HEAD", "refs/heads/master"]
         )

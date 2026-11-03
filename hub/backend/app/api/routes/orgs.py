@@ -357,7 +357,13 @@ def _get_member_to_modify(
     A ``new_role`` of ``None`` means removal. Only owners and superusers may
     touch owners or grant the owner role, and nobody may remove or demote the
     org's last owner.
+
+    Locks the org's row until the caller commits, so concurrent changes to its
+    members are each checked against what the others committed.
     """
+    session.exec(select(Org).where(Org.id == org.id).with_for_update()).one()
+    # Memberships read before the lock may be stale
+    session.expire_all()
     current_role = _check_can_manage_members(
         org=org, current_user=current_user
     )

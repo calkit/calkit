@@ -1,14 +1,16 @@
 """Tests for the org routes."""
 
+import threading
 import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from httpx import Response
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app import users
+from app.db import engine
 from app.models import (
     ROLE_IDS,
     Account,
@@ -300,3 +302,50 @@ def test_update_and_delete_org_member(
         owner.account.name: "admin",
         member.account.name: "owner",
     }
+
+
+def test_concurrent_owner_changes_keep_an_owner(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    owner = _make_user(db, "owner")
+    org = _make_org(db, owner)
+    other_owner = _make_user(db, "owner")
+    base = f"/orgs/{org.account.name}/members"
+    resp = client.post(
+        base,
+        headers=superuser_token_headers,
+        json={"username": other_owner.account.name, "role": "owner"},
+    )
+    assert resp.status_code == 200, resp.text
+    results: list[Response] = []
+
+    def demote_other_owner() -> None:
+        results.append(
+            client.patch(
+                f"{base}/{other_owner.account.name}",
+                headers=superuser_token_headers,
+                json={"role": "admin"},
+            )
+        )
+
+    # Another transaction holds the org's lock while it demotes the first owner
+    with Session(engine) as other:
+        other.exec(select(Org).where(Org.id == org.id).with_for_update()).one()
+        thread = threading.Thread(target=demote_other_owner)
+        thread.start()
+        # So the request waits rather than counting two owners
+        thread.join(timeout=1)
+        assert thread.is_alive()
+        membership = other.exec(
+            select(UserOrgMembership)
+            .where(UserOrgMembership.org_id == org.id)
+            .where(UserOrgMembership.user_id == owner.id)
+        ).one()
+        membership.role_id = ROLE_IDS["admin"]
+        other.add(membership)
+        other.commit()
+    thread.join(timeout=30)
+    assert not thread.is_alive()
+    # Then sees the other owner is the last one
+    assert results[0].status_code == 400, results[0].text
+    assert "last owner" in results[0].json()["detail"]

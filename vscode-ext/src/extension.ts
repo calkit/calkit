@@ -6887,7 +6887,7 @@ async function runCreateUvEnvironmentWizard(
   workspaceRoot: string,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
-  let name = "my-uv-env";
+  let name = "py";
   let pyprojectPath = "pyproject.toml";
   let step = 0;
 

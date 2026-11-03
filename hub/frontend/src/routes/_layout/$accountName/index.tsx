@@ -82,6 +82,8 @@ function UsersTable({ orgName, canManage, canManageOwners }: UsersTableProps) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["org-users", orgName] })
+      // Changing your own role changes which controls the page shows
+      queryClient.invalidateQueries({ queryKey: ["accounts", orgName] })
     },
   })
   return (

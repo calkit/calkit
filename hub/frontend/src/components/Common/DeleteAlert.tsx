@@ -131,6 +131,8 @@ const Delete = ({
       }
       if (type === "Org member") {
         queryClient.invalidateQueries({ queryKey: ["org-users", orgName] })
+        // Removing yourself takes away your role on the org page
+        queryClient.invalidateQueries({ queryKey: ["accounts", orgName] })
       }
       if (type === "Question") {
         queryClient.invalidateQueries({

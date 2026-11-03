@@ -620,7 +620,7 @@ def _commit(message: str) -> None:
 
 def test_latex_to_arxiv() -> None:
     result = subprocess.run(
-        ["calkit", "latex", "to-arxiv", "test/latex-comments", "main.tex"],
+        ["calkit", "latex", "to-arxiv", "test/latex-comments", "main"],
         capture_output=True,
         text=True,
     )

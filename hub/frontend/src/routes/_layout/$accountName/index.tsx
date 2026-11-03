@@ -5,6 +5,7 @@ import {
   Heading,
   IconButton,
   Link,
+  Select,
   SkeletonText,
   Table,
   TableContainer,
@@ -15,31 +16,73 @@ import {
   Tr,
   useDisclosure,
 } from "@chakra-ui/react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Link as RouterLink } from "@tanstack/react-router"
-import { useEffect } from "react"
+import type { AxiosError } from "axios"
+import { useEffect, useState } from "react"
+import DeleteAlert from "../../../components/Common/DeleteAlert"
 import LoadingSpinner from "../../../components/Common/LoadingSpinner"
 
 import { ExternalLinkIcon } from "@chakra-ui/icons"
-import { FaPlus } from "react-icons/fa"
-import { AccountsService, OrgsService, ProjectsService } from "../../../client"
+import { FaPlus, FaTrash } from "react-icons/fa"
+import {
+  AccountsService,
+  type OrgMemberPatch,
+  OrgsService,
+  ProjectsService,
+} from "../../../client"
 import NotFound from "../../../components/Common/NotFound"
 import AddMember from "../../../components/Orgs/AddMember"
+import useAuth from "../../../hooks/useAuth"
+import useCustomToast from "../../../hooks/useCustomToast"
+import { handleError } from "../../../lib/errors"
 import { capitalizeFirstLetter } from "../../../lib/strings"
 
 export const Route = createFileRoute("/_layout/$accountName/")({
   component: AccountPage,
 })
 
-function UsersTable() {
-  const { accountName } = Route.useParams()
+type OrgRole = OrgMemberPatch["role"]
+
+const ORG_ROLES: OrgRole[] = ["read", "write", "admin", "owner"]
+
+interface UsersTableProps {
+  orgName: string
+  // Superusers and org owners or admins
+  canManage: boolean
+  // Only superusers and org owners may grant ownership or change an owner
+  canManageOwners: boolean
+}
+
+function UsersTable({ orgName, canManage, canManageOwners }: UsersTableProps) {
+  const queryClient = useQueryClient()
+  const showToast = useCustomToast()
+  const removeModal = useDisclosure()
+  const [memberToRemove, setMemberToRemove] = useState("")
   const { isPending, data: users } = useQuery({
-    queryKey: ["org-users", accountName],
+    queryKey: ["org-users", orgName],
     queryFn: () =>
-      OrgsService.getOrgUsers({ org_name: accountName }).then(
+      OrgsService.getOrgUsers({ org_name: orgName }).then(
         (response) => response.data,
       ),
+  })
+  const roleMutation = useMutation({
+    mutationFn: ({ username, role }: { username: string; role: OrgRole }) =>
+      OrgsService.updateOrgMember({
+        org_name: orgName,
+        username,
+        orgMemberPatch: { role },
+      }).then((response) => response.data),
+    onSuccess: () => {
+      showToast("Success!", "Member role updated.", "success")
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["org-users", orgName] })
+    },
   })
   return (
     <>
@@ -50,12 +93,13 @@ function UsersTable() {
               <Th>Name</Th>
               <Th>GitHub name</Th>
               <Th>Role</Th>
+              {canManage ? <Th /> : null}
             </Tr>
           </Thead>
           {isPending ? (
             <Tbody>
               <Tr>
-                {new Array(3).fill(null).map((_, index) => (
+                {new Array(canManage ? 4 : 3).fill(null).map((_, index) => (
                   <Td key={index}>
                     <SkeletonText noOfLines={1} paddingBlock="16px" />
                   </Td>
@@ -64,28 +108,87 @@ function UsersTable() {
             </Tbody>
           ) : (
             <Tbody>
-              {users?.map((user) => (
-                <Tr key={user.name}>
-                  <Td>
-                    <Link as={RouterLink} to={`/${user.name}`}>
-                      {user.name}
-                    </Link>
-                  </Td>
-                  <Td>
-                    <Link
-                      href={`https://github.com/${user.github_name}`}
-                      isExternal
-                    >
-                      <ExternalLinkIcon mx="2px" /> {user.github_name}
-                    </Link>
-                  </Td>
-                  <Td>{capitalizeFirstLetter(user.role)}</Td>
-                </Tr>
-              ))}
+              {users?.map((user) => {
+                const canEdit =
+                  canManage && (canManageOwners || user.role !== "owner")
+                return (
+                  <Tr key={user.name}>
+                    <Td>
+                      <Link as={RouterLink} to={`/${user.name}`}>
+                        {user.name}
+                      </Link>
+                    </Td>
+                    <Td>
+                      {user.github_name ? (
+                        <Link
+                          href={`https://github.com/${user.github_name}`}
+                          isExternal
+                        >
+                          <ExternalLinkIcon mx="2px" /> {user.github_name}
+                        </Link>
+                      ) : (
+                        ""
+                      )}
+                    </Td>
+                    <Td>
+                      {canEdit ? (
+                        <Select
+                          aria-label={`Role for ${user.name}`}
+                          size="sm"
+                          maxW="130px"
+                          value={user.role}
+                          isDisabled={roleMutation.isPending}
+                          onChange={(e) =>
+                            roleMutation.mutate({
+                              username: user.name,
+                              role: e.target.value as OrgRole,
+                            })
+                          }
+                        >
+                          {ORG_ROLES.filter(
+                            (role) => canManageOwners || role !== "owner",
+                          ).map((role) => (
+                            <option key={role} value={role}>
+                              {capitalizeFirstLetter(role)}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        capitalizeFirstLetter(user.role)
+                      )}
+                    </Td>
+                    {canManage ? (
+                      <Td>
+                        {canEdit ? (
+                          <IconButton
+                            aria-label={`Remove ${user.name}`}
+                            icon={<FaTrash />}
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => {
+                              setMemberToRemove(user.name)
+                              removeModal.onOpen()
+                            }}
+                          />
+                        ) : (
+                          ""
+                        )}
+                      </Td>
+                    ) : null}
+                  </Tr>
+                )
+              })}
             </Tbody>
           )}
         </Table>
       </TableContainer>
+      <DeleteAlert
+        type="Org member"
+        id={memberToRemove}
+        orgName={orgName}
+        isOpen={removeModal.isOpen}
+        onClose={removeModal.onClose}
+      />
     </>
   )
 }
@@ -182,6 +285,11 @@ function AccountPage() {
     }
   }, [account, accountName, navigate])
   const { isOpen, onOpen, onClose } = useDisclosure()
+  const { user: currentUser } = useAuth()
+  const isSuperuser = Boolean(currentUser?.is_superuser)
+  const canManageMembers =
+    isSuperuser || ["owner", "admin"].includes(account?.role ?? "")
+  const canManageOwners = isSuperuser || account?.role === "owner"
 
   return (
     <Box>
@@ -203,13 +311,13 @@ function AccountPage() {
             {/* TODO: Show icons indicating user/org and role */}
           </Heading>
           {/* Add a users table if this is an org */}
-          {account.kind === "org" && account.role ? (
+          {account.kind === "org" && (account.role || isSuperuser) ? (
             <Box mb={8}>
               <Flex align="center" mb={4}>
                 <Heading size="md" mr={2}>
                   Members
                 </Heading>
-                {["owner", "admin"].includes(account.role) ? (
+                {canManageMembers ? (
                   <IconButton
                     aria-label="Add member"
                     height="25px"
@@ -223,7 +331,11 @@ function AccountPage() {
                   ""
                 )}
               </Flex>
-              <UsersTable />
+              <UsersTable
+                orgName={account.name}
+                canManage={canManageMembers}
+                canManageOwners={canManageOwners}
+              />
               <AddMember
                 isOpen={isOpen}
                 onClose={onClose}

@@ -7,6 +7,7 @@ import {
   parsePixiPackages,
   parseProjectDependencies,
   parseRequirementsTxt,
+  parseSlurmServerOutput,
   parseSlurmOptionList,
   parseUvPackages,
   slurmOptionsToOptionList,
@@ -68,6 +69,36 @@ test("getDefaultSlurmOptions ignores legacy object format", () => {
   });
 
   assert.equal(parsed, undefined);
+});
+
+test("parseSlurmServerOutput finds the compute node and Jupyter port", () => {
+  // Nothing printed yet
+  assert.deepEqual(parseSlurmServerOutput(""), {
+    host: undefined,
+    port: undefined,
+  });
+  // Job started, Jupyter not up yet
+  assert.deepEqual(parseSlurmServerOutput("CALKIT_SLURM_NODE=node042\n"), {
+    host: "node042",
+    port: undefined,
+  });
+  // Jupyter up on a fallback port since the requested one was taken
+  const output = [
+    "CALKIT_SLURM_NODE=node042.cluster.edu",
+    "Environment is up to date",
+    "[I ServerApp] Jupyter Server 2.21.1 is running at:",
+    "[I ServerApp] http://0.0.0.0:8889/lab?token=abc",
+    "[I ServerApp]     http://127.0.0.1:8889/lab?token=abc",
+  ].join("\n");
+  assert.deepEqual(parseSlurmServerOutput(output), {
+    host: "node042.cluster.edu",
+    port: 8889,
+  });
+  // URLs that aren't the Jupyter server's are ignored
+  assert.deepEqual(
+    parseSlurmServerOutput("See https://example.com:443/docs for help"),
+    { host: undefined, port: undefined },
+  );
 });
 
 test("makeEnvironmentCandidates returns standalone notebook envs and nested slurm combinations", () => {

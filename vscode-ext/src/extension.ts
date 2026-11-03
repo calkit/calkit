@@ -16,7 +16,9 @@ import {
   kernelRegistrationKinds,
   makeCalkitEnvKernelSourceCandidates,
   parsePixiPackages,
+  parseSlurmServerOutput,
   parseUvPackages,
+  SLURM_NODE_MARKER,
   slurmOptionsToOptionList,
   type CalkitEnvNotebookKernelSource,
   type CalkitEnvironment,
@@ -257,6 +259,9 @@ interface NotebookLaunchProfile {
 interface ActiveJupyterServerSession {
   kind: "slurm" | "docker" | "other";
   notebookUri?: string;
+  // Where a SLURM job's server ended up, parsed from its output
+  host?: string;
+  port?: number;
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -4745,10 +4750,13 @@ async function selectCalkitEnvironment(
     notebookUri: targetNotebookUri,
   });
 
-  const uri = serverToken
+  // SLURM servers run on a compute node we only learn once the job starts
+  let uri = serverToken
     ? `http://localhost:${port}/lab?token=${encodeURIComponent(serverToken)}`
     : `http://localhost:${port}/lab`;
-  await vscode.env.clipboard.writeText(uri);
+  if (!picked.outerSlurmEnvironment) {
+    await vscode.env.clipboard.writeText(uri);
+  }
   const kernelsBeforeConnect =
     await getResolvedKernelIdsForActiveNotebook(targetNotebookUri);
 
@@ -4756,6 +4764,18 @@ async function selectCalkitEnvironment(
   if (picked.outerSlurmEnvironment || picked.innerKind === "docker") {
     const envType = picked.outerSlurmEnvironment ? "Slurm" : "Docker";
     const runConnectFlow = async (): Promise<string | undefined> => {
+      if (picked.outerSlurmEnvironment && serverToken) {
+        const slurmUri = await waitForSlurmServerUri(
+          serverToken,
+          targetNotebookUri,
+        );
+        if (!slurmUri) {
+          await refreshNotebookToolbarContext(context);
+          return undefined;
+        }
+        uri = slurmUri;
+        await vscode.env.clipboard.writeText(uri);
+      }
       const serverReady = picked.outerSlurmEnvironment
         ? await waitForServerReady(uri, {
             sessionKind: "slurm",
@@ -7423,10 +7443,13 @@ function buildLaunchCommand(
   // For a SLURM outer environment, run jupyter directly under srun.
   // Run checks and launch in the same remote shell so setup side effects
   // (e.g., module loads) apply to both kernel checks and Jupyter startup.
+  // The server runs on a compute node, so it must listen on all interfaces
+  // for VS Code to reach it from the login node.
   const rawJupyterCmd = `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
     serverToken ? ` --IdentityProvider.token=${shQuote(serverToken)}` : ""
   }${defaultKernelFlag}`;
   const remoteParts = [
+    `echo "${SLURM_NODE_MARKER}$(hostname)"`,
     ...slurmSetupCommands,
     checkPart,
     ...(picked.innerKind === "docker" ? [] : [kernelCheckPart]),
@@ -7728,6 +7751,36 @@ async function waitForServerReady(
     await sleep(pollMs);
   }
   return false;
+}
+
+// Wait for a SLURM job's Jupyter server to report its compute node and port,
+// which can take a while if the job is queued.
+async function waitForSlurmServerUri(
+  serverToken: string,
+  notebookUri?: string,
+  timeoutMs = 300_000,
+  pollMs = 1_000,
+): Promise<string | undefined> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (!hasRunningServerSession("slurm", notebookUri)) {
+      void vscode.window.showWarningMessage(
+        "SLURM Jupyter server failed to start. See Calkit output for details.",
+      );
+      return undefined;
+    }
+    const { host, port } = activeJupyterServerSession ?? {};
+    if (host && port) {
+      return `http://${host}:${port}/lab?token=${encodeURIComponent(
+        serverToken,
+      )}`;
+    }
+    await sleep(pollMs);
+  }
+  void vscode.window.showWarningMessage(
+    "SLURM job has not started Jupyter after 5 minutes (may be queued). See Calkit output.",
+  );
+  return undefined;
 }
 
 async function isHttpEndpointReachable(targetUrl: string): Promise<boolean> {
@@ -8620,14 +8673,15 @@ async function startSlurmJobForActiveNotebook(
         notebookUri: profile.notebookUri,
       });
 
-      const uri = `http://localhost:${port}/lab?token=${encodeURIComponent(
-        serverToken,
-      )}`;
-      await vscode.env.clipboard.writeText(uri);
       const kernelsBeforeConnect = await getResolvedKernelIdsForActiveNotebook(
         profile.notebookUri,
       );
-
+      const uri = await waitForSlurmServerUri(serverToken, profile.notebookUri);
+      if (!uri) {
+        await refreshNotebookToolbarContext(context);
+        return false;
+      }
+      await vscode.env.clipboard.writeText(uri);
       const serverReady = await waitForServerReady(uri, {
         sessionKind: "slurm",
         notebookUri: profile.notebookUri,
@@ -9070,8 +9124,25 @@ function startServerInBackground(
   });
   jupyterServerProcess = child;
   activeJupyterServerSession = session;
+  // Accumulate SLURM output until we know which node and port to connect to
+  const slurmOutput = { stdout: "", stderr: "" };
+  const findSlurmServer = (stream: "stdout" | "stderr", chunk: string) => {
+    if (session.kind !== "slurm" || (session.host && session.port)) {
+      return;
+    }
+    slurmOutput[stream] += chunk;
+    const { host, port } = parseSlurmServerOutput(
+      `${slurmOutput.stdout}\n${slurmOutput.stderr}`,
+    );
+    session.host = host;
+    session.port = port;
+    if (host && port) {
+      log(`SLURM Jupyter server is on ${host}:${port}`);
+    }
+  };
 
   child.stdout?.on("data", (chunk: Buffer | string) => {
+    findSlurmServer("stdout", chunk.toString());
     const text = chunk.toString().trim();
     if (text) {
       log(`[server] ${text}`);
@@ -9079,6 +9150,7 @@ function startServerInBackground(
   });
 
   child.stderr?.on("data", (chunk: Buffer | string) => {
+    findSlurmServer("stderr", chunk.toString());
     const text = chunk.toString().trim();
     if (text) {
       log(`[server:err] ${text}`);

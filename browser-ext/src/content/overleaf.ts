@@ -2464,6 +2464,7 @@ function renderStatus(
               text: "Open in Codespaces",
               href: `https://codespaces.new/${link.github_repo}?quickstart=1`,
               title: "Work on the project in a GitHub Codespace",
+              attrs: { target: "_blank" },
             })
           : null,
       ]),
@@ -3781,6 +3782,10 @@ const RAIL_STYLES = `
     padding: 10px 12px; min-height: 100%; box-sizing: border-box;
     color: var(--ck-fg); background: var(--ck-bg);
   }
+  .rail .project {
+    flex-direction: column; align-items: flex-start; gap: 2px;
+    overflow-wrap: anywhere;
+  }
   .rail h3 {
     font-size: 12px; font-weight: 600; margin: 14px 0 4px;
     text-transform: uppercase; letter-spacing: 0.04em;
@@ -3875,9 +3880,8 @@ function drawRail(): void {
     link.project_name,
   );
   body.append(
-    el("div", { class: "row" }, [
+    el("div", { class: "row project" }, [
       el("a", {
-        class: "grow",
         text: linkKey(link),
         href: base,
         attrs: { target: "_blank" },
@@ -3888,6 +3892,7 @@ function drawRail(): void {
             text: "Open in Codespaces",
             href: `https://codespaces.new/${link.github_repo}?quickstart=1`,
             title: "Work on the project in a GitHub Codespace",
+            attrs: { target: "_blank" },
           })
         : null,
     ]),

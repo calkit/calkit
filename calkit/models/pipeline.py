@@ -1428,7 +1428,7 @@ class LatexStage(Stage):
             path_to_stem = (parent_path / stem_path).as_posix()
             arxiv_dir = f"{path_to_stem}_arxiv.zip"
             arxiv_stage: dict = {
-                "cmd": f"calkit latex to-arxiv {shlex.quote(parent_path.as_posix())} {shlex.quote(stem_path.as_posix())}",
+                "cmd": f"calkit latex to-arxiv {shlex.quote(parent_path.as_posix())} {shlex.quote(stem_path)}",
                 "deps": deps,
                 "outs": [arxiv_dir],
                 "desc": desc,

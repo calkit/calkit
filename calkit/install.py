@@ -130,6 +130,18 @@ _R_INSTALLER: dict[Platform, Installer] = {
     },
 }
 
+# Through pixi everywhere: Linux packages of Node are often old, and version
+# managers like nvm only put it on PATH in shells set up for them
+_NODE_VIA_PIXI: Installer = {
+    "script": "pixi global install nodejs",
+    "path_add": "~/.pixi/bin",
+    "requires": ["pixi"],
+}
+_NODE_INSTALLER: dict[Platform, Installer] = {
+    "unix": _NODE_VIA_PIXI,
+    "windows": _NODE_VIA_PIXI,
+}
+
 
 # name -> platform -> Installer
 INSTALLERS: dict[str, dict[Platform, Installer]] = {
@@ -242,6 +254,7 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "conda": _MINIFORGE_INSTALLER,
     "R": _R_INSTALLER,
+    "node": _NODE_INSTALLER,
     # Converts equations for Word exports of LaTeX documents
     "pandoc": {
         "mac": {
@@ -261,6 +274,11 @@ INSTALLERS["cargo"] = _RUSTUP_INSTALLER
 INSTALLERS["julia"] = _JULIAUP_INSTALLER
 INSTALLERS["mamba"] = _MINIFORGE_INSTALLER
 INSTALLERS["Rscript"] = _R_INSTALLER
+INSTALLERS["npm"] = _NODE_INSTALLER
+INSTALLERS["npx"] = _NODE_INSTALLER
+# Names an app goes by that aren't a binary it provides, which is what an
+# install is checked for afterward
+NAME_ALIASES = {"nodejs": "node"}
 
 
 # Apps that are known to be unsupported on a given platform, mapped to the

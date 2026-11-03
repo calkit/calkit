@@ -618,6 +618,16 @@ def _commit(message: str) -> None:
     )
 
 
+def test_latex_to_arxiv() -> None:
+    result = subprocess.run(
+        ["calkit", "latex", "to-arxiv", "test/latex-comments", "main.tex"],
+        capture_output=True,
+        text=True,
+    )
+    # does not fail
+    assert result.returncode == 0
+
+
 def test_latex_diff_setup(tmp_dir):
     # Everything up to running latexdiff itself, which needs TeX Live and
     # so can't run in CI: which revision gets compared, and that the

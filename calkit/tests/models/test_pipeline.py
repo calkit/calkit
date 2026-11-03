@@ -676,6 +676,27 @@ def test_to_ck_dict() -> None:
     assert PythonScriptStage.model_validate(d2) == s2
 
 
+def test_latex_stage_to_arxiv():
+    stage = LatexStage(
+        name="paper-1",
+        kind="latex",
+        environment="tex",
+        target_path="pubs/paper-1/main.tex",
+        inputs=["figures/fig1.png"],
+        latex2arxiv=True,
+    )
+    extra = stage.extra_dvc_stages()
+    assert list(extra) == ["paper-1_to_arxiv"]
+    assert extra["paper-1_to_arxiv"]["cmd"] == (
+        "calkit latex to-arxiv pubs/paper-1 main.tex"
+    )
+    assert extra["paper-1_to_arxiv"]["deps"] == [
+        "pubs/paper-1/main.tex",
+        "figures/fig1.png",
+    ]
+    assert extra["paper-1_to_arxiv"]["outs"] == ("pubs/paper-1/main_arxiv.zip")
+
+
 def test_latex_stage_diffs():
     stage = LatexStage(
         name="paper-1",

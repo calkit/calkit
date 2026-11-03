@@ -31,6 +31,7 @@ import {
 import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
   getExecutedNotebookHtmlPath,
+  resolveNotebookEnvironmentName,
 } from "./notebooks";
 import type {
   CalkitInfo,
@@ -1535,43 +1536,54 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND_DEFINE_NOTEBOOK_STAGE, async () => {
-      const workspaceRoot = getWorkspaceRoot();
-      if (!workspaceRoot) {
-        return;
-      }
-      const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
-      if (!notebookUri) {
-        return;
-      }
-      const project = projectForPath(
-        workspaceRoot,
-        path.relative(workspaceRoot, notebookUri.fsPath).replace(/\\/g, "/"),
-      );
-      const profile = getLaunchProfileForActiveNotebook(context);
-      // The stage goes in the notebook's project, so its environment is
-      // only one that project declares, named as it is there
-      const env = profile?.environmentName
-        ? splitQualifiedName(profile.environmentName, currentSubprojectDirs)
-        : undefined;
-      const envName =
-        env &&
-        path.resolve(workspaceRoot, env.dir) ===
-          path.resolve(project.projectDir)
-          ? env.name
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_NOTEBOOK_STAGE,
+      async (uri?: vscode.Uri) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        // From the explorer we get the notebook; otherwise use the open one
+        const notebookUri =
+          uri ?? vscode.window.activeNotebookEditor?.notebook.uri;
+        if (!notebookUri) {
+          return;
+        }
+        const project = projectForPath(
+          workspaceRoot,
+          path.relative(workspaceRoot, notebookUri.fsPath).replace(/\\/g, "/"),
+        );
+        // The notebooks section is authoritative, then the kernel chosen in VS
+        // Code, which is only usable if it's declared in the notebook's project
+        const projectConfig = await readCalkitConfig(project.projectDir);
+        const profile = getLaunchProfileForNotebookUri(
+          context,
+          notebookUri.toString(),
+        );
+        const env = profile?.environmentName
+          ? splitQualifiedName(profile.environmentName, currentSubprojectDirs)
           : undefined;
-      const prefillStage = envName
-        ? { kind: "jupyter-notebook", environment: envName }
-        : { kind: "jupyter-notebook" };
-      await showStageEditor(
-        context,
-        project.projectDir,
-        undefined,
-        project.path,
-        undefined,
-        prefillStage,
-      );
-    }),
+        const envName =
+          (projectConfig &&
+            resolveNotebookEnvironmentName(projectConfig, project.path)) ||
+          (env &&
+          path.resolve(workspaceRoot, env.dir) ===
+            path.resolve(project.projectDir)
+            ? env.name
+            : undefined);
+        const prefillStage = envName
+          ? { kind: "jupyter-notebook", environment: envName }
+          : { kind: "jupyter-notebook" };
+        await showStageEditor(
+          context,
+          project.projectDir,
+          undefined,
+          project.path,
+          undefined,
+          prefillStage,
+        );
+      },
+    ),
   );
 
   context.subscriptions.push(
@@ -2610,6 +2622,12 @@ async function refreshPipelineOutputContext(
       pipelineNotebookUris.add(path.join(workspaceRoot, stage.notebook_path));
     }
   }
+  // For explorer menus; resourcePath's form varies by platform, so list both
+  void vscode.commands.executeCommand(
+    "setContext",
+    "calkit-vscode.stagedNotebooks",
+    [...pipelineNotebookUris].flatMap((p) => [p, vscode.Uri.file(p).path]),
+  );
   if (!decorationProvider) {
     decorationProvider = new PipelineOutputDecorationProvider();
     context.subscriptions.push(
@@ -3489,6 +3507,15 @@ function buildStageEditorHtml(
           e.name === existingEnv ? " selected" : ""
         }>${escHtml(e.name)}${e.kind ? ` (${escHtml(e.kind)})` : ""}</option>`,
     ),
+    // Keep one that isn't listed, e.g., a nested slurm:uv env, rather than
+    // silently dropping it
+    ...(existingEnv && !envEntries.some((e) => e.name === existingEnv)
+      ? [
+          `<option value="${escHtml(existingEnv)}" selected>${escHtml(
+            existingEnv,
+          )}</option>`,
+        ]
+      : []),
     `<option value="__new__">New environment (enter spec path below)…</option>`,
   ].join("\n");
 

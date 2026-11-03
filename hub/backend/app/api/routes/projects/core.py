@@ -1169,10 +1169,7 @@ def post_project(
                 dc_fpath = os.path.join(dc_dir, "devcontainer.json")
                 with open(dc_fpath, "w", encoding="utf-8") as f:
                     f.write(
-                        calkit.resources.read_text(
-                            "devcontainer",
-                            calkit.resources.DEVCONTAINER_FNAME,
-                        )
+                        calkit.resources.render_project_devcontainer(ck_info)
                     )
                 repo.git.add(".devcontainer")
             # Create the README

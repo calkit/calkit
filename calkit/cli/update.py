@@ -50,12 +50,9 @@ def update_devcontainer(
     os.makedirs(out_dir, exist_ok=True)
     out_fpath = os.path.join(out_dir, "devcontainer.json")
     typer.echo(f"Writing to {out_fpath}")
+    ck_info = calkit.load_calkit_info(wdir=wdir)
     with open(out_fpath, "w", encoding="utf-8") as f:
-        f.write(
-            calkit_resources.read_text(
-                "devcontainer", calkit_resources.DEVCONTAINER_FNAME
-            )
-        )
+        f.write(calkit_resources.render_project_devcontainer(ck_info))
     if not no_commit:
         repo = calkit.git.get_repo(wdir)
         rel_path = os.path.join(".devcontainer", "devcontainer.json")

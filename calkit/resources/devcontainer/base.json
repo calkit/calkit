@@ -8,7 +8,17 @@
   },
   "customizations": {
     "vscode": {
+      "extensions": [
+        "-lakefs.lakefs-dvc",
+        "-ms-vscode-remote.remote-containers",
+        "-github.vscode-pull-request-github",
+        "-github.vscode-github-actions"
+      ],
       "settings": {
+        "workbench.editorAssociations": {
+          "*.pdf": "calkit.pdfReview"
+        },
+        "python.useEnvironmentsExtension": false,
         "python.terminal.activateEnvironment": false,
         "python.terminal.activateEnvInCurrentTerminal": false,
         "redhat.telemetry.enabled": false,

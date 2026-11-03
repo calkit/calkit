@@ -4806,6 +4806,19 @@ export const OperationResultSchema = {
   description: "Result for file operations like delete, move, copy.",
 } as const
 
+export const OrgMemberPatchSchema = {
+  properties: {
+    role: {
+      type: "string",
+      enum: ["read", "write", "admin", "owner"],
+      title: "Role",
+    },
+  },
+  type: "object",
+  required: ["role"],
+  title: "OrgMemberPatch",
+} as const
+
 export const OrgMemberPostSchema = {
   properties: {
     username: {
@@ -5048,7 +5061,14 @@ export const OrgUserPublicSchema = {
       title: "Name",
     },
     github_name: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Github Name",
     },
     role: {

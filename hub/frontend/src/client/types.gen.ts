@@ -2833,6 +2833,16 @@ export type OperationResult = {
 }
 
 /**
+ * OrgMemberPatch
+ */
+export type OrgMemberPatch = {
+  /**
+   * Role
+   */
+  role: "read" | "write" | "admin" | "owner"
+}
+
+/**
  * OrgMemberPost
  */
 export type OrgMemberPost = {
@@ -2989,7 +2999,7 @@ export type OrgUserPublic = {
   /**
    * Github Name
    */
-  github_name: string
+  github_name: string | null
   /**
    * Role
    */
@@ -15668,6 +15678,78 @@ export type AddOrgMemberResponses = {
 
 export type AddOrgMemberResponse =
   AddOrgMemberResponses[keyof AddOrgMemberResponses]
+
+export type DeleteOrgMemberData = {
+  body?: never
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type DeleteOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteOrgMemberError =
+  DeleteOrgMemberErrors[keyof DeleteOrgMemberErrors]
+
+export type DeleteOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteOrgMemberResponse =
+  DeleteOrgMemberResponses[keyof DeleteOrgMemberResponses]
+
+export type UpdateOrgMemberData = {
+  body: OrgMemberPatch
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type UpdateOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type UpdateOrgMemberError =
+  UpdateOrgMemberErrors[keyof UpdateOrgMemberErrors]
+
+export type UpdateOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type UpdateOrgMemberResponse =
+  UpdateOrgMemberResponses[keyof UpdateOrgMemberResponses]
 
 export type PutOrgSubscriptionData = {
   body: OrgSubscriptionUpdate

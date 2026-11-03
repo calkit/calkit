@@ -35,6 +35,8 @@ import type {
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
+  DeleteOrgMemberErrors,
+  DeleteOrgMemberResponses,
   DeleteProjectByIdErrors,
   DeleteProjectByIdResponses,
   DeleteProjectCollaboratorErrors,
@@ -293,6 +295,7 @@ import type {
   NativeCollaboratorPost,
   NewPassword,
   OnboardingFlagPost,
+  OrgMemberPatch,
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
@@ -514,6 +517,8 @@ import type {
   UpdateCurrentUserPasswordErrors,
   UpdateCurrentUserPasswordResponses,
   UpdateCurrentUserResponses,
+  UpdateOrgMemberErrors,
+  UpdateOrgMemberResponses,
   UpdatePassword,
   UpdateUserErrors,
   UpdateUserResponses,
@@ -9490,6 +9495,89 @@ export class OrgsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/orgs/{org_name}/members",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete Org Member
+   */
+  public static deleteOrgMember<ThrowOnError extends boolean = true>(
+    parameters: {
+      org_name: string
+      username: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteOrgMemberResponses,
+    DeleteOrgMemberErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "org_name" },
+            { in: "path", key: "username" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteOrgMemberResponses,
+      DeleteOrgMemberErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/orgs/{org_name}/members/{username}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update Org Member
+   */
+  public static updateOrgMember<ThrowOnError extends boolean = true>(
+    parameters: {
+      org_name: string
+      username: string
+      orgMemberPatch: OrgMemberPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    UpdateOrgMemberResponses,
+    UpdateOrgMemberErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "org_name" },
+            { in: "path", key: "username" },
+            { key: "orgMemberPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      UpdateOrgMemberResponses,
+      UpdateOrgMemberErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/orgs/{org_name}/members/{username}",
       ...options,
       ...params,
       headers: {

@@ -1766,6 +1766,10 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\ckvalue{../outside.json}{secret}\n"
             "\\includegraphics{figures/drawn}\n"
             "\\includegraphics{figures/exported.png}\n"
+            "\\includegraphics{figures/rebuilt}\n"
+            "\\newcommand{\\fig}[1]{\\includegraphics{figures/#1}}\n"
+            "\\includegraphics{\\figdir/macro}\n"
+            "\\includegraphics{figures/missing.jpeg}\n"
             "\\end{document}\n"
         )
     with open("paper/sections/results.tex", "w") as f:
@@ -1787,6 +1791,9 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     os.makedirs("paper/figures")
     with open("paper/figures/drawn.png", "wb") as fb:
         fb.write(b"drawn")
+    # Left over from before a stage made it as a PDF
+    with open("paper/figures/rebuilt.png", "wb") as fb:
+        fb.write(b"rebuilt")
     os.makedirs("results")
     for name, content in [
         ("metrics", '{"rmse": 0.123}'),
@@ -1795,7 +1802,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         with open(f"results/{name}.json", "w") as f:
             f.write(content)
     # Components kept in other ways, in a document of their own
-    os.makedirs("extra")
+    os.makedirs("extra/plots")
     with open("extra/main.tex", "w") as f:
         f.write(
             "\\documentclass{article}\n\\usepackage{calkit}\n"
@@ -1803,13 +1810,18 @@ def test_to_dvc_latex_component_deps(tmp_dir):
             "\\ckfigure{maps/world}\n\\ckfigure{maps/typo.png}\n"
             "\\ckfigure{photos/cat}\n\\ckfigure{images/logo.png}\n"
             "\\ckfigure{figures/fit_1.5}\n\\ckfigure{figures/sweep-2}\n"
+            "\\includegraphics{plots/a}\n"
             "\\end{document}\n"
         )
     os.makedirs("images")
     for path in ["images/logo.png", "images/logo.png.dvc", "photos.dvc"]:
         with open(path, "w") as f:
             f.write("x")
-    for path in ["figures/fit_1.5.pdf", "figures/sweep-2.png"]:
+    for path in [
+        "figures/fit_1.5.pdf",
+        "figures/sweep-2.png",
+        "extra/plots/a.png",
+    ]:
         with open(path, "w") as f:
             f.write("x")
     # Tracked by DVC but not pulled
@@ -1838,7 +1850,18 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "kind": "command",
                     "environment": "_system",
                     "command": "echo png > paper/figures/exported.png",
-                    "outputs": ["paper/figures/exported.png"],
+                    "outputs": [
+                        "paper/figures/exported.png",
+                        "paper/figures/rebuilt.pdf",
+                    ],
+                },
+                # Its outputs are a pattern matching most figure names
+                "render": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo {n} > paper/figures/{n}.pdf",
+                    "outputs": ["paper/figures/{n}.pdf"],
+                    "iterate_over": [{"arg_name": "n", "values": ["a", "b"]}],
                 },
                 "build-other": {
                     "kind": "latex",
@@ -1859,10 +1882,17 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "outputs": ["figures/sweep-{n}.png"],
                     "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
                 },
+                "plots": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "mkdir -p extra/plots",
+                    "outputs": ["extra/plots"],
+                },
                 "build-extra": {
                     "kind": "latex",
                     "environment": "tex",
                     "target_path": "extra/main.tex",
+                    "inputs": [{"from_stage_outputs": "plots"}],
                 },
                 # Paths in a stage are relative to its wdir, while component
                 # paths are relative to the project
@@ -1871,6 +1901,7 @@ def test_to_dvc_latex_component_deps(tmp_dir):
                     "environment": "tex",
                     "wdir": "paper",
                     "target_path": "main.tex",
+                    "inputs": ["figures/"],
                 },
             }
         },
@@ -1893,8 +1924,25 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     assert {
         "paper/figures/drawn.png",
         "paper/figures/exported.png",
+        "paper/figures/rebuilt.pdf",
         "paper/sections/results.tex",
     } <= set(deps)
+    # But not a macro's parameter, a name built from macros, an extension
+    # added to one already there, or a file that's not there in place of
+    # one that is, just since an iterated stage's outputs match them, though
+    # one a stage declares wins as TeX would pick it
+    assert not [
+        d
+        for d in deps
+        if d.startswith("paper/figures/")
+        and d
+        not in [
+            "paper/figures/drawn.png",
+            "paper/figures/exported.png",
+            "paper/figures/rebuilt.pdf",
+        ]
+    ]
+    assert not any("#" in d or "macro" in d for d in deps)
     # And on the copies it reads, like a cleaned notebook, so a new value or
     # calkit.sty rebuilds it, except a figure a stage makes, which is copied
     # only after DVC checks the stage's dependencies are there
@@ -1928,6 +1976,9 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     assert {"figures/fit_1.5.pdf", "extra/_calkit/figures/fit_1.5.pdf"} <= set(
         deps
     )
+    # What's in a folder it reads from another stage is already covered
+    assert "extra/plots" in deps
+    assert "extra/plots/a.png" not in deps
     deps = stages["build-paper-wdir"]["deps"]
     assert {
         "../figures/plot.png",
@@ -1936,6 +1987,9 @@ def test_to_dvc_latex_component_deps(tmp_dir):
         "_calkit/figures/photo.png",
         "calkit.sty",
     } <= set(deps)
+    # And so is what's in a folder it declares
+    assert "figures/" in deps
+    assert not any(d.startswith("figures/") and d != "figures/" for d in deps)
     # A document that doesn't load calkit.sty depends on no copies
     os.makedirs("plain")
     with open("plain/main.tex", "w") as f:
@@ -1952,7 +2006,15 @@ def test_to_dvc_latex_component_deps(tmp_dir):
     )
     # Compiling for a run or check maps the components in, kept out of Git,
     # with one stage building each PDF, as DVC requires
-    for name in ["build-paper-wdir", "maps", "sweep", "build-extra", "export"]:
+    for name in [
+        "build-paper-wdir",
+        "maps",
+        "sweep",
+        "build-extra",
+        "export",
+        "render",
+        "plots",
+    ]:
         del ck_info["pipeline"]["stages"][name]
     del ck_info["pipeline"]["stages"]["build-plain"]
     with open("figures/plot.png", "wb") as fb:

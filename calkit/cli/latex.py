@@ -2005,7 +2005,7 @@ def to_arxiv(
 
     scripts_dir = Path(sysconfig.get_path("scripts"))
     cli_path = scripts_dir / "latex2arxiv"
-    output_folder = str(Path(target_folder) / tex_file) + "_arxiv.zip"
+    output_folder = (Path(target_folder) / tex_file).as_posix() + "_arxiv.zip"
 
     subprocess.run(
         [str(cli_path), target_folder, output_folder, "--main", tex_file],

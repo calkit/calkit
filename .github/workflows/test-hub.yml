@@ -122,7 +122,8 @@ jobs:
       (needs.frontend-unit.result == 'success' || needs.frontend-unit.result == 'skipped') &&
       (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true')
     timeout-minutes: 60
-    runs-on: ubuntu-latest
+    # Playwright 1.56 cannot install Chromium on Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: hub

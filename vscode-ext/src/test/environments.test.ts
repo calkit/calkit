@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   findCalkitEnvKernelSourceCandidate,
   getDefaultSlurmOptions,
+  getMissingSlurmResources,
   makeCalkitEnvKernelSourceCandidates,
+  mergeSlurmOptions,
   parsePixiPackages,
   parseProjectDependencies,
   parseRemoteSshHost,
@@ -43,8 +45,56 @@ test("parseSlurmOptionList parses equals and spaced options", () => {
     gpus: "1",
     time: "02:00:00",
     partition: "gpu",
-    extra: "--cpus-per-task=8 --mem=32G",
+    cpus: "8",
+    mem: "32G",
+    extra: undefined,
   });
+  // Short flags, several flags per entry, and unknown flags kept as extra
+  assert.deepEqual(
+    parseSlurmOptionList(["-p short -t 60", "-c 4 --mem-per-cpu=2G -A lab"]),
+    {
+      gpus: undefined,
+      time: "60",
+      partition: "short",
+      cpus: "4",
+      mem: undefined,
+      extra: "--mem-per-cpu=2G -A lab",
+    },
+  );
+  assert.equal(parseSlurmOptionList([" "]), undefined);
+});
+
+test("missing SLURM resources are found and filled from other options", () => {
+  assert.deepEqual(getMissingSlurmResources(undefined), [
+    "partition",
+    "time",
+    "cpus",
+    "mem",
+  ]);
+  // Memory per CPU or GPU counts as memory
+  assert.deepEqual(
+    getMissingSlurmResources({
+      partition: "short",
+      cpus: "4",
+      extra: "--mem-per-cpu=2G",
+    }),
+    ["time"],
+  );
+  // Only what the override sets replaces the base
+  assert.deepEqual(
+    mergeSlurmOptions(
+      { time: "120", cpus: "4", gpus: "1" },
+      { time: "60", cpus: " ", partition: "short" },
+    ),
+    {
+      gpus: "1",
+      time: "60",
+      partition: "short",
+      cpus: "4",
+      mem: undefined,
+      extra: undefined,
+    },
+  );
 });
 
 test("getDefaultSlurmOptions prefers default_options in calkit.yaml format", () => {

@@ -17,8 +17,30 @@ export interface SlurmLaunchOptions {
   gpus?: string;
   time?: string;
   partition?: string;
+  cpus?: string;
+  mem?: string;
   extra?: string;
 }
+
+type SlurmOptionField = Exclude<keyof SlurmLaunchOptions, "extra">;
+
+// srun flags for the launch options we know, long form first
+const SLURM_OPTION_FLAGS: Record<SlurmOptionField, string[]> = {
+  gpus: ["--gpus", "-G"],
+  time: ["--time", "-t"],
+  partition: ["--partition", "-p"],
+  cpus: ["--cpus-per-task", "-c"],
+  mem: ["--mem"],
+};
+
+// Resources a notebook job asks for when its environment doesn't set them, so
+// it doesn't silently get the cluster's defaults
+export const NOTEBOOK_SLURM_RESOURCES: SlurmOptionField[] = [
+  "partition",
+  "time",
+  "cpus",
+  "mem",
+];
 
 export interface CalkitEnvironment {
   kind: EnvKind;
@@ -59,8 +81,38 @@ export function compactSlurmOptions(
     gpus: options.gpus?.trim() || undefined,
     time: options.time?.trim() || undefined,
     partition: options.partition?.trim() || undefined,
+    cpus: options.cpus?.trim() || undefined,
+    mem: options.mem?.trim() || undefined,
     extra: options.extra?.trim() || undefined,
   };
+}
+
+// Options from base, overridden by whatever override sets
+export function mergeSlurmOptions(
+  base: SlurmLaunchOptions | undefined,
+  override: SlurmLaunchOptions | undefined,
+): SlurmLaunchOptions {
+  const merged = compactSlurmOptions(base ?? {});
+  for (const [key, value] of Object.entries(
+    compactSlurmOptions(override ?? {}),
+  )) {
+    if (value) {
+      merged[key as keyof SlurmLaunchOptions] = value;
+    }
+  }
+  return merged;
+}
+
+export function getMissingSlurmResources(
+  options: SlurmLaunchOptions | undefined,
+): SlurmOptionField[] {
+  const compact = compactSlurmOptions(options ?? {});
+  return NOTEBOOK_SLURM_RESOURCES.filter((key) => {
+    if (key === "mem" && /--mem-per-(cpu|gpu)\b/.test(compact.extra ?? "")) {
+      return false;
+    }
+    return !compact[key];
+  });
 }
 
 export function slurmOptionsToOptionList(
@@ -68,14 +120,11 @@ export function slurmOptionsToOptionList(
 ): string[] {
   const compact = compactSlurmOptions(options);
   const result: string[] = [];
-  if (compact.gpus) {
-    result.push(`--gpus=${compact.gpus}`);
-  }
-  if (compact.time) {
-    result.push(`--time=${compact.time}`);
-  }
-  if (compact.partition) {
-    result.push(`--partition=${compact.partition}`);
+  for (const [key, flags] of Object.entries(SLURM_OPTION_FLAGS)) {
+    const value = compact[key as SlurmOptionField];
+    if (value) {
+      result.push(`${flags[0]}=${value}`);
+    }
   }
   if (compact.extra) {
     result.push(compact.extra);
@@ -88,36 +137,32 @@ export function parseSlurmOptionList(
 ): SlurmLaunchOptions | undefined {
   const result: SlurmLaunchOptions = {};
   const extraParts: string[] = [];
-
-  for (const raw of options) {
-    const opt = raw.trim();
-    if (!opt) {
+  // One entry can hold several flags, e.g., "--cpus-per-task=8 --mem=32G"
+  const tokens = options.flatMap((opt) => opt.trim().split(/\s+/));
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token) {
       continue;
     }
-    const gpusMatch = opt.match(/^--gpus(?:=|\s+)(.+)$/);
-    if (gpusMatch) {
-      result.gpus = gpusMatch[1].trim();
+    const eq = token.indexOf("=");
+    const flag = eq < 0 ? token : token.slice(0, eq);
+    const key = (Object.keys(SLURM_OPTION_FLAGS) as SlurmOptionField[]).find(
+      (k) => SLURM_OPTION_FLAGS[k].includes(flag),
+    );
+    if (!key) {
+      extraParts.push(token);
       continue;
     }
-    const timeMatch = opt.match(/^--time(?:=|\s+)(.+)$/);
-    if (timeMatch) {
-      result.time = timeMatch[1].trim();
-      continue;
+    const value = eq < 0 ? tokens[++i] : token.slice(eq + 1);
+    if (value) {
+      result[key] = value;
     }
-    const partitionMatch = opt.match(/^--partition(?:=|\s+)(.+)$/);
-    if (partitionMatch) {
-      result.partition = partitionMatch[1].trim();
-      continue;
-    }
-    extraParts.push(opt);
   }
-
   if (extraParts.length > 0) {
     result.extra = extraParts.join(" ");
   }
-
   const compact = compactSlurmOptions(result);
-  if (!compact.gpus && !compact.time && !compact.partition && !compact.extra) {
+  if (Object.values(compact).every((value) => !value)) {
     return undefined;
   }
   return compact;

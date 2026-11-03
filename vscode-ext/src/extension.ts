@@ -13,8 +13,10 @@ import {
   compactSlurmOptions,
   findCalkitEnvKernelSourceCandidate,
   getDefaultSlurmOptions,
+  getMissingSlurmResources,
   kernelRegistrationKinds,
   makeCalkitEnvKernelSourceCandidates,
+  mergeSlurmOptions,
   parsePixiPackages,
   parseRemoteSshHost,
   parseSlurmServerOutput,
@@ -4659,12 +4661,13 @@ async function selectCalkitEnvironment(
 
   let slurmOptions: SlurmLaunchOptions | undefined;
   if (picked.outerSlurmEnvironment) {
-    const defaultSlurmOptions = getNotebookSlurmOptionsWithDefaults(
+    slurmOptions = await chooseSlurmOptionsForLaunch(
+      picked.outerSlurmEnvironment,
       getDefaultSlurmOptions(
         config?.environments?.[picked.outerSlurmEnvironment],
       ),
+      getLaunchProfileForNotebookUri(context, targetNotebookUri)?.slurmOptions,
     );
-    slurmOptions = await chooseSlurmOptionsForLaunch(defaultSlurmOptions);
     if (!slurmOptions) {
       await refreshNotebookToolbarContext(context);
       return undefined;
@@ -6639,19 +6642,29 @@ async function suggestSlurmHost(workspaceRoot: string): Promise<string> {
 }
 
 async function chooseSlurmOptionsForLaunch(
-  defaults?: SlurmLaunchOptions,
+  environmentName: string,
+  envDefaults: SlurmLaunchOptions | undefined,
+  previous: SlurmLaunchOptions | undefined,
 ): Promise<SlurmLaunchOptions | undefined> {
-  const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
+  const values = await askForMissingSlurmResources(
+    environmentName,
+    envDefaults,
+    previous,
+  );
+  // Anything missing was just asked for, so don't ask again
+  if (!values || getMissingSlurmResources(envDefaults).length > 0) {
+    return values;
+  }
   const choice = await vscode.window.showQuickPick(
     [
       {
         label: "Use saved/default SLURM options",
-        description: summarizeSlurmOptions(effectiveDefaults),
+        description: slurmOptionsToOptionList(values).join(" "),
         action: "use",
       },
       {
         label: "Modify SLURM options...",
-        description: "Edit --gpus, --time, and extra srun flags",
+        description: "Edit partition, time, CPUs, memory, GPUs, and more",
         action: "edit",
       },
     ],
@@ -6661,33 +6674,13 @@ async function chooseSlurmOptionsForLaunch(
       ignoreFocusOut: true,
     },
   );
-
   if (!choice) {
     return undefined;
   }
-
   if (choice.action === "use") {
-    return effectiveDefaults;
+    return values;
   }
-
-  return await askForSlurmOptions(effectiveDefaults);
-}
-
-function summarizeSlurmOptions(options: SlurmLaunchOptions): string {
-  const parts: string[] = [];
-  if (options.gpus) {
-    parts.push(`--gpus=${options.gpus}`);
-  }
-  if (options.time) {
-    parts.push(`--time=${options.time}`);
-  }
-  if (options.partition) {
-    parts.push(`--partition=${options.partition}`);
-  }
-  if (options.extra) {
-    parts.push(options.extra);
-  }
-  return parts.length > 0 ? parts.join(" ") : "No extra options";
+  return await askForSlurmOptions(values);
 }
 
 async function askForSlurmSetupCommandsStep(): Promise<
@@ -6730,73 +6723,95 @@ async function askForSlurmSetupCommandsStep(): Promise<
   return { kind: "value", value: setupCommands };
 }
 
-async function askForSlurmOptionsWizard(
-  defaults: SlurmLaunchOptions,
+const SLURM_OPTION_PROMPTS: Record<
+  keyof SlurmLaunchOptions,
+  { title: string; prompt: string }
+> = {
+  partition: {
+    title: "--partition",
+    prompt: "Partition (queue) to run in",
+  },
+  time: {
+    title: "--time",
+    prompt: "Time limit, in minutes or as HH:MM:SS",
+  },
+  cpus: { title: "--cpus-per-task", prompt: "Number of CPUs" },
+  mem: { title: "--mem", prompt: "Memory, e.g., 16G" },
+  gpus: {
+    title: "--gpus",
+    prompt: "GPU count or type:count, e.g., 1 or a100:1",
+  },
+  extra: {
+    title: "Additional srun options",
+    prompt: "Raw options appended as-is, e.g., --account=myaccount",
+  },
+};
+
+// Ask for SLURM options one at a time, so Back steps through them
+async function askForSlurmOptionFields(
+  fields: Array<keyof SlurmLaunchOptions>,
+  initial: SlurmLaunchOptions,
+  options?: { canGoBack?: boolean; titleNote?: string },
 ): Promise<WizardStepResult<SlurmLaunchOptions>> {
-  const values: SlurmLaunchOptions = {
-    ...defaults,
-  };
+  const values: SlurmLaunchOptions = { ...initial };
   let step = 0;
-
-  while (step >= 0) {
-    if (step === 0) {
-      const result = await showInputBoxStep({
-        title: "Slurm option: --gpus",
-        prompt: "Optional GPU count or value (e.g., 1 or a100:1)",
-        value: values.gpus ?? "",
-        placeHolder: "leave blank to skip",
-        canGoBack: true,
-      });
-      if (result.kind === "cancel") {
-        return result;
-      }
-      if (result.kind === "back") {
-        return { kind: "back" };
-      }
-      values.gpus = result.value;
-      step = 1;
-      continue;
-    }
-
-    if (step === 1) {
-      const result = await showInputBoxStep({
-        title: "Slurm option: --time",
-        prompt: "Optional time (e.g., 60 or 01:00:00)",
-        value: values.time ?? "",
-        placeHolder: "leave blank to skip",
-        canGoBack: true,
-      });
-      if (result.kind === "cancel") {
-        return result;
-      }
-      if (result.kind === "back") {
-        step = 0;
-        continue;
-      }
-      values.time = result.value;
-      step = 2;
-      continue;
-    }
-
+  while (step < fields.length) {
+    const field = fields[step];
+    const { title, prompt } = SLURM_OPTION_PROMPTS[field];
     const result = await showInputBoxStep({
-      title: "Additional srun options",
-      prompt: "Optional raw options appended as-is (e.g., --cpus-per-task=8)",
-      value: values.extra ?? "",
-      placeHolder: "leave blank to skip",
-      canGoBack: true,
+      title: `SLURM ${title}${options?.titleNote ?? ""} (${step + 1}/${
+        fields.length
+      })`,
+      prompt,
+      value: values[field] ?? "",
+      placeHolder: "leave blank for the cluster default",
+      canGoBack: step > 0 || options?.canGoBack,
     });
     if (result.kind === "cancel") {
       return result;
     }
     if (result.kind === "back") {
-      step = 1;
+      if (step === 0) {
+        return result;
+      }
+      step--;
       continue;
     }
-    values.extra = result.value;
-    return { kind: "value", value: compactSlurmOptions(values) };
+    values[field] = result.value;
+    step++;
   }
+  return { kind: "value", value: compactSlurmOptions(values) };
+}
 
-  return { kind: "cancel" };
+async function askForSlurmOptionsWizard(
+  defaults: SlurmLaunchOptions,
+): Promise<WizardStepResult<SlurmLaunchOptions>> {
+  return await askForSlurmOptionFields(
+    ["partition", "time", "cpus", "mem", "gpus", "extra"],
+    defaults,
+    { canGoBack: true },
+  );
+}
+
+// Ask for the resources an environment leaves unset, so a notebook job doesn't
+// silently get the cluster's defaults. Previous answers are prefilled.
+async function askForMissingSlurmResources(
+  environmentName: string,
+  envDefaults: SlurmLaunchOptions | undefined,
+  previous: SlurmLaunchOptions | undefined,
+): Promise<SlurmLaunchOptions | undefined> {
+  const values = mergeSlurmOptions(
+    mergeSlurmOptions({ time: DEFAULT_NOTEBOOK_SLURM_TIME }, previous),
+    envDefaults,
+  );
+  const missing = getMissingSlurmResources(envDefaults);
+  if (missing.length === 0) {
+    return values;
+  }
+  const result = await askForSlurmOptionFields(missing, values, {
+    titleNote: ` (not set in '${environmentName}')`,
+  });
+  return result.kind === "value" ? result.value : undefined;
 }
 
 async function runCreateCondaEnvironmentWizard(
@@ -7233,11 +7248,9 @@ async function autoSelectEnvironmentForActiveNotebook(
         innerEnvironment: configuredCandidate.innerEnvironment,
         innerKind: configuredCandidate.innerKind,
         outerSlurmEnvironment: configuredCandidate.outerSlurmEnvironment,
-        slurmOptions: getNotebookSlurmOptionsWithDefaults(
-          getDefaultSlurmOptions(
-            config.environments?.[configuredCandidate.outerSlurmEnvironment],
-          ),
-        ),
+        // Kept for prefilling; the launch merges in the env's defaults
+        slurmOptions: getLaunchProfileForNotebookUri(context, notebookUri)
+          ?.slurmOptions,
         preferredPort: getDefaultPort(),
       });
 
@@ -7298,56 +7311,13 @@ async function autoSelectEnvironmentForActiveNotebook(
 }
 
 async function askForSlurmOptions(
-  defaults?: SlurmLaunchOptions,
+  defaults: SlurmLaunchOptions,
 ): Promise<SlurmLaunchOptions | undefined> {
-  const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
-  const gpus = await vscode.window.showInputBox({
-    title: "Slurm option: --gpus",
-    prompt: "Optional GPU count or value (e.g., 1 or a100:1)",
-    value: effectiveDefaults.gpus ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (gpus === undefined) {
-    return undefined;
-  }
-
-  const time = await vscode.window.showInputBox({
-    title: "Slurm option: --time",
-    prompt: "Optional time (e.g., 60 or 01:00:00)",
-    value: effectiveDefaults.time ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (time === undefined) {
-    return undefined;
-  }
-
-  const extra = await vscode.window.showInputBox({
-    title: "Additional srun options",
-    prompt: "Optional raw options appended as-is (e.g., --cpus-per-task=8)",
-    value: effectiveDefaults.extra ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (extra === undefined) {
-    return undefined;
-  }
-
-  return compactSlurmOptions({
-    gpus,
-    time,
-    partition: effectiveDefaults.partition,
-    extra,
-  });
-}
-
-function getNotebookSlurmOptionsWithDefaults(
-  defaults?: SlurmLaunchOptions,
-): SlurmLaunchOptions {
-  return compactSlurmOptions({
-    gpus: defaults?.gpus,
-    time: defaults?.time ?? DEFAULT_NOTEBOOK_SLURM_TIME,
-    partition: defaults?.partition,
-    extra: defaults?.extra,
-  });
+  const result = await askForSlurmOptionFields(
+    ["partition", "time", "cpus", "mem", "gpus", "extra"],
+    defaults,
+  );
+  return result.kind === "value" ? result.value : undefined;
 }
 
 async function confirmAutoStartSlurmNotebookSession(
@@ -7438,20 +7408,7 @@ function buildLaunchCommand(
     picked,
     notebookRelativePath,
   );
-  const opts: string[] = [];
-  if (slurmOptions?.gpus?.trim()) {
-    opts.push(`--gpus=${slurmOptions.gpus.trim()}`);
-  }
-  if (slurmOptions?.time?.trim()) {
-    opts.push(`--time=${slurmOptions.time.trim()}`);
-  }
-  if (slurmOptions?.partition?.trim()) {
-    opts.push(`--partition=${slurmOptions.partition.trim()}`);
-  }
-  if (slurmOptions?.extra?.trim()) {
-    opts.push(slurmOptions.extra.trim());
-  }
-
+  const opts = slurmOptionsToOptionList(slurmOptions ?? {});
   // For a SLURM outer environment, run jupyter directly under srun.
   // Run checks and launch in the same remote shell so setup side effects
   // (e.g., module loads) apply to both kernel checks and Jupyter startup.
@@ -8646,6 +8603,18 @@ async function startSlurmJobForActiveNotebook(
     return false;
   }
 
+  const slurmOptions = await askForMissingSlurmResources(
+    profile.outerSlurmEnvironment,
+    getDefaultSlurmOptions(config.environments[profile.outerSlurmEnvironment]),
+    profile.slurmOptions,
+  );
+  if (!slurmOptions) {
+    return false;
+  }
+  await saveLaunchProfileForNotebookUri(context, profile.notebookUri, {
+    ...profile,
+    slurmOptions,
+  });
   const picked: CalkitEnvNotebookKernelSource = {
     label: profile.environmentName,
     description: `${profile.outerSlurmEnvironment} + ${profile.innerKind}`,
@@ -8673,7 +8642,7 @@ async function startSlurmJobForActiveNotebook(
         workspaceRoot,
         config,
         port,
-        profile.slurmOptions,
+        slurmOptions,
         serverToken,
         undefined,
         expectedKernel?.kernelName,

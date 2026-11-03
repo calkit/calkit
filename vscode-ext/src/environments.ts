@@ -158,6 +158,29 @@ export function parseSlurmServerOutput(output: string): {
   return { host, port: port ? Number(port) : undefined };
 }
 
+// Host a Remote-SSH window connected to, from its workspace URI authority,
+// e.g., "ssh-remote+login.hpc.caltech.edu". Remote-SSH hex-encodes the host as
+// JSON when it carries more than a name.
+export function parseRemoteSshHost(authority: string): string | undefined {
+  const prefix = "ssh-remote+";
+  if (!authority.startsWith(prefix)) {
+    return undefined;
+  }
+  let host = authority.slice(prefix.length);
+  if (/^([0-9a-f]{2})+$/i.test(host)) {
+    try {
+      const decoded = JSON.parse(Buffer.from(host, "hex").toString("utf8"));
+      if (typeof decoded?.hostName === "string") {
+        host = decoded.hostName;
+      }
+    } catch {
+      // A plain host name that happens to look like hex
+    }
+  }
+  host = host.replace(/^[^@]*@/, "").replace(/:\d+$/, "");
+  return host || undefined;
+}
+
 export function makeCalkitEnvKernelSourceCandidates(
   environments: Record<string, CalkitEnvironment>,
 ): CalkitEnvNotebookKernelSource[] {

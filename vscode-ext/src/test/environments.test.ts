@@ -6,6 +6,7 @@ import {
   makeCalkitEnvKernelSourceCandidates,
   parsePixiPackages,
   parseProjectDependencies,
+  parseRemoteSshHost,
   parseRequirementsTxt,
   parseSlurmServerOutput,
   parseSlurmOptionList,
@@ -69,6 +70,30 @@ test("getDefaultSlurmOptions ignores legacy object format", () => {
   });
 
   assert.equal(parsed, undefined);
+});
+
+test("parseRemoteSshHost finds the host a Remote-SSH window connected to", () => {
+  assert.equal(
+    parseRemoteSshHost("ssh-remote+login.hpc.caltech.edu"),
+    "login.hpc.caltech.edu",
+  );
+  assert.equal(
+    parseRemoteSshHost("ssh-remote+pete@login.hpc.caltech.edu:2222"),
+    "login.hpc.caltech.edu",
+  );
+  // Hex-encoded JSON form
+  const encoded = Buffer.from(
+    JSON.stringify({ hostName: "login.hpc.caltech.edu", user: "pete" }),
+  ).toString("hex");
+  assert.equal(
+    parseRemoteSshHost(`ssh-remote+${encoded}`),
+    "login.hpc.caltech.edu",
+  );
+  // A host name that only looks like hex
+  assert.equal(parseRemoteSshHost("ssh-remote+deadbeef"), "deadbeef");
+  // Not Remote-SSH
+  assert.equal(parseRemoteSshHost(""), undefined);
+  assert.equal(parseRemoteSshHost("wsl+Ubuntu"), undefined);
 });
 
 test("parseSlurmServerOutput finds the compute node and Jupyter port", () => {

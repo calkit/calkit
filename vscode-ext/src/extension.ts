@@ -16,6 +16,7 @@ import {
   kernelRegistrationKinds,
   makeCalkitEnvKernelSourceCandidates,
   parsePixiPackages,
+  parseRemoteSshHost,
   parseSlurmServerOutput,
   parseUvPackages,
   SLURM_NODE_MARKER,
@@ -6272,7 +6273,7 @@ async function runCreateSlurmEnvironmentWizard(
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   let name = "cluster";
-  let host = await detectLocalHostname(workspaceRoot);
+  let host = await suggestSlurmHost(workspaceRoot);
   let defaults: SlurmLaunchOptions = {};
   let step = 0;
 
@@ -6612,7 +6613,16 @@ function toRepoRelativePath(inputPath: string, workspaceRoot: string): string {
   return path.relative(workspaceRoot, inputPath);
 }
 
-async function detectLocalHostname(workspaceRoot: string): Promise<string> {
+// Prefer the name used to log in over this node's own, since clusters often
+// have several login nodes behind one name. Short names are likely local SSH
+// aliases, which don't work for anyone else.
+async function suggestSlurmHost(workspaceRoot: string): Promise<string> {
+  const remoteHost = parseRemoteSshHost(
+    vscode.workspace.workspaceFolders?.[0]?.uri.authority ?? "",
+  );
+  if (remoteHost?.includes(".")) {
+    return remoteHost;
+  }
   try {
     const { stdout } = await execFileAsync("hostname", [], {
       cwd: workspaceRoot,

@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useRef } from "react"
+import { useEffect, useRef } from "react"
 
-import { type Figure, type Issue, ProjectsService } from "../client"
+import {
+  type Figure,
+  type Issue,
+  type PipelineRun,
+  ProjectsService,
+} from "../client"
 import { dataOrNull, httpStatus } from "../lib/api"
 import { isAuthenticationError } from "../lib/auth"
 
@@ -252,6 +257,50 @@ const useProjectEnvironments = (
   return { environmentsRequest }
 }
 
+// Runs listed at first, where the pipeline page and the sidebar share them
+export const PIPELINE_RUNS_SHOWN = 10
+
+export const isRunGoing = (run?: Pick<PipelineRun, "status">) =>
+  run?.status === "queued" || run?.status === "running"
+
+/**
+ * The pipeline's runs, newest first, checked often while one is going and
+ * now and then otherwise, which refreshes the pipeline's stages once one
+ * finishes.
+ */
+const useProjectPipelineRuns = (
+  accountName: string,
+  projectName: string,
+  { enabled = true, limit = PIPELINE_RUNS_SHOWN } = {},
+) => {
+  const queryClient = useQueryClient()
+  const runsRequest = useQuery({
+    queryKey: ["projects", accountName, projectName, "pipeline-runs", limit],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineRuns({
+        owner_name: accountName,
+        project_name: projectName,
+        limit,
+      }).then((response) => response.data),
+    enabled,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      isRunGoing(query.state.data?.runs?.[0]) ? 15_000 : 60_000,
+  })
+  const going = isRunGoing(runsRequest.data?.runs?.[0])
+  const wasGoing = useRef(false)
+  useEffect(() => {
+    if (wasGoing.current && !going) {
+      queryClient.invalidateQueries({
+        queryKey: ["projects", accountName, projectName, "pipeline"],
+      })
+    }
+    wasGoing.current = going
+  }, [going, queryClient, accountName, projectName])
+  return { runsRequest }
+}
+
 const useProjectPublications = (
   accountName: string,
   projectName: string,
@@ -483,6 +532,7 @@ export {
   useProjectDatasets,
   useProjectEnvironments,
   useProjectIssues,
+  useProjectPipelineRuns,
   useProjectQuestions,
 }
 export default useProject

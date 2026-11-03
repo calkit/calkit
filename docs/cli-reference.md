@@ -4554,6 +4554,8 @@ Options:
 
 List scheduler jobs submitted via Calkit (across SLURM and PBS).
 
+Includes interactive jobs, e.g., Jupyter servers for notebooks.
+
 Usage:
 
 ```text

@@ -27,8 +27,12 @@ import type {
   OverleafLinkPublic,
   Provenance,
   StageFromScriptOrNotebookResponse,
+  OverleafSyncResponse,
   OverleafSyncStatus,
   OverleafSyncStatusFile,
+  PipelineRun,
+  PipelineRuns,
+  ProjectPipeline,
   ProjectPublic,
 } from "../core/types";
 import {
@@ -327,15 +331,10 @@ function renderAddScript(
         // Brings the \ckfigure into the editor
         if (saved.included_in.length) {
           clear(message).append(loading("Syncing"));
-          await send({
-            type: "overleaf.sync",
-            owner,
-            project,
-            path: link.path,
-          });
+          await syncOverleaf(owner, project, link.path);
         }
         await showDefined(container, link, citation);
-        container.append(renderRunIt(saved, `${owner}/${project}`));
+        container.append(renderRunIt(saved, link));
       } catch (e) {
         fail(e);
         save.disabled = false;
@@ -662,7 +661,7 @@ function renderDefineOrigin(
 /** How to run a stage that's never run, since Overleaf can't. */
 function renderRunIt(
   saved: StageFromScriptOrNotebookResponse,
-  spec: string,
+  link: OverleafLinkPublic,
 ): HTMLElement {
   const folder = saved.git_repo_url
     .replace(/\.git$/, "")
@@ -670,7 +669,7 @@ function renderRunIt(
     .pop();
   const commands = [
     "curl -LsSf install.calkit.org | sh",
-    `calkit clone ${spec}`,
+    `calkit clone ${link.project_owner_name}/${link.project_name}`,
     `cd ${folder}`,
     "calkit run --save --overleaf",
   ].join("\n");
@@ -683,8 +682,15 @@ function renderRunIt(
     el("div", {
       class: "small",
       text:
-        `Added stage ${saved.stage_name}. It hasn't run yet. To run it ` +
-        "and bring the result into this paper, on your computer:",
+        `Added stage ${saved.stage_name}. It hasn't run yet. Run it on ` +
+        "GitHub Actions, and its results come into this paper when it " +
+        "finishes:",
+    }),
+    renderRuns(link, true),
+    el("div", {
+      class: "small",
+      style: { marginTop: "6px" },
+      text: "Or on your computer:",
     }),
     el("pre", {
       class: "name",
@@ -693,6 +699,345 @@ function renderRunIt(
     }),
     el("div", { class: "actions" }, [copy]),
   ]);
+}
+
+// The project's pipeline runs, checked often while one is going, so a
+// finished run syncs to Overleaf even with the panel closed, and now and
+// then otherwise, to see ones started elsewhere
+let pipelineRuns: {
+  key: string;
+  runs: PipelineRuns;
+  // What the last finished run did here
+  notice?: string;
+} | null = null;
+let runsTimer: ReturnType<typeof setTimeout> | undefined;
+// The check going now, which others wait on rather than repeat
+let runsRequest: { key: string; promise: Promise<void> } | null = null;
+// Checks that failed in a row, which space the next ones out
+let runsFailures = 0;
+// A start from a run button, kept across their redraws
+let starting: { key: string; busy: boolean; error?: string } | null = null;
+// Where the open panel shows them, redrawn as they change
+const runsBoxes = new Set<{
+  box: HTMLElement;
+  link: OverleafLinkPublic;
+  offer: boolean;
+}>();
+
+function linkKey(link: OverleafLinkPublic): string {
+  return `${link.project_owner_name}/${link.project_name}`;
+}
+
+/** Whether the user can change the project, e.g., run or sync it. */
+function canWrite(link: OverleafLinkPublic): boolean {
+  return ["write", "admin", "owner"].includes(link.current_user_access ?? "");
+}
+
+/** The run going now, if there is one. */
+function activeRun(): PipelineRun | null {
+  const latest = pipelineRuns?.runs.runs[0];
+  return latest && ["queued", "running"].includes(latest.status)
+    ? latest
+    : null;
+}
+
+/** Show what's going on on the launcher, while the panel is closed. */
+function remountLauncher(): void {
+  if (!panel && currentProjectId) {
+    const id = currentProjectId;
+    mountLauncher(() => openPanel(id), launcherTone());
+  }
+}
+
+/**
+ * Check the project's runs, and keep checking: often while one is going,
+ * now and then otherwise, less often after failures, and not while the tab
+ * is hidden. A check already going is waited on rather than repeated.
+ */
+function refreshRuns(link: OverleafLinkPublic): Promise<void> {
+  const key = linkKey(link);
+  const schedule = () => {
+    clearTimeout(runsTimer);
+    const delay = runsFailures
+      ? Math.min(15_000 * 2 ** runsFailures, 300_000)
+      : activeRun()
+      ? 15_000
+      : 60_000;
+    runsTimer = setTimeout(() => {
+      if (document.hidden) {
+        schedule();
+      } else {
+        void refreshRuns(link);
+      }
+    }, delay);
+  };
+  const check = async () => {
+    const known = pipelineRuns?.key === key ? pipelineRuns : null;
+    const wasRunning = Boolean(known && activeRun());
+    let runs: PipelineRuns;
+    try {
+      runs = await send({
+        type: "project.pipelineRuns",
+        owner: link.project_owner_name,
+        project: link.project_name,
+      });
+      runsFailures = 0;
+    } catch {
+      runsFailures++;
+      schedule();
+      return;
+    }
+    if (currentLink && linkKey(currentLink) !== key) {
+      return;
+    }
+    pipelineRuns = { key, runs, notice: known?.notice };
+    if (!activeRun() && wasRunning) {
+      if (railOpen) {
+        void refreshRailPipeline(link);
+      }
+      if (runs.runs[0]?.status === "succeeded") {
+        await syncAfterRun(link);
+      } else {
+        pipelineRuns.notice = undefined;
+      }
+    }
+    schedule();
+    drawRuns();
+    drawRail();
+    remountLauncher();
+  };
+  if (runsRequest?.key === key) {
+    return runsRequest.promise;
+  }
+  const promise = check().finally(() => {
+    if (runsRequest?.promise === promise) {
+      runsRequest = null;
+    }
+  });
+  runsRequest = { key, promise };
+  return promise;
+}
+
+/** Sync the paper with its project, showing that it's going meanwhile. */
+async function syncOverleaf(
+  owner: string,
+  project: string,
+  path: string,
+): Promise<OverleafSyncResponse> {
+  syncing = true;
+  drawRail();
+  remountLauncher();
+  try {
+    return await send({ type: "overleaf.sync", owner, project, path });
+  } finally {
+    syncing = false;
+    drawRail();
+    remountLauncher();
+  }
+}
+
+/** Look again at what's synced and shown, now that a sync changed it. */
+function afterSync(): void {
+  provenanceCache.clear();
+  if (!currentProjectId) {
+    return;
+  }
+  if (panel) {
+    void load(currentProjectId);
+  } else {
+    void checkSyncStatus(currentProjectId);
+  }
+}
+
+// Why the last sync from a Sync now button failed, kept across redraws
+let syncError: string | undefined;
+
+/** A Sync now button, for where a sync is all that's needed. */
+function syncNow(
+  link: OverleafLinkPublic,
+  path: string,
+  secondary = false,
+): { button: HTMLElement; message: HTMLElement } {
+  const message = el("div", { class: "small" }, [
+    syncError ? errorMessage(syncError) : null,
+  ]);
+  const button = el("button", {
+    class: secondary ? "action secondary" : "action",
+    text: "Sync now",
+    disabled: !canWrite(link) || syncing,
+    title: canWrite(link)
+      ? "Push project files to Overleaf and pull Overleaf edits back"
+      : "You need write access to this project to sync",
+  });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    syncError = undefined;
+    clear(message).append(loading("Syncing"));
+    try {
+      await syncOverleaf(link.project_owner_name, link.project_name, path);
+      clear(message).append(el("div", { class: "dim", text: "Synced." }));
+      afterSync();
+    } catch (e) {
+      syncError = e instanceof Error ? e.message : String(e);
+      button.disabled = false;
+      clear(message).append(errorMessage(syncError));
+    }
+  });
+  return { button, message };
+}
+
+/** Start the pipeline on GitHub Actions, which syncs here when it's done. */
+async function startRun(link: OverleafLinkPublic): Promise<void> {
+  const key = linkKey(link);
+  starting = { key, busy: true };
+  drawRuns();
+  try {
+    const run = await send({
+      type: "project.startPipelineRun",
+      owner: link.project_owner_name,
+      project: link.project_name,
+    });
+    starting = null;
+    // Listed as soon as it's recorded, before GitHub lists it
+    if (pipelineRuns?.key === key) {
+      pipelineRuns.runs.runs.unshift(run);
+      pipelineRuns.notice = undefined;
+    }
+  } catch (e) {
+    starting = {
+      key,
+      busy: false,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+  drawRuns();
+  drawRail();
+  remountLauncher();
+  if (!starting) {
+    // One that was already going may not have it yet
+    await runsRequest?.promise;
+    await refreshRuns(link);
+  }
+}
+
+/** Bring what a finished run made into this paper. */
+async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
+  if (!pipelineRuns) {
+    return;
+  }
+  if (canWrite(link)) {
+    try {
+      await syncOverleaf(link.project_owner_name, link.project_name, link.path);
+      pipelineRuns.notice =
+        "The pipeline finished on GitHub Actions, and its results were " +
+        "synced here.";
+    } catch (e) {
+      pipelineRuns.notice =
+        "The pipeline finished on GitHub Actions, but syncing failed: " +
+        (e instanceof Error ? e.message : String(e));
+    }
+  }
+  afterSync();
+}
+
+/**
+ * The pipeline's latest run, and a button to start one when ``offer``
+ * says there's something to run.
+ */
+function renderRuns(link: OverleafLinkPublic, offer: boolean): HTMLElement {
+  const box = el("div", { style: { marginTop: "6px" } });
+  runsBoxes.add({ box, link, offer });
+  if (pipelineRuns?.key === linkKey(link)) {
+    drawRuns();
+  } else if (!runsFailures) {
+    // Failed checks are retried on a timer instead
+    void refreshRuns(link);
+  }
+  return box;
+}
+
+function drawRuns(): void {
+  for (const entry of runsBoxes) {
+    const { box, link, offer } = entry;
+    if (!box.isConnected && box.dataset.drawn) {
+      runsBoxes.delete(entry);
+      continue;
+    }
+    box.dataset.drawn = "1";
+    clear(box);
+    if (pipelineRuns?.key !== linkKey(link)) {
+      continue;
+    }
+    const { runs, notice } = pipelineRuns;
+    const run = activeRun();
+    const latest = runs.runs[0];
+    const view = (r: PipelineRun, text: string) =>
+      r.url
+        ? el("a", { text, href: r.url, attrs: { target: "_blank" } })
+        : null;
+    if (run) {
+      const since = run.started
+        ? ` since ${new Date(run.started).toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+          })}`
+        : "";
+      box.append(
+        el("div", { class: "row" }, [
+          el("span", { class: "spinner" }),
+          el("div", {
+            class: "grow small",
+            text:
+              run.status === "running"
+                ? `Running on GitHub Actions${since}`
+                : "Waiting to run on GitHub Actions",
+          }),
+          view(run, "View"),
+        ]),
+      );
+      continue;
+    }
+    if (notice) {
+      box.append(el("div", { class: "dim small", text: notice }));
+    } else if (latest?.status === "failed") {
+      box.append(
+        el("div", { class: "row" }, [
+          el("div", {
+            class: "grow small",
+            text: "The last run on GitHub Actions failed.",
+          }),
+          view(latest, "See why"),
+        ]),
+      );
+    }
+    // Something the document shows being out of date is reason to run
+    // too, even when Overleaf has what the project has
+    const staleShown = editorProblems?.found.some((problems) =>
+      problems.some((p) => p.kind === "stale"),
+    );
+    if (!offer && !staleShown && latest?.status !== "failed") {
+      continue;
+    }
+    const mine = starting?.key === linkKey(link) ? starting : null;
+    const start = el("button", {
+      class: "action",
+      text: "Run and sync",
+      disabled: !canWrite(link) || !runs.can_start || Boolean(mine?.busy),
+      title: !canWrite(link)
+        ? "You need write access to this project to run it"
+        : runs.cannot_start_reason ??
+          "Run the pipeline on GitHub Actions, then sync what it makes here",
+      onClick: () => void startRun(link),
+    });
+    box.append(
+      el("div", { class: "actions" }, [start]),
+      mine?.busy
+        ? loading("Starting")
+        : mine?.error
+        ? errorMessage(mine.error)
+        : el("div"),
+    );
+  }
 }
 
 /** A file's contents, base64-encoded, as the hub takes an upload. */
@@ -1041,6 +1386,8 @@ async function checkCitations(): Promise<void> {
     return;
   }
   editorProblems = { version: snapshot.version, found };
+  drawRuns();
+  drawRail();
   toEditor({
     type: "problems",
     version: snapshot.version,
@@ -1097,17 +1444,69 @@ async function fillTooltip(
   const root = host.attachShadow({ mode: "open" });
   const style = document.createElement("style");
   style.textContent = STYLES + TOOLTIP_STYLES;
-  const body = el("div", { class: "tip" }, [loading()]);
+  const body = el("div", { class: "tip" });
   root.append(style, body);
+  await fillCard(body, link, item);
+}
+
+/**
+ * Where something the document shows came from, and how to fix what's
+ * wrong with it, as its hover card and the sidebar show it.
+ */
+async function fillCard(
+  body: HTMLElement,
+  link: OverleafLinkPublic,
+  item: EditorCitation,
+): Promise<void> {
+  clear(body).append(loading());
   try {
     const provenance = await citationProvenance(link, item.citation);
     clear(body);
     renderProvenance(body, link, item.citation, provenance);
+    body.append(bringUpToDate(link, item.citation, provenance));
   } catch (e) {
     clear(body).append(
       errorMessage(e instanceof Error ? e.message : String(e)),
     );
   }
+}
+
+/**
+ * A way to bring what the document shows up to date from its card: syncing
+ * what the project already has, or running what's stale first, which syncs
+ * when it's done.
+ */
+function bringUpToDate(
+  link: OverleafLinkPublic,
+  citation: Citation,
+  provenance: Provenance,
+): HTMLElement {
+  const path = provenance.path;
+  // What the next sync would bring, by where Overleaf gets its copy
+  const status =
+    lastCheck && linkKey(lastCheck.link) === linkKey(link)
+      ? lastCheck.status
+      : null;
+  const waiting = (status?.files_to_push ?? []).some(
+    (f) =>
+      f.project_path === path ||
+      f.project_path.endsWith(`/_calkit/${path}`) ||
+      (citation.kind === "value" &&
+        f.project_path.endsWith("/_calkit/values.tex")),
+  );
+  // A frozen stage won't rerun, and a manual step needs a person
+  const stale =
+    provenance.stale_reason === "pipeline" &&
+    provenance.stage_kind !== "manual-step";
+  if (stale) {
+    return renderRuns(link, true);
+  }
+  const box = el("div", { style: { marginTop: "6px" } });
+  if (waiting) {
+    const { button, message } = syncNow(link, link.path);
+    box.append(el("div", { class: "actions" }, [button]), message);
+  }
+  return box;
 }
 
 /**
@@ -1126,6 +1525,7 @@ function watchEditor(): void {
     const message = event.data as FromEditor;
     if (message.type === "citations") {
       editorCitations = { version: message.version, items: message.items };
+      drawRail();
       void checkCitations();
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
@@ -1601,7 +2001,7 @@ function renderInsert(
         // started first would miss it
         await new Promise((resolve) => setTimeout(resolve, 3000));
         try {
-          await send({ type: "overleaf.sync", owner, project, path });
+          await syncOverleaf(owner, project, path);
           reload();
         } catch (e) {
           clear(message).append(
@@ -2042,9 +2442,6 @@ function renderStatus(
   clear(body);
   const figures = status.files_to_push.filter((f) => f.figure);
   const others = status.files_to_push.filter((f) => !f.figure);
-  const canWrite = ["write", "admin", "owner"].includes(
-    link.current_user_access ?? "",
-  );
   body.append(
     el("div", { class: "row" }, [
       el("div", { class: "grow" }, [
@@ -2124,11 +2521,16 @@ function renderStatus(
       }),
     );
   }
+  // Something stale is what a run would fix
+  const stale = [...status.files_to_push, ...status.files_to_delete].some(
+    (f) => f.stage_status && f.stage_status.status !== "up-to-date",
+  );
+  body.append(renderRuns(link, stale));
   const syncButton = el("button", {
     class: "action",
     text: "Sync now",
-    disabled: !canWrite || status.in_sync,
-    title: canWrite
+    disabled: !canWrite(link) || status.in_sync,
+    title: canWrite(link)
       ? "Push project files to Overleaf and pull Overleaf edits back"
       : "You need write access to this project to sync",
   });
@@ -2138,12 +2540,11 @@ function renderStatus(
     syncButton.disabled = true;
     clear(message).append(loading("Syncing"));
     try {
-      const result = await send({
-        type: "overleaf.sync",
-        owner: link.project_owner_name,
-        project: link.project_name,
-        path: status.path,
-      });
+      const result = await syncOverleaf(
+        link.project_owner_name,
+        link.project_name,
+        status.path,
+      );
       // Shown as in sync straight away, since that's what a sync leaves,
       // while the hub confirms it
       lastSyncNeeded = false;
@@ -2173,9 +2574,11 @@ function renderStatus(
       );
     }
   });
+  // Nothing to sync while it's in sync, e.g., when what's out of date
+  // needs a run first
   body.append(
     el("div", { class: "actions" }, [
-      syncButton,
+      status.in_sync ? null : syncButton,
       el("button", {
         class: "action secondary",
         text: "Refresh",
@@ -2958,7 +3361,13 @@ async function load(overleafProjectId: string): Promise<void> {
  * without the panel opening on top of the document uninvited. A paper
  * not in any project gets it too, since linking it is the first step.
  */
-type LauncherTone = "idle" | "attention" | "reconnect" | "unlinked";
+type LauncherTone =
+  | "idle"
+  | "attention"
+  | "reconnect"
+  | "unlinked"
+  | "running"
+  | "syncing";
 
 function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
   document.getElementById(LAUNCHER_ID)?.remove();
@@ -2993,8 +3402,10 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
       attention: "Calkit: sync needed",
       reconnect: "Calkit: reconnect Overleaf",
       unlinked: "Calkit: not linked",
+      running: "Calkit: running",
+      syncing: "Calkit: syncing",
     }[tone],
-    class: tone === "idle" ? "" : "attention",
+    class: ["idle", "running", "syncing"].includes(tone) ? "" : "attention",
   });
   button.addEventListener("click", onClick);
   root.append(style, button);
@@ -3003,8 +3414,26 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
 
 // Remembered so a closed panel can still show that something is waiting
 let lastSyncNeeded = false;
+// A sync from here is going, which the sidebar and launcher show
+let syncing = false;
 let lastTokenProblem = false;
 let lastUnlinked = false;
+
+function launcherTone(): LauncherTone {
+  if (lastTokenProblem) {
+    return "reconnect";
+  }
+  if (lastUnlinked) {
+    return "unlinked";
+  }
+  if (syncing) {
+    return "syncing";
+  }
+  if (activeRun()) {
+    return "running";
+  }
+  return lastSyncNeeded ? "attention" : "idle";
+}
 
 function openPanel(
   overleafProjectId: string,
@@ -3016,16 +3445,7 @@ function openPanel(
     title: "Calkit",
     onClose: () => {
       panel = null;
-      mountLauncher(
-        () => openPanel(overleafProjectId),
-        lastTokenProblem
-          ? "reconnect"
-          : lastUnlinked
-          ? "unlinked"
-          : lastSyncNeeded
-          ? "attention"
-          : "idle",
-      );
+      mountLauncher(() => openPanel(overleafProjectId), launcherTone());
     },
   });
   if (fill) {
@@ -3128,6 +3548,13 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     hubWebUrl = hub;
     currentLink = link;
     void checkCitations();
+    drawRail();
+    if (railOpen && railPipeline?.key !== linkKey(link)) {
+      void refreshRailPipeline(link);
+    }
+    if (pipelineRuns?.key !== linkKey(link)) {
+      void refreshRuns(link);
+    }
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
@@ -3144,15 +3571,13 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     lastCheck = statuses.length
       ? { overleafProjectId, hubWebUrl: hub, link, status: statuses[0] }
       : null;
+    drawRail();
     // Nothing to say if the panel was opened in the meantime, or if the
     // page moved on to another project
     if (panel || currentProjectId !== overleafProjectId) {
       return;
     }
-    mountLauncher(
-      () => openPanel(overleafProjectId),
-      lastSyncNeeded ? "attention" : "idle",
-    );
+    mountLauncher(() => openPanel(overleafProjectId), launcherTone());
   } catch (e) {
     if (!(await current())) {
       return;
@@ -3200,6 +3625,399 @@ function watchForSaves(): void {
     },
     true,
   );
+}
+
+const RAIL_TAB_ID = "calkit-rail-tab";
+const RAIL_PANE_ID = "calkit-rail-pane";
+// Whether Calkit's tab is the one showing in Overleaf's sidebar
+let railOpen = false;
+let railPane: { host: HTMLElement; body: HTMLElement } | null = null;
+// The component opened in the sidebar, kept through redraws, which come
+// with every edit
+let railCard: { key: string; element: HTMLElement } | null = null;
+let railPipeline: {
+  key: string;
+  pipeline?: ProjectPipeline;
+  error?: string;
+} | null = null;
+
+/**
+ * A Calkit tab in Overleaf's sidebar, listing what the open document shows
+ * from the project and the pipeline's stages, with a button to run it.
+ *
+ * Overleaf renders only its active tab's pane, so this one is put in the
+ * sidebar's content area while it's open, with Overleaf's pane hidden,
+ * rather than being a tab Overleaf knows about.
+ */
+function watchRail(): void {
+  const style = document.createElement("style");
+  style.textContent = `
+    .ide-rail-tab-content.calkit-open > :not(#${RAIL_PANE_ID}) {
+      display: none !important;
+    }
+    #${RAIL_PANE_ID} { height: 100%; overflow-y: auto; }
+    body.calkit-rail-open .ide-rail-tab-link.active:not(#${RAIL_TAB_ID}) {
+      background-color: transparent !important;
+      color: inherit !important;
+    }
+    body.calkit-rail-open
+      .ide-rail-tab-link.active:not(#${RAIL_TAB_ID})::after {
+      display: none !important;
+    }
+    #${RAIL_TAB_ID} svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+      margin: 0 auto;
+      color: #009688;
+    }
+    #${RAIL_TAB_ID}.active svg { color: #fff; }
+  `;
+  document.head.append(style);
+  // One of Overleaf's own tabs brings its pane back. The one it thinks is
+  // showing would otherwise close the sidebar instead.
+  document.addEventListener(
+    "click",
+    (event) => {
+      const target = (event.target as Element | null)?.closest?.(
+        ".ide-rail-tab-link",
+      );
+      if (!railOpen || !target || target.id === RAIL_TAB_ID) {
+        return;
+      }
+      if (target.classList.contains("active")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      setRail(false);
+    },
+    true,
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const ensure = () => {
+    const first = document.getElementById("ide-rail-tabs-tab-file-tree");
+    const tabs = first?.parentElement;
+    if (!tabs || !currentProjectId) {
+      return;
+    }
+    let tab = document.getElementById(RAIL_TAB_ID);
+    if (!tab) {
+      tab = el("button", {
+        class: "ide-rail-tab-link nav-link",
+        attrs: {
+          id: RAIL_TAB_ID,
+          type: "button",
+          role: "tab",
+          title: "Calkit",
+          "aria-label": "Calkit",
+        },
+      });
+      // Inline, so it takes the tab's color: white while ours is open
+      tab.innerHTML = calkitLogo;
+      tab.addEventListener("click", () => setRail(!railOpen));
+      const separated = tabs.querySelector(".separated-rail-tab");
+      if (separated) {
+        separated.before(tab);
+      } else {
+        tabs.append(tab);
+      }
+    }
+    // Overleaf underlines the tab whose pane is open by open-rail
+    tab.classList.toggle("active", railOpen);
+    tab.classList.toggle("open-rail", railOpen);
+    tab.setAttribute("aria-selected", String(railOpen));
+    if (railOpen) {
+      placeRailPane();
+    }
+  };
+  new MutationObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(ensure, 100);
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+function setRail(open: boolean): void {
+  railOpen = open;
+  document.body.classList.toggle("calkit-rail-open", open);
+  const tab = document.getElementById(RAIL_TAB_ID);
+  tab?.classList.toggle("active", open);
+  tab?.classList.toggle("open-rail", open);
+  tab?.setAttribute("aria-selected", String(open));
+  if (!open) {
+    document
+      .querySelector(".ide-rail-tab-content")
+      ?.classList.remove("calkit-open");
+    railPane?.host.remove();
+    return;
+  }
+  // A closed sidebar has no content area to show it in, so open it on the
+  // file tree first
+  const content = document.querySelector(".ide-rail-tab-content");
+  if (!content || content.getBoundingClientRect().width < 20) {
+    // Its pane is put there once it's drawn, as Overleaf redraws
+    document.getElementById("ide-rail-tabs-tab-file-tree")?.click();
+  } else {
+    placeRailPane();
+  }
+  drawRail();
+  if (currentLink) {
+    void refreshRailPipeline(currentLink);
+  }
+}
+
+// The Calkit pane in Overleaf's sidebar, which brings its own background,
+// since its colors follow the system's theme rather than Overleaf's
+const RAIL_STYLES = `
+  .rail {
+    padding: 10px 12px; min-height: 100%; box-sizing: border-box;
+    color: var(--ck-fg); background: var(--ck-bg);
+  }
+  .rail h3 {
+    font-size: 12px; font-weight: 600; margin: 14px 0 4px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ck-dim);
+  }
+  .item {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 3px 4px; border: 0; border-radius: 4px; text-align: left;
+    background: none; color: inherit; cursor: pointer;
+  }
+  .item:hover { background: var(--ck-subtle-bg); }
+  .item .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+    background: var(--ck-success); }
+  .dot.warning { background: var(--ck-warning); }
+  .dot.error { background: var(--ck-danger); }
+  .dot.unknown { background: var(--ck-dim); }
+  .item .spinner { width: 8px; height: 8px; border-width: 1.5px;
+    flex: none; }
+  .card {
+    margin: 2px 0 8px 14px; padding: 6px 8px; font-size: 12px;
+    border-left: 2px solid var(--ck-border);
+  }
+`;
+
+/** Put the pane in the sidebar, where Overleaf may have redrawn it away. */
+function placeRailPane(): void {
+  const content = document.querySelector(".ide-rail-tab-content");
+  if (!content) {
+    return;
+  }
+  if (!railPane) {
+    const host = el("div", { attrs: { id: RAIL_PANE_ID } });
+    const root = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = STYLES + RAIL_STYLES;
+    const body = el("div", { class: "rail" });
+    root.append(style, body);
+    railPane = { host, body };
+    drawRail();
+  }
+  if (railPane.host.parentElement !== content) {
+    content.append(railPane.host);
+  }
+  content.classList.add("calkit-open");
+}
+
+/** Ask the hub for the pipeline's stages, then show them. */
+async function refreshRailPipeline(link: OverleafLinkPublic): Promise<void> {
+  try {
+    const pipeline = await send({
+      type: "project.pipeline",
+      owner: link.project_owner_name,
+      project: link.project_name,
+    });
+    railPipeline = { key: linkKey(link), pipeline };
+  } catch (e) {
+    railPipeline = {
+      key: linkKey(link),
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+  drawRail();
+}
+
+function drawRail(): void {
+  if (!railPane) {
+    return;
+  }
+  const body = clear(railPane.body);
+  const link = currentLink;
+  if (!link) {
+    body.append(
+      el("div", {
+        class: "small",
+        text: "This paper isn't linked to a Calkit project yet.",
+      }),
+      el("div", { class: "actions" }, [
+        el("button", {
+          class: "action",
+          text: "Link it",
+          onClick: () => currentProjectId && openPanel(currentProjectId),
+        }),
+      ]),
+    );
+    return;
+  }
+  const base = projectUrl(
+    hubWebUrl,
+    link.project_owner_name,
+    link.project_name,
+  );
+  body.append(
+    el("a", {
+      text: linkKey(link),
+      href: base,
+      attrs: { target: "_blank" },
+    }),
+  );
+  // What's going on between the paper and its project
+  const running = activeRun();
+  const status =
+    lastCheck && linkKey(lastCheck.link) === linkKey(link)
+      ? lastCheck.status
+      : null;
+  if (syncing) {
+    body.append(loading("Syncing with the project"));
+  } else if (running) {
+    body.append(
+      loading(
+        running.status === "running"
+          ? "Running on GitHub Actions"
+          : "Waiting to run on GitHub Actions",
+      ),
+    );
+  } else if (status?.in_sync) {
+    body.append(
+      el("div", { class: "row small" }, [
+        el("span", { class: "dot" }),
+        el("span", { text: "In sync with the project" }),
+      ]),
+    );
+  } else if (status) {
+    const { button, message } = syncNow(link, status.path, true);
+    body.append(
+      el("div", { class: "row small" }, [
+        el("span", { class: "dot warning" }),
+        el("span", { class: "grow", text: "Changes to sync" }),
+        button,
+      ]),
+      message,
+    );
+  }
+  // Components the open document shows, each with what's wrong with it
+  body.append(el("h3", { text: "Components" }));
+  const items = editorCitations?.items ?? [];
+  const checked =
+    editorProblems && editorProblems.version === editorCitations?.version
+      ? editorProblems.found
+      : null;
+  if (!items.length) {
+    body.append(
+      el("div", {
+        class: "dim small",
+        text: "Nothing from the project here yet.",
+      }),
+    );
+  }
+  const seen = new Map<string, number>();
+  items.forEach((item, index) => {
+    const problems = checked?.[index];
+    // What it shows, and which time, since its line moves with edits
+    const text = citationText(item.citation);
+    const nth = (seen.get(text) ?? 0) + 1;
+    seen.set(text, nth);
+    const key = `${text}#${nth}`;
+    const label = item.citation.key
+      ? `${item.citation.path} · ${item.citation.key}`
+      : item.citation.path;
+    body.append(
+      el(
+        "button",
+        {
+          class: "item",
+          title: problems?.length
+            ? problems.map((p) => p.message).join("\n")
+            : `Line ${item.line}`,
+          onClick: () => {
+            toEditor({ type: "goto", line: item.line, column: item.column });
+            if (railCard?.key === key) {
+              railCard = null;
+            } else {
+              const element = el("div", { class: "card" });
+              railCard = { key, element };
+              void fillCard(element, link, item);
+            }
+            drawRail();
+          },
+        },
+        [
+          el("span", {
+            class: `dot ${
+              problems === undefined
+                ? "unknown"
+                : problems.some((p) => p.severity === "error")
+                ? "error"
+                : problems.length
+                ? "warning"
+                : ""
+            }`,
+          }),
+          el("span", { class: "grow small", text: label }),
+          el("span", { class: "dim small", text: `${item.line}` }),
+        ],
+      ),
+    );
+    if (railCard?.key === key) {
+      body.append(railCard.element);
+    }
+  });
+  // The pipeline's stages, and running it
+  body.append(el("h3", { text: "Pipeline" }));
+  const known = railPipeline?.key === linkKey(link) ? railPipeline : null;
+  const pipeline = known?.pipeline;
+  if (known?.error) {
+    body.append(errorMessage(known.error));
+  } else if (!pipeline) {
+    body.append(loading());
+  } else if (!pipeline.ck_stages.length) {
+    body.append(el("div", { class: "dim small", text: "No stages yet." }));
+  }
+  for (const name of pipeline?.ck_stages ?? []) {
+    const status = pipeline?.stage_statuses[name]?.status ?? "unknown";
+    const due = ["stale", "not-run"].includes(status);
+    // What a run going now will run
+    const toRun = Boolean(running) && due;
+    body.append(
+      el(
+        "a",
+        {
+          class: "item",
+          href: `${base}/pipeline?stage=${encodeURIComponent(name)}`,
+          attrs: { target: "_blank" },
+          title: status,
+        },
+        [
+          toRun
+            ? el("span", { class: "spinner" })
+            : el("span", {
+                class: `dot ${
+                  status === "up-to-date" ? "" : due ? "warning" : "unknown"
+                }`,
+              }),
+          el("span", { class: "grow small", text: name }),
+          status !== "up-to-date"
+            ? el("span", {
+                class: "dim small",
+                text: toRun ? "running" : status,
+              })
+            : null,
+        ],
+      ),
+    );
+  }
+  body.append(renderRuns(link, true));
 }
 
 /**
@@ -3341,6 +4159,7 @@ watchForSaves();
 watchEditor();
 watchPdf();
 watchIntegrations();
+watchRail();
 watchContextMenu();
 runContentScript({
   id: "overleaf",

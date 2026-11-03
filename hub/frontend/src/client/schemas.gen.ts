@@ -3042,6 +3042,32 @@ export const FsOpResponseSchema = {
     "Response describing how to perform a file system operation\n(get/put/exists/list) for a given path within the project.",
 } as const
 
+export const GitHubActionsRunOptionsSchema = {
+  properties: {
+    workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Workflow",
+    },
+    inputs: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Inputs",
+      default: {},
+    },
+  },
+  type: "object",
+  title: "GitHubActionsRunOptions",
+} as const
+
 export const GitHubInstallationsSchema = {
   properties: {
     total_count: {
@@ -4780,6 +4806,19 @@ export const OperationResultSchema = {
   description: "Result for file operations like delete, move, copy.",
 } as const
 
+export const OrgMemberPatchSchema = {
+  properties: {
+    role: {
+      type: "string",
+      enum: ["read", "write", "admin", "owner"],
+      title: "Role",
+    },
+  },
+  type: "object",
+  required: ["role"],
+  title: "OrgMemberPatch",
+} as const
+
 export const OrgMemberPostSchema = {
   properties: {
     username: {
@@ -5022,7 +5061,14 @@ export const OrgUserPublicSchema = {
       title: "Name",
     },
     github_name: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Github Name",
     },
     role: {
@@ -5416,6 +5462,262 @@ export const PipelinePutSchema = {
   type: "object",
   required: ["yaml"],
   title: "PipelinePut",
+} as const
+
+export const PipelineRunSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    started: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started",
+    },
+    finished: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Finished",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    started_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started By",
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    github_run_id: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Run Id",
+    },
+  },
+  type: "object",
+  required: ["id", "location", "status", "created"],
+  title: "PipelineRun",
+  description: "A run of the pipeline, wherever it ran.",
+} as const
+
+export const PipelineRunLogPartSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    phases: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPhase",
+      },
+      type: "array",
+      title: "Phases",
+      default: [],
+    },
+    log: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Log",
+    },
+    log_truncated: {
+      type: "boolean",
+      title: "Log Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPart",
+  description: "Part of a run's log, e.g., a GitHub Actions job's.",
+} as const
+
+export const PipelineRunLogPhaseSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPhase",
+} as const
+
+export const PipelineRunLogsSchema = {
+  properties: {
+    parts: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPart",
+      },
+      type: "array",
+      title: "Parts",
+      default: [],
+    },
+  },
+  type: "object",
+  title: "PipelineRunLogs",
+} as const
+
+export const PipelineRunPostSchema = {
+  properties: {
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+      default: "github-actions",
+    },
+    github_actions: {
+      $ref: "#/components/schemas/GitHubActionsRunOptions",
+    },
+  },
+  type: "object",
+  title: "PipelineRunPost",
+} as const
+
+export const PipelineRunsSchema = {
+  properties: {
+    runs: {
+      items: {
+        $ref: "#/components/schemas/PipelineRun",
+      },
+      type: "array",
+      title: "Runs",
+      default: [],
+    },
+    total: {
+      type: "integer",
+      title: "Total",
+      default: 0,
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    can_start: {
+      type: "boolean",
+      title: "Can Start",
+      default: false,
+    },
+    cannot_start_reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Cannot Start Reason",
+    },
+  },
+  type: "object",
+  title: "PipelineRuns",
 } as const
 
 export const PipelineStageSchema = {

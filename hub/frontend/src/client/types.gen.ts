@@ -1741,6 +1741,22 @@ export type FsOpResponse = {
 }
 
 /**
+ * GitHubActionsRunOptions
+ */
+export type GitHubActionsRunOptions = {
+  /**
+   * Workflow
+   */
+  workflow?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: {
+    [key: string]: string
+  }
+}
+
+/**
  * GitHubInstallations
  */
 export type GitHubInstallations = {
@@ -2817,6 +2833,16 @@ export type OperationResult = {
 }
 
 /**
+ * OrgMemberPatch
+ */
+export type OrgMemberPatch = {
+  /**
+   * Role
+   */
+  role: "read" | "write" | "admin" | "owner"
+}
+
+/**
  * OrgMemberPost
  */
 export type OrgMemberPost = {
@@ -2973,7 +2999,7 @@ export type OrgUserPublic = {
   /**
    * Github Name
    */
-  github_name: string
+  github_name: string | null
   /**
    * Role
    */
@@ -3225,6 +3251,151 @@ export type PipelinePut = {
    * Message
    */
   message?: string | null
+}
+
+/**
+ * PipelineRun
+ *
+ * A run of the pipeline, wherever it ran.
+ */
+export type PipelineRun = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Location
+   */
+  location: "github-actions"
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Started
+   */
+  started?: string | null
+  /**
+   * Finished
+   */
+  finished?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Started By
+   */
+  started_by?: string | null
+  /**
+   * Github Workflow
+   */
+  github_workflow?: string | null
+  /**
+   * Github Run Id
+   */
+  github_run_id?: number | null
+}
+
+/**
+ * PipelineRunLogPart
+ *
+ * Part of a run's log, e.g., a GitHub Actions job's.
+ */
+export type PipelineRunLogPart = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+  /**
+   * Phases
+   */
+  phases?: Array<PipelineRunLogPhase>
+  /**
+   * Log
+   */
+  log?: string | null
+  /**
+   * Log Truncated
+   */
+  log_truncated?: boolean
+}
+
+/**
+ * PipelineRunLogPhase
+ */
+export type PipelineRunLogPhase = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+}
+
+/**
+ * PipelineRunLogs
+ */
+export type PipelineRunLogs = {
+  /**
+   * Parts
+   */
+  parts?: Array<PipelineRunLogPart>
+}
+
+/**
+ * PipelineRunPost
+ */
+export type PipelineRunPost = {
+  /**
+   * Location
+   */
+  location?: "github-actions"
+  github_actions?: GitHubActionsRunOptions
+}
+
+/**
+ * PipelineRuns
+ */
+export type PipelineRuns = {
+  /**
+   * Runs
+   */
+  runs?: Array<PipelineRun>
+  /**
+   * Total
+   */
+  total?: number
+  /**
+   * Github Workflow
+   */
+  github_workflow?: string | null
+  /**
+   * Can Start
+   */
+  can_start?: boolean
+  /**
+   * Cannot Start Reason
+   */
+  cannot_start_reason?: string | null
 }
 
 /**
@@ -14014,6 +14185,127 @@ export type PostProjectPipelineExportStageResponses = {
 export type PostProjectPipelineExportStageResponse =
   PostProjectPipelineExportStageResponses[keyof PostProjectPipelineExportStageResponses]
 
+export type GetProjectPipelineRunsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+    /**
+     * Offset
+     */
+    offset?: number
+  }
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type GetProjectPipelineRunsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunsError =
+  GetProjectPipelineRunsErrors[keyof GetProjectPipelineRunsErrors]
+
+export type GetProjectPipelineRunsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRuns
+}
+
+export type GetProjectPipelineRunsResponse =
+  GetProjectPipelineRunsResponses[keyof GetProjectPipelineRunsResponses]
+
+export type PostProjectPipelineRunData = {
+  body: PipelineRunPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type PostProjectPipelineRunErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineRunError =
+  PostProjectPipelineRunErrors[keyof PostProjectPipelineRunErrors]
+
+export type PostProjectPipelineRunResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRun
+}
+
+export type PostProjectPipelineRunResponse =
+  PostProjectPipelineRunResponses[keyof PostProjectPipelineRunResponses]
+
+export type GetProjectPipelineRunLogsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Run Id
+     */
+    run_id: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs"
+}
+
+export type GetProjectPipelineRunLogsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunLogsError =
+  GetProjectPipelineRunLogsErrors[keyof GetProjectPipelineRunLogsErrors]
+
+export type GetProjectPipelineRunLogsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRunLogs
+}
+
+export type GetProjectPipelineRunLogsResponse =
+  GetProjectPipelineRunLogsResponses[keyof GetProjectPipelineRunLogsResponses]
+
 export type GetProjectProvenanceData = {
   body?: never
   path: {
@@ -15382,6 +15674,78 @@ export type AddOrgMemberResponses = {
 
 export type AddOrgMemberResponse =
   AddOrgMemberResponses[keyof AddOrgMemberResponses]
+
+export type DeleteOrgMemberData = {
+  body?: never
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type DeleteOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteOrgMemberError =
+  DeleteOrgMemberErrors[keyof DeleteOrgMemberErrors]
+
+export type DeleteOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteOrgMemberResponse =
+  DeleteOrgMemberResponses[keyof DeleteOrgMemberResponses]
+
+export type UpdateOrgMemberData = {
+  body: OrgMemberPatch
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type UpdateOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type UpdateOrgMemberError =
+  UpdateOrgMemberErrors[keyof UpdateOrgMemberErrors]
+
+export type UpdateOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type UpdateOrgMemberResponse =
+  UpdateOrgMemberResponses[keyof UpdateOrgMemberResponses]
 
 export type PutOrgSubscriptionData = {
   body: OrgSubscriptionUpdate

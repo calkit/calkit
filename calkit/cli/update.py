@@ -56,9 +56,6 @@ def update_devcontainer(
                 "devcontainer", calkit_resources.DEVCONTAINER_FNAME
             )
         )
-    # A Codespace opens on the project's documents
-    if os.path.isfile(os.path.join(wdir or ".", "calkit.yaml")):
-        calkit_resources.set_devcontainer_open_files(wdir)
     if not no_commit:
         repo = calkit.git.get_repo(wdir)
         rel_path = os.path.join(".devcontainer", "devcontainer.json")

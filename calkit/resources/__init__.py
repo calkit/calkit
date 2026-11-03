@@ -15,7 +15,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import posixpath
 import re
 import stat
 from typing import Any
@@ -83,58 +82,6 @@ def render_devcontainer_spec() -> dict:
         vscode.setdefault(key, value)
     spec["customizations"]["vscode"] = vscode
     return spec
-
-
-def set_devcontainer_open_files(
-    wdir: str | None = None, ck_info: dict | None = None
-) -> bool:
-    """Have a Codespace open the project's LaTeX documents when it's
-    created, returning whether the project's dev container spec changed.
-
-    Only an existing spec is changed, and only its list of files to open,
-    which keeps what's already there, e.g., files a person added.
-    """
-    import calkit
-
-    fpath = os.path.join(wdir or ".", ".devcontainer", DEVCONTAINER_FNAME)
-    if not os.path.isfile(fpath):
-        return False
-    if ck_info is None:
-        ck_info = calkit.load_calkit_info(wdir=wdir)
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    docs = [
-        posixpath.normpath(
-            posixpath.join(stage.get("wdir") or "", stage["target_path"])
-        )
-        for stage in stages.values()
-        if isinstance(stage, dict)
-        and stage.get("kind") == "latex"
-        and isinstance(stage.get("target_path"), str)
-    ]
-    if not docs:
-        return False
-    try:
-        with open(fpath, encoding="utf-8") as f:
-            spec = json.load(f)
-    except (OSError, ValueError):
-        # e.g., one with comments, which only JSONC allows
-        return False
-    if not isinstance(spec, dict):
-        return False
-    customizations = spec.setdefault("customizations", {})
-    if not isinstance(customizations, dict):
-        return False
-    codespaces = customizations.setdefault("codespaces", {})
-    if not isinstance(codespaces, dict):
-        return False
-    open_files = codespaces.get("openFiles") or []
-    added = [doc for doc in dict.fromkeys(docs) if doc not in open_files]
-    if not added:
-        return False
-    codespaces["openFiles"] = list(open_files) + added
-    with open(fpath, "w", encoding="utf-8") as f:
-        f.write(json.dumps(spec, indent=2) + "\n")
-    return True
 
 
 def get_action_ref(version: str | None = None) -> str:

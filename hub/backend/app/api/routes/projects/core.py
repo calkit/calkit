@@ -7416,11 +7416,6 @@ async def post_project_overleaf_publication(
     repo.git.add("dvc.yaml")
     if os.path.isfile(os.path.join(repo.working_dir, ".gitattributes")):
         repo.git.add(".gitattributes")
-    # A Codespace opens on the document too
-    if calkit.resources.set_devcontainer_open_files(
-        repo.working_dir, ck_info=ck_info
-    ):
-        repo.git.add(".devcontainer")
     if auto_build:
         workflow_dir = os.path.join(repo.working_dir, ".github", "workflows")
         os.makedirs(workflow_dir, exist_ok=True)

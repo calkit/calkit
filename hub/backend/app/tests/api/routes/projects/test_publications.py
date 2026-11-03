@@ -1,7 +1,6 @@
 """Tests for publication routes: the Overleaf import and its components."""
 
 import io
-import json
 import os
 import uuid
 import zipfile
@@ -449,14 +448,7 @@ def test_post_project_overleaf_publication_creates_tex_env(
     normal_user_token_headers: dict[str, str],
     tmp_path: Path,
 ) -> None:
-    repo, _ = _make_repo(
-        tmp_path,
-        {
-            "README.md": b"Hi\n",
-            ".devcontainer/devcontainer.json": b'{"image": "x"}\n',
-        },
-        {"name": "p"},
-    )
+    repo, _ = _make_repo(tmp_path, {"README.md": b"Hi\n"}, {"name": "p"})
     wdir = str(repo.working_dir)
     fake_project = SimpleNamespace(
         owner_account_name="o",
@@ -497,14 +489,6 @@ def test_post_project_overleaf_publication_creates_tex_env(
     }
     stages = ck["pipeline"]["stages"]
     assert {s["environment"] for s in stages.values()} == {"tex"}
-    # A Codespace opens on each document, committed with its import
-    with open(os.path.join(wdir, ".devcontainer", "devcontainer.json")) as f:
-        spec = json.load(f)
-    assert spec["customizations"]["codespaces"]["openFiles"] == [
-        "paper/main.tex",
-        "talk/main.tex",
-    ]
-    assert not repo.git.status("--porcelain", "--", ".devcontainer")
 
 
 def test_get_project_publications_latex_diffs(

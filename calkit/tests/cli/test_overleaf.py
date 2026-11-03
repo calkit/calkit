@@ -74,7 +74,6 @@ def test_overleaf(tmp_dir):
     assert os.environ["CALKIT_TEST_OVERLEAF_TOKEN"] == "none"
     config = calkit.config.read()
     assert config.overleaf_token == "none"
-    subprocess.run(["calkit", "update", "devcontainer"], check=True)
     subprocess.run(
         [
             "calkit",
@@ -87,13 +86,6 @@ def test_overleaf(tmp_dir):
         ],
         check=True,
     )
-    # A Codespace opens on the document, which is committed with the import
-    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
-        spec = json.load(f)
-    assert spec["customizations"]["codespaces"]["openFiles"] == [
-        "ol-project/main.tex"
-    ]
-    assert not repo.git.status("--porcelain", "--", ".devcontainer")
     with open("ol-project/main.tex") as f:
         txt = f.read()
         assert "This is the initial text" in txt

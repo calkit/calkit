@@ -2457,8 +2457,7 @@ function renderStatus(
           class: "dim small",
           text: `Synced folder: ${status.path}`,
         }),
-        // Where to work on what the paper shows, without installing
-        // anything; the Codespace opens on the paper
+        // Where to work on what the paper shows, without installing anything
         link.github_repo
           ? el("a", {
               class: "small",

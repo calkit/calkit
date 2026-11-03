@@ -31,7 +31,7 @@ from calkit.cli.scheduler import (
     _slurm_exit_code,
     _wait_for_output_file,
     _wait_until_done,
-    track_interactive_job,
+    record_interactive_job,
 )
 
 
@@ -519,31 +519,34 @@ def test_count_queued_jobs(tmp_dir, monkeypatch):
     assert _count_queued_jobs("hpc", exclude="none") == 3
 
 
-def test_track_interactive_job(tmp_dir, monkeypatch):
+def test_record_interactive_job(tmp_dir, monkeypatch):
     monkeypatch.delenv("SLURM_JOB_ID", raising=False)
     monkeypatch.delenv("PBS_JOBID", raising=False)
     # Outside a scheduler job, nothing is recorded
     with open("calkit.yaml", "w") as f:
         f.write("name: test\n")
-    with track_interactive_job("jupyter"):
-        assert _load_jobs() == {}
-    # Inside a SLURM job, the job is recorded while the session lasts
-    monkeypatch.setenv("SLURM_JOB_ID", "123")
-    with track_interactive_job("jupyter"):
-        record = _load_jobs()["jupyter:123"]
-        assert record["kind"] == "slurm"
-        assert record["job_id"] == "123"
-        assert record["interactive"]
+    record_interactive_job("jupyter")
     assert _load_jobs() == {}
+    # Inside a SLURM job, the allocation is recorded, once however many
+    # sessions it runs
+    monkeypatch.setenv("SLURM_JOB_ID", "123")
+    record_interactive_job("jupyter")
+    record_interactive_job("jupyter")
+    jobs = _load_jobs()
+    assert list(jobs) == ["jupyter:123"]
+    assert jobs["jupyter:123"]["kind"] == "slurm"
+    assert jobs["jupyter:123"]["job_id"] == "123"
+    assert jobs["jupyter:123"]["interactive"]
     # PBS jobs too
     monkeypatch.delenv("SLURM_JOB_ID")
     monkeypatch.setenv("PBS_JOBID", "456.server")
-    with track_interactive_job("jupyter"):
-        assert _load_jobs()["jupyter:456.server"]["kind"] == "pbs"
+    record_interactive_job("jupyter")
+    assert _load_jobs()["jupyter:456.server"]["kind"] == "pbs"
     # Outside a project, there's nowhere to record it
     os.remove("calkit.yaml")
-    with track_interactive_job("jupyter"):
-        assert _load_jobs() == {}
+    monkeypatch.setenv("PBS_JOBID", "789.server")
+    record_interactive_job("jupyter")
+    assert "jupyter:789.server" not in _load_jobs()
 
 
 def test_get_queue(tmp_dir, monkeypatch, capsys):

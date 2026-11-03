@@ -87,32 +87,80 @@ export function compactSlurmOptions(
   };
 }
 
-// Options from base, overridden by whatever override sets
+// Memory flags besides --mem; SLURM takes only one of them
+const SLURM_MEMORY_FLAGS = ["--mem-per-cpu", "--mem-per-gpu"];
+
+// srun options split into flags with their values, keeping quoted values, e.g.,
+// --comment="a -p b", whole
+function groupSlurmFlags(
+  options: string[],
+): Array<{ flag: string; tokens: string[] }> {
+  const groups: Array<{ flag: string; tokens: string[] }> = [];
+  for (const token of options.flatMap(
+    (opt) => opt.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [],
+  )) {
+    if (token.startsWith("-") || groups.length === 0) {
+      const eq = token.indexOf("=");
+      groups.push({
+        flag: eq < 0 ? token : token.slice(0, eq),
+        tokens: [token],
+      });
+    } else {
+      groups[groups.length - 1].tokens.push(token);
+    }
+  }
+  return groups;
+}
+
+function setsSlurmMemory(options: SlurmLaunchOptions): boolean {
+  return (
+    Boolean(options.mem) ||
+    groupSlurmFlags([options.extra ?? ""]).some((g) =>
+      SLURM_MEMORY_FLAGS.includes(g.flag),
+    )
+  );
+}
+
+// Options from base, overridden by whatever override sets. Known flags saved
+// in extra, e.g., by older versions, are normalized first so they can't
+// conflict, and memory flags override each other as a group.
 export function mergeSlurmOptions(
   base: SlurmLaunchOptions | undefined,
   override: SlurmLaunchOptions | undefined,
 ): SlurmLaunchOptions {
-  const merged = compactSlurmOptions(base ?? {});
-  for (const [key, value] of Object.entries(
-    compactSlurmOptions(override ?? {}),
-  )) {
-    if (value) {
-      merged[key as keyof SlurmLaunchOptions] = value;
+  const normalize = (options: SlurmLaunchOptions | undefined) =>
+    parseSlurmOptionList(slurmOptionsToOptionList(options ?? {})) ?? {};
+  const merged = normalize(base);
+  const over = normalize(override);
+  const overExtra = groupSlurmFlags([over.extra ?? ""]);
+  const overridden = new Set(overExtra.map((g) => g.flag));
+  if (setsSlurmMemory(over)) {
+    merged.mem = undefined;
+    SLURM_MEMORY_FLAGS.forEach((flag) => overridden.add(flag));
+  }
+  for (const key of Object.keys(SLURM_OPTION_FLAGS) as SlurmOptionField[]) {
+    if (over[key]) {
+      merged[key] = over[key];
     }
   }
-  return merged;
+  merged.extra = [
+    ...groupSlurmFlags([merged.extra ?? ""]).filter(
+      (g) => !overridden.has(g.flag),
+    ),
+    ...overExtra,
+  ]
+    .flatMap((g) => g.tokens)
+    .join(" ");
+  return compactSlurmOptions(merged);
 }
 
 export function getMissingSlurmResources(
   options: SlurmLaunchOptions | undefined,
 ): SlurmOptionField[] {
   const compact = compactSlurmOptions(options ?? {});
-  return NOTEBOOK_SLURM_RESOURCES.filter((key) => {
-    if (key === "mem" && /--mem-per-(cpu|gpu)\b/.test(compact.extra ?? "")) {
-      return false;
-    }
-    return !compact[key];
-  });
+  return NOTEBOOK_SLURM_RESOURCES.filter((key) =>
+    key === "mem" ? !setsSlurmMemory(compact) : !compact[key],
+  );
 }
 
 export function slurmOptionsToOptionList(
@@ -137,26 +185,22 @@ export function parseSlurmOptionList(
 ): SlurmLaunchOptions | undefined {
   const result: SlurmLaunchOptions = {};
   const extraParts: string[] = [];
-  // One entry can hold several flags, e.g., "--cpus-per-task=8 --mem=32G"
-  const tokens = options.flatMap((opt) => opt.trim().split(/\s+/));
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (!token) {
-      continue;
-    }
-    const eq = token.indexOf("=");
-    const flag = eq < 0 ? token : token.slice(0, eq);
+  for (const { flag, tokens } of groupSlurmFlags(options)) {
     const key = (Object.keys(SLURM_OPTION_FLAGS) as SlurmOptionField[]).find(
       (k) => SLURM_OPTION_FLAGS[k].includes(flag),
     );
     if (!key) {
-      extraParts.push(token);
+      extraParts.push(...tokens);
       continue;
     }
-    const value = eq < 0 ? tokens[++i] : token.slice(eq + 1);
+    // The value is after "=" or in the next token; anything else is extra
+    const [first, ...rest] = tokens;
+    const eq = first.indexOf("=");
+    const value = eq < 0 ? rest.shift() : first.slice(eq + 1);
     if (value) {
       result[key] = value;
     }
+    extraParts.push(...rest);
   }
   if (extraParts.length > 0) {
     result.extra = extraParts.join(" ");

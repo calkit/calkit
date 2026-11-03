@@ -62,6 +62,18 @@ test("parseSlurmOptionList parses equals and spaced options", () => {
     },
   );
   assert.equal(parseSlurmOptionList([" "]), undefined);
+  // Flag-like text in a quoted value stays in that value
+  assert.deepEqual(
+    parseSlurmOptionList(['--comment="notebook -p gpu"', "-p short"]),
+    {
+      gpus: undefined,
+      time: undefined,
+      partition: "short",
+      cpus: undefined,
+      mem: undefined,
+      extra: '--comment="notebook -p gpu"',
+    },
+  );
 });
 
 test("missing SLURM resources are found and filled from other options", () => {
@@ -94,6 +106,38 @@ test("missing SLURM resources are found and filled from other options", () => {
       mem: undefined,
       extra: undefined,
     },
+  );
+  // Flags saved in extra by older versions don't survive a newer value
+  assert.deepEqual(
+    mergeSlurmOptions(
+      { extra: "--mem=32G -A lab --qos=low" },
+      { mem: "64G", extra: "--qos=high" },
+    ),
+    {
+      gpus: undefined,
+      time: undefined,
+      partition: undefined,
+      cpus: undefined,
+      mem: "64G",
+      extra: "-A lab --qos=high",
+    },
+  );
+  // Memory flags override each other, since SLURM takes only one
+  assert.deepEqual(
+    mergeSlurmOptions({ mem: "32G" }, { extra: "--mem-per-cpu=2G" }),
+    {
+      gpus: undefined,
+      time: undefined,
+      partition: undefined,
+      cpus: undefined,
+      mem: undefined,
+      extra: "--mem-per-cpu=2G",
+    },
+  );
+  assert.equal(
+    mergeSlurmOptions({ extra: "--mem-per-gpu 8G -A lab" }, { mem: "64G" })
+      .extra,
+    "-A lab",
   );
 });
 

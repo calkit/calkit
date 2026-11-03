@@ -5460,15 +5460,18 @@ def run_jupyter(
     help: Annotated[bool, typer.Option("-h", "--help")] = False,
 ) -> None:
     """Run a command with the Jupyter CLI."""
-    from calkit.cli.scheduler import track_interactive_job
-
     args = sys.argv[2:]
-    # A server in a scheduler job is an interactive session worth tracking
-    if args and args[0] in ("lab", "notebook", "server"):
-        with track_interactive_job("jupyter"):
-            process = subprocess.run([sys.executable, "-m", "jupyter"] + args)
-    else:
-        process = subprocess.run([sys.executable, "-m", "jupyter"] + args)
+    # Starting a server, not a subcommand like `server list`, in a scheduler
+    # job is an interactive session worth tracking
+    if (
+        args
+        and args[0] in ("lab", "notebook", "server")
+        and (len(args) == 1 or args[1].startswith("-"))
+    ):
+        from calkit.cli.scheduler import record_interactive_job
+
+        record_interactive_job("jupyter")
+    process = subprocess.run([sys.executable, "-m", "jupyter"] + args)
     sys.exit(process.returncode)
 
 

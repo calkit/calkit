@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 import uuid
-from typing import Any, Iterator
+from typing import Any
 
 import typer
 from sqlitedict import SqliteDict
@@ -144,13 +144,14 @@ def _record_job_result(name: str, exit_code: int) -> None:
         jobs[name] = info
 
 
-@contextlib.contextmanager
-def track_interactive_job(prefix: str) -> Iterator[None]:
-    """Record the scheduler job we're running in, if any, while it lasts.
+def record_interactive_job(prefix: str) -> None:
+    """Record the scheduler job we're running in, if any.
 
     Interactive sessions, e.g., a Jupyter server started with ``srun`` from
     VS Code, aren't submitted by Calkit but still hold an allocation for the
-    project, so ``scheduler queue`` and ``cancel`` should see them.
+    project, so ``scheduler queue`` and ``cancel`` should see them. The
+    record is for the allocation, which can outlive or be shared by several
+    sessions, so it stays until ``queue`` finds the job gone.
     """
     kind, job_id = None, None
     if os.getenv("SLURM_JOB_ID"):
@@ -158,13 +159,11 @@ def track_interactive_job(prefix: str) -> Iterator[None]:
     elif os.getenv("PBS_JOBID"):
         kind, job_id = "pbs", os.environ["PBS_JOBID"]
     if job_id is None or not os.path.isfile("calkit.yaml"):
-        yield
         return
     # The colon keeps it apart from stage records, since stage names can't
     # contain one
-    name = f"{prefix}:{job_id}"
     _record_job(
-        name,
+        f"{prefix}:{job_id}",
         {
             "kind": kind,
             "job_id": job_id,
@@ -172,11 +171,6 @@ def track_interactive_job(prefix: str) -> Iterator[None]:
             "submitted_at": calkit.utcnow().isoformat(),
         },
     )
-    try:
-        yield
-    finally:
-        # A canceled job is killed before this runs; queue prunes those
-        _delete_job(name)
 
 
 def _mock_enabled() -> bool:

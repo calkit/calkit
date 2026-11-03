@@ -1538,14 +1538,16 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_DEFINE_NOTEBOOK_STAGE,
-      async (uri?: vscode.Uri) => {
+      async (arg?: unknown) => {
         const workspaceRoot = getWorkspaceRoot();
         if (!workspaceRoot) {
           return;
         }
-        // From the explorer we get the notebook; otherwise use the open one
+        // The explorer passes the notebook; the toolbar passes its own context
         const notebookUri =
-          uri ?? vscode.window.activeNotebookEditor?.notebook.uri;
+          arg instanceof vscode.Uri
+            ? arg
+            : vscode.window.activeNotebookEditor?.notebook.uri;
         if (!notebookUri) {
           return;
         }
@@ -6678,9 +6680,8 @@ async function chooseSlurmOptionsForLaunch(
     envDefaults,
     previous,
   );
-  // Anything missing was just asked for, so don't ask again
-  if (!values || getMissingSlurmResources(envDefaults).length > 0) {
-    return values;
+  if (!values) {
+    return undefined;
   }
   const choice = await vscode.window.showQuickPick(
     [

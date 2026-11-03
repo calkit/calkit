@@ -2008,7 +2008,7 @@ def to_arxiv(
     output_folder = (Path(target_folder) / tex_file).as_posix() + "_arxiv.zip"
 
     subprocess.run(
-        [str(cli_path), target_folder, output_folder, "--main", tex_file],
+        [cli_path.as_posix(), target_folder, output_folder, "--main", tex_file],
         check=True,
     )
 

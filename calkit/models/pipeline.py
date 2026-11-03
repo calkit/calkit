@@ -1423,9 +1423,12 @@ class LatexStage(Stage):
         if self.latex2arxiv:
             # Convert the document to arXiv format
             arxiv_name = f"{self.name}_to_arxiv"
-            arxiv_dir = f"{Path(self.target_path).parent / Path(self.target_path).stem}_arxiv.zip"
+            parent_path = Path(self.target_path).parent
+            stem_path = Path(self.target_path).stem
+            path_to_stem = (parent_path / stem_path).as_posix()
+            arxiv_dir = f"{path_to_stem}_arxiv.zip"
             arxiv_stage: dict = {
-                "cmd": f"calkit latex to-arxiv {shlex.quote(str(Path(self.target_path).parent.as_posix()))} {shlex.quote(str(Path(self.target_path).stem))}",
+                "cmd": f"calkit latex to-arxiv {shlex.quote(parent_path.as_posix())} {shlex.quote(stem_path.as_posix())}",
                 "deps": deps,
                 "outs": [arxiv_dir],
                 "desc": desc,

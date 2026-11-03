@@ -132,6 +132,14 @@ def test_record_overleaf_links_and_lookup(
     assert data[0]["github_repo"] == project.git_repo_url.removeprefix(
         "https://github.com/"
     )
+    # Any GitHub URL form project creation accepts gives the same repo
+    for url in [
+        "https://github.com/o/p",
+        "https://www.github.com/o/p.git",
+        "http://github.com/o/p/",
+    ]:
+        assert Project(git_repo_url=url).github_repo == "o/p"
+    assert Project(git_repo_url="https://gitlab.com/o/p").github_repo is None
     # An unrelated user gets nothing back for the same private project
     resp = client.get(
         "/user/overleaf-syncs/ol333",

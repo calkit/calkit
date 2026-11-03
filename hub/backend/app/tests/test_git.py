@@ -1377,6 +1377,74 @@ def test_a_reported_push_to_a_new_branch_shows_up_in_the_branch_list(
         assert main in branches()
 
 
+def test_get_repo_picks_up_the_first_push_to_an_empty_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: a clone made while the remote was empty has no commits, so
+    # every refresh failed at `git stash` and the project never showed files.
+    from typing import Any
+    from unittest.mock import patch
+
+    session: Any = None
+    shared_root = tmp_path / "_shared"
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+
+    def setup(name: str) -> tuple[Any, Path, git.Repo]:
+        project: Any = _StubProject(name)
+        origin_dir = tmp_path / name / "origin.git"
+        git.Repo.init(str(origin_dir), bare=True, initial_branch="main")
+        base = shared_root / project.owner_github_name / project.name
+        base.mkdir(parents=True)
+        git.Repo.clone_from(str(origin_dir), str(base / "repo"))
+        (base / "updated.txt").touch()
+        seed = git.Repo.clone_from(str(origin_dir), str(tmp_path / name / "s"))
+        _identify(seed)
+        return project, origin_dir, seed
+
+    def read(project: Any) -> git.Repo:
+        return app.git.get_repo(
+            project=project,
+            user=None,
+            session=session,
+            ttl=0,
+            read_only=True,
+        )
+
+    with patch("app.git.shared_reader_root", return_value=str(shared_root)):
+        # Nothing pushed yet is not an error
+        project, origin_dir, seed = setup("ck-empty-same-branch")
+        assert not read(project).head.is_valid()
+        # The first push to the branch the clone expected shows up, and the
+        # next one goes through the normal update
+        seed.git.checkout(["-b", "main"])
+        first = _commit(seed, "notes.txt", "one")
+        seed.git.push(["origin", "main"])
+        repo = read(project)
+        assert repo.head.commit.hexsha == first
+        assert repo.active_branch.name == "main"
+        second = _commit(seed, "notes.txt", "two")
+        seed.git.push(["origin", "main"])
+        assert read(project).head.commit.hexsha == second
+        # A first push to another branch, which becomes the default, is
+        # picked up too
+        project, origin_dir, seed = setup("ck-empty-other-branch")
+        seed.git.checkout(["-b", "master"])
+        first = _commit(seed, "notes.txt", "one")
+        seed.git.push(["origin", "master"])
+        # Until the remote can say which branch is the default, the refresh
+        # fails rather than reporting an empty tree as current
+        with pytest.raises(HTTPException) as excinfo:
+            read(project)
+        assert excinfo.value.status_code == 502
+        git.Repo(str(origin_dir)).git.symbolic_ref(
+            ["HEAD", "refs/heads/master"]
+        )
+        repo = read(project)
+        assert repo.head.commit.hexsha == first
+        assert repo.active_branch.name == "master"
+        assert (Path(str(repo.working_dir)) / "notes.txt").read_text() == "one"
+
+
 def test_push_and_expire_falls_back_when_the_shared_checkout_wont_take_it(
     tmp_path,
 ) -> None:

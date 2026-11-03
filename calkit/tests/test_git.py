@@ -581,6 +581,7 @@ def test_get_set_upstream_args(tmp_dir: Path) -> None:
     repo = git.Repo.init()
     # Without push.autoSetupRemote, a plain push of a new branch fails
     repo.git.config("push.autoSetupRemote", "false")
+    repo.git.config("push.default", "simple")
     Path("a.txt").write_text("a")
     repo.git.add("a.txt")
     repo.git.commit(["-m", "First commit"])
@@ -602,6 +603,23 @@ def test_get_set_upstream_args(tmp_dir: Path) -> None:
     # Naming where to push leaves that to the caller, but flags don't
     assert calkit.git.get_set_upstream_args(repo, ["hub"]) == []
     assert calkit.git.get_set_upstream_args(repo, ["--force"]) == args
+    # Flags that pick their own refs would push the branch too
+    for flag in ["--tags", "--all", "--mirror", "--delete"]:
+        assert calkit.git.get_set_upstream_args(repo, [flag]) == []
+    # The branch's own remote comes before origin
+    repo.git.config(f"branch.{branch}.remote", "hub")
+    hub_args = ["--set-upstream", "hub", branch]
+    assert calkit.git.get_set_upstream_args(repo) == hub_args
+    # Git pushes to a push remote it doesn't pull from without an upstream,
+    # and setting one would change where the branch pulls from
+    repo.git.config("--unset", f"branch.{branch}.remote")
+    repo.git.config("remote.pushDefault", "hub")
+    assert calkit.git.get_set_upstream_args(repo) == []
+    # But not to the one it does pull from
+    repo.git.config(f"branch.{branch}.pushRemote", "origin")
+    assert calkit.git.get_set_upstream_args(repo) == args
+    repo.git.config("--unset", f"branch.{branch}.pushRemote")
+    repo.git.config("--unset", "remote.pushDefault")
     repo.git.push(*args)
     # Once the branch tracks one, a plain push is fine
     assert calkit.git.get_set_upstream_args(repo) == []

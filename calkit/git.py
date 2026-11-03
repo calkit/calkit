@@ -73,10 +73,21 @@ def get_set_upstream_args(
     Git refuses to push a branch with no upstream unless
     ``push.autoSetupRemote`` is on, so the first push of a project, e.g.,
     right after connecting it to a hub, would fail. Returns nothing when
-    the branch already tracks one, ``push_args`` name where to push, or
+    the branch already tracks one, ``push_args`` say what or where to
+    push, Git pushes to a remote other than the one it pulls from, or
     there's no obvious remote to choose.
     """
-    if any(not a.startswith("-") for a in push_args or []):
+    # These pick their own refs, so naming the branch would change them
+    ref_flags = {
+        "--all",
+        "--branches",
+        "--mirror",
+        "--tags",
+        "--delete",
+        "-d",
+        "--prune",
+    }
+    if any(not a.startswith("-") or a in ref_flags for a in push_args or []):
         return []
     try:
         branch = repo.active_branch
@@ -85,8 +96,23 @@ def get_set_upstream_args(
         return []
     if branch.tracking_branch() is not None:
         return []
+    config = repo.config_reader()
+    section = f'branch "{branch.name}"'
+    push_remote = str(
+        config.get_value(section, "pushRemote", "")
+        or config.get_value("remote", "pushDefault", "")
+    )
+    pull_remote = str(config.get_value(section, "remote", ""))
+    # Git already pushes a new branch to a push remote that isn't the one
+    # it pulls from, and setting an upstream would change where it pulls
+    if push_remote and push_remote != (pull_remote or "origin"):
+        return []
     remote_names = [r.name for r in repo.remotes]
-    if "origin" in remote_names:
+    if push_remote:
+        remote = push_remote
+    elif pull_remote in remote_names:
+        remote = pull_remote
+    elif "origin" in remote_names:
         remote = "origin"
     elif len(remote_names) == 1:
         remote = remote_names[0]

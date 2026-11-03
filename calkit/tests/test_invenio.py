@@ -20,6 +20,10 @@ def test_get_token():
         token = calkit.invenio.get_token("zenodo")
     except requests.ConnectionError:
         pytest.skip("No Zenodo token, and no local hub to fetch one from")
+    except ValueError as e:
+        if not str(e).startswith("No token found"):
+            raise
+        pytest.skip("No Zenodo token, and no hub token to fetch one with")
     assert isinstance(token, str)
 
 

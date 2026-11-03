@@ -712,7 +712,9 @@ def ensure_image_available(ref: str, platform: str | None = None) -> None:
     success, output = pull_image(ref, platform=platform)
     if success:
         return
-    if "permission denied" in output.lower():
+    # A credential helper that can't run is also denied permission, but
+    # only the daemon's socket is about the docker group
+    if "permission denied while trying to connect" in output.lower():
         raise ValueError(
             f"{get_no_permission_message()}\n{output.strip()[-500:]}"
         )

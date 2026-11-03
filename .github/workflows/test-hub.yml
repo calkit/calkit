@@ -53,6 +53,7 @@ jobs:
           # package changes must run the backend tests too.
           filters: |
             backend:
+              - '.github/workflows/test-hub.yml'
               - 'hub/backend/**'
               - 'hub/config/**'
               - 'hub/scripts/**'

@@ -6970,6 +6970,8 @@ async function runCreateUvEnvironmentWizard(
           "--path",
           pyprojectPath,
           "--no-commit",
+          // Only notebooks use this wizard, and they need a kernel
+          "ipykernel",
         ],
         { cwd: workspaceRoot },
       );

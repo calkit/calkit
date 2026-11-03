@@ -688,7 +688,7 @@ def test_latex_stage_to_arxiv():
     extra = stage.extra_dvc_stages()
     assert list(extra) == ["paper-1_to_arxiv"]
     assert extra["paper-1_to_arxiv"]["cmd"] == (
-        "calkit latex to-arxiv pubs/paper-1 main.tex"
+        "calkit latex to-arxiv pubs/paper-1 main"
     )
     assert extra["paper-1_to_arxiv"]["deps"] == [
         "pubs/paper-1/main.tex",

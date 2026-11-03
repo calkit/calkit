@@ -146,11 +146,14 @@ export const SLURM_NODE_MARKER = "CALKIT_SLURM_NODE=";
 
 // Compute node and port of a Jupyter server started in a SLURM job, from its
 // output so far. The port can differ from the requested one if it was taken.
+// The node only counts once its line ends, since output arrives in chunks.
 export function parseSlurmServerOutput(output: string): {
   host?: string;
   port?: number;
 } {
-  const host = output.match(new RegExp(`${SLURM_NODE_MARKER}(\\S+)`))?.[1];
+  const host = output.match(
+    new RegExp(`${SLURM_NODE_MARKER}(\\S+)\\r?\\n`),
+  )?.[1];
   const port = output.match(/https?:\/\/[^\s/:]+:(\d+)\/lab\b/)?.[1];
   return { host, port: port ? Number(port) : undefined };
 }

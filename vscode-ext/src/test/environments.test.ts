@@ -94,6 +94,15 @@ test("parseSlurmServerOutput finds the compute node and Jupyter port", () => {
     host: "node042.cluster.edu",
     port: 8889,
   });
+  // Node name cut off mid-chunk isn't used until its line ends
+  assert.equal(
+    parseSlurmServerOutput("CALKIT_SLURM_NODE=node042.cl").host,
+    undefined,
+  );
+  assert.equal(
+    parseSlurmServerOutput("CALKIT_SLURM_NODE=node042.cluster.edu\r\n").host,
+    "node042.cluster.edu",
+  );
   // URLs that aren't the Jupyter server's are ignored
   assert.deepEqual(
     parseSlurmServerOutput("See https://example.com:443/docs for help"),

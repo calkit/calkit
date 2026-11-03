@@ -9131,9 +9131,11 @@ function startServerInBackground(
       return;
     }
     slurmOutput[stream] += chunk;
-    const { host, port } = parseSlurmServerOutput(
-      `${slurmOutput.stdout}\n${slurmOutput.stderr}`,
-    );
+    // Parse streams separately so joining them can't end a partial line
+    const fromStdout = parseSlurmServerOutput(slurmOutput.stdout);
+    const fromStderr = parseSlurmServerOutput(slurmOutput.stderr);
+    const host = fromStdout.host ?? fromStderr.host;
+    const port = fromStdout.port ?? fromStderr.port;
     session.host = host;
     session.port = port;
     if (host && port) {

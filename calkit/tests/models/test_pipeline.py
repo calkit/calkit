@@ -694,7 +694,7 @@ def test_latex_stage_to_arxiv():
         "pubs/paper-1/main.tex",
         "figures/fig1.png",
     ]
-    assert extra["paper-1_to_arxiv"]["outs"] == ("pubs/paper-1/main_arxiv.zip")
+    assert extra["paper-1_to_arxiv"]["outs"] == ["pubs/paper-1/main_arxiv.zip"]
 
 
 def test_latex_stage_diffs():

@@ -42,7 +42,7 @@ def test_resources(monkeypatch):
     assert customizations["extensions"] == in_container + excluded
     for ext in excluded:
         assert re.fullmatch(r"-[\w-]+\.[\w-]+", ext), ext
-    # PDFs open in Calkit's viewer in the container
+    # PDFs open in Calkit's viewer, in the container too
     assert customizations["settings"]["workbench.editorAssociations"] == {
         "*.pdf": "calkit.pdfReview"
     }

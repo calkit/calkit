@@ -15,9 +15,6 @@
         "-github.vscode-github-actions"
       ],
       "settings": {
-        "workbench.editorAssociations": {
-          "*.pdf": "calkit.pdfReview"
-        },
         "python.useEnvironmentsExtension": false,
         "python.terminal.activateEnvironment": false,
         "python.terminal.activateEnvInCurrentTerminal": false,

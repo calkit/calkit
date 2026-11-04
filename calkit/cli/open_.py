@@ -225,5 +225,5 @@ def find_or_install_vscode() -> str | None:
         return None
     code = install.find("code")
     if code is not None and choice == "2":
-        install.add_vscode_recommendations(code)
+        install.add_vscode_recs(code)
     return code

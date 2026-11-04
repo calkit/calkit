@@ -450,7 +450,7 @@ def find(app: str) -> str | None:
 DOWNLOAD_PAGES = {"code": "https://code.visualstudio.com/download"}
 
 
-def add_vscode_recommendations(code: str) -> None:
+def add_vscode_recs(code: str) -> None:
     """Install the VS Code extensions Calkit recommends, and add its
     recommended settings to the user's, keeping any already set.
     """

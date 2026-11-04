@@ -88,17 +88,34 @@ def render_devcontainer_spec() -> dict:
     return spec
 
 
-def make_devcontainer_spec(ck_info: dict | None = None) -> str:
+def make_devcontainer_spec(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> str:
     """Return the dev container spec for a project, as JSON text.
 
-    Julia is only installed for a project with a Julia environment, since
-    installing it slows down creating every Codespace.
+    Julia is only installed for a project with a Julia environment, in it
+    or a subproject, since installing it slows down creating every
+    Codespace.
     """
+    from calkit.core import iter_projects
+
+    def uses_julia(env: Any) -> bool:
+        if not isinstance(env, dict):
+            return False
+        # A switch's options may be defined in place
+        options = [
+            o.get("use")
+            for o in env.get("switch") or []
+            if isinstance(o, dict)
+        ]
+        return env.get("kind") == "julia" or any(map(uses_julia, options))
+
     spec = load_json("devcontainer", DEVCONTAINER_FNAME)
-    envs = (ck_info or {}).get("environments") or {}
+    projects = iter_projects(wdir=wdir, ck_info=ck_info)
     if not any(
-        isinstance(env, dict) and env.get("kind") == "julia"
-        for env in envs.values()
+        uses_julia(env)
+        for _, info in projects
+        for env in (info.get("environments") or {}).values()
     ):
         features = spec.get("features", {})
         for key in list(features):

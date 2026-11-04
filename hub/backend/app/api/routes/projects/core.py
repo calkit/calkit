@@ -1168,7 +1168,11 @@ def post_project(
                 os.makedirs(dc_dir, exist_ok=True)
                 dc_fpath = os.path.join(dc_dir, "devcontainer.json")
                 with open(dc_fpath, "w", encoding="utf-8") as f:
-                    f.write(calkit.resources.make_devcontainer_spec(ck_info))
+                    f.write(
+                        calkit.resources.make_devcontainer_spec(
+                            ck_info, wdir=repo.working_dir
+                        )
+                    )
                 repo.git.add(".devcontainer")
             # Create the README
             logger.info("Creating README.md")

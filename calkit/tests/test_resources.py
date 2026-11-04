@@ -77,7 +77,7 @@ def test_resources(monkeypatch):
     assert merged["settings"] == customizations["settings"]
 
 
-def test_make_devcontainer_spec():
+def test_make_devcontainer_spec(tmp_path):
     spec = calkit.resources.load_json(
         "devcontainer", calkit.resources.DEVCONTAINER_FNAME
     )
@@ -88,8 +88,8 @@ def test_make_devcontainer_spec():
         in spec["customizations"]["vscode"]["extensions"]
     )
     # Without a Julia environment, Julia isn't installed
-    for ck_info in [None, {}, {"environments": {"py": {"kind": "uv"}}}]:
-        txt = calkit.resources.make_devcontainer_spec(ck_info)
+    for ck_info in [{}, {"environments": {"py": {"kind": "uv"}}}]:
+        txt = calkit.resources.make_devcontainer_spec(ck_info, wdir=tmp_path)
         assert txt.endswith("}\n")
         rendered = json.loads(txt)
         assert not [k for k in rendered["features"] if "julia" in k]
@@ -101,10 +101,29 @@ def test_make_devcontainer_spec():
             "ghcr.io/devcontainers/features/docker-in-docker:2"
             in (rendered["features"])
         )
-    # With one, the spec is the bundled one as-is
-    txt = calkit.resources.make_devcontainer_spec(
-        {"environments": {"jl": {"kind": "julia", "julia": "1.11"}}}
-    )
+    # With one, the spec is the bundled one as-is, whether it's defined in
+    # place in a switch or only in a subproject
+    julia = {"kind": "julia", "julia": "1.11"}
+    switch = {
+        "kind": "switch",
+        "switch": [{"when": [{"os_is": "linux"}], "use": julia}],
+    }
+    for ck_info in [
+        {"environments": {"jl": julia}},
+        {"environments": {"jl": switch}},
+    ]:
+        txt = calkit.resources.make_devcontainer_spec(ck_info, wdir=tmp_path)
+        assert json.loads(txt) == spec
+    (tmp_path / "sim").mkdir()
+    with open(tmp_path / "sim" / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"jl": julia}}, f)
+    ck_info = {"subprojects": [{"path": "sim"}]}
+    txt = calkit.resources.make_devcontainer_spec(ck_info, wdir=tmp_path)
+    assert json.loads(txt) == spec
+    # Read from the project when not given
+    with open(tmp_path / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    txt = calkit.resources.make_devcontainer_spec(wdir=tmp_path)
     assert json.loads(txt) == spec
 
 

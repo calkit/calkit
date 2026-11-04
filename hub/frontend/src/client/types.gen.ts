@@ -2861,6 +2861,16 @@ export type OperationResult = {
 }
 
 /**
+ * OrgMemberPatch
+ */
+export type OrgMemberPatch = {
+  /**
+   * Role
+   */
+  role: "read" | "write" | "admin" | "owner"
+}
+
+/**
  * OrgMemberPost
  */
 export type OrgMemberPost = {
@@ -3017,7 +3027,7 @@ export type OrgUserPublic = {
   /**
    * Github Name
    */
-  github_name: string
+  github_name: string | null
   /**
    * Role
    */
@@ -3040,6 +3050,12 @@ export type OrgsResponse = {
 
 /**
  * OverleafLinkPublic
+ *
+ * A folder of a Calkit project an Overleaf project syncs with, and what
+ * the current user can do with that project.
+ *
+ * ``github_repo_url`` is the project's repo on GitHub, in one canonical
+ * form, e.g., to open it in a Codespace, or none if it's elsewhere.
  */
 export type OverleafLinkPublic = {
   /**
@@ -3067,9 +3083,9 @@ export type OverleafLinkPublic = {
    */
   current_user_access: "read" | "write" | "admin" | "owner" | null
   /**
-   * Github Repo
+   * Github Repo Url
    */
-  github_repo?: string | null
+  github_repo_url?: string | null
 }
 
 /**
@@ -15744,6 +15760,78 @@ export type AddOrgMemberResponses = {
 
 export type AddOrgMemberResponse =
   AddOrgMemberResponses[keyof AddOrgMemberResponses]
+
+export type DeleteOrgMemberData = {
+  body?: never
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type DeleteOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteOrgMemberError =
+  DeleteOrgMemberErrors[keyof DeleteOrgMemberErrors]
+
+export type DeleteOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteOrgMemberResponse =
+  DeleteOrgMemberResponses[keyof DeleteOrgMemberResponses]
+
+export type UpdateOrgMemberData = {
+  body: OrgMemberPatch
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type UpdateOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type UpdateOrgMemberError =
+  UpdateOrgMemberErrors[keyof UpdateOrgMemberErrors]
+
+export type UpdateOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type UpdateOrgMemberResponse =
+  UpdateOrgMemberResponses[keyof UpdateOrgMemberResponses]
 
 export type PutOrgSubscriptionData = {
   body: OrgSubscriptionUpdate

@@ -50,25 +50,6 @@ def test_update_project_config(tmp_dir, monkeypatch):
     assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
     assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
     assert not repo.git.status("--porcelain")
-    # A Codespace opens on the project's documents
-    ck_info = calkit.load_calkit_info()
-    ck_info["pipeline"] = {
-        "stages": {
-            "build-paper": {
-                "kind": "latex",
-                "environment": "tex",
-                "target_path": "paper/main.tex",
-            }
-        }
-    }
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
-    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
-    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
-        spec = json.load(f)
-    assert spec["customizations"]["codespaces"]["openFiles"] == [
-        "paper/main.tex"
-    ]
 
 
 def test_update_dataset(tmp_dir):

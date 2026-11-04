@@ -35,6 +35,8 @@ import type {
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
+  DeleteOrgMemberErrors,
+  DeleteOrgMemberResponses,
   DeleteProjectByIdErrors,
   DeleteProjectByIdResponses,
   DeleteProjectCollaboratorErrors,
@@ -185,6 +187,10 @@ import type {
   GetProjectOverleafSyncStatusResponses,
   GetProjectPipelineErrors,
   GetProjectPipelineResponses,
+  GetProjectPipelineRunLogsErrors,
+  GetProjectPipelineRunLogsResponses,
+  GetProjectPipelineRunsErrors,
+  GetProjectPipelineRunsResponses,
   GetProjectPipelineStageErrors,
   GetProjectPipelineStageResponses,
   GetProjectPresentationsErrors,
@@ -290,6 +296,7 @@ import type {
   NativeCollaboratorPost,
   NewPassword,
   OnboardingFlagPost,
+  OrgMemberPatch,
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
@@ -312,6 +319,7 @@ import type {
   PatchUserTokenErrors,
   PatchUserTokenResponses,
   PipelinePut,
+  PipelineRunPost,
   PipelineStageEdit,
   PipelineStagePut,
   PostDiscountCodeErrors,
@@ -383,6 +391,8 @@ import type {
   PostProjectOverleafSyncResponses,
   PostProjectPipelineExportStageErrors,
   PostProjectPipelineExportStageResponses,
+  PostProjectPipelineRunErrors,
+  PostProjectPipelineRunResponses,
   PostProjectPipelineStageErrors,
   PostProjectPipelineStageResponses,
   PostProjectPublicationErrors,
@@ -510,6 +520,8 @@ import type {
   UpdateCurrentUserPasswordErrors,
   UpdateCurrentUserPasswordResponses,
   UpdateCurrentUserResponses,
+  UpdateOrgMemberErrors,
+  UpdateOrgMemberResponses,
   UpdatePassword,
   UpdateUserErrors,
   UpdateUserResponses,
@@ -7878,6 +7890,149 @@ export class ProjectsService {
   }
 
   /**
+   * Get Project Pipeline Runs
+   *
+   * The pipeline's runs, newest first, and whether one can be started
+   * here.
+   *
+   * Only on GitHub Actions so far, where the default branch's runs of every
+   * workflow that runs the Calkit action are recorded, however each was
+   * started.
+   */
+  public static getProjectPipelineRuns<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      limit?: number
+      offset?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPipelineRunsResponses,
+    GetProjectPipelineRunsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "offset" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPipelineRunsResponses,
+      GetProjectPipelineRunsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/runs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Pipeline Run
+   *
+   * Start the pipeline, on the default branch.
+   *
+   * Only on GitHub Actions so far, where a project without a workflow that
+   * runs the Calkit action gets one that only runs when started, since
+   * every Overleaf sync is a push.
+   */
+  public static postProjectPipelineRun<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      pipelineRunPost: PipelineRunPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPipelineRunResponses,
+    PostProjectPipelineRunErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "pipelineRunPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPipelineRunResponses,
+      PostProjectPipelineRunErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/runs",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Pipeline Run Logs
+   *
+   * A pipeline run's logs, in parts, e.g., one per GitHub Actions job,
+   * with what each did.
+   */
+  public static getProjectPipelineRunLogs<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      run_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPipelineRunLogsResponses,
+    GetProjectPipelineRunLogsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "run_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPipelineRunLogsResponses,
+      GetProjectPipelineRunLogsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Get Project Provenance
    */
   public static getProjectProvenance<ThrowOnError extends boolean = true>(
@@ -9393,6 +9548,89 @@ export class OrgsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/orgs/{org_name}/members",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete Org Member
+   */
+  public static deleteOrgMember<ThrowOnError extends boolean = true>(
+    parameters: {
+      org_name: string
+      username: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteOrgMemberResponses,
+    DeleteOrgMemberErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "org_name" },
+            { in: "path", key: "username" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteOrgMemberResponses,
+      DeleteOrgMemberErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/orgs/{org_name}/members/{username}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update Org Member
+   */
+  public static updateOrgMember<ThrowOnError extends boolean = true>(
+    parameters: {
+      org_name: string
+      username: string
+      orgMemberPatch: OrgMemberPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    UpdateOrgMemberResponses,
+    UpdateOrgMemberErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "org_name" },
+            { in: "path", key: "username" },
+            { key: "orgMemberPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      UpdateOrgMemberResponses,
+      UpdateOrgMemberErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/orgs/{org_name}/members/{username}",
       ...options,
       ...params,
       headers: {

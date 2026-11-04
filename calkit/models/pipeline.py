@@ -670,12 +670,15 @@ class Stage(Model):
         project_dir: str | None,
         is_output: Callable[[str], bool],
         write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
     ) -> None:
         """Work out what the stage depends on from the project before it's
         compiled, for a kind of stage whose sources name some of it.
 
         ``project_dir`` is where the project is, and ``is_output`` says
-        whether a stage makes a project path. With ``write_files``, the stage also
+        whether a stage makes a project path, including by matching an
+        iterated stage's output pattern, while ``is_exact_output`` says
+        whether a stage declares it as is. With ``write_files``, the stage also
         writes files it reads that aren't kept in the project, since it's
         about to run or have its status checked. That happens on every
         call, so only fast work belongs here.
@@ -1502,6 +1505,7 @@ class LatexStage(Stage):
         project_dir: str | None,
         is_output: Callable[[str], bool],
         write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
     ) -> None:
         """Read which components the document includes with calkit.sty's
         commands, since they're as much inputs as its source, and with
@@ -1561,6 +1565,11 @@ class LatexStage(Stage):
             self.target_path,
             wdir=os.path.join(project_dir or "", wdir),
             is_output=lambda p: is_output(posixpath.join(wdir, p)),
+            is_exact_output=(
+                None
+                if is_exact_output is None
+                else lambda p: is_exact_output(posixpath.join(wdir, p))
+            ),
         ):
             paths.append(posixpath.normpath(posixpath.join(wdir, rel)))
         self._component_paths = list(dict.fromkeys(paths))
@@ -1590,13 +1599,22 @@ class LatexStage(Stage):
         ] + [posixpath.join(components_dir, p) for p in self._copied_paths]
 
     @property
+    def found_paths(self) -> list[str]:
+        """What the document reads that preprocessing found, relative to the
+        stage's ``wdir``.
+        """
+        return [self.path_from_wdir(p) for p in self._component_paths]
+
+    @property
     def dvc_deps(self) -> list[str]:
         # The copies the document reads, and what they're copied from, so it
-        # builds after the stages making them
+        # builds after the stages making them, unless in a folder it declares
+        declared = super().dvc_deps
+        folders = tuple(d.rstrip("/") + "/" for d in declared)
         deps = (
             [self.target_path]
-            + super().dvc_deps
-            + [self.path_from_wdir(p) for p in self._component_paths]
+            + declared
+            + [p for p in self.found_paths if not p.startswith(folders)]
             + self.component_copies
         )
         if self.latexmkrc_path is not None:
@@ -3192,7 +3210,12 @@ class Pipeline(Model):
             return path in outputs or any(p.match(path) for p in patterns)
 
         for stage in self.stages.values():
-            stage.preprocess(project_dir, is_output, write_files=write_files)
+            stage.preprocess(
+                project_dir,
+                is_output,
+                write_files=write_files,
+                is_exact_output=outputs.__contains__,
+            )
 
     def resolve_procedure_paths(self, procedures: dict) -> None:
         """Tell procedure stages where their procedure is written down.

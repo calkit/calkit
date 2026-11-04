@@ -13,10 +13,15 @@ import {
   compactSlurmOptions,
   findCalkitEnvKernelSourceCandidate,
   getDefaultSlurmOptions,
+  getMissingSlurmResources,
   kernelRegistrationKinds,
   makeCalkitEnvKernelSourceCandidates,
+  mergeSlurmOptions,
   parsePixiPackages,
+  parseRemoteSshHost,
+  parseSlurmServerOutput,
   parseUvPackages,
+  SLURM_NODE_MARKER,
   slurmOptionsToOptionList,
   type CalkitEnvNotebookKernelSource,
   type CalkitEnvironment,
@@ -26,6 +31,7 @@ import {
 import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
   getExecutedNotebookHtmlPath,
+  resolveNotebookEnvironmentName,
 } from "./notebooks";
 import type {
   CalkitInfo,
@@ -257,6 +263,9 @@ interface NotebookLaunchProfile {
 interface ActiveJupyterServerSession {
   kind: "slurm" | "docker" | "other";
   notebookUri?: string;
+  // Where a SLURM job's server ended up, parsed from its output
+  host?: string;
+  port?: number;
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -1527,43 +1536,56 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND_DEFINE_NOTEBOOK_STAGE, async () => {
-      const workspaceRoot = getWorkspaceRoot();
-      if (!workspaceRoot) {
-        return;
-      }
-      const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
-      if (!notebookUri) {
-        return;
-      }
-      const project = projectForPath(
-        workspaceRoot,
-        path.relative(workspaceRoot, notebookUri.fsPath).replace(/\\/g, "/"),
-      );
-      const profile = getLaunchProfileForActiveNotebook(context);
-      // The stage goes in the notebook's project, so its environment is
-      // only one that project declares, named as it is there
-      const env = profile?.environmentName
-        ? splitQualifiedName(profile.environmentName, currentSubprojectDirs)
-        : undefined;
-      const envName =
-        env &&
-        path.resolve(workspaceRoot, env.dir) ===
-          path.resolve(project.projectDir)
-          ? env.name
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_NOTEBOOK_STAGE,
+      async (arg?: unknown) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        // The explorer passes the notebook; the toolbar passes its own context
+        const notebookUri =
+          arg instanceof vscode.Uri
+            ? arg
+            : vscode.window.activeNotebookEditor?.notebook.uri;
+        if (!notebookUri) {
+          return;
+        }
+        const project = projectForPath(
+          workspaceRoot,
+          path.relative(workspaceRoot, notebookUri.fsPath).replace(/\\/g, "/"),
+        );
+        // The notebooks section is authoritative, then the kernel chosen in VS
+        // Code, which is only usable if it's declared in the notebook's project
+        const projectConfig = await readCalkitConfig(project.projectDir);
+        const profile = getLaunchProfileForNotebookUri(
+          context,
+          notebookUri.toString(),
+        );
+        const env = profile?.environmentName
+          ? splitQualifiedName(profile.environmentName, currentSubprojectDirs)
           : undefined;
-      const prefillStage = envName
-        ? { kind: "jupyter-notebook", environment: envName }
-        : { kind: "jupyter-notebook" };
-      await showStageEditor(
-        context,
-        project.projectDir,
-        undefined,
-        project.path,
-        undefined,
-        prefillStage,
-      );
-    }),
+        const envName =
+          (projectConfig &&
+            resolveNotebookEnvironmentName(projectConfig, project.path)) ||
+          (env &&
+          path.resolve(workspaceRoot, env.dir) ===
+            path.resolve(project.projectDir)
+            ? env.name
+            : undefined);
+        const prefillStage = envName
+          ? { kind: "jupyter-notebook", environment: envName }
+          : { kind: "jupyter-notebook" };
+        await showStageEditor(
+          context,
+          project.projectDir,
+          undefined,
+          project.path,
+          undefined,
+          prefillStage,
+        );
+      },
+    ),
   );
 
   context.subscriptions.push(
@@ -2602,6 +2624,12 @@ async function refreshPipelineOutputContext(
       pipelineNotebookUris.add(path.join(workspaceRoot, stage.notebook_path));
     }
   }
+  // For explorer menus; resourcePath's form varies by platform, so list both
+  void vscode.commands.executeCommand(
+    "setContext",
+    "calkit-vscode.stagedNotebooks",
+    [...pipelineNotebookUris].flatMap((p) => [p, vscode.Uri.file(p).path]),
+  );
   if (!decorationProvider) {
     decorationProvider = new PipelineOutputDecorationProvider();
     context.subscriptions.push(
@@ -3481,6 +3509,15 @@ function buildStageEditorHtml(
           e.name === existingEnv ? " selected" : ""
         }>${escHtml(e.name)}${e.kind ? ` (${escHtml(e.kind)})` : ""}</option>`,
     ),
+    // Keep one that isn't listed, e.g., a nested slurm:uv env, rather than
+    // silently dropping it
+    ...(existingEnv && !envEntries.some((e) => e.name === existingEnv)
+      ? [
+          `<option value="${escHtml(existingEnv)}" selected>${escHtml(
+            existingEnv,
+          )}</option>`,
+        ]
+      : []),
     `<option value="__new__">New environment (enter spec path below)…</option>`,
   ].join("\n");
 
@@ -4653,12 +4690,13 @@ async function selectCalkitEnvironment(
 
   let slurmOptions: SlurmLaunchOptions | undefined;
   if (picked.outerSlurmEnvironment) {
-    const defaultSlurmOptions = getNotebookSlurmOptionsWithDefaults(
+    slurmOptions = await chooseSlurmOptionsForLaunch(
+      picked.outerSlurmEnvironment,
       getDefaultSlurmOptions(
         config?.environments?.[picked.outerSlurmEnvironment],
       ),
+      getLaunchProfileForNotebookUri(context, targetNotebookUri)?.slurmOptions,
     );
-    slurmOptions = await chooseSlurmOptionsForLaunch(defaultSlurmOptions);
     if (!slurmOptions) {
       await refreshNotebookToolbarContext(context);
       return undefined;
@@ -4745,10 +4783,13 @@ async function selectCalkitEnvironment(
     notebookUri: targetNotebookUri,
   });
 
-  const uri = serverToken
+  // SLURM servers run on a compute node we only learn once the job starts
+  let uri = serverToken
     ? `http://localhost:${port}/lab?token=${encodeURIComponent(serverToken)}`
     : `http://localhost:${port}/lab`;
-  await vscode.env.clipboard.writeText(uri);
+  if (!picked.outerSlurmEnvironment) {
+    await vscode.env.clipboard.writeText(uri);
+  }
   const kernelsBeforeConnect =
     await getResolvedKernelIdsForActiveNotebook(targetNotebookUri);
 
@@ -4756,6 +4797,18 @@ async function selectCalkitEnvironment(
   if (picked.outerSlurmEnvironment || picked.innerKind === "docker") {
     const envType = picked.outerSlurmEnvironment ? "Slurm" : "Docker";
     const runConnectFlow = async (): Promise<string | undefined> => {
+      if (picked.outerSlurmEnvironment && serverToken) {
+        const slurmUri = await waitForSlurmServerUri(
+          serverToken,
+          targetNotebookUri,
+        );
+        if (!slurmUri) {
+          await refreshNotebookToolbarContext(context);
+          return undefined;
+        }
+        uri = slurmUri;
+        await vscode.env.clipboard.writeText(uri);
+      }
       const serverReady = picked.outerSlurmEnvironment
         ? await waitForServerReady(uri, {
             sessionKind: "slurm",
@@ -6252,7 +6305,7 @@ async function runCreateSlurmEnvironmentWizard(
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   let name = "cluster";
-  let host = await detectLocalHostname(workspaceRoot);
+  let host = await suggestSlurmHost(workspaceRoot);
   let defaults: SlurmLaunchOptions = {};
   let step = 0;
 
@@ -6592,7 +6645,16 @@ function toRepoRelativePath(inputPath: string, workspaceRoot: string): string {
   return path.relative(workspaceRoot, inputPath);
 }
 
-async function detectLocalHostname(workspaceRoot: string): Promise<string> {
+// Prefer the name used to log in over this node's own, since clusters often
+// have several login nodes behind one name. Short names are likely local SSH
+// aliases, which don't work for anyone else.
+async function suggestSlurmHost(workspaceRoot: string): Promise<string> {
+  const remoteHost = parseRemoteSshHost(
+    vscode.workspace.workspaceFolders?.[0]?.uri.authority ?? "",
+  );
+  if (remoteHost?.includes(".")) {
+    return remoteHost;
+  }
   try {
     const { stdout } = await execFileAsync("hostname", [], {
       cwd: workspaceRoot,
@@ -6609,19 +6671,28 @@ async function detectLocalHostname(workspaceRoot: string): Promise<string> {
 }
 
 async function chooseSlurmOptionsForLaunch(
-  defaults?: SlurmLaunchOptions,
+  environmentName: string,
+  envDefaults: SlurmLaunchOptions | undefined,
+  previous: SlurmLaunchOptions | undefined,
 ): Promise<SlurmLaunchOptions | undefined> {
-  const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
+  const values = await askForMissingSlurmResources(
+    environmentName,
+    envDefaults,
+    previous,
+  );
+  if (!values) {
+    return undefined;
+  }
   const choice = await vscode.window.showQuickPick(
     [
       {
         label: "Use saved/default SLURM options",
-        description: summarizeSlurmOptions(effectiveDefaults),
+        description: slurmOptionsToOptionList(values).join(" "),
         action: "use",
       },
       {
         label: "Modify SLURM options...",
-        description: "Edit --gpus, --time, and extra srun flags",
+        description: "Edit partition, time, CPUs, memory, GPUs, and more",
         action: "edit",
       },
     ],
@@ -6631,33 +6702,13 @@ async function chooseSlurmOptionsForLaunch(
       ignoreFocusOut: true,
     },
   );
-
   if (!choice) {
     return undefined;
   }
-
   if (choice.action === "use") {
-    return effectiveDefaults;
+    return values;
   }
-
-  return await askForSlurmOptions(effectiveDefaults);
-}
-
-function summarizeSlurmOptions(options: SlurmLaunchOptions): string {
-  const parts: string[] = [];
-  if (options.gpus) {
-    parts.push(`--gpus=${options.gpus}`);
-  }
-  if (options.time) {
-    parts.push(`--time=${options.time}`);
-  }
-  if (options.partition) {
-    parts.push(`--partition=${options.partition}`);
-  }
-  if (options.extra) {
-    parts.push(options.extra);
-  }
-  return parts.length > 0 ? parts.join(" ") : "No extra options";
+  return await askForSlurmOptions(values);
 }
 
 async function askForSlurmSetupCommandsStep(): Promise<
@@ -6700,73 +6751,95 @@ async function askForSlurmSetupCommandsStep(): Promise<
   return { kind: "value", value: setupCommands };
 }
 
-async function askForSlurmOptionsWizard(
-  defaults: SlurmLaunchOptions,
+const SLURM_OPTION_PROMPTS: Record<
+  keyof SlurmLaunchOptions,
+  { title: string; prompt: string }
+> = {
+  partition: {
+    title: "--partition",
+    prompt: "Partition (queue) to run in",
+  },
+  time: {
+    title: "--time",
+    prompt: "Time limit, in minutes or as HH:MM:SS",
+  },
+  cpus: { title: "--cpus-per-task", prompt: "Number of CPUs" },
+  mem: { title: "--mem", prompt: "Memory, e.g., 16G" },
+  gpus: {
+    title: "--gpus",
+    prompt: "GPU count or type:count, e.g., 1 or a100:1",
+  },
+  extra: {
+    title: "Additional srun options",
+    prompt: "Raw options appended as-is, e.g., --account=myaccount",
+  },
+};
+
+// Ask for SLURM options one at a time, so Back steps through them
+async function askForSlurmOptionFields(
+  fields: Array<keyof SlurmLaunchOptions>,
+  initial: SlurmLaunchOptions,
+  options?: { canGoBack?: boolean; titleNote?: string },
 ): Promise<WizardStepResult<SlurmLaunchOptions>> {
-  const values: SlurmLaunchOptions = {
-    ...defaults,
-  };
+  const values: SlurmLaunchOptions = { ...initial };
   let step = 0;
-
-  while (step >= 0) {
-    if (step === 0) {
-      const result = await showInputBoxStep({
-        title: "Slurm option: --gpus",
-        prompt: "Optional GPU count or value (e.g., 1 or a100:1)",
-        value: values.gpus ?? "",
-        placeHolder: "leave blank to skip",
-        canGoBack: true,
-      });
-      if (result.kind === "cancel") {
-        return result;
-      }
-      if (result.kind === "back") {
-        return { kind: "back" };
-      }
-      values.gpus = result.value;
-      step = 1;
-      continue;
-    }
-
-    if (step === 1) {
-      const result = await showInputBoxStep({
-        title: "Slurm option: --time",
-        prompt: "Optional time (e.g., 60 or 01:00:00)",
-        value: values.time ?? "",
-        placeHolder: "leave blank to skip",
-        canGoBack: true,
-      });
-      if (result.kind === "cancel") {
-        return result;
-      }
-      if (result.kind === "back") {
-        step = 0;
-        continue;
-      }
-      values.time = result.value;
-      step = 2;
-      continue;
-    }
-
+  while (step < fields.length) {
+    const field = fields[step];
+    const { title, prompt } = SLURM_OPTION_PROMPTS[field];
     const result = await showInputBoxStep({
-      title: "Additional srun options",
-      prompt: "Optional raw options appended as-is (e.g., --cpus-per-task=8)",
-      value: values.extra ?? "",
-      placeHolder: "leave blank to skip",
-      canGoBack: true,
+      title: `SLURM ${title}${options?.titleNote ?? ""} (${step + 1}/${
+        fields.length
+      })`,
+      prompt,
+      value: values[field] ?? "",
+      placeHolder: "leave blank for the cluster default",
+      canGoBack: step > 0 || options?.canGoBack,
     });
     if (result.kind === "cancel") {
       return result;
     }
     if (result.kind === "back") {
-      step = 1;
+      if (step === 0) {
+        return result;
+      }
+      step--;
       continue;
     }
-    values.extra = result.value;
-    return { kind: "value", value: compactSlurmOptions(values) };
+    values[field] = result.value;
+    step++;
   }
+  return { kind: "value", value: compactSlurmOptions(values) };
+}
 
-  return { kind: "cancel" };
+async function askForSlurmOptionsWizard(
+  defaults: SlurmLaunchOptions,
+): Promise<WizardStepResult<SlurmLaunchOptions>> {
+  return await askForSlurmOptionFields(
+    ["partition", "time", "cpus", "mem", "gpus", "extra"],
+    defaults,
+    { canGoBack: true },
+  );
+}
+
+// Ask for the resources an environment leaves unset, so a notebook job doesn't
+// silently get the cluster's defaults. Previous answers are prefilled.
+async function askForMissingSlurmResources(
+  environmentName: string,
+  envDefaults: SlurmLaunchOptions | undefined,
+  previous: SlurmLaunchOptions | undefined,
+): Promise<SlurmLaunchOptions | undefined> {
+  const values = mergeSlurmOptions(
+    mergeSlurmOptions({ time: DEFAULT_NOTEBOOK_SLURM_TIME }, previous),
+    envDefaults,
+  );
+  const missing = getMissingSlurmResources(envDefaults);
+  if (missing.length === 0) {
+    return values;
+  }
+  const result = await askForSlurmOptionFields(missing, values, {
+    titleNote: ` (not set in '${environmentName}')`,
+  });
+  return result.kind === "value" ? result.value : undefined;
 }
 
 async function runCreateCondaEnvironmentWizard(
@@ -6867,7 +6940,7 @@ async function runCreateUvEnvironmentWizard(
   workspaceRoot: string,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
-  let name = "my-uv-env";
+  let name = "py";
   let pyprojectPath = "pyproject.toml";
   let step = 0;
 
@@ -6940,6 +7013,8 @@ async function runCreateUvEnvironmentWizard(
           "--path",
           pyprojectPath,
           "--no-commit",
+          // Only notebooks use this wizard, and they need a kernel
+          "ipykernel",
         ],
         { cwd: workspaceRoot },
       );
@@ -7201,11 +7276,9 @@ async function autoSelectEnvironmentForActiveNotebook(
         innerEnvironment: configuredCandidate.innerEnvironment,
         innerKind: configuredCandidate.innerKind,
         outerSlurmEnvironment: configuredCandidate.outerSlurmEnvironment,
-        slurmOptions: getNotebookSlurmOptionsWithDefaults(
-          getDefaultSlurmOptions(
-            config.environments?.[configuredCandidate.outerSlurmEnvironment],
-          ),
-        ),
+        // Kept for prefilling; the launch merges in the env's defaults
+        slurmOptions: getLaunchProfileForNotebookUri(context, notebookUri)
+          ?.slurmOptions,
         preferredPort: getDefaultPort(),
       });
 
@@ -7266,56 +7339,13 @@ async function autoSelectEnvironmentForActiveNotebook(
 }
 
 async function askForSlurmOptions(
-  defaults?: SlurmLaunchOptions,
+  defaults: SlurmLaunchOptions,
 ): Promise<SlurmLaunchOptions | undefined> {
-  const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
-  const gpus = await vscode.window.showInputBox({
-    title: "Slurm option: --gpus",
-    prompt: "Optional GPU count or value (e.g., 1 or a100:1)",
-    value: effectiveDefaults.gpus ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (gpus === undefined) {
-    return undefined;
-  }
-
-  const time = await vscode.window.showInputBox({
-    title: "Slurm option: --time",
-    prompt: "Optional time (e.g., 60 or 01:00:00)",
-    value: effectiveDefaults.time ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (time === undefined) {
-    return undefined;
-  }
-
-  const extra = await vscode.window.showInputBox({
-    title: "Additional srun options",
-    prompt: "Optional raw options appended as-is (e.g., --cpus-per-task=8)",
-    value: effectiveDefaults.extra ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (extra === undefined) {
-    return undefined;
-  }
-
-  return compactSlurmOptions({
-    gpus,
-    time,
-    partition: effectiveDefaults.partition,
-    extra,
-  });
-}
-
-function getNotebookSlurmOptionsWithDefaults(
-  defaults?: SlurmLaunchOptions,
-): SlurmLaunchOptions {
-  return compactSlurmOptions({
-    gpus: defaults?.gpus,
-    time: defaults?.time ?? DEFAULT_NOTEBOOK_SLURM_TIME,
-    partition: defaults?.partition,
-    extra: defaults?.extra,
-  });
+  const result = await askForSlurmOptionFields(
+    ["partition", "time", "cpus", "mem", "gpus", "extra"],
+    defaults,
+  );
+  return result.kind === "value" ? result.value : undefined;
 }
 
 async function confirmAutoStartSlurmNotebookSession(
@@ -7406,27 +7436,17 @@ function buildLaunchCommand(
     picked,
     notebookRelativePath,
   );
-  const opts: string[] = [];
-  if (slurmOptions?.gpus?.trim()) {
-    opts.push(`--gpus=${slurmOptions.gpus.trim()}`);
-  }
-  if (slurmOptions?.time?.trim()) {
-    opts.push(`--time=${slurmOptions.time.trim()}`);
-  }
-  if (slurmOptions?.partition?.trim()) {
-    opts.push(`--partition=${slurmOptions.partition.trim()}`);
-  }
-  if (slurmOptions?.extra?.trim()) {
-    opts.push(slurmOptions.extra.trim());
-  }
-
+  const opts = slurmOptionsToOptionList(slurmOptions ?? {});
   // For a SLURM outer environment, run jupyter directly under srun.
   // Run checks and launch in the same remote shell so setup side effects
   // (e.g., module loads) apply to both kernel checks and Jupyter startup.
+  // The server runs on a compute node, so it must listen on all interfaces
+  // for VS Code to reach it from the login node.
   const rawJupyterCmd = `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
     serverToken ? ` --IdentityProvider.token=${shQuote(serverToken)}` : ""
   }${defaultKernelFlag}`;
   const remoteParts = [
+    `echo "${SLURM_NODE_MARKER}$(hostname)"`,
     ...slurmSetupCommands,
     checkPart,
     ...(picked.innerKind === "docker" ? [] : [kernelCheckPart]),
@@ -7728,6 +7748,36 @@ async function waitForServerReady(
     await sleep(pollMs);
   }
   return false;
+}
+
+// Wait for a SLURM job's Jupyter server to report its compute node and port,
+// which can take a while if the job is queued.
+async function waitForSlurmServerUri(
+  serverToken: string,
+  notebookUri?: string,
+  timeoutMs = 300_000,
+  pollMs = 1_000,
+): Promise<string | undefined> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (!hasRunningServerSession("slurm", notebookUri)) {
+      void vscode.window.showWarningMessage(
+        "SLURM Jupyter server failed to start. See Calkit output for details.",
+      );
+      return undefined;
+    }
+    const { host, port } = activeJupyterServerSession ?? {};
+    if (host && port) {
+      return `http://${host}:${port}/lab?token=${encodeURIComponent(
+        serverToken,
+      )}`;
+    }
+    await sleep(pollMs);
+  }
+  void vscode.window.showWarningMessage(
+    "SLURM job has not started Jupyter after 5 minutes (may be queued). See Calkit output.",
+  );
+  return undefined;
 }
 
 async function isHttpEndpointReachable(targetUrl: string): Promise<boolean> {
@@ -8581,6 +8631,18 @@ async function startSlurmJobForActiveNotebook(
     return false;
   }
 
+  const slurmOptions = await askForMissingSlurmResources(
+    profile.outerSlurmEnvironment,
+    getDefaultSlurmOptions(config.environments[profile.outerSlurmEnvironment]),
+    profile.slurmOptions,
+  );
+  if (!slurmOptions) {
+    return false;
+  }
+  await saveLaunchProfileForNotebookUri(context, profile.notebookUri, {
+    ...profile,
+    slurmOptions,
+  });
   const picked: CalkitEnvNotebookKernelSource = {
     label: profile.environmentName,
     description: `${profile.outerSlurmEnvironment} + ${profile.innerKind}`,
@@ -8608,7 +8670,7 @@ async function startSlurmJobForActiveNotebook(
         workspaceRoot,
         config,
         port,
-        profile.slurmOptions,
+        slurmOptions,
         serverToken,
         undefined,
         expectedKernel?.kernelName,
@@ -8620,14 +8682,15 @@ async function startSlurmJobForActiveNotebook(
         notebookUri: profile.notebookUri,
       });
 
-      const uri = `http://localhost:${port}/lab?token=${encodeURIComponent(
-        serverToken,
-      )}`;
-      await vscode.env.clipboard.writeText(uri);
       const kernelsBeforeConnect = await getResolvedKernelIdsForActiveNotebook(
         profile.notebookUri,
       );
-
+      const uri = await waitForSlurmServerUri(serverToken, profile.notebookUri);
+      if (!uri) {
+        await refreshNotebookToolbarContext(context);
+        return false;
+      }
+      await vscode.env.clipboard.writeText(uri);
       const serverReady = await waitForServerReady(uri, {
         sessionKind: "slurm",
         notebookUri: profile.notebookUri,
@@ -9070,8 +9133,27 @@ function startServerInBackground(
   });
   jupyterServerProcess = child;
   activeJupyterServerSession = session;
+  // Accumulate SLURM output until we know which node and port to connect to
+  const slurmOutput = { stdout: "", stderr: "" };
+  const findSlurmServer = (stream: "stdout" | "stderr", chunk: string) => {
+    if (session.kind !== "slurm" || (session.host && session.port)) {
+      return;
+    }
+    slurmOutput[stream] += chunk;
+    // Parse streams separately so joining them can't end a partial line
+    const fromStdout = parseSlurmServerOutput(slurmOutput.stdout);
+    const fromStderr = parseSlurmServerOutput(slurmOutput.stderr);
+    const host = fromStdout.host ?? fromStderr.host;
+    const port = fromStdout.port ?? fromStderr.port;
+    session.host = host;
+    session.port = port;
+    if (host && port) {
+      log(`SLURM Jupyter server is on ${host}:${port}`);
+    }
+  };
 
   child.stdout?.on("data", (chunk: Buffer | string) => {
+    findSlurmServer("stdout", chunk.toString());
     const text = chunk.toString().trim();
     if (text) {
       log(`[server] ${text}`);
@@ -9079,6 +9161,7 @@ function startServerInBackground(
   });
 
   child.stderr?.on("data", (chunk: Buffer | string) => {
+    findSlurmServer("stderr", chunk.toString());
     const text = chunk.toString().trim();
     if (text) {
       log(`[server:err] ${text}`);

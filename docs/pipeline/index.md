@@ -635,17 +635,19 @@ Model class: `RScriptStage`
 
 Model class: `ReferencesCheckStage`
 
-Whether the references the project's documents cite are real.
+Whether the references a document cites are real.
 
-Its inputs are `calkit.yaml`, the documents the pipeline builds
-into PDFs, the files they input, and the project's reference
-collections, and its outputs are one report per document, all added
-when the pipeline is compiled. Nothing needs declaring in the stage.
+Its inputs are `calkit.yaml`, the target document, the files it
+inputs, and the project's reference collections, and its output is
+that document's report, all added when the pipeline is compiled. One
+stage checks one document, so a project with two papers has one of
+these each and each goes out of date on its own.
 
 | Kind-specific parameter | Type | Required | Default    | Description                                                                                                                       |
 | ----------------------- | ---- | -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `environment`           | str  | no       | '\_system' | Name of the environment in which to run this stage.                                                                               |
+| `environment`           | str  | no       | '\_system' | Where to run the check. Defaults to the system, which is where the Calkit running the pipeline already is.                        |
 | `wdir`                  | None | no       | null       | Not supported; the stage reads the project's calkit.yaml and documents from the project root.                                     |
+| `target_path`           | str  | yes      |            | Path to the document whose citations to check, e.g., the .tex file a LaTeX stage builds.                                          |
 | `offline`               | bool | no       | False      | Use only cached answers instead of calling out to Crossref, OpenAlex, and arXiv, e.g., where the pipeline runs without a network. |
 
 ### `sbatch`

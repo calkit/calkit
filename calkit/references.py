@@ -633,15 +633,19 @@ def classify(reference: Reference) -> None:
 
 def check_references(
     wdir: str | Path | None = None,
+    paths: list[str] | None = None,
     offline: bool = False,
     refresh: bool = False,
 ) -> ReferenceCheck:
-    """Check that every reference the project's documents cite is real.
+    """Check that every reference a project's documents cite is real.
 
     Parameters
     ----------
     wdir : str or Path, optional
         Project working directory, defaulting to the current one.
+    paths : list of str, optional
+        Documents to check. Defaults to every one the pipeline builds
+        into a PDF.
     offline : bool, optional
         Use only cached answers, and report the rest as unchecked.
     refresh : bool, optional
@@ -650,7 +654,7 @@ def check_references(
     Returns
     -------
     ReferenceCheck
-        One report per document the pipeline builds into a PDF.
+        One report per document checked.
     """
     import calkit
     from calkit.latex import comment_documents, flatten
@@ -670,7 +674,7 @@ def check_references(
             else None
         )
 
-    for document in comment_documents(ck_info):
+    for document in paths or comment_documents(ck_info):
         lines = flatten(document, read=read)
         if not lines:
             continue
@@ -1119,14 +1123,16 @@ def format_check(check: ReferenceCheck, verbose: bool = False) -> str:
 
 
 def document_inputs(
-    ck_info: dict, wdir: str | Path | None = None
+    ck_info: dict, document: str, wdir: str | Path | None = None
 ) -> list[str]:
-    """Files a references check reads: documents, inputs, collections.
+    """Files a check of one document reads: it, its inputs, collections.
 
     Parameters
     ----------
     ck_info : dict
         The project's ``calkit.yaml`` contents.
+    document : str
+        Project-relative path of the document being checked.
     wdir : str or Path, optional
         Project working directory, defaulting to the current one.
 
@@ -1135,7 +1141,7 @@ def document_inputs(
     list of str
         Project-relative paths, deduplicated and sorted.
     """
-    from calkit.latex import comment_documents, flatten
+    from calkit.latex import flatten
 
     def read(path: str) -> str | None:
         full = Path(wdir or ".") / path
@@ -1145,13 +1151,12 @@ def document_inputs(
             else None
         )
 
-    out = set()
-    for document in comment_documents(ck_info):
-        for line in flatten(document, read=read):
-            out.add(line.path)
-        # A document that doesn't exist yet is still a dependency, so the
-        # check reruns once it does.
-        out.add(document)
+    # The document and everything it inputs, so a generated table that
+    # grew a citation is seen, and the document itself even when it does
+    # not exist yet, so the check runs once it does.
+    out = {document}
+    for line in flatten(document, read=read):
+        out.add(line.path)
     for item in ck_info.get("references") or []:
         path = item.get("path") if isinstance(item, dict) else item
         if path:
@@ -1164,30 +1169,34 @@ def expand_reference_check_stages(
 ) -> dict:
     """Give each ``references-check`` stage the files it reads and writes.
 
-    The check reads the documents the pipeline builds, the files they
-    input, and the project's reference collections, so it has to rerun
-    when any of them changes. All of that is listed once here, from the
-    project itself, rather than repeated by hand in the stage. Its
-    outputs are one report per document, which is what makes a check go
-    stale per document rather than all at once.
+    A stage names the document it checks, and the check reads that
+    document, the files it inputs, and the project's reference
+    collections, so it has to rerun when any of them changes. All of that
+    is derived here, from the project itself, rather than repeated by
+    hand in the stage. Its output is that document's report, so editing
+    one paper rechecks that paper and leaves another project document's
+    report alone.
     """
-    from calkit.latex import comment_documents
-
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if not any(
         isinstance(st, dict) and st.get("kind") == "references-check"
         for st in stages.values()
     ):
         return ck_info
-    derived = ["calkit.yaml", *document_inputs(ck_info, wdir=wdir)]
-    outputs = [
-        {"path": output_path(document), "storage": "git"}
-        for document in comment_documents(ck_info)
-    ]
     expanded = {}
     for name, stage in stages.items():
         if isinstance(stage, dict) and stage.get("kind") == "references-check":
+            document = stage.get("target_path")
+            if not document:
+                # Let the model's own validation report the missing path
+                # rather than guessing one here.
+                expanded[name] = stage
+                continue
             stage = dict(stage)
+            derived = [
+                "calkit.yaml",
+                *document_inputs(ck_info, document, wdir=wdir),
+            ]
             declared = list(stage.get("inputs") or [])
             stage["inputs"] = declared + [
                 p for p in derived if p not in declared
@@ -1197,9 +1206,11 @@ def expand_reference_check_stages(
                 o.get("path") if isinstance(o, dict) else o
                 for o in declared_outs
             }
-            stage["outputs"] = declared_outs + [
-                o for o in outputs if o["path"] not in declared_paths
-            ]
+            report = output_path(document)
+            if report not in declared_paths:
+                stage["outputs"] = declared_outs + [
+                    {"path": report, "storage": "git"}
+                ]
         expanded[name] = stage
     out = dict(ck_info)
     out["pipeline"] = {**ck_info["pipeline"], "stages": expanded}

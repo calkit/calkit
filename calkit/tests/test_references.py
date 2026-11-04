@@ -536,9 +536,11 @@ def test_stage_expansion_derives_inputs_and_a_report_per_document(
     _project(tmp_dir, "\\input{sec}\n")
     (tmp_dir / "paper" / "sec.tex").write_text("\\citep{real2020thing}\n")
     ck_info = calkit.load_calkit_info()
+    # No environment: it defaults to the system, which is where the
+    # Calkit running the pipeline already is.
     ck_info["pipeline"]["stages"]["check-refs"] = {
         "kind": "references-check",
-        "environment": "_system",
+        "target_path": "paper/main.tex",
     }
     expanded = refs.expand_reference_check_stages(ck_info)
     stage = expanded["pipeline"]["stages"]["check-refs"]
@@ -564,15 +566,16 @@ def test_the_stage_compiles_to_a_dvc_stage(tmp_dir: Path) -> None:
     from calkit.models.pipeline import ReferencesCheckStage
 
     stage = ReferencesCheckStage(
-        kind="references-check",
-        environment="_system",
-        outputs=[".calkit/reference-checks/paper/main.tex.json"],
+        kind="references-check", target_path="paper/main.tex"
     )
-    assert stage.dvc_cmd == "calkit check references"
+    # The environment is not required: the check runs where the Calkit
+    # running the pipeline already is.
+    assert stage.environment == "_system"
+    assert stage.dvc_cmd == "calkit check references paper/main.tex"
     offline = ReferencesCheckStage(
-        kind="references-check", environment="_system", offline=True
+        kind="references-check", target_path="a b.tex", offline=True
     )
-    assert offline.dvc_cmd == "calkit check references --offline"
+    assert offline.dvc_cmd == "calkit check references 'a b.tex' --offline"
 
 
 def test_markdown_citations_are_found(tmp_dir: Path) -> None:

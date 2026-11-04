@@ -1799,16 +1799,25 @@ class QuestionsToLatexStage(Stage):
 
 
 class ReferencesCheckStage(Stage):
-    """Whether the references the project's documents cite are real.
+    """Whether the references a document cites are real.
 
-    Its inputs are ``calkit.yaml``, the documents the pipeline builds
-    into PDFs, the files they input, and the project's reference
-    collections, and its outputs are one report per document, all added
-    when the pipeline is compiled. Nothing needs declaring in the stage.
+    Its inputs are ``calkit.yaml``, the target document, the files it
+    inputs, and the project's reference collections, and its output is
+    that document's report, all added when the pipeline is compiled. One
+    stage checks one document, so a project with two papers has one of
+    these each and each goes out of date on its own.
     """
 
     kind: Literal["references-check"] = "references-check"
-    environment: str = "_system"
+    target_path: str = Field(
+        description="Path to the document whose citations to check, e.g., "
+        "the .tex file a LaTeX stage builds."
+    )
+    environment: str = Field(
+        default="_system",
+        description="Where to run the check. Defaults to the system, "
+        "which is where the Calkit running the pipeline already is.",
+    )
     offline: bool = Field(
         default=False,
         description=(
@@ -1825,7 +1834,7 @@ class ReferencesCheckStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = "calkit check references"
+        cmd = f"calkit check references {shlex.quote(self.target_path)}"
         if self.offline:
             cmd += " --offline"
         return cmd

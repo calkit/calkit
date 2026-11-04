@@ -10,7 +10,7 @@ import re
 import shutil
 import subprocess
 import textwrap
-from typing import Annotated, Callable
+from typing import Annotated, Callable, Optional
 
 import dotenv
 import typer
@@ -2576,6 +2576,13 @@ def check_questions(
 
 @check_app.command(name="references")
 def check_references(
+    paths: Annotated[
+        Optional[list[str]],
+        typer.Argument(
+            help="Documents whose citations to check. Defaults to every "
+            "one the pipeline builds into a PDF.",
+        ),
+    ] = None,
     wdir: Annotated[
         str, typer.Option("--wdir", help="Project working directory.")
     ] = ".",
@@ -2616,9 +2623,9 @@ def check_references(
 ) -> None:
     """Check that the references the project's documents cite are real.
 
-    Reads citation keys from the documents the pipeline builds, and the
-    files they input, then resolves each against the project's reference
-    collections and looks the entry up in Crossref, OpenAlex, and arXiv.
+    Reads citation keys from the documents named, or from every one the
+    pipeline builds into a PDF, and from the files they input, then
+    resolves each against the project's reference collections and looks the entry up in Crossref, OpenAlex, and arXiv.
     Reports, worst first: a key defined in no collection, so the citation
     cannot resolve; an entry whose identifier resolves to a different work
     than it describes; and an entry no service has, which is what a
@@ -2636,7 +2643,9 @@ def check_references(
     from calkit.references import check_references as _check_references
     from calkit.references import compact, format_check, write_reports
 
-    check = _check_references(wdir=wdir, offline=offline, refresh=refresh)
+    check = _check_references(
+        wdir=wdir, paths=paths, offline=offline, refresh=refresh
+    )
     if not no_write:
         write_reports(check, wdir=wdir)
     if json_output:

@@ -85,22 +85,27 @@ describing an unrelated paper.
 
 ## Checking references in the pipeline
 
-A `references-check` stage runs the check as part of the pipeline:
+A `references-check` stage runs the check as part of the pipeline,
+naming the document to check:
 
 ```yaml
 pipeline:
   stages:
     check-references:
       kind: references-check
-      environment: _system
+      target_path: paper/main.tex
 ```
 
-Its inputs are `calkit.yaml`, the documents the pipeline builds, the files
-they input, and the reference collections, and its outputs are one report
-per document, under `.calkit/reference-checks`.
-All of that is derived when the pipeline is compiled, so nothing needs
-declaring in the stage, and editing a document or a `.bib` file makes only
-that document's check stale.
+Its inputs are `calkit.yaml`, that document, the files it inputs, and the
+reference collections, and its output is that document's report, under
+`.calkit/reference-checks`.
+All of that is derived when the pipeline is compiled, so nothing else
+needs declaring: editing `paper/main.tex`, a `.tex` file it inputs, or a
+`.bib` file rechecks that document, and nothing else.
+A project with two papers gives each one a stage, and each goes out of
+date on its own.
+No `environment` is needed, since the check runs where the Calkit running
+the pipeline already is.
 
 A report records that a work was found and where to go and see it, not
 what the work is.

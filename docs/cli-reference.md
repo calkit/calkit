@@ -3953,7 +3953,7 @@ Options:
 
 Check that the references the project's documents cite are real.
 
-Reads citation keys from the documents the pipeline builds, and the files they input, then resolves each against the project's reference collections and looks the entry up in Crossref, OpenAlex, and arXiv. Reports, worst first: a key defined in no collection, so the citation cannot resolve; an entry whose identifier resolves to a different work than it describes; and an entry no service has, which is what a fabricated citation looks like, though a venue that registers no DOIs looks the same and is named as such.
+Reads citation keys from the documents named, or from every one the pipeline builds into a PDF, and from the files they input, then resolves each against the project's reference collections and looks the entry up in Crossref, OpenAlex, and arXiv. Reports, worst first: a key defined in no collection, so the citation cannot resolve; an entry whose identifier resolves to a different work than it describes; and an entry no service has, which is what a fabricated citation looks like, though a venue that registers no DOIs looks the same and is named as such.
 
 One report per document is written to .calkit/reference-checks, so each is a pipeline output that goes stale when its document or a collection changes. Answers are cached, so a rerun needs no network.
 
@@ -3962,8 +3962,14 @@ Exits with an error if a key resolves to no entry, or an entry contradicts the r
 Usage:
 
 ```text
-calkit check references [OPTIONS]
+calkit check references [OPTIONS] [PATHS...]
 ```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                               |
+| -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------- |
+| `paths`  | str  | no       |         | Documents whose citations to check. Defaults to every one the pipeline builds into a PDF. |
 
 Options:
 

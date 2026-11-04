@@ -2857,17 +2857,17 @@ Options:
 
 Open things.
 
-| Command                               | Description                                               |
-| ------------------------------------- | --------------------------------------------------------- |
-| [`project`](#subcommand-open-project) | Open a project on this machine in VS Code, from anywhere. |
+| Command                               | Description                                                  |
+| ------------------------------------- | ------------------------------------------------------------ |
+| [`project`](#subcommand-open-project) | Open a project on this machine in its editor, from anywhere. |
 
 <a id="subcommand-open-project"></a>
 
 #### `calkit open project`
 
-Open a project on this machine in VS Code, from anywhere.
+Open a project on this machine in its editor, from anywhere.
 
-Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't there.
+Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor'.
 
 Usage:
 

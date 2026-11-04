@@ -2580,6 +2580,65 @@ function fileRow(file: OverleafSyncStatusFile): HTMLElement {
   ]);
 }
 
+/**
+ * A link that shows how to open the project on this computer: install the
+ * CLI, then one command that finds the project, or clones it, and opens it.
+ */
+function renderOpenLocally(link: OverleafLinkPublic): HTMLElement[] {
+  const install = navigator.userAgent.includes("Windows")
+    ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
+    : "curl -LsSf install.calkit.org | sh";
+  const commands = [install, `calkit open project ${linkKey(link)}`].join("\n");
+  const copy = el("button", { class: "action secondary", text: "Copy" });
+  copy.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(commands);
+    copy.textContent = "Copied";
+  });
+  const box = el(
+    "div",
+    {
+      class: "muted-box",
+      style: {
+        display: "none",
+        marginTop: "4px",
+        alignSelf: "stretch",
+        boxSizing: "border-box",
+      },
+    },
+    [
+      el("div", {
+        class: "small",
+        text: "In a terminal, install Calkit, then open the project in VS Code, which clones it first if needed:",
+      }),
+      el("pre", {
+        class: "name",
+        style: { whiteSpace: "pre-wrap", margin: "6px 0" },
+        text: commands,
+      }),
+      el("div", { class: "actions" }, [
+        copy,
+        el("a", {
+          class: "small",
+          text: "Other ways to install",
+          href: "https://docs.calkit.org/installation/",
+          attrs: { target: "_blank" },
+        }),
+      ]),
+    ],
+  );
+  const toggle = el("a", {
+    class: "small",
+    text: "Open locally",
+    href: "#",
+    title: "Open the project on this computer",
+    onClick: (event) => {
+      event.preventDefault();
+      box.style.display = box.style.display === "none" ? "" : "none";
+    },
+  });
+  return [toggle, box];
+}
+
 function renderStatus(
   body: HTMLElement,
   link: OverleafLinkPublic,
@@ -2621,6 +2680,7 @@ function renderStatus(
                 attrs: { target: "_blank" },
               })
             : null,
+          ...renderOpenLocally(link),
           el("div", {
             class: "dim small",
             text: `Synced folder: ${status.path}`,
@@ -4058,6 +4118,7 @@ function drawRail(): void {
             attrs: { target: "_blank" },
           })
         : null,
+      ...renderOpenLocally(link),
     ]),
   );
   // What's going on between the paper and its project

@@ -1,46 +1,21 @@
 """Tests for app.api.routes.references endpoints."""
 
 import os
-import uuid
 from unittest.mock import patch
 
 import git
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app import users
 from app.core import ryaml
-from app.models import Project, UserCreate
-from app.tests import authentication_token_from_email
+from app.tests.api.routes.projects.test_core import _make_owner_with_project
 
 
 def test_get_user_reference_matches(
     client: TestClient, db: Session, tmp_path
 ) -> None:
-    suffix = uuid.uuid4().hex[:8]
-    owner = users.create_user(
-        session=db,
-        user_create=UserCreate(
-            email=f"owner-{suffix}@example.com",
-            password="ownerpassword123",
-            account_name=f"owner{suffix}",
-            github_username=f"owner{suffix}",
-        ),
-    )
-    project = Project(
-        name=f"proj-{suffix}",
-        title="Reference Search Test Project",
-        git_repo_url=f"https://github.com/owner{suffix}/proj-{suffix}",
-        owner_account_id=owner.account.id,
-        owner_account=owner.account,
-    )
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-    headers = authentication_token_from_email(
-        client=client, email=owner.email, db=db
-    )
-    repo_dir = tmp_path / suffix
+    project, headers = _make_owner_with_project(db, client)
+    repo_dir = tmp_path / "repo"
     os.makedirs(repo_dir)
     repo = git.Repo.init(path=repo_dir)
     # The test container has no committer

@@ -2591,32 +2591,42 @@ function renderStatus(
   const others = status.files_to_push.filter((f) => !f.figure);
   body.append(
     el("div", { class: "row" }, [
-      el("div", { class: "grow" }, [
-        el("a", {
-          text: `${link.project_owner_name}/${link.project_name}`,
-          href: projectUrl(
-            hubWebUrl,
-            link.project_owner_name,
-            link.project_name,
-          ),
-        }),
-        el("div", {
-          class: "dim small",
-          text: `Synced folder: ${status.path}`,
-        }),
-        // Where to work on what the paper shows, without installing anything
-        link.github_repo_url
-          ? el("a", {
-              class: "small",
-              text: "Open in Codespaces",
-              href: `https://codespaces.new${
-                new URL(link.github_repo_url).pathname
-              }?quickstart=1`,
-              title: "Work on the project in a GitHub Codespace",
-              attrs: { target: "_blank" },
-            })
-          : null,
-      ]),
+      el(
+        "div",
+        {
+          class: "grow stack",
+          style: { gap: "2px", alignItems: "flex-start" },
+        },
+        [
+          el("a", {
+            class: "small",
+            text: "Open in Calkit",
+            href: projectUrl(
+              hubWebUrl,
+              link.project_owner_name,
+              link.project_name,
+            ),
+            title: linkKey(link),
+            attrs: { target: "_blank" },
+          }),
+          // Where to work on what the paper shows, without installing anything
+          link.github_repo_url
+            ? el("a", {
+                class: "small",
+                text: "Open in Codespaces",
+                href: `https://codespaces.new${
+                  new URL(link.github_repo_url).pathname
+                }?quickstart=1`,
+                title: "Work on the project in a GitHub Codespace",
+                attrs: { target: "_blank" },
+              })
+            : null,
+          el("div", {
+            class: "dim small",
+            text: `Synced folder: ${status.path}`,
+          }),
+        ],
+      ),
       status.in_sync
         ? el("span", { class: "badge ok", text: "in sync" })
         : el("span", {
@@ -4031,8 +4041,10 @@ function drawRail(): void {
   body.append(
     el("div", { class: "row project" }, [
       el("a", {
-        text: linkKey(link),
+        class: "small",
+        text: "Open in Calkit",
         href: base,
+        title: linkKey(link),
         attrs: { target: "_blank" },
       }),
       link.github_repo_url

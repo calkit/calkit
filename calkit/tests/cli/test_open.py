@@ -174,7 +174,7 @@ def test_open_project(tmp_path, monkeypatch):
     )
     os.makedirs(settings_dir)
     (settings_dir / "settings.json").write_text('{"git.autofetch": false}')
-    for choice in ["3", "1", "2"]:
+    for choice in ["4", "3", "1", "2"]:
         editors.clear()
         launched.clear()
         opened.clear()
@@ -183,8 +183,12 @@ def test_open_project(tmp_path, monkeypatch):
         )
         assert result.exit_code == 0, result.output
         proj = os.path.realpath(home / "dev" / "proj")
-        if choice == "3":
+        if choice == "4":
             assert launched == [proj] and not editors
+            continue
+        if choice == "3":
+            assert launched[0].startswith("https://code.visualstudio.com/")
+            assert launched[1:] == [proj] and not editors
             continue
         assert opened[-1] == ["/fake/bin/code", proj]
         extensions = [c for c in opened if "--install-extension" in c]

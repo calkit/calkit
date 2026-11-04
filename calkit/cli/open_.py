@@ -175,11 +175,18 @@ def find_or_install_vscode() -> str | None:
         if os.path.isfile(path):
             return path
     entry = install.get_installer("code")
-    if entry is None or not is_tty():
+    download_url = "https://code.visualstudio.com/download"
+    if not is_tty():
         hint = install.get_unsupported_message("code") or (
             "install it with 'calkit install code'"
         )
         warn(f"VS Code isn't installed; {hint}")
+        return None
+    if entry is None:
+        if typer.confirm(
+            "VS Code isn't installed. Open its download page?", default=True
+        ):
+            typer.launch(download_url)
         return None
     calkit.echo("VS Code isn't installed. Calkit can install it with:")
     calkit.echo(f"  {entry['script']}")
@@ -187,12 +194,17 @@ def find_or_install_vscode() -> str | None:
         "1. Install VS Code\n"
         "2. Install VS Code, with Calkit's recommended extensions and "
         "settings\n"
-        "3. Don't install it; open the folder instead\n"
+        "3. Open VS Code's download page instead\n"
+        "4. Don't install it; open the folder\n"
         "Choose",
         default="1",
-        type=click.Choice(["1", "2", "3"]),
+        type=click.Choice(["1", "2", "3", "4"]),
     )
     if choice == "3":
+        typer.launch(download_url)
+        calkit.echo("Once it's installed, run this again to open the project")
+        return None
+    if choice == "4":
         return None
     if not install.install("code"):
         warn("Couldn't install VS Code")

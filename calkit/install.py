@@ -227,10 +227,16 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
         },
     },
     "code": {
+        # VS Code's own download, unzipped where its installer would put it,
+        # so it doesn't take Homebrew
         "mac": {
-            "script": "brew install --cask visual-studio-code",
-            "path_add": _BREW_BINS,
-            "requires": ["brew"],
+            "script": (
+                'zip="$(mktemp)" && curl -fsSL -o "$zip" '
+                "https://update.code.visualstudio.com/latest/darwin-universal/"
+                'stable && ditto -xk "$zip" /Applications && rm "$zip"'
+            ),
+            "path_add": "/Applications/Visual Studio Code.app/Contents/"
+            "Resources/app/bin",
         },
         "windows": {
             "script": _WINGET + "Microsoft.VisualStudioCode",

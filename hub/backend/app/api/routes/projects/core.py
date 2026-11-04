@@ -4631,13 +4631,16 @@ def _github_token_for_repo(
     session: Session,
     current_user: User,
     owner_repo: str,
+    permissions: dict[str, str] | None = None,
 ) -> str | None:
     """Return a token for GitHub API calls on ``owner/repo``.
 
     Prefers the user's personal token; for GitHub-less collaborators (e.g.
     invite-link members) falls back to the Calkit GitHub App installation
     token so they can still open, close, and comment on issues. Returns None
-    if neither is available.
+    if neither is available. ``permissions`` are what an App token is
+    narrowed to, e.g., ``{"actions": "read"}``, which the App's default
+    token leaves out.
     """
     try:
         return users.get_github_token(session, current_user)
@@ -4645,7 +4648,9 @@ def _github_token_for_repo(
         pass
     try:
         owner_name, repo_name = owner_repo.split("/", 1)
-        return github.get_app_installation_token(owner_name, repo_name)
+        return github.get_app_installation_token(
+            owner_name, repo_name, permissions=permissions
+        )
     except (github.GitHubAppNotConfigured, HTTPException) as e:
         logger.info(
             f"No GitHub token for {current_user.email} on {owner_repo}: {e}"
@@ -8041,12 +8046,11 @@ def get_project_pipeline(
     # commit identifies it. Building the diagram walks the whole graph
     # through DVC, which is over a second on a pipeline of any size.
     commit_sha = resolve_commit_sha(repo, ref)
+    # Versioned, so diagrams drawn before arrows were labeled, or with
+    # unescaped labels, go
     mermaid_key = (
         cache.make_key(
-            # Versioned, since older entries have unescaped labels
-            "mermaid-v2",
-            f"{owner_name}/{project_name}".lower(),
-            commit_sha,
+            "mermaid-v3", f"{owner_name}/{project_name}".lower(), commit_sha
         )
         if commit_sha
         else None

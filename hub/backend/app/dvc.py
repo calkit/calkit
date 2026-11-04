@@ -74,6 +74,10 @@ def read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
         return None
 
 
+# Past this many arrows, labeling them hides the graph they're on
+MAX_LABELED_EDGES = 30
+
+
 def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
     """Create a Mermaid diagram from a pipeline file (typically ``dvc.yaml``).
 
@@ -103,23 +107,45 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
             # process's working directory, e.g., ../../dvc.yaml:name
             e.args = (str(e).replace(f"{relpath('/dvc.yaml')}:", ""),)
             raise
+        # What each arrow carries: the upstream stage's outputs the
+        # downstream one reads, or that contain or are inside what it reads
+        carried: dict[tuple[str, str], list[str]] = {}
+        for downstream, upstream in graph.edges:
+            reads = [d.fs_path for d in downstream.deps]
+            carried[(upstream.name, downstream.name)] = [
+                out.fs_path.lstrip("/")
+                for out in upstream.outs
+                if any(
+                    path == out.fs_path
+                    or path.startswith(out.fs_path.rstrip("/") + "/")
+                    or out.fs_path.startswith(path.rstrip("/") + "/")
+                    for path in reads
+                )
+            ]
         graph = nx.relabel_nodes(graph, lambda stage: stage.name)
-    # As DVC's own _show_mermaid draws it, but with labels escaped, since
-    # stage names come from the repo and could otherwise add Mermaid of their
-    # own, e.g., a click with a javascript: link
-    lines = ["flowchart TD"]
-    n = 0
+    # As DVC writes it, so node IDs and order match ``dvc dag --mermaid``,
+    # but with names escaped, since they come from the repo and could
+    # otherwise add Mermaid of their own, e.g., a click with a javascript: link,
+    # with the arrows labeled by file name, a couple at most, unless there
+    # are so many arrows that labels would bury the graph
+    labeled = len(carried) <= MAX_LABELED_EDGES
+    mermaid = "flowchart TD"
+    total_nodes = 0
     for pipeline_graph in get_pipelines(graph):
         node_ids = {}
         for node in sorted(str(x) for x in pipeline_graph.nodes):
-            n += 1
-            node_ids[node] = f"node{n}"
-            label = escape_mermaid_label(node)
-            lines.append(f'\tnode{n}["{label}"]')
+            total_nodes += 1
+            node_ids[node] = f"node{total_nodes}"
+            mermaid += f'\n\t{node_ids[node]}["{escape_mermaid_label(node)}"]'
         edges = sorted((str(a), str(b)) for b, a in pipeline_graph.edges)
         for a, b in edges:
-            lines.append(f"\t{node_ids[a]}-->{node_ids[b]}")
-    return "\n".join(lines)
+            names = [os.path.basename(p) or p for p in carried.get((a, b), [])]
+            label = "<br>".join(
+                escape_mermaid_label(name) for name in names[:2]
+            ) + (f"<br>+{len(names) - 2} more" if len(names) > 2 else "")
+            arrow = f'-->|"{label}"|' if labeled and label else "-->"
+            mermaid += f"\n\t{node_ids[a]}{arrow}{node_ids[b]}"
+    return mermaid
 
 
 def escape_mermaid_label(label: str) -> str:

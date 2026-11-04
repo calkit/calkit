@@ -75,7 +75,7 @@ def create_app_token() -> str:
 # (two GitHub API calls) on every repo operation. This is a per-worker
 # in-process cache, so each worker mints at most once per repo per ~hour.
 _installation_token_cache: dict[
-    tuple[str, str, tuple[tuple[str, str], ...]], tuple[str, float]
+    tuple[str, str, bool, tuple[tuple[str, str], ...]], tuple[str, float]
 ] = {}
 _installation_token_cache_lock = threading.Lock()
 # Refresh this long before GitHub's stated expiry so a cached token can't lapse
@@ -84,14 +84,17 @@ _INSTALLATION_TOKEN_SAFETY_SECONDS = 300
 
 
 def get_app_installation_token(
-    owner_name: str, repo_name: str, read_only: bool = False
+    owner_name: str,
+    repo_name: str,
+    read_only: bool = False,
+    permissions: dict[str, str] | None = None,
 ) -> str:
     """Return a GitHub App installation access token scoped to one repo.
 
     See ``get_app_installation_token_and_expiry``.
     """
     return get_app_installation_token_and_expiry(
-        owner_name, repo_name, read_only=read_only
+        owner_name, repo_name, read_only=read_only, permissions=permissions
     )[0]
 
 
@@ -104,10 +107,6 @@ def get_app_installation_token_and_expiry(
     """Return a GitHub App installation access token scoped to one repo,
     and when to stop using it, a little before GitHub's expiry.
 
-    ``permissions`` narrows a token that isn't read-only below the
-    installation's own, e.g., ``{"contents": "write"}`` for one that only
-    pushes, since the installation's can exceed what its holder needs.
-
     Used to perform git operations on behalf of users who have native Calkit
     access to a project but no personal GitHub token (e.g. email/Google
     signups). Tokens are cached in-process and reused until shortly before they
@@ -118,12 +117,17 @@ def get_app_installation_token_and_expiry(
     these: it is read by everyone with access to the project, and a token
     that cannot write is a better guarantee than one that merely shouldn't.
     Cached separately, so a reader never picks up a writable token.
+
+    Otherwise it has the installation's permissions except ``workflows`` and
+    ``actions``, since anyone with write access on the hub gets one, and a
+    workflow it could push would run with the repo's secrets. Pass
+    ``permissions`` to ask for exactly those instead, e.g., to push a
+    workflow the hub wrote itself.
     """
-    if read_only:
-        permissions = {"contents": "read"}
     cache_key = (
         owner_name.lower(),
         repo_name.lower(),
+        read_only,
         tuple(sorted((permissions or {}).items())),
     )
     now = time.time()
@@ -135,7 +139,7 @@ def get_app_installation_token_and_expiry(
     # for different repos don't serialize; a rare concurrent double-mint just
     # yields two valid tokens.
     token, expires_at = _mint_app_installation_token(
-        owner_name, repo_name, permissions=permissions
+        owner_name, repo_name, read_only=read_only, permissions=permissions
     )
     # ~50 min fallback if GitHub omits expires_at for some reason.
     expiry = now + 3000.0
@@ -151,11 +155,12 @@ def get_app_installation_token_and_expiry(
 
 
 def _mint_app_installation_token(
-    owner_name: str, repo_name: str, permissions: dict[str, str] | None = None
+    owner_name: str,
+    repo_name: str,
+    read_only: bool = False,
+    permissions: dict[str, str] | None = None,
 ) -> tuple[str, str | None]:
-    """Mint a fresh installation token, narrowed to ``permissions`` if
-    given, returning (token, expires_at).
-    """
+    """Mint a fresh installation token, returning (token, expires_at)."""
     app_jwt = create_app_token()
     headers = {
         "Authorization": f"Bearer {app_jwt}",
@@ -177,18 +182,23 @@ def _mint_app_installation_token(
             f"{owner_name}/{repo_name}: GitHub returned {resp.status_code} "
             f"({resp.text[:200]})",
         )
-    installation_id = resp.json()["id"]
+    installation = resp.json()
+    if permissions is None and read_only:
+        permissions = {"contents": "read"}
+    elif permissions is None:
+        # Narrowing is allowed; widening is not
+        permissions = {
+            name: level
+            for name, level in (
+                installation.get("permissions") or {"contents": "write"}
+            ).items()
+            if name not in ("workflows", "actions")
+        }
     resp = requests.post(
-        f"https://api.github.com/app/installations/{installation_id}"
+        f"https://api.github.com/app/installations/{installation['id']}"
         "/access_tokens",
         headers=headers,
-        json=(
-            {"repositories": [repo_name], "permissions": permissions}
-            if permissions
-            # Otherwise the installation's own permissions. Narrowing is
-            # allowed; widening is not.
-            else {"repositories": [repo_name]}
-        ),
+        json={"repositories": [repo_name], "permissions": permissions},
         timeout=15,
     )
     if resp.status_code not in (200, 201):

@@ -12,13 +12,18 @@ editing ``vscode/*.json`` or ``devcontainer/base.json``.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
+import stat
+from typing import Any
 
 DEVCONTAINER_FNAME = "devcontainer.json"
 VSCODE_FNAMES = ["settings.json", "extensions.json"]
 GITHUB_ACTIONS_FNAME = "example.yml"
+# Bigger than any workflow, so a file this size isn't read as one
+MAX_WORKFLOW_BYTES = 1_000_000
 ACTION_PATH = "calkit/calkit/actions/run"
 # The ref the example workflow ships with, which gets pinned to a released
 # version of Calkit when there is one to pin to
@@ -118,11 +123,101 @@ def set_action_ref(workflow_txt: str, version: str | None = None) -> str:
     )
 
 
-def render_github_actions_workflow(version: str | None = None) -> str:
-    """Return the example workflow, pinning the action to a Calkit version."""
-    return set_action_ref(
+def set_workflow_triggers(
+    workflow_txt: str, on: str | list[str] | dict[str, Any]
+) -> str:
+    """Return a workflow with its ``on`` triggers replaced, keeping the rest
+    as it was.
+
+    Event names become a mapping with no settings for each, e.g.,
+    ``workflow_dispatch:``, which is how GitHub's docs write them. A mapping
+    is used as is, e.g., ``{"push": {"branches": ["main"]}}``.
+    """
+    from ruamel.yaml.comments import CommentedMap
+
+    from calkit.core import ryaml
+
+    workflow = ryaml.load(workflow_txt)
+    if isinstance(on, str):
+        on = [on]
+    triggers = (
+        CommentedMap(on)
+        if isinstance(on, dict)
+        else CommentedMap((name, None) for name in on)
+    )
+    # YAML 1.1 parsers read the key as true, so it might be quoted either way
+    key: Any = True if True in workflow and "on" not in workflow else "on"
+    workflow[key] = triggers
+    buf = io.StringIO()
+    ryaml.dump(workflow, buf)
+    return buf.getvalue()
+
+
+def render_github_actions_workflow(
+    version: str | None = None,
+    on: str | list[str] | dict[str, Any] | None = None,
+) -> str:
+    """Return the example workflow, pinning the action to a Calkit version.
+
+    ``on`` replaces its triggers, e.g., ``["workflow_dispatch"]`` for one
+    that only runs when started, e.g., from the hub, rather than on every
+    push, which for a paper synced from Overleaf is every sync.
+    """
+    txt = set_action_ref(
         read_text("github-actions", GITHUB_ACTIONS_FNAME), version=version
     )
+    if on is not None:
+        txt = set_workflow_triggers(txt, on)
+    return txt
+
+
+def find_run_workflows(wdir: str | None = None) -> list[tuple[str, str]]:
+    """Return the names and text of a project's workflows that run the
+    Calkit action.
+
+    Symlinks, anything that isn't a regular file, and files too big to be
+    a workflow are skipped, since the hub reads these from repos anyone can
+    push to.
+    """
+    root = os.path.realpath(wdir or ".")
+    workflows_dir = os.path.join(root, ".github", "workflows")
+    if not os.path.realpath(workflows_dir).startswith(root + os.sep):
+        return []
+    if not os.path.isdir(workflows_dir):
+        return []
+    found = []
+    for fname in sorted(os.listdir(workflows_dir)):
+        fpath = os.path.join(workflows_dir, fname)
+        if not (fname.endswith(".yaml") or fname.endswith(".yml")):
+            continue
+        st = os.lstat(fpath)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_WORKFLOW_BYTES:
+            continue
+        with open(fpath, encoding="utf-8", errors="replace") as f:
+            txt = f.read()
+        if uses_run_action(txt):
+            found.append((fname, txt))
+    return found
+
+
+def can_start_workflow(workflow_txt: str) -> bool:
+    """Return whether a workflow can be started on demand, i.e., it has a
+    ``workflow_dispatch`` trigger.
+    """
+    from calkit.core import ryaml
+
+    try:
+        workflow = ryaml.load(workflow_txt)
+    except Exception:
+        return False
+    if not isinstance(workflow, dict):
+        return False
+    # YAML 1.1 parsers read the key as true, so a workflow written by one
+    # might have it quoted either way
+    triggers = workflow.get("on", workflow.get(True))
+    if isinstance(triggers, str):
+        triggers = [triggers]
+    return "workflow_dispatch" in (triggers or [])
 
 
 def is_default_github_actions_workflow(workflow_txt: str) -> bool:

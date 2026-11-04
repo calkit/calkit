@@ -16,14 +16,29 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalHeader,
+  ModalOverlay,
+  Spinner,
+  Table,
+  TableContainer,
+  Tbody,
+  Td,
   Text,
+  Th,
+  Thead,
+  Tr,
 } from "@chakra-ui/react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Link as RouterLink,
   createFileRoute,
   useNavigate,
 } from "@tanstack/react-router"
+import type { AxiosError } from "axios"
 import {
   type ReactNode,
   useCallback,
@@ -40,24 +55,35 @@ import { z } from "zod"
 
 import { FaExclamationTriangle } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
-import { MachinesService, ProjectsService } from "../../../../../client"
+import {
+  MachinesService,
+  type PipelineRun,
+  ProjectsService,
+} from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import Mermaid, {
   MAX_READABLE_STAGES,
 } from "../../../../../components/Common/Mermaid"
+import Tooltip from "../../../../../components/Common/Tooltip"
 import PipelineEditorModal from "../../../../../components/Pipeline/PipelineEditorModal"
 import StageEditorModal from "../../../../../components/Pipeline/StageEditorModal"
 import useAuth from "../../../../../hooks/useAuth"
+import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject, {
+  isRunGoing,
+  PIPELINE_RUNS_SHOWN,
   useProjectEnvironments,
+  useProjectPipelineRuns,
 } from "../../../../../hooks/useProject"
 import { dataOrNull } from "../../../../../lib/api"
+import { handleError } from "../../../../../lib/errors"
 import {
   extractEnvRefs,
   extractFilePaths,
   findStageLineRange,
 } from "../../../../../lib/pipelineYaml"
+import { formatTimestamp } from "../../../../../lib/strings"
 
 SyntaxHighlighter.registerLanguage("yaml", yaml)
 
@@ -364,7 +390,307 @@ const pipelineSearchSchema = z.object({
   show_diagram: z.boolean().optional(),
   // Render every line of a pipeline file too long to show at once.
   show_full_yaml: z.boolean().optional(),
+  // The run whose logs are open
+  run_logs: z.string().optional(),
+  // How many runs are listed, more than the first page once asked for
+  runs_shown: z.number().int().positive().optional(),
 })
+
+const RUN_STATUS_COLORS: Record<PipelineRun["status"], string> = {
+  queued: "gray",
+  running: "blue",
+  succeeded: "green",
+  failed: "red",
+  canceled: "gray",
+}
+
+const RUN_LOCATIONS: Record<PipelineRun["location"], string> = {
+  "github-actions": "GitHub Actions",
+}
+
+/** The pipeline's runs, wherever they ran, and a button to start one. */
+function PipelineRunsSection({
+  ownerName,
+  projectName,
+  canStart,
+}: {
+  ownerName: string
+  projectName: string
+  canStart: boolean
+}) {
+  const queryClient = useQueryClient()
+  const showToast = useCustomToast()
+  const { run_logs: logsRunId, runs_shown: shown = PIPELINE_RUNS_SHOWN } =
+    Route.useSearch()
+  const navigate = useNavigate({ from: Route.fullPath })
+  const { runsRequest } = useProjectPipelineRuns(ownerName, projectName, {
+    limit: shown,
+  })
+  const startMutation = useMutation({
+    mutationFn: () =>
+      ProjectsService.postProjectPipelineRun({
+        owner_name: ownerName,
+        project_name: projectName,
+        pipelineRunPost: { location: "github-actions" },
+      }).then((response) => response.data),
+    onSuccess: () => {
+      showToast(
+        "Started",
+        "The pipeline is running on GitHub Actions.",
+        "success",
+      )
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "pipeline-runs"],
+      })
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+  })
+  const runs = runsRequest.data?.runs ?? []
+  const total = runsRequest.data?.total ?? 0
+  // Named only when there's more than one to tell apart
+  const manyWorkflows = new Set(runs.map((run) => run.github_workflow)).size > 1
+  const going = isRunGoing(runs[0])
+  const logsRun = runs.find((run) => run.id === logsRunId)
+  return (
+    <Box mt={4}>
+      <Flex align="center" gap={3} mb={2}>
+        <Heading size="md">Runs</Heading>
+        {canStart && (
+          <Tooltip
+            label={runsRequest.data?.cannot_start_reason ?? undefined}
+            isDisabled={!runsRequest.data?.cannot_start_reason}
+          >
+            <Button
+              size="sm"
+              isLoading={startMutation.isPending}
+              isDisabled={!runsRequest.data?.can_start || going}
+              onClick={() => startMutation.mutate()}
+            >
+              Run on GitHub Actions
+            </Button>
+          </Tooltip>
+        )}
+        {going && <Spinner size="sm" />}
+      </Flex>
+      {runsRequest.isPending ? (
+        <Spinner size="sm" />
+      ) : runsRequest.isError ? (
+        <Text fontSize="sm" color="ui.danger">
+          Failed to load runs. Try refreshing.
+        </Text>
+      ) : runs.length === 0 ? (
+        <Text fontSize="sm" color="ui.dim">
+          {runsRequest.data?.github_workflow
+            ? "No runs yet."
+            : "Not run on GitHub Actions yet. Starting a run adds a " +
+              "workflow that only runs when started."}
+        </Text>
+      ) : (
+        <TableContainer>
+          <Table size="sm">
+            <Thead>
+              <Tr>
+                <Th>Status</Th>
+                <Th>Location</Th>
+                <Th>Started</Th>
+                <Th>By</Th>
+                <Th>Commit</Th>
+                <Th />
+              </Tr>
+            </Thead>
+            <Tbody>
+              {runs.map((run) => (
+                <Tr key={run.id}>
+                  <Td>
+                    <Badge colorScheme={RUN_STATUS_COLORS[run.status]}>
+                      {run.status}
+                    </Badge>
+                  </Td>
+                  <Td>
+                    {RUN_LOCATIONS[run.location]}
+                    {manyWorkflows && run.github_workflow && (
+                      <Text as="span" color="ui.dim">
+                        {" "}
+                        ({run.github_workflow})
+                      </Text>
+                    )}
+                  </Td>
+                  <Td>{formatTimestamp(run.started ?? run.created)}</Td>
+                  <Td>{run.started_by ?? ""}</Td>
+                  <Td fontFamily="mono">{run.git_rev?.slice(0, 7) ?? ""}</Td>
+                  <Td>
+                    <Flex gap={3}>
+                      <Button
+                        size="xs"
+                        variant="link"
+                        onClick={() =>
+                          navigate({
+                            search: (prev) => ({ ...prev, run_logs: run.id }),
+                          })
+                        }
+                      >
+                        Logs
+                      </Button>
+                      {run.url && (
+                        <Link isExternal variant="blue" href={run.url}>
+                          GitHub
+                        </Link>
+                      )}
+                    </Flex>
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </TableContainer>
+      )}
+      {total > runs.length && (
+        <Button
+          size="xs"
+          variant="link"
+          mt={2}
+          onClick={() =>
+            navigate({
+              search: (prev) => ({
+                ...prev,
+                runs_shown: shown + PIPELINE_RUNS_SHOWN,
+              }),
+            })
+          }
+        >
+          Show more
+        </Button>
+      )}
+      {logsRunId && (
+        <RunLogsModal
+          ownerName={ownerName}
+          projectName={projectName}
+          runId={logsRunId}
+          run={logsRun}
+          onClose={() =>
+            navigate({ search: (prev) => ({ ...prev, run_logs: undefined }) })
+          }
+        />
+      )}
+    </Box>
+  )
+}
+
+/** A run's logs, in parts, kept current while it runs. */
+function RunLogsModal({
+  ownerName,
+  projectName,
+  runId,
+  run,
+  onClose,
+}: {
+  ownerName: string
+  projectName: string
+  runId: string
+  run?: PipelineRun
+  onClose: () => void
+}) {
+  const logsQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "pipeline-run-logs", runId],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineRunLogs({
+        owner_name: ownerName,
+        project_name: projectName,
+        run_id: runId,
+      }).then((response) => response.data),
+    refetchInterval: (query) => {
+      const parts = query.state.data?.parts
+      return !parts?.length || parts.some((part) => isRunGoing(part))
+        ? 10_000
+        : false
+    },
+  })
+  const detail = (logsQuery.error as AxiosError<{ detail?: string }> | null)
+    ?.response?.data?.detail
+  return (
+    <Modal isOpen onClose={onClose} size="6xl" scrollBehavior="inside">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>
+          {run ? `Run on ${RUN_LOCATIONS[run.location]} ` : "Run "}
+          {run && (
+            <Badge colorScheme={RUN_STATUS_COLORS[run.status]}>
+              {run.status}
+            </Badge>
+          )}
+        </ModalHeader>
+        <ModalCloseButton />
+        <ModalBody pb={6}>
+          {logsQuery.isPending ? (
+            <Spinner size="sm" />
+          ) : logsQuery.isError ? (
+            <Text color="ui.danger">
+              {typeof detail === "string" ? detail : "Failed to load logs."}
+            </Text>
+          ) : !logsQuery.data?.parts?.length ? (
+            <Text fontSize="sm" color="ui.dim">
+              No logs yet.
+            </Text>
+          ) : (
+            logsQuery.data.parts.map((part) => (
+              <Box key={part.name} mb={4}>
+                <Flex align="center" gap={2} mb={2}>
+                  <Heading size="sm">{part.name}</Heading>
+                  <Badge colorScheme={RUN_STATUS_COLORS[part.status]}>
+                    {part.status}
+                  </Badge>
+                  {isRunGoing(part) && <Spinner size="xs" />}
+                </Flex>
+                <Flex wrap="wrap" gap={1} mb={2}>
+                  {part.phases?.map((phase) => (
+                    <Badge
+                      key={phase.name}
+                      variant="outline"
+                      colorScheme={RUN_STATUS_COLORS[phase.status]}
+                      textTransform="none"
+                    >
+                      {phase.name}
+                    </Badge>
+                  ))}
+                </Flex>
+                {part.log ? (
+                  <Box
+                    as="pre"
+                    fontSize="xs"
+                    bg="gray.900"
+                    color="gray.100"
+                    p={3}
+                    borderRadius="md"
+                    maxH="60vh"
+                    overflow="auto"
+                    whiteSpace="pre-wrap"
+                    // Opens on the end, which is where a failure is, but
+                    // only once, so rereading it doesn't jump
+                    ref={(el: HTMLElement | null) => {
+                      if (el && !el.dataset.scrolled) {
+                        el.scrollTop = el.scrollHeight
+                        el.dataset.scrolled = "1"
+                      }
+                    }}
+                  >
+                    {part.log_truncated ? "[earlier lines left out]\n" : ""}
+                    {part.log}
+                  </Box>
+                ) : (
+                  <Text fontSize="sm" color="ui.dim">
+                    The log shows up once this part finishes.
+                  </Text>
+                )}
+              </Box>
+            ))
+          )}
+        </ModalBody>
+      </ModalContent>
+    </Modal>
+  )
+}
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/pipeline",
@@ -482,6 +808,16 @@ function ProjectPipeline() {
           stage_editor_open: true,
         }),
       }),
+    [navigate],
+  )
+  // Clicking a stage only points it out; editing is a step after that. The
+  // view stays put, since it's already showing what was clicked.
+  const [clickedStage, setClickedStage] = useState<string | null>(null)
+  const selectStage = useCallback(
+    (stageName: string) => {
+      setClickedStage(stageName)
+      navigate({ search: (prev) => ({ ...prev, stage: stageName }) })
+    },
     [navigate],
   )
   const closeStageEditor = () =>
@@ -614,17 +950,25 @@ function ProjectPipeline() {
                       isOversizedShown={show_diagram}
                       setIsOversizedShown={setIsDiagramShown}
                       zoomToStage={stage}
-                      stageNames={canEditStages ? stageNames : undefined}
-                      onStageClick={canEditStages ? openStageEditor : undefined}
+                      isZoomSkipped={stage === clickedStage}
+                      stageNames={stageNames}
+                      onStageClick={selectStage}
                     >
                       {String(pipelineQuery.data.mermaid)}
                     </Mermaid>
-                    {canEditStages && isDiagramDrawn && (
+                    {isDiagramDrawn && stageNames.size > 0 && (
                       <Text mt={1} fontSize="xs" color="ui.dim">
-                        Click a stage to edit it.
+                        Click a stage to find it in calkit.yaml.
                       </Text>
                     )}
                   </>
+                )}
+                {!ref && user && (
+                  <PipelineRunsSection
+                    ownerName={accountName}
+                    projectName={projectName}
+                    canStart={userHasWriteAccess}
+                  />
                 )}
               </Box>
               <Box flex={1} minW={0}>
@@ -643,6 +987,16 @@ function ProjectPipeline() {
                           size="xs"
                           onClick={openPipelineEditor}
                         />
+                      )}
+                      {stage && canEditStages && stageNames.has(stage) && (
+                        <Button
+                          size="xs"
+                          ml="auto"
+                          leftIcon={<MdEdit />}
+                          onClick={() => openStageEditor(stage)}
+                        >
+                          Edit {stage}
+                        </Button>
                       )}
                     </Flex>
                     <LinkedYaml

@@ -872,6 +872,9 @@ class Project(ProjectBase, table=True):
     dvc_pushes: list["ProjectDvcPush"] = Relationship(
         back_populates="project", cascade_delete=True
     )
+    pipeline_runs: list["ProjectPipelineRun"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
 
     @computed_field
     @property
@@ -1103,6 +1106,45 @@ class ProjectDvcPush(SQLModel, table=True):
     # Relationships
     project: "Project" = Relationship(back_populates="dvc_pushes")
     user: User = Relationship(back_populates="dvc_pushes")
+
+
+class ProjectPipelineRun(SQLModel, table=True):
+    """A run of a project's pipeline, wherever it ran.
+
+    The ID is ours, so a run is named the same way wherever it runs, e.g.,
+    on GitHub Actions now and a linked machine later, with the location's
+    own ID beside it.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint("project_id", "github_run_id"),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(
+        foreign_key="project.id", index=True, ondelete="CASCADE"
+    )
+    location: str = "github-actions"
+    status: str = "queued"
+    created: datetime = Field(default_factory=utcnow)
+    started: datetime | None = None
+    finished: datetime | None = None
+    git_rev: str | None = None
+    branch: str | None = None
+    # Who started it from Calkit, if it was
+    started_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    # Who started it, as the location names them, e.g., a GitHub username
+    started_by: str | None = None
+    url: str | None = None
+    # By file name
+    github_workflow: str | None = None
+    # Unknown for one just started, until GitHub lists it
+    github_run_id: int | None = Field(
+        default=None, sa_type=sqlalchemy.BigInteger
+    )
+    # Relationships
+    project: Project = Relationship(back_populates="pipeline_runs")
 
 
 class OnboardingFlags(SQLModel):
@@ -1371,6 +1413,8 @@ class Provenance(SQLModel):
     # What a manual step says to do
     message: str | None = None
     inputs: list[str] = Field(default_factory=list)
+    # The stages that use it as an input or DVC dep
+    input_to_stages: list[str] = Field(default_factory=list)
     stage_status: StageStatus | None = None
     stale_reason: Literal["pipeline", "frozen"] | None = None
     # Where a copy, e.g., one a map-paths stage put beside a document, came

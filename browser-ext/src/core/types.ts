@@ -238,6 +238,42 @@ export interface StageFromScriptOrNotebookResponse {
   git_repo_url: string;
 }
 
+/** The project's pipeline, as the hub summarizes it. */
+export interface ProjectPipeline {
+  /** Stages calkit.yaml declares, in its order. */
+  ck_stages: string[];
+  stage_statuses: Record<string, StageStatus>;
+  status: "up-to-date" | "stale" | "unknown";
+  error?: string | null;
+}
+
+/** A run of the pipeline, wherever it ran. */
+export interface PipelineRun {
+  id: string;
+  location: "github-actions";
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
+  created: string;
+  started?: string | null;
+  finished?: string | null;
+  url?: string | null;
+  git_rev?: string | null;
+  branch?: string | null;
+  started_by?: string | null;
+  /** By file name. */
+  github_workflow?: string | null;
+  /** Unknown for one just started, until GitHub lists it. */
+  github_run_id?: number | null;
+}
+
+export interface PipelineRuns {
+  /** Newest first. */
+  runs: PipelineRun[];
+  total: number;
+  github_workflow?: string | null;
+  can_start: boolean;
+  cannot_start_reason?: string | null;
+}
+
 export interface ProvenanceGap {
   path: string;
   steps: { path: string; stage?: string | null }[];

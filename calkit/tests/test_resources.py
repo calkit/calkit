@@ -58,7 +58,7 @@ def test_resources(monkeypatch):
     assert merged["settings"] == customizations["settings"]
 
 
-def test_github_actions_workflow():
+def test_github_actions_workflow(tmp_path):
     workflow = calkit.ryaml.load(
         calkit.resources.read_text(
             "github-actions", calkit.resources.GITHUB_ACTIONS_FNAME
@@ -111,6 +111,74 @@ def test_github_actions_workflow():
     assert not calkit.resources.is_default_github_actions_workflow(
         pinned + "\n      - run: echo custom\n"
     )
+    # Its triggers can be replaced, leaving the rest as it was, given as
+    # event names or GitHub's mapping
+    on_demand = calkit.resources.render_github_actions_workflow(
+        on=["workflow_dispatch"]
+    )
+    assert calkit.ryaml.load(on_demand)["on"] == {"workflow_dispatch": None}
+    assert "\non:\n  workflow_dispatch:\n\npermissions:" in on_demand
+    default = calkit.resources.render_github_actions_workflow()
+    assert on_demand.replace("  workflow_dispatch:\n", "") == default.replace(
+        "  push:\n    branches:\n      - main\n  pull_request:\n"
+        "  workflow_dispatch:\n",
+        "",
+    )
+    assert not calkit.resources.is_default_github_actions_workflow(on_demand)
+    for on, expected in [
+        ("push", {"push": None}),
+        (["push", "pull_request"], {"push": None, "pull_request": None}),
+        ({"push": {"branches": ["main"]}}, {"push": {"branches": ["main"]}}),
+    ]:
+        txt = calkit.resources.set_workflow_triggers(on_demand, on)
+        assert calkit.ryaml.load(txt)["on"] == expected
+    # Even when a YAML 1.1 writer quoted the key
+    quoted = calkit.resources.set_workflow_triggers(
+        "'on': push\njobs: {}\n", "workflow_dispatch"
+    )
+    assert calkit.ryaml.load(quoted) == {
+        "on": {"workflow_dispatch": None},
+        "jobs": {},
+    }
+    # Whether a workflow can be started, however its triggers are written
+    for txt, can in [
+        (pinned, True),
+        (on_demand, True),
+        ("on: workflow_dispatch\n", True),
+        ("on: [push, workflow_dispatch]\n", True),
+        ("'on':\n  push:\n", False),
+        ("on: push\n", False),
+        ("jobs: {}\n", False),
+        ("{{ not yaml\n", False),
+        ("just text\n", False),
+        ("- on\n", False),
+    ]:
+        assert calkit.resources.can_start_workflow(txt) is can, txt
+    # Every workflow that runs the action is found, in name order, but not
+    # others
+    assert calkit.resources.find_run_workflows(str(tmp_path)) == []
+    workflows_dir = tmp_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True)
+    (workflows_dir / "tests.yml").write_text(other)
+    (workflows_dir / "run.yaml").write_text(pinned)
+    (workflows_dir / "on-demand.yml").write_text(on_demand)
+    (workflows_dir / "notes.txt").write_text(pinned)
+    # Nor symlinks, which could point anywhere, or files too big to be one
+    outside = tmp_path / "outside.yml"
+    outside.write_text(pinned)
+    (workflows_dir / "link.yml").symlink_to(outside)
+    (workflows_dir / "huge.yml").write_text(
+        pinned + "#" * calkit.resources.MAX_WORKFLOW_BYTES
+    )
+    assert calkit.resources.find_run_workflows(str(tmp_path)) == [
+        ("on-demand.yml", on_demand),
+        ("run.yaml", pinned),
+    ]
+    # A workflows folder that's a symlink out of the project is skipped too
+    other_project = tmp_path / "other"
+    (other_project / ".github").mkdir(parents=True)
+    (other_project / ".github" / "workflows").symlink_to(workflows_dir)
+    assert calkit.resources.find_run_workflows(str(other_project)) == []
     # The bundled copy is generated from the action's own example, which is
     # only present in the repo, not in an installed package
     repo_copy = os.path.join(

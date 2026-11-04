@@ -29,6 +29,7 @@ import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 
 import { useQuery } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
+import { useEffect, useRef } from "react"
 import { z } from "zod"
 import Markdown from "../../../../../components/Common/Markdown"
 import Tooltip from "../../../../../components/Common/Tooltip"
@@ -246,6 +247,8 @@ const datasetsSearchSchema = z.object({
   browse: z.boolean().optional(),
   // The dataset open in the viewer, by path.
   view: z.string().optional(),
+  // A dataset to point out, by path, e.g., one linked from the files page.
+  highlight: z.string().optional(),
 })
 
 export const Route = createFileRoute(
@@ -271,7 +274,13 @@ function ProjectDataView() {
     editor: editorDataset,
     browse: browseOpen,
     view: viewPath,
+    highlight,
   } = Route.useSearch()
+  const highlightRef = useRef<HTMLDivElement>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once it's drawn
+  useEffect(() => {
+    highlightRef.current?.scrollIntoView({ block: "center" })
+  }, [highlight, datasets])
   const setViewPath = (path: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, view: path }) })
   const viewedDataset = datasets?.find((d) => d.path === viewPath) ?? null
@@ -435,7 +444,14 @@ function ProjectDataView() {
           ) : null}
           <SimpleGrid columns={[3, null, 4]} gap={6}>
             {datasets?.map((dataset) => (
-              <Card key={dataset.path} p={6} variant="elevated">
+              <Card
+                key={dataset.path}
+                p={6}
+                variant="elevated"
+                ref={dataset.path === highlight ? highlightRef : undefined}
+                outline={dataset.path === highlight ? "2px solid" : undefined}
+                outlineColor="ui.main"
+              >
                 <Heading size="sm" mb={2}>
                   <Code p={1} maxW="100%">
                     {/* The card's heading opens the viewer; the viewer's

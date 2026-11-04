@@ -387,6 +387,17 @@ def update_github_actions(
             help="Do not create a Git commit for the updated GitHub Actions.",
         ),
     ] = False,
+    on: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--on",
+            help=(
+                "Event that runs the workflow, e.g., push or "
+                "workflow_dispatch; repeat for more. "
+                "An existing workflow's are kept if not given."
+            ),
+        ),
+    ] = None,
 ):
     """Update a project's GitHub Actions to match this version of Calkit's
     recommendations.
@@ -404,23 +415,18 @@ def update_github_actions(
     txt_out = None
     out_dir = os.path.join(wdir or ".", ".github", "workflows")
     os.makedirs(out_dir, exist_ok=True)
-    for fname in sorted(os.listdir(out_dir)):
-        if fname.endswith(".yaml") or fname.endswith(".yml"):
-            fpath = os.path.join(out_dir, fname)
-            with open(fpath, encoding="utf-8") as f:
-                txt = f.read()
-            if calkit_resources.uses_run_action(txt):
-                fname_out = fname
-                # A workflow that's still the example gets replaced outright,
-                # picking up any other improvements to it, but one that's been
-                # customized only has its action ref updated
-                if not calkit_resources.is_default_github_actions_workflow(
-                    txt
-                ):
-                    txt_out = calkit_resources.set_action_ref(txt)
-                break
+    existing = calkit_resources.find_run_workflows(wdir)
+    if existing:
+        fname_out, txt = existing[0]
+        # A workflow that's still the example gets replaced outright, picking
+        # up any other improvements to it, but one that's been customized
+        # only has its action ref updated
+        if not calkit_resources.is_default_github_actions_workflow(txt):
+            txt_out = calkit_resources.set_action_ref(txt)
     if txt_out is None:
-        txt_out = calkit_resources.render_github_actions_workflow()
+        txt_out = calkit_resources.render_github_actions_workflow(on=on)
+    elif on is not None:
+        txt_out = calkit_resources.set_workflow_triggers(txt_out, on)
     out_fpath = os.path.join(out_dir, fname_out)
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w", encoding="utf-8") as f:

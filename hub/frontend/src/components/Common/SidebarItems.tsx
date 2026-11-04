@@ -31,6 +31,7 @@ import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
 import { MachinesService, ProjectsService } from "../../client"
 import useAuth from "../../hooks/useAuth"
+import { isRunGoing, useProjectPipelineRuns } from "../../hooks/useProject"
 import Tooltip from "./Tooltip"
 
 export interface ProjectNavItem {
@@ -133,6 +134,12 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
   const runningOn = (workspacesQuery.data ?? [])
     .filter((ws) => ws.running)
     .map((ws) => ws.machine_name)
+  // Whether it's running somewhere, e.g., on GitHub Actions, shared with
+  // the pipeline page
+  const { runsRequest } = useProjectPipelineRuns(accountName, projectName, {
+    enabled: Boolean(user) && !currentRef,
+  })
+  const pipelineIsRunning = isRunGoing(runsRequest.data?.runs?.[0])
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {
@@ -180,6 +187,17 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
             >
               <Spinner size="xs" color="blue.400" />
             </Box>
+          </Tooltip>
+        ) : title === "Pipeline" && pipelineIsRunning ? (
+          <Tooltip label="The pipeline is running on GitHub Actions">
+            <Spinner
+              ml="auto"
+              mr={1}
+              size="xs"
+              alignSelf="center"
+              flexShrink={0}
+              aria-label="Pipeline is running"
+            />
           </Tooltip>
         ) : title === "Pipeline" && pipelineIsStale ? (
           <Tooltip label="The pipeline has changed since it was last run">

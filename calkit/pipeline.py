@@ -3017,6 +3017,15 @@ def to_dvc(
                         else:
                             stage_output_paths.append(out)
                             dvc_stages[stage_name]["deps"].append(out)
+        # What a document reads from a folder those stages make is covered
+        if stage_output_paths and isinstance(stage, LatexStage):
+            folders = tuple(p.rstrip("/") + "/" for p in stage_output_paths)
+            found = set(stage.found_paths)
+            dvc_stages[stage_name]["deps"] = [
+                d
+                for d in dvc_stages[stage_name]["deps"]
+                if d not in found or not d.startswith(folders)
+            ]
         # Stages generated from this one read these too, e.g., a latex
         # stage's diffs, but the paths are only known now
         if stage_output_paths:

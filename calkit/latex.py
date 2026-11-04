@@ -456,19 +456,12 @@ def _strip_comments_joined(tex: str) -> str:
     return "".join(out)
 
 
-def _project_has(base: Path, rel: str) -> bool:
-    """Whether the project contains this file.
-
-    A DVC-tracked figure isn't in the working tree until it's pulled, but
-    its ``.dvc`` pointer is always in Git, and it's every bit as much a
-    project file -- and a stage input -- as one stored directly. Without
-    this, detection would depend on whether the caller had pulled, and a
-    server working from a fresh clone would miss every DVC-tracked figure.
-    """
-    return (base / rel).is_file() or (base / f"{rel}.dvc").is_file()
-
-
-def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
+def detect_inputs(
+    target_path: str,
+    wdir: str | None = None,
+    is_output: Callable[[str], bool] | None = None,
+    is_exact_output: Callable[[str], bool] | None = None,
+) -> list[str]:
     """Find the project files a LaTeX document reads.
 
     A document's class, style, bibliography, and figure files are inputs
@@ -489,14 +482,39 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
     Paths are returned relative to ``wdir`` -- the same frame as
     ``target_path`` and the rest of a stage's paths -- sorted, and with
     the target itself excluded (it's already a dependency).
+
+    ``is_output`` says if the file is created by a pipeline stage, taking paths
+    in that frame. Such a figure is an input even before the stage first
+    makes it, e.g., on a fresh clone, when it isn't in the project yet.
+    ``is_exact_output`` says if a stage declares it as is, rather than by
+    matching an iterated stage's output pattern.
     """
     base = Path(wdir) if wdir else Path(".")
-    root = Path(target_path)
+    # Each folder is listed once, since most names tried aren't there, e.g.,
+    # every package from TeX Live, with each extension TeX would try
+    listings: dict[str, set[str]] = {}
+
+    def is_project_file(rel: str) -> bool:
+        folder, name = posixpath.split(rel)
+        if folder not in listings:
+            try:
+                listings[folder] = set(os.listdir(base / folder))
+            except OSError:
+                listings[folder] = set()
+        # A DVC-tracked figure isn't in the working tree until it's pulled,
+        # but its .dvc pointer is in Git, and it's every bit as much an
+        # input as one stored directly
+        listed = listings[folder]
+        if name in listed and (base / rel).is_file():
+            return True
+        return f"{name}.dvc" in listed
+
+    root = posixpath.normpath(Path(target_path).as_posix())
     found: set[str] = set()
     # Source files whose own inputs still need collecting, and everything
     # already visited, so a pair of files including each other terminates.
     queue = [root]
-    seen = {root.as_posix()}
+    seen = {root}
     while queue:
         current = queue.pop()
         try:
@@ -505,33 +523,59 @@ def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
             )
         except (OSError, UnicodeDecodeError):
             continue
+        # TeX resolves a reference against the compile's working directory,
+        # which is the root document's; a nested file written as if paths
+        # were relative to itself is common enough to try too
+        parents = list(
+            dict.fromkeys(
+                [posixpath.dirname(root), posixpath.dirname(current)]
+            )
+        )
         for command, arg in _INPUT_RE.findall(tex):
             for raw in [n.strip() for n in arg.split(",")]:
-                if not raw or raw.startswith(("http://", "https://")):
+                # A macro's parameter, e.g., #1, or a name built from macros
+                # isn't a file
+                if (
+                    not raw
+                    or "#" in raw
+                    or "\\" in raw
+                    or raw.startswith(("http://", "https://"))
+                ):
                     continue
-                # TeX resolves a reference against the compile's working
-                # directory, which is the root document's; a nested file
-                # written as if paths were relative to itself is common
-                # enough to try too. Names as written come first, since a
-                # reference can already carry its extension.
-                names = [raw] + [
-                    raw + ext for ext in _INPUT_COMMANDS[command] if ext
-                ]
+                # Names as written come first, and TeX doesn't add an
+                # extension to one already carrying one it would try
+                exts = _INPUT_COMMANDS[command]
+                names = [raw]
+                if posixpath.splitext(raw)[1] not in exts:
+                    names += [raw + ext for ext in exts if ext]
                 candidates = [
-                    parent / name
+                    posixpath.normpath(posixpath.join(parent, name))
                     for name in names
-                    for parent in dict.fromkeys([root.parent, current.parent])
+                    for parent in parents
                 ]
-                for candidate in candidates:
-                    rel = Path(os.path.normpath(candidate)).as_posix()
-                    if rel.startswith("..") or not _project_has(base, rel):
-                        continue
-                    if rel != root.as_posix():
-                        found.add(rel)
-                    if Path(rel).suffix in _SOURCE_EXTS and rel not in seen:
-                        seen.add(rel)
-                        queue.append(Path(rel))
-                    break
+                candidates = [c for c in candidates if not c.startswith("..")]
+                # A name a stage only might make, by matching an iterated
+                # stage's output pattern, is tried last, since such a pattern
+                # can match most names
+                rel = next(
+                    (
+                        c
+                        for c in candidates
+                        if is_project_file(c)
+                        or (is_exact_output is not None and is_exact_output(c))
+                    ),
+                    None,
+                )
+                if rel is None and is_output is not None:
+                    rel = next((c for c in candidates if is_output(c)), None)
+                if rel is None:
+                    continue
+                if rel != root:
+                    found.add(rel)
+                is_source = posixpath.splitext(rel)[1] in _SOURCE_EXTS
+                if is_source and rel not in seen:
+                    seen.add(rel)
+                    queue.append(rel)
     return sorted(found)
 
 

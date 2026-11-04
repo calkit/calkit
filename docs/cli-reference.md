@@ -44,6 +44,7 @@
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
+| [`open`](#command-group-open)                    | Open things.                                                                                                 |
 | [`export`](#command-group-export)                | Export data and artifacts from various applications.                                                         |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
@@ -2849,6 +2850,43 @@ Options:
 | Option           | Type | Required | Default | Description                                                                          |
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
+
+<a id="command-group-open"></a>
+
+### `calkit open`
+
+Open things.
+
+| Command                               | Description                                                  |
+| ------------------------------------- | ------------------------------------------------------------ |
+| [`project`](#subcommand-open-project) | Open a project on this machine in its editor, from anywhere. |
+
+<a id="subcommand-open-project"></a>
+
+#### `calkit open project`
+
+Open a project on this machine in its editor, from anywhere.
+
+Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor', or the one given with '--with'.
+
+Usage:
+
+```text
+calkit open project [OPTIONS] PROJECT
+```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description                                               |
+| --------- | ---- | -------- | ------- | --------------------------------------------------------- |
+| `project` | str  | yes      |         | Project name, or owner and name, e.g., 'someone/my-proj'. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                                                                            |
+| -------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--yes`, `-y`  | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here.                                                   |
+| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder. |
 
 <a id="command-group-export"></a>
 

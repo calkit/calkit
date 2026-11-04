@@ -757,6 +757,8 @@ def build(
         dep="latexmk",
         env_vars=tex_env_vars,
     )
+    if verbose:
+        typer.echo(f"Latexmk command: {cmd}")
     log_dir = aux_dir or output_dir or tex_dir
     # A little early, for file systems that keep times coarsely
     started = time.time() - 2

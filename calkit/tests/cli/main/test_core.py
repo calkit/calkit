@@ -3133,11 +3133,15 @@ def test_save_offers_hub_before_committing(
     import calkit.cli.update
     import calkit.core
 
-    subprocess.check_call(["calkit", "init"])
     # The first push must work without push.autoSetupRemote, which CI sets
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "push.autoSetupRemote")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+    # globally, and which no other config can turn back off
+    git_config = tmp_path_factory.mktemp("git") / "config"
+    git_config.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+    for role in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Calkit Test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@calkit.org")
+    subprocess.check_call(["calkit", "init"])
     monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
     bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
     subprocess.check_call(["git", "init", "-q", "--bare", bare])

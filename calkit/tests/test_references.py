@@ -128,7 +128,7 @@ def test_statuses_separate_what_is_wrong_from_what_is_unknown(
     # invented citation, and also fails.
     swapped = refs.Reference(
         key="k",
-        in_collections=["refs.bib"],
+        collection="refs.bib",
         title="A Study of Something Real",
         first_author="Vega",
         year=2020,
@@ -151,7 +151,7 @@ def test_statuses_separate_what_is_wrong_from_what_is_unknown(
     # Software has no registered record, so its absence proves nothing.
     software = refs.Reference(
         key="tool",
-        in_collections=["refs.bib"],
+        collection="refs.bib",
         title="ToolName: a simulation tool",
         url="https://github.com/example/tool",
     )
@@ -161,7 +161,7 @@ def test_statuses_separate_what_is_wrong_from_what_is_unknown(
     # Neither does absence from a venue nobody indexes.
     thin = refs.Reference(
         key="k",
-        in_collections=["refs.bib"],
+        collection="refs.bib",
         title="Hypervolume Knowledge Gradient",
         venue="Proceedings of the 40th International Conference on Machine "
         "Learning",
@@ -173,6 +173,28 @@ def test_statuses_separate_what_is_wrong_from_what_is_unknown(
     assert thin.status not in refs.BLOCKING
 
 
+def test_a_key_in_two_collections_names_the_one_that_wins(
+    tmp_dir: Path,
+) -> None:
+    # One collection is the normal case, so the report names it rather
+    # than wrapping it in a list. More than one is worth saying, because
+    # which entry BibTeX uses then depends on their declared order.
+    _project(tmp_dir, "\\citep{real2020thing}\n")
+    (tmp_dir / "paper" / "extra.bib").write_text(
+        "@misc{real2020thing, title = {A Different Entry}, year = {1999}}\n"
+    )
+    (tmp_dir / "calkit.yaml").write_text(
+        (tmp_dir / "calkit.yaml").read_text() + "  - path: paper/extra.bib\n"
+    )
+    check = refs.check_references(offline=True)
+    reference = check.documents[0].references["real2020thing"]
+    assert reference.collection == "paper/references.bib"
+    assert reference.also_in == ["paper/extra.bib"]
+    assert any("also defined in" in n for n in reference.notes)
+    # The entry used is the winning collection's, not the other one.
+    assert reference.year == 2020
+
+
 def test_an_unregistered_doi_is_decisive(tmp_dir: Path) -> None:
     # The handle system registers every DOI whatever the registrar, so a
     # handle it doesn't have cannot be a real identifier. This is the one
@@ -180,7 +202,7 @@ def test_an_unregistered_doi_is_decisive(tmp_dir: Path) -> None:
     # unlike a work that merely isn't indexed anywhere.
     reference = refs.Reference(
         key="ghost",
-        in_collections=["refs.bib"],
+        collection="refs.bib",
         title="A Paper That Was Never Written",
         year=2021,
         doi="10.9999/definitely-not-real",
@@ -193,7 +215,7 @@ def test_an_unregistered_doi_is_decisive(tmp_dir: Path) -> None:
     # Unreachable is not the same answer as unregistered.
     unknown = refs.Reference(
         key="k",
-        in_collections=["refs.bib"],
+        collection="refs.bib",
         title="A Real Paper Nobody Indexed",
         doi="10.1000/real",
         doi_registered=None,
@@ -205,7 +227,7 @@ def test_an_unregistered_doi_is_decisive(tmp_dir: Path) -> None:
     # one that couldn't be resolved at all.
     registered = refs.Reference(
         key="k",
-        in_collections=["refs.bib"],
+        collection="refs.bib",
         title="A Real Paper Nobody Indexed",
         doi="10.1000/real",
         doi_registered=True,
@@ -253,7 +275,7 @@ def test_comparison_forgives_only_what_it_should(tmp_dir: Path) -> None:
     assert found.title_matches is True
     assert found.year_matches is None
     published.found = found
-    published.in_collections = ["refs.bib"]
+    published.collection = "refs.bib"
     refs.classify(published)
     assert published.status == "verified"
     # Two different papers in the same year by the same author do not pass.
@@ -285,7 +307,7 @@ def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
     # since reporting it accuses the entry of describing another paper.
     reference = refs.Reference(
         key="k",
-        in_collections=["refs.bib"],
+        collection="refs.bib",
         title="Hypervolume Knowledge Gradient for Partial Information",
         year=2023,
     )
@@ -305,8 +327,10 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
     document = check.documents[0]
     assert document.path == "paper/main.tex"
     assert document.n_cited == 3
-    by_key = {r.key: r for r in document.references}
+    by_key = document.references
     assert by_key["ghost"].status == "missing-from-bib"
+    assert by_key["ghost"].collection is None
+    assert by_key["real2020thing"].collection == "paper/references.bib"
     assert by_key["tool2024software"].status == "not-checkable"
     # Offline, a real entry cannot be confirmed, but it is not accused.
     assert by_key["real2020thing"].status == "not-found"
@@ -315,6 +339,13 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
     assert paths == [".calkit/reference-checks/paper/main.tex.json"]
     payload = json.loads((tmp_dir / paths[0]).read_text())
     assert payload["n_cited"] == 3
+    # Keyed by citation key, so the key is not repeated as a field.
+    assert set(payload["references"]) == {
+        "real2020thing",
+        "tool2024software",
+        "ghost",
+    }
+    assert "key" not in payload["references"]["ghost"]
     # No timestamp, so the report is a function of its inputs and can be
     # checked for staleness like any other output.
     assert "checked_at" not in payload
@@ -329,7 +360,7 @@ def test_the_report_is_evidence_not_a_copy_of_the_collection(
     # keeps is that the work was found, and where to go and see it.
     reference = refs.Reference(
         key="k",
-        in_collections=["refs.bib"],
+        collection="refs.bib",
         title="A Study of Something Real",
         first_author="Vega",
         year=2020,
@@ -348,7 +379,7 @@ def test_the_report_is_evidence_not_a_copy_of_the_collection(
     refs.classify(reference)
     assert reference.status == "verified"
     payload = refs.compact(reference.model_dump(mode="json"))
-    assert set(payload) == {"key", "in_collections", "status", "evidence"}
+    assert set(payload) == {"collection", "status", "evidence"}
     assert payload["evidence"] == {
         "matched_by": "doi",
         "source": "crossref",
@@ -359,7 +390,7 @@ def test_the_report_is_evidence_not_a_copy_of_the_collection(
     # there the record is the finding.
     swapped = refs.Reference(
         key="k",
-        in_collections=["refs.bib"],
+        collection="refs.bib",
         title="A Study of Something Real",
         first_author="Vega",
         year=2020,
@@ -384,7 +415,7 @@ def test_the_report_is_evidence_not_a_copy_of_the_collection(
     }
     assert "agrees_on" not in evidence
     # A title match says how close it was; an identifier match needn't.
-    searched = refs.Reference(key="k", in_collections=["refs.bib"])
+    searched = refs.Reference(key="k", collection="refs.bib")
     searched.title = "A Study of Something Real"
     searched.found = refs.compare(
         searched,

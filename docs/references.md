@@ -110,22 +110,27 @@ each reference keeps the collection it's defined in, where it's cited, how
 it was found, and which fields were compared:
 
 ```json
-{
-  "key": "jones1998ego",
-  "cited_at": ["paper/main.tex:100"],
-  "in_collections": ["paper/references.bib"],
-  "status": "verified",
-  "evidence": {
-    "matched_by": "doi",
-    "source": "crossref",
-    "url": "https://doi.org/10.1023/a:1008306431147",
-    "agrees_on": ["title", "first-author", "year"]
+"references": {
+  "jones1998ego": {
+    "cited_at": ["paper/main.tex:100"],
+    "collection": "paper/references.bib",
+    "status": "verified",
+    "evidence": {
+      "matched_by": "doi",
+      "source": "crossref",
+      "url": "https://doi.org/10.1023/a:1008306431147",
+      "agrees_on": ["title", "first-author", "year"]
+    }
   }
 }
 ```
 
 A field only carries a value where the record disagrees with the entry,
 under `differs`, since there the record is the finding.
+
+A key defined in more than one collection also gets an `also_in`, since
+which entry BibTeX uses then depends on the order the collections are
+declared in.
 
 A report carries no timestamp, so it's a function of the sources that
 produced it and can be checked for staleness like any other output.

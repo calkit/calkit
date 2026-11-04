@@ -181,9 +181,22 @@ class Reference(BaseModel):
     the file it was copied from.
     """
 
-    key: str
+    key: str = Field(
+        exclude=True,
+        description="The citation key, which a report carries as the key "
+        "of the mapping this sits in rather than as a field.",
+    )
     cited_at: list[str] = Field(default_factory=list)
-    in_collections: list[str] = Field(default_factory=list)
+    collection: str | None = Field(
+        default=None,
+        description="The collection whose entry was used, or None if the "
+        "key is in none of them.",
+    )
+    also_in: list[str] = Field(
+        default_factory=list,
+        description="Other collections defining the same key, which is "
+        "the only case where more than one matters.",
+    )
     status: Status = "not-checkable"
     evidence: Evidence | None = None
     notes: list[str] = Field(default_factory=list)
@@ -213,15 +226,19 @@ class DocumentCheck(BaseModel):
     offline: bool = False
     n_cited: int = 0
     n_by_status: dict[str, int] = Field(default_factory=dict)
-    references: list[Reference] = Field(default_factory=list)
+    references: dict[str, Reference] = Field(
+        default_factory=dict,
+        description="Each cited key and what was found for it, in the "
+        "order the document cites them.",
+    )
 
     @property
     def suspect(self) -> list[Reference]:
-        return [r for r in self.references if r.status in SUSPECT]
+        return [r for r in self.references.values() if r.status in SUSPECT]
 
     @property
     def blocking(self) -> list[Reference]:
-        return [r for r in self.references if r.status in BLOCKING]
+        return [r for r in self.references.values() if r.status in BLOCKING]
 
     @property
     def ok(self) -> bool:
@@ -530,17 +547,18 @@ def _evidence(reference: Reference, found: Found) -> Evidence:
 
 def classify(reference: Reference) -> None:
     """Set a reference's status and notes from what was found."""
-    if not reference.in_collections:
+    if reference.collection is None:
         reference.status = "missing-from-bib"
         reference.notes.append(
             "cited but defined in no declared reference collection, so the "
             "citation cannot resolve"
         )
         return
-    if len(reference.in_collections) > 1:
+    if reference.also_in:
         reference.notes.append(
-            "defined in more than one collection, so which entry is used "
-            "depends on their order"
+            f"also defined in {', '.join(reference.also_in)}, so which "
+            "entry is used depends on the order the collections are "
+            "declared in"
         )
     if reference.doi_registered is False:
         reference.status = "doi-not-registered"
@@ -664,19 +682,21 @@ def check_references(
         )
         for key, locations in cited_keys(lines).items():
             reference = Reference(key=key, cited_at=locations)
+            defining = []
             for name, entries in collections.items():
                 if key in entries:
-                    reference.in_collections.append(name)
-            if reference.in_collections:
-                _fill_from_entry(
-                    reference, collections[reference.in_collections[0]][key]
-                )
+                    defining.append(name)
+            if defining:
+                # The first wins, as BibTeX takes them in order.
+                reference.collection = defining[0]
+                reference.also_in = defining[1:]
+                _fill_from_entry(reference, collections[defining[0]][key])
                 verify(reference, lookup)
             classify(reference)
-            check.references.append(reference)
+            check.references[key] = reference
         check.n_cited = len(check.references)
         counts: dict[str, int] = {}
-        for reference in check.references:
+        for reference in check.references.values():
             counts[reference.status] = counts.get(reference.status, 0) + 1
         check.n_by_status = dict(sorted(counts.items()))
         out.documents.append(check)
@@ -1058,7 +1078,9 @@ def format_check(check: ReferenceCheck, verbose: bool = False) -> str:
             f"{n} {status}" for status, n in document.n_by_status.items()
         )
         lines.append(f"{document.path}: {document.n_cited} cited ({counts})")
-        shown = document.references if verbose else document.suspect
+        shown = (
+            list(document.references.values()) if verbose else document.suspect
+        )
         order = {s: i for i, s in enumerate(SUSPECT)}
         for reference in sorted(
             shown, key=lambda r: order.get(r.status, len(order))

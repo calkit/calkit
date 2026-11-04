@@ -432,6 +432,96 @@ def test_the_report_is_evidence_not_a_copy_of_the_collection(
     assert searched.evidence.title_similarity == 1.0
 
 
+# The report's serialized shape, recorded so that changing it has to be
+# deliberate. A stage type's output is a contract with every project that
+# has one committed: when the shape changes, reports already on disk are
+# stale and nothing in the pipeline says so, because a stage cannot
+# depend on the version of the tool that produced it. Until Calkit
+# versions its stage types, this snapshot is the whole guard -- so if it
+# fails, either the change was an accident, or every committed report of
+# this type needs regenerating.
+_DOCUMENT_KEYS = {
+    "path",
+    "sources",
+    "collections",
+    "offline",
+    "n_cited",
+    "n_by_status",
+    "references",
+}
+_EVIDENCE_KEYS = {
+    "matched_by",
+    "source",
+    "url",
+    "agrees_on",
+    "differs",
+    "title_similarity",
+}
+_REFERENCE_KEYS = {
+    "cited_at",
+    "collection",
+    "also_in",
+    "status",
+    "evidence",
+    "notes",
+}
+
+
+def test_the_report_shape_is_what_was_recorded(tmp_dir: Path) -> None:
+    _project(
+        tmp_dir,
+        "\\citep{real2020thing}\n\\citep{tool2024software}\n\\citep{ghost}\n",
+    )
+    check = refs.check_references(offline=True)
+    payload = check.documents[0].model_dump(mode="json")
+    assert set(payload) == _DOCUMENT_KEYS
+    # Every key a reference can carry, over every status it can take.
+    statuses = set()
+    keys: set[str] = set()
+    for reference in check.documents[0].references.values():
+        keys |= set(reference.model_dump(mode="json"))
+        statuses.add(reference.status)
+    # Offline, three of the statuses are reachable; the other three need
+    # a record, so build one of each.
+    verified = refs.Reference(key="k", collection="refs.bib")
+    verified.title = "A Study of Something Real"
+    verified.found = refs.compare(
+        verified,
+        refs.Found(
+            source="crossref-doi",
+            doi="10.1000/real",
+            title="A Study of Something Real",
+        ),
+    )
+    refs.classify(verified)
+    mismatch = refs.Reference(
+        key="k", collection="refs.bib", also_in=["other.bib"]
+    )
+    mismatch.title = "A Study of Something Real"
+    mismatch.found = refs.compare(
+        mismatch,
+        refs.Found(
+            source="crossref-doi",
+            doi="10.1000/real",
+            title="An Entirely Different Paper",
+        ),
+    )
+    refs.classify(mismatch)
+    bad_doi = refs.Reference(
+        key="k", collection="refs.bib", doi="10.9999/no", doi_registered=False
+    )
+    refs.classify(bad_doi)
+    for reference in (verified, mismatch, bad_doi):
+        keys |= set(reference.model_dump(mode="json"))
+        statuses.add(reference.status)
+    assert keys == _REFERENCE_KEYS
+    assert set(refs.Status.__args__) == statuses  # type: ignore[attr-defined]
+    assert verified.evidence is not None
+    assert set(verified.evidence.model_dump(mode="json")) == _EVIDENCE_KEYS
+    # The citation key is the mapping's key, never a field inside it.
+    assert "key" not in keys
+
+
 def test_compact_drops_only_what_says_nothing(tmp_dir: Path) -> None:
     assert refs.compact(
         {"a": 1, "b": None, "c": [], "d": {}, "e": False, "f": 0, "g": ""}

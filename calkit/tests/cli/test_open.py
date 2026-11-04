@@ -34,11 +34,16 @@ def test_open_project(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     # Windows reads the home folder from here
     monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setattr(
-        calkit.config,
-        "read",
-        lambda: calkit.config.Settings(default_editor="vscode"),
-    )
+    # Like the real settings, a '.env' where it runs can set the editor
+    monkeypatch.chdir(tmp_path)
+
+    def read_settings():
+        editor = "vscode"
+        if os.path.isfile(".env"):
+            editor = open(".env").read().split("=", 1)[1].strip()
+        return calkit.config.Settings(default_editor=editor)
+
+    monkeypatch.setattr(calkit.config, "read", read_settings)
     opened: list[list[str]] = []
     # Editors are never looked up or launched for real; those "installed"
     # are found in a fake bin folder
@@ -87,6 +92,12 @@ def test_open_project(tmp_path, monkeypatch):
         assert opened == [["/fake/bin/code", os.path.realpath(main)]]
     # Another owner's project of the same name needs the owner given
     make_project(str(home / "dev" / "proj"), "them", "proj")
+    # A checkout that can't be read is skipped rather than stopping the
+    # search
+    make_project(str(home / "dev" / "broken"), "me", "broken")
+    (home / "dev" / "broken" / "calkit.yaml").write_text(
+        "<<<<<<< HEAD\nname: a\n=======\nname: b\n>>>>>>> other\n"
+    )
     result = run("proj")
     assert result.exit_code != 0
     assert "me/proj" in result.output and "them/proj" in result.output
@@ -105,8 +116,13 @@ def test_open_project(tmp_path, monkeypatch):
     cloned = []
 
     def fake_clone(url, location):
+        # The real clone moves into the repo, whose '.env' isn't trusted to
+        # pick what runs
         cloned.append((url, location))
         make_project(location, "me", "new-proj")
+        with open(os.path.join(location, ".env"), "w") as f:
+            f.write("CALKIT_DEFAULT_EDITOR=cursor --evil\n")
+        os.chdir(location)
 
     monkeypatch.setattr(calkit.cli.main.core, "clone", fake_clone)
     result = run("me/new-proj", "--yes")
@@ -114,6 +130,7 @@ def test_open_project(tmp_path, monkeypatch):
     new_path = os.path.join(str(home), "calkit", "new-proj")
     assert cloned == [("me/new-proj", new_path)]
     assert opened == [["/fake/bin/code", new_path]]
+    os.chdir(tmp_path)
     # The default editor can be another one we know or any command
     for editor, cmd in [
         ("jupyterlab", ["/fake/bin/jupyter", "lab"]),
@@ -129,11 +146,7 @@ def test_open_project(tmp_path, monkeypatch):
         result = run("me/new-proj")
         assert result.exit_code == 0, result.output
         assert opened == [[*cmd, new_path]]
-    monkeypatch.setattr(
-        calkit.config,
-        "read",
-        lambda: calkit.config.Settings(default_editor="vscode"),
-    )
+    monkeypatch.setattr(calkit.config, "read", read_settings)
     # Without VS Code, and no terminal to ask in, the folder opens instead
     editors.clear()
     real_isfile = os.path.isfile
@@ -197,3 +210,24 @@ def test_open_project(tmp_path, monkeypatch):
     settings = json.loads((settings_dir / "settings.json").read_text())
     assert settings["git.autofetch"] is False
     assert settings["workbench.editorAssociations"]["*.pdf"]
+
+
+def test_split_command():
+    from calkit.cli.open_ import split_command
+
+    # Windows paths keep their backslashes, and quotes around one with
+    # spaces are dropped
+    assert split_command(
+        r"C:\Tools\cursor.exe --new-window", windows=True
+    ) == [
+        r"C:\Tools\cursor.exe",
+        "--new-window",
+    ]
+    assert split_command(
+        r'"C:\Program Files\Cursor\cursor.exe" -n', windows=True
+    ) == [r"C:\Program Files\Cursor\cursor.exe", "-n"]
+    # Elsewhere it's split like a POSIX shell would
+    assert split_command("'/opt/My Editor/ed' -n", windows=False) == [
+        "/opt/My Editor/ed",
+        "-n",
+    ]

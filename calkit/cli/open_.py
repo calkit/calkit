@@ -16,6 +16,24 @@ open_app = typer.Typer(no_args_is_help=True)
 EDITOR_COMMANDS = {"vscode": "code", "jupyterlab": "jupyter lab"}
 
 
+def split_command(command: str, windows: bool | None = None) -> list[str]:
+    """Split a command into its arguments the way the platform's shell
+    would, so a Windows path keeps its backslashes.
+    """
+    import shlex
+
+    if windows is None:
+        windows = os.name == "nt"
+    if not windows:
+        return shlex.split(command)
+    # Non-POSIX mode keeps backslashes, but also the quotes around a quoted
+    # argument, e.g., a path with spaces
+    return [
+        arg[1:-1] if len(arg) > 1 and arg[0] == arg[-1] == '"' else arg
+        for arg in shlex.split(command, posix=False)
+    ]
+
+
 @open_app.command(name="project")
 def open_project(
     project: Annotated[
@@ -40,7 +58,6 @@ def open_project(
     there. The editor is the 'default_editor' setting, VS Code unless
     set otherwise, e.g., with 'calkit config set default_editor cursor'.
     """
-    import shlex
     import shutil
     import subprocess
 
@@ -49,28 +66,35 @@ def open_project(
     owner, _, name = project.rpartition("/")
     if not name or "/" in owner:
         raise_error("Give the project as NAME or OWNER/NAME")
+    # Read now, since cloning moves into the new repo, and a '.env' file
+    # there must not get to choose what runs
+    editor = calkit.config.read().default_editor
     home = os.path.expanduser("~")
     default_path = os.path.join(home, "calkit", name)
     # Find checkouts of it, by the owner and name each project says it has
     found: dict[str, str] = {}
     for path in calkit.find_project_dirs():
         path = os.path.realpath(path)
-        # Most projects say their name, which rules them out without asking
-        # Git for a remote
-        declared = calkit.load_calkit_info(wdir=path, read_only=True).get(
-            "name"
-        )
-        if declared is not None and declared != name:
-            continue
-        # A subproject without its own repo would look like its parent
-        repo = calkit.git.get_repo(path)
-        if os.path.realpath(str(repo.working_tree_dir)) != path:
-            continue
         try:
+            # Most projects say their name, which rules them out without
+            # asking Git for a remote
+            info = calkit.load_calkit_info(wdir=path, read_only=True)
+            declared = info.get("name") if isinstance(info, dict) else None
+            if declared is not None and declared != name:
+                continue
+            # A subproject without its own repo would look like its parent
+            repo = calkit.git.get_repo(path)
+            if os.path.realpath(str(repo.working_tree_dir)) != path:
+                continue
             p_owner, p_name = calkit.detect_project_name(wdir=path).split(
                 "/", 1
             )
         except ValueError:
+            # It names no owner, so it can't be the one asked for
+            continue
+        except Exception as e:
+            # E.g., a calkit.yaml left with merge conflict markers
+            warn(f"Skipping {path}, which can't be read: {e}")
             continue
         if p_name == name and owner in ("", p_owner):
             found[path] = p_owner
@@ -123,8 +147,7 @@ def open_project(
     path = paths[0]
     # Open it in the configured editor, which is either one we know the
     # command for or a command itself
-    editor = calkit.config.read().default_editor
-    cmd = shlex.split(EDITOR_COMMANDS.get(editor, editor))
+    cmd = split_command(EDITOR_COMMANDS.get(editor, editor))
     exe = shutil.which(cmd[0]) if cmd else None
     if exe is None and editor == "vscode":
         exe = find_or_install_vscode()

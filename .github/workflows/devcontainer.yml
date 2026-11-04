@@ -52,3 +52,10 @@ jobs:
               bash -n "$INIT_SCRIPTS_DIR/$script"
             done
           '
+          # VS Code reads its environment from the user's login shell
+          docker run --rm --user vscode calkit/devcontainer:pr bash -lc '
+            set -euxo pipefail
+            calkit --version
+            dvc --version
+            conda --version
+          '

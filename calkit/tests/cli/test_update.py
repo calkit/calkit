@@ -28,9 +28,7 @@ def test_update_project_config(tmp_dir, monkeypatch):
     result = runner.invoke(update_app, ["devcontainer"])
     assert result.exit_code == 0
     with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
-        assert json.load(f) == calkit.resources.load_json(
-            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
-        )
+        assert f.read() == calkit.resources.make_devcontainer_spec({})
     result = runner.invoke(update_app, ["vscode-config"])
     assert result.exit_code == 0
     for fname in calkit.resources.VSCODE_FNAMES:
@@ -50,6 +48,16 @@ def test_update_project_config(tmp_dir, monkeypatch):
     assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
     assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
     assert not repo.git.status("--porcelain")
+    # A project with a Julia environment gets Julia installed too
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"jl": {"kind": "julia", "julia": "1.11"}}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
+    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
+        assert json.load(f) == calkit.resources.load_json(
+            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
+        )
 
 
 def test_update_dataset(tmp_dir):

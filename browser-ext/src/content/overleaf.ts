@@ -1534,6 +1534,7 @@ async function checkCitations(): Promise<void> {
   }
   editorProblems = { version: snapshot.version, found };
   drawRuns();
+  drawSyncState();
   drawRail();
   toEditor({
     type: "problems",
@@ -2580,6 +2581,59 @@ function fileRow(file: OverleafSyncStatusFile): HTMLElement {
   ]);
 }
 
+// Where the panel says whether the paper is in sync and current, redrawn as
+// the document's problems are found
+const syncStateBoxes = new Set<{
+  box: HTMLElement;
+  status: OverleafSyncStatus;
+  figures: number;
+}>();
+
+function drawSyncState(): void {
+  const stale =
+    editorProblems?.found.filter((problems) =>
+      problems.some((p) => p.kind === "stale"),
+    ).length ?? 0;
+  for (const entry of syncStateBoxes) {
+    const { box, status, figures } = entry;
+    if (!box.isConnected && box.dataset.drawn) {
+      syncStateBoxes.delete(entry);
+      continue;
+    }
+    box.dataset.drawn = "1";
+    const badges = [
+      status.in_sync
+        ? null
+        : el("span", {
+            class: figures ? "badge danger" : "badge warn",
+            text: figures
+              ? `${figures} figure${figures === 1 ? "" : "s"} to sync`
+              : "out of sync",
+          }),
+      stale
+        ? el("span", { class: "badge warn", text: `${stale} stale` })
+        : null,
+      status.in_sync && !stale
+        ? el("span", { class: "badge ok", text: "in sync" })
+        : null,
+    ];
+    const text = stale
+      ? `${stale} component${stale === 1 ? " here is" : "s here are"} ` +
+        "stale; run the pipeline to update them."
+      : status.in_sync
+      ? "Everything here matches the Calkit project and is up to date."
+      : null;
+    clear(box).append(
+      el("div", { class: "row", style: { gap: "6px" } }, badges),
+    );
+    if (text) {
+      box.append(
+        el("div", { class: "dim small", style: { paddingTop: "4px" }, text }),
+      );
+    }
+  }
+}
+
 /**
  * A link that shows how to open the project on this computer: install the
  * CLI, then one command that finds the project, or clones it, and opens it.
@@ -2687,27 +2741,14 @@ function renderStatus(
           }),
         ],
       ),
-      status.in_sync
-        ? el("span", { class: "badge ok", text: "in sync" })
-        : el("span", {
-            class: figures.length ? "badge danger" : "badge warn",
-            text: figures.length
-              ? `${figures.length} figure${
-                  figures.length === 1 ? "" : "s"
-                } to sync`
-              : "out of sync",
-          }),
     ]),
   );
-  if (status.in_sync) {
-    body.append(
-      el("div", {
-        class: "dim small",
-        style: { paddingTop: "6px" },
-        text: "Everything here matches the Calkit project.",
-      }),
-    );
-  }
+  // Whether Overleaf has what the project has, and whether what the
+  // document shows is current, which in sync alone doesn't say
+  const syncState = el("div", { style: { paddingTop: "6px" } });
+  syncStateBoxes.add({ box: syncState, status, figures: figures.length });
+  drawSyncState();
+  body.append(syncState);
   if (figures.length) {
     body.append(
       el("div", {

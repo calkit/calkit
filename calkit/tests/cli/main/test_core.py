@@ -4060,6 +4060,8 @@ def test_clone(monkeypatch):
         clone(*args, **kwargs)
         return cloned[0]
 
+    # Clone sets CALKIT_HUB, so have it restored after the test
+    monkeypatch.setenv("CALKIT_HUB", "")
     monkeypatch.setattr("subprocess.check_call", check_call)
     monkeypatch.setattr(calkit.hub, "get", get)
     # SSH where it's set up for GitHub, by a project's name or its URL

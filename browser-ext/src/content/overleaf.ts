@@ -1639,6 +1639,7 @@ async function checkCitations(): Promise<void> {
   }
   editorProblems = { version: snapshot.version, found };
   drawRuns();
+  drawSyncState();
   drawRail();
   toEditor({
     type: "problems",
@@ -2951,6 +2952,118 @@ function fileRow(file: OverleafSyncStatusFile): HTMLElement {
   ]);
 }
 
+// Where the panel says whether the paper is in sync and current, redrawn as
+// the document's problems are found
+const syncStateBoxes = new Set<{
+  box: HTMLElement;
+  status: OverleafSyncStatus;
+  figures: number;
+}>();
+
+function drawSyncState(): void {
+  const stale =
+    editorProblems?.found.filter((problems) =>
+      problems.some((p) => p.kind === "stale"),
+    ).length ?? 0;
+  for (const entry of syncStateBoxes) {
+    const { box, status, figures } = entry;
+    if (!box.isConnected && box.dataset.drawn) {
+      syncStateBoxes.delete(entry);
+      continue;
+    }
+    box.dataset.drawn = "1";
+    const badges = [
+      status.in_sync
+        ? null
+        : el("span", {
+            class: figures ? "badge danger" : "badge warn",
+            text: figures
+              ? `${figures} figure${figures === 1 ? "" : "s"} to sync`
+              : "out of sync",
+          }),
+      stale
+        ? el("span", { class: "badge warn", text: `${stale} stale` })
+        : null,
+      status.in_sync && !stale
+        ? el("span", { class: "badge ok", text: "in sync" })
+        : null,
+    ];
+    const text = stale
+      ? `${stale} component${stale === 1 ? " here is" : "s here are"} ` +
+        "stale; run the pipeline to update them."
+      : status.in_sync
+      ? "Everything here matches the Calkit project and is up to date."
+      : null;
+    clear(box).append(
+      el("div", { class: "row", style: { gap: "6px" } }, badges),
+    );
+    if (text) {
+      box.append(
+        el("div", { class: "dim small", style: { paddingTop: "4px" }, text }),
+      );
+    }
+  }
+}
+
+/**
+ * A link that shows how to open the project on this computer: install the
+ * CLI, then one command that finds the project, or clones it, and opens it.
+ */
+function renderOpenLocally(link: OverleafLinkPublic): HTMLElement[] {
+  const install = navigator.userAgent.includes("Windows")
+    ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
+    : "curl -LsSf install.calkit.org | sh";
+  const commands = [install, `calkit open project ${linkKey(link)}`].join("\n");
+  const copy = el("button", { class: "action secondary", text: "Copy" });
+  copy.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(commands);
+    copy.textContent = "Copied";
+  });
+  const box = el(
+    "div",
+    {
+      class: "muted-box",
+      style: {
+        display: "none",
+        marginTop: "4px",
+        alignSelf: "stretch",
+        boxSizing: "border-box",
+      },
+    },
+    [
+      el("div", {
+        class: "small",
+        text: "In a terminal, install Calkit, then open the project in VS Code, which clones it first if needed:",
+      }),
+      el("pre", {
+        class: "name",
+        style: { whiteSpace: "pre-wrap", margin: "6px 0" },
+        text: commands,
+      }),
+      el("div", { class: "actions" }, [
+        copy,
+        el("a", {
+          class: "small",
+          text: "Other ways to install",
+          href: "https://docs.calkit.org/installation/",
+          attrs: { target: "_blank" },
+        }),
+      ]),
+    ],
+  );
+  const toggle = el("a", {
+    class: "small",
+    text: "Open locally",
+    href: "#",
+    title: "Open the project on this computer",
+    onClick: (event) => {
+      event.preventDefault();
+      box.style.display = box.style.display === "none" ? "" : "none";
+    },
+  });
+  return [toggle, box];
+}
+
 function renderStatus(
   body: HTMLElement,
   link: OverleafLinkPublic,
@@ -2962,53 +3075,51 @@ function renderStatus(
   const others = status.files_to_push.filter((f) => !f.figure);
   body.append(
     el("div", { class: "row" }, [
-      el("div", { class: "grow" }, [
-        el("a", {
-          text: `${link.project_owner_name}/${link.project_name}`,
-          href: projectUrl(
-            hubWebUrl,
-            link.project_owner_name,
-            link.project_name,
-          ),
-        }),
-        el("div", {
-          class: "dim small",
-          text: `Synced folder: ${status.path}`,
-        }),
-        // Where to work on what the paper shows, without installing anything
-        link.github_repo_url
-          ? el("a", {
-              class: "small",
-              text: "Open in Codespaces",
-              href: `https://codespaces.new${
-                new URL(link.github_repo_url).pathname
-              }?quickstart=1`,
-              title: "Work on the project in a GitHub Codespace",
-              attrs: { target: "_blank" },
-            })
-          : null,
-      ]),
-      status.in_sync
-        ? el("span", { class: "badge ok", text: "in sync" })
-        : el("span", {
-            class: figures.length ? "badge danger" : "badge warn",
-            text: figures.length
-              ? `${figures.length} figure${
-                  figures.length === 1 ? "" : "s"
-                } to sync`
-              : "out of sync",
+      el(
+        "div",
+        {
+          class: "grow stack",
+          style: { gap: "2px", alignItems: "flex-start" },
+        },
+        [
+          el("a", {
+            class: "small",
+            text: "Open in Calkit",
+            href: projectUrl(
+              hubWebUrl,
+              link.project_owner_name,
+              link.project_name,
+            ),
+            title: linkKey(link),
+            attrs: { target: "_blank" },
           }),
+          // Where to work on what the paper shows, without installing anything
+          link.github_repo_url
+            ? el("a", {
+                class: "small",
+                text: "Open in Codespaces",
+                href: `https://codespaces.new${
+                  new URL(link.github_repo_url).pathname
+                }?quickstart=1`,
+                title: "Work on the project in a GitHub Codespace",
+                attrs: { target: "_blank" },
+              })
+            : null,
+          ...renderOpenLocally(link),
+          el("div", {
+            class: "dim small",
+            text: `Synced folder: ${status.path}`,
+          }),
+        ],
+      ),
     ]),
   );
-  if (status.in_sync) {
-    body.append(
-      el("div", {
-        class: "dim small",
-        style: { paddingTop: "6px" },
-        text: "Everything here matches the Calkit project.",
-      }),
-    );
-  }
+  // Whether Overleaf has what the project has, and whether what the
+  // document shows is current, which in sync alone doesn't say
+  const syncState = el("div", { style: { paddingTop: "6px" } });
+  syncStateBoxes.add({ box: syncState, status, figures: figures.length });
+  drawSyncState();
+  body.append(syncState);
   if (figures.length) {
     body.append(
       el("div", {
@@ -4402,8 +4513,10 @@ function drawRail(): void {
   body.append(
     el("div", { class: "row project" }, [
       el("a", {
-        text: linkKey(link),
+        class: "small",
+        text: "Open in Calkit",
         href: base,
+        title: linkKey(link),
         attrs: { target: "_blank" },
       }),
       link.github_repo_url
@@ -4417,6 +4530,7 @@ function drawRail(): void {
             attrs: { target: "_blank" },
           })
         : null,
+      ...renderOpenLocally(link),
     ]),
   );
   // What's going on between the paper and its project

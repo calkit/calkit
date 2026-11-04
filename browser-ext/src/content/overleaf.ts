@@ -2457,6 +2457,18 @@ function renderStatus(
           class: "dim small",
           text: `Synced folder: ${status.path}`,
         }),
+        // Where to work on what the paper shows, without installing anything
+        link.github_repo_url
+          ? el("a", {
+              class: "small",
+              text: "Open in Codespaces",
+              href: `https://codespaces.new${
+                new URL(link.github_repo_url).pathname
+              }?quickstart=1`,
+              title: "Work on the project in a GitHub Codespace",
+              attrs: { target: "_blank" },
+            })
+          : null,
       ]),
       status.in_sync
         ? el("span", { class: "badge ok", text: "in sync" })
@@ -3772,6 +3784,10 @@ const RAIL_STYLES = `
     padding: 10px 12px; min-height: 100%; box-sizing: border-box;
     color: var(--ck-fg); background: var(--ck-bg);
   }
+  .rail .project {
+    flex-direction: column; align-items: flex-start; gap: 2px;
+    overflow-wrap: anywhere;
+  }
   .rail h3 {
     font-size: 12px; font-weight: 600; margin: 14px 0 4px;
     text-transform: uppercase; letter-spacing: 0.04em;
@@ -3866,11 +3882,24 @@ function drawRail(): void {
     link.project_name,
   );
   body.append(
-    el("a", {
-      text: linkKey(link),
-      href: base,
-      attrs: { target: "_blank" },
-    }),
+    el("div", { class: "row project" }, [
+      el("a", {
+        text: linkKey(link),
+        href: base,
+        attrs: { target: "_blank" },
+      }),
+      link.github_repo_url
+        ? el("a", {
+            class: "small",
+            text: "Open in Codespaces",
+            href: `https://codespaces.new${
+              new URL(link.github_repo_url).pathname
+            }?quickstart=1`,
+            title: "Work on the project in a GitHub Codespace",
+            attrs: { target: "_blank" },
+          })
+        : null,
+    ]),
   );
   // What's going on between the paper and its project
   const running = activeRun();

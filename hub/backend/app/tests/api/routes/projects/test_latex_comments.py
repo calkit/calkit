@@ -16,7 +16,7 @@ import calkit.latex
 from app import pdftext
 from app.core import ryaml, utcnow
 from app.models import ProjectComment
-from app.tests.api.routes.projects.test_overleaf_links import (
+from app.tests.api.routes.projects.test_core import (
     _make_owner_with_project,
 )
 

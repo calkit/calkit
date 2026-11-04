@@ -1,6 +1,7 @@
 """Tests for ``calkit.references``."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -41,13 +42,13 @@ BIB = r"""
 
 
 @pytest.fixture
-def tmp_dir(tmp_path, monkeypatch):
+def tmp_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Fixture to change to a temporary directory."""
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
 
-def _project(tmp_path, tex: str, bib: str = BIB) -> None:
+def _project(tmp_path: Path, tex: str, bib: str = BIB) -> None:
     (tmp_path / "paper").mkdir(exist_ok=True)
     (tmp_path / "paper" / "main.tex").write_text(tex)
     (tmp_path / "paper" / "references.bib").write_text(bib)
@@ -63,7 +64,7 @@ def _project(tmp_path, tex: str, bib: str = BIB) -> None:
     )
 
 
-def test_bib_fields_and_entry_metadata(tmp_dir):
+def test_bib_fields_and_entry_metadata(tmp_dir: Path) -> None:
     _project(tmp_dir, "\\citep{real2020thing}\n")
     collections = refs.load_collections()
     entries = collections["paper/references.bib"]
@@ -93,7 +94,7 @@ def test_bib_fields_and_entry_metadata(tmp_dir):
     assert article.venue == "Journal of Things"
 
 
-def test_keys_come_from_the_source_not_its_comments(tmp_dir):
+def test_keys_come_from_the_source_not_its_comments(tmp_dir: Path) -> None:
     _project(
         tmp_dir,
         "Text \\citep{real2020thing}.\n"
@@ -115,7 +116,9 @@ def test_keys_come_from_the_source_not_its_comments(tmp_dir):
     assert keys["real2020thing"] == ["paper/main.tex:1"]
 
 
-def test_statuses_separate_what_is_wrong_from_what_is_unknown(tmp_dir):
+def test_statuses_separate_what_is_wrong_from_what_is_unknown(
+    tmp_dir: Path,
+) -> None:
     # A key in no collection cannot resolve, and fails the check.
     missing = refs.Reference(key="ghost")
     refs.classify(missing)
@@ -170,7 +173,7 @@ def test_statuses_separate_what_is_wrong_from_what_is_unknown(tmp_dir):
     assert thin.status not in refs.BLOCKING
 
 
-def test_an_unregistered_doi_is_decisive(tmp_dir):
+def test_an_unregistered_doi_is_decisive(tmp_dir: Path) -> None:
     # The handle system registers every DOI whatever the registrar, so a
     # handle it doesn't have cannot be a real identifier. This is the one
     # unambiguous sign of an invented citation, so it fails the check,
@@ -212,7 +215,7 @@ def test_an_unregistered_doi_is_decisive(tmp_dir):
     assert any("is registered" in n for n in registered.notes)
 
 
-def test_handle_responses_map_to_an_answer(tmp_dir):
+def test_handle_responses_map_to_an_answer(tmp_dir: Path) -> None:
     lookup = refs.Lookup(offline=True)
     url = "https://doi.org/api/handles/10.1000/real"
     lookup.cache[url] = json.dumps({"responseCode": 1, "handle": "x"})
@@ -226,7 +229,7 @@ def test_handle_responses_map_to_an_answer(tmp_dir):
     assert lookup.doi_registered("10.1000/real") is None
 
 
-def test_comparison_forgives_only_what_it_should(tmp_dir):
+def test_comparison_forgives_only_what_it_should(tmp_dir: Path) -> None:
     # An entry citing the published version, matched to its preprint, has
     # a year that says nothing about whether the work is real.
     published = refs.Reference(
@@ -277,7 +280,7 @@ def test_comparison_forgives_only_what_it_should(tmp_dir):
     )
 
 
-def test_a_failed_title_search_is_not_a_disagreement(tmp_dir):
+def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
     # The nearest neighbor of a query that matched nothing is discarded,
     # since reporting it accuses the entry of describing another paper.
     reference = refs.Reference(
@@ -292,7 +295,7 @@ def test_a_failed_title_search_is_not_a_disagreement(tmp_dir):
     assert reference.found is None
 
 
-def test_offline_check_reports_what_needs_no_network(tmp_dir):
+def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
     _project(
         tmp_dir,
         "\\citep{real2020thing}\n\\citep{tool2024software}\n\\citep{ghost}\n",
@@ -319,7 +322,96 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir):
     assert "ghost" in text and "cannot be accounted for" in text
 
 
-def test_stage_expansion_derives_inputs_and_a_report_per_document(tmp_dir):
+def test_the_report_is_evidence_not_a_copy_of_the_collection(
+    tmp_dir: Path,
+) -> None:
+    # Everything the entry already says stays in the .bib; what the report
+    # keeps is that the work was found, and where to go and see it.
+    reference = refs.Reference(
+        key="k",
+        in_collections=["refs.bib"],
+        title="A Study of Something Real",
+        first_author="Vega",
+        year=2020,
+        doi="10.1000/real",
+    )
+    reference.found = refs.compare(
+        reference,
+        refs.Found(
+            source="crossref-doi",
+            doi="10.1000/real",
+            title="A Study of Something Real",
+            year=2020,
+            first_author="Vega",
+        ),
+    )
+    refs.classify(reference)
+    assert reference.status == "verified"
+    payload = refs.compact(reference.model_dump(mode="json"))
+    assert set(payload) == {"key", "in_collections", "status", "evidence"}
+    assert payload["evidence"] == {
+        "matched_by": "doi",
+        "source": "crossref",
+        "url": "https://doi.org/10.1000/real",
+        "agrees_on": ["title", "first-author", "year"],
+    }
+    # A disagreement is the one place a value is worth repeating, since
+    # there the record is the finding.
+    swapped = refs.Reference(
+        key="k",
+        in_collections=["refs.bib"],
+        title="A Study of Something Real",
+        first_author="Vega",
+        year=2020,
+        doi="10.1000/real",
+    )
+    swapped.found = refs.compare(
+        swapped,
+        refs.Found(
+            source="crossref-doi",
+            doi="10.1000/real",
+            title="An Entirely Different Paper",
+            year=2011,
+            first_author="Nobody",
+        ),
+    )
+    refs.classify(swapped)
+    evidence = refs.compact(swapped.model_dump(mode="json"))["evidence"]
+    assert evidence["differs"] == {
+        "title": "An Entirely Different Paper",
+        "first-author": "Nobody",
+        "year": 2011,
+    }
+    assert "agrees_on" not in evidence
+    # A title match says how close it was; an identifier match needn't.
+    searched = refs.Reference(key="k", in_collections=["refs.bib"])
+    searched.title = "A Study of Something Real"
+    searched.found = refs.compare(
+        searched,
+        refs.Found(
+            source="openalex",
+            id="https://openalex.org/W1",
+            title="A Study of Something Real",
+        ),
+    )
+    refs.classify(searched)
+    assert searched.evidence is not None
+    assert searched.evidence.matched_by == "title"
+    assert searched.evidence.url == "https://openalex.org/W1"
+    assert searched.evidence.title_similarity == 1.0
+
+
+def test_compact_drops_only_what_says_nothing(tmp_dir: Path) -> None:
+    assert refs.compact(
+        {"a": 1, "b": None, "c": [], "d": {}, "e": False, "f": 0, "g": ""}
+    ) == {"a": 1, "e": False, "f": 0, "g": ""}
+    assert refs.compact({"a": {"b": None, "c": 2}}) == {"a": {"c": 2}}
+    assert refs.compact([{"a": None}, {"b": 1}]) == [{}, {"b": 1}]
+
+
+def test_stage_expansion_derives_inputs_and_a_report_per_document(
+    tmp_dir: Path,
+) -> None:
     _project(tmp_dir, "\\input{sec}\n")
     (tmp_dir / "paper" / "sec.tex").write_text("\\citep{real2020thing}\n")
     ck_info = calkit.load_calkit_info()
@@ -347,7 +439,7 @@ def test_stage_expansion_derives_inputs_and_a_report_per_document(tmp_dir):
     assert refs.expand_reference_check_stages(ck_info) is not ck_info
 
 
-def test_the_stage_compiles_to_a_dvc_stage(tmp_dir):
+def test_the_stage_compiles_to_a_dvc_stage(tmp_dir: Path) -> None:
     from calkit.models.pipeline import ReferencesCheckStage
 
     stage = ReferencesCheckStage(
@@ -362,7 +454,7 @@ def test_the_stage_compiles_to_a_dvc_stage(tmp_dir):
     assert offline.dvc_cmd == "calkit check references --offline"
 
 
-def test_markdown_citations_are_found(tmp_dir):
+def test_markdown_citations_are_found(tmp_dir: Path) -> None:
     (tmp_dir / "paper").mkdir()
     (tmp_dir / "paper" / "main.md").write_text(
         "Text [@real2020thing] and @thin2021venue.\n"

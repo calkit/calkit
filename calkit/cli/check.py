@@ -2634,13 +2634,15 @@ def check_references(
     indexed anywhere is reported but doesn't fail the check.
     """
     from calkit.references import check_references as _check_references
-    from calkit.references import format_check, write_reports
+    from calkit.references import compact, format_check, write_reports
 
     check = _check_references(wdir=wdir, offline=offline, refresh=refresh)
     if not no_write:
         write_reports(check, wdir=wdir)
     if json_output:
-        calkit.echo(json.dumps(check.model_dump(mode="json"), indent=2))
+        calkit.echo(
+            json.dumps(compact(check.model_dump(mode="json")), indent=2)
+        )
     else:
         calkit.echo(format_check(check, verbose=verbose))
     if not check.ok:

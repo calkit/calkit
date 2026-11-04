@@ -119,7 +119,12 @@ MARKDOWN_CITE_RE = re.compile(r"(?<![\w.])@([A-Za-z][\w:.#$%&+?<>~/-]*[\w])")
 
 
 class Found(BaseModel):
-    """A work a service returned for an entry, and how well it fits."""
+    """A work a service returned for an entry, and how well it fits.
+
+    Working state rather than output: what it says about the work is
+    already in the entry, so only the part of it that is evidence about
+    the entry, i.e., :class:`Evidence`, is reported.
+    """
 
     source: str
     id: str | None = None
@@ -133,28 +138,70 @@ class Found(BaseModel):
     author_matches: bool | None = None
 
 
+class Evidence(BaseModel):
+    """That an entry was found, and where to go and see it.
+
+    This is what the report keeps instead of the record itself. Repeating
+    the title, authors, and year back would only copy the collection the
+    check just read them from, so what is kept is how the work was found,
+    a link to it, and which fields were compared. Values appear only
+    where they disagree, since there the record is the finding.
+    """
+
+    matched_by: Literal["doi", "arxiv", "title"] = Field(
+        description="What the work was found by: its DOI, its arXiv "
+        "identifier, or a search for its title."
+    )
+    source: str = Field(description="The service that had it.")
+    url: str | None = Field(
+        default=None, description="Where to see the record."
+    )
+    agrees_on: list[str] = Field(
+        default_factory=list,
+        description="Fields compared that agree with the entry.",
+    )
+    differs: dict[str, str | int | None] = Field(
+        default_factory=dict,
+        description="Fields compared that disagree, and what the record "
+        "says instead.",
+    )
+    title_similarity: float | None = Field(
+        default=None,
+        description="How close the titles are, where the work was found "
+        "by searching for one.",
+    )
+
+
 class Reference(BaseModel):
-    """One cited key, where it is defined, and what was confirmed."""
+    """One cited key, where it is defined, and what was confirmed.
+
+    The entry's own metadata is read from the collection and kept here
+    while the check runs, but excluded from the report: it is already in
+    the collection, and a report that copied it would go stale against
+    the file it was copied from.
+    """
 
     key: str
     cited_at: list[str] = Field(default_factory=list)
     in_collections: list[str] = Field(default_factory=list)
-    entry_type: str | None = None
-    title: str | None = None
-    first_author: str | None = None
-    year: int | None = None
-    venue: str | None = None
-    doi: str | None = None
-    arxiv: str | None = None
-    url: str | None = None
+    status: Status = "not-checkable"
+    evidence: Evidence | None = None
+    notes: list[str] = Field(default_factory=list)
+    entry_type: str | None = Field(default=None, exclude=True)
+    title: str | None = Field(default=None, exclude=True)
+    first_author: str | None = Field(default=None, exclude=True)
+    year: int | None = Field(default=None, exclude=True)
+    venue: str | None = Field(default=None, exclude=True)
+    doi: str | None = Field(default=None, exclude=True)
+    arxiv: str | None = Field(default=None, exclude=True)
+    url: str | None = Field(default=None, exclude=True)
     doi_registered: bool | None = Field(
         default=None,
+        exclude=True,
         description="Whether the DOI exists in the global handle system, "
         "which is registrar-agnostic, or None if it was not asked.",
     )
-    status: Status = "not-checkable"
-    found: Found | None = None
-    notes: list[str] = Field(default_factory=list)
+    found: Found | None = Field(default=None, exclude=True)
 
 
 class DocumentCheck(BaseModel):
@@ -424,6 +471,63 @@ def compare(reference: Reference, found: Found) -> Found:
     return found
 
 
+def _evidence(reference: Reference, found: Found) -> Evidence:
+    """What a candidate record is evidence of, without copying it.
+
+    Parameters
+    ----------
+    reference : Reference
+        The entry the record was found for.
+    found : Found
+        The record, already compared against the entry.
+
+    Returns
+    -------
+    Evidence
+        How the work was found, where to see it, and which of the three
+        compared fields agree. A field the record disagrees on carries
+        what the record says, since that is the finding; one neither
+        record can settle is left out of both lists.
+    """
+    matched_by: Literal["doi", "arxiv", "title"] = (
+        "doi"
+        if found.source == "crossref-doi"
+        else "arxiv"
+        if found.source == "arxiv"
+        else "title"
+    )
+    url: str | None
+    if found.source == "arxiv" and found.id:
+        url = f"https://arxiv.org/abs/{found.id.removeprefix('arXiv:')}"
+    elif found.source == "openalex":
+        url = found.id
+    elif found.doi:
+        url = f"https://doi.org/{found.doi}"
+    else:
+        url = None
+    agrees: list[str] = []
+    differs: dict[str, str | int | None] = {}
+    for name, ok, value in (
+        ("title", found.title_matches, found.title),
+        ("first-author", found.author_matches, found.first_author),
+        ("year", found.year_matches, found.year),
+    ):
+        if ok is True:
+            agrees.append(name)
+        elif ok is False:
+            differs[name] = value
+    return Evidence(
+        matched_by=matched_by,
+        source="crossref" if found.source == "crossref-doi" else found.source,
+        url=url,
+        agrees_on=agrees,
+        differs=differs,
+        title_similarity=(
+            found.title_similarity if matched_by == "title" else None
+        ),
+    )
+
+
 def classify(reference: Reference) -> None:
     """Set a reference's status and notes from what was found."""
     if not reference.in_collections:
@@ -447,6 +551,7 @@ def classify(reference: Reference) -> None:
         return
     found = reference.found
     if found is not None:
+        reference.evidence = _evidence(reference, found)
         disagrees = [
             name
             for name, ok in (
@@ -462,7 +567,7 @@ def classify(reference: Reference) -> None:
         reference.status = "mismatch"
         reference.notes.append(
             f"found a work, but {', '.join(disagrees)} disagrees with the "
-            "entry"
+            "entry; see what the record says under evidence"
         )
         if (
             reference.doi
@@ -870,6 +975,36 @@ class Lookup:
         return best
 
 
+def compact(value: Any) -> Any:
+    """Drop what a report says nothing with: nulls and empty containers.
+
+    A reference that was found and agrees on everything should read as
+    four lines, not as a form with blanks left in it.
+
+    Parameters
+    ----------
+    value : Any
+        Already dumped to JSON-compatible types.
+
+    Returns
+    -------
+    Any
+        The same, without keys whose value is None, an empty list, or an
+        empty dict.
+    """
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            item = compact(item)
+            if item is None or (isinstance(item, (list, dict)) and not item):
+                continue
+            out[key] = item
+        return out
+    if isinstance(value, list):
+        return [compact(item) for item in value]
+    return value
+
+
 def write_reports(
     check: ReferenceCheck, wdir: str | Path | None = None
 ) -> list[str]:
@@ -895,7 +1030,8 @@ def write_reports(
         full = Path(wdir or ".") / path
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(
-            json.dumps(document.model_dump(mode="json"), indent=2) + "\n"
+            json.dumps(compact(document.model_dump(mode="json")), indent=2)
+            + "\n"
         )
         out.append(path)
     return out
@@ -932,19 +1068,21 @@ def format_check(check: ReferenceCheck, verbose: bool = False) -> str:
                 lines.append(f"    cited at {reference.cited_at[0]}")
             for note in reference.notes:
                 lines.append(f"    {note}")
-            found = reference.found
-            if found is not None and reference.status != "verified":
-                lines.append(
-                    f"    entry: {reference.title!r} "
-                    f"({reference.first_author}, {reference.year})"
+            evidence = reference.evidence
+            if evidence is None:
+                continue
+            where = evidence.url or evidence.source
+            if evidence.differs:
+                says = ", ".join(
+                    f"{name} {value!r}"
+                    for name, value in evidence.differs.items()
                 )
+                lines.append(f"    the record at {where} says {says}")
+            else:
                 lines.append(
-                    f"    found: {found.title!r} "
-                    f"({found.first_author}, {found.year}) via "
-                    f"{found.source} {found.doi}"
+                    f"    found by {evidence.matched_by} at {where}, "
+                    f"agreeing on {', '.join(evidence.agrees_on) or 'nothing'}"
                 )
-            elif found is not None:
-                lines.append(f"    found via {found.source} {found.doi}")
     if not check.documents:
         lines.append("No documents with citations to check.")
     elif check.ok:

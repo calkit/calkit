@@ -102,6 +102,31 @@ All of that is derived when the pipeline is compiled, so nothing needs
 declaring in the stage, and editing a document or a `.bib` file makes only
 that document's check stale.
 
+A report records that a work was found and where to go and see it, not
+what the work is.
+Repeating the title, authors, and year would only copy the collection the
+check just read them from, and a copy goes stale against its original, so
+each reference keeps the collection it's defined in, where it's cited, how
+it was found, and which fields were compared:
+
+```json
+{
+  "key": "jones1998ego",
+  "cited_at": ["paper/main.tex:100"],
+  "in_collections": ["paper/references.bib"],
+  "status": "verified",
+  "evidence": {
+    "matched_by": "doi",
+    "source": "crossref",
+    "url": "https://doi.org/10.1023/a:1008306431147",
+    "agrees_on": ["title", "first-author", "year"]
+  }
+}
+```
+
+A field only carries a value where the record disagrees with the entry,
+under `differs`, since there the record is the finding.
+
 A report carries no timestamp, so it's a function of the sources that
 produced it and can be checked for staleness like any other output.
 Answers from the services are cached under `.calkit/local`, which isn't

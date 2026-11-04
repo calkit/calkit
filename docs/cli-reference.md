@@ -97,12 +97,12 @@ Arguments:
 
 Options:
 
-| Option               | Type    | Required | Default | Description                                       |
-| -------------------- | ------- | -------- | ------- | ------------------------------------------------- |
-| `--ssh`              | boolean | no       | False   | Use SSH with Git.                                 |
-| `--no-config-remote` | boolean | no       | False   | Do not automatically configure Calkit DVC remote. |
-| `--no-dvc-pull`      | boolean | no       | False   | Do not pull DVC objects.                          |
-| `--no-recursive`     | boolean | no       | False   | Do not recursively clone submodules.              |
+| Option               | Type    | Required | Default | Description                                                                                            |
+| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--ssh`, `--https`   | boolean | no       |         | Use SSH or HTTPS with Git. Defaults to SSH for GitHub if it's set up, i.e., GitHub accepts a key here. |
+| `--no-config-remote` | boolean | no       | False   | Do not automatically configure Calkit DVC remote.                                                      |
+| `--no-dvc-pull`      | boolean | no       | False   | Do not pull DVC objects.                                                                               |
+| `--no-recursive`     | boolean | no       | False   | Do not recursively clone submodules.                                                                   |
 
 <a id="top-command-status-st"></a>
 

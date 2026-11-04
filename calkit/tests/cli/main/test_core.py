@@ -4028,3 +4028,51 @@ def test_run_records_app_version(tmp_dir):
         system = json.load(f)["export-setup"]["system"]
     assert system["inkscape_version"] == "1.3.2"
     assert system["os"] == platform.system()
+
+
+def test_clone_picks_ssh_or_https(monkeypatch):
+    from typer.testing import CliRunner
+
+    cloned = []
+
+    def check_call(cmd, *args, **kwargs):
+        # Stop at the clone, which is all that depends on the protocol
+        if cmd[:2] == ["git", "clone"]:
+            cloned.append(cmd[2])
+            raise subprocess.CalledProcessError(1, cmd)
+        raise AssertionError(cmd)
+
+    def clone_url(*args, ssh_set_up=True):
+        cloned.clear()
+        monkeypatch.setattr(calkit.github, "can_use_ssh", lambda: ssh_set_up)
+        result = CliRunner().invoke(calkit.cli.main.app, ["clone", *args])
+        assert result.exit_code != 0
+        return cloned[0]
+
+    monkeypatch.setattr("subprocess.check_call", check_call)
+    monkeypatch.setattr(
+        calkit.hub,
+        "get",
+        lambda path: {"git_repo_url": "https://github.com/me/proj"},
+    )
+    # SSH where it's set up for GitHub, by a project's name or its URL
+    assert clone_url("me/proj") == "git@github.com:me/proj.git"
+    assert (
+        clone_url("https://github.com/me/proj.git")
+        == "git@github.com:me/proj.git"
+    )
+    # Otherwise HTTPS, which is also what's asked for wins
+    assert (
+        clone_url("me/proj", ssh_set_up=False)
+        == "https://github.com/me/proj.git"
+    )
+    assert clone_url("me/proj", "--https") == "https://github.com/me/proj.git"
+    assert (
+        clone_url("me/proj", "--ssh", ssh_set_up=False)
+        == "git@github.com:me/proj.git"
+    )
+    # Another host's URL is left as given
+    assert (
+        clone_url("https://gitlab.com/me/proj.git")
+        == "https://gitlab.com/me/proj.git"
+    )

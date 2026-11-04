@@ -376,8 +376,15 @@ def clone(
         ),
     ] = None,
     ssh: Annotated[
-        bool, typer.Option("--ssh", help="Use SSH with Git.")
-    ] = False,
+        bool | None,
+        typer.Option(
+            "--ssh/--https",
+            help=(
+                "Use SSH or HTTPS with Git. Defaults to SSH for GitHub if "
+                "it's set up, i.e., GitHub accepts a key here."
+            ),
+        ),
+    ] = None,
     no_config_remote: Annotated[
         bool,
         typer.Option(
@@ -414,9 +421,14 @@ def clone(
         url = project["git_repo_url"]
         if not url.endswith(".git"):
             url += ".git"
+    # Use SSH for GitHub where it's set up, so pushing later needs no token
+    on_github = url.startswith("https://github.com/")
+    if ssh is None:
+        ssh = on_github and calkit.github.can_use_ssh()
         if ssh:
-            typer.echo("Converting URL to use with SSH")
-            url = url.replace("https://github.com/", "git@github.com:")
+            typer.echo("Cloning over SSH, which is set up for GitHub")
+    if ssh and on_github:
+        url = url.replace("https://github.com/", "git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
     if not non_recursive:

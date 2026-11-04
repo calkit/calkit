@@ -77,6 +77,12 @@ def get_set_upstream_args(
     push, Git pushes to a remote other than the one it pulls from, or
     there's no obvious remote to choose.
     """
+
+    def get_config(key: str) -> str:
+        # Through Git, since its keys are case-insensitive and config files
+        # can include others
+        return str(repo.git.config("--get", key, with_exceptions=False))
+
     # These pick their own refs, so naming the branch would change them
     ref_flags = {
         "--all",
@@ -87,7 +93,14 @@ def get_set_upstream_args(
         "-d",
         "--prune",
     }
-    if any(not a.startswith("-") or a in ref_flags for a in push_args or []):
+    for arg in push_args or []:
+        if not arg.startswith("-") or arg in ref_flags:
+            return []
+        # A remote named this way loses to one given as an argument
+        if arg == "--repo" or arg.startswith("--repo="):
+            return []
+    # Neither pushes just the current branch, which naming it would do
+    if get_config("push.default") in ("nothing", "matching"):
         return []
     try:
         branch = repo.active_branch
@@ -96,13 +109,10 @@ def get_set_upstream_args(
         return []
     if branch.tracking_branch() is not None:
         return []
-    config = repo.config_reader()
-    section = f'branch "{branch.name}"'
-    push_remote = str(
-        config.get_value(section, "pushRemote", "")
-        or config.get_value("remote", "pushDefault", "")
+    push_remote = get_config(f"branch.{branch.name}.pushRemote") or get_config(
+        "remote.pushDefault"
     )
-    pull_remote = str(config.get_value(section, "remote", ""))
+    pull_remote = get_config(f"branch.{branch.name}.remote")
     # Git already pushes a new branch to a push remote that isn't the one
     # it pulls from, and setting an upstream would change where it pulls
     if push_remote and push_remote != (pull_remote or "origin"):

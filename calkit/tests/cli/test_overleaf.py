@@ -1544,10 +1544,13 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     monkeypatch.setattr(
         "calkit.cli.main.core.push", lambda **kwargs: pushes.append(kwargs)
     )
-    # The same line endings on every runner, since status compares bytes
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    # The same line endings on every runner, since status compares bytes,
+    # and a first push that works without push.autoSetupRemote, which CI sets
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "input")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "push.autoSetupRemote")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "false")
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     remote = tempfile.mkdtemp()

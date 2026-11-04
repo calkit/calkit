@@ -232,7 +232,8 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             # the docker group so Docker can be used without it
             "script": (
                 "curl -fsSL https://get.docker.com | sudo sh "
-                '&& sudo usermod -aG docker "$USER"'
+                # $USER isn't always set, e.g., in a container
+                '&& sudo usermod -aG docker "$(id -un)"'
             ),
             "path_add": "/usr/bin",
         },

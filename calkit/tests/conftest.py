@@ -7,6 +7,8 @@ import subprocess
 
 import pytest
 
+TOOLS = ["docker", "juliaup", "chrome"]
+
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
@@ -30,7 +32,8 @@ def get_missing_reason(tool: str) -> str | None:
         except subprocess.TimeoutExpired:
             return "Docker did not answer"
         if res.returncode != 0:
-            return "Docker is not usable: " + res.stderr.decode().strip()
+            stderr = res.stderr.decode(errors="replace").strip()
+            return "Docker is not usable: " + stderr
         return None
     if tool == "juliaup":
         if shutil.which("juliaup") is None:
@@ -50,15 +53,19 @@ def get_missing_reason(tool: str) -> str | None:
         ):
             return None
         return "Chrome is not installed"
-    raise ValueError(f"Unknown tool '{tool}'")
+    return None
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
+    tools = [t for m in item.iter_markers("needs") for t in m.args]
+    # Checked even in CI, where a misspelled tool would never be looked up
+    unknown = sorted(set(tools) - set(TOOLS))
+    if unknown:
+        raise ValueError(f"Unknown tools for 'needs': {unknown}")
     # CI has everything, so a missing tool there is a failure, not a skip
-    if os.getenv("CI"):
+    if os.getenv("CI", "").lower() not in ("", "0", "false"):
         return
-    for marker in item.iter_markers("needs"):
-        for tool in marker.args:
-            reason = get_missing_reason(tool)
-            if reason is not None:
-                pytest.skip(reason)
+    for tool in tools:
+        reason = get_missing_reason(tool)
+        if reason is not None:
+            pytest.skip(reason)

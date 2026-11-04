@@ -5134,6 +5134,17 @@ export const OverleafLinkPublicSchema = {
       ],
       title: "Current User Access",
     },
+    github_repo_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Repo Url",
+    },
   },
   type: "object",
   required: [
@@ -5145,6 +5156,8 @@ export const OverleafLinkPublicSchema = {
     "current_user_access",
   ],
   title: "OverleafLinkPublic",
+  description:
+    "A folder of a Calkit project an Overleaf project syncs with, and what\nthe current user can do with that project.\n\n``github_repo_url`` is the project's repo on GitHub, in one canonical\nform, e.g., to open it in a Codespace, or none if it's elsewhere.",
 } as const
 
 export const OverleafLookupSchema = {

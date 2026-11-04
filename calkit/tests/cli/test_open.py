@@ -131,6 +131,16 @@ def test_open_project(tmp_path, monkeypatch):
     assert cloned == [("me/new-proj", new_path)]
     assert opened == [["/fake/bin/code", new_path]]
     os.chdir(tmp_path)
+    # One on another hub is cloned from there
+    result = run("calkit.example.edu/me/hub-proj", "--yes")
+    assert result.exit_code == 0, result.output
+    assert cloned[-1] == (
+        "calkit.example.edu/me/hub-proj",
+        os.path.join(str(home), "calkit", "hub-proj"),
+    )
+    os.chdir(tmp_path)
+    result = run("a/b/c/d")
+    assert result.exit_code != 0 and "HUB/OWNER/NAME" in result.output
     # One given for this time wins over the default
     result = run("me/new-proj", "--with", "jupyterlab")
     assert result.exit_code == 0, result.output

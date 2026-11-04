@@ -2878,9 +2878,9 @@ calkit open project [OPTIONS] PROJECT
 
 Arguments:
 
-| Argument  | Type | Required | Default | Description                                               |
-| --------- | ---- | -------- | ------- | --------------------------------------------------------- |
-| `project` | str  | yes      |         | Project name, or owner and name, e.g., 'someone/my-proj'. |
+| Argument  | Type | Required | Default | Description                                                                                                                               |
+| --------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `project` | str  | yes      |         | Project name, or owner and name, e.g., 'someone/my-proj', with its hub to clone from another, e.g., 'calkit.example.edu/someone/my-proj'. |
 
 Options:
 

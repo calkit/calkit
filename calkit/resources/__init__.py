@@ -61,8 +61,8 @@ def render_devcontainer_spec() -> dict:
 
     The spec's ``settings`` are the shared VS Code settings plus the
     container-only ones defined in the base, and its ``extensions`` are the
-    shared recommendations, so a project gets the same setup whether or not
-    it's opened in a container.
+    shared recommendations minus any the base excludes, so a project gets
+    nearly the same setup whether or not it's opened in a container.
     """
     spec = load_json("devcontainer", "base.json")
     base = spec.setdefault("customizations", {}).get("vscode", {})
@@ -70,10 +70,14 @@ def render_devcontainer_spec() -> dict:
     # Container-only settings win, since they exist to override how things
     # work inside the container
     settings |= base.get("settings", {})
+    # The base leaves out extensions with a "-" prefix, which the dev
+    # container spec also reads as "don't install", e.g., one Codespaces adds
+    excluded = [e for e in base.get("extensions", []) if e.startswith("-")]
+    skipped = {e[1:].lower() for e in excluded}
+    recommended = load_json("vscode", "extensions.json")["recommendations"]
     vscode = {
-        "extensions": load_json("vscode", "extensions.json")[
-            "recommendations"
-        ],
+        "extensions": [e for e in recommended if e.lower() not in skipped]
+        + excluded,
         "settings": settings,
     }
     # Anything else the base customizes, e.g., a future `snippets` key, is
@@ -82,6 +86,50 @@ def render_devcontainer_spec() -> dict:
         vscode.setdefault(key, value)
     spec["customizations"]["vscode"] = vscode
     return spec
+
+
+def make_devcontainer_spec(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> str:
+    """Return the dev container spec for a project, as JSON text.
+
+    Julia is only installed for a project with a Julia environment, in it
+    or a subproject, since installing it slows down creating every
+    Codespace.
+    """
+    from calkit.core import iter_projects
+
+    def uses_julia(env: Any) -> bool:
+        if not isinstance(env, dict):
+            return False
+        # A switch's options may be defined in place
+        options = [
+            o.get("use")
+            for o in env.get("switch") or []
+            if isinstance(o, dict)
+        ]
+        return env.get("kind") == "julia" or any(map(uses_julia, options))
+
+    spec = load_json("devcontainer", DEVCONTAINER_FNAME)
+    projects = iter_projects(wdir=wdir, ck_info=ck_info)
+    if not any(
+        uses_julia(env)
+        for _, info in projects
+        for env in (info.get("environments") or {}).values()
+    ):
+        features = spec.get("features", {})
+        for key in list(features):
+            if key.startswith(
+                "ghcr.io/julialang/devcontainer-features/julia:"
+            ):
+                del features[key]
+        vscode = spec["customizations"]["vscode"]
+        vscode["extensions"] = [
+            e
+            for e in vscode["extensions"]
+            if e.lower() != "julialang.language-julia"
+        ]
+    return json.dumps(spec, indent=2) + "\n"
 
 
 def get_action_ref(version: str | None = None) -> str:

@@ -3552,6 +3552,7 @@ Check things.
 | [`storage`](#subcommand-check-storage)                      | Check that paths are tracked where they're declared to be stored.                                            |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
 | [`questions`](#subcommand-check-questions)                  | Check that answered questions are backed by current evidence.                                                |
+| [`references`](#subcommand-check-references)                | Check that the references the project's documents cite are real.                                             |
 
 <a id="subcommand-check-repro"></a>
 
@@ -3945,6 +3946,35 @@ Options:
 | `--verbose`, `-v` | boolean | no       | False   | List every answered question and its evidence, not only the ones needing attention.   |
 | `--json`          | boolean | no       | False   | Output the report as JSON.                                                            |
 | `--no-pipeline`   | boolean | no       | False   | Skip asking DVC which stages are out of date, which is the slowest part of the check. |
+
+<a id="subcommand-check-references"></a>
+
+#### `calkit check references`
+
+Check that the references the project's documents cite are real.
+
+Reads citation keys from the documents the pipeline builds, and the files they input, then resolves each against the project's reference collections and looks the entry up in Crossref, OpenAlex, and arXiv. Reports, worst first: a key defined in no collection, so the citation cannot resolve; an entry whose identifier resolves to a different work than it describes; and an entry no service has, which is what a fabricated citation looks like, though a venue that registers no DOIs looks the same and is named as such.
+
+One report per document is written to .calkit/reference-checks, so each is a pipeline output that goes stale when its document or a collection changes. Answers are cached, so a rerun needs no network.
+
+Exits with an error if a key resolves to no entry, or an entry contradicts the record it was found in. A reference that simply isn't indexed anywhere is reported but doesn't fail the check.
+
+Usage:
+
+```text
+calkit check references [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                      |
+| ----------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------- |
+| `--wdir`          | str     | no       | .       | Project working directory.                                                       |
+| `--verbose`, `-v` | boolean | no       | False   | List every cited reference, not only the ones needing attention.                 |
+| `--json`          | boolean | no       | False   | Output the report as JSON.                                                       |
+| `--offline`       | boolean | no       | False   | Use only cached answers instead of calling out to Crossref, OpenAlex, and arXiv. |
+| `--refresh`       | boolean | no       | False   | Ignore the cache and ask the services again.                                     |
+| `--no-write`      | boolean | no       | False   | Don't write the reports into .calkit/reference-checks.                           |
 
 <a id="command-group-fix"></a>
 

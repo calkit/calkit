@@ -325,6 +325,7 @@ class Stage(Model):
         "markdown-pdf",
         "procedure",
         "questions-to-latex",
+        "references-check",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -1797,6 +1798,57 @@ class QuestionsToLatexStage(Stage):
         return outs
 
 
+class ReferencesCheckStage(Stage):
+    """Whether the references the project's documents cite are real.
+
+    Its inputs are ``calkit.yaml``, the documents the pipeline builds
+    into PDFs, the files they input, and the project's reference
+    collections, and its outputs are one report per document, all added
+    when the pipeline is compiled. Nothing needs declaring in the stage.
+    """
+
+    kind: Literal["references-check"] = "references-check"
+    environment: str = "_system"
+    offline: bool = Field(
+        default=False,
+        description=(
+            "Use only cached answers instead of calling out to Crossref, "
+            "OpenAlex, and arXiv, e.g., where the pipeline runs without a "
+            "network."
+        ),
+    )
+    wdir: None = Field(
+        default=None,
+        description="Not supported; the stage reads the project's "
+        "calkit.yaml and documents from the project root.",
+    )
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = "calkit check references"
+        if self.offline:
+            cmd += " --offline"
+        return cmd
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        """Stored with Git by default, since a report is small text."""
+        outs: list[str | dict] = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(cache=False, persist=False)})
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=out.storage == "dvc",
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
+
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
     script_path: RelativeChildPathString = Field(
@@ -2866,6 +2918,7 @@ class Pipeline(Model):
                 | QuartoStage
                 | JsonToLatexStage
                 | QuestionsToLatexStage
+                | ReferencesCheckStage
                 | MatlabScriptStage
                 | MatlabCommandStage
                 | ShellCommandStage

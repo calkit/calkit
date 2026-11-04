@@ -2386,6 +2386,7 @@ def to_dvc(
     import calkit.latex
     import calkit.markdown
     import calkit.questions
+    import calkit.references
     from calkit.environments import (
         SWITCH_KIND,
         get_env,
@@ -2409,6 +2410,11 @@ def to_dvc(
     ck_info = markdown.ck_info
     # Likewise give questions-to-latex stages the evidence they read
     ck_info = calkit.questions.expand_questions_stages(ck_info)
+    # And give references-check stages the documents and collections they
+    # read, and a report per document to write
+    ck_info = calkit.references.expand_reference_check_stages(
+        ck_info, wdir=wdir
+    )
     # The project model isn't validated on every load, so this rule is
     # enforced where stages are compiled
     from calkit.models.core import env_requirements_problem

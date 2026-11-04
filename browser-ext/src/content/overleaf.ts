@@ -2458,11 +2458,13 @@ function renderStatus(
           text: `Synced folder: ${status.path}`,
         }),
         // Where to work on what the paper shows, without installing anything
-        link.github_repo
+        link.github_repo_url
           ? el("a", {
               class: "small",
               text: "Open in Codespaces",
-              href: `https://codespaces.new/${link.github_repo}?quickstart=1`,
+              href: `https://codespaces.new${
+                new URL(link.github_repo_url).pathname
+              }?quickstart=1`,
               title: "Work on the project in a GitHub Codespace",
               attrs: { target: "_blank" },
             })
@@ -3886,11 +3888,13 @@ function drawRail(): void {
         href: base,
         attrs: { target: "_blank" },
       }),
-      link.github_repo
+      link.github_repo_url
         ? el("a", {
             class: "small",
             text: "Open in Codespaces",
-            href: `https://codespaces.new/${link.github_repo}?quickstart=1`,
+            href: `https://codespaces.new${
+              new URL(link.github_repo_url).pathname
+            }?quickstart=1`,
             title: "Work on the project in a GitHub Codespace",
             attrs: { target: "_blank" },
           })

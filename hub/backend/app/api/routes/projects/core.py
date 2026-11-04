@@ -7713,14 +7713,20 @@ def get_project_overleaf_sync_status(
 
 
 class OverleafLinkPublic(BaseModel):
+    """A folder of a Calkit project an Overleaf project syncs with, and what
+    the current user can do with that project.
+
+    ``github_repo_url`` is the project's repo on GitHub, in one canonical
+    form, e.g., to open it in a Codespace, or none if it's elsewhere.
+    """
+
     overleaf_project_id: str
     path: str
     project_owner_name: str
     project_name: str
     project_title: str
     current_user_access: Literal["read", "write", "admin", "owner"] | None
-    # Its GitHub repo, e.g., to open it in a Codespace, if it's on GitHub
-    github_repo: str | None = None
+    github_repo_url: str | None = None
 
 
 def _indexed_overleaf_links(
@@ -7753,7 +7759,11 @@ def _indexed_overleaf_links(
                 project_name=project.name,
                 project_title=project.title,
                 current_user_access=project.current_user_access,
-                github_repo=project.github_repo,
+                github_repo_url=(
+                    f"https://github.com/{project.github_repo}"
+                    if project.github_repo
+                    else None
+                ),
             )
         )
     return resp

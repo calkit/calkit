@@ -131,6 +131,10 @@ def test_open_project(tmp_path, monkeypatch):
     assert cloned == [("me/new-proj", new_path)]
     assert opened == [["/fake/bin/code", new_path]]
     os.chdir(tmp_path)
+    # One given for this time wins over the default
+    result = run("me/new-proj", "--with", "jupyterlab")
+    assert result.exit_code == 0, result.output
+    assert opened == [["/fake/bin/jupyter", "lab", new_path]]
     # The default editor can be another one we know or any command
     for editor, cmd in [
         ("jupyterlab", ["/fake/bin/jupyter", "lab"]),
@@ -149,15 +153,6 @@ def test_open_project(tmp_path, monkeypatch):
     monkeypatch.setattr(calkit.config, "read", read_settings)
     # Without VS Code, and no terminal to ask in, the folder opens instead
     editors.clear()
-    real_isfile = os.path.isfile
-    monkeypatch.setattr(
-        "os.path.isfile",
-        lambda p: (
-            "VS Code" not in str(p)
-            and "Visual Studio" not in str(p)
-            and real_isfile(p)
-        ),
-    )
     launched = []
     monkeypatch.setattr("typer.launch", lambda path: launched.append(path))
     monkeypatch.setattr("calkit.core.is_tty", lambda: False)
@@ -175,7 +170,9 @@ def test_open_project(tmp_path, monkeypatch):
 
     monkeypatch.setattr("calkit.core.is_tty", lambda: True)
     monkeypatch.setattr(
-        calkit.install, "get_installer", lambda app: {"script": "fake"}
+        calkit.install,
+        "get_installer",
+        lambda app: {"script": "fake", "path_add": []},
     )
     monkeypatch.setattr(calkit.install, "install", fake_install)
     monkeypatch.setenv("APPDATA", str(home / "AppData"))

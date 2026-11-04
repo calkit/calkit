@@ -2867,7 +2867,7 @@ Open things.
 
 Open a project on this machine in its editor, from anywhere.
 
-Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor'.
+Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor', or the one given with '--with'.
 
 Usage:
 
@@ -2883,9 +2883,10 @@ Arguments:
 
 Options:
 
-| Option        | Type    | Required | Default | Description                                          |
-| ------------- | ------- | -------- | ------- | ---------------------------------------------------- |
-| `--yes`, `-y` | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here. |
+| Option         | Type    | Required | Default | Description                                                                                            |
+| -------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--yes`, `-y`  | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here.                                                   |
+| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder. |
 
 <a id="command-group-export"></a>
 

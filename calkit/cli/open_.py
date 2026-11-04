@@ -50,13 +50,25 @@ def open_project(
             help="Clone into ~/calkit without asking if it isn't here.",
         ),
     ] = False,
+    with_editor: Annotated[
+        str | None,
+        typer.Option(
+            "--with",
+            "-w",
+            help=(
+                "Editor to open it with instead of the default, e.g., "
+                "'jupyterlab', or a command that takes the folder."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Open a project on this machine in its editor, from anywhere.
 
     Looks for it among the Calkit projects in your home folder, e.g., in
     ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't
     there. The editor is the 'default_editor' setting, VS Code unless
-    set otherwise, e.g., with 'calkit config set default_editor cursor'.
+    set otherwise, e.g., with 'calkit config set default_editor cursor',
+    or the one given with '--with'.
     """
     import shutil
     import subprocess
@@ -68,7 +80,7 @@ def open_project(
         raise_error("Give the project as NAME or OWNER/NAME")
     # Read now, since cloning moves into the new repo, and a '.env' file
     # there must not get to choose what runs
-    editor = calkit.config.read().default_editor
+    editor = with_editor or calkit.config.read().default_editor
     home = os.path.expanduser("~")
     default_path = os.path.join(home, "calkit", name)
     # Find checkouts of it, by the owner and name each project says it has
@@ -164,41 +176,20 @@ def open_project(
 
 
 def find_or_install_vscode() -> str | None:
-    """Find VS Code's command where it's installed but not on PATH, e.g.,
-    an app dragged into /Applications, or offer to install it, optionally
-    with Calkit's recommended extensions and settings.
+    """Find VS Code's command, even where it isn't on PATH, or offer to
+    install it, optionally with Calkit's recommended extensions and
+    settings.
     """
-    import json
-    import shutil
-    import subprocess
-
     import click
 
     from calkit import install
     from calkit.core import is_tty
-    from calkit.resources import load_json
 
-    platform = install._current_platform()
-    known = {
-        "mac": [
-            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/"
-            "code",
-            os.path.expanduser(
-                "~/Applications/Visual Studio Code.app/Contents/Resources/"
-                "app/bin/code"
-            ),
-        ],
-        "windows": [
-            os.path.expandvars(
-                "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\bin\\code.cmd"
-            ),
-        ],
-    }
-    for path in known.get(platform, []):
-        if os.path.isfile(path):
-            return path
+    code = install.find("code")
+    if code is not None:
+        return code
     entry = install.get_installer("code")
-    download_url = "https://code.visualstudio.com/download"
+    download_url = install.DOWNLOAD_PAGES["code"]
     if not is_tty():
         hint = install.get_unsupported_message("code") or (
             "install it with 'calkit install code'"
@@ -232,36 +223,7 @@ def find_or_install_vscode() -> str | None:
     if not install.install("code"):
         warn("Couldn't install VS Code")
         return None
-    code = shutil.which("code")
-    if code is None or choice != "2":
-        return code
-    # Recommended extensions, and settings that aren't already set, so a
-    # choice the user made in VS Code is kept
-    extensions = load_json("vscode", "extensions.json")["recommendations"]
-    args = [a for e in extensions for a in ("--install-extension", e)]
-    subprocess.call([code, *args])
-    settings_dir = {
-        "mac": "~/Library/Application Support/Code/User",
-        "windows": "%APPDATA%\\Code\\User",
-    }.get(platform, "~/.config/Code/User")
-    settings_path = os.path.join(
-        os.path.expandvars(os.path.expanduser(settings_dir)), "settings.json"
-    )
-    current: dict = {}
-    if os.path.isfile(settings_path):
-        try:
-            with open(settings_path, encoding="utf-8") as f:
-                current = json.load(f)
-        except ValueError:
-            # VS Code allows comments there, which can't be merged into
-            # without losing them
-            warn(
-                f"Not adding Calkit's settings to {settings_path}, since it "
-                "isn't plain JSON"
-            )
-            return code
-    recommended = load_json("vscode", "settings.json")
-    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
-    with open(settings_path, "w", encoding="utf-8") as f:
-        json.dump(recommended | current, f, indent=2)
+    code = install.find("code")
+    if code is not None and choice == "2":
+        install.add_vscode_recommendations(code)
     return code

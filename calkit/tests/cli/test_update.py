@@ -28,7 +28,7 @@ def test_update_project_config(tmp_dir, monkeypatch):
     result = runner.invoke(update_app, ["devcontainer"])
     assert result.exit_code == 0
     with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
-        assert f.read() == calkit.resources.render_project_devcontainer({})
+        assert f.read() == calkit.resources.make_devcontainer_spec({})
     result = runner.invoke(update_app, ["vscode-config"])
     assert result.exit_code == 0
     for fname in calkit.resources.VSCODE_FNAMES:

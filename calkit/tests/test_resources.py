@@ -77,7 +77,7 @@ def test_resources(monkeypatch):
     assert merged["settings"] == customizations["settings"]
 
 
-def test_render_project_devcontainer():
+def test_make_devcontainer_spec():
     spec = calkit.resources.load_json(
         "devcontainer", calkit.resources.DEVCONTAINER_FNAME
     )
@@ -89,7 +89,7 @@ def test_render_project_devcontainer():
     )
     # Without a Julia environment, Julia isn't installed
     for ck_info in [None, {}, {"environments": {"py": {"kind": "uv"}}}]:
-        txt = calkit.resources.render_project_devcontainer(ck_info)
+        txt = calkit.resources.make_devcontainer_spec(ck_info)
         assert txt.endswith("}\n")
         rendered = json.loads(txt)
         assert not [k for k in rendered["features"] if "julia" in k]
@@ -102,7 +102,7 @@ def test_render_project_devcontainer():
             in (rendered["features"])
         )
     # With one, the spec is the bundled one as-is
-    txt = calkit.resources.render_project_devcontainer(
+    txt = calkit.resources.make_devcontainer_spec(
         {"environments": {"jl": {"kind": "julia", "julia": "1.11"}}}
     )
     assert json.loads(txt) == spec

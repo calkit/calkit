@@ -88,7 +88,7 @@ def render_devcontainer_spec() -> dict:
     return spec
 
 
-def render_project_devcontainer(ck_info: dict | None = None) -> str:
+def make_devcontainer_spec(ck_info: dict | None = None) -> str:
     """Return the dev container spec for a project, as JSON text.
 
     Julia is only installed for a project with a Julia environment, since

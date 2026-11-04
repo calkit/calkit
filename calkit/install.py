@@ -242,10 +242,21 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
         },
     },
     "code": {
+        # VS Code's own download, unzipped where its installer would put it,
+        # so it doesn't take Homebrew
         "mac": {
-            "script": "brew install --cask visual-studio-code",
-            "path_add": _BREW_BINS,
-            "requires": ["brew"],
+            "script": (
+                'zip="$(mktemp)" && curl -fsSL -o "$zip" '
+                "https://update.code.visualstudio.com/latest/darwin-universal/"
+                'stable && ditto -xk "$zip" /Applications && rm "$zip"'
+            ),
+            # Also where one dragged into the user's own Applications runs
+            "path_add": [
+                "/Applications/Visual Studio Code.app/Contents/Resources/app/"
+                "bin",
+                "~/Applications/Visual Studio Code.app/Contents/Resources/app/"
+                "bin",
+            ],
         },
         "windows": {
             "script": _WINGET + "Microsoft.VisualStudioCode",
@@ -435,6 +446,62 @@ def _add_to_path(entry: Installer) -> None:
         # Prepend so our new install wins over any stale copy
         if path_add not in current_path.split(os.pathsep):
             os.environ["PATH"] = path_add + os.pathsep + current_path
+
+
+def find(app: str) -> str | None:
+    """Find an app's binary on ``PATH``, or where its installer puts it.
+
+    An app can be installed without being on ``PATH``, e.g., VS Code
+    dragged into /Applications without its shell command.
+    """
+    found = shutil.which(app)
+    if found is not None:
+        return found
+    entry = get_installer(app)
+    if entry is None:
+        return None
+    paths = entry["path_add"]
+    dirs = [
+        _expand_path(p) for p in ([paths] if isinstance(paths, str) else paths)
+    ]
+    return shutil.which(app, path=os.pathsep.join(dirs))
+
+
+# Where to get apps whose installers aren't registered for every platform
+DOWNLOAD_PAGES = {"code": "https://code.visualstudio.com/download"}
+
+
+def add_vscode_recs(code: str) -> None:
+    """Install the VS Code extensions Calkit recommends, and add its
+    recommended settings to the user's, keeping any already set.
+    """
+    from calkit.resources import load_json
+
+    extensions = load_json("vscode", "extensions.json")["recommendations"]
+    args = [a for e in extensions for a in ("--install-extension", e)]
+    subprocess.call([code, *args])
+    settings_dir = {
+        "mac": "~/Library/Application Support/Code/User",
+        "windows": "%APPDATA%\\Code\\User",
+    }.get(_current_platform(), "~/.config/Code/User")
+    settings_path = os.path.join(_expand_path(settings_dir), "settings.json")
+    current: dict = {}
+    if os.path.isfile(settings_path):
+        try:
+            with open(settings_path, encoding="utf-8") as f:
+                current = json.load(f)
+        except ValueError:
+            # VS Code allows comments there, which can't be merged into
+            # without losing them
+            print(
+                f"Not adding Calkit's settings to {settings_path}, since it "
+                "isn't plain JSON"
+            )
+            return
+    recommended = load_json("vscode", "settings.json")
+    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump(recommended | current, f, indent=2)
 
 
 def install(app: str) -> bool:

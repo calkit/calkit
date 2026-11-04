@@ -1169,9 +1169,8 @@ def post_project(
                 dc_fpath = os.path.join(dc_dir, "devcontainer.json")
                 with open(dc_fpath, "w", encoding="utf-8") as f:
                     f.write(
-                        calkit.resources.read_text(
-                            "devcontainer",
-                            calkit.resources.DEVCONTAINER_FNAME,
+                        calkit.resources.make_devcontainer_spec(
+                            ck_info, wdir=repo.working_dir
                         )
                     )
                 repo.git.add(".devcontainer")
@@ -7713,12 +7712,20 @@ def get_project_overleaf_sync_status(
 
 
 class OverleafLinkPublic(BaseModel):
+    """A folder of a Calkit project an Overleaf project syncs with, and what
+    the current user can do with that project.
+
+    ``github_repo_url`` is the project's repo on GitHub, in one canonical
+    form, e.g., to open it in a Codespace, or none if it's elsewhere.
+    """
+
     overleaf_project_id: str
     path: str
     project_owner_name: str
     project_name: str
     project_title: str
     current_user_access: Literal["read", "write", "admin", "owner"] | None
+    github_repo_url: str | None = None
 
 
 def _indexed_overleaf_links(
@@ -7751,6 +7758,11 @@ def _indexed_overleaf_links(
                 project_name=project.name,
                 project_title=project.title,
                 current_user_access=project.current_user_access,
+                github_repo_url=(
+                    f"https://github.com/{project.github_repo}"
+                    if project.github_repo
+                    else None
+                ),
             )
         )
     return resp

@@ -3022,6 +3022,12 @@ export type OrgsResponse = {
 
 /**
  * OverleafLinkPublic
+ *
+ * A folder of a Calkit project an Overleaf project syncs with, and what
+ * the current user can do with that project.
+ *
+ * ``github_repo_url`` is the project's repo on GitHub, in one canonical
+ * form, e.g., to open it in a Codespace, or none if it's elsewhere.
  */
 export type OverleafLinkPublic = {
   /**
@@ -3048,6 +3054,10 @@ export type OverleafLinkPublic = {
    * Current User Access
    */
   current_user_access: "read" | "write" | "admin" | "owner" | null
+  /**
+   * Github Repo Url
+   */
+  github_repo_url?: string | null
 }
 
 /**

@@ -79,6 +79,10 @@ def test_install_and_path_injection(tmp_dir, monkeypatch):
     import shutil
 
     assert shutil.which("pixi") is None
+    # Where it's installed but not on PATH, it's still found, without
+    # changing PATH
+    assert install.find("pixi") == shutil.which("pixi", path=str(fake_bin_dir))
+    assert os.environ["PATH"] == "/usr/bin:/bin"
     assert install.install("pixi") is True
     assert str(fake_bin_dir) in os.environ["PATH"].split(os.pathsep)
     assert shutil.which("pixi") is not None

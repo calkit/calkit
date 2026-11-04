@@ -5,7 +5,7 @@
   "latex-workshop.docker.enabled": true,
   "dvc.doNotShowSetupAfterInstall": true,
   "workbench.editorAssociations": {
-    "*.pdf": "latex-workshop-pdf-hook"
+    "*.pdf": "calkit.pdfReview"
   },
   "git.autofetch": true,
   "[python]": {

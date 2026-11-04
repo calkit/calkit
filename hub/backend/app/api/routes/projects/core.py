@@ -1169,9 +1169,8 @@ def post_project(
                 dc_fpath = os.path.join(dc_dir, "devcontainer.json")
                 with open(dc_fpath, "w", encoding="utf-8") as f:
                     f.write(
-                        calkit.resources.read_text(
-                            "devcontainer",
-                            calkit.resources.DEVCONTAINER_FNAME,
+                        calkit.resources.make_devcontainer_spec(
+                            ck_info, wdir=repo.working_dir
                         )
                     )
                 repo.git.add(".devcontainer")

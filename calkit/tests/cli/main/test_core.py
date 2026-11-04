@@ -4030,10 +4030,11 @@ def test_run_records_app_version(tmp_dir):
     assert system["os"] == platform.system()
 
 
-def test_clone_picks_ssh_or_https(monkeypatch):
+def test_clone(monkeypatch):
     from typer.testing import CliRunner
 
     cloned = []
+    hubs = []
 
     def check_call(cmd, *args, **kwargs):
         # Stop at the clone, which is all that depends on the protocol
@@ -4042,25 +4043,32 @@ def test_clone_picks_ssh_or_https(monkeypatch):
             raise subprocess.CalledProcessError(1, cmd)
         raise AssertionError(cmd)
 
-    def clone_url(*args, ssh_set_up=True):
+    def get(path):
+        hubs.append(os.environ.get("CALKIT_HUB"))
+        return {"git_repo_url": "https://github.com/me/proj"}
+
+    def clone(*args, ssh_set_up=True):
         cloned.clear()
+        hubs.clear()
+        monkeypatch.delenv("CALKIT_HUB", raising=False)
         monkeypatch.setattr(calkit.github, "can_use_ssh", lambda: ssh_set_up)
         result = CliRunner().invoke(calkit.cli.main.app, ["clone", *args])
         assert result.exit_code != 0
+        return result
+
+    def clone_url(*args, **kwargs):
+        clone(*args, **kwargs)
         return cloned[0]
 
     monkeypatch.setattr("subprocess.check_call", check_call)
-    monkeypatch.setattr(
-        calkit.hub,
-        "get",
-        lambda path: {"git_repo_url": "https://github.com/me/proj"},
-    )
+    monkeypatch.setattr(calkit.hub, "get", get)
     # SSH where it's set up for GitHub, by a project's name or its URL
     assert clone_url("me/proj") == "git@github.com:me/proj.git"
     assert (
         clone_url("https://github.com/me/proj.git")
         == "git@github.com:me/proj.git"
     )
+    assert clone_url("github.com/me/proj") == "git@github.com:me/proj"
     # Otherwise HTTPS, which is also what's asked for wins
     assert (
         clone_url("me/proj", ssh_set_up=False)
@@ -4076,3 +4084,22 @@ def test_clone_picks_ssh_or_https(monkeypatch):
         clone_url("https://gitlab.com/me/proj.git")
         == "https://gitlab.com/me/proj.git"
     )
+    # A project is looked up on the default hub, the one it names, or the
+    # one given, and localhost is the development hub
+    for args, hub in [
+        (["me/proj"], None),
+        (["calkit.example.edu/me/proj"], "https://calkit.example.edu"),
+        (
+            ["me/proj", "--hub", "calkit.example.edu"],
+            "https://calkit.example.edu",
+        ),
+        (["localhost/me/proj"], "http://localhost:5173"),
+        (["localhost:5173/me/proj"], "http://localhost:5173"),
+    ]:
+        clone(*args)
+        assert hubs == [hub], args
+    # Two different hubs, or a name that isn't one, is an error
+    result = clone("a.edu/me/proj", "--hub", "b.edu")
+    assert "doesn't match" in result.output and not hubs
+    result = clone("a/b/c/d")
+    assert "HUB/OWNER/NAME" in result.output and not hubs

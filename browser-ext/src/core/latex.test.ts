@@ -11,6 +11,7 @@ import {
   latexDiffPath,
   refDirName,
 } from "./latex";
+import type { StageStatus } from "./types";
 
 describe("latexDiffPath", () => {
   test("mirrors the document's own path under the comparison", () => {
@@ -244,9 +245,37 @@ describe("citationProblems", () => {
         stale_reason: "pipeline",
       }).map((p) => p.message),
     ).toEqual([
-      "Needs a manual step, since what it's made from changed: In " +
+      "Needs a manual step, since what it's made from was changed: In " +
         "Photoshop, export figures/a.png",
     ]);
+    // Stale, naming what changed where the stage's status says
+    const stale = (status: Partial<StageStatus>) =>
+      citationProblems(figure, {
+        ...base,
+        stage: "plot",
+        stale_reason: "pipeline",
+        stage_status: {
+          status: "stale",
+          modified_command: false,
+          modified_inputs: [],
+          modified_outputs: [],
+          missing_outputs: [],
+          ...status,
+        },
+      }).map((p) => p.message);
+    expect(stale({ modified_inputs: ["data/raw.csv"] })).toEqual([
+      "Stale: data/raw.csv was changed",
+    ]);
+    expect(stale({ modified_inputs: ["a.csv", "plot.py"] })).toEqual([
+      "Stale: a.csv and plot.py were changed",
+    ]);
+    expect(stale({ modified_inputs: ["a", "b", "c", "d"] })).toEqual([
+      "Stale: a, b, and 2 more were changed",
+    ]);
+    expect(stale({ modified_command: true })).toEqual([
+      "Stale: its command was changed",
+    ]);
+    expect(stale({})).toEqual(["Stale: what it's made from was changed"]);
     // Imported from somewhere only described, which is worth a warning
     expect(
       citationProblems(figure, {

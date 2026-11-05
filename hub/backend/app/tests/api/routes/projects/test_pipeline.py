@@ -305,9 +305,11 @@ def test_post_project_stage_from_script_or_notebook(
         },
     )
     script = (
+        "import glob\n"
         "import matplotlib.pyplot as plt\n"
         "import pandas as pd\n"
         "df = pd.read_csv('data/raw.csv')\n"
+        "runs = glob.glob('/Users/me/Box-Box/runs/Run*.csv')\n"
         "fig, ax = plt.subplots()\n"
         "fig.savefig('figures/fit.png')\n"
     )
@@ -357,6 +359,8 @@ def test_post_project_stage_from_script_or_notebook(
     assert data["outputs"] == ["figures/fit.png"]
     # Nothing has the data the script reads
     assert data["missing_inputs"] == ["data/raw.csv"]
+    # Nor does it have the runs, which are only on the author's laptop
+    assert data["external_inputs"] == ["/Users/me/Box-Box/runs"]
     assert data["produces"] == "figures/fit.png"
     assert data["included_in"] == ["paper/paper.tex"]
     assert data["git_repo_url"] == "https://github.com/o/p"

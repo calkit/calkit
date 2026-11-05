@@ -10362,6 +10362,14 @@ export const ReproCheckSchema = {
       title: "Scripts Not In Pipeline",
       default: [],
     },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
+      default: [],
+    },
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
@@ -10976,6 +10984,14 @@ export const StageFromScriptOrNotebookResponseSchema = {
       },
       type: "array",
       title: "Missing Inputs",
+      default: [],
+    },
+    external_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "External Inputs",
       default: [],
     },
     produces: {
@@ -13192,6 +13208,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Scripts Not In Pipeline",
+      default: [],
+    },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
       default: [],
     },
     n_dvc_remotes: {

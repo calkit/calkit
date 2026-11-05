@@ -232,6 +232,8 @@ export interface StageFromScriptOrNotebookResponse {
   outputs: string[];
   /** Inputs that aren't in the project and that no stage produces. */
   missing_inputs: string[];
+  /** Data read from outside the project, as the script names it. */
+  external_inputs?: string[];
   /** Which output is what the document shows. */
   produces?: string | null;
   /** Documents changed to show it from there, with `\ckfigure`. */

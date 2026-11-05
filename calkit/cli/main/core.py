@@ -465,6 +465,8 @@ def clone(
         calkit.config.set_hub(hub_url(hub))
     # Use SSH for GitHub when it's set up, unless asked for one or the other,
     # so pushing later needs no token
+    if use_ssh is False and url.startswith("git@github.com:"):
+        url = "https://github.com/" + url.removeprefix("git@github.com:")
     on_github = url.startswith("https://github.com/")
     if use_ssh is None:
         use_ssh = on_github and calkit.github.can_use_ssh()

@@ -2608,6 +2608,7 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
     """
     from dvc.cli import main as dvc_cli_main
 
+    calkit.dvc.ensure_writable_site_cache()
     try:
         return int(dvc_cli_main(argv))
     except ModuleNotFoundError as e:

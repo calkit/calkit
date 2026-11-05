@@ -668,7 +668,7 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
             return True
 
     register_ck_scheme()
-    ensure_writable_dvc_site_cache()
+    ensure_writable_site_cache()
     dvc.cli._log_unknown_exceptions = log_unknown_exceptions
     links = DropLinks()
     dvc.cli.logger.addFilter(links)
@@ -678,7 +678,7 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
         dvc.cli.logger.removeFilter(links)
 
 
-def ensure_writable_dvc_site_cache() -> None:
+def ensure_writable_site_cache() -> None:
     """Point DVC at a per-user site cache if the shared one isn't writable.
 
     On Linux, DVC keeps per-repo state in ``/var/tmp/dvc``, which every user
@@ -705,7 +705,7 @@ def ensure_writable_dvc_site_cache() -> None:
 def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     """Return a DVC repo with ``ck://`` scheme support registered."""
     register_ck_scheme()
-    ensure_writable_dvc_site_cache()
+    ensure_writable_site_cache()
     return dvc.repo.Repo(wdir)
 
 

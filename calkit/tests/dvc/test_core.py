@@ -737,7 +737,7 @@ def test_split_lock_stage_name():
     assert calkit.dvc.split_lock_stage_name("a:b") == (None, "a:b")
 
 
-def test_ensure_writable_dvc_site_cache(tmp_path, monkeypatch):
+def test_ensure_writable_site_cache(tmp_path, monkeypatch):
     import dvc.dirs
 
     if sys.platform == "win32":
@@ -754,13 +754,13 @@ def test_ensure_writable_dvc_site_cache(tmp_path, monkeypatch):
         lambda config=None: os.getenv("DVC_SITE_CACHE_DIR") or str(shared),
     )
     # Missing under a writable parent, so DVC can create it
-    calkit.dvc.ensure_writable_dvc_site_cache()
+    calkit.dvc.ensure_writable_site_cache()
     assert "DVC_SITE_CACHE_DIR" not in os.environ
     # Another user's, which we can't write to
     (shared / "repo").mkdir(parents=True)
     (shared / "repo").chmod(0o555)
     try:
-        calkit.dvc.ensure_writable_dvc_site_cache()
+        calkit.dvc.ensure_writable_site_cache()
         assert os.environ["DVC_SITE_CACHE_DIR"] == fallback
         # DVC then opens repos with the fallback
         monkeypatch.chdir(tmp_path)
@@ -772,7 +772,7 @@ def test_ensure_writable_dvc_site_cache(tmp_path, monkeypatch):
         repo.close()
         # One the user set is left alone
         monkeypatch.setenv("DVC_SITE_CACHE_DIR", "/somewhere")
-        calkit.dvc.ensure_writable_dvc_site_cache()
+        calkit.dvc.ensure_writable_site_cache()
         assert os.environ["DVC_SITE_CACHE_DIR"] == "/somewhere"
     finally:
         (shared / "repo").chmod(0o755)

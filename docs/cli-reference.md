@@ -90,19 +90,20 @@ calkit clone [OPTIONS] URL [LOCATION]
 
 Arguments:
 
-| Argument   | Type | Required | Default | Description                                          |
-| ---------- | ---- | -------- | ------- | ---------------------------------------------------- |
-| `url`      | str  | yes      |         | Repo URL.                                            |
-| `location` | str  | no       |         | Location to clone to (default will be ./{repo_name}) |
+| Argument   | Type | Required | Default | Description                                                                                                                   |
+| ---------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `url`      | str  | yes      |         | Project as OWNER/NAME, or HUB/OWNER/NAME for one on another hub, e.g., calkit.example.edu/someone/my-proj, or a Git repo URL. |
+| `location` | str  | no       |         | Location to clone to (default will be ./{repo_name})                                                                          |
 
 Options:
 
-| Option               | Type    | Required | Default | Description                                       |
-| -------------------- | ------- | -------- | ------- | ------------------------------------------------- |
-| `--ssh`              | boolean | no       | False   | Use SSH with Git.                                 |
-| `--no-config-remote` | boolean | no       | False   | Do not automatically configure Calkit DVC remote. |
-| `--no-dvc-pull`      | boolean | no       | False   | Do not pull DVC objects.                          |
-| `--no-recursive`     | boolean | no       | False   | Do not recursively clone submodules.              |
+| Option               | Type    | Required | Default | Description                                                                                            |
+| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--ssh`, `--https`   | boolean | no       |         | Use SSH or HTTPS with Git. Defaults to SSH for GitHub if it's set up, i.e., GitHub accepts a key here. |
+| `--hub`              | str     | no       |         | URL of the project's hub, e.g., https://calkit.example.edu. Defaults to calkit.io.                     |
+| `--no-config-remote` | boolean | no       | False   | Do not automatically configure Calkit DVC remote.                                                      |
+| `--no-dvc-pull`      | boolean | no       | False   | Do not pull DVC objects.                                                                               |
+| `--no-recursive`     | boolean | no       | False   | Do not recursively clone submodules.                                                                   |
 
 <a id="top-command-status-st"></a>
 
@@ -2877,9 +2878,9 @@ calkit open project [OPTIONS] PROJECT
 
 Arguments:
 
-| Argument  | Type | Required | Default | Description                                               |
-| --------- | ---- | -------- | ------- | --------------------------------------------------------- |
-| `project` | str  | yes      |         | Project name, or owner and name, e.g., 'someone/my-proj'. |
+| Argument  | Type | Required | Default | Description                                                                                                                               |
+| --------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `project` | str  | yes      |         | Project name, or owner and name, e.g., 'someone/my-proj', with its hub to clone from another, e.g., 'calkit.example.edu/someone/my-proj'. |
 
 Options:
 

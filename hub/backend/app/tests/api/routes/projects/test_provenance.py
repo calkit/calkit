@@ -26,19 +26,23 @@ def test_get_project_provenance(client: TestClient) -> None:
         "paper/diagram.png": "",
         "paper/box.png": "",
         "paper/from-src.png": "old",
+        "paper/from-stored.png": "old",
         "paper/from-git.png": "",
         # The other project's, which has moved on
         "figs/plot.png": "new",
         ".calkit/imports.json": json.dumps(
             {
-                "paper/from-src.png": {
-                    "hash": "sha256:" + hashlib.sha256(b"old").hexdigest()
-                }
+                path: {"hash": "sha256:" + hashlib.sha256(b"old").hexdigest()}
+                for path in ["paper/from-src.png", "paper/from-stored.png"]
             }
         ),
     }
     # In object storage, inside a directory a stage outputs
-    stored = {"results/sweep/summary.json": json.dumps({"best": 7})}
+    stored = {
+        "results/sweep/summary.json": json.dumps({"best": 7}),
+        # The other project's, kept with DVC, which has moved on too
+        "figs/stored.png": "new",
+    }
     tree = SimpleNamespace(
         is_file=lambda path: path in files,
         is_dir=lambda path: path == "data/downloaded",
@@ -73,6 +77,13 @@ def test_get_project_provenance(client: TestClient) -> None:
             {
                 "path": "paper/from-src.png",
                 "imported_from": {"project": "o/src", "path": "figs/plot.png"},
+            },
+            {
+                "path": "paper/from-stored.png",
+                "imported_from": {
+                    "project": "o/src",
+                    "path": "figs/stored.png",
+                },
             },
             {
                 "path": "paper/from-git.png",
@@ -118,7 +129,12 @@ def test_get_project_provenance(client: TestClient) -> None:
                             "kind": "file-to-file",
                             "src": "figs/out.png",
                             "dest": "paper/out.png",
-                        }
+                        },
+                        {
+                            "kind": "file-to-file",
+                            "src": "paper/from-src.png",
+                            "dest": "slides/from-src.png",
+                        },
                     ],
                 },
             }
@@ -305,6 +321,16 @@ def test_get_project_provenance(client: TestClient) -> None:
     assert body["origin_url"].endswith("/o/src/files?path=figs/plot.png")
     assert body["updatable"]
     assert body["update_available"]
+    # Also when the source is kept with DVC rather than Git
+    body = get("path=paper/from-stored.png")
+    assert body["updatable"]
+    assert body["update_available"]
+    # A copy of an import shows where it came from, but is updated through
+    # the import itself
+    body = get("path=slides/from-src.png")
+    assert body["origin"] == "Imported from o/src/figs/plot.png"
+    assert body["copied_from"] == "paper/from-src.png"
+    assert not body["updatable"]
     # Imported from a Git repo, which would have to be cloned to tell
     body = get("path=paper/from-git.png")
     assert body["updatable"]

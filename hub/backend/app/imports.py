@@ -196,6 +196,11 @@ def fetch_git_path(
     branch's head is used. Returns the commit actually checked out, which
     is what gets recorded: a branch name would drift, a commit doesn't.
     """
+
+    def inside(root: str, path: str) -> bool:
+        root, real = os.path.realpath(root), os.path.realpath(path)
+        return real == root or real.startswith(root + os.sep)
+
     # Anything else, e.g., a local path or file://, would read the server
     if not repo_url.startswith("https://"):
         raise HTTPException(422, "A Git repo is fetched from an https:// URL")
@@ -247,11 +252,27 @@ def fetch_git_path(
         except subprocess.TimeoutExpired:
             raise HTTPException(504, f"Timed out fetching from {repo_url}")
         source = os.path.join(clone, src_path) if src_path else clone
-        if not os.path.exists(source):
+        if not os.path.lexists(source):
             raise HTTPException(
                 404, f"{src_path} is not in {repo_url} at {rev}"
             )
+        # A link to elsewhere, e.g., a file on the server, would be copied
+        # into the project, so the path and everything in it stays in the
+        # clone
+        within = [source]
+        if os.path.isdir(source) and not os.path.islink(source):
+            within += [
+                os.path.join(d, name)
+                for d, dirs, files in os.walk(source)
+                for name in dirs + files
+            ]
+        if not all(inside(clone, p) for p in within):
+            raise HTTPException(
+                422, f"{src_path or 'The repo'} links to outside the repo"
+            )
         target = os.path.join(repo_dir, dest)
+        if not inside(repo_dir, target):
+            raise HTTPException(422, f"'{dest}' leads outside the project")
         os.makedirs(os.path.dirname(target) or repo_dir, exist_ok=True)
         if os.path.isdir(source):
             shutil.copytree(

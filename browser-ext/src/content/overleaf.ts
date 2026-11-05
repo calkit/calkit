@@ -86,6 +86,9 @@ let loadGeneration = 0;
 let tokenWatcher: MutationObserver | null = null;
 // The Calkit project this Overleaf project syncs with, once found
 let currentLink: OverleafLinkPublic | null = null;
+// Overleaf links whose project changed on the hub, e.g., with an import,
+// but whose sync failed, so a retry syncs even when nothing changes again
+const syncOwed = new Set<string>();
 // Kept for a minute, since the project changes under it, e.g., with a sync
 const provenanceCache = new Map<
   string,
@@ -199,6 +202,22 @@ function projectTables(link: OverleafLinkPublic): Promise<TableFile[]> {
   tables.catch(() => tablesCache.delete(cacheKey));
   tablesCache.set(cacheKey, { at: Date.now(), tables });
   return tables;
+}
+
+/**
+ * Sync after the hub changed the project, remembering until it works that
+ * a sync is owed, since the hub won't report the change again.
+ */
+async function syncAfterHubChange(link: OverleafLinkPublic): Promise<void> {
+  const key = `${linkKey(link)}:${link.path}`;
+  syncOwed.add(key);
+  await send({
+    type: "overleaf.sync",
+    owner: link.project_owner_name,
+    project: link.project_name,
+    path: link.path,
+  });
+  syncOwed.delete(key);
 }
 
 /**
@@ -737,6 +756,26 @@ function renderRecordOrigin(
         path: target,
         ...origin,
       });
+      // One from a Git repo or project replaces the file on the hub, so
+      // Overleaf gets it too
+      const imported =
+        "importedFrom" in origin ? origin.importedFrom : undefined;
+      if (imported?.project || imported?.git_repo_url) {
+        clear(message).append(loading("Syncing"));
+        try {
+          await syncAfterHubChange(link);
+        } catch (e) {
+          await showDefined(container, link, citation);
+          container.append(
+            errorMessage(
+              `Saved, but not synced to Overleaf: ${
+                e instanceof Error ? e.message : String(e)
+              }. Update to try again.`,
+            ),
+          );
+          return;
+        }
+      }
       await showDefined(container, link, citation);
     } catch (e) {
       clear(message).append(
@@ -784,6 +823,10 @@ function renderDefineOrigin(
             path: link.path,
           });
           synced = true;
+          // Found again now that it's in the project, e.g., figs/fit as
+          // figs/fit.png, so what's recorded lands on the file itself
+          provenanceCache.clear();
+          target = (await citationProvenance(link, citation)).path;
         } catch (e) {
           clear(body).append(
             errorMessage(e instanceof Error ? e.message : String(e)),
@@ -1456,14 +1499,12 @@ function renderProvenance(
             project: link.project_name,
             path: provenance.path,
           });
-          if (updated.changed) {
+          if (
+            updated.changed ||
+            syncOwed.has(`${linkKey(link)}:${link.path}`)
+          ) {
             clear(message).append(loading("Syncing"));
-            await send({
-              type: "overleaf.sync",
-              owner: link.project_owner_name,
-              project: link.project_name,
-              path: link.path,
-            });
+            await syncAfterHubChange(link);
             await showDefined(container, link, citation);
           } else {
             clear(message).append(

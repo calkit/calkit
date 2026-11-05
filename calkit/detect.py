@@ -850,9 +850,11 @@ def _detect_python_code_io(
             import ntpath
             import posixpath
 
-            if "\\" in path or re.match(r"[A-Za-z]:", path):
+            # Only drive and backslash-rooted paths are Windows ones, since
+            # joining, e.g., '~' and a folder adds backslashes on Windows
+            if re.match(r"[A-Za-z]:|\\", path):
                 return ntpath.normpath(path)
-            return posixpath.normpath(path)
+            return posixpath.normpath(path.replace("\\", "/"))
         # Relative Windows paths, e.g., '..\\data.csv', are read the same on
         # any platform
         path = path.replace("\\", "/")

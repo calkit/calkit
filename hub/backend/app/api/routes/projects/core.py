@@ -6472,6 +6472,17 @@ def _fetch_import(
     None for any other source, e.g., a DOI, which is recorded as given,
     since it names a record rather than a file that can move.
     """
+    # Written only where it stays in the project, e.g., not through a
+    # tracked symlink, and only once what's fetched passes its checks, so a
+    # rejected import leaves the file and its lock as they were
+    dest = os.path.join(wdir, path)
+    if os.path.islink(dest) or not _inside(wdir, dest):
+        raise HTTPException(422, f"'{path}' leads outside the project")
+    too_big = HTTPException(
+        413,
+        f"'{path}' is too big to import here; use 'calkit import path' "
+        "instead",
+    )
     if imported_from.get("project"):
         try:
             src_owner, src_name = (
@@ -6501,66 +6512,52 @@ def _fetch_import(
         )
         rev = src_repo.head.commit.hexsha
         tree = get_repo_tree_for_ref(src_repo, rev)
-        if tree.is_file(src_path):
-            content = tree.read_bytes(src_path)
-        else:
-            out = app.projects.dvc_outputs_from_tree(
-                project=src_project, tree=tree
-            ).get(src_path)
-            md5 = (out or {}).get("md5")
-            fs = get_object_fs()
-            fpath = (
-                get_data_fpath_for_md5(
-                    owner_name=src_project.owner_account_name,
-                    project_name=src_project.name,
-                    md5=md5,
-                    fs=fs,
-                )
-                if md5 and not md5.endswith(".dir")
-                else None
+        # From Git or DVC storage, including a DVC file that project
+        # imported in turn, whose bytes are in its source's storage
+        try:
+            content = app.projects.read_project_file(
+                project=src_project,
+                tree=tree,
+                path=src_path,
+                max_bytes=calkit.core.DVC_SIZE_THRESH_BYTES - 1,
+                session=session,
+                current_user=current_user,
             )
-            if fpath is None:
+        except HTTPException as e:
+            if e.status_code == 413:
+                raise too_big
+            if e.status_code == 404:
                 raise HTTPException(
                     404, f"'{src_path}' isn't a file in {src_owner}/{src_name}"
                 )
-            with fs.open(fpath, "rb") as f:
-                content = f.read()
-        if len(content) >= calkit.core.DVC_SIZE_THRESH_BYTES:
-            raise HTTPException(
-                413,
-                f"'{src_path}' is too big to import here; use "
-                "'calkit import path' instead",
-            )
-        dest = os.path.join(wdir, path)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "wb") as f:
-            f.write(content)
-        lock: dict[str, Any] = calkit.provenance.import_lock({}, dest, rev=rev)
-        return lock
-    if imported_from.get("git_repo_url"):
+            raise
+    elif imported_from.get("git_repo_url"):
         if not imported_from.get("path"):
             raise HTTPException(422, "Name the file in that repo")
-        rev = app.imports.fetch_git_path(
-            str(imported_from["git_repo_url"]),
-            imported_from.get("git_ref"),
-            str(imported_from["path"]),
-            wdir,
-            path,
-        )
-        dest = os.path.join(wdir, path)
-        if os.path.isdir(dest):
-            raise HTTPException(422, "Name a file in that repo, not a folder")
-        if os.path.getsize(dest) >= calkit.core.DVC_SIZE_THRESH_BYTES:
-            raise HTTPException(
-                413,
-                f"'{path}' is too big to import here; use "
-                "'calkit import path' instead",
+        with tempfile.TemporaryDirectory() as tmp:
+            rev = app.imports.fetch_git_path(
+                str(imported_from["git_repo_url"]),
+                imported_from.get("git_ref"),
+                str(imported_from["path"]),
+                tmp,
+                "fetched",
             )
-        fetched: dict[str, Any] = calkit.provenance.import_lock(
-            {}, dest, rev=rev
-        )
-        return fetched
-    return None
+            fetched = os.path.join(tmp, "fetched")
+            if os.path.isdir(fetched):
+                raise HTTPException(
+                    422, "Name a file in that repo, not a folder"
+                )
+            if os.path.getsize(fetched) >= calkit.core.DVC_SIZE_THRESH_BYTES:
+                raise too_big
+            with open(fetched, "rb") as f:
+                content = f.read()
+    else:
+        return None
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, "wb") as f:
+        f.write(content)
+    lock: dict[str, Any] = calkit.provenance.import_lock({}, dest, rev=rev)
+    return lock
 
 
 class MiscArtifactPost(BaseModel):

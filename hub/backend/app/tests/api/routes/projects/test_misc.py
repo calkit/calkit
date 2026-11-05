@@ -263,6 +263,7 @@ def test_post_project_import_update(
     from fastapi import HTTPException
 
     import app.imports
+    import calkit.core
 
     repos = {}
     for name in ["p", "src"]:
@@ -292,13 +293,19 @@ def test_post_project_import_update(
             git_repo_url=f"https://github.com/o/{name}",
         )
 
+    # What the Git repo has, a folder where it's a dict
+    in_git: dict = {"content": b"from git"}
+
     def fetch_git_path(repo_url, rev, src_path, repo_dir, dest):
         assert (repo_url, rev, src_path) == (
             "https://github.com/a/b",
             "main",
             "fig.png",
         )
-        Path(repo_dir, dest).write_bytes(b"from git")
+        if isinstance(in_git["content"], dict):
+            os.makedirs(Path(repo_dir, dest))
+        else:
+            Path(repo_dir, dest).write_bytes(in_git["content"])
         return "abc1234"
 
     def locks():
@@ -395,6 +402,53 @@ def test_post_project_import_update(
         assert resp.status_code == 200, resp.text
         assert (wdir / "paper" / "fig.png").read_bytes() == b"from git"
         assert locks()["paper/fig.png"]["rev"] == "abc1234"
+        # One too big to import, or a folder, leaves the file and its lock
+        # as they were, so a later update still works
+        lock_before = locks()["paper/fig.png"]
+        for content, status in [
+            (b"x" * calkit.core.DVC_SIZE_THRESH_BYTES, 413),
+            ({}, 422),
+        ]:
+            in_git["content"] = content
+            resp = client.post(
+                update,
+                json={"path": "paper/fig.png"},
+                headers=normal_user_token_headers,
+            )
+            assert resp.status_code == status, resp.text
+            assert (wdir / "paper" / "fig.png").read_bytes() == b"from git"
+            assert locks()["paper/fig.png"] == lock_before
+        in_git["content"] = b"newer"
+        resp = client.post(
+            update,
+            json={"path": "paper/fig.png"},
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert (wdir / "paper" / "fig.png").read_bytes() == b"newer"
+        # Nothing is written through a tracked symlink, even to a file
+        # outside the project
+        outside = tmp_path / "outside.png"
+        outside.write_bytes(b"server file")
+        os.symlink(outside, wdir / "paper" / "link.png")
+        os.symlink(tmp_path, wdir / "linked")
+        for path in ["paper/link.png", "linked/outside.png"]:
+            resp = client.post(
+                URL,
+                json={
+                    "path": path,
+                    "imported_from": {
+                        "project": "o/src",
+                        "path": "figures/plot.png",
+                    },
+                },
+                headers=normal_user_token_headers,
+            )
+            assert resp.status_code == 422, resp.text
+            assert "outside the project" in resp.text
+        assert outside.read_bytes() == b"server file"
+        os.remove(wdir / "paper" / "link.png")
+        os.remove(wdir / "linked")
         # Only a Git repo or project can be updated from
         resp = client.post(
             URL,
@@ -421,3 +475,38 @@ def test_post_project_import_update(
             "x",
         )
     assert e.value.status_code == 422
+    # Nor can a repo's links bring in a file on the server, whether named
+    # or inside a folder that is, while links within the repo are fine
+    secret = tmp_path / "secret.txt"
+    secret.write_text("server secret")
+
+    def run(cmd, **kwargs):
+        if cmd[1] == "clone":
+            clone = Path(cmd[-1])
+            os.makedirs(clone / "figs")
+            (clone / "figs" / "a.png").write_bytes(b"a")
+            os.symlink("a.png", clone / "figs" / "same.png")
+            os.symlink(secret, clone / "figs" / "leak.png")
+            os.symlink(secret, clone / "leak.png")
+            os.symlink(tmp_path, clone / "up")
+        return SimpleNamespace(stdout="abc1234\n")
+
+    with patch("app.imports.subprocess.run", side_effect=run):
+        for src_path in ["leak.png", "figs", "up/secret.txt"]:
+            with pytest.raises(HTTPException) as e:
+                app.imports.fetch_git_path(
+                    "https://github.com/a/b", None, src_path, str(wdir), "got"
+                )
+            assert e.value.status_code == 422
+            assert not os.path.lexists(wdir / "got")
+        app.imports.fetch_git_path(
+            "https://github.com/a/b", None, "figs/same.png", str(wdir), "got"
+        )
+        assert (wdir / "got").read_bytes() == b"a"
+        # Nor written outside the project
+        with pytest.raises(HTTPException) as e:
+            app.imports.fetch_git_path(
+                "https://github.com/a/b", None, "figs/a.png", str(wdir), "../x"
+            )
+        assert e.value.status_code == 422
+        assert not (tmp_path / "x").exists()

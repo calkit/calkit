@@ -734,3 +734,42 @@ def test_split_lock_stage_name():
     assert calkit.dvc.split_lock_stage_name("sub\\dvc.yaml:a") == ("sub", "a")
     # A colon that isn't after a dvc.yaml is part of the name
     assert calkit.dvc.split_lock_stage_name("a:b") == (None, "a:b")
+
+
+def test_use_writable_dvc_site_cache(tmp_path, monkeypatch):
+    import dvc.dirs
+
+    if os.geteuid() == 0:
+        pytest.skip("root can write anywhere")
+    shared = tmp_path / "var-tmp" / "dvc"
+    fallback = str(tmp_path / "cache" / "dvc" / "site")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.delenv("DVC_SITE_CACHE_DIR", raising=False)
+    monkeypatch.setattr(
+        dvc.dirs,
+        "site_cache_dir",
+        lambda config=None: os.getenv("DVC_SITE_CACHE_DIR") or str(shared),
+    )
+    # Missing under a writable parent, so DVC can create it
+    calkit.dvc.use_writable_dvc_site_cache()
+    assert "DVC_SITE_CACHE_DIR" not in os.environ
+    # Another user's, which we can't write to
+    (shared / "repo").mkdir(parents=True)
+    (shared / "repo").chmod(0o555)
+    try:
+        calkit.dvc.use_writable_dvc_site_cache()
+        assert os.environ["DVC_SITE_CACHE_DIR"] == fallback
+        # DVC then opens repos with the fallback
+        monkeypatch.chdir(tmp_path)
+        subprocess.check_call(["git", "init", "-q", "proj"])
+        subprocess.check_call(["dvc", "init", "-q"], cwd="proj")
+        monkeypatch.delenv("DVC_SITE_CACHE_DIR")
+        repo = calkit.dvc.get_dvc_repo("proj")
+        assert repo.site_cache_dir.startswith(fallback)
+        repo.close()
+        # One the user set is left alone
+        monkeypatch.setenv("DVC_SITE_CACHE_DIR", "/somewhere")
+        calkit.dvc.use_writable_dvc_site_cache()
+        assert os.environ["DVC_SITE_CACHE_DIR"] == "/somewhere"
+    finally:
+        (shared / "repo").chmod(0o755)

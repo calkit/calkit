@@ -668,6 +668,7 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
             return True
 
     register_ck_scheme()
+    use_writable_dvc_site_cache()
     dvc.cli._log_unknown_exceptions = log_unknown_exceptions
     links = DropLinks()
     dvc.cli.logger.addFilter(links)
@@ -677,9 +678,34 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
         dvc.cli.logger.removeFilter(links)
 
 
+def use_writable_dvc_site_cache() -> None:
+    """Point DVC at a per-user site cache if the shared one isn't writable.
+
+    On Linux, DVC keeps per-repo state in ``/var/tmp/dvc``, which every user
+    on a machine shares, so on, e.g., an HPC login node, another user can
+    own it and DVC fails to open any repo. The fallback goes in the
+    environment, so DVC subprocesses use it too.
+    """
+    import dvc.dirs
+
+    if os.environ.get("DVC_SITE_CACHE_DIR"):
+        return
+    # DVC creates whatever is missing, so check the deepest part that exists
+    path = os.path.join(dvc.dirs.site_cache_dir(), "repo")
+    while not os.path.exists(path) and os.path.dirname(path) != path:
+        path = os.path.dirname(path)
+    if os.access(path, os.W_OK | os.X_OK):
+        return
+    cache_home = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache"
+    )
+    os.environ["DVC_SITE_CACHE_DIR"] = os.path.join(cache_home, "dvc", "site")
+
+
 def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     """Return a DVC repo with ``ck://`` scheme support registered."""
     register_ck_scheme()
+    use_writable_dvc_site_cache()
     return dvc.repo.Repo(wdir)
 
 

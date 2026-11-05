@@ -5895,6 +5895,10 @@ export type ReproCheck = {
    */
   scripts_not_in_pipeline?: Array<string>
   /**
+   * Paths Outside Project
+   */
+  paths_outside_project?: Array<string>
+  /**
    * N Dvc Remotes
    */
   n_dvc_remotes: number
@@ -6250,6 +6254,10 @@ export type StageFromScriptOrNotebookResponse = {
    * Missing Inputs
    */
   missing_inputs?: Array<string>
+  /**
+   * External Inputs
+   */
+  external_inputs?: Array<string>
   /**
    * Produces
    */
@@ -7578,6 +7586,10 @@ export type ReproCheckWritable = {
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
+  /**
+   * Paths Outside Project
+   */
+  paths_outside_project?: Array<string>
   /**
    * N Dvc Remotes
    */

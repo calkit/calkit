@@ -39,7 +39,11 @@ def open_project(
     project: Annotated[
         str,
         typer.Argument(
-            help="Project name, or owner and name, e.g., 'someone/my-proj'."
+            help=(
+                "Project name, or owner and name, e.g., 'someone/my-proj', "
+                "with its hub to clone from another, e.g., "
+                "'calkit.example.edu/someone/my-proj'."
+            )
         ),
     ],
     yes: Annotated[
@@ -75,9 +79,11 @@ def open_project(
 
     from calkit.core import is_tty
 
-    owner, _, name = project.rpartition("/")
-    if not name or "/" in owner:
-        raise_error("Give the project as NAME or OWNER/NAME")
+    # A hub only matters for cloning, since checkouts are found by owner and
+    # name
+    hub, owner, name = ([""] * 2 + project.split("/"))[-3:]
+    if not name or project.count("/") > 2 or (hub and not owner):
+        raise_error("Give the project as NAME, OWNER/NAME, or HUB/OWNER/NAME")
     # Read now, since cloning moves into the new repo, and a '.env' file
     # there must not get to choose what runs
     editor = with_editor or calkit.config.read().default_editor
@@ -141,7 +147,7 @@ def open_project(
                 raise typer.Exit(1)
         from calkit.cli.main.core import clone
 
-        clone(url=f"{owner}/{name}", location=default_path)
+        clone(url=project, location=default_path)
         paths = [default_path]
     # With more than one checkout, e.g., Git worktrees, prefer the one in
     # ~/calkit, then the main checkout, whose .git is a folder rather than a

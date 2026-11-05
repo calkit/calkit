@@ -368,16 +368,42 @@ def init(
 
 @app.command(name="clone")
 def clone(
-    url: Annotated[str, typer.Argument(help="Repo URL.")],
+    url: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Project as OWNER/NAME, or HUB/OWNER/NAME for one on another "
+                "hub, e.g., calkit.example.edu/someone/my-proj, or a Git "
+                "repo URL."
+            )
+        ),
+    ],
     location: Annotated[
         str | None,
         typer.Argument(
             help="Location to clone to (default will be ./{repo_name})"
         ),
     ] = None,
-    ssh: Annotated[
-        bool, typer.Option("--ssh", help="Use SSH with Git.")
-    ] = False,
+    use_ssh: Annotated[
+        bool | None,
+        typer.Option(
+            "--ssh/--https",
+            help=(
+                "Use SSH or HTTPS with Git. Defaults to SSH for GitHub if "
+                "it's set up, i.e., GitHub accepts a key here."
+            ),
+        ),
+    ] = None,
+    hub: Annotated[
+        str | None,
+        typer.Option(
+            "--hub",
+            help=(
+                "URL of the project's hub, e.g., https://calkit.example.edu. "
+                "Defaults to calkit.io."
+            ),
+        ),
+    ] = None,
     no_config_remote: Annotated[
         bool,
         typer.Option(
@@ -396,16 +422,35 @@ def clone(
     ] = False,
 ) -> None:
     """Clone or download a copy of a project."""
-    # If the URL looks like just a project owner and name, fetch its repo URL
-    # first
-    if not url.startswith("https://") and not url.startswith("git@"):
-        url_split = url.split("/")
-        if len(url_split) != 2:
+    from calkit.config import normalize_hub_url
+
+    def hub_url(hub: str) -> str:
+        # 'localhost' is the development hub, whose web app has a port
+        url = normalize_hub_url(hub)
+        return (
+            calkit.hub.HUB_URLS["local"] if url == "http://localhost" else url
+        )
+
+    # A project named by its owner and name, and maybe its hub, has its repo
+    # URL fetched from that hub
+    parts = url.split("/")
+    if url.startswith(("github.com/", "gitlab.com/")):
+        url = "https://" + url
+    elif not url.startswith(("https://", "http://", "git@")):
+        if len(parts) == 3:
+            if hub is not None and hub_url(hub) != hub_url(parts[0]):
+                raise_error(
+                    f"--hub {hub} doesn't match the hub in {url}; give one"
+                )
+            hub, parts = parts[0], parts[1:]
+        if len(parts) != 2 or not all(parts):
             raise_error(
-                "Calkit projects must be specified like "
-                "{owner_name}/{project_name}"
+                "Calkit projects must be specified like OWNER/NAME, or "
+                "HUB/OWNER/NAME, e.g., calkit.example.edu/someone/my-proj"
             )
-        owner_name, project_name = url_split
+        owner_name, project_name = parts
+        if hub is not None:
+            calkit.config.set_hub(hub_url(hub))
         typer.echo("Fetching Git repo URL from the hub")
         try:
             project = calkit.hub.get(f"/projects/{owner_name}/{project_name}")
@@ -414,9 +459,21 @@ def clone(
         url = project["git_repo_url"]
         if not url.endswith(".git"):
             url += ".git"
-        if ssh:
-            typer.echo("Converting URL to use with SSH")
-            url = url.replace("https://github.com/", "git@github.com:")
+    # Set up the project for its hub, e.g., its DVC remote, even when it's
+    # given by its repo URL
+    if hub is not None:
+        calkit.config.set_hub(hub_url(hub))
+    # Use SSH for GitHub when it's set up, unless asked for one or the other,
+    # so pushing later needs no token
+    if use_ssh is False and url.startswith("git@github.com:"):
+        url = "https://github.com/" + url.removeprefix("git@github.com:")
+    on_github = url.startswith("https://github.com/")
+    if use_ssh is None:
+        use_ssh = on_github and calkit.github.can_use_ssh()
+        if use_ssh:
+            typer.echo("Cloning over SSH, which is set up for GitHub")
+    if use_ssh and on_github:
+        url = url.replace("https://github.com/", "git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
     if not non_recursive:
@@ -2551,6 +2608,7 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
     """
     from dvc.cli import main as dvc_cli_main
 
+    calkit.dvc.ensure_writable_site_cache()
     try:
         return int(dvc_cli_main(argv))
     except ModuleNotFoundError as e:

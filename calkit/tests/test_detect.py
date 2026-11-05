@@ -73,6 +73,42 @@ plt.savefig('plot.png')
     assert "result.csv" in result["outputs"]
     assert "output.npy" in result["outputs"]
     assert "plot.png" in result["outputs"]
+    # Reads from outside the project, e.g., a synced Box folder on someone's
+    # laptop, are reported apart rather than taken for project paths, and a
+    # glob reads the folder it matches in
+    os.makedirs("scripts")
+    with open("scripts/wake.py", "w") as f:
+        f.write(
+            "import glob, os\n"
+            "import numpy as np\n"
+            "from pathlib import Path\n"
+            'folder = "/Users/me/Box-Box/Lab Data/tow tank/runs/"\n'
+            'files = glob.glob(folder + "Run*.csv")\n'
+            'cal = np.loadtxt(f"{folder}../calibration.txt")\n'
+            'win = open(r"C:\\Users\\me\\Box\\cal.csv")\n'
+            'x = open(Path.home() / "Dropbox" / "data.csv")\n'
+            'y = open(os.path.expanduser("~/Desktop/t.csv"))\n'
+            'up = open("../shared/thing.csv")\n'
+            'null = open("/dev/null")\n'
+            'runs = [p for p in Path("data/runs").glob("Run*.csv")]\n'
+            'raw = os.listdir("data/raw")\n'
+            'here = glob.glob("*.csv")\n'
+            'np.savetxt("out_" + "1.csv", cal)\n'
+            'np.savetxt("../elsewhere.csv", cal)\n'
+        )
+    result = detect_python_script_io("scripts/wake.py")
+    assert sorted(result["inputs"]) == ["data/raw", "data/runs"]
+    assert result["outputs"] == ["out_1.csv"]
+    assert sorted(result["external_inputs"]) == sorted(
+        [
+            "/Users/me/Box-Box/Lab Data/tow tank/runs",
+            "/Users/me/Box-Box/Lab Data/tow tank/calibration.txt",
+            "C:\\Users\\me\\Box\\cal.csv",
+            "~/Dropbox/data.csv",
+            "~/Desktop/t.csv",
+            "../shared/thing.csv",
+        ]
+    )
 
 
 def test_detect_python_script_io_with_modes(tmp_dir):
@@ -454,8 +490,11 @@ def test_detect_jupyter_notebook_io_with_variables(tmp_dir):
     result = detect_jupyter_notebook_io("notebook_vars.ipynb")
     # Variable references should be resolved
     assert "input_data.csv" in result["inputs"]
-    # Template string from format should be detected
-    assert ".calkit/scheduler/logs/amip-baseline.out" in result["inputs"]
+    # Template string from format should be detected, and is outside the
+    # project, since the notebook is at its root
+    assert result["external_inputs"] == [
+        "../.calkit/scheduler/logs/amip-baseline.out"
+    ]
 
 
 def test_detect_jupyter_notebook_io_julia(tmp_dir):

@@ -682,6 +682,23 @@ def image_exists_locally(ref: str) -> bool:
         return False
 
 
+def get_no_permission_message() -> str:
+    """What to do when Docker refuses this user."""
+    from calkit.core import is_wsl
+
+    # A group only applies to new sessions, and closing its terminals
+    # doesn't end a WSL session
+    if is_wsl():
+        restart = "restart WSL by running 'wsl --shutdown' in Windows"
+    else:
+        restart = "log out and back in"
+    return (
+        "Docker is installed, but this user isn't allowed to use it. "
+        "Add yourself to the 'docker' group with "
+        f"'sudo usermod -aG docker $USER', then {restart}."
+    )
+
+
 def ensure_image_available(ref: str, platform: str | None = None) -> None:
     """Make sure an image can be run, or say why it can't.
 
@@ -695,6 +712,12 @@ def ensure_image_available(ref: str, platform: str | None = None) -> None:
     success, output = pull_image(ref, platform=platform)
     if success:
         return
+    # A credential helper that can't run is also denied permission, but
+    # only the daemon's socket is about the docker group
+    if "permission denied while trying to connect" in output.lower():
+        raise ValueError(
+            f"{get_no_permission_message()}\n{output.strip()[-500:]}"
+        )
     # Docker announces what it's pulling before it fetches anything, so a
     # pull that produced nothing at all never reached the registry. That
     # is local: most often a credential helper that doesn't answer, which
@@ -793,12 +816,7 @@ def ensure_ready(interactive: bool = False) -> None:
     if error is None:
         return
     if "permission denied" in error.lower():
-        raise DockerNotReadyError(
-            "Docker is installed, but this user isn't allowed to use it. "
-            "Add yourself to the 'docker' group with "
-            "'sudo usermod -aG docker $USER', then log out and back in.\n"
-            + error
-        )
+        raise DockerNotReadyError(f"{get_no_permission_message()}\n{error}")
     start_cmd = get_desktop_start_cmd()
     if start_cmd is not None and interactive:
         try:

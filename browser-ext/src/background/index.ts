@@ -277,6 +277,7 @@ async function handle(message: Request): Promise<unknown> {
             content: message.content,
             shows: message.shows,
             produces: message.produces,
+            data: message.data ?? [],
             save: message.save ?? false,
           },
         },

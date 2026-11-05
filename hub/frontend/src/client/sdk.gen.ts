@@ -7687,7 +7687,9 @@ export class ProjectsService {
    * script isn't left in the project's clone before it's saved. With
    * ``save``, the script, its environment, and the stage are committed,
    * with each document that shows the output elsewhere changed to show it
-   * with ``\ckfigure`` from where it's made.
+   * with ``\ckfigure`` from where it's made. Data it reads from outside
+   * the project can come with it, and the script is changed to read the
+   * project's copy.
    */
   public static postProjectStageFromScriptOrNotebook<
     ThrowOnError extends boolean = true,

@@ -1665,3 +1665,46 @@ def test_detect_project_artifacts_considers_ignored_pipeline_outputs(tmp_dir):
     assert "paper/shared/figures/logo.png" in figures
     # A pipeline can be null
     calkit.detect.detect_project_artifacts(ck_info={"pipeline": None})
+
+
+def test_rewrite_paths():
+    from calkit.detect import rewrite_paths
+
+    code = (
+        'folder = "/Users/me/Box-Box/Lab Data/runs/"\n'
+        'files = glob.glob(folder + "Run*.csv")\n'
+        'cal = open("/Users/me/Box-Box/Lab Data/runs/cal.txt")\n'
+        "win = open('C:\\\\Users\\\\me\\\\t.csv')\n"
+        "fwd = open(r'C:/Users/me/t.csv')\n"
+        'home = open(os.path.expanduser("~/Desktop/t.csv"))\n'
+        # Only whole paths, not ones that merely start the same
+        'other = open("/Users/me/Box-Box/Lab Data/runs2/x.csv")\n'
+        'parts = open(Path.home() / "Dropbox" / "data.csv")\n'
+    )
+    moves = {
+        "/Users/me/Box-Box/Lab Data/runs": "data/runs",
+        "/Users/me/Box-Box/Lab Data/runs/cal.txt": "data/cal.txt",
+        "C:\\Users\\me\\t.csv": "data/t.csv",
+        "~/Desktop/t.csv": "data/desk.csv",
+        "~/Dropbox/data.csv": "data/data.csv",
+    }
+    text, found = rewrite_paths(code, moves)
+    assert text.splitlines() == [
+        'folder = "data/runs/"',
+        'files = glob.glob(folder + "Run*.csv")',
+        'cal = open("data/cal.txt")',
+        "win = open('data/t.csv')",
+        "fwd = open(r'data/t.csv')",
+        'home = open(os.path.expanduser("data/desk.csv"))',
+        'other = open("/Users/me/Box-Box/Lab Data/runs2/x.csv")',
+        'parts = open(Path.home() / "Dropbox" / "data.csv")',
+    ]
+    # One put together from pieces isn't found
+    assert sorted(found) == sorted(set(moves) - {"~/Dropbox/data.csv"})
+    # In a notebook, where the JSON escapes it again
+    notebook = json.dumps(
+        {"cells": [{"source": ['x = open("C:\\\\Users\\\\me\\\\t.csv")']}]}
+    )
+    text, found = rewrite_paths(notebook, moves)
+    assert json.loads(text)["cells"][0]["source"] == ['x = open("data/t.csv")']
+    assert found == ["C:\\Users\\me\\t.csv"]

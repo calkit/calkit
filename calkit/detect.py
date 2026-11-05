@@ -725,6 +725,35 @@ def _resolve_variable_in_call(
     return None
 
 
+def rewrite_paths(text: str, moves: dict[str, str]) -> tuple[str, list[str]]:
+    """Point the paths a script or notebook names at new ones, e.g., data
+    outside the project at its copy inside, returning the new text and the
+    old paths that were found.
+
+    A path is only found written out whole in one string, e.g.,
+    ``"/data/runs/"``, not put together from pieces, and anything after it
+    in the string is kept, e.g., a file in a moved folder.
+    """
+    found = []
+    # Longest first, so a file is moved as itself rather than with its folder
+    for old in sorted(moves, key=len, reverse=True):
+        count = 0
+        # As written, with Windows separators escaped or as slashes, and
+        # escaped again in a notebook's JSON
+        for written in dict.fromkeys(
+            old.replace("\\", sep) for sep in ("\\", "/", "\\" * 2, "\\" * 4)
+        ):
+            text, n = re.subn(
+                r"(?<=['\"])" + re.escape(written) + r"(?=[/\\'\"])",
+                lambda _, new=moves[old]: new,
+                text,
+            )
+            count += n
+        if count:
+            found.append(old)
+    return text, found
+
+
 def filter_covered_inputs(
     detected: Iterable[str], existing: Iterable[str]
 ) -> list[str]:

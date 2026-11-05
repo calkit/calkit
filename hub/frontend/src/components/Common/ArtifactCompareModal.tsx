@@ -885,6 +885,13 @@ function StageFromScriptForm({
               Not in the project yet: {detected.missing_inputs.join(", ")}
             </Text>
           ) : null}
+          {detected.external_inputs?.length ? (
+            <Text color="orange.400">
+              Outside the project: {detected.external_inputs.join(", ")}. It
+              will only run on the computer it came from; add the data to the
+              project and read it from there.
+            </Text>
+          ) : null}
           {detected.outputs?.length ? (
             <RadioGroup value={produces} onChange={setProduces} mt={1}>
               <Text color="gray.500">

@@ -268,6 +268,18 @@ function renderAddScript(
         }),
       );
     }
+    if (detected.external_inputs?.length) {
+      review.append(
+        el("div", {
+          class: "small",
+          style: { color: "var(--ck-warning)" },
+          text:
+            `Outside the project: ${detected.external_inputs.join(", ")}. ` +
+            "It will only run on the computer it came from; add the data " +
+            "to the project and read it from there.",
+        }),
+      );
+    }
     // Which output this is, when the script writes several or names it
     // differently from the paper
     const choices = detected.outputs.map((output) => {

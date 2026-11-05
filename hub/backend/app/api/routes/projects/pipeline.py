@@ -15,10 +15,13 @@ e.g., for a figure a paper includes that nothing in the pipeline produces.
 
 import base64
 import binascii
+import glob
 import json
 import os
+import posixpath
 import re
 import subprocess
+import sys
 import tempfile
 import uuid
 from collections import deque
@@ -38,6 +41,7 @@ from sqlmodel import col, select
 import app.cache
 import app.github
 import app.projects
+import calkit.detect
 import calkit.export
 import calkit.latex
 import calkit.pipeline
@@ -50,6 +54,7 @@ from app.api.routes.projects.core import (
     _dump_ck_stage_map,
     _github_token_for_repo,
     _inside,
+    _push_dvc_cache_to_storage,
     _validate_ck_stage,
 )
 from app.api.routes.projects.figures import _clean_rel_path, _slug
@@ -335,6 +340,27 @@ def _commit_pipeline(
 # What calkit xr makes a script stage from, by extension
 SCRIPT_EXTS = (".py", ".r", ".jl", ".m", ".ipynb", ".sh")
 MAX_SCRIPT_BYTES = 1_000_000
+# All the data uploaded with a script, which arrives in one request
+MAX_SCRIPT_DATA_BYTES = 50_000_000
+
+
+class ScriptDataFile(BaseModel):
+    # Relative to the data's path in the project, or empty for a single file
+    path: str = ""
+    # Base64-encoded
+    content: str
+
+
+class ScriptData(BaseModel):
+    """Data a script reads from outside the project, and its place in it."""
+
+    # As the script names it, e.g., one of the detected external inputs
+    external: str
+    # Where it goes, or already is, in the project
+    path: str
+    # Uploaded; without any, it's already in the project, or for a dry run,
+    # will be
+    files: list[ScriptDataFile] = []
 
 
 class StageFromScriptOrNotebookPost(BaseModel):
@@ -346,6 +372,9 @@ class StageFromScriptOrNotebookPost(BaseModel):
     # the script's outputs that is, when the script writes it elsewhere
     shows: str | None = None
     produces: str | None = None
+    # Data to read from the project instead, with the script's paths to it
+    # rewritten
+    data: list[ScriptData] = []
     # Without it, nothing is written, so the user can see what would be
     save: bool = False
 
@@ -367,6 +396,9 @@ class StageFromScriptOrNotebookResponse(BaseModel):
     # Data read from outside the project, e.g., a synced Box folder, as the
     # script names it, which only the machine it came from has
     external_inputs: list[str] = []
+    # Data paths the script was changed to read from the project instead,
+    # as it named them
+    rewritten: list[str] = []
     # Which output is what the document shows, and the documents changed
     # to show it from there with \ckfigure when that's a different path
     produces: str | None = None
@@ -393,7 +425,9 @@ def post_project_stage_from_script_or_notebook(
     script isn't left in the project's clone before it's saved. With
     ``save``, the script, its environment, and the stage are committed,
     with each document that shows the output elsewhere changed to show it
-    with ``\\ckfigure`` from where it's made.
+    with ``\\ckfigure`` from where it's made. Data it reads from outside
+    the project can come with it, and the script is changed to read the
+    project's copy.
     """
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -435,6 +469,82 @@ def post_project_stage_from_script_or_notebook(
                     f"'{script_path}' is already in the project; pick it "
                     "without uploading, or upload under another name",
                 )
+    # Data, checked in full before anything is written
+    data_files: list[tuple[str, bytes]] = []
+    data_paths: list[str] = []
+    moves: dict[str, str] = {}
+    # What the script names is relative to where it runs: a notebook's
+    # folder, or else the project
+    run_dir = (
+        posixpath.dirname(script_path)
+        if script_path.lower().endswith(".ipynb")
+        else "."
+    )
+    for data in req.data:
+        data_path = _clean_rel_path(data.path, "data")
+        if not _inside(wdir, os.path.join(wdir, data_path)):
+            raise HTTPException(
+                422, f"'{data_path}' leads outside the project"
+            )
+        for file in data.files:
+            path = _clean_rel_path(
+                posixpath.join(data_path, file.path)
+                if file.path
+                else data_path,
+                "data",
+            )
+            full = os.path.join(wdir, path)
+            if not _inside(wdir, full):
+                raise HTTPException(422, f"'{path}' leads outside the project")
+            try:
+                content_bytes = base64.b64decode(file.content, validate=True)
+            except (binascii.Error, ValueError):
+                raise HTTPException(
+                    422, f"Content of '{path}' isn't valid base64"
+                )
+            data_files.append((path, content_bytes))
+            if sum(len(c) for _, c in data_files) > MAX_SCRIPT_DATA_BYTES:
+                raise HTTPException(
+                    413,
+                    "The data is too large to upload with the script; add "
+                    "it to the project another way, e.g., with 'calkit add' "
+                    "on the computer that has it",
+                )
+            if os.path.isfile(full):
+                with open(full, "rb") as fb:
+                    if fb.read() != content_bytes:
+                        raise HTTPException(
+                            409,
+                            f"'{path}' is already in the project; pick "
+                            "another place for the data",
+                        )
+        if (
+            req.save
+            and not data.files
+            and not any(
+                os.path.exists(os.path.join(wdir, data_path + ext))
+                for ext in ("", ".dvc")
+            )
+        ):
+            raise HTTPException(404, f"'{data_path}' is not in the project")
+        data_paths.append(data_path)
+        moves[data.external] = posixpath.relpath(data_path, run_dir)
+    # The script, changed to read the project's copies
+    rewritten: list[str] = []
+    if moves:
+        if content is not None:
+            source = content
+        else:
+            with open(os.path.join(wdir, script_path), "rb") as fb:
+                source = fb.read()
+        try:
+            text, rewritten = calkit.detect.rewrite_paths(
+                source.decode("utf-8"), moves
+            )
+        except UnicodeDecodeError:
+            raise HTTPException(422, f"'{script_path}' isn't UTF-8 text")
+        if rewritten:
+            content = text.encode("utf-8")
     # Read in a checkout of its own, discarded after
     scan_dir = tempfile.mkdtemp(prefix="calkit-xr-")
     os.rmdir(scan_dir)
@@ -514,6 +624,7 @@ def post_project_stage_from_script_or_notebook(
         if not os.path.exists(os.path.join(wdir, i))
         and i not in dvc_outs
         and calkit.pipeline.get_stage_for_output(i, ck_info) is None
+        and not any(i == p or i.startswith(p + "/") for p in data_paths)
     ]
 
     def include(shown: str, path: str) -> dict[str, str]:
@@ -597,6 +708,7 @@ def post_project_stage_from_script_or_notebook(
         outputs=outputs,
         missing_inputs=missing,
         external_inputs=detected.get("external_inputs") or [],
+        rewritten=rewritten,
         produces=produces,
         included_in=sorted(included),
         git_repo_url=project.git_repo_url,
@@ -612,6 +724,58 @@ def post_project_stage_from_script_or_notebook(
     for path in writes + list(included):
         if not _inside(wdir, os.path.join(wdir, path)):
             raise HTTPException(422, f"'{path}' leads outside the project")
+    # The data goes where calkit add puts it, Git or DVC, with only what it
+    # newly cached copied to the hub's storage
+    if data_files:
+        for path, data_bytes in data_files:
+            full = os.path.join(wdir, path)
+            os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
+            with open(full, "wb") as fb:
+                fb.write(data_bytes)
+        cache_dir = os.path.join(wdir, ".dvc", "cache", "files", "md5")
+        cached = {
+            os.path.relpath(p, cache_dir).replace(os.sep, "/")
+            for p in glob.glob(os.path.join(cache_dir, "*", "*"))
+        }
+        uploaded = sorted(
+            {
+                d
+                for d in data_paths
+                if any(p == d or p.startswith(d + "/") for p, _ in data_files)
+            }
+        )
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "calkit", "add", *uploaded],
+                cwd=wdir,
+                stdin=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.exception(f"calkit add failed for {uploaded}: {e}")
+            repo.git.reset("--hard")
+            repo.git.clean("-fd")
+            raise HTTPException(500, "Couldn't add the data to the project")
+        _push_dvc_cache_to_storage(
+            repo_dir=wdir,
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            skip=cached,
+        )
+        # Recorded as a dataset, from where it was, unless it's already one
+        datasets = ck_info.setdefault("datasets", [])
+        known = {d.get("path") for d in datasets if isinstance(d, dict)}
+        for data in req.data:
+            data_path = _clean_rel_path(data.path, "data")
+            if data_path in uploaded and data_path not in known:
+                datasets.append(
+                    {
+                        "path": data_path,
+                        "imported_from": {
+                            "description": f"Uploaded from {data.external}",
+                            "date": utcnow().date(),
+                        },
+                    }
+                )
     # Written as xr writes them, then committed with the pipeline
     if content is not None:
         dest = os.path.join(wdir, script_path)

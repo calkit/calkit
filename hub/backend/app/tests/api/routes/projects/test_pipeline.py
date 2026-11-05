@@ -282,7 +282,14 @@ def test_post_project_stage_from_script_or_notebook(
     client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
 ) -> None:
     import base64
+    import hashlib
+    import subprocess
 
+    import fsspec
+
+    from app.storage import make_data_fpath
+
+    store = fsspec.filesystem("memory")
     paper = (
         "\\documentclass{article}\n"
         "\\begin{document}\n"
@@ -333,6 +340,10 @@ def test_post_project_stage_from_script_or_notebook(
                 "app.api.routes.projects.pipeline.app.projects"
                 ".dvc_outputs_from_tree",
                 return_value={},
+            ),
+            patch(
+                "app.api.routes.projects.core.get_object_fs",
+                return_value=store,
             ),
         ):
             return client.post(
@@ -453,6 +464,122 @@ def test_post_project_stage_from_script_or_notebook(
     assert resp.status_code == 422, resp.text
     assert not (outside / "plot.py").exists()
     (wdir / "linked").unlink()
+    # Data it reads from outside the project comes with it, and the script
+    # is changed to read the project's copy, with the stage reading that
+    wake = (
+        "import glob\n"
+        "import numpy as np\n"
+        "folder = '/Users/me/Box-Box/runs/'\n"
+        "runs = [np.loadtxt(f) for f in glob.glob(folder + 'Run*.csv')]\n"
+        "cal = np.loadtxt('/Users/me/Box-Box/cal.txt')\n"
+        "w = np.loadtxt('C:/Users/me/w.txt')\n"
+        "big = open('/Users/me/Box-Box/big.bin', 'rb').read()\n"
+        "np.savetxt('results/wake.csv', cal)\n"
+    )
+    wake_upload = dict(
+        script_path="scripts/wake.py",
+        content=base64.b64encode(wake.encode()).decode(),
+    )
+
+    def b64(text: str) -> str:
+        return base64.b64encode(text.encode()).decode()
+
+    data = [
+        {
+            "external": "/Users/me/Box-Box/runs",
+            "path": "data/runs",
+            "files": [
+                {"path": "Run1.csv", "content": b64("1\n")},
+                {"path": "sub/Run2.csv", "content": b64("2\n")},
+            ],
+        },
+        {
+            "external": "/Users/me/Box-Box/cal.txt",
+            "path": "data/cal.txt",
+            "files": [{"content": b64("3\n")}],
+        },
+    ]
+    # Too big for Git
+    big = b"x" * 6_000_000
+    big_data = {
+        "external": "/Users/me/Box-Box/big.bin",
+        "path": "data/big.bin",
+        "files": [{"content": base64.b64encode(big).decode()}],
+    }
+    resp = post(**wake_upload)
+    assert resp.status_code == 200, resp.text
+    assert sorted(resp.json()["external_inputs"]) == [
+        "/Users/me/Box-Box/big.bin",
+        "/Users/me/Box-Box/cal.txt",
+        "/Users/me/Box-Box/runs",
+        "C:\\Users\\me\\w.txt",
+    ]
+    # Only where it'll go is needed to see what that would be, and the
+    # data is neither outside nor missing then
+    resp = post(**wake_upload, data=[{**d, "files": []} for d in data])
+    assert resp.status_code == 200, resp.text
+    assert sorted(resp.json()["rewritten"]) == [
+        "/Users/me/Box-Box/cal.txt",
+        "/Users/me/Box-Box/runs",
+    ]
+    assert sorted(resp.json()["external_inputs"]) == [
+        "/Users/me/Box-Box/big.bin",
+        "C:\\Users\\me\\w.txt",
+    ]
+    assert {"data/runs", "data/cal.txt"} <= set(resp.json()["inputs"])
+    assert resp.json()["missing_inputs"] == []
+    assert not (wdir / "data").exists()
+    assert not repo.is_dirty(untracked_files=True)
+    # Saving needs it uploaded, or already there
+    resp = post(
+        **wake_upload, data=[{**d, "files": []} for d in data], save=True
+    )
+    assert resp.status_code == 404, resp.text
+    # Too much at once, or in place of a different file, is refused
+    with patch("app.api.routes.projects.pipeline.MAX_SCRIPT_DATA_BYTES", 2):
+        resp = post(**wake_upload, data=data, save=True)
+    assert resp.status_code == 413, resp.text
+    resp = post(
+        **wake_upload,
+        data=[{**data[1], "path": "scripts/old.py"}],
+        save=True,
+    )
+    assert resp.status_code == 409, resp.text
+    assert not (wdir / "data").exists()
+    # Something cached already, e.g., pulled, isn't sent again
+    subprocess.check_call(["dvc", "init", "-q"], cwd=wdir)
+    repo.git.add(".dvc")
+    repo.git.commit("-m", "Init DVC")
+    old = wdir / ".dvc" / "cache" / "files" / "md5" / "aa" / "old"
+    old.parent.mkdir(parents=True)
+    old.write_text("old")
+    resp = post(**wake_upload, data=data + [big_data], save=True)
+    assert resp.status_code == 200, resp.text
+    assert (wdir / "scripts" / "wake.py").read_text() == wake.replace(
+        "/Users/me/Box-Box/runs/", "data/runs/"
+    ).replace("/Users/me/Box-Box/cal.txt", "data/cal.txt").replace(
+        "/Users/me/Box-Box/big.bin", "data/big.bin"
+    )
+    assert (wdir / "data" / "runs" / "sub" / "Run2.csv").read_text() == "2\n"
+    assert (wdir / "data" / "cal.txt").read_text() == "3\n"
+    tracked = repo.git.ls_files("data").splitlines()
+    assert {"data/cal.txt", "data/runs/Run1.csv"} <= set(tracked) or (
+        "data/runs.dvc" in tracked
+    )
+    ck = yaml.safe_load((wdir / "calkit.yaml").read_text())
+    stage = ck["pipeline"]["stages"][resp.json()["stage_name"]]
+    assert {"data/runs", "data/cal.txt"} <= set(stage["inputs"])
+    # Stored with DVC, and on the hub, without the rest of the cache
+    assert "data/big.bin.dvc" in tracked
+    md5 = hashlib.md5(big).hexdigest()
+    assert store.exists(make_data_fpath("o", "p", md5[:2], md5[2:]))
+    assert not store.exists(make_data_fpath("o", "p", "aa", "old"))
+    by_path = {d["path"]: d for d in ck["datasets"]}
+    assert by_path["data/runs"]["imported_from"]["description"] == (
+        "Uploaded from /Users/me/Box-Box/runs"
+    )
+    assert not repo.is_dirty(untracked_files=True)
+    assert origin.head.commit.hexsha == repo.head.commit.hexsha
     # Not a script, or not there to read
     assert post(script_path="paper/paper.tex").status_code == 422
     assert post(script_path="scripts/gone.py").status_code == 404

@@ -10978,6 +10978,14 @@ export const StageFromScriptOrNotebookResponseSchema = {
       title: "Missing Inputs",
       default: [],
     },
+    external_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "External Inputs",
+      default: [],
+    },
     produces: {
       anyOf: [
         {

@@ -364,6 +364,9 @@ class StageFromScriptOrNotebookResponse(BaseModel):
     outputs: list[str] = []
     # Inputs that aren't in the project and that no stage produces
     missing_inputs: list[str] = []
+    # Data read from outside the project, e.g., a synced Box folder, as the
+    # script names it, which only the machine it came from has
+    external_inputs: list[str] = []
     # Which output is what the document shows, and the documents changed
     # to show it from there with \ckfigure when that's a different path
     produces: str | None = None
@@ -593,6 +596,7 @@ def post_project_stage_from_script_or_notebook(
         inputs=inputs,
         outputs=outputs,
         missing_inputs=missing,
+        external_inputs=detected.get("external_inputs") or [],
         produces=produces,
         included_in=sorted(included),
         git_repo_url=project.git_repo_url,

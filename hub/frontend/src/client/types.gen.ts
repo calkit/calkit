@@ -6251,6 +6251,10 @@ export type StageFromScriptOrNotebookResponse = {
    */
   missing_inputs?: Array<string>
   /**
+   * External Inputs
+   */
+  external_inputs?: Array<string>
+  /**
    * Produces
    */
   produces?: string | null

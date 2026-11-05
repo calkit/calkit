@@ -111,6 +111,34 @@ describe("TableView", () => {
     )
   })
 
+  it("renders a markdown file as markdown, not as its own source", () => {
+    const md = ["# Findings", "", "The kernel is *bound* by memory."].join("\n")
+    const html = render({
+      table: { path: "results/notes.md", title: "Notes", content: btoa(md) },
+    })
+    // Nothing tabular in it, so there is no grid to show -- but it is a
+    // file written to be read, so it is shown the way it was written
+    expect(html).not.toContain("<tbody")
+    expect(html).toContain("chakra-heading")
+    expect(html).toContain("Findings")
+    expect(html).toContain("<em>bound</em>")
+    // The source markers are gone, which is the whole point
+    expect(html).not.toContain("# Findings")
+    expect(html).not.toContain("*bound*")
+    // A file that is neither tabular nor markdown still shows verbatim,
+    // which is what a diff or a log wants
+    const diff = render({
+      table: {
+        path: "results/run.diff",
+        title: "Diff",
+        content: btoa("- old line\n+ new line"),
+      },
+    })
+    expect(diff).toContain("- old line")
+    expect(diff).toContain("+ new line")
+    expect(diff).not.toContain("chakra-heading")
+  })
+
   it("seeds the search box from the search prop", () => {
     expect(render({ search: "b" })).toContain('value="b"')
   })

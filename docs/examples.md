@@ -51,6 +51,24 @@ calkit new project my-readme \
 
 See [Runnable Markdown](pipeline/markdown.md) for how it works.
 
+## Python package with a runnable README
+
+[GitHub repo](https://github.com/calkit/calkit/tree/main/examples/markdown-python)
+
+Features:
+
+- A Python package whose README's code blocks are its pipeline
+- The README's install command resolved to the package's own uv project
+  environment, so editing the package reruns its examples
+- A figure drawn by the README, stored in Git, and shown in it
+
+Create a copy with:
+
+```sh
+calkit new project my-package \
+    --from https://github.com/calkit/calkit/examples/markdown-python
+```
+
 ## MATLAB
 
 [Project page](https://calkit.io/calkit/example-matlab) |
@@ -162,3 +180,57 @@ calkit new project my-paper \
 ```
 
 See the [LaTeX and Word tutorial](tutorials/latex-word.md) for the workflow.
+
+## Harbor and Terminal-Bench-Science
+
+[GitHub repo](https://github.com/calkit/calkit/tree/main/examples/harbor-tb-science)
+
+Features:
+
+- A benchmark task's authoring scripts run as a pipeline in a Docker
+  environment, with questions answered from their outputs
+- A variant of the task whose submission must be a Calkit project,
+  checked and rerun by the task's verifier with no network access
+- Run with [Harbor](https://github.com/harbor-framework/harbor)'s oracle
+  agent, and regraded with tampered submissions
+
+See [Calkit vs. other tools](comparisons.md) for the results.
+
+## Multiple HPC clusters
+
+[GitHub repo](https://github.com/calkit/calkit/tree/main/examples/multi-hpc)
+
+Features:
+
+- A simulation run through SLURM or PBS depending on which cluster it's run
+  from, and skipped anywhere else
+- An environment that uses whichever scheduler is available, or none
+- A plotting stage in a uv environment that runs anywhere
+
+Create a copy with:
+
+```sh
+calkit new project my-hpc-project \
+    --from https://github.com/calkit/calkit/examples/multi-hpc
+```
+
+See [HPC](hpc.md) for more.
+
+## Subprojects
+
+[GitHub repo](https://github.com/calkit/calkit/tree/main/examples/subprojects)
+
+Features:
+
+- A project made only of subprojects, which are run and checked from it
+- A nested subproject, and a stage that reads a sibling subproject's output
+- A uv project environment in each subproject
+
+Create a copy with:
+
+```sh
+calkit new project my-subprojects \
+    --from https://github.com/calkit/calkit/examples/subprojects
+```
+
+See [Subprojects](subprojects.md) for more.

@@ -4,14 +4,20 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Discriminator, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, model_validator
 
 DTYPES = {"int": int, "float": float, "str": str}
 DEFAULT_IN_TYPE = "float"
 DEFAULT_OUT_TYPE = "float"
 
 
-class Input(BaseModel):
+class _Model(BaseModel):
+    # As calkit.models.base.Model, which importing here would import
+    # calkit.models, which imports this
+    model_config = ConfigDict(defer_build=True)
+
+
+class Input(_Model):
     name: str
     description: str | None = None
     dtype: Literal["int", "float", "str"] = DEFAULT_IN_TYPE
@@ -19,14 +25,14 @@ class Input(BaseModel):
     max: int | float | None = None
 
 
-class Output(BaseModel):
+class Output(_Model):
     name: str
     description: str | None = None
     dtype: Literal["int", "float", "str"] = DEFAULT_OUT_TYPE
     template: str | None = None
 
 
-class Calculation(BaseModel):
+class Calculation(_Model):
     kind: str
     params: dict = {}
     name: str | None = None
@@ -124,7 +130,7 @@ class Calculation(BaseModel):
         return template.format(**(inputs | {out_name: res}))
 
 
-class FormulaParams(BaseModel):
+class FormulaParams(_Model):
     formula: str
 
 
@@ -139,7 +145,7 @@ class Formula(Calculation):
         return arithmetic_eval.evaluate(self.params.formula, inputs)
 
 
-class LinearParams(BaseModel):
+class LinearParams(_Model):
     coeffs: dict[str, float]
     offset: float = 0.0
 
@@ -163,7 +169,7 @@ class Linear(Calculation):
         return val
 
 
-class LookupTableParams(BaseModel):
+class LookupTableParams(_Model):
     x_values: list[float]
     y_values: list[float]
     method: Literal["floor", "ceil", "round", "interpolate"] = "interpolate"
@@ -176,7 +182,7 @@ class LookupTable(Calculation):
     params: LookupTableParams
 
 
-class HttpRequestParams(BaseModel):
+class HttpRequestParams(_Model):
     url: str
     inputs_as_params: bool = True  # Otherwise, use body
     method: Literal["get", "post", "put"] = "get"
@@ -210,7 +216,7 @@ class HttpRequest(Calculation):
             return resp.text
 
 
-class XGBoostModelParams(BaseModel):
+class XGBoostModelParams(_Model):
     path: str
     type: Literal["classifier", "regressor"]
 

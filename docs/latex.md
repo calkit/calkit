@@ -1,21 +1,34 @@
 # LaTeX documents
 
-Calkit builds LaTeX documents with `latexmk`, in whichever
-[environment](environments.md) the project defines:
+LaTeX is a longstanding favorite typesetting system for technical
+documents, and its math syntax has become the de facto standard.
+It's also a great choice to use in a Calkit pipeline to produce
+papers and theses since it can easily include figures, tables, and
+even numerical result values produced in other stages,
+so there's no need to copy/paste them in, like you might in
+like Microsoft Word.
+
+For one-off compilation,
+Calkit offers a `calkit latex build` command,
+which will invoke `latexmk`, optionally using one of the
+project's [environments](environments.md):
 
 ```sh
 calkit latex build paper/main.tex --env tex
 ```
 
-Without `--env`, `latexmk` runs directly if it's installed, and in a TeX Live
+Without `--env`, `latexmk` is called directly
+if it's installed on the system, and in Calkit's TinyTeX/TeXlive
 container if it isn't.
 
 ## Adding a document to the pipeline
 
-A one-off build isn't reproducible on its own.
-Add the document to the [pipeline](pipeline/index.md) as a `latex` stage, and
-`calkit run` rebuilds it whenever the source or any of its inputs change,
-and skips it when nothing has:
+If your project involves more than just writing,
+you'll likely have other stages that create figures and results.
+Tie these all together by
+adding the document to the [pipeline](pipeline/index.md) as a `latex` stage,
+and `calkit run` will rebuild it whenever the source or any of
+its inputs change, skipping if not:
 
 ```sh
 calkit new latex-stage --name paper --target paper/main.tex --environment tex
@@ -32,45 +45,169 @@ pipeline:
       target_path: paper/main.tex
 ```
 
-The compiled PDF is an output of the stage without being declared, so there's
-nothing to add for it.
-Use `--output` only for the extras a build produces, and see the
-[pipeline docs](pipeline/index.md) for the attributes every stage shares,
-e.g., `inputs`, which can include figures, tables, and results
-converted to [.tex from JSON](pipeline/index.md#json-to-latex).
+## Using a template
 
-To start a document from scratch instead, `calkit new publication` writes the
-source files, the environment, and the stage in one go:
+To start a new document from scratch, `calkit new publication` writes the
+source files, the environment, and the stage in one go.
+For example, this command will start a journal article using the
+Journal of Fluid Mechanics (JFM) template in a folder called `paper`:
 
 ```sh
-calkit new publication paper --template latex/jfm --stage paper \
-    --environment tex --kind journal-article --title "A cool paper"
+calkit new publication paper \
+    --template latex/jfm \
+    --stage paper \
+    --environment tex \
+    --kind journal-article \
+    --title "A cool paper"
 ```
 
 Available templates are `latex/article` (generic), `latex/ieee-conference`
 (IEEEtran), `latex/jfm` (Journal of Fluid Mechanics), and `latex/report`
-(chapters, for a thesis or technical report). Each uses packages that ship
-with TeX Live, so the `texlive/texlive:latest-full` Docker environment
-builds all of them.
+(chapters, for a thesis or technical report).
+The environment created uses Calkit's LaTeX Docker image,
+which can build all of them.
+
+## Packages
+
+Calkit's LaTeX image includes the packages used by common journal classes
+and most papers,
+which makes it a fraction of the size of a full TeX Live distribution.
+If a document uses a package the image doesn't include,
+`calkit latex build` will install it the first time it's needed.
+Installed packages are kept in the project in `.calkit/local/texmf`,
+which is ignored by Git,
+so they don't need to be installed again on the next build.
+
+Packages are only installed automatically when building with Calkit's
+image, either directly, i.e., with no environment specified,
+or in a Docker environment built from it.
+For other images or a LaTeX distribution installed on your machine,
+you'll need to install packages the usual way.
 
 ## Inputs
 
-A document's class, style, bibliography, and figure files are inputs to
-building it, but LaTeX resolves those itself, so the pipeline can't see them
-unless the stage declares them.
-`calkit new latex-stage` and `calkit new publication` read the document and
+A document's class, style, bibliography, and figure files
+need to be declared as inputs to its pipeline stage.
+`calkit new latex-stage` and `calkit new publication`
+scan through the document and
 add the ones that live in the project, following `\input`, `\include`, and
 any class or style file that loads others.
-Anything that comes from TeX Live is left alone, since it isn't the project's
-to track, and anything an already-declared directory covers is left off
-rather than listed again underneath it.
 Pass `--no-detect-inputs` to turn this off, and `--input` to add more.
 `calkit xr` detects the same inputs when the command it wraps builds a
 document.
 
-Undeclared inputs mean editing the class file doesn't rebuild the paper, and
-the web app's in-browser editor, which loads exactly what the stage declares,
-can't compile the document at all.
+The stage also depends on whatever the document includes this way when the
+pipeline is compiled, declared or not,
+so a figure added later, e.g., on Overleaf, rebuilds the paper when it
+changes.
+Declaring them still matters for the web app's in-browser editor,
+which loads exactly what the stage declares.
+
+## Including project components
+
+A document can include figures, tables, and result values from anywhere in
+the project by their path, with the commands the `calkit` package:
+
+```latex
+\usepackage{calkit}
+...
+The error falls to \ckvalue[.2f]{results/metrics.json}{rmse}.
+\ckfigure[width=0.7\textwidth]{figures/plot.png}
+\cktable{tables/summary.tex}
+```
+
+- `\ckvalue[format]{path}{key}` prints a value from a JSON, YAML, or TOML
+  file.
+  Keys are separated by dots to reach into nested values, e.g., `fit.slope`.
+- `\ckfigure[options]{path}` includes a figure, with the same options as
+  `\includegraphics`.
+- `\cktable{path}` includes a table a stage writes.
+- `\ckinclude{path}` includes any other LaTeX a stage writes,
+  e.g., a sentence that reports several results.
+
+Paths are relative to the project, not the document's working directory,
+so nothing needs copying into the document's folder,
+and no `map-paths` or `json-to-latex` stages are needed.
+A figure, table, or included file can be named without its extension,
+as with `\includegraphics` and `\input`.
+Paths outside the project, or with `..` in them, aren't read.
+Before running or checking the pipeline, and before each
+`calkit latex build`, Calkit copies what a document that loads the package
+includes into a `_calkit` folder beside it, writes the values it uses to
+`_calkit/values.tex`, and puts `calkit.sty` next to the document.
+A document that doesn't load it gets none of these.
+Neither is committed to Git, since Calkit writes them at pipeline
+compilation time.
+With `\usepackage[links]{calkit}`, values and figures in the PDF
+link (with `hyperref`)
+to the project's page on Calkit to allow inspection of its origin
+or provenance, e.g., the pipeline stage that produced it.
+Captions link too, in a `figure` or `table` environment around a
+`\ckfigure` or `\cktable`, or in the LaTeX that `\cktable` or `\ckinclude`
+brings in.
+
+The document's stage depends on everything it includes this way,
+without any of it being listed as an input,
+so `calkit run` builds the document after the stages that produce what it
+includes, and again whenever one of them changes.
+Calkit finds them by reading the document and the files it inputs,
+so a command inside a macro of your own, e.g., one that takes the key as
+an argument, isn't seen.
+
+Anything not in the project yet, e.g., a figure the pipeline hasn't made or
+a path with a typo, prints as **??** with a warning rather than failing the
+build.
+
+These commands are optional.
+`\includegraphics` and `\input` work as usual for files in the document's
+folder.
+
+### Formatting values
+
+The document formats numbers when it compiles, with the
+[siunitx](https://ctan.org/pkg/siunitx) package,
+so a changed format takes effect on the next build, including on Overleaf.
+A format is either a Python-style format spec, which Calkit translates,
+or siunitx options:
+
+| Format                                 | Meaning                     | Example                   |
+| -------------------------------------- | --------------------------- | ------------------------- |
+| `.2f`                                  | Decimal places              | 0.123456 → 0.12           |
+| `.3g` or `.3`                          | Significant figures         | 0.123456 → 0.123          |
+| `.2e`                                  | Scientific notation         | 0.000123456 → 1.23 × 10⁻⁴ |
+| `d`                                    | Whole number                | 42.7 → 43                 |
+| `,d`, `,.2f`, etc.                     | Thousands grouped by commas | 1234567 → 1,234,567       |
+| `round-mode=places, round-precision=1` | siunitx options             | 0.123456 → 0.1            |
+
+As in Python, digits are only grouped with a comma,
+and `g` switches to scientific notation for very large or small numbers.
+Unlike Python, it keeps zeros left by rounding, e.g., 2.501 → 2.50.
+
+Without a format, siunitx's defaults apply, which print every digit,
+grouped in threes with thin spaces, e.g., 0.123 456.
+To set a default for the whole document, use `\sisetup`, e.g.,
+`\sisetup{round-mode=figures, round-precision=3}`.
+A value that isn't a number, e.g., a name, prints as it is.
+Since `%` starts a comment in LaTeX, a percentage is easiest written to the
+results file by the pipeline.
+
+`\ckvalue` can't go inside siunitx's own commands or an `S` column, since
+those read their argument as a number.
+For a value with units, write the unit after it, e.g.,
+`\ckvalue[.2f]{results/metrics.json}{speed}~\unit{\metre\per\second}`.
+
+## Build dates
+
+pdfTeX writes the build time into the PDF,
+so building the same document twice produces two different files,
+and each rebuild writes a new hash to `dvc.lock`,
+even if the document didn't change.
+
+To avoid this, Calkit sets the build date to that of the last commit
+that modified the document's directory.
+This way the date is still meaningful,
+and the PDF won't change until the document does.
+If there are uncommitted changes, the current time is used instead.
 
 ## Comparing revisions
 
@@ -79,6 +216,8 @@ A LaTeX PDF output is stored/tracked with DVC by default
 file changing and nothing about the document itself.
 Calkit can mark up one revision of a document against another with
 `latexdiff`, so additions and deletions appear where they happen.
+Each side's [project components](#including-project-components) are read
+from its own revision, so a changed value, figure, or table is marked too.
 
 List the comparisons a document should keep in its `latex` stage
 under the `diffs` list:
@@ -106,10 +245,19 @@ document can usually diff it too.
 
 ### For pull request reviewers
 
-A single revision compares it against `HEAD`, so `- main` means "what this
-branch has committed, against the `main` branch".
+A single revision is compared against the working tree,
+which is what the document itself is built from,
+so `- main` means "what this branch changes, against the `main` branch".
 That's the diff you'd want to see for a pull request,
 and it will be rebuilt by the pipeline whenever the PR or `main` changes.
+Since it reads the working tree, you can make an edit, run the pipeline to
+check both the document and its diff, and commit them together.
+
+A branch named in `diffs` means the local branch, like it does everywhere
+else in the pipeline.
+If it's behind its remote-tracking branch,
+e.g., because it was updated on GitHub and fetched but never checked out,
+Calkit prints a warning with the command to update it.
 
 On the default branch, `main` and `HEAD` are the same commit, so the
 comparison comes out empty and the diff will show no changes.
@@ -164,7 +312,7 @@ possible with the `--pipeline` option,
 which creates a standalone pipeline for the LaTeX stage and everything
 it depends on upstream.
 
-### Where they go
+### Where diffs are stored
 
 Each comparison gets a directory named after what it compares, with the
 document's own path inside it:
@@ -208,6 +356,42 @@ pipeline:
         - --type=CFONT
 ```
 
+A macro that wraps a block of the document, e.g., one that switches the
+appendix to a single column, is expanded before comparing,
+so what it wraps is marked up like the rest of the document.
+
+To post-process the marked-up document before it's built,
+set `diff_filter` to a Python script that reads it on stdin and writes the
+result to stdout, e.g., to drop changes that only replace text with the
+equivalent glossary entry:
+
+```yaml
+pipeline:
+  stages:
+    paper-1:
+      kind: latex
+      environment: tex
+      target_path: pubs/paper-1/main.tex
+      diffs:
+        - paper-1-submitted
+      diff_filter:
+        kind: python-script
+        script_path: scripts/glossary-filter.py
+```
+
+By default the script runs with Calkit's own Python,
+so it can only use the standard library and Calkit's dependencies.
+To run it in one of the project's environments instead,
+set `environment` on the filter, and pass any arguments with `args`.
+The script is a dependency of the diff stage, so changing it rebuilds the
+diff.
+
+If LaTeX reports errors building the marked-up document but still produces
+a PDF, the diff is kept and the errors are shown in a warning.
+Some of these errors come from the document itself, and can be hidden when
+building it normally, e.g., by an aux directory kept between runs,
+so check that the document builds from an empty aux directory.
+
 ### Running diffs
 
 Each comparison is its own pipeline substage, named after the document's
@@ -219,22 +403,66 @@ To run all of a document's comparisons:
 calkit run paper-1.diffs
 ```
 
-### Comparing against uncommitted work
-
-`calkit latex diff` runs a comparison on demand, and with no `--to` the
-newer side is the working tree:
+To see which diffs the pipeline keeps, and whether each is up to date,
+stale, or not built yet:
 
 ```sh
-calkit latex diff pubs/paper-1/main.tex --from main --env tex
+calkit list latex-diffs
+```
+
+To open one, name it by its stage, the document, or the revision it compares
+against:
+
+```sh
+calkit show latex-diff paper-1-submitted
+```
+
+From a VS Code terminal it opens in the editor, and otherwise in the system's
+PDF viewer.
+Pass `--run` to build it first if it's stale or hasn't been built.
+
+In VS Code, the Calkit sidebar lists each diff under its stage and its
+publication, marked as up to date, stale, or not built,
+with a button to build it.
+Clicking a built diff opens it.
+The diff button in the editor toolbar, shown for a `.tex` file or a PDF a
+`latex` stage builds, lists the pipeline's diffs for that document too.
+A diff that's already built opens straight away,
+and one that's stale is rebuilt after it opens, with the viewer reloading when
+it's done.
+
+The toolbar also has a button to switch between a `.tex` file and the PDF its
+stage builds in the same tab, as well as LaTeX Workshop's button that opens
+the PDF beside it.
+
+### Comparing on demand
+
+To compare against a revision that isn't in the pipeline's `diffs`,
+`calkit latex diff` runs a comparison on demand,
+and with no `--to` option specified, the comparison is the working copy:
+
+```sh
+calkit latex diff pubs/paper-1/main.tex --from main
 # .calkit/local/latex-diffs/main..working/pubs/paper-1/main.pdf
 ```
 
 Those diffs can't be reproduced from two revisions, so they're not tracked,
 ending up in the project's `.calkit/local` directory.
-With no `--from` it compares against the merge base with the default branch.
-DVC-tracked files the document names directly are fetched for the older
-side, but a pipeline output without a `.dvc` file isn't found that way, so
-name any of those with `--input`, e.g., `--input pubs/paper-1/figs/`.
+With no `--from` it compares against the merge base with the default
+branch--typically `main`.
+If a `latex` pipeline stage builds the document,
+the diff is built with the stage configuration, i.e.,
+its environment, settings, and inputs,
+so the diff uses both revisions of the figures, tables, and results.
+
+To see the .tex files sent into `latexdiff`, e.g., when the
+marked-up document fails to build, pass `--keep-tex`,
+or set `keep_diff_tex: true` on the stage.
+The old, new, and marked-up `.tex` files are kept beside the diff PDF,
+e.g., `main-old.tex`, `main-new.tex`, and `main-diff.tex`.
+
+In VS Code, the Calkit extension's "Diff LaTeX Document Against..." command
+does the same from the editor, and opens the result.
 
 ## Interoperability with Microsoft Word
 
@@ -268,9 +496,95 @@ if omitted.
 For example:
 
 ```latex
-% COMMENT resolved=false highlight={text: "something", occ: 0}
+% COMMENT id=3f9a2c1b resolved=false highlight={text: "something", occ: 0}
 %   Someone Name <email@mail.com> (2025-01-01 01:00):
 %     This is a comment.
 %   Person, Other:
 %     That's a very good comment.
 ```
+
+The metadata a thread can have:
+
+- `id`: eight hexadecimal characters that identify the thread,
+  so tools can find it after the lines around it change.
+  A thread gets one the first time a tool edits it.
+- `resolved`: `true` once the discussion is done.
+  The thread stays in the source, so it can be reopened.
+- `highlight`: the text in the following paragraph, as it reads in the PDF,
+  that the thread is about, and `occ`, which occurrence of that text it is.
+  Without a highlight, a thread is about the whole paragraph.
+- `issue`: the URL of an issue that mirrors the thread, e.g., on GitHub.
+
+Tools keep any other metadata they don't recognize when they rewrite a
+thread, so newer attributes survive older tools.
+
+### From the command line
+
+`calkit latex comments` reads and edits threads in place.
+To list a document's threads, including those in files it inputs,
+in the order they appear:
+
+```sh
+calkit latex comments list paper/main.tex --unresolved
+```
+
+To start a thread above the paragraph at a line, about some of its text:
+
+```sh
+calkit latex comments add paper/intro.tex --line 12 \
+  --highlight "the wake recovers" -m "How quickly?"
+```
+
+This prints the new thread's ID, which `reply`, `resolve`, `reopen`,
+and `delete` take with `--id`.
+They also take `--line` with the number of any line in the thread:
+
+```sh
+calkit latex comments reply paper/intro.tex --id 3f9a2c1b -m "Within 3D."
+calkit latex comments resolve paper/intro.tex --id 3f9a2c1b
+```
+
+Authors default to Git's `user.name` and `user.email`.
+Pass `--json` to `list` or `add` for output other programs can read.
+
+### In VS Code
+
+The Calkit extension opens a `latex` stage's PDF in its PDF Review viewer,
+which shows the document's threads as highlights on the PDF and in a side
+panel, where they can be replied to, resolved, reopened, and deleted.
+The Comments button shows how many are open, and hides or shows them.
+
+Selecting text in the PDF offers to comment on it,
+which writes a new thread into the source above that paragraph,
+or to go to the source, which opens the `.tex` file with that text selected.
+Right-clicking the PDF, or Cmd/Ctrl-clicking it, goes to the source too.
+Cmd/Ctrl+Alt+Shift+J switches between a `.tex` file and its PDF,
+at the cursor, and Cmd/Ctrl+F searches the PDF's text.
+
+The viewer uses the SyncTeX file `latexmk` writes beside the PDF to find
+where things are.
+A PDF built elsewhere won't have one, e.g., one pulled from DVC,
+so the viewer finds each paragraph by its text instead,
+which can misplace a thread on a paragraph that's repeated word for word.
+
+### On the Calkit Hub
+
+On the Calkit Hub, comments on a publication that a `latex` stage builds
+are stored the same way, in its `.tex` source,
+so they show up for anyone who views the document,
+whether in VS Code, from the command line, or on the hub.
+A comment made on the hub is saved to the source on the branch being viewed.
+Comments made while viewing a release or another past version go on a new
+branch from it instead, with a pull request to bring them into the main
+branch.
+
+The hub's LaTeX editor shows the threads in the file being edited,
+and comments made there are saved along with the file.
+
+Comments made on the hub before it stored them in the source are listed as
+kept on the hub, with a button to move them into the source.
+
+When commenting on the hub, a thread can optionally also be posted as a
+GitHub issue, which is linked from the thread's `issue` metadata.
+Replies and resolving are copied to the issue,
+and closing the issue resolves the thread.

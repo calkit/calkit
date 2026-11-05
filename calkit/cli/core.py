@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from enum import Enum
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import Any, NoReturn
 
 import typer
 from typer.core import TyperCommand, TyperGroup
@@ -26,10 +27,6 @@ class EnvDefaultsModeChoice(str, Enum):
     ignore = "ignore"
     replace = "replace"
     merge = "merge"
-
-
-if TYPE_CHECKING:
-    import click
 
 
 class AliasGroup(TyperGroup):
@@ -87,21 +84,19 @@ class OptionalValueCommand(TyperCommand):
 
 
 def complete_stage_names(
-    ctx: "click.Context | None",
-    param: "click.Parameter | None",
-    incomplete: str,
-) -> list:
+    ctx: object, param: object, incomplete: str
+) -> list[str]:
     """Return pipeline stage names for shell tab-completion.
 
     ``ctx`` and ``param`` are part of the Click completion-callback signature
-    but are unused here, so they accept ``None`` (e.g. when called directly in
-    tests).
+    but are unused here, so they accept anything, e.g., ``None`` when called
+    directly in tests. Typer bundles its own Click, so its types would only
+    tie this to that copy.
     """
     if not os.path.isfile("calkit.yaml"):
         return []
     try:
         import ruamel.yaml
-        from click.shell_completion import CompletionItem
 
         ryaml = ruamel.yaml.YAML()
         with open("calkit.yaml") as f:
@@ -122,11 +117,7 @@ def complete_stage_names(
                 sp_stages = sp_info.get("pipeline", {}).get("stages", {})
                 for stage in sp_stages:
                     candidates.append(f"{sp_name}:{stage}")
-        return [
-            CompletionItem(name)
-            for name in candidates
-            if name.startswith(incomplete)
-        ]
+        return [name for name in candidates if name.startswith(incomplete)]
     except Exception:
         return []
 
@@ -162,8 +153,24 @@ def echo_json(obj: Any) -> None:
     typer.echo(json.dumps(obj, default=str))
 
 
+def _echo_above_spinner(text: str, err: bool) -> bool:
+    """Print through a spinner's stand-in for the stream, if there is one.
+
+    Click writes to a Windows console's handle directly, which would put the
+    text on the spinner's line rather than above it.
+    """
+    file_proxy = sys.modules.get("rich.file_proxy")
+    stream = sys.stderr if err else sys.stdout
+    if file_proxy is None or not isinstance(stream, file_proxy.FileProxy):
+        return False
+    print(text, file=stream, flush=True)
+    return True
+
+
 def raise_error(txt: str) -> NoReturn:
-    typer.echo(typer.style("Error: " + str(txt), fg="red"), err=True)
+    text = typer.style("Error: " + str(txt), fg="red")
+    if not _echo_above_spinner(text, err=True):
+        typer.echo(text, err=True)
     raise typer.Exit(1)
 
 
@@ -174,7 +181,38 @@ def warn(txt: str, prefix: str = "Warning: ", err: bool = False):
     # defined.
     from calkit.core import encode_safe
 
-    typer.echo(
-        typer.style(prefix + encode_safe(str(txt), err=err), fg="yellow"),
-        err=err,
+    text = typer.style(prefix + encode_safe(str(txt), err=err), fg="yellow")
+    if not _echo_above_spinner(text, err=err):
+        typer.echo(text, err=err)
+
+
+def warn_app_control(
+    output: str = "", returncode: int | None = None, maybe: bool = False
+) -> None:
+    """Explain a failure Windows App Control may have caused.
+
+    Smart App Control blocks unsigned executables and DLLs it doesn't trust,
+    which environments are full of, and the failure reads as unrelated.
+    Pass ``maybe`` for a failure whose output went straight to the terminal,
+    to warn whenever Smart App Control is on.
+    """
+    from calkit.windows import (
+        SMART_APP_CONTROL_DOCS_URL,
+        app_control_blocked,
+        smart_app_control_on,
     )
+
+    if app_control_blocked(output=output, returncode=returncode):
+        warn(
+            "Windows blocked a file from running, which Smart App Control "
+            "does to unsigned files it doesn't trust; see "
+            f"{SMART_APP_CONTROL_DOCS_URL}",
+            err=True,
+        )
+    elif maybe and smart_app_control_on():
+        warn(
+            "Smart App Control is on, which can block files in environments "
+            "from running; if the output above says a file was blocked, see "
+            f"{SMART_APP_CONTROL_DOCS_URL}",
+            err=True,
+        )

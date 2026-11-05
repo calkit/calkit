@@ -12,7 +12,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli.core import raise_error
+from calkit.cli.core import raise_error, warn
 
 config_app = typer.Typer(no_args_is_help=True)
 
@@ -189,8 +189,16 @@ def setup_remote(
 ):
     """Set up the Calkit hub as the default DVC remote and store a token
     in the local config.
+
+    Deprecated: this configures the project, not Calkit itself, which is
+    what the rest of this app is for.
     """
     from git.exc import InvalidGitRepositoryError
+
+    warn(
+        "'calkit config remote' is deprecated; use 'calkit update hub', "
+        "which also creates the project on the hub if it isn't there"
+    )
 
     from calkit.dvc import configure_remote, set_remote_auth
 
@@ -255,12 +263,7 @@ def config_github_ssh():
 
     typer.echo("Checking if you can already connect to GitHub via SSH")
     # First check if we can already connect to GitHub
-    ssh_test_cmd = ["ssh", "-T", "git@github.com"]
-    p = subprocess.run(ssh_test_cmd, capture_output=True, text=True)
-    if (
-        "successfully authenticated" in p.stdout
-        or "successfully authenticated" in p.stderr
-    ):
+    if calkit.github.can_use_ssh(interactive=True):
         typer.echo("You can already connect to GitHub via SSH")
         go_on = typer.confirm("Do you want to add a new SSH key anyway?")
         if not go_on:
@@ -402,8 +405,7 @@ def config_github_ssh():
     typer.echo(f"Paste this into the public key field:\n\n{pub_key}\n")
     typer.confirm("Press Enter when done", default=True)
     typer.echo("Testing SSH connection to GitHub")
-    p = subprocess.run(ssh_test_cmd, capture_output=True, text=True)
-    if "successfully authenticated" in p.stderr:
+    if calkit.github.can_use_ssh(interactive=True):
         typer.echo("Successfully connected to GitHub via SSH!")
     else:
         raise_error(

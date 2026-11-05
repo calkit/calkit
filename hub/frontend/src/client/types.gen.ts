@@ -31,9 +31,57 @@ export type AccountPublic = {
 }
 
 /**
+ * ActiveCounts
+ */
+export type ActiveCounts = {
+  /**
+   * Last Day
+   */
+  last_day: number
+  /**
+   * Last 7 Days
+   */
+  last_7_days: number
+  /**
+   * Last 30 Days
+   */
+  last_30_days: number
+}
+
+/**
+ * AnalyticsStats
+ */
+export type AnalyticsStats = {
+  /**
+   * Likely human users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.
+   */
+  active_users: ActiveCounts
+  /**
+   * Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.
+   */
+  active_visitors: ActiveCounts
+  /**
+   * Visitor-days from visitors who didn't accept analytics, i.e., distinct (UTC day, visitor) pairs with a page view in the window that followed input and wasn't from a bot. Not unique people: their IDs reset daily, so one person visiting on three days counts three times.
+   */
+  human_visits: ActiveCounts
+  /**
+   * Human visits as above that included a project page, leaving out projects owned by excluded accounts
+   */
+  human_project_visits: ActiveCounts
+  /**
+   * Distinct projects, not owned by excluded accounts, with human visits as above
+   */
+  projects_viewed: ActiveCounts
+}
+
+/**
  * Body_login-login_access_token
  */
 export type BodyLoginLoginAccessToken = {
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
   /**
    * Grant Type
    */
@@ -361,6 +409,14 @@ export type ConnectedAccounts = {
    * Overleaf
    */
   overleaf: boolean
+  /**
+   * Overleaf Token
+   */
+  overleaf_token?: boolean
+  /**
+   * Overleaf Session
+   */
+  overleaf_session?: boolean
   /**
    * Google
    */
@@ -1131,6 +1187,56 @@ export type ExistsResult = {
 }
 
 /**
+ * ExportStage
+ */
+export type ExportStage = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Exported By
+   */
+  exported_by?: string | null
+  /**
+   * Saved
+   */
+  saved?: boolean
+}
+
+/**
+ * ExportStagePost
+ */
+export type ExportStagePost = {
+  /**
+   * Source
+   */
+  source: string
+  /**
+   * Output
+   */
+  output: string
+  /**
+   * App
+   */
+  app?: string | null
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
  * ExternalReleasePost
  *
  * A release declared as published to an external venue.
@@ -1635,6 +1741,22 @@ export type FsOpResponse = {
 }
 
 /**
+ * GitHubActionsRunOptions
+ */
+export type GitHubActionsRunOptions = {
+  /**
+   * Workflow
+   */
+  workflow?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: {
+    [key: string]: string
+  }
+}
+
+/**
  * GitHubInstallations
  */
 export type GitHubInstallations = {
@@ -1985,6 +2107,22 @@ export type HttpRequestAccess = {
 }
 
 /**
+ * HubStats
+ */
+export type HubStats = {
+  users: UserStats
+  projects: ProjectStats
+  /**
+   * Excluded Accounts
+   */
+  excluded_accounts: Array<string>
+  /**
+   * From Mixpanel; null when not configured or unreachable
+   */
+  analytics?: AnalyticsStats | null
+}
+
+/**
  * HubVersion
  */
 export type HubVersion = {
@@ -2122,6 +2260,10 @@ export type Issue = {
    * Artifact Path
    */
   artifact_path?: string | null
+  /**
+   * Is Pull Request
+   */
+  is_pull_request?: boolean
 }
 
 /**
@@ -2168,6 +2310,230 @@ export type ItemLock = {
    * User Github Username
    */
   user_github_username: string
+}
+
+/**
+ * LatexCommentMessage
+ */
+export type LatexCommentMessage = {
+  /**
+   * Author
+   */
+  author: string
+  /**
+   * Email
+   */
+  email?: string | null
+  /**
+   * Date
+   */
+  date?: string | null
+  /**
+   * Text
+   */
+  text: string
+}
+
+/**
+ * LatexCommentPatch
+ */
+export type LatexCommentPatch = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Ref
+   */
+  ref?: string | null
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Resolved
+   */
+  resolved: boolean
+}
+
+/**
+ * LatexCommentPost
+ */
+export type LatexCommentPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Ref
+   */
+  ref?: string | null
+  /**
+   * Comment
+   */
+  comment: string
+  highlight?: CommentHighlight | null
+  /**
+   * Create Github Issue
+   */
+  create_github_issue?: boolean
+}
+
+/**
+ * LatexCommentReplyPost
+ */
+export type LatexCommentReplyPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Ref
+   */
+  ref?: string | null
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Body
+   */
+  body: string
+}
+
+/**
+ * LatexCommentThread
+ */
+export type LatexCommentThread = {
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Id
+   */
+  id?: string | null
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Line
+   */
+  line: number
+  /**
+   * Resolved
+   */
+  resolved: boolean
+  /**
+   * Issue
+   */
+  issue?: string | null
+  /**
+   * Highlight
+   */
+  highlight?: string | null
+  /**
+   * Position
+   */
+  position?: {
+    [key: string]: unknown
+  } | null
+  /**
+   * Messages
+   */
+  messages: Array<LatexCommentMessage>
+}
+
+/**
+ * LatexComments
+ */
+export type LatexComments = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Source
+   */
+  source: string
+  /**
+   * Rev
+   */
+  rev: string
+  /**
+   * Branch
+   */
+  branch: string | null
+  /**
+   * Can Comment
+   */
+  can_comment: boolean
+  /**
+   * Threads
+   */
+  threads: Array<LatexCommentThread>
+}
+
+/**
+ * LatexCommentsMove
+ */
+export type LatexCommentsMove = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Ref
+   */
+  ref?: string | null
+}
+
+/**
+ * LatexComponents
+ *
+ * What a document needs beside it for calkit.sty's commands, as
+ * ``calkit latex build`` would write it.
+ */
+export type LatexComponents = {
+  /**
+   * Loads Calkit
+   */
+  loads_calkit: boolean
+  /**
+   * Style
+   */
+  style?: string | null
+  /**
+   * Values
+   */
+  values?: string | null
+  /**
+   * Copies
+   */
+  copies?: Array<string>
+  /**
+   * Problems
+   */
+  problems?: Array<string>
+}
+
+/**
+ * LatexComponentsRequest
+ *
+ * A LaTeX document to bring calkit.sty's components in for.
+ */
+export type LatexComponentsRequest = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Sources
+   */
+  sources?: {
+    [key: string]: string
+  }
 }
 
 /**
@@ -2410,20 +2776,6 @@ export type Notification = {
 }
 
 /**
- * OAuthCodeExchange
- */
-export type OAuthCodeExchange = {
-  /**
-   * Code
-   */
-  code: string
-  /**
-   * Redirect Uri
-   */
-  redirect_uri: string
-}
-
-/**
  * OnboardingFlagPost
  */
 export type OnboardingFlagPost = {
@@ -2478,6 +2830,16 @@ export type OperationResult = {
    * Message
    */
   message?: string | null
+}
+
+/**
+ * OrgMemberPatch
+ */
+export type OrgMemberPatch = {
+  /**
+   * Role
+   */
+  role: "read" | "write" | "admin" | "owner"
 }
 
 /**
@@ -2637,7 +2999,7 @@ export type OrgUserPublic = {
   /**
    * Github Name
    */
-  github_name: string
+  github_name: string | null
   /**
    * Role
    */
@@ -2660,6 +3022,12 @@ export type OrgsResponse = {
 
 /**
  * OverleafLinkPublic
+ *
+ * A folder of a Calkit project an Overleaf project syncs with, and what
+ * the current user can do with that project.
+ *
+ * ``github_repo_url`` is the project's repo on GitHub, in one canonical
+ * form, e.g., to open it in a Codespace, or none if it's elsewhere.
  */
 export type OverleafLinkPublic = {
   /**
@@ -2686,6 +3054,10 @@ export type OverleafLinkPublic = {
    * Current User Access
    */
   current_user_access: "read" | "write" | "admin" | "owner" | null
+  /**
+   * Github Repo Url
+   */
+  github_repo_url?: string | null
 }
 
 /**
@@ -2704,6 +3076,26 @@ export type OverleafLookup = {
    * Projects Remaining
    */
   projects_remaining: number
+}
+
+/**
+ * OverleafSessionPut
+ */
+export type OverleafSessionPut = {
+  /**
+   * Session
+   */
+  session: string
+}
+
+/**
+ * OverleafSessionResponse
+ */
+export type OverleafSessionResponse = {
+  /**
+   * Session
+   */
+  session: string
 }
 
 /**
@@ -2858,6 +3250,165 @@ export type Pipeline = {
 }
 
 /**
+ * PipelinePut
+ */
+export type PipelinePut = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
+ * PipelineRun
+ *
+ * A run of the pipeline, wherever it ran.
+ */
+export type PipelineRun = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Location
+   */
+  location: "github-actions"
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Started
+   */
+  started?: string | null
+  /**
+   * Finished
+   */
+  finished?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Started By
+   */
+  started_by?: string | null
+  /**
+   * Github Workflow
+   */
+  github_workflow?: string | null
+  /**
+   * Github Run Id
+   */
+  github_run_id?: number | null
+}
+
+/**
+ * PipelineRunLogPart
+ *
+ * Part of a run's log, e.g., a GitHub Actions job's.
+ */
+export type PipelineRunLogPart = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+  /**
+   * Phases
+   */
+  phases?: Array<PipelineRunLogPhase>
+  /**
+   * Log
+   */
+  log?: string | null
+  /**
+   * Log Truncated
+   */
+  log_truncated?: boolean
+}
+
+/**
+ * PipelineRunLogPhase
+ */
+export type PipelineRunLogPhase = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+}
+
+/**
+ * PipelineRunLogs
+ */
+export type PipelineRunLogs = {
+  /**
+   * Parts
+   */
+  parts?: Array<PipelineRunLogPart>
+}
+
+/**
+ * PipelineRunPost
+ */
+export type PipelineRunPost = {
+  /**
+   * Location
+   */
+  location?: "github-actions"
+  github_actions?: GitHubActionsRunOptions
+}
+
+/**
+ * PipelineRuns
+ */
+export type PipelineRuns = {
+  /**
+   * Runs
+   */
+  runs?: Array<PipelineRun>
+  /**
+   * Total
+   */
+  total?: number
+  /**
+   * Github Workflow
+   */
+  github_workflow?: string | null
+  /**
+   * Can Start
+   */
+  can_start?: boolean
+  /**
+   * Cannot Start Reason
+   */
+  cannot_start_reason?: string | null
+}
+
+/**
  * PipelineStage
  *
  * One stage of the Calkit pipeline, as editable YAML.
@@ -2923,6 +3474,21 @@ export type PipelineStagePut = {
    * Message
    */
   message?: string | null
+}
+
+/**
+ * PipelineYaml
+ *
+ * The project's whole pipeline, as editable YAML.
+ *
+ * The YAML is the ``pipeline:`` block of calkit.yaml, exactly as the
+ * pipeline page shows it -- same key order, same comments.
+ */
+export type PipelineYaml = {
+  /**
+   * Yaml
+   */
+  yaml: string
 }
 
 /**
@@ -3247,6 +3813,10 @@ export type ProjectComment = {
    */
   git_rev?: string | null
   /**
+   * Moved To Source
+   */
+  moved_to_source?: string | null
+  /**
    * User Github Username
    */
   readonly user_github_username: string | null
@@ -3552,7 +4122,7 @@ export type ProjectPost = {
   /**
    * Title
    */
-  title: string
+  title?: string | null
   /**
    * Description
    */
@@ -3601,6 +4171,14 @@ export type ProjectPost = {
    * Keep Template History
    */
   keep_template_history?: boolean
+  /**
+   * Empty Repo
+   */
+  empty_repo?: boolean
+  /**
+   * Overleaf Project Url
+   */
+  overleaf_project_url?: string | null
 }
 
 /**
@@ -3706,6 +4284,36 @@ export type ProjectPushEventPost = {
 }
 
 /**
+ * ProjectStats
+ */
+export type ProjectStats = {
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Public
+   */
+  public: number
+  /**
+   * Private
+   */
+  private: number
+  /**
+   * Owners
+   */
+  owners: number
+  /**
+   * Worked On
+   */
+  worked_on: number
+  /**
+   * Updated Last 90 Days
+   */
+  updated_last_90_days: number
+}
+
+/**
  * ProjectStatus
  */
 export type ProjectStatus = {
@@ -3749,6 +4357,131 @@ export type ProjectsPublic = {
    * Count
    */
   count: number
+}
+
+/**
+ * Provenance
+ *
+ * Where an artifact, or one value inside a results file, came from.
+ */
+export type Provenance = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Exists
+   */
+  exists?: boolean
+  /**
+   * Value
+   */
+  value?: unknown
+  /**
+   * Value Error
+   */
+  value_error?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Stage Kind
+   */
+  stage_kind?: string | null
+  /**
+   * Stage App
+   */
+  stage_app?: string | null
+  /**
+   * Source
+   */
+  source?: string | null
+  /**
+   * Command
+   */
+  command?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Input To Stages
+   */
+  input_to_stages?: Array<string>
+  stage_status?: StageStatus | null
+  /**
+   * Stale Reason
+   */
+  stale_reason?: "pipeline" | "frozen" | null
+  /**
+   * Copied From
+   */
+  copied_from?: string | null
+  /**
+   * Copy Stage
+   */
+  copy_stage?: string | null
+  /**
+   * Origin
+   */
+  origin?: string | null
+  /**
+   * Origin Url
+   */
+  origin_url?: string | null
+  /**
+   * Origin Path
+   */
+  origin_path?: string | null
+  /**
+   * Gaps
+   */
+  gaps?: Array<ProvenanceGap>
+}
+
+/**
+ * ProvenanceGap
+ *
+ * Something nothing records the origin of, and the chain to it.
+ */
+export type ProvenanceGap = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Steps
+   */
+  steps?: Array<ProvenanceStep>
+  /**
+   * Unchecked
+   */
+  unchecked?: boolean
+}
+
+/**
+ * ProvenanceStep
+ *
+ * A path on the way back from an artifact, and the stage producing it.
+ */
+export type ProvenanceStep = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Stage
+   */
+  stage?: string | null
 }
 
 /**
@@ -3807,6 +4540,10 @@ export type Publication = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+  /**
+   * Latex Diffs
+   */
+  latex_diffs?: Array<PublicationLatexDiff>
 }
 
 /**
@@ -3826,7 +4563,7 @@ export type PublicationComponent = {
   /**
    * Via
    */
-  via?: "folder" | "input"
+  via?: "folder" | "input" | "included"
   /**
    * Stage
    */
@@ -3865,6 +4602,42 @@ export type PublicationComponents = {
    * N Unknown
    */
   n_unknown: number
+}
+
+/**
+ * PublicationLatexDiff
+ *
+ * A PDF marking up what changed in a publication between revisions.
+ */
+export type PublicationLatexDiff = {
+  /**
+   * From Ref
+   */
+  from_ref: string
+  /**
+   * To Ref
+   */
+  to_ref: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Storage
+   */
+  storage?: "git" | "dvc" | "dvc-zip" | null
 }
 
 /**
@@ -3926,7 +4699,7 @@ export type QuestionEvidence = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "table" | "publication"
+  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
   /**
    * Path
    */
@@ -3936,9 +4709,29 @@ export type QuestionEvidence = {
    */
   key?: string | null
   /**
+   * Values
+   */
+  values?: Array<QuestionEvidenceValue> | null
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Section
+   */
+  section?: string | null
+  /**
+   * Label
+   */
+  label?: string | null
+  /**
    * Explanation
    */
   explanation?: string | null
+  /**
+   * Explanation Path
+   */
+  explanation_path?: string | null
   /**
    * Git Ref
    */
@@ -3968,7 +4761,7 @@ export type QuestionEvidencePost = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "table" | "publication"
+  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
   /**
    * Path
    */
@@ -3978,13 +4771,55 @@ export type QuestionEvidencePost = {
    */
   key?: string | null
   /**
+   * Values
+   */
+  values?: {
+    [key: string]: string
+  } | null
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Section
+   */
+  section?: string | null
+  /**
+   * Label
+   */
+  label?: string | null
+  /**
    * Explanation
    */
   explanation?: string | null
   /**
+   * Explanation Path
+   */
+  explanation_path?: string | null
+  /**
    * Git Ref
    */
   git_ref?: string | null
+}
+
+/**
+ * QuestionEvidenceValue
+ *
+ * One of the named values a result evidence entry cites.
+ */
+export type QuestionEvidenceValue = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Value
+   */
+  value?: string | null
 }
 
 /**
@@ -4026,6 +4861,10 @@ export type QuestionPublic = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4033,6 +4872,14 @@ export type QuestionPublic = {
    * Evidence
    */
   evidence?: Array<QuestionEvidence>
+  /**
+   * Verifications
+   */
+  verifications?: Array<QuestionSignOff>
+  /**
+   * Validations
+   */
+  validations?: Array<QuestionSignOff>
 }
 
 /**
@@ -4048,6 +4895,10 @@ export type QuestionPut = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4055,6 +4906,44 @@ export type QuestionPut = {
    * Evidence
    */
   evidence?: Array<QuestionEvidencePost>
+}
+
+/**
+ * QuestionSignOff
+ *
+ * A verification or validation of a question, checked against history.
+ *
+ * A verification says the stages behind the evidence implement the
+ * approach; a validation says the approach suits the question and the
+ * evidence justifies the answer. Stale means what it vouches for changed
+ * after the commit that added it; unchecked means that commit couldn't be
+ * found.
+ */
+export type QuestionSignOff = {
+  /**
+   * By
+   */
+  by: string
+  /**
+   * Date
+   */
+  date?: string | null
+  /**
+   * Notes
+   */
+  notes?: string | null
+  /**
+   * With Ai
+   */
+  with_ai?: Array<string>
+  /**
+   * Status
+   */
+  status: "current" | "stale" | "unchecked"
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -4994,6 +5883,14 @@ export type ReproCheck = {
    */
   misc_needing_provenance?: Array<string>
   /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
+  /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
+  /**
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
@@ -5085,6 +5982,7 @@ export type Result = {
    * Key
    */
   key?: string | null
+  stage_status?: StageStatus | null
 }
 
 /**
@@ -5259,6 +6157,139 @@ export type SoftwareItem = {
    * Description
    */
   description?: string | null
+}
+
+/**
+ * StageFile
+ *
+ * A file a new stage needs, e.g., a script or the file a figure is
+ * exported from.
+ */
+export type StageFile = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Created By Me
+   */
+  created_by_me?: boolean
+}
+
+/**
+ * StageFromScriptOrNotebookPost
+ */
+export type StageFromScriptOrNotebookPost = {
+  /**
+   * Script Path
+   */
+  script_path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Shows
+   */
+  shows?: string | null
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
+ * StageFromScriptOrNotebookResponse
+ */
+export type StageFromScriptOrNotebookResponse = {
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Stage Yaml
+   */
+  stage_yaml: string
+  /**
+   * Environment
+   */
+  environment: string
+  /**
+   * Environment Is New
+   */
+  environment_is_new: boolean
+  /**
+   * Environment Spec Path
+   */
+  environment_spec_path?: string | null
+  /**
+   * Environment Spec Content
+   */
+  environment_spec_content?: string | null
+  /**
+   * Dependencies
+   */
+  dependencies?: Array<string>
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Outputs
+   */
+  outputs?: Array<string>
+  /**
+   * Missing Inputs
+   */
+  missing_inputs?: Array<string>
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Included In
+   */
+  included_in?: Array<string>
+  /**
+   * Saved
+   */
+  saved?: boolean
+  /**
+   * Git Repo Url
+   */
+  git_repo_url: string
+}
+
+/**
+ * StagePost
+ */
+export type StagePost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -5657,6 +6688,59 @@ export type UpdateSubscriptionResponse = {
 }
 
 /**
+ * UserAdminPublic
+ *
+ * A user as listed for a superuser, with what they own.
+ */
+export type UserAdminPublic = {
+  /**
+   * Email
+   */
+  email: string
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Superuser
+   */
+  is_superuser?: boolean
+  /**
+   * Full Name
+   */
+  full_name?: string | null
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Github Username
+   */
+  github_username: string | null
+  /**
+   * Email Verified
+   */
+  email_verified: boolean
+  subscription: UserSubscription | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+  /**
+   * N Projects
+   */
+  n_projects?: number
+  /**
+   * N Private Projects
+   */
+  n_private_projects?: number
+}
+
+/**
  * UserCreate
  */
 export type UserCreate = {
@@ -5727,6 +6811,10 @@ export type UserPublic = {
    */
   email_verified: boolean
   subscription: UserSubscription | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -5749,6 +6837,30 @@ export type UserRegister = {
    * Full Name
    */
   full_name?: string | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+}
+
+/**
+ * UserStats
+ */
+export type UserStats = {
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Verified
+   */
+  verified: number
+  /**
+   * Likely Human
+   *
+   * Users with a GitHub or other connected identity, a verified email, an invitation to a project or org, a personal access token, or sessions on two or more days. Password signup checks none of these, so it's how bot accounts get in.
+   */
+  likely_human: number
 }
 
 /**
@@ -5807,6 +6919,30 @@ export type UserSubscription = {
    * Plan Name
    */
   readonly plan_name: string
+}
+
+/**
+ * UserSubscriptionAdminUpdate
+ *
+ * A superuser's direct edit of a user's subscription, bypassing Stripe.
+ */
+export type UserSubscriptionAdminUpdate = {
+  /**
+   * Plan Name
+   */
+  plan_name: "free" | "standard" | "professional"
+  /**
+   * Period Months
+   */
+  period_months: 1 | 12
+  /**
+   * Price
+   */
+  price: number
+  /**
+   * Paid Until
+   */
+  paid_until?: string | null
 }
 
 /**
@@ -5893,6 +7029,10 @@ export type UserUpdateMe = {
    * Github Username
    */
   github_username?: string | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -5902,7 +7042,7 @@ export type UsersPublic = {
   /**
    * Data
    */
-  data: Array<UserPublic>
+  data: Array<UserAdminPublic>
   /**
    * Count
    */
@@ -6129,6 +7269,38 @@ export type ContentsItemBase = {
 }
 
 /**
+ * OAuthCodeExchange
+ */
+export type AppApiRoutesLoginOAuthCodeExchange = {
+  /**
+   * Code
+   */
+  code: string
+  /**
+   * Redirect Uri
+   */
+  redirect_uri: string
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+}
+
+/**
+ * OAuthCodeExchange
+ */
+export type AppApiRoutesUsersOAuthCodeExchange = {
+  /**
+   * Code
+   */
+  code: string
+  /**
+   * Redirect Uri
+   */
+  redirect_uri: string
+}
+
+/**
  * FileLock
  */
 export type FileLockWritable = {
@@ -6288,6 +7460,10 @@ export type ProjectCommentWritable = {
    * Git Rev
    */
   git_rev?: string | null
+  /**
+   * Moved To Source
+   */
+  moved_to_source?: string | null
 }
 
 /**
@@ -6391,6 +7567,14 @@ export type ReproCheckWritable = {
    */
   misc_needing_provenance?: Array<string>
   /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
+  /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
+  /**
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
@@ -6424,6 +7608,59 @@ export type UpdateSubscriptionResponseWritable = {
    * Stripe Session Client Secret
    */
   stripe_session_client_secret: string | null
+}
+
+/**
+ * UserAdminPublic
+ *
+ * A user as listed for a superuser, with what they own.
+ */
+export type UserAdminPublicWritable = {
+  /**
+   * Email
+   */
+  email: string
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Superuser
+   */
+  is_superuser?: boolean
+  /**
+   * Full Name
+   */
+  full_name?: string | null
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Github Username
+   */
+  github_username: string | null
+  /**
+   * Email Verified
+   */
+  email_verified: boolean
+  subscription: UserSubscriptionWritable | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
+  /**
+   * N Projects
+   */
+  n_projects?: number
+  /**
+   * N Private Projects
+   */
+  n_private_projects?: number
 }
 
 /**
@@ -6463,6 +7700,10 @@ export type UserPublicWritable = {
    */
   email_verified: boolean
   subscription: UserSubscriptionWritable | null
+  /**
+   * Analytics Consent
+   */
+  analytics_consent?: boolean | null
 }
 
 /**
@@ -6526,7 +7767,7 @@ export type UsersPublicWritable = {
   /**
    * Data
    */
-  data: Array<UserPublicWritable>
+  data: Array<UserAdminPublicWritable>
   /**
    * Count
    */
@@ -6738,7 +7979,7 @@ export type RecoverPasswordHtmlContentResponse =
   RecoverPasswordHtmlContentResponses[keyof RecoverPasswordHtmlContentResponses]
 
 export type LoginWithGithubData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesLoginOAuthCodeExchange
   path?: never
   query?: never
   url: "/login/github"
@@ -6765,7 +8006,7 @@ export type LoginWithGithubResponse =
   LoginWithGithubResponses[keyof LoginWithGithubResponses]
 
 export type LoginWithGoogleData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesLoginOAuthCodeExchange
   path?: never
   query?: never
   url: "/login/google"
@@ -7203,6 +8444,38 @@ export type RegisterUserResponses = {
 export type RegisterUserResponse =
   RegisterUserResponses[keyof RegisterUserResponses]
 
+export type GetUserStorageByIdData = {
+  body?: never
+  path: {
+    /**
+     * User Id
+     */
+    user_id: string
+  }
+  query?: never
+  url: "/users/{user_id}/storage"
+}
+
+export type GetUserStorageByIdErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserStorageByIdError =
+  GetUserStorageByIdErrors[keyof GetUserStorageByIdErrors]
+
+export type GetUserStorageByIdResponses = {
+  /**
+   * Successful Response
+   */
+  200: StorageUsage
+}
+
+export type GetUserStorageByIdResponse =
+  GetUserStorageByIdResponses[keyof GetUserStorageByIdResponses]
+
 export type DeleteUserData = {
   body?: never
   path: {
@@ -7293,6 +8566,38 @@ export type UpdateUserResponses = {
 }
 
 export type UpdateUserResponse = UpdateUserResponses[keyof UpdateUserResponses]
+
+export type PutUserSubscriptionAdminData = {
+  body: UserSubscriptionAdminUpdate
+  path: {
+    /**
+     * User Id
+     */
+    user_id: string
+  }
+  query?: never
+  url: "/users/{user_id}/subscription"
+}
+
+export type PutUserSubscriptionAdminErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutUserSubscriptionAdminError =
+  PutUserSubscriptionAdminErrors[keyof PutUserSubscriptionAdminErrors]
+
+export type PutUserSubscriptionAdminResponses = {
+  /**
+   * Successful Response
+   */
+  200: UserSubscription
+}
+
+export type PutUserSubscriptionAdminResponse =
+  PutUserSubscriptionAdminResponses[keyof PutUserSubscriptionAdminResponses]
 
 export type GetUserGithubReposData = {
   body?: never
@@ -7531,7 +8836,7 @@ export type GetUserConnectedAccountsResponse =
   GetUserConnectedAccountsResponses[keyof GetUserConnectedAccountsResponses]
 
 export type PostUserZenodoAuthData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
   query?: never
   url: "/user/zenodo-auth"
@@ -7635,8 +8940,52 @@ export type PutUserOverleafTokenResponses = {
 export type PutUserOverleafTokenResponse =
   PutUserOverleafTokenResponses[keyof PutUserOverleafTokenResponses]
 
+export type GetUserOverleafSessionData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/overleaf-session"
+}
+
+export type GetUserOverleafSessionResponses = {
+  /**
+   * Successful Response
+   */
+  200: OverleafSessionResponse
+}
+
+export type GetUserOverleafSessionResponse =
+  GetUserOverleafSessionResponses[keyof GetUserOverleafSessionResponses]
+
+export type PutUserOverleafSessionData = {
+  body: OverleafSessionPut
+  path?: never
+  query?: never
+  url: "/user/overleaf-session"
+}
+
+export type PutUserOverleafSessionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutUserOverleafSessionError =
+  PutUserOverleafSessionErrors[keyof PutUserOverleafSessionErrors]
+
+export type PutUserOverleafSessionResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PutUserOverleafSessionResponse =
+  PutUserOverleafSessionResponses[keyof PutUserOverleafSessionResponses]
+
 export type PostUserGoogleAuthData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
   query?: never
   url: "/user/google-auth"
@@ -7663,7 +9012,7 @@ export type PostUserGoogleAuthResponse =
   PostUserGoogleAuthResponses[keyof PostUserGoogleAuthResponses]
 
 export type PostUserGithubAuthData = {
-  body: OAuthCodeExchange
+  body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
   query?: never
   url: "/user/github-auth"
@@ -8005,6 +9354,41 @@ export type PostDiscountCodeResponses = {
 
 export type PostDiscountCodeResponse =
   PostDiscountCodeResponses[keyof PostDiscountCodeResponses]
+
+export type GetHubStatsData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Exclude
+     */
+    exclude?: Array<string>
+    /**
+     * Include Superusers
+     */
+    include_superusers?: boolean
+  }
+  url: "/stats"
+}
+
+export type GetHubStatsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetHubStatsError = GetHubStatsErrors[keyof GetHubStatsErrors]
+
+export type GetHubStatsResponses = {
+  /**
+   * Successful Response
+   */
+  200: HubStats
+}
+
+export type GetHubStatsResponse =
+  GetHubStatsResponses[keyof GetHubStatsResponses]
 
 export type GetSubscriptionPlansData = {
   body?: never
@@ -9285,6 +10669,46 @@ export type PostProjectQuestionResponses = {
 export type PostProjectQuestionResponse =
   PostProjectQuestionResponses[keyof PostProjectQuestionResponses]
 
+export type DeleteProjectQuestionData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Number
+     */
+    number: number
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/questions/{number}"
+}
+
+export type DeleteProjectQuestionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteProjectQuestionError =
+  DeleteProjectQuestionErrors[keyof DeleteProjectQuestionErrors]
+
+export type DeleteProjectQuestionResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteProjectQuestionResponse =
+  DeleteProjectQuestionResponses[keyof DeleteProjectQuestionResponses]
+
 export type PutProjectQuestionData = {
   body: QuestionPut
   path: {
@@ -10073,6 +11497,47 @@ export type GetProjectPublicationComponentsResponses = {
 export type GetProjectPublicationComponentsResponse =
   GetProjectPublicationComponentsResponses[keyof GetProjectPublicationComponentsResponses]
 
+export type PostProjectLatexComponentsData = {
+  body: LatexComponentsRequest
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/latex-components"
+}
+
+export type PostProjectLatexComponentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexComponentsError =
+  PostProjectLatexComponentsErrors[keyof PostProjectLatexComponentsErrors]
+
+export type PostProjectLatexComponentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComponents
+}
+
+export type PostProjectLatexComponentsResponse =
+  PostProjectLatexComponentsResponses[keyof PostProjectLatexComponentsResponses]
+
 export type PostProjectMiscData = {
   body: MiscArtifactPost
   path: {
@@ -10426,6 +11891,42 @@ export type GetProjectPipelineResponses = {
 
 export type GetProjectPipelineResponse =
   GetProjectPipelineResponses[keyof GetProjectPipelineResponses]
+
+export type PutProjectPipelineData = {
+  body: PipelinePut
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline"
+}
+
+export type PutProjectPipelineErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutProjectPipelineError =
+  PutProjectPipelineErrors[keyof PutProjectPipelineErrors]
+
+export type PutProjectPipelineResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineYaml
+}
+
+export type PutProjectPipelineResponse =
+  PutProjectPipelineResponses[keyof PutProjectPipelineResponses]
 
 export type GetProjectPipelineStageData = {
   body?: never
@@ -12586,6 +14087,284 @@ export type PostProjectMapPathsResponses = {
 export type PostProjectMapPathsResponse =
   PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
 
+export type PostProjectStageFromScriptOrNotebookData = {
+  body: StageFromScriptOrNotebookPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook"
+}
+
+export type PostProjectStageFromScriptOrNotebookErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectStageFromScriptOrNotebookError =
+  PostProjectStageFromScriptOrNotebookErrors[keyof PostProjectStageFromScriptOrNotebookErrors]
+
+export type PostProjectStageFromScriptOrNotebookResponses = {
+  /**
+   * Successful Response
+   */
+  200: StageFromScriptOrNotebookResponse
+}
+
+export type PostProjectStageFromScriptOrNotebookResponse =
+  PostProjectStageFromScriptOrNotebookResponses[keyof PostProjectStageFromScriptOrNotebookResponses]
+
+export type PostProjectPipelineStageData = {
+  body: StagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages"
+}
+
+export type PostProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineStageError =
+  PostProjectPipelineStageErrors[keyof PostProjectPipelineStageErrors]
+
+export type PostProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PostProjectPipelineStageResponse =
+  PostProjectPipelineStageResponses[keyof PostProjectPipelineStageResponses]
+
+export type PostProjectPipelineExportStageData = {
+  body: ExportStagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/export"
+}
+
+export type PostProjectPipelineExportStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineExportStageError =
+  PostProjectPipelineExportStageErrors[keyof PostProjectPipelineExportStageErrors]
+
+export type PostProjectPipelineExportStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExportStage
+}
+
+export type PostProjectPipelineExportStageResponse =
+  PostProjectPipelineExportStageResponses[keyof PostProjectPipelineExportStageResponses]
+
+export type GetProjectPipelineRunsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+    /**
+     * Offset
+     */
+    offset?: number
+  }
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type GetProjectPipelineRunsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunsError =
+  GetProjectPipelineRunsErrors[keyof GetProjectPipelineRunsErrors]
+
+export type GetProjectPipelineRunsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRuns
+}
+
+export type GetProjectPipelineRunsResponse =
+  GetProjectPipelineRunsResponses[keyof GetProjectPipelineRunsResponses]
+
+export type PostProjectPipelineRunData = {
+  body: PipelineRunPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type PostProjectPipelineRunErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineRunError =
+  PostProjectPipelineRunErrors[keyof PostProjectPipelineRunErrors]
+
+export type PostProjectPipelineRunResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRun
+}
+
+export type PostProjectPipelineRunResponse =
+  PostProjectPipelineRunResponses[keyof PostProjectPipelineRunResponses]
+
+export type GetProjectPipelineRunLogsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Run Id
+     */
+    run_id: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs"
+}
+
+export type GetProjectPipelineRunLogsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunLogsError =
+  GetProjectPipelineRunLogsErrors[keyof GetProjectPipelineRunLogsErrors]
+
+export type GetProjectPipelineRunLogsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRunLogs
+}
+
+export type GetProjectPipelineRunLogsResponse =
+  GetProjectPipelineRunLogsResponses[keyof GetProjectPipelineRunLogsResponses]
+
+export type GetProjectProvenanceData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Key
+     */
+    key?: string | null
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/provenance"
+}
+
+export type GetProjectProvenanceErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectProvenanceError =
+  GetProjectProvenanceErrors[keyof GetProjectProvenanceErrors]
+
+export type GetProjectProvenanceResponses = {
+  /**
+   * Successful Response
+   */
+  200: Provenance
+}
+
+export type GetProjectProvenanceResponse =
+  GetProjectProvenanceResponses[keyof GetProjectProvenanceResponses]
+
 export type PostProjectFigureScriptData = {
   body: FigureScriptPost
   path: {
@@ -12792,6 +14571,244 @@ export type GetProjectActivityResponses = {
 
 export type GetProjectActivityResponse =
   GetProjectActivityResponses[keyof GetProjectActivityResponses]
+
+export type DeleteProjectLatexCommentData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Key
+     */
+    key: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/latex-comments"
+}
+
+export type DeleteProjectLatexCommentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteProjectLatexCommentError =
+  DeleteProjectLatexCommentErrors[keyof DeleteProjectLatexCommentErrors]
+
+export type DeleteProjectLatexCommentResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type DeleteProjectLatexCommentResponse =
+  DeleteProjectLatexCommentResponses[keyof DeleteProjectLatexCommentResponses]
+
+export type GetProjectLatexCommentsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/latex-comments"
+}
+
+export type GetProjectLatexCommentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectLatexCommentsError =
+  GetProjectLatexCommentsErrors[keyof GetProjectLatexCommentsErrors]
+
+export type GetProjectLatexCommentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type GetProjectLatexCommentsResponse =
+  GetProjectLatexCommentsResponses[keyof GetProjectLatexCommentsResponses]
+
+export type PatchProjectLatexCommentData = {
+  body: LatexCommentPatch
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-comments"
+}
+
+export type PatchProjectLatexCommentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PatchProjectLatexCommentError =
+  PatchProjectLatexCommentErrors[keyof PatchProjectLatexCommentErrors]
+
+export type PatchProjectLatexCommentResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type PatchProjectLatexCommentResponse =
+  PatchProjectLatexCommentResponses[keyof PatchProjectLatexCommentResponses]
+
+export type PostProjectLatexCommentData = {
+  body: LatexCommentPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-comments"
+}
+
+export type PostProjectLatexCommentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexCommentError =
+  PostProjectLatexCommentErrors[keyof PostProjectLatexCommentErrors]
+
+export type PostProjectLatexCommentResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type PostProjectLatexCommentResponse =
+  PostProjectLatexCommentResponses[keyof PostProjectLatexCommentResponses]
+
+export type PostProjectLatexCommentReplyData = {
+  body: LatexCommentReplyPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-comments/replies"
+}
+
+export type PostProjectLatexCommentReplyErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexCommentReplyError =
+  PostProjectLatexCommentReplyErrors[keyof PostProjectLatexCommentReplyErrors]
+
+export type PostProjectLatexCommentReplyResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type PostProjectLatexCommentReplyResponse =
+  PostProjectLatexCommentReplyResponses[keyof PostProjectLatexCommentReplyResponses]
+
+export type PostProjectLatexCommentsMoveData = {
+  body: LatexCommentsMove
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/latex-comments/move"
+}
+
+export type PostProjectLatexCommentsMoveErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexCommentsMoveError =
+  PostProjectLatexCommentsMoveErrors[keyof PostProjectLatexCommentsMoveErrors]
+
+export type PostProjectLatexCommentsMoveResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComments
+}
+
+export type PostProjectLatexCommentsMoveResponse =
+  PostProjectLatexCommentsMoveResponses[keyof PostProjectLatexCommentsMoveResponses]
 
 export type GetReferencesData = {
   body?: never
@@ -13667,6 +15684,78 @@ export type AddOrgMemberResponses = {
 
 export type AddOrgMemberResponse =
   AddOrgMemberResponses[keyof AddOrgMemberResponses]
+
+export type DeleteOrgMemberData = {
+  body?: never
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type DeleteOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteOrgMemberError =
+  DeleteOrgMemberErrors[keyof DeleteOrgMemberErrors]
+
+export type DeleteOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteOrgMemberResponse =
+  DeleteOrgMemberResponses[keyof DeleteOrgMemberResponses]
+
+export type UpdateOrgMemberData = {
+  body: OrgMemberPatch
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type UpdateOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type UpdateOrgMemberError =
+  UpdateOrgMemberErrors[keyof UpdateOrgMemberErrors]
+
+export type UpdateOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type UpdateOrgMemberResponse =
+  UpdateOrgMemberResponses[keyof UpdateOrgMemberResponses]
 
 export type PutOrgSubscriptionData = {
   body: OrgSubscriptionUpdate

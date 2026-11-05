@@ -1,24 +1,37 @@
 """Tests for app.api.routes.projects.core endpoints."""
 
 import base64
+import json
+import os
 import uuid
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
+import git
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
+import app.index
+from app import projects as projects_module
 from app import users, zotero
 from app.api.routes.projects.core import (
     _normalize_artifact_file_path,
     get_project_comments,
+    get_project_issues,
 )
 from app.config import settings
 from app.core import ryaml
-from app.models import Project, UserCreate
-from app.models.core import ContentsItem, UserProjectAccess
+from app.models import OverleafLink, Project, UserCreate
+from app.models.core import (
+    ROLE_IDS,
+    Account,
+    ContentsItem,
+    UserProjectAccess,
+)
+from app.pipeline import PipelineAtRef
+from app.pipeline import StageStatus as PipelineStageStatus
 from app.projects import CkInfoAndOuts
 from app.tests import authentication_token_from_email, create_random_user
 
@@ -285,6 +298,58 @@ def test_get_project_comments_uses_all_results() -> None:
     assert session.exec_result.all_called is True
     assert comments == [fake_comment]
     mock_sync.assert_called_once_with(session, [fake_comment], None)
+
+
+def test_get_project_issues_marks_pull_requests() -> None:
+    fake_project = SimpleNamespace(id="project-id", github_repo="me/proj")
+    linked = SimpleNamespace(
+        external_url="https://github.com/me/proj/issues/2",
+        artifact_type="figure",
+        artifact_path="figures/a.png",
+    )
+    session = SimpleNamespace(
+        exec=lambda _query: SimpleNamespace(all=lambda: [linked])
+    )
+    gh_items = [
+        {
+            "id": n,
+            "number": n,
+            "html_url": f"https://github.com/me/proj/{kind}/{n}",
+            "user": {"login": "me"},
+            "state": "open",
+            "title": f"Item {n}",
+            "body": None,
+            **({"pull_request": {}} if kind == "pull" else {}),
+        }
+        for n, kind in [(3, "pull"), (2, "issues")]
+    ]
+    resp = SimpleNamespace(status_code=200, json=lambda: gh_items)
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.requests.get", return_value=resp
+        ) as mock_get,
+    ):
+        issues = get_project_issues(
+            owner_name="me",
+            project_name="proj",
+            current_user=None,
+            session=session,  # type: ignore
+        )
+    # Pull requests stay in the list, in GitHub's order, marked as such
+    assert [(i.number, i.is_pull_request) for i in issues] == [
+        (3, True),
+        (2, False),
+    ]
+    assert issues[1].artifact_path == "figures/a.png"
+    assert issues[0].artifact_path is None
+    # GitHub does the paging
+    assert mock_get.call_args.kwargs["params"] == dict(
+        page=1, per_page=30, state="open"
+    )
 
 
 def _make_fake_blob(path: str) -> SimpleNamespace:
@@ -1010,7 +1075,12 @@ def _get_declared_at_ref(
     client: TestClient, endpoint: str, ck_key: str, declared: list
 ):
     """GET an artifact listing at a ref with ``declared`` in calkit.yaml."""
-    fake_project = SimpleNamespace(owner_account_name="o", name="p")
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
     fake_repo = SimpleNamespace(
         working_dir="/tmp/nonexistent",
         commit=lambda _ref: SimpleNamespace(tree=_EmptyTree()),
@@ -1312,7 +1382,11 @@ def test_get_project_results_autodetects_and_reads_ref(
 ) -> None:
     """Results under a results-style dir are auto-detected, and declared
     results plus the tree are read at the requested ref."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000002")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000002",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     detected_paths = [
         "results/summary.json",
         "results/data.csv",
@@ -1345,7 +1419,17 @@ def test_get_project_results_autodetects_and_reads_ref(
         ) as mock_get_repo,
         patch(
             "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
-            return_value={},
+            return_value={
+                "results": [
+                    # A declared result whose name is the key it is stored
+                    # under, not something written to be read
+                    {"path": "results/stats.json", "name": "r_squared"},
+                    # A declared result with neither, so the path is tidied
+                    {"path": "results/mean-velocity.json"},
+                    # A title someone wrote is left exactly as it is
+                    {"path": "results/rmse.json", "title": "RMSE by run"},
+                ]
+            },
         ) as mock_ck_for_ref,
         patch(
             "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
@@ -1356,31 +1440,244 @@ def test_get_project_results_autodetects_and_reads_ref(
             ".get_ck_info_and_dvc_outs_from_tree",
             return_value=CkInfoAndOuts({}, {}, {}, {}),
         ),
+        # The stage that writes a result, and whether it's out of date
+        patch(
+            "app.api.routes.projects.core.pipeline_at_ref",
+            return_value=PipelineAtRef(
+                dvc_yaml={},
+                dvc_lock={
+                    "stages": {
+                        "summarize": {
+                            "outs": [{"path": "results/summary.json"}]
+                        }
+                    }
+                },
+                statuses={"summarize": PipelineStageStatus(status="stale")},
+                frozen=set(),
+            ),
+        ),
     ):
         response = client.get(
             "/projects/test-owner/test-project/results?ref=some-branch"
         )
     assert response.status_code == 200, response.text
-    paths = {res["path"] for res in response.json()}
+    body = response.json()
+    paths = {res["path"] for res in body}
     for path in detected_paths:
         assert path in paths, f"Expected {path!r} to be detected"
     for path in ignored_paths:
         assert path not in paths, f"Expected {path!r} to be ignored"
+    titles = {res["path"]: res["title"] for res in body}
+    # A derived title reads as a title, whether it came from the name or
+    # the path; one the user wrote is never rewritten
+    assert titles["results/stats.json"] == "R squared"
+    assert titles["results/mean-velocity.json"] == "Mean velocity"
+    assert titles["results/rmse.json"] == "RMSE by run"
+    assert titles["results/data.csv"] == "Data"
     assert mock_get_repo.call_args.kwargs["ref"] == "some-branch"
     assert mock_ck_for_ref.call_args.kwargs["ref"] == "some-branch"
+    by_path = {res["path"]: res for res in body}
+    assert by_path["results/summary.json"]["stage"] == "summarize"
+    assert by_path["results/summary.json"]["stage_status"]["status"] == "stale"
+    assert by_path["results/data.csv"]["stage_status"] is None
 
 
-def test_question_text_handles_string_and_object() -> None:
-    from app.api.routes.projects.core import _extract_question_text
+def test_get_project_questions_without_an_index(
+    client: TestClient, db: Session
+) -> None:
+    # Reading questions doesn't write the cross-project index, and doesn't
+    # depend on it either: the warm job rebuilds it after a push, so it can
+    # be empty or behind while the page still shows every question.
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    ck_info = {
+        "questions": [
+            "Does it work?",
+            {"question": "How well?", "hypothesis": "Very"},
+            "And for how long?",
+        ]
+    }
+    fake_repo = _make_fake_repo("/tmp/does-not-matter")
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        r = client.get(f"{base}/questions", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [q["question"] for q in body] == [
+        "Does it work?",
+        "How well?",
+        "And for how long?",
+    ]
+    assert [q["number"] for q in body] == [1, 2, 3]
+    assert body[1]["hypothesis"] == "Very"
+    # Nothing was indexed by the read
+    db.refresh(project)
+    assert list(project.questions) == []
+    # Ids are stable across reads, so a client keying a list on them isn't
+    # re-rendering every question on every poll
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        again = client.get(f"{base}/questions", headers=headers).json()
+    assert [q["id"] for q in again] == [q["id"] for q in body]
+    # Once the index catches up, the real row ids are what come back
+    app.index.index_questions(session=db, project=project, ck_info=ck_info)
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        indexed = client.get(f"{base}/questions", headers=headers).json()
+    by_number = {q.number: str(q.id) for q in project.questions}
+    assert [q["id"] for q in indexed] == [by_number[n] for n in (1, 2, 3)]
 
-    assert _extract_question_text("Plain question?") == "Plain question?"
+
+def test_get_project_questions_checks_sign_offs(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    import git
+
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    repo = git.Repo.init(tmp_path)
+    with repo.config_writer() as config:
+        config.set_value("user", "name", "t")
+        config.set_value("user", "email", "t@t")
+    ada = {"name": "Ada", "email": "ada@example.org"}
+    question = {
+        "question": "Does it work?",
+        "approach": "Run it.",
+        "answer": "Yes.",
+        "verifications": [
+            {"by": ada, "date": "2026-10-04", "notes": "Read run.py."}
+        ],
+        "validations": [
+            {"by": {**ada, "with_ai": "Claude Opus 5"}, "date": "2026-10-04"}
+        ],
+    }
+
+    def commit(message: str) -> str:
+        with open(tmp_path / "calkit.yaml", "w") as f:
+            ryaml.dump({"questions": [question]}, f)
+        repo.git.add("calkit.yaml")
+        repo.git.commit("-m", message)
+        return repo.head.commit.hexsha
+
+    signed = commit("Sign off")
+    question["answer"] = "Mostly."
+    commit("Edit the answer")
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        r = client.get(f"{base}/questions", headers=headers)
+        assert r.status_code == 200, r.text
+        now = r.json()[0]
+        r = client.get(
+            f"{base}/questions", params={"ref": signed}, headers=headers
+        )
+        assert r.status_code == 200, r.text
+        then = r.json()[0]
+    # Editing the answer makes the validation stale, but not the
+    # verification, since the approach and stages didn't change
+    assert now["approach"] == "Run it."
+    assert [s["status"] for s in now["verifications"]] == ["current"]
+    assert now["verifications"][0]["by"] == "Ada"
+    assert now["verifications"][0]["notes"] == "Read run.py."
+    assert [s["status"] for s in now["validations"]] == ["stale"]
+    assert "question was edited" in now["validations"][0]["message"]
+    assert now["validations"][0]["with_ai"] == ["Claude Opus 5"]
+    # At the ref it was signed off at, it's current
+    assert [s["status"] for s in then["validations"]] == ["current"]
+    # Evidence on a branch is rechecked when the branch moves, though the
+    # project's own commit hasn't
+    (tmp_path / "result.json").write_text('{"r": 1}')
+    repo.git.add("result.json")
+    question["evidence"] = [
+        {
+            "kind": "value",
+            "path": "result.json",
+            "key": "r",
+            "git_ref": "published",
+        }
+    ]
+    question["validations"] = [{"by": ada, "date": "2026-10-05"}]
+    with repo.git.custom_environment(
+        GIT_COMMITTER_DATE="2099-01-01T00:00:00+00:00"
+    ):
+        commit("Cite the published result")
+    repo.git.branch("published")
+    statuses = []
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        for moved in [False, True]:
+            if moved:
+                main = repo.active_branch.name
+                repo.git.checkout("-q", "published")
+                (tmp_path / "result.json").write_text('{"r": 2}')
+                repo.git.add("result.json")
+                with repo.git.custom_environment(
+                    GIT_COMMITTER_DATE="2099-01-02T00:00:00+00:00"
+                ):
+                    repo.git.commit("-m", "Publish again")
+                repo.git.checkout("-q", main)
+            r = client.get(f"{base}/questions", headers=headers)
+            assert r.status_code == 200, r.text
+            statuses.append(r.json()[0]["validations"][0]["status"])
+    assert statuses == ["current", "stale"]
+
+
+def test_render_template() -> None:
+    # A number in an answer is read out of the results file rather than
+    # retyped, so the page can't show a figure the pipeline has moved past.
+    from app.api.routes.projects.core import _render_template
+
+    values = {"speedup": 3.2571, "launches": 1480000, "name": "RRTMGP"}
     assert (
-        _extract_question_text({"question": "Rich?", "hypothesis": "h"})
-        == "Rich?"
+        _render_template("{speedup:.1f}x faster on {name}", values)
+        == "3.3x faster on RRTMGP"
     )
-    assert _extract_question_text({}) == ""
-    # A non-string/non-dict value (e.g. a list) yields empty text, not a repr.
-    assert _extract_question_text(["a", "b"]) == ""  # type: ignore
+    # A format spec needs the value's own type, not a stringified copy
+    assert _render_template("{launches:,}", values) == "1,480,000"
+    # Nothing to fill, nothing to do
+    assert _render_template("Plain prose.", values) == "Plain prose."
+    assert _render_template(None, values) is None
+    # For display: a name with no evidence, and a spec the value can't
+    # satisfy, are left as written rather than breaking the page
+    assert _render_template("{missing}", values) == "{missing}"
+    assert _render_template("{name:.2f}", values) == "{name:.2f}"
+
+
+def test_resolve_explanation() -> None:
+    # An explanation is either the reasoning itself or a citation of the
+    # file holding it. The file is not read: a document stays a document,
+    # linked rather than spliced into the card.
+    from app.api.routes.projects.core import _resolve_explanation
+
+    assert _resolve_explanation("Because the slope is flat.") == (
+        "Because the slope is flat.",
+        None,
+    )
+    assert _resolve_explanation({"path": "docs/why.md"}) == (
+        None,
+        "docs/why.md",
+    )
+    # A file explanation is `{path: <string>}` and nothing else. Anything
+    # that only resembles one is ignored rather than guessed at.
+    assert _resolve_explanation(None) == (None, None)
+    assert _resolve_explanation({}) == (None, None)
+    assert _resolve_explanation({"path": ""}) == (None, None)
+    assert _resolve_explanation({"path": 3}) == (None, None)
+    assert _resolve_explanation({"path": "a.md", "title": "x"}) == (None, None)
+    assert _resolve_explanation({"file": "a.md"}) == (None, None)
+    assert _resolve_explanation(["a"]) == (None, None)
 
 
 def test_build_question_evidence_resolves_figures_and_results() -> None:
@@ -1592,6 +1889,32 @@ def test_apply_question_update_builds_object() -> None:
             {"kind": "result", "path": "results/summary.json", "key": "mean"},
         ],
     }
+    # A conditional answer sent back as the branch it rendered to is kept,
+    # while an edited answer replaces it
+    conditional = {"if p < 0.05": "yes", "else": "no"}
+    existing = {"question": "q?", "answer": conditional}
+    out = _apply_question_update(
+        existing, QuestionPut(answer="no"), rendered_answer="no"
+    )
+    assert isinstance(out, dict) and out["answer"] == conditional
+    out = _apply_question_update(
+        existing, QuestionPut(answer="maybe"), rendered_answer="no"
+    )
+    assert isinstance(out, dict) and out["answer"] == "maybe"
+    # The approach is kept when not sent, so an older client can't clear
+    # it, set when sent, and cleared when sent empty; sign-offs are kept
+    signed = {
+        "question": "q?",
+        "approach": "Run it.",
+        "validations": [{"by": {"name": "Ada"}, "date": "2026-10-04"}],
+    }
+    out = _apply_question_update(signed, QuestionPut())
+    assert isinstance(out, dict) and out["approach"] == "Run it."
+    assert out["validations"] == signed["validations"]
+    out = _apply_question_update(signed, QuestionPut(approach="Fit it."))
+    assert isinstance(out, dict) and out["approach"] == "Fit it."
+    out = _apply_question_update(signed, QuestionPut(approach=""))
+    assert isinstance(out, dict) and "approach" not in out
 
 
 def test_apply_question_update_figure_evidence_drops_key() -> None:
@@ -1632,6 +1955,7 @@ def _make_fake_repo(working_dir: str) -> SimpleNamespace:
     return SimpleNamespace(
         working_dir=working_dir,
         active_branch=SimpleNamespace(name="main"),
+        head=SimpleNamespace(commit=SimpleNamespace(hexsha="0" * 40)),
         ignored=lambda *a, **k: [],
         git=SimpleNamespace(
             add=lambda *a, **k: None,
@@ -3119,6 +3443,215 @@ def test_project_pipeline_stage_edit(
         assert "slurm" in ryaml.load(r.json()["yaml"])
 
 
+def test_project_pipeline_edit(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    # The whole pipeline can be replaced without disturbing the rest of
+    # calkit.yaml.
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    url = f"/projects/{owner_name}/{project.name}/pipeline"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "scripts/plot.py",
+                }
+            }
+        },
+        # Everything else in the file, which an edit here must leave alone
+        "datasets": [{"path": "data/raw.csv", "title": "Raw"}],
+        "questions": ["Does it work?"],
+    }
+
+    def fake_ck_info(*args, **kwargs) -> dict:
+        return ck_info
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=fake_ck_info,
+        ),
+        # Saving recompiles dvc.yaml from the whole project, which this
+        # stand-in repo can't support; the compile has its own tests
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
+    ):
+        # The page shows the `pipeline:` key and its body, so that is what
+        # comes back, and a second stage is added by sending it whole
+        edited = (
+            "pipeline:\n"
+            "  stages:\n"
+            "    plot:\n"
+            "      kind: python-script\n"
+            "      environment: py\n"
+            "      script_path: scripts/plot.py\n"
+            "    # keep this comment\n"
+            "    report:\n"
+            "      kind: latex\n"
+            "      environment: tex\n"
+            "      target_path: paper/paper.tex\n"
+        )
+        r = client.put(
+            url,
+            headers=headers,
+            json={"yaml": edited, "message": "Add report"},
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert list(written["pipeline"]["stages"]) == ["plot", "report"]
+        # Nothing outside the pipeline was touched
+        assert written["datasets"] == [
+            {"path": "data/raw.csv", "title": "Raw"}
+        ]
+        assert written["questions"] == ["Does it work?"]
+        # Comments survive the round trip, in the response and on disk
+        assert "# keep this comment" in r.json()["yaml"]
+        assert "# keep this comment" in (tmp_path / "calkit.yaml").read_text()
+        # A body without the wrapper is what someone who deleted the
+        # `pipeline:` line would send, so it means the same thing
+        r = client.put(
+            url,
+            headers=headers,
+            json={
+                "yaml": (
+                    "stages:\n"
+                    "  plot:\n"
+                    "    kind: python-script\n"
+                    "    environment: py\n"
+                    "    script_path: scripts/plot.py\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert list(
+            ryaml.load((tmp_path / "calkit.yaml").read_text())["pipeline"][
+                "stages"
+            ]
+        ) == ["plot"]
+        # Bad YAML, a non-mapping, an unknown kind, and a missing required
+        # field are all rejected before anything is written
+        for bad in [
+            "pipeline:\n  stages:\n   bad indent: true\n",
+            "- not a mapping\n",
+            "stages:\n  plot:\n    kind: not-a-real-kind\n",
+            "stages:\n  plot:\n    kind: latex\n    environment: tex\n",
+        ]:
+            r = client.put(url, headers=headers, json={"yaml": bad})
+            assert r.status_code == 422, f"{bad!r} -> {r.status_code}"
+        assert list(
+            ryaml.load((tmp_path / "calkit.yaml").read_text())["pipeline"][
+                "stages"
+            ]
+        ) == ["plot"]
+
+
+def test_project_pipeline_edit_creates_one_where_there_was_none(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    # A project gets its first pipeline from the same editor.
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    url = f"/projects/{owner_name}/{project.name}/pipeline"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    # No pipeline key, and other things in the file that must survive
+    ck_info = {"questions": ["Does it work?"]}
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=lambda *a, **k: ck_info,
+        ),
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
+    ):
+        # The empty shape the editor opens on saves as-is, so someone can
+        # commit the key and fill it in from there
+        r = client.put(
+            url, headers=headers, json={"yaml": "pipeline:\n  stages: {}\n"}
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert written["pipeline"] == {"stages": {}}
+        assert written["questions"] == ["Does it work?"]
+        # Emptying the editor means an empty pipeline, not a broken one:
+        # a cleared pane, a bare key, and a bare `stages:` all save
+        for emptied in ["", "   \n", "pipeline:\n", "pipeline:\n  stages:\n"]:
+            r = client.put(url, headers=headers, json={"yaml": emptied})
+            assert r.status_code == 200, f"{emptied!r} -> {r.text}"
+            written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+            assert written["pipeline"] in ({}, {"stages": {}}), emptied
+            assert written["questions"] == ["Does it work?"]
+        r = client.put(
+            url,
+            headers=headers,
+            json={
+                "yaml": (
+                    "pipeline:\n"
+                    "  stages:\n"
+                    "    plot:\n"
+                    "      kind: python-script\n"
+                    "      environment: py\n"
+                    "      script_path: scripts/plot.py\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        assert list(written["pipeline"]["stages"]) == ["plot"]
+
+
+def test_resolve_project_template(client: TestClient, db: Session) -> None:
+    # A template doesn't have to be hosted by the hub using it.
+    from app.api.routes.projects.core import _resolve_project_template
+
+    project, _ = _make_owner_with_project(db, client)
+    owner = project.owner_account.user
+    # A template this hub hosts is preferred: being a project here is what
+    # lets its outputs be copied into the new project's storage
+    found, url = _resolve_project_template(
+        session=db,
+        current_user=owner,
+        template=f"{project.owner_account.name}/{project.name}",
+    )
+    assert found is not None and found.id == project.id
+    assert url == project.git_repo_url
+    # One this hub has never heard of still works if the package knows it:
+    # it lives on its own hub and its repo is readable from anywhere, which
+    # is what makes the built-in templates usable from a dev instance
+    assert (
+        db.exec(
+            select(Project)
+            .join(Account, Account.id == Project.owner_account_id)  # type: ignore
+            .where(Account.name == "calkit")
+            .where(Project.name == "example-r")
+        ).first()
+        is None
+    ), "this test means nothing if the hub happens to host the template"
+    found, url = _resolve_project_template(
+        session=db, current_user=owner, template="calkit/example-r"
+    )
+    assert found is None
+    assert url == "https://github.com/calkit/example-r"
+    # Neither hosted nor known is a 404 that names the template, since it
+    # came off a list this hub offered
+    with pytest.raises(HTTPException) as exc:
+        _resolve_project_template(
+            session=db, current_user=owner, template="nobody/nothing"
+        )
+    assert exc.value.status_code == 404
+    assert "nobody/nothing" in str(exc.value.detail)
+    # A name that isn't owner/project can't be either
+    with pytest.raises(HTTPException) as exc:
+        _resolve_project_template(
+            session=db, current_user=owner, template="just-a-name"
+        )
+    assert exc.value.status_code == 422
+
+
 def test_normalize_artifact_file_path_rejects_out_of_repo_paths() -> None:
     # A declared path is joined onto the repo's working dir and written to,
     # so anything that could resolve outside the project is refused
@@ -3876,6 +4409,265 @@ def test_evidence_git_ref_round_trips_through_calkit_yaml() -> None:
     ]
 
 
+def test_question_evidence_values_documents_and_publications() -> None:
+    import base64
+    import json
+
+    from app.api.routes.projects.core import (
+        _build_question_evidence,
+        _evidence_values,
+        _EvidenceLookups,
+    )
+    from app.models.core import ContentsItem, Publication
+
+    declared = Publication(path="paper/main.pdf", title="The paper")
+    evidence_ck = [
+        # The kind calkit recommends for one value, named for the templates
+        {
+            "kind": "value",
+            "path": "results/summary.json",
+            "key": "stats.mean",
+            "name": "mean",
+        },
+        # A section YAML reads as a number is still a section
+        {"kind": "document", "path": "docs/notes.md", "section": 4.2},
+        {"kind": "document", "path": "docs/gone.md"},
+        # Undeclared but there: calkit doesn't require declaring it
+        {"kind": "publication", "path": "docs/draft.md", "section": "2b-i"},
+        {"kind": "publication", "path": "docs/nowhere.md"},
+        {"kind": "publication", "path": "paper/main.pdf", "label": "sec:x"},
+        # A value with no key names no number, so there's nothing to show
+        {"kind": "value", "path": "results/summary.json"},
+        # Several values from one file on one card, each by name
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            # Keys resolve as the CLI reads them, dots in names and all
+            "values": {
+                "avg": "stats.mean",
+                "total": "stats.n",
+                "failed": "sweep.back_off_1.50_k.failed",
+            },
+        },
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "values": {"avg2": "stats.mean", "gone": "stats.nope"},
+        },
+    ]
+
+    def fake_contents(project, repo, path, ref):
+        return ContentsItem(
+            name="summary.json",
+            path=path,
+            type="file",
+            size=1,
+            in_repo=True,
+            content=base64.b64encode(
+                json.dumps(
+                    {
+                        "stats": {"mean": 2.5, "n": 40},
+                        "sweep": {"back_off_1.50_k": {"failed": 13}},
+                    }
+                ).encode()
+            ).decode(),
+            url=None,
+            storage="git",
+        )
+
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        side_effect=fake_contents,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            lookups_by_ref={
+                None: _EvidenceLookups(
+                    figures_by_path={},
+                    results_by_path={},
+                    tables_by_path={},
+                    publications_by_path={declared.path: declared},
+                    dvc_lock={},
+                    stage_statuses={},
+                    frozen_stages=set(),
+                    present_paths={"docs/notes.md", "docs/draft.md"},
+                )
+            },
+            result_value_cache={},
+        )
+        template_values = _evidence_values(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            cache={},
+        )
+    # The templates see every named value, typed as the file holds them
+    assert template_values == {
+        "mean": 2.5,
+        "avg": 2.5,
+        "total": 40,
+        "failed": 13,
+        "avg2": 2.5,
+    }
+    assert [ev.kind for ev in evidence] == [
+        "value",
+        "document",
+        "document",
+        "publication",
+        "publication",
+        "publication",
+        "value",
+        "result",
+        "result",
+    ]
+    assert evidence[0].value == "2.5"
+    assert evidence[0].name == "mean"
+    assert evidence[0].stale_reason is None
+    assert evidence[1].section == "4.2"
+    assert evidence[1].stale_reason is None
+    assert evidence[2].stale_reason == "missing"
+    assert evidence[3].publication is None
+    assert evidence[3].section == "2b-i"
+    assert evidence[3].stale_reason is None
+    assert evidence[4].stale_reason == "missing"
+    assert evidence[5].publication == declared
+    assert evidence[5].label == "sec:x"
+    assert evidence[5].stale_reason is None
+    assert evidence[6].stale_reason == "missing"
+    assert [(v.name, v.key, v.value) for v in evidence[7].values or []] == [
+        ("avg", "stats.mean", "2.5"),
+        ("total", "stats.n", "40"),
+        ("failed", "sweep.back_off_1.50_k.failed", "13"),
+    ]
+    assert evidence[7].stale_reason is None
+    # One value that can't be read is enough to call the card missing
+    assert [v.value for v in evidence[8].values or []] == ["2.5", None]
+    assert evidence[8].stale_reason == "missing"
+
+
+def test_saving_a_question_keeps_names_sections_and_labels() -> None:
+    from app.api.routes.projects.core import _apply_question_update
+    from app.models.core import QuestionEvidencePost, QuestionPut
+
+    # A template names its value, so an edit that dropped the name would
+    # leave the answer rendering a raw placeholder
+    req = QuestionPut(
+        question="q?",
+        answer="About {mean:.1f}.",
+        evidence=[
+            QuestionEvidencePost(
+                kind="value",
+                path="results/summary.json",
+                key="stats.mean",
+                name="mean",
+            ),
+            QuestionEvidencePost(
+                kind="document", path="docs/notes.md", section="4.2"
+            ),
+            QuestionEvidencePost(
+                kind="publication",
+                path="paper/main.pdf",
+                section="3",
+                label="sec:results",
+                git_ref="v1.0",
+            ),
+            # Fields a kind doesn't carry aren't written for it
+            QuestionEvidencePost(
+                kind="figure", path="figures/x.png", name="x", section="1"
+            ),
+            # A result's values survive an edit, and replace any key
+            QuestionEvidencePost(
+                kind="result",
+                path="results/summary.json",
+                key="stats.mean",
+                values={"avg": "stats.mean", "total": "stats.n"},
+            ),
+        ],
+    )
+    out = _apply_question_update("q?", req)
+    assert isinstance(out, dict)
+    assert out["evidence"] == [
+        {
+            "kind": "value",
+            "path": "results/summary.json",
+            "key": "stats.mean",
+            "name": "mean",
+        },
+        {"kind": "document", "path": "docs/notes.md", "section": "4.2"},
+        {
+            "kind": "publication",
+            "path": "paper/main.pdf",
+            "section": "3",
+            "label": "sec:results",
+            "git_ref": "v1.0",
+        },
+        {"kind": "figure", "path": "figures/x.png"},
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "values": {"avg": "stats.mean", "total": "stats.n"},
+        },
+    ]
+
+
+def test_delete_project_question(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    fake_repo = _make_fake_repo(str(tmp_path))
+
+    def delete(number: int, questions: list):
+        ck_info = {"name": project.name, "questions": questions}
+        with (
+            patch(
+                "app.api.routes.projects.core.get_repo",
+                return_value=fake_repo,
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects"
+                ".get_ck_info_from_repo",
+                return_value=ck_info,
+            ),
+            patch("app.api.routes.projects.core.push_and_expire"),
+        ):
+            r = client.delete(f"{base}/questions/{number}", headers=headers)
+        with open(tmp_path / "calkit.yaml") as f:
+            written = ryaml.load(f)
+        return r, written
+
+    questions = ["First?", {"question": "Second?", "answer": "Yes."}, "Third?"]
+    r, written = delete(2, list(questions))
+    assert r.status_code == 200, r.text
+    assert written["questions"] == ["First?", "Third?"]
+    # The index follows, so the numbers close up behind the deleted one
+    db.refresh(project)
+    assert sorted((q.number, q.question) for q in project.questions) == [
+        (1, "First?"),
+        (2, "Third?"),
+    ]
+    # Deleting the last one drops the key rather than leaving an empty list
+    r, written = delete(1, ["Only?"])
+    assert r.status_code == 200, r.text
+    assert "questions" not in written
+    # A number past the end is not found, and nothing is written
+    (tmp_path / "calkit.yaml").unlink()
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_from_repo",
+            return_value={"questions": ["One?"]},
+        ),
+    ):
+        r = client.delete(f"{base}/questions/5", headers=headers)
+    assert r.status_code == 404
+    assert not (tmp_path / "calkit.yaml").exists()
+
+
 def test_tables_listing_skips_evidence_at_another_ref() -> None:
     from app.api.routes.projects.core import _build_tables
 
@@ -3974,6 +4766,133 @@ def test_get_featured_projects(client: TestClient, db: Session) -> None:
     assert response.json() == {"data": [], "count": 0}
 
 
+# A pipeline that copies a figure and a table into the paper's folder, the
+# way a map-paths stage stands in for a symlink
+MAP_PATHS_CK_INFO = {
+    "pipeline": {
+        "stages": {
+            "copy-to-paper": {
+                "kind": "map-paths",
+                "paths": [
+                    {
+                        "kind": "file-to-file",
+                        "src": "figures/plot.png",
+                        "dest": "paper/figures/plot.png",
+                    },
+                    {
+                        "kind": "file-to-dir",
+                        "src": "tables/t.csv",
+                        "dest": "paper/tables",
+                    },
+                ],
+            }
+        }
+    }
+}
+
+
+def _committed_repo(tmp_path, files: dict[str, str]):
+    import git
+
+    repo = git.Repo.init(tmp_path / "repo")
+    for path, content in files.items():
+        full = tmp_path / "repo" / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Initial")
+    return repo
+
+
+def test_figures_listing_skips_map_paths_copies(tmp_path) -> None:
+    from app.api.routes.projects.core import _discover_figures
+
+    repo = _committed_repo(
+        tmp_path,
+        {
+            "calkit.yaml": "",
+            "figures/plot.png": "png",
+            "paper/figures/plot.png": "png",
+            "paper/figures/hand-drawn.png": "png",
+        },
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=(MAP_PATHS_CK_INFO, {}, {}, {}),
+        ),
+    ):
+        ctx = _discover_figures(
+            project=SimpleNamespace(
+                owner_account_name="o",
+                name="p",
+                owner_github_name="o",
+                git_repo_url="https://github.com/o/p",
+            ),
+            repo=repo,
+            ref=None,
+        )
+    # The copy is the same figure; a file only in the paper's folder isn't
+    assert sorted(f["path"] for f in ctx.figures) == [
+        "figures/plot.png",
+        "paper/figures/hand-drawn.png",
+    ]
+
+
+def test_imported_from_info_reads_bare_strings() -> None:
+    from app.api.routes.projects.core import _imported_from_info
+
+    assert _imported_from_info(None) is None
+    assert _imported_from_info({"doi": "10.1/x"}) == {"doi": "10.1/x"}
+    assert _imported_from_info("https://doi.org/10.5281/zenodo.3960218") == {
+        "doi": "10.5281/zenodo.3960218"
+    }
+    assert _imported_from_info("https://example.com/data.csv") == {
+        "url": "https://example.com/data.csv"
+    }
+    assert _imported_from_info("a colleague's USB stick") == {
+        "description": "a colleague's USB stick"
+    }
+
+
+def test_tables_listing_skips_map_paths_copies(tmp_path) -> None:
+    from app.api.routes.projects.core import _build_tables
+
+    repo = _committed_repo(
+        tmp_path,
+        {
+            "calkit.yaml": "",
+            "tables/t.csv": "a,b\n1,2\n",
+            "paper/tables/t.csv": "a,b\n1,2\n",
+        },
+    )
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=MAP_PATHS_CK_INFO,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=(MAP_PATHS_CK_INFO, {}, {}, {}),
+        ),
+    ):
+        tables = _build_tables(
+            project=SimpleNamespace(
+                owner_account_name="o", name="p", file_locks=[]
+            ),
+            repo=repo,
+            ref=None,
+            resolve_content=False,
+        )
+    assert [t.path for t in tables] == ["tables/t.csv"]
+
+
 def test_post_project_when_account_name_differs_from_github(
     client: TestClient, db: Session
 ) -> None:
@@ -4038,6 +4957,241 @@ def test_post_project_when_account_name_differs_from_github(
     assert "org" not in resp.text.lower()
 
 
+def test_post_project_empty_repo(client: TestClient, db: Session) -> None:
+    suffix = uuid.uuid4().hex[:8]
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"empty-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"empty{suffix}",
+            github_username=f"empty{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    created: list[dict] = []
+
+    def create_repo(url: str, json: dict, headers: dict):
+        created.append(json)
+        return SimpleNamespace(
+            status_code=201,
+            json=lambda: {
+                "html_url": f"https://github.com/empty{suffix}/{json['name']}"
+            },
+        )
+
+    def post(body: dict):
+        with (
+            patch(
+                "app.api.routes.projects.core.users.get_github_token",
+                return_value="gh-token",
+            ),
+            patch(
+                "app.api.routes.projects.core.requests.get",
+                return_value=SimpleNamespace(
+                    status_code=404, json=lambda: {}, text=""
+                ),
+            ),
+            patch(
+                "app.api.routes.projects.core.requests.post",
+                side_effect=create_repo,
+            ),
+            patch("app.api.routes.projects.core.get_repo") as get_repo,
+        ):
+            resp = client.post("/projects", headers=headers, json=body)
+        return resp, get_repo
+
+    # An existing project pushes its own history, so the repo is left with
+    # no commits for it to be rejected by, and the hub writes nothing to it
+    name = f"proj-{suffix}"
+    resp, get_repo = post(
+        {
+            "name": name,
+            "title": "Connected from the CLI",
+            "is_public": False,
+            "git_repo_url": f"https://github.com/empty{suffix}/{name}",
+            "git_repo_exists": False,
+            "empty_repo": True,
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert "gitignore_template" not in created[-1]
+    get_repo.assert_not_called()
+    assert resp.json()["name"] == name
+    # A new project from the web still gets the scaffold
+    name = f"web-{suffix}"
+    post(
+        {
+            "name": name,
+            "title": "Created on the web",
+            "is_public": False,
+            "git_repo_url": f"https://github.com/empty{suffix}/{name}",
+            "git_repo_exists": False,
+        }
+    )
+    assert created[-1]["gitignore_template"] == "Python"
+    # A template's content has to go somewhere
+    name = f"tmpl-{suffix}"
+    resp, _ = post(
+        {
+            "name": name,
+            "title": "From a template",
+            "is_public": False,
+            "git_repo_url": f"https://github.com/empty{suffix}/{name}",
+            "git_repo_exists": False,
+            "empty_repo": True,
+            "template": "calkit/example-basic",
+        }
+    )
+    assert resp.status_code == 400
+
+
+def test_post_project_org_repo_collaborator(
+    client: TestClient, db: Session
+) -> None:
+    from app.orgs import get_org_by_github_name
+
+    suffix = uuid.uuid4().hex[:8]
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"collab-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"collab{suffix}",
+            github_username=f"collab{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    org_github_name = f"Org-{suffix}"
+    permissions = {"admin": False, "maintain": False, "push": False}
+    install_status = 404
+
+    def fake_get(url: str, headers: dict, timeout: int | None = None):
+        if url.endswith("/installation"):
+            return SimpleNamespace(
+                status_code=install_status, json=lambda: {}, text=""
+            )
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "owner": {"login": org_github_name, "type": "Organization"},
+                "private": True,
+                "description": "An org's repo",
+                "permissions": permissions,
+            },
+        )
+
+    def post(name: str, git_repo_exists: bool = True):
+        with (
+            patch(
+                "app.api.routes.projects.core.users.get_github_token",
+                return_value="gh-token",
+            ),
+            patch(
+                "app.api.routes.projects.core.github.create_app_token",
+                return_value="jwt",
+            ),
+            patch(
+                "app.api.routes.projects.core.requests.get",
+                side_effect=fake_get,
+            ),
+        ):
+            return client.post(
+                "/projects",
+                headers=headers,
+                json={
+                    "name": name,
+                    "title": "An org's project",
+                    "git_repo_url": (
+                        f"https://github.com/{org_github_name}/{name}"
+                    ),
+                    "git_repo_exists": git_repo_exists,
+                },
+            )
+
+    # Without belonging to the org, a new repo can't be made in it
+    resp = post(f"new-{suffix}", git_repo_exists=False)
+    assert resp.status_code == 403
+    assert "Can only create" in resp.json()["detail"]
+    # Nor can an existing one be added with only read access
+    resp = post(f"push-{suffix}")
+    assert resp.status_code == 403
+    assert "write access" in resp.json()["detail"]
+    # Someone with write access can, once the app is installed on the repo
+    permissions = {"admin": False, "maintain": False, "push": True}
+    resp = post(f"noapp-{suffix}")
+    assert resp.status_code == 400
+    assert "not installed" in resp.json()["detail"]
+    assert get_org_by_github_name(db, org_github_name) is None
+    install_status = 200
+    name = f"widget-{suffix}"
+    resp = post(name)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["is_public"] is False
+    # The org is added with nobody in it, and owns the project
+    db.expire_all()
+    org = get_org_by_github_name(db, org_github_name)
+    assert org is not None
+    assert org.github_name == org_github_name
+    assert org.user_memberships == []
+    project = db.exec(select(Project).where(Project.name == name)).one()
+    assert project.owner_account_id == org.account.id
+    # Its creator can open it and sees it listed without asking GitHub again
+    resp = client.get(
+        f"/projects/{org_github_name.lower()}/{name}", headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["current_user_access"] == "write"
+    resp = client.get("/projects", headers=headers)
+    assert name in [p["name"] for p in resp.json()["data"]]
+    # A second repo of the org goes to the same org
+    resp = post(f"second-{suffix}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["owner_account_id"] == str(org.account.id)
+    # Another collaborator finds it by its repo before ever opening it,
+    # which is how 'calkit update remote' looks for it, while someone the
+    # repo isn't shared with still doesn't
+    other = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"other-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"other{suffix}",
+            github_username=f"other{suffix}",
+        ),
+    )
+    other_headers = authentication_token_from_email(
+        client=client, email=other.email, db=db
+    )
+    for permission, expected in [("none", []), ("write", [name])]:
+        db.exec(
+            delete(UserProjectAccess).where(
+                UserProjectAccess.user_id == other.id
+            )
+        )
+        db.commit()
+        with (
+            patch("app.users.get_github_token", return_value="gh-token"),
+            patch(
+                "app.projects.requests.get",
+                return_value=SimpleNamespace(
+                    status_code=200, json=lambda: {"permission": permission}
+                ),
+            ),
+        ):
+            resp = client.get(
+                "/projects",
+                headers=other_headers,
+                params={"github_repo": f"{org_github_name}/{name}"},
+            )
+        assert resp.status_code == 200, resp.text
+        assert [p["name"] for p in resp.json()["data"]] == expected
+
+
 def test_post_project_dataset_provenance(
     client: TestClient, db: Session
 ) -> None:
@@ -4054,6 +5208,7 @@ def test_post_project_dataset_provenance(
             push=lambda *a, **k: None,
         )
         active_branch = SimpleNamespace(name="main")
+        head = SimpleNamespace(commit=SimpleNamespace(hexsha="0" * 40))
 
     def post(body: dict, existing_path: bool = False):
         ck_info: dict = {"datasets": list(written)}
@@ -4104,6 +5259,7 @@ def test_post_project_dataset_provenance(
                 return_value=existing_path,
             ),
             patch("builtins.open", new_callable=lambda: _fake_open),
+            patch("pathlib.Path.write_text"),
             patch("app.api.routes.projects.core.mixpanel.track"),
         ):
             resp = client.post(url, headers=headers, json=body)
@@ -4523,3 +5679,329 @@ def test_push_dvc_cache_to_storage(tmp_path) -> None:
             == 0
         )
     fs.assert_not_called()
+
+
+def _set_identity(repo: git.Repo) -> None:
+    """Give the repo a committer, which the test container lacks."""
+    repo.git.config(["user.email", "test@example.com"])
+    repo.git.config(["user.name", "Calkit Test"])
+
+
+def _make_overleaf_repo(
+    tmp_path, ck_info: dict, sync_info: dict | None = None
+):
+    """Build a Git repo standing in for a project's clone."""
+    repo_dir = tmp_path / uuid.uuid4().hex[:8]
+    os.makedirs(repo_dir)
+    repo = git.Repo.init(path=repo_dir)
+    _set_identity(repo)
+    with open(repo_dir / "calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if sync_info is not None:
+        os.makedirs(repo_dir / ".calkit", exist_ok=True)
+        with open(repo_dir / ".calkit" / "overleaf-sync.json", "w") as f:
+            json.dump(sync_info, f)
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Initial commit"])
+    return repo
+
+
+def test_record_overleaf_links_and_lookup(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    _, other_headers = _make_owner_with_project(db, client)
+    repo = _make_overleaf_repo(
+        tmp_path,
+        ck_info={
+            "overleaf_sync": {
+                "paper": {"url": "https://www.overleaf.com/project/ol111"},
+                "poster": {"url": "https://www.overleaf.com/project/ol222"},
+            }
+        },
+    )
+    links = projects_module.record_overleaf_links(
+        session=db, project=project, repo=repo
+    )
+    assert {link.path for link in links} == {"paper", "poster"}
+    assert {link.overleaf_project_id for link in links} == {"ol111", "ol222"}
+    # Re-recording is idempotent, and a link removed from calkit.yaml is
+    # dropped from the index rather than lingering
+    repo2 = _make_overleaf_repo(
+        tmp_path,
+        ck_info={
+            "overleaf_sync": {
+                "paper": {"url": "https://www.overleaf.com/project/ol333"}
+            }
+        },
+    )
+    links = projects_module.record_overleaf_links(
+        session=db, project=project, repo=repo2
+    )
+    assert len(links) == 1
+    assert links[0].path == "paper"
+    assert links[0].overleaf_project_id == "ol333"
+    stored = db.exec(
+        select(OverleafLink).where(OverleafLink.project_id == project.id)
+    ).all()
+    assert len(stored) == 1
+    # The owner can resolve the Overleaf project back to their project,
+    # straight from the index
+    resp = client.get(
+        "/user/overleaf-syncs/ol333",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()["links"]
+    assert len(data) == 1
+    assert data[0]["project_name"] == project.name
+    assert data[0]["path"] == "paper"
+    assert data[0]["current_user_access"] == "owner"
+    # Where it's on GitHub, e.g., to open it in a Codespace
+    assert data[0]["github_repo_url"] == project.git_repo_url
+    # Any GitHub URL form project creation accepts gives the same repo
+    for url in [
+        "https://github.com/o/p",
+        "https://www.github.com/o/p.git",
+        "http://github.com/o/p/",
+    ]:
+        assert Project(git_repo_url=url).github_repo == "o/p"
+    assert Project(git_repo_url="https://gitlab.com/o/p").github_repo is None
+    # An unrelated user gets nothing back for the same private project
+    resp = client.get(
+        "/user/overleaf-syncs/ol333",
+        headers=other_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["links"] == []
+
+
+def test_get_projects_min_access_level_write(
+    client: TestClient, db: Session
+) -> None:
+    # A project the user owns, plus one owned by somebody else that they can
+    # only read
+    owned, headers = _make_owner_with_project(db, client)
+    others, _ = _make_owner_with_project(db, client)
+    others.is_public = True
+    db.add(others)
+    db.commit()
+    suffix = uuid.uuid4().hex[:8]
+    reader = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"reader-{suffix}@example.com",
+            password="readerpassword123",
+            account_name=f"reader{suffix}",
+            github_username=f"reader{suffix}",
+        ),
+    )
+    reader_headers = authentication_token_from_email(
+        client=client, email=reader.email, db=db
+    )
+
+    def _list(headers: dict[str, str], **params):
+        resp = client.get("/projects", params=params, headers=headers)
+        assert resp.status_code == 200
+        return {
+            f"{p['owner_account_name']}/{p['name']}"
+            for p in resp.json()["data"]
+        }
+
+    owned_spec = f"{owned.owner_account_name}/{owned.name}"
+    others_spec = f"{others.owner_account_name}/{others.name}"
+    # Reading lists the public project belonging to someone else; asking for
+    # write access drops it, since a reader can't write to it
+    assert others_spec in _list(reader_headers)
+    assert others_spec not in _list(reader_headers, min_access_level="write")
+    # An owner keeps their own project under either level
+    assert owned_spec in _list(headers)
+    assert owned_spec in _list(headers, min_access_level="write")
+    # A read-level grant isn't enough, but a write-level one is
+    db.add(
+        UserProjectAccess(
+            project_id=others.id, user_id=reader.id, role_id=ROLE_IDS["read"]
+        )
+    )
+    db.commit()
+    assert others_spec not in _list(reader_headers, min_access_level="write")
+    access = db.exec(
+        select(UserProjectAccess)
+        .where(UserProjectAccess.project_id == others.id)
+        .where(UserProjectAccess.user_id == reader.id)
+    ).one()
+    access.role_id = ROLE_IDS["write"]
+    db.add(access)
+    db.commit()
+    assert others_spec in _list(reader_headers, min_access_level="write")
+    # GitHub-derived access counts too, but only at write or better
+    access.role_id = None
+    access.github_access = "read"
+    db.add(access)
+    db.commit()
+    assert others_spec not in _list(reader_headers, min_access_level="write")
+    access.github_access = "admin"
+    db.add(access)
+    db.commit()
+    assert others_spec in _list(reader_headers, min_access_level="write")
+    # Anonymous callers can't ask for write access at all
+    resp = client.get("/projects", params={"min_access_level": "write"})
+    assert resp.status_code == 403
+
+
+def test_get_projects_filters_by_github_repo(
+    client: TestClient, db: Session
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    github_repo = project.git_repo_url.removeprefix("https://github.com/")
+    resp = client.get(
+        "/projects",
+        params={"github_repo": github_repo},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["data"][0]["name"] == project.name
+    # Matching is exact, so a repo whose name merely starts the same doesn't
+    # come back
+    resp = client.get(
+        "/projects",
+        params={"github_repo": f"{github_repo}-other"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["count"] == 0
+
+
+def test_post_reference_item_creates_missing_collection(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    repo_dir = tmp_path / uuid.uuid4().hex[:8]
+    os.makedirs(repo_dir)
+    repo = git.Repo.init(path=repo_dir)
+    _set_identity(repo)
+    with open(repo_dir / "calkit.yaml", "w") as f:
+        ryaml.dump({}, f)
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Initial commit"])
+    remote_dir = tmp_path / f"{uuid.uuid4().hex[:8]}-remote"
+    git.Repo.init(path=remote_dir, bare=True)
+    repo.git.remote(["add", "origin", str(remote_dir)])
+    repo.git.push(["-u", "origin", repo.active_branch.name])
+    url = (
+        f"/projects/{project.owner_account_name}/"
+        f"{project.name}/references/items"
+    )
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        resp = client.post(
+            url,
+            json={
+                "path": "references.bib",
+                "key": "thomas2026",
+                "type": "article",
+                "fields": {"title": "Reversing biodiversity decline"},
+            },
+            headers=headers,
+        )
+    assert resp.status_code == 200
+    # The first reference in a project creates the collection rather than
+    # failing because the .bib doesn't exist yet
+    bib_path = repo_dir / "references.bib"
+    assert bib_path.is_file()
+    assert "thomas2026" in bib_path.read_text()
+    ck_info = ryaml.load((repo_dir / "calkit.yaml").read_text())
+    assert ck_info["references"] == [{"path": "references.bib"}]
+    # A second reference lands in the collection that now exists, and
+    # doesn't re-declare it
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        resp = client.post(
+            url,
+            json={
+                "path": "references.bib",
+                "key": "smith2025",
+                "type": "article",
+                "fields": {"title": "Another paper"},
+            },
+            headers=headers,
+        )
+    assert resp.status_code == 200
+    assert "smith2025" in bib_path.read_text()
+    ck_info = ryaml.load((repo_dir / "calkit.yaml").read_text())
+    assert ck_info["references"] == [{"path": "references.bib"}]
+
+
+def test_get_user_overleaf_sync_scans_lazily(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    url = "/user/overleaf-syncs/54b68eff0ee71ad2767b704a"
+    ck_info = {
+        "overleaf_sync": {
+            "paper2": {
+                "url": "https://www.overleaf.com/project/54b68eff0ee71ad2767b704a"
+            },
+            "report": {
+                "url": "https://www.overleaf.com/project/699f2a0fb20a38960a52bc26"
+            },
+        }
+    }
+
+    def _lookup(**params):
+        # The scan reads calkit.yaml from GitHub rather than cloning, so a
+        # stubbed response stands in for the repo; other tests' projects
+        # indexed with the same link ask it for a permission, which is none
+        with (
+            patch(
+                "app.projects.requests.get",
+                return_value=SimpleNamespace(
+                    status_code=200,
+                    text=json.dumps(ck_info),
+                    json=lambda: {"permission": "none"},
+                ),
+            ),
+            patch(
+                "app.projects.app.users.get_github_token",
+                return_value="gh-token",
+            ),
+        ):
+            return client.get(url, params=params, headers=headers)
+
+    # Nothing is indexed yet, so the lookup finds it by reading the project
+    resp = _lookup()
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["projects_scanned"] == 1
+    assert [link["path"] for link in data["links"]] == ["paper2"]
+    assert data["links"][0]["project_name"] == project.name
+    # Both syncs declared in one calkit.yaml are indexed together, so the
+    # second Overleaf project resolves without reading anything again
+    resp = client.get(
+        "/user/overleaf-syncs/699f2a0fb20a38960a52bc26",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["projects_scanned"] == 0
+    assert [link["path"] for link in data["links"]] == ["report"]
+    # A second lookup is answered from the index, without scanning again
+    resp = _lookup()
+    assert resp.status_code == 200
+    assert resp.json()["projects_scanned"] == 0
+    # A project already scanned isn't re-read until the TTL lapses, so an
+    # Overleaf project nobody syncs with doesn't cost a scan per lookup
+    resp = client.get(
+        "/user/overleaf-syncs/nonexistent",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "links": [],
+        "projects_scanned": 0,
+        "projects_remaining": 0,
+    }
+    # refresh re-reads regardless, for a link that was only just added
+    resp = _lookup(refresh=True)
+    assert resp.status_code == 200
+    assert resp.json()["projects_scanned"] == 1

@@ -85,15 +85,22 @@ Install the Calkit plugin with:
 
 This gives you these action skills:
 
-- `/calkit:create-pipeline` — converts an ad hoc repo into a reproducible
+- **`/calkit:create-pipeline`**: converts an ad hoc repo into a reproducible
   pipeline end-to-end
-- `/calkit:add-pipeline-stage` — adds a single stage to an existing pipeline
-- `/calkit:build-paper-pipeline` — builds the pipeline stages your
+- **`/calkit:add-pipeline-stage`**: adds a single stage to an existing pipeline
+- **`/calkit:build-paper-pipeline`**: builds the pipeline stages your
   manuscript's TODO comments ask for, working backwards from the writing,
   and keeps the project's questions and answers matching the paper. See
   [writing first](tutorials/writing-first.md).
-- `/calkit:check-questions` — reviews whether the project's answers still
+- **`/calkit:connect-overleaf-project`**: connects an Overleaf project, e.g., a
+  paper, thesis, or poster, to a Calkit project and its associated
+  code and data, so its figures, tables, and numerical values
+  update automatically
+- **`/calkit:check-questions`**: reviews whether the project's answers still
   follow from their evidence
+- **`/calkit:resolve-merge-conflicts`**: resolves merge conflicts, choosing
+  for each pipeline stage which run's results to keep. See
+  [merging branches](version-control.md#merging-branches).
 
 Calkit conventions are loaded automatically whenever you work in a Calkit
 project.
@@ -134,3 +141,5 @@ Code plugin) include:
   `dvc.yaml` directly
 - The `calkit xr` command for auto-detecting stage type, environment, and I/O
 - Key CLI commands for running, checking, and committing
+- The questions and answers workflow: Record a question, produce evidence
+  with the pipeline, and write an answer that references it

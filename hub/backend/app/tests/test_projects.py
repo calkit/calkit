@@ -6,7 +6,7 @@ from pathlib import Path
 
 import git
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 import app.dvc
 import app.projects
@@ -164,6 +164,174 @@ def test_get_project_logged_in_without_min_access_level(db: Session) -> None:
     finally:
         db.delete(project)
         db.delete(owner)
+        db.commit()
+
+
+def test_get_project_org_owned(db: Session) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from fastapi import HTTPException
+
+    from app import users
+    from app.models import ROLE_IDS, Org, UserCreate, UserOrgMembership
+
+    suffix = uuid.uuid4().hex[:8]
+    org = Org(
+        account=Account(
+            name=f"org{suffix}",
+            display_name="Org",
+            github_name=f"Org{suffix}",
+        )
+    )
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    project = Project(
+        name=f"org-proj-{suffix}",
+        title="Org Project",
+        git_repo_url=f"https://github.com/Org{suffix}/org-proj-{suffix}",
+        owner_account_id=org.account.id,
+    )
+    db.add(project)
+    db.commit()
+    github_permission = "write"
+
+    def make_user(name: str):
+        return users.create_user(
+            session=db,
+            user_create=UserCreate(
+                email=f"{name}{suffix}@example.com",
+                password="UserPassword123",
+                account_name=f"{name}{suffix}",
+                github_username=f"{name}{suffix}",
+            ),
+        )
+
+    def access(user) -> str | None:
+        with (
+            patch("app.users.get_github_token", return_value="t"),
+            patch(
+                "app.projects.requests.get",
+                return_value=SimpleNamespace(
+                    status_code=200,
+                    json=lambda: {"permission": github_permission},
+                ),
+            ),
+        ):
+            return app.projects.get_project(
+                session=db,
+                owner_name=f"org{suffix}",
+                project_name=f"org-proj-{suffix}",
+                current_user=user,
+            ).current_user_access
+
+    # A member of the org gets access from their role in it
+    member = make_user("member")
+    db.add(UserOrgMembership(user=member, org=org, role_id=ROLE_IDS["read"]))
+    db.commit()
+    db.refresh(member)
+    assert access(member) == "read"
+    # A collaborator on the repo outside the org gets it from GitHub
+    assert access(make_user("collab")) == "write"
+    # And someone with no access on GitHub gets none
+    github_permission = "none"
+    with pytest.raises(HTTPException) as e:
+        access(make_user("stranger"))
+    assert e.value.status_code == 403
+
+
+def test_get_project_survives_a_concurrent_access_insert(db: Session) -> None:
+    # Two requests resolving the same user's access don't 500 one of them.
+    # Regression: the unique violation was caught, but the handler logged
+    # ``current_user.id`` before rolling back. A failed flush expires every
+    # attribute and refuses to load one back until the rollback, so reading it
+    # raised PendingRollbackError out of the handler -- which is what a burst
+    # of requests for one project (a page load) actually hit.
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from sqlmodel import Session as SQLSession
+
+    from app import users
+    from app.db import engine
+    from app.models import UserCreate, UserProjectAccess
+
+    suffix = uuid.uuid4().hex[:8]
+    owner = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"owner-{suffix}@example.com",
+            password="OwnerPassword123",
+            account_name=f"owner{suffix}",
+            github_username=f"owner{suffix}",
+        ),
+    )
+    viewer = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"viewer-{suffix}@example.com",
+            password="ViewerPassword123",
+            account_name=f"viewer{suffix}",
+            github_username=f"viewer{suffix}",
+        ),
+    )
+    project = Project(
+        name=f"race-{suffix}",
+        title="Race",
+        git_repo_url=f"https://github.com/owner{suffix}/race-{suffix}",
+        owner_account_id=owner.account.id,
+        is_public=True,
+    )
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    project_id = project.id
+    viewer_id = viewer.id
+
+    def insert_the_row_first(*args, **kwargs):
+        """Stand in for the request that wins the race."""
+        with SQLSession(engine) as other:
+            other.add(
+                UserProjectAccess(
+                    project_id=project_id,
+                    user_id=viewer_id,
+                    github_access="write",
+                )
+            )
+            other.commit()
+        return SimpleNamespace(
+            status_code=200, json=lambda: {"permission": "write"}
+        )
+
+    try:
+        with (
+            patch("app.projects.requests.get", insert_the_row_first),
+            patch(
+                "app.projects.app.users.get_github_token",
+                return_value="gh-token",
+            ),
+        ):
+            found = app.projects.get_project(
+                session=db,
+                owner_name=f"owner{suffix}",
+                project_name=f"race-{suffix}",
+                current_user=viewer,
+                min_access_level="read",
+            )
+        # Losing the race is a no-op, not an error, and the answer is still
+        # the access we resolved
+        assert found.current_user_access == "write"
+        # The session is usable afterwards, which it isn't until the rollback
+        assert db.exec(select(Project).where(Project.id == project_id)).first()
+    finally:
+        for row in db.exec(
+            select(UserProjectAccess).where(
+                UserProjectAccess.project_id == project_id
+            )
+        ).all():
+            db.delete(row)
+        db.delete(project)
         db.commit()
 
 
@@ -369,7 +537,12 @@ def test_declared_paths_with_leading_dot_slash(
         "    title: A figure\n"
         "showcase:\n"
         "  - figure: ./figures/plot.png\n"
+        "results:\n"
+        "  - path: results/fit.json\n"
+        "    name: slope\n"
     )
+    (repo_dir / "results").mkdir()
+    (repo_dir / "results" / "fit.json").write_text('{"slope": 1.2}')
     (repo_dir / "dvc.lock").write_text(
         "schema: '2.0'\n"
         "stages:\n"
@@ -394,6 +567,13 @@ def test_declared_paths_with_leading_dot_slash(
         assert item.stage == "build-paper"
         assert item.calkit_object is not None
         assert item.calkit_object["title"] == "A paper"
+        assert item.calkit_object["kind"] == "publication"
+    # A declared result is one too
+    item = app.projects.get_contents_from_repo(
+        project=project, repo=repo, path="results/fit.json"
+    )
+    assert item.calkit_object is not None
+    assert item.calkit_object["kind"] == "result"
     # Declared metadata comes back with normalized paths, so everything
     # downstream keys artifacts the same way DVC and Git do
     ck_info = app.projects.get_ck_info_for_ref(project=project, repo=repo)
@@ -737,6 +917,37 @@ def test_find_notebook_paths_in_tree(tmp_path: Path) -> None:
     )
 
 
+def test_dvc_outputs_from_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from app.git import WorkingTree
+
+    # A stage output stored in Git is a file in the tree; one stored with
+    # DVC is ignored by Git, so it isn't, and a `dvc add` pointer is
+    (tmp_path / "figures").mkdir()
+    (tmp_path / "figures" / "plot.png").write_bytes(b"png")
+    (tmp_path / "data.csv.dvc").write_text(
+        "outs:\n- md5: c3\n  path: data.csv\n"
+    )
+    lock_outs = {
+        "figures/plot.png": {"md5": "a1", "type": "file"},
+        "results/big.h5": {"md5": "b2", "type": "file"},
+    }
+    monkeypatch.setattr(
+        app.projects,
+        "get_ck_info_and_dvc_outs_from_tree",
+        lambda project, tree: SimpleNamespace(dvc_lock_outs=lock_outs),
+    )
+    outs = app.projects.dvc_outputs_from_tree(
+        project=None,  # type: ignore[arg-type]
+        tree=WorkingTree(str(tmp_path)),
+    )
+    assert set(outs) == {"results/big.h5", "data.csv"}
+    assert outs["data.csv"]["md5"] == "c3"
+
+
 def test_drop_stale_lock_stages() -> None:
     from app.dvc import drop_stale_lock_stages
 
@@ -894,4 +1105,16 @@ def test_dvc_dir_out_resolves_after_being_pushed(
     res = app.projects.get_ck_info_and_dvc_outs_from_tree(
         project=project, tree=tree
     )
+    assert res.dvc_lock_outs["app/index.html"]["md5"] == file_md5
+    # A calkit.yaml that doesn't parse, e.g., a key wrapped over two lines,
+    # leaves the files readable instead of raising
+    (repo_dir / "calkit.yaml").write_text(
+        "answer:\n  if a and\n    b: >-\n    Yes.\n"
+    )
+    repo.git.add(["calkit.yaml"])
+    repo.git.commit(["-m", "Break calkit.yaml"])
+    res = app.projects.get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=get_repo_tree_for_ref(repo, None)
+    )
+    assert res.ck_info == {}
     assert res.dvc_lock_outs["app/index.html"]["md5"] == file_md5

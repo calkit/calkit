@@ -26,10 +26,10 @@ import { ProjectsService, type References } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError, isProviderNotConnected } from "../../lib/errors"
-import ConnectZoteroPrompt from "../Common/ConnectZoteroPrompt"
 import CommentsPanel, {
   projectCommentToPanelComment,
 } from "../Common/CommentsPanel"
+import ConnectZoteroPrompt from "../Common/ConnectZoteroPrompt"
 import DeleteReferencesCollectionDialog from "./DeleteReferencesCollectionDialog"
 
 interface ReferencesInfoPanelProps {
@@ -240,6 +240,7 @@ const ReferencesInfoPanel = ({
         isOpen={connectZoteroDisclosure.isOpen}
         onClose={connectZoteroDisclosure.onClose}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent>

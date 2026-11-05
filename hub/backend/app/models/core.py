@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, get_args
+from urllib.parse import urlparse
 
 import sqlalchemy
 
@@ -86,6 +87,7 @@ class UserRegister(SQLModel):
     password: str = Field(min_length=8, max_length=40)
     account_name: str | None = Field(default=None, max_length=64)
     full_name: str | None = Field(default=None, max_length=255)
+    analytics_consent: bool | None = None
 
 
 # Properties to receive via API on update, all are optional
@@ -98,6 +100,7 @@ class UserUpdateMe(SQLModel):
     full_name: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
     github_username: str | None = Field(default=None, max_length=255)
+    analytics_consent: bool | None = None
 
 
 class UpdatePassword(SQLModel):
@@ -197,6 +200,9 @@ class User(UserBase, table=True):
     # code or following its link; null until then. A Google or GitHub
     # sign-in that vouched for the address sets it too.
     email_verified_at: datetime | None = Field(default=None)
+    # Whether the user allows usage analytics; null until they answer. Saved
+    # on the account so server-side events can respect it too.
+    analytics_consent: bool | None = Field(default=None)
     # Relationships
     account: Account = Relationship(back_populates="user", cascade_delete=True)
     github_token: UserGitHubToken | None = Relationship(cascade_delete=True)
@@ -307,6 +313,7 @@ class UserPublic(UserBase):
     github_username: str | None
     email_verified: bool
     subscription: Union["UserSubscription", None]
+    analytics_consent: bool | None = None
 
 
 class UserEmailVerification(SQLModel, table=True):
@@ -327,8 +334,15 @@ class UserEmailVerification(SQLModel, table=True):
     user: User = Relationship(back_populates="email_verification")
 
 
+class UserAdminPublic(UserPublic):
+    """A user as listed for a superuser, with what they own."""
+
+    n_projects: int = 0
+    n_private_projects: int = 0
+
+
 class UsersPublic(SQLModel):
-    data: list[UserPublic]
+    data: list[UserAdminPublic]
     count: int
 
 
@@ -440,6 +454,25 @@ class SubscriptionUpdate(BaseModel):
     plan_name: Literal["free", "standard", "professional"]
     period: Literal["monthly", "annual"]
     discount_code: str | None = None
+
+
+class UserSubscriptionAdminUpdate(BaseModel):
+    """A superuser's direct edit of a user's subscription, bypassing Stripe."""
+
+    plan_name: Literal["free", "standard", "professional"]
+    period_months: Literal[1, 12]
+    price: float = Field(ge=0)
+    paid_until: datetime | None = None
+
+    @model_validator(mode="after")
+    def check_consistent(self) -> "UserSubscriptionAdminUpdate":
+        if self.plan_name == "free" and self.price != 0:
+            raise ValueError("The free plan can't have a price")
+        # Without it, a paid plan is checked against Stripe and dropped; a
+        # $0 comp without one runs indefinitely
+        if self.price > 0 and self.paid_until is None:
+            raise ValueError("paid_until is required for a paid plan")
+        return self
 
 
 class UpdateSubscriptionResponse(BaseModel):
@@ -594,8 +627,8 @@ class NewPassword(SQLModel):
 
 
 class ProjectBase(SQLModel):
-    name: str = Field(min_length=4, max_length=255)
-    title: str = Field(min_length=4, max_length=255)
+    name: str = Field(min_length=3, max_length=255)
+    title: str = Field(min_length=3, max_length=255)
     description: str | None = Field(
         default=None, min_length=0, max_length=2048
     )
@@ -659,6 +692,9 @@ class Project(ProjectBase, table=True):
     dvc_pushes: list["ProjectDvcPush"] = Relationship(
         back_populates="project", cascade_delete=True
     )
+    pipeline_runs: list["ProjectPipelineRun"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
 
     @computed_field
     @property
@@ -705,11 +741,11 @@ class Project(ProjectBase, table=True):
 
     @property
     def github_repo(self) -> str | None:
-        if not self.git_repo_url.startswith("https://github.com"):
-            return
-        return self.git_repo_url.removeprefix(
-            "https://github.com/"
-        ).removesuffix(".git")
+        # Any form project creation accepts, e.g., www. or http://
+        parsed = urlparse(self.git_repo_url or "")
+        if parsed.hostname not in ("github.com", "www.github.com"):
+            return None
+        return parsed.path.strip("/").removesuffix(".git") or None
 
 
 class ProjectPublic(ProjectBase):
@@ -729,8 +765,10 @@ class ProjectsPublic(SQLModel):
 
 
 class ProjectPost(ProjectBase):
-    name: str = Field(min_length=4, max_length=255)
-    title: str = Field(min_length=4, max_length=255)
+    name: str = Field(min_length=3, max_length=255)
+    # Optional only when an Overleaf project is named below, since the title
+    # is then read from its main document
+    title: str | None = Field(default=None, min_length=3, max_length=255)
     description: str | None = Field(
         default=None, min_length=0, max_length=2048
     )
@@ -741,6 +779,12 @@ class ProjectPost(ProjectBase):
     # Whether a project made from a template keeps the template's commits.
     # Off by default: the new project's history starts with itself.
     keep_template_history: bool = False
+    # Create the Git repo with no commits, for a project that already has
+    # its own history to push, e.g., one connected with 'calkit update hub'.
+    # A scaffolded repo shares no history with it, so its push is rejected.
+    empty_repo: bool = False
+    # An Overleaf project to take the title from, when none is given
+    overleaf_project_url: str | None = Field(default=None, max_length=2048)
 
 
 class UserProjectAccess(SQLModel, table=True):
@@ -884,6 +928,45 @@ class ProjectDvcPush(SQLModel, table=True):
     user: User = Relationship(back_populates="dvc_pushes")
 
 
+class ProjectPipelineRun(SQLModel, table=True):
+    """A run of a project's pipeline, wherever it ran.
+
+    The ID is ours, so a run is named the same way wherever it runs, e.g.,
+    on GitHub Actions now and a linked machine later, with the location's
+    own ID beside it.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint("project_id", "github_run_id"),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(
+        foreign_key="project.id", index=True, ondelete="CASCADE"
+    )
+    location: str = "github-actions"
+    status: str = "queued"
+    created: datetime = Field(default_factory=utcnow)
+    started: datetime | None = None
+    finished: datetime | None = None
+    git_rev: str | None = None
+    branch: str | None = None
+    # Who started it from Calkit, if it was
+    started_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL"
+    )
+    # Who started it, as the location names them, e.g., a GitHub username
+    started_by: str | None = None
+    url: str | None = None
+    # By file name
+    github_workflow: str | None = None
+    # Unknown for one just started, until GitHub lists it
+    github_run_id: int | None = Field(
+        default=None, sa_type=sqlalchemy.BigInteger
+    )
+    # Relationships
+    project: Project = Relationship(back_populates="pipeline_runs")
+
+
 class OnboardingFlags(SQLModel):
     """Every onboarding flag a user has set, in one response.
 
@@ -1023,6 +1106,21 @@ class Pipeline(SQLModel):
     status: Literal["up-to-date", "stale", "unknown"] = "unknown"
 
 
+class PipelineYaml(SQLModel):
+    """The project's whole pipeline, as editable YAML.
+
+    The YAML is the ``pipeline:`` block of calkit.yaml, exactly as the
+    pipeline page shows it -- same key order, same comments.
+    """
+
+    yaml: str
+
+
+class PipelinePut(SQLModel):
+    yaml: str
+    message: str | None = None
+
+
 class PipelineStage(SQLModel):
     """One stage of the Calkit pipeline, as editable YAML.
 
@@ -1075,7 +1173,7 @@ class Figure(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     dataset: str | None = None
     content: str | None = None  # Base64 encoded
     url: str | None = None
@@ -1097,6 +1195,60 @@ class Result(SQLModel):
     # Which value inside the file this result is; null means the whole file.
     # Several results can share a path with different keys.
     key: str | None = None
+    stage_status: StageStatus | None = None
+
+
+class ProvenanceStep(SQLModel):
+    """A path on the way back from an artifact, and the stage producing it."""
+
+    path: str
+    stage: str | None = None
+
+
+class ProvenanceGap(SQLModel):
+    """Something nothing records the origin of, and the chain to it."""
+
+    path: str
+    steps: list[ProvenanceStep] = Field(default_factory=list)
+    # Imported, but from somewhere only described, which nobody can check
+    unchecked: bool = False
+
+
+class Provenance(SQLModel):
+    """Where an artifact, or one value inside a results file, came from."""
+
+    path: str
+    key: str | None = None
+    exists: bool = False
+    # JSON-able, so a key can name a subtree as well as a number
+    value: Any = None
+    value_error: str | None = None
+    stage: str | None = None
+    stage_kind: str | None = None
+    # The app an export stage runs, e.g., Inkscape
+    stage_app: str | None = None
+    # What to open to change it: the stage's script, notebook, or document
+    source: str | None = None
+    command: str | None = None
+    # What a manual step says to do
+    message: str | None = None
+    inputs: list[str] = Field(default_factory=list)
+    # The stages that use it as an input or DVC dep
+    input_to_stages: list[str] = Field(default_factory=list)
+    stage_status: StageStatus | None = None
+    stale_reason: Literal["pipeline", "frozen"] | None = None
+    # Where a copy, e.g., one a map-paths stage put beside a document, came
+    # from, and the stage that copied it; the rest describes the original
+    copied_from: str | None = None
+    copy_stage: str | None = None
+    # What calkit.yaml says about an artifact no stage produces: where it
+    # was imported from, or who created it, possibly recorded for a folder
+    # it's in
+    origin: str | None = None
+    origin_url: str | None = None
+    origin_path: str | None = None
+    # Data behind it that nothing records the origin of, however far back
+    gaps: list[ProvenanceGap] = Field(default_factory=list)
 
 
 class Table(SQLModel):
@@ -1112,7 +1264,7 @@ class Table(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     content: str | None = None  # Base64 encoded
     url: str | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
@@ -1176,6 +1328,9 @@ class ProjectComment(SQLModel, table=True):
     # Git context at the time the comment was posted
     git_ref: str | None = Field(default=None, max_length=256)
     git_rev: str | None = Field(default=None, max_length=40)
+    # When the thread was moved into the source of the LaTeX document it's
+    # on, after which it's kept there rather than here
+    moved_to_source: datetime | None = Field(default=None)
     # Relationships
     user: User = Relationship(back_populates="project_comments")
     project: Project = Relationship(back_populates="project_comments")
@@ -1447,6 +1602,19 @@ class _DeclaredArtifact(BaseModel):
 PublicationKind = CkPublicationKind
 
 
+class PublicationLatexDiff(BaseModel):
+    """A PDF marking up what changed in a publication between revisions."""
+
+    from_ref: str
+    to_ref: str
+    path: str
+    # The generated DVC stage that builds it
+    stage: str | None = None
+    content: str | None = None
+    url: str | None = None
+    storage: Literal["git", "dvc", "dvc-zip"] | None = None
+
+
 class Publication(_DeclaredArtifact):
     """A publication declared in calkit.yaml."""
 
@@ -1456,7 +1624,7 @@ class Publication(_DeclaredArtifact):
     description: str | None = None
     kind: PublicationKind | None = None
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     content: str | None = None
     stage_info: DvcPipelineStage | None = None
     # The full Calkit pipeline stage definition from calkit.yaml, unlike
@@ -1466,6 +1634,8 @@ class Publication(_DeclaredArtifact):
     url: str | None = None
     overleaf: PublicationOverleaf | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # From the diffs of the LaTeX stage that builds it
+    latex_diffs: list[PublicationLatexDiff] = []
 
 
 class PublicationComponent(BaseModel):
@@ -1474,9 +1644,9 @@ class PublicationComponent(BaseModel):
     # Repo-relative
     path: str
     kind: Literal["produced", "authored", "attested", "imported", "unknown"]
-    # In the publication's folder, or read by its build stage from
-    # elsewhere in the project
-    via: Literal["folder", "input"] = "folder"
+    # In the publication's folder, read by its build stage from elsewhere
+    # in the project, or included by a document with calkit.sty's commands
+    via: Literal["folder", "input", "included"] = "folder"
     # For "produced": the stage that makes it, and that stage's kind, so a
     # map-paths copy can be told from something computed
     stage: str | None = None
@@ -1494,6 +1664,30 @@ class PublicationComponents(BaseModel):
     n_unknown: int
 
 
+class LatexComponentsRequest(BaseModel):
+    """A LaTeX document to bring calkit.sty's components in for."""
+
+    # Repo-relative
+    path: str
+    # Text that differs from what's committed, e.g., an editor's unsaved
+    # changes, by repo-relative path
+    sources: dict[str, str] = {}
+
+
+class LatexComponents(BaseModel):
+    """What a document needs beside it for calkit.sty's commands, as
+    ``calkit latex build`` would write it.
+    """
+
+    loads_calkit: bool
+    # calkit.sty from this hub's Calkit, and _calkit/values.tex
+    style: str | None = None
+    values: str | None = None
+    # Project paths to copy into _calkit, each at the same path under it
+    copies: list[str] = []
+    problems: list[str] = []
+
+
 class MiscArtifact(BaseModel):
     """A calkit.yaml ``misc`` entry: a path attributed to someone or to
     somewhere, without being a figure, dataset, or publication.
@@ -1508,11 +1702,42 @@ class MiscArtifact(BaseModel):
 
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
+EvidenceKind = Literal[
+    "figure", "result", "value", "table", "publication", "document"
+]
+
+
+class QuestionEvidenceValue(SQLModel):
+    """One of the named values a result evidence entry cites."""
+
+    name: str
+    key: str
+    # Read from the result file, like QuestionEvidence.value
+    value: str | None = None
+
+
 class QuestionEvidence(SQLModel):
-    kind: Literal["figure", "result", "table", "publication"]
+    kind: EvidenceKind
     path: str
     key: str | None = None
+    # For result evidence citing several values in its file, each by name,
+    # shown together on one card
+    values: list[QuestionEvidenceValue] | None = None
+    # What a value is called in the question's templates
+    name: str | None = None
+    # Where in a publication or document the evidence is, for the reader
+    section: str | None = None
+    # A publication's source anchor, e.g., a LaTeX label
+    label: str | None = None
+    # Why this piece of evidence answers the question. Written inline in
+    # calkit.yaml, or kept in a file and cited by path -- a paragraph of
+    # reasoning belongs in a file the pipeline can rebuild, not in a YAML
+    # string nobody can diff. Either way this is the text to show.
     explanation: str | None = None
+    # The file the explanation was read from, when it came from one. Lets
+    # the page link to it, and say how to render it: a .md explanation is
+    # a document, not a YAML scalar that happens to contain markdown.
+    explanation_path: str | None = None
     # The ref the evidence itself names, if any: evidence can cite a branch,
     # tag, or commit other than the one being browsed, e.g. an answer backed
     # by the figure as it stood when the answer was written. Carried through
@@ -1530,7 +1755,7 @@ class QuestionEvidence(SQLModel):
     # citing an artifact the pipeline would rebuild differently, which is
     # worth knowing before trusting it as an answer.
     stage: str | None = None
-    stage_status: "StageStatus | None" = None
+    stage_status: StageStatus | None = None
     # Why this citation shouldn't be taken at face value, if it shouldn't.
     # 'missing': it resolves to nothing -- never pushed, deleted, or at a ref
     # that isn't there. 'pipeline': the stage that made it is out of date.
@@ -1542,11 +1767,40 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: Literal["figure", "result", "table", "publication"]
+    kind: EvidenceKind
     path: str
     key: str | None = None
+    # Name to key, for result evidence citing several values
+    values: dict[str, str] | None = None
+    name: str | None = None
+    section: str | None = None
+    label: str | None = None
     explanation: str | None = None
+    # Set instead of ``explanation`` to point at a file holding it. The two
+    # are alternatives: a path wins, since the file is the record and the
+    # text the reader saw was only a copy of it.
+    explanation_path: str | None = None
     git_ref: str | None = None
+
+
+class QuestionSignOff(SQLModel):
+    """A verification or validation of a question, checked against history.
+
+    A verification says the stages behind the evidence implement the
+    approach; a validation says the approach suits the question and the
+    evidence justifies the answer. Stale means what it vouches for changed
+    after the commit that added it; unchecked means that commit couldn't be
+    found.
+    """
+
+    # Their name, or their email if no name is given
+    by: str
+    date: str | None = None
+    notes: str | None = None
+    with_ai: list[str] = []
+    status: Literal["current", "stale", "unchecked"]
+    # What changed, when stale
+    message: str | None = None
 
 
 class QuestionPublic(SQLModel):
@@ -1555,13 +1809,18 @@ class QuestionPublic(SQLModel):
     number: int
     question: str
     hypothesis: str | None = None
+    approach: str | None = None
     answer: str | None = None
     evidence: list[QuestionEvidence] = []
+    verifications: list[QuestionSignOff] = []
+    validations: list[QuestionSignOff] = []
 
 
 class QuestionPut(SQLModel):
     question: str | None = None
     hypothesis: str | None = None
+    # Left as is when not sent, so an older client can't clear it
+    approach: str | None = None
     answer: str | None = None
     evidence: list[QuestionEvidencePost] = []
 

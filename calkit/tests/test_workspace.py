@@ -501,7 +501,7 @@ def test_prune_command_is_quoted_and_scoped():
 
 
 def test_remote_system_info_reads_the_machine_that_runs_the_stage(
-    monkeypatch,
+    monkeypatch, tmp_path
 ):
     # A system env's lock describes the machine the results depend on, which
     # is the far end, not this one
@@ -512,14 +512,47 @@ def test_remote_system_info_reads_the_machine_that_runs_the_stage(
     )
     w = ws.Workspace(host="box", wdir="/w")
     assert ws.remote_system_info(w) == {"cpu_count": 64, "os": "Linux"}
+    # An older Calkit's keys are read as they're named now, after whatever
+    # logging in printed
+    monkeypatch.setattr(
+        ws.subprocess,
+        "check_output",
+        lambda argv, *a, **kw: (
+            b'Welcome\n{"Rscript_version": "4.3", "python_version": "3.11.2"}'
+        ),
+    )
+    assert ws.remote_system_info(w) == {
+        "rscript_version": "4.3",
+        "calkit_python_version": "3.11.2",
+    }
 
     # Calkit has to be there to answer; say so rather than failing obscurely
     def fail(argv, *a, **kw):
         raise subprocess.CalledProcessError(127, argv)
 
     monkeypatch.setattr(ws.subprocess, "check_output", fail)
-    with pytest.raises(ValueError, match="requires Calkit on that machine"):
+    with pytest.raises(ValueError, match="needs Calkit installed there."):
         ws.remote_system_info(w)
+    # Asking for an app's version needs a Calkit new enough to take '--app'
+    with pytest.raises(ValueError, match="new enough to report app"):
+        ws.remote_system_info(w, apps=["jq"])
+    # During a run each machine is asked once, and again only for other apps
+    calls = []
+
+    def answer(argv, *a, **kw):
+        calls.append(argv)
+        return b'{"cpu_count": 64}'
+
+    monkeypatch.setattr(ws.subprocess, "check_output", answer)
+    monkeypatch.setenv(ws.REMOTE_INFO_CACHE_ENV_VAR, str(tmp_path))
+    assert ws.remote_system_info(w) == {"cpu_count": 64}
+    assert ws.remote_system_info(w) == {"cpu_count": 64}
+    assert len(calls) == 1
+    ws.remote_system_info(w, apps=["jq", "git"])
+    assert len(calls) == 2
+    assert "--app jq" in " ".join(calls[-1])
+    # Apps it always reports aren't asked for, so an older Calkit can answer
+    assert "--app git" not in " ".join(calls[-1])
 
 
 def test_workspace_from_env_carries_the_machine_id():
@@ -1387,6 +1420,11 @@ def test_scheduler_dispatches_to_a_remote_host(tmp_dir, monkeypatch):
     monkeypatch.setattr(
         sched.calkit.environments, "host_is_local", lambda h: False
     )
+    monkeypatch.setattr(
+        sched.sys,
+        "argv",
+        ["calkit", "scheduler", "batch", "--name", "sim", "--", "./run.sh"],
+    )
     sched.run_batch(
         name="sim",
         target="./run.sh",
@@ -1446,6 +1484,31 @@ def test_requirements_are_checked_where_the_stage_will_run(monkeypatch):
     failing.add("SCRATCH")
     with pytest.raises(ValueError, match="env-var 'SCRATCH' is not set"):
         ws.check_requirements(w, [{"kind": "env-var", "name": "SCRATCH"}])
+    # How to get a value is passed along
+    with pytest.raises(ValueError, match="Get a value with 'get-token'"):
+        ws.check_requirements(
+            w,
+            [
+                {
+                    "kind": "env-var",
+                    "name": "SCRATCH",
+                    "setup_command": "get-token",
+                }
+            ],
+        )
+    failing.clear()
+    # AWS credentials are checked there, for the account asked for
+    ran.clear()
+    aws = {"kind": "aws-credentials", "account_id": "012", "profile": "p"}
+    ws.check_requirements(w, [aws])
+    assert "get-caller-identity" in ran[0]
+    assert "--profile p" in ran[0]
+    assert "= 012" in ran[0]
+    failing.add("get-caller-identity")
+    with pytest.raises(
+        ValueError, match="'aws-credentials-p-012' is not satisfied on host"
+    ):
+        ws.check_requirements(w, [aws])
     failing.clear()
     failing.add("gh auth")
     with pytest.raises(ValueError, match="To satisfy it there, run: gh login"):

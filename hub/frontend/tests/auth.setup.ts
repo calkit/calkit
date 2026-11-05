@@ -29,10 +29,12 @@ setup("authenticate as superuser", async ({ page, request }) => {
   const { access_token } = await response.json()
 
   // Seed the token into the app's localStorage so all subsequent page loads
-  // start in an authenticated state.
+  // start in an authenticated state. Answering the analytics consent banner
+  // keeps it from covering the bottom of every page under test.
   await page.goto("/")
   await page.evaluate((token: string) => {
     localStorage.setItem("access_token", token)
+    localStorage.setItem("analytics_consent", "denied")
   }, access_token)
 
   await page.context().storageState({ path: authFile })

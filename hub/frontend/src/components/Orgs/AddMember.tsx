@@ -68,7 +68,7 @@ const AddMember = ({ isOpen, onClose, orgName }: AddMemberProps) => {
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={onClose} isCentered>
+      <Modal isOpen={isOpen} onClose={onClose} isCentered motionPreset="none">
         <ModalOverlay />
         <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>
           <ModalHeader>Add org member</ModalHeader>

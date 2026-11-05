@@ -16,7 +16,7 @@ import { shell } from "@codemirror/legacy-modes/mode/shell"
 import { stex } from "@codemirror/legacy-modes/mode/stex"
 import { toml } from "@codemirror/legacy-modes/mode/toml"
 import { yaml } from "@codemirror/legacy-modes/mode/yaml"
-import { Prec } from "@codemirror/state"
+import { type Extension, Prec } from "@codemirror/state"
 import { oneDarkTheme } from "@codemirror/theme-one-dark"
 import { keymap } from "@codemirror/view"
 import { tags as t } from "@lezer/highlight"
@@ -123,6 +123,8 @@ interface CodeEditorPaneProps {
   onModEnter?: () => void
   // Shift+Enter, for "run and move on" in a notebook.
   onShiftEnter?: () => void
+  // More for this file, e.g., decorations
+  extensions?: Extension[]
 }
 
 const CodeEditorPane = ({
@@ -132,6 +134,7 @@ const CodeEditorPane = ({
   onChange,
   onModEnter,
   onShiftEnter,
+  extensions = [],
 }: CodeEditorPaneProps) => {
   const ref = useRef<HTMLDivElement>(null)
   const onModEnterRef = useRef(onModEnter)
@@ -180,6 +183,7 @@ const CodeEditorPane = ({
         // brings along; basicSetup's default style is a fallback below it.
         syntaxHighlighting(atomOneDarkHighlightStyle),
         ...languageExtension(path),
+        ...extensions,
         EditorView.lineWrapping,
         EditorView.updateListener.of((u) => {
           if (u.docChanged) {

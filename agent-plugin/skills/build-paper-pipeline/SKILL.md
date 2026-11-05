@@ -84,15 +84,18 @@ building a pipeline from scratch.
    `calkit.yaml`: the `question` as the paper poses it, the `answer` as the
    paper states it with `{name}` placeholders where numbers go, and
    `evidence` naming the results file and key, the figure, and the
-   publication section that carries the argument. Run
-   `calkit check questions` and fix what it reports.
+   publication section that carries the argument. The results file must be
+   one a stage from step 3 writes, never one written by hand. Where the
+   claim hinges on a threshold, write a conditional answer; the
+   `check-questions` skill covers both. Run `calkit check questions` and
+   fix what it reports.
 
 6. **Run the pipeline, then check your own work.** Run `calkit run`, then
    `calkit check repro`, which reads the manuscript back and reports any
    number in it that is not traceable to a pipeline output. A finding there
    is a hole you closed by typing rather than by building, so go back to
    step 3 for it. Show the user the rendered sentences
-   (`calkit list questions`) and the built document. Never commit a derived
+   (`calkit show question <n>`) and the built document. Never commit a derived
    output yourself, and never edit a results file by hand.
 
 ## Data a person has to collect

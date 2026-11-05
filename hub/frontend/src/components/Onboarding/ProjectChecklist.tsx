@@ -1,8 +1,9 @@
 import { ExternalLinkIcon } from "@chakra-ui/icons"
-import { Button, Flex, HStack, Link, useDisclosure } from "@chakra-ui/react"
+import { Button, HStack, Link, useDisclosure } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import mixpanel from "mixpanel-browser"
+import { useEffect } from "react"
 
 import { ProjectsService } from "../../client"
 import useOnboardingFlags from "../../hooks/useOnboarding"
@@ -10,23 +11,22 @@ import { useProjectQuestions } from "../../hooks/useProject"
 import { DISMISSED, buildProjectSteps } from "../../lib/onboarding"
 import NewDataset from "../Datasets/NewDataset"
 import FigureEditor from "../Figures/FigureEditor"
+import CreateQuestion from "../Projects/CreateQuestion"
 import ImportOverleaf from "../Publications/ImportOverleaf"
 import NewPublication from "../Publications/NewPublication"
-import CreateQuestion from "../Projects/CreateQuestion"
+import ImportFromZoteroModal from "../References/ImportFromZoteroModal"
+import NewReferencesCollection from "../References/NewReferencesCollection"
 import ChecklistCard from "./ChecklistCard"
 import CommandBlock from "./CommandBlock"
 
-const VSCODE_EXT_URL =
-  "https://marketplace.visualstudio.com/items?itemName=Calkit.calkit-vscode"
-const CHROME_EXT_URL =
-  "https://chromewebstore.google.com/detail/idhdomgapfolnpffanajdckdaojencal"
-const JUPYTER_DOCS_URL = "https://docs.calkit.org/jupyterlab/"
 const PIPELINE_DOCS_URL = "https://docs.calkit.org/pipeline/"
 
 interface ProjectChecklistProps {
   accountName: string
   projectName: string
   projectId: string
+  /** Told once the card knows what it will show, including nothing. */
+  onSettledChange?: (settled: boolean) => void
 }
 
 /**
@@ -40,6 +40,7 @@ const ProjectChecklist = ({
   accountName,
   projectName,
   projectId,
+  onSettledChange,
 }: ProjectChecklistProps) => {
   const { projectFlags, setFlag, flagsLoading } = useOnboardingFlags(projectId)
   const { questionsRequest } = useProjectQuestions(accountName, projectName)
@@ -62,6 +63,17 @@ const ProjectChecklist = ({
     retry: false,
     refetchOnWindowFocus: false,
   })
+  const referencesQuery = useQuery({
+    enabled: isNeeded,
+    queryKey: ["projects", accountName, projectName, "references", undefined],
+    queryFn: () =>
+      ProjectsService.getProjectReferences({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
   const pipelineQuery = useQuery({
     enabled: isNeeded,
     queryKey: ["projects", accountName, projectName, "pipeline", undefined],
@@ -77,18 +89,35 @@ const ProjectChecklist = ({
   const newDatasetModal = useDisclosure()
   const enterDataModal = useDisclosure()
   const editorModal = useDisclosure()
+  const newRefsModal = useDisclosure()
+  const zoteroImportModal = useDisclosure()
   const newPubTemplateModal = useDisclosure()
   const overleafImportModal = useDisclosure()
   const steps = buildProjectSteps({
     questionCount: questionsRequest.data?.length ?? 0,
+    // Entries, not collections: a collection someone made and never filled
+    // hasn't added a reference to anything.
+    referenceCount: (referencesQuery.data ?? []).reduce(
+      (total, collection) => total + (collection.entries?.length ?? 0),
+      0,
+    ),
     reproCheck: reproCheckQuery.data,
-    pipelineStatus: pipelineQuery.data?.status,
     stageStatuses: pipelineQuery.data?.stage_statuses as Record<
       string,
       { status?: string | null }
     >,
     flags: projectFlags,
   })
+  const signalsPending =
+    reproCheckQuery.isPending ||
+    questionsRequest.isPending ||
+    pipelineQuery.isPending ||
+    referencesQuery.isPending
+  const settled =
+    !flagsLoading && (isDismissed || reproCheckQuery.isError || !signalsPending)
+  useEffect(() => {
+    onSettledChange?.(settled)
+  }, [settled, onSettledChange])
   // Waiting on the repo read would flash a list of unchecked boxes at
   // someone whose project is already in good shape, which is the worst
   // first impression this card can make. A read that failed outright says
@@ -98,7 +127,14 @@ const ProjectChecklist = ({
   if (flagsLoading || isDismissed) {
     return null
   }
-  if (reproCheckQuery.isPending || reproCheckQuery.isError) {
+  if (reproCheckQuery.isError) {
+    return null
+  }
+  // Every signal, not just the repo read: these three land at different
+  // times, and each one arriving ticks off its own step under the reader,
+  // collapsing a row and swapping its mark as it goes. Rendering once they
+  // have all settled shows the list in the state it is actually in.
+  if (signalsPending) {
     return null
   }
   const actions: Record<string, React.ReactNode> = {
@@ -187,7 +223,31 @@ const ProjectChecklist = ({
         />
         <CommandBlock
           label="Run it and push the results"
-          command='calkit run -m "Run pipeline"'
+          command={`cd ${projectName} && calkit run -m "Run pipeline"`}
+        />
+      </>
+    ),
+    references: (
+      <>
+        <HStack spacing={3}>
+          <Button size="xs" variant="primary" onClick={newRefsModal.onOpen}>
+            Add a new reference collection
+          </Button>
+          <Button size="xs" onClick={zoteroImportModal.onOpen}>
+            Import from Zotero
+          </Button>
+        </HStack>
+        <NewReferencesCollection
+          isOpen={newRefsModal.isOpen}
+          onClose={newRefsModal.onClose}
+          ownerName={accountName}
+          projectName={projectName}
+        />
+        <ImportFromZoteroModal
+          isOpen={zoteroImportModal.isOpen}
+          onClose={zoteroImportModal.onClose}
+          ownerName={accountName}
+          projectName={projectName}
         />
       </>
     ),
@@ -216,36 +276,15 @@ const ProjectChecklist = ({
         />
       </>
     ),
-    editor: (
-      <Flex gap={4} wrap="wrap">
-        <Link fontSize="xs" variant="blue" href={VSCODE_EXT_URL} isExternal>
-          VS Code <ExternalLinkIcon mb={0.5} />
-        </Link>
-        <Link fontSize="xs" variant="blue" href={JUPYTER_DOCS_URL} isExternal>
-          JupyterLab <ExternalLinkIcon mb={0.5} />
-        </Link>
-        <Link fontSize="xs" variant="blue" href={CHROME_EXT_URL} isExternal>
-          Chrome <ExternalLinkIcon mb={0.5} />
-        </Link>
-      </Flex>
-    ),
   }
   return (
     <ChecklistCard
       title="Project setup"
-      intro={
-        "Each step here is checked against the project itself, so anything " +
-        "you do from the CLI ticks off on its own."
-      }
       steps={steps}
       actions={actions}
       onMarkDone={setFlag}
       dismissed={projectFlags.includes(DISMISSED)}
       onDismissedChange={(dismissed) => setFlag(DISMISSED, dismissed)}
-      doneMessage={
-        "This project is reproducible end to end. Anyone can clone it and " +
-        "get your results back."
-      }
     />
   )
 }

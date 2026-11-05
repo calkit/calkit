@@ -93,6 +93,8 @@ export interface StageStaleContext {
   // of these is a modified dep, the stage is stale because its environment
   // changed.
   envFilePaths?: string[];
+  // The subproject the stage runs in, whose .calkit its bookkeeping is under
+  projectDir?: string;
 }
 
 // How a stale stage's changes map onto the categories surfaced in the tree, so
@@ -116,8 +118,12 @@ export interface StaleClassification {
 // calkit tracks a notebook stage's *cleaned* copy under `.calkit/` as the DVC
 // dep, so a source-notebook edit surfaces as a change to this path rather than
 // the notebook's own path.
-function cleanedNotebookPath(notebookPath: string): string {
-  return `.calkit/notebooks/cleaned/${notebookPath}`;
+function cleanedNotebookPath(notebookPath: string, projectDir = "."): string {
+  if (projectDir === ".") {
+    return `.calkit/notebooks/cleaned/${notebookPath}`;
+  }
+  const local = notebookPath.slice(projectDir.length + 1);
+  return `${projectDir}/.calkit/notebooks/cleaned/${local}`;
 }
 
 // Attribute a stale stage's modified deps/outs to the script, notebook, source,
@@ -128,6 +134,7 @@ export function classifyStaleStage(
   context: StageStaleContext,
 ): StaleClassification {
   const modifiedInputs = new Set(detail.modified_inputs ?? []);
+  const projectDir = context.projectDir ?? ".";
   const modifiedOutputs = new Set(detail.modified_outputs ?? []);
   const staleOutputs = new Set(detail.stale_outputs ?? []);
   const scriptStale =
@@ -135,7 +142,9 @@ export function classifyStaleStage(
   const notebookStale =
     !!context.notebookPath &&
     (modifiedInputs.has(context.notebookPath) ||
-      modifiedInputs.has(cleanedNotebookPath(context.notebookPath)));
+      modifiedInputs.has(
+        cleanedNotebookPath(context.notebookPath, projectDir),
+      ));
   const sourceStale =
     !!context.targetPath && modifiedInputs.has(context.targetPath);
   const envFilePaths = context.envFilePaths ?? [];
@@ -148,7 +157,7 @@ export function classifyStaleStage(
   }
   if (context.notebookPath) {
     covered.add(context.notebookPath);
-    covered.add(cleanedNotebookPath(context.notebookPath));
+    covered.add(cleanedNotebookPath(context.notebookPath, projectDir));
   }
   if (context.targetPath) {
     covered.add(context.targetPath);
@@ -157,7 +166,9 @@ export function classifyStaleStage(
     covered.add(p);
   }
   const extraModifiedInputs = [...modifiedInputs].filter(
-    (p) => !covered.has(p) && !p.startsWith(".calkit/"),
+    (p) =>
+      !covered.has(p) &&
+      !p.startsWith(projectDir === "." ? ".calkit/" : `${projectDir}/.calkit/`),
   );
   return {
     modifiedInputs,

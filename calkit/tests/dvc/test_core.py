@@ -148,6 +148,66 @@ def test_tolerate_lock_release_failures(tmp_dir, caplog):
         zc.lockfile._unlock_file = original
 
 
+def test_memoized_hashes(tmp_dir, monkeypatch):
+    from dvc.output import Output
+
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    # Outputs are written up front and persisted, so the stages' commands
+    # don't need a shell that can write them
+    for path in ["data/0.txt", "data/1.txt", "out/0.txt", "figs/b.txt"]:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(path)
+    # 'data' feeds two stages, 'out' is a directory output, and 'figs' holds
+    # an output tracked on its own while also being another stage's input
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  a:\n    cmd: echo a\n    deps: [data]\n"
+            "    outs: [{out: {persist: true}}]\n"
+            "  b:\n    cmd: echo b\n    deps: [data]\n"
+            "    outs: [{figs/b.txt: {persist: true}}]\n"
+            "  c:\n    cmd: echo c\n    deps: [figs]\n"
+        )
+    subprocess.check_call(["dvc", "repro", "-q"])
+
+    def check() -> tuple[dict, dict]:
+        # Data status must read the same with the hashes shared as without
+        expected = dict(dvc.repo.Repo().data_status())
+        repo = dvc.repo.Repo()
+        with dvc.repo.lock_repo(repo), calkit.dvc.memoized_hashes():
+            status = repo.status()
+            assert dict(repo.data_status()) == expected
+        return status, expected
+
+    # Count the hashes DVC really computes, beneath the memo
+    hashed = []
+    original = Output._get_hash_meta
+
+    def counting(self):
+        hashed.append(self.def_path)
+        return original(self)
+
+    monkeypatch.setattr(Output, "_get_hash_meta", counting)
+    status, data_status = check()
+    assert status == {}
+    assert not data_status["uncommitted"]
+    assert hashed.count("data") == 1
+    assert Output._get_hash_meta is counting
+    # A change is still seen by every stage that depends on it
+    with open("data/0.txt", "w") as f:
+        f.write("changed")
+    status, _ = check()
+    assert set(status) == {"a", "b"}
+    # And a changed output is still uncommitted
+    with open("out/0.txt", "w") as f:
+        f.write("changed")
+    _, data_status = check()
+    data_status = calkit.dvc.data_status_as_posix(data_status)
+    assert data_status["uncommitted"] == {"modified": ["out"]}
+
+
 def test_register_ck_scheme_updates_schema_and_registry():
     register_ck_scheme()
 
@@ -526,3 +586,151 @@ def test_commit_path_with_missing_dep(tmp_dir):
     # The output's hash should be kept, since there's nothing new to hash
     assert lock["stages"]["my-stage"]["outs"][0]["path"] == "output.txt"
     assert "md5" in lock["stages"]["my-stage"]["outs"][0]
+
+
+def test_ck_fs_reads_content_only_for_dirs() -> None:
+    from calkit.dvc.core import CalkitDVCFileSystem
+
+    calls: list[tuple[list[str], bool]] = []
+    stored = {
+        "o/p/files/md5/aa/1.dir": b"[]",
+        "o/p/files/md5/bb/2": b"data",
+    }
+
+    class FakeFS:
+        def info_many(
+            self, paths: list[str], content: bool = True, **kwargs: object
+        ) -> dict[str, dict]:
+            calls.append((sorted(paths), content))
+            infos = {}
+            for path in paths:
+                if path in stored:
+                    infos[path] = {"name": path, "size": len(stored[path])}
+                    if content:
+                        infos[path]["content"] = stored[path]
+            return infos
+
+    fs = CalkitDVCFileSystem()
+    fs.__dict__["fs"] = FakeFS()
+    paths = [
+        "o/p/files/md5/aa/1.dir",
+        "o/p/files/md5/bb/2",
+        "o/p/files/md5/cc/3.dir",
+        "o/p/files/md5/dd/4",
+    ]
+    assert fs.exists(paths) == [True, True, False, False]
+    assert calls == [
+        (["o/p/files/md5/aa/1.dir", "o/p/files/md5/cc/3.dir"], True),
+        (["o/p/files/md5/bb/2", "o/p/files/md5/dd/4"], False),
+    ]
+    infos = fs.info(paths[:2])
+    assert infos[0]["content"] == b"[]"
+    assert "content" not in infos[1]
+    # Everything asked about is answered from what was already fetched
+    assert len(calls) == 2
+    with pytest.raises(FileNotFoundError):
+        fs.info(paths)
+    assert len(calls) == 2
+
+
+def test_get_storage_problems(tmp_dir):
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def problems(**kwargs) -> dict:
+        return {
+            p["path"]: p
+            for p in calkit.dvc.get_storage_problems(large_mb=None, **kwargs)
+        }
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo hi > out.txt && echo yo > kept.txt",
+                "outputs": ["out.txt", {"path": "kept.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "data.csv"])
+    subprocess.check_call(["calkit", "run"])
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    assert problems() == {}
+    # Cached by DVC and tracked by Git, which DVC's stage or .dvc file says
+    # is wrong
+    git("add", "-f", "out.txt", "data.csv")
+    found = problems()
+    # Only the project's own paths count, not those of another sharing its
+    # DVC repo
+    os.makedirs("sub")
+    assert problems(wdir="sub") == {}
+    assert found["out.txt"]["kind"] == "both"
+    assert found["out.txt"]["stage"] == "make"
+    assert found["out.txt"]["store_in"] == "dvc"
+    assert found["data.csv"]["dvc_file"] == "data.csv.dvc"
+    assert found["data.csv"]["store_in"] == "dvc"
+    # Unless the file differs from its .dvc file, which leaves it unclear
+    with open("data.csv", "a") as f:
+        f.write("1,2\n")
+    assert problems()["data.csv"]["store_in"] is None
+    git("reset", "-q", "--", "out.txt", "data.csv")
+    # A Git-stored output that's ignored, e.g., left over from DVC
+    git("rm", "-q", "--cached", "kept.txt")
+    with open(".gitignore", "a") as f:
+        f.write("/kept.txt\n")
+    found = problems()
+    assert list(found) == ["kept.txt"]
+    assert found["kept.txt"]["kind"] == "ignored"
+    assert found["kept.txt"]["store_in"] == "git"
+    # Including generated LaTeX, which is stored in Git unless it says
+    # otherwise
+    ck_info["pipeline"]["stages"]["values"] = {
+        "kind": "json-to-latex",
+        "inputs": ["values.json"],
+        "outputs": ["values.tex"],
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("values.tex", "w") as f:
+        f.write("x")
+    with open(".gitignore", "a") as f:
+        f.write("/values.tex\n")
+    assert problems()["values.tex"]["kind"] == "ignored"
+    os.remove("values.tex")
+    # A path stored zipped and tracked by Git
+    os.makedirs("zipped")
+    with open("zipped/a.txt", "w") as f:
+        f.write("z")
+    calkit.dvc.zip.write_zip_path_map({"zipped": "zips/zipped.zip"})
+    git("add", "zipped")
+    assert problems()["zipped"]["kind"] == "zipped"
+    # Large files in Git, but not those in Git LFS
+    for path in ["big.txt", "big.bin"]:
+        with open(path, "w") as f:
+            f.write("x" * 2048)
+    with open(".gitattributes", "w") as f:
+        f.write("*.bin filter=lfs\n")
+    git("add", "big.txt", "big.bin", ".gitattributes")
+    large = [
+        p["path"]
+        for p in calkit.dvc.get_storage_problems(large_mb=0.001)
+        if p["kind"] == "large"
+    ]
+    assert "big.txt" in large
+    assert "big.bin" not in large
+
+
+def test_split_lock_stage_name():
+    assert calkit.dvc.split_lock_stage_name("a") == (None, "a")
+    assert calkit.dvc.split_lock_stage_name("sub/dvc.yaml:a") == ("sub", "a")
+    assert calkit.dvc.split_lock_stage_name("a/b/dvc.yaml:c") == ("a/b", "c")
+    # As DVC names a subproject's stage on Windows
+    assert calkit.dvc.split_lock_stage_name("sub\\dvc.yaml:a") == ("sub", "a")
+    # A colon that isn't after a dvc.yaml is part of the name
+    assert calkit.dvc.split_lock_stage_name("a:b") == (None, "a:b")

@@ -7,7 +7,6 @@ import { type Figure, ProjectsService } from "../../client"
 import useProject from "../../hooks/useProject"
 import { declaredInputs } from "../../lib/provenance"
 import NotebookRunLauncher from "../Notebooks/NotebookRunLauncher"
-import TipBubble from "../Onboarding/TipBubble"
 import FigureEditor, { type FigureEditTarget } from "./FigureEditor"
 
 interface StageInfo {
@@ -109,22 +108,20 @@ const FigureEditLauncher = ({
     }
     return (
       <Box mt={3} pt={3} borderTopWidth={1}>
-        <TipBubble tip="edit-figure" where="page" display="block">
-          <Button
-            size="sm"
-            variant="primary"
-            width="100%"
-            onClick={() => {
-              mixpanel.track("Opened figure editor", {
-                source: "figure-detail",
-                editing: true,
-              })
-              editor.onOpen()
-            }}
-          >
-            Edit figure
-          </Button>
-        </TipBubble>
+        <Button
+          size="sm"
+          variant="primary"
+          width="100%"
+          onClick={() => {
+            mixpanel.track("Opened figure editor", {
+              source: "figure-detail",
+              editing: true,
+            })
+            editor.onOpen()
+          }}
+        >
+          Edit figure
+        </Button>
         {editor.isOpen ? (
           <FigureEditor
             isOpen={editor.isOpen}

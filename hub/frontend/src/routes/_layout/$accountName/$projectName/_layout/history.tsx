@@ -234,6 +234,7 @@ function CommitDetailModal({
       size="4xl"
       scrollBehavior="inside"
       isCentered
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent>

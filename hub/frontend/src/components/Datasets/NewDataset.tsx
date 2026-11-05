@@ -32,6 +32,7 @@ import {
   useForm,
 } from "react-hook-form"
 
+import { refreshProjectContents } from "../../lib/api"
 import { type Table as TableData, toCsv } from "../../lib/csv"
 import DataEntryGrid from "./DataEntryGrid"
 
@@ -325,76 +326,82 @@ const NewDataset = ({
       created_by: "",
     },
   })
-  const mutation = useMutation({
-    mutationFn: (data: DatasetForm) => {
-      if (source === "enter") {
-        // Typed-in data becomes a real CSV in the repo, tracked like any
-        // uploaded file, with the person who entered it as its collector.
-        const csv = toCsv({
-          columns: table.columns,
-          rows: table.rows.filter((row) => row.some((cell) => cell !== "")),
-        })
-        const file = new File([csv], data.path.split("/").pop() ?? "data.csv", {
-          type: "text/csv",
-        })
-        return ProjectsService.postProjectDatasetUpload({
-          "content-length": file.size,
-          owner_name: accountName,
-          project_name: projectName,
-          bodyProjectsPostProjectDatasetUpload: {
-            path: data.path,
-            title: data.title,
-            description: data.description,
-            file,
-            // Typed-in data is attested by the person typing it: the
-            // signed-in user, not a free-text field.
-            created_by: currentUser?.email ?? null,
-            created_by_name: currentUser?.full_name ?? null,
-          },
-        }).then((response) => response.data)
-      }
-      if (source === "primary" && primaryMode === "upload") {
-        if (!uploadFile) {
-          return Promise.reject(new Error("Choose a file to upload."))
-        }
-        // The creator is whoever is named, defaulting to the uploader;
-        // the hub decides Git or DVC from the size, as `calkit add` would
-        return ProjectsService.postProjectDatasetUpload({
-          "content-length": uploadFile.size,
-          owner_name: accountName,
-          project_name: projectName,
-          bodyProjectsPostProjectDatasetUpload: {
-            path: data.path,
-            title: data.title,
-            description: data.description,
-            file: uploadFile,
-            created_by: data.created_by || currentUser?.email || null,
-            created_by_name:
-              data.created_by && data.created_by !== currentUser?.email
-                ? null
-                : currentUser?.full_name ?? null,
-          },
-        }).then((response) => response.data)
-      }
-      const post: DatasetPost = {
-        path: data.path,
-        title: data.title || null,
-        description: data.description || null,
-      }
-      if (source === "primary") {
-        // Recording who created or collected it is what marks it primary,
-        // and the person filling this in is almost always that person.
-        post.created_by = [
-          { email: data.created_by || currentUser?.email || "" },
-        ]
-      } else {
-        post.imported_from = buildImportedFrom(source, data)
-      }
-      return ProjectsService.postProjectDataset({
+  const addDataset = (data: DatasetForm) => {
+    if (source === "enter") {
+      // Typed-in data becomes a real CSV in the repo, tracked like any
+      // uploaded file, with the person who entered it as its collector.
+      const csv = toCsv({
+        columns: table.columns,
+        rows: table.rows.filter((row) => row.some((cell) => cell !== "")),
+      })
+      const file = new File([csv], data.path.split("/").pop() ?? "data.csv", {
+        type: "text/csv",
+      })
+      return ProjectsService.postProjectDatasetUpload({
+        "content-length": file.size,
         owner_name: accountName,
         project_name: projectName,
-        datasetPost: post,
+        bodyProjectsPostProjectDatasetUpload: {
+          path: data.path,
+          title: data.title,
+          description: data.description,
+          file,
+          // Typed-in data is attested by the person typing it: the
+          // signed-in user, not a free-text field.
+          created_by: currentUser?.email ?? null,
+          created_by_name: currentUser?.full_name ?? null,
+        },
       }).then((response) => response.data)
+    }
+    if (source === "primary" && primaryMode === "upload") {
+      if (!uploadFile) {
+        return Promise.reject(new Error("Choose a file to upload."))
+      }
+      // The creator is whoever is named, defaulting to the uploader;
+      // the hub decides Git or DVC from the size, as `calkit add` would
+      return ProjectsService.postProjectDatasetUpload({
+        "content-length": uploadFile.size,
+        owner_name: accountName,
+        project_name: projectName,
+        bodyProjectsPostProjectDatasetUpload: {
+          path: data.path,
+          title: data.title,
+          description: data.description,
+          file: uploadFile,
+          created_by: data.created_by || currentUser?.email || null,
+          created_by_name:
+            data.created_by && data.created_by !== currentUser?.email
+              ? null
+              : currentUser?.full_name ?? null,
+        },
+      }).then((response) => response.data)
+    }
+    const post: DatasetPost = {
+      path: data.path,
+      title: data.title || null,
+      description: data.description || null,
+    }
+    if (source === "primary") {
+      // Recording who created or collected it is what marks it primary,
+      // and the person filling this in is almost always that person.
+      post.created_by = [{ email: data.created_by || currentUser?.email || "" }]
+    } else {
+      post.imported_from = buildImportedFrom(source, data)
+    }
+    return ProjectsService.postProjectDataset({
+      owner_name: accountName,
+      project_name: projectName,
+      datasetPost: post,
+    }).then((response) => response.data)
+  }
+  const mutation = useMutation({
+    mutationFn: async (data: DatasetForm) => {
+      const added = await addDataset(data)
+      // Part of the add rather than a follow-up: the datasets page reads a
+      // server-side clone, and a refetch before the write reaches it comes
+      // back without the dataset that was just added.
+      await refreshProjectContents(accountName, projectName, queryClient)
+      return added
     },
     onSuccess: () => {
       mixpanel.track("Added dataset", { source })
@@ -412,11 +419,12 @@ const NewDataset = ({
       setTable(EMPTY_TABLE)
       onClose()
     },
-    onError: (err: AxiosError) => handleError(err, showToast),
-    onSettled: () =>
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
       queryClient.invalidateQueries({
         queryKey: ["projects", accountName, projectName, "datasets"],
-      }),
+      })
+    },
   })
   const onSubmit: SubmitHandler<DatasetForm> = (data) => mutation.mutate(data)
   const selected = SOURCES.find((s) => s.value === source)
@@ -427,6 +435,7 @@ const NewDataset = ({
       size={{ base: "sm", md: source === "enter" ? "2xl" : "lg" }}
       isCentered
       scrollBehavior="inside"
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>

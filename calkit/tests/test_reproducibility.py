@@ -45,8 +45,10 @@ def test_check_reproducibility(tmp_dir):
             {"path": "mystery.csv"},
         ],
         "figures": [
-            {"path": "schematic.png", "created_by": {"email": "me@x.edu"}},
+            {"path": "schematic.svg", "created_by": {"email": "me@x.edu"}},
             {"path": "mystery.png"},
+            # Exported, so a person can't be its origin
+            {"path": "exported.png", "created_by": {"email": "me@x.edu"}},
         ],
         "publications": [
             {"path": "paper.pdf", "imported_from": {"doi": "10.1234/y"}}
@@ -70,8 +72,8 @@ def test_check_reproducibility(tmp_dir):
     assert res.n_datasets == 4
     assert res.n_datasets_no_import_or_stage == 1
     assert res.n_datasets_with_import_or_stage == 3
-    assert res.n_figures == 2
-    assert res.n_figures_no_import_or_stage == 1
+    assert res.n_figures == 3
+    assert res.n_figures_no_import_or_stage == 2
     assert res.n_publications_no_import_or_stage == 0
     assert res.n_misc == 3
     assert res.n_misc_no_import_or_stage == 1
@@ -84,6 +86,15 @@ def test_check_reproducibility(tmp_dir):
     assert res.n_presentations_with_import_or_stage == 1
     assert "Misc with provenance recorded" in res.to_pretty()
     assert "Tables with provenance recorded" in res.to_pretty()
+    # What's shown is followed back to its sources: a figure or table with
+    # nothing behind it is a gap, while one whose stage isn't compiled yet
+    # is taken at its word
+    assert res.provenance_gaps == [
+        "origin not defined for mystery.png",
+        "origin not defined for exported.png",
+        "origin not defined for mystery.csv",
+    ]
+    assert "with origin not defined: 3" in res.to_pretty()
     # Nothing tracked yet, so no scripts to flag, and the mystery misc
     # artifact isn't of a kind that's hard to make by hand
     assert res.scripts_not_in_pipeline == []
@@ -175,10 +186,83 @@ def test_check_reproducibility(tmp_dir):
         good | {"scripts_not_in_pipeline": []}
     ).recommendation
     assert "2 misc artifacts (plot.png, slides.PPTX)" in rec  # type: ignore
+    good |= {"scripts_not_in_pipeline": [], "misc_needing_provenance": []}
+    rec = ReproCheck.model_validate(good).recommendation
+    assert "e.g., origin not defined for mystery.png" in rec  # type: ignore
     rec = ReproCheck.model_validate(
-        good | {"scripts_not_in_pipeline": [], "misc_needing_provenance": []}
+        good | {"provenance_gaps": []}
     ).recommendation
     assert "datasets with no provenance" in rec  # type: ignore
+    # What a LaTeX document shows is followed too, whether cited with
+    # \\ckfigure or included plainly, and a plain include is fine wherever
+    # the pipeline made the file, e.g., copied in by a map-paths stage or
+    # written by a json-to-latex one
+    ck_info["pipeline"]["stages"]["paper"] = {
+        "kind": "latex",
+        "target_path": "paper/main.tex",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "plot": {
+                        "cmd": "calkit xenv -n py -- python scripts/plot.py",
+                        "deps": ["scripts/plot.py"],
+                        "outs": ["figures/fit.png", "results/fit.json"],
+                    },
+                    "copy-figs": {
+                        "cmd": "calkit map-paths",
+                        "deps": ["figures/fit.png"],
+                        "outs": ["paper/figs/fit.png"],
+                    },
+                    "table": {
+                        "cmd": "calkit latex from-json results/fit.json",
+                        "deps": ["results/fit.json"],
+                        "outs": ["paper/table.tex"],
+                    },
+                }
+            },
+            f,
+        )
+    os.makedirs("paper/figs")
+    for path in ["paper/figs/fit.png", "paper/table.tex", "paper/drawn.png"]:
+        with open(path, "w") as f:
+            f.write("")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "\\includegraphics{figs/fit}\n\\input{table}\n"
+            "\\includegraphics[width=1cm]{drawn.png}\n"
+            "\\ckfigure{figures/pasted.png}\n"
+            "\\end{document}\n"
+        )
+    res = check_reproducibility()
+    expected = [
+        "origin not defined for figures/pasted.png",
+        "origin not defined for paper/drawn.png",
+    ]
+    assert [
+        g
+        for g in res.provenance_gaps
+        if "mystery" not in g and "exported" not in g
+    ] == expected
+    # The same paper, named relative to its stage's working directory
+    ck_info["pipeline"]["stages"]["paper"] = {
+        "kind": "latex",
+        "wdir": "paper",
+        "target_path": "main.tex",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check_reproducibility()
+    assert [
+        g
+        for g in res.provenance_gaps
+        if "mystery" not in g and "exported" not in g
+    ] == expected
 
 
 def test_check_call():

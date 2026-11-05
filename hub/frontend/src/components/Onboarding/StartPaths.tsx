@@ -12,7 +12,7 @@ import mixpanel from "mixpanel-browser"
 import type { IconType } from "react-icons"
 import { FaBroom, FaLeaf, FaSeedling } from "react-icons/fa"
 
-export type StartPath = "existing" | "fresh" | "overleaf"
+import type { StartPath } from "../../lib/onboarding"
 
 interface PathOption {
   path: StartPath
@@ -21,37 +21,27 @@ interface PathOption {
   description: string
 }
 
-/**
- * Nobody arrives wanting "a project." They arrive with scripts scattered
- * across a laptop, a shared drive, and an Overleaf tab, or with an idea and
- * a wish not to end up there again. Naming those situations lets someone
- * recognize themselves rather than guess which button is for them.
- */
-export const START_PATHS: PathOption[] = [
+const START_PATHS: PathOption[] = [
   {
     path: "existing",
     icon: FaBroom,
-    title: "Take control of a project in progress",
+    title: "Clean up an existing project",
     description:
-      "Notebooks on your laptop, data on a shared drive, figures pasted into " +
-      "Overleaf. Bring it all under one roof and reduce context switching.",
+      "Link a GitHub repo or upload a ZIP of the files on your laptop.",
   },
   {
     path: "fresh",
     icon: FaSeedling,
-    title: "Start clean and stay that way",
+    title: "Start fresh",
     description:
-      "Environment, pipeline, and paper tied together from the first " +
-      "commit, so you spend your attention on the research questions instead of the " +
-      "plumbing.",
+      "Build on a blank slate or a project template and follow best practices from day one.",
   },
   {
     path: "overleaf",
     icon: FaLeaf,
-    title: "Start from the paper you're writing",
+    title: "Start from Overleaf",
     description:
-      "Link the Overleaf project you already have, then grow the analysis " +
-      "behind it so its figures and results stop drifting out of date.",
+      "Connect the analysis to something you're already writing in Overleaf.",
   },
 ]
 
@@ -111,9 +101,8 @@ const StartPaths = ({
                   path: option.path,
                   source,
                 }),
-              // Step 1 is the form; the choice this card just made is what
-              // step 0 exists to ask, so don't ask it twice.
-              search: { path: option.path, step: 1 },
+              // The form opens with this source already picked.
+              search: { path: option.path },
             }
         return (
           <Box

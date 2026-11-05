@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://docs.calkit.org/schemas/calkit.json
+name: example-subprojects-calibration
+title: Sensor calibration
+
+requirements:
+  - uv
+
+environments:
+  py:
+    kind: uv
+    path: pyproject.toml
+
+pipeline:
+  stages:
+    calibrate:
+      kind: python-script
+      script_path: scripts/calibrate.py
+      environment: py
+      outputs:
+        - path: results/calibration.json
+          storage: git

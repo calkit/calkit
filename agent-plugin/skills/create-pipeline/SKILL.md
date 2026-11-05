@@ -45,8 +45,9 @@ no `pipeline` section, skip this—you will add one.
 
 Every stage must reference a named environment. Identify what's needed:
 
-- **Python**: `requirements.txt` or `pyproject.toml` → `uv-venv`;
-  `environment.yml` → `conda`
+- **Python**: `pyproject.toml`, or no spec yet → `uv`, created with
+  `calkit new uv-env`; an existing `requirements.txt` the project should
+  keep → `uv-venv`; `environment.yml` → `conda`
 - **R**: `renv.lock` → `renv`
 - **Julia**: `Project.toml` → `julia`
 - **LaTeX**: `docker` with `texlive/texlive:latest-full`
@@ -57,9 +58,8 @@ Add environments to `calkit.yaml`:
 ```yaml
 environments:
   main:
-    kind: uv-venv
-    path: requirements.txt
-    python: "3.13"
+    kind: uv
+    path: pyproject.toml
 ```
 
 Name a single Python environment `main`. With multiple environments, use

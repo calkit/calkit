@@ -681,6 +681,7 @@ def test_xr_stage_name_conflict(tmp_dir):
     assert stages["process-v3"]["script_path"] == "other/process.py"
 
 
+@pytest.mark.xdist_group("conda")
 def test_xr_jupyter_notebook_conda_env(tmp_dir):
     # First, create a conda env with matplotlib and jupyter deps
     os.makedirs("env")
@@ -863,6 +864,7 @@ def test_xr_markdown_no_record(tmp_dir):
     assert not os.path.isfile("dvc.lock")
     assert not os.path.isdir(".dvc")
     assert not os.path.isfile(".dvcignore")
+    assert not os.path.isfile(".calkit/stage-runs.json")
     repo = git.Repo(".")
     assert not repo.head.is_valid()
     # Nothing the bootstrap staged lingers in the index either; only
@@ -901,3 +903,10 @@ def test_xr_no_record_command(tmp_dir):
         assert f.read() == ck_yaml_before
     assert not os.path.isfile("dvc.yaml")
     assert not os.path.isfile("dvc.lock")
+    assert not os.path.isfile(".calkit/stage-runs.json")
+    # Nor is anything the run staged left in the index
+    staged = subprocess.check_output(
+        ["git", "diff", "--cached", "--name-only"], text=True
+    ).splitlines()
+    assert ".calkit/stage-runs.json" not in staged
+    assert "dvc.lock" not in staged

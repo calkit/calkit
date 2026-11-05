@@ -43,6 +43,7 @@ from app.security import (
     verify_password,
 )
 from app.zenodo import AUTH_URL as ZENODO_AUTH_URL
+from calkit.overleaf import WebClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -297,6 +298,20 @@ def create_email_verification(
         user_id=user.id, email=user.email
     )
     return code, token
+
+
+def apply_analytics_consent(
+    *, session: Session, user: User, consent: bool | None
+) -> User:
+    """Save a consent answer sent with a signup or login, if the account
+    has none yet.
+    """
+    if consent is not None and user.analytics_consent is None:
+        user.analytics_consent = consent
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return user
 
 
 def mark_email_verified(*, session: Session, user: User) -> User:
@@ -709,6 +724,61 @@ def save_overleaf_token(
     )
 
 
+# Label of an Overleaf browser session, kept apart from the Git token so
+# either can be replaced without the other
+_OVERLEAF_SESSION_LABEL = "session"
+
+
+def get_overleaf_session_credential(
+    session: Session, user: User
+) -> UserExternalCredential | None:
+    """Get a user's saved Overleaf browser session, still encrypted."""
+    return get_external_credential(
+        session=session,
+        user=user,
+        provider="overleaf",
+        label=_OVERLEAF_SESSION_LABEL,
+    )
+
+
+def get_overleaf_session(session: Session, user: User) -> str:
+    """Get a user's decrypted Overleaf browser session cookie."""
+    credential = get_overleaf_session_credential(session=session, user=user)
+    if credential is None:
+        raise HTTPException(404, "User has no Overleaf session saved")
+    payload = json.loads(decrypt_secret(credential.secret_payload))
+    cookie: str = payload["session"]
+    return cookie
+
+
+def save_overleaf_session(session: Session, user: User, cookie: str) -> None:
+    """Save an Overleaf browser session cookie, for syncing without Overleaf
+    Premium.
+    """
+    save_external_credential(
+        session=session,
+        user=user,
+        provider="overleaf",
+        secret_payload=json.dumps({"session": cookie}),
+        credential_type="session",
+        label=_OVERLEAF_SESSION_LABEL,
+    )
+
+
+def get_overleaf_auth(session: Session, user: User) -> str | WebClient:
+    """Get a user's Overleaf Git token, or, without one, a client for their
+    saved browser session.
+    """
+    try:
+        return get_overleaf_token(session=session, user=user)
+    except HTTPException:
+        pass
+    try:
+        return WebClient(get_overleaf_session(session=session, user=user))
+    except HTTPException:
+        raise HTTPException(401, "Overleaf token not found")
+
+
 def get_google_token(session: Session, user: User) -> str:
     """Get a user's decrypted Google access token, automatically refreshing if
     necessary.
@@ -951,18 +1021,22 @@ def check_user_subscription_active(session: Session, user: User) -> bool:
     if subscription.plan_id == 0:
         logger.info(f"{user.email} has a free subscription")
         return True
+    if subscription.price == 0 and subscription.paid_until is None:
+        logger.info(f"{user.email} has a comp with no end date")
+        return True
     if (
         subscription.paid_until is not None
         and subscription.paid_until >= utcnow()
     ):
         return True
     # Check with Stripe if the subscription has been paid
-    customer = app.stripe.get_customer(email=user.email)
-    if customer is None:
-        return False
-    stripe_subs = app.stripe.get_customer_subscriptions(
-        customer_id=customer.id, status="active"
-    )
+    stripe_subs = [
+        sub
+        for customer in app.stripe.get_user_customers(user)
+        for sub in app.stripe.get_customer_subscriptions(
+            customer_id=customer.id, status="active"
+        )
+    ]
     if not stripe_subs:
         return False
     sub_period_end_timestamps = [sub.current_period_end for sub in stripe_subs]

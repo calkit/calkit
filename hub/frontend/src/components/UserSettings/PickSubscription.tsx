@@ -506,7 +506,7 @@ const PickSubscription = ({
       </Box>
 
       {/* Downgrade confirmation modal */}
-      <Modal isOpen={isOpen} onClose={onClose} isCentered>
+      <Modal isOpen={isOpen} onClose={onClose} isCentered motionPreset="none">
         <ModalOverlay />
         <ModalContent>
           <ModalHeader>Confirm downgrade</ModalHeader>

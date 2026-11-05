@@ -1,19 +1,27 @@
 import * as path from "node:path";
+import * as fs from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import * as http from "node:http";
 import * as https from "node:https";
 import * as net from "node:net";
+import * as os from "node:os";
 import * as vscode from "vscode";
 import YAML from "yaml";
+import { isAppControlBlock, missingInstallDirs } from "./cli";
 import {
   compactSlurmOptions,
   findCalkitEnvKernelSourceCandidate,
   getDefaultSlurmOptions,
+  getMissingSlurmResources,
   kernelRegistrationKinds,
   makeCalkitEnvKernelSourceCandidates,
+  mergeSlurmOptions,
   parsePixiPackages,
+  parseRemoteSshHost,
+  parseSlurmServerOutput,
   parseUvPackages,
+  SLURM_NODE_MARKER,
   slurmOptionsToOptionList,
   type CalkitEnvNotebookKernelSource,
   type CalkitEnvironment,
@@ -23,6 +31,7 @@ import {
 import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
   getExecutedNotebookHtmlPath,
+  resolveNotebookEnvironmentName,
 } from "./notebooks";
 import type {
   CalkitInfo,
@@ -31,6 +40,18 @@ import type {
   StaleStageDetail,
 } from "./types";
 import { dvcStageOutputPaths } from "./pipeline/core";
+import {
+  collectSubprojects,
+  mergeSubprojectConfigs,
+  mergeSubprojectDvcYaml,
+  qualifyEnvDescriptions,
+  splitQualifiedName,
+  splitSubprojectPath,
+  stageNameFromDvcAddress,
+  type QuestionOrigin,
+  type Subproject,
+} from "./subprojects";
+import { alignQuestionChecks, parseQuestionChecks } from "./questions";
 import {
   formatYamlSyntaxError,
   yamlSyntaxError,
@@ -47,6 +68,16 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
+import {
+  documentStagePdf,
+  documentStageSource,
+  latexStagePdf,
+  latexStageSource,
+  latexWorkingDiffPath,
+  pipelineLatexDiffs,
+  type PipelineLatexDiff,
+} from "./latex/core";
+import { PDF_REVIEW_VIEW_TYPE, PdfReviewProvider } from "./latex/review";
 import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
@@ -91,6 +122,14 @@ const COMMAND_PREVIEW_PLOTLY_TO_SIDE =
 const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
 const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
 const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
+const COMMAND_DIFF_LATEX = "calkit-vscode.diffLatex";
+const COMMAND_SHOW_LATEX_PDF = "calkit-vscode.showLatexPdf";
+const COMMAND_SHOW_LATEX_SOURCE = "calkit-vscode.showLatexSource";
+const COMMAND_SHOW_IN_PDF = "calkit-vscode.showInPdf";
+const COMMAND_SHOW_IN_PDF_TO_SIDE = "calkit-vscode.showInPdfToSide";
+const COMMAND_PDF_GO_TO_SOURCE = "calkit-vscode.pdfGoToSource";
+const COMMAND_PDF_GO_TO_SOURCE_TO_SIDE = "calkit-vscode.pdfGoToSourceToSide";
+const COMMAND_TOGGLE_PDF_SOURCE = "calkit-vscode.togglePdfSource";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
@@ -140,9 +179,10 @@ const DATASET_EXTENSIONS = new Set([
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.41.15";
+const DEFAULT_MIN_CALKIT_VERSION = "0.49.0";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
+const SMART_APP_CONTROL_DOCS_URL = `${CALKIT_INSTALL_DOCS_URL}/#windows-smart-app-control`;
 const WINDOWS_INSTALL_SCRIPT = "irm install-ps1.calkit.org | iex";
 const WINDOWS_INSTALL_COMMAND = `powershell -ExecutionPolicy ByPass -c "${WINDOWS_INSTALL_SCRIPT}"`;
 const UNIX_INSTALL_COMMAND = "curl -LsSf install.calkit.org | sh";
@@ -174,7 +214,19 @@ const runningStageNames = new Set<string>();
 // "!" badge below.
 const importedArtifactUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
+// The root's config with its subprojects' folded in, which is what the
+// sidebar and decorations show. Anything that writes reads the one project
+// it writes to instead.
 let currentCalkitConfig: CalkitInfo | undefined;
+// Bumped by each refresh of the pipeline context, so one that a newer refresh
+// has overtaken doesn't overwrite its state
+let pipelineContextGeneration = 0;
+// Subproject directories, relative to the workspace root
+let currentSubprojectDirs: string[] = [];
+let currentQuestionOrigins: QuestionOrigin[] = [];
+let currentArtifactOrigins = new Map<string, string>();
+// For telling open PDF viewers when the config has been read
+let pdfReviewProvider: PdfReviewProvider | undefined;
 // Whether a calkit.yaml exists in the workspace. The sidebar is gated on this:
 // when false, the config passed to the sidebar is treated as undefined so the
 // "Initialize Calkit Project" welcome view shows and no badge is displayed.
@@ -211,6 +263,9 @@ interface NotebookLaunchProfile {
 interface ActiveJupyterServerSession {
   kind: "slurm" | "docker" | "other";
   notebookUri?: string;
+  // Where a SLURM job's server ended up, parsed from its output
+  host?: string;
+  port?: number;
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -218,6 +273,18 @@ export function activate(context: vscode.ExtensionContext): void {
   extensionContextRef = context;
   outputChannel = vscode.window.createOutputChannel("Calkit");
   context.subscriptions.push(outputChannel);
+  // Before anything runs calkit, which VS Code may not have on PATH
+  const addedDirs = missingInstallDirs(
+    process.env,
+    os.homedir(),
+    process.platform,
+  );
+  if (addedDirs.length) {
+    process.env.PATH = [process.env.PATH, ...addedDirs]
+      .filter(Boolean)
+      .join(path.delimiter);
+    log(`Added install folders missing from PATH: ${addedDirs.join(", ")}`);
+  }
   slurmStatusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
     200,
@@ -373,6 +440,26 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  const pdfReview = new PdfReviewProvider(context, {
+    getWorkspaceRoot,
+    getStages: () => currentCalkitConfig?.pipeline?.stages ?? {},
+    getNonce,
+    promptUpgrade: (message) =>
+      void promptCalkitInstallOrUpgrade({
+        mode: "upgrade",
+        title: "Calkit CLI upgrade required",
+        message,
+      }),
+  });
+  pdfReviewProvider = pdfReview;
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      PDF_REVIEW_VIEW_TYPE,
+      pdfReview,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
+
   const activeTabUri = (uri?: vscode.Uri): vscode.Uri | undefined =>
     uri ??
     vscode.window.activeTextEditor?.document.uri ??
@@ -417,6 +504,202 @@ export function activate(context: vscode.ExtensionContext): void {
         if (fileUri) {
           void reopenEditorInPlace(fileUri, "default");
         }
+      },
+    ),
+  );
+
+  // A document and the PDF its stage builds take each other's place,
+  // like a Plotly figure and its preview, unless the other is open already,
+  // in which case it's shown and both stay open. The other file opens in the
+  // same group first, since closing the last tab first can close the group.
+  const swapActiveTab = async (
+    from: vscode.Uri,
+    to: vscode.Uri,
+    open: (column: vscode.ViewColumn) => Promise<unknown>,
+  ): Promise<void> => {
+    const active = vscode.window.tabGroups.activeTabGroup;
+    const shown = [
+      active,
+      ...vscode.window.tabGroups.all.filter((group) => group !== active),
+    ]
+      .flatMap((group) => group.tabs)
+      .find((tab) => tabResourceUri(tab)?.toString() === to.toString());
+    if (shown) {
+      await open(shown.group.viewColumn);
+      return;
+    }
+    await open(vscode.ViewColumn.Active);
+    const group = vscode.window.tabGroups.activeTabGroup;
+    const previous = group.tabs.find(
+      (tab) =>
+        !tab.isActive && tabResourceUri(tab)?.toString() === from.toString(),
+    );
+    if (previous) {
+      await vscode.window.tabGroups.close(previous);
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_SHOW_LATEX_PDF,
+      async (uri?: vscode.Uri) => {
+        const fileUri = activeTabUri(uri);
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const docFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const pdfFile = documentStagePdf(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          docFile,
+        );
+        if (!pdfFile) {
+          void vscode.window.showInformationMessage(
+            "No stage in the pipeline builds this document into a PDF.",
+          );
+          return;
+        }
+        const pdfUri = vscode.Uri.file(path.join(workspaceRoot, pdfFile));
+        try {
+          await vscode.workspace.fs.stat(pdfUri);
+        } catch {
+          void vscode.window.showInformationMessage(
+            `${pdfFile} hasn't been built yet. Run the stage to build it first.`,
+          );
+          return;
+        }
+        await swapActiveTab(fileUri, pdfUri, (column) =>
+          Promise.resolve(
+            vscode.commands.executeCommand(
+              "vscode.openWith",
+              pdfUri,
+              PDF_REVIEW_VIEW_TYPE,
+              column,
+            ),
+          ),
+        );
+      },
+    ),
+  );
+
+  // Go from a line of a document to where it is in the PDF, in the same group
+  // of tabs, the one beside it, or where the PDF is showing
+  const showInPdf = async (
+    toSide: boolean,
+    keepShown = false,
+  ): Promise<void> => {
+    const editor = vscode.window.activeTextEditor;
+    const workspaceRoot = getWorkspaceRoot();
+    if (!editor || !workspaceRoot) {
+      return;
+    }
+    const texFile = path
+      .relative(workspaceRoot, editor.document.uri.fsPath)
+      .replace(/\\/g, "/");
+    const line = editor.selection.active.line + 1;
+    const column = toSide
+      ? vscode.ViewColumn.Beside
+      : editor.viewColumn ?? vscode.ViewColumn.Active;
+    if (await pdfReview.reveal(texFile, line, column, keepShown)) {
+      return;
+    }
+    // Not in an open PDF yet, so open the one its stage builds, or for a
+    // file it inputs, the only one there is
+    const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+    const latexPdfs = Object.values(stages)
+      .map((stage) => {
+        const st = stage as {
+          kind?: string;
+          wdir?: string;
+          target_path?: string;
+        };
+        return st?.kind === "latex" && st.target_path
+          ? latexStagePdf(
+              stages,
+              path.posix.join(st.wdir ?? "", st.target_path),
+            )
+          : undefined;
+      })
+      .filter((p): p is string => p !== undefined);
+    const pdfFile =
+      documentStagePdf(stages, texFile) ??
+      (latexPdfs.length === 1 ? latexPdfs[0] : undefined);
+    const pdfUri = pdfFile
+      ? vscode.Uri.file(path.join(workspaceRoot, pdfFile))
+      : undefined;
+    const built =
+      pdfUri !== undefined &&
+      (await vscode.workspace.fs.stat(pdfUri).then(
+        () => true,
+        () => false,
+      ));
+    if (!built) {
+      void vscode.window.showInformationMessage(
+        "No built PDF found for this document. Open its PDF first.",
+      );
+      return;
+    }
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      pdfUri,
+      PDF_REVIEW_VIEW_TYPE,
+      column,
+    );
+    await pdfReview.reveal(texFile, line, column);
+  };
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_SHOW_IN_PDF, () =>
+      showInPdf(false),
+    ),
+    vscode.commands.registerCommand(COMMAND_SHOW_IN_PDF_TO_SIDE, () =>
+      showInPdf(true),
+    ),
+    vscode.commands.registerCommand(COMMAND_PDF_GO_TO_SOURCE, () =>
+      pdfReview.goToSource("here", true),
+    ),
+    vscode.commands.registerCommand(COMMAND_PDF_GO_TO_SOURCE_TO_SIDE, () =>
+      pdfReview.goToSource("side", true),
+    ),
+    vscode.commands.registerCommand(COMMAND_TOGGLE_PDF_SOURCE, async () => {
+      if (!pdfReview.goToSource("shown", false)) {
+        await showInPdf(false, true);
+      }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_SHOW_LATEX_SOURCE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = activeTabUri(uri);
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const pdfFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const sourceFile = documentStageSource(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+          pdfFile,
+        );
+        if (!sourceFile) {
+          void vscode.window.showInformationMessage(
+            "No stage in the pipeline builds this PDF.",
+          );
+          return;
+        }
+        const sourceUri = vscode.Uri.file(path.join(workspaceRoot, sourceFile));
+        await swapActiveTab(fileUri, sourceUri, (column) =>
+          Promise.resolve(
+            vscode.window.showTextDocument(sourceUri, {
+              viewColumn: column,
+              preview: false,
+            }),
+          ),
+        );
       },
     ),
   );
@@ -518,6 +801,261 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         await openPdfInLatexWorkshop(context, pdfUri);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DIFF_LATEX,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        // Run calkit with a cancellable progress notification, reporting a
+        // failure with a way to see the output
+        const runCalkit = (args: string[], title: string) => {
+          log(`Running: calkit ${args.join(" ")}`);
+          return vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title,
+              cancellable: true,
+            },
+            async (_progress, token) => {
+              const abort = new AbortController();
+              token.onCancellationRequested(() => abort.abort());
+              try {
+                const { stdout, stderr } = await execFileAsync("calkit", args, {
+                  cwd: workspaceRoot,
+                  maxBuffer: 16 * 1024 * 1024,
+                  signal: abort.signal,
+                });
+                log([stdout, stderr].filter(Boolean).join("\n").trim());
+                return true;
+              } catch (error: unknown) {
+                if (abort.signal.aborted) {
+                  return false;
+                }
+                const err = error as {
+                  stdout?: string;
+                  stderr?: string;
+                  message?: string;
+                };
+                log([err.stdout, err.stderr].filter(Boolean).join("\n").trim());
+                const errMsg = (err.stderr || err.message || String(error))
+                  .trim()
+                  .split("\n")
+                  .pop();
+                void vscode.window
+                  .showErrorMessage(
+                    `LaTeX diff failed: ${errMsg}`,
+                    "View Output",
+                  )
+                  .then((choice) => {
+                    if (choice === "View Output") {
+                      outputChannel.show(true);
+                    }
+                  });
+                return false;
+              }
+            },
+          );
+        };
+        const openPdf = async (relPath: string) => {
+          const pdfUri = vscode.Uri.file(path.join(workspaceRoot, relPath));
+          if (isLatexWorkshopInstalled()) {
+            await openPdfInLatexWorkshop(context, pdfUri);
+          } else {
+            await vscode.env.openExternal(pdfUri);
+          }
+        };
+        let texFile = path
+          .relative(workspaceRoot, fileUri.fsPath)
+          .replace(/\\/g, "/");
+        const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+        // A PDF a latex stage builds is diffed as the document it's built
+        // from
+        if (texFile.toLowerCase().endsWith(".pdf")) {
+          const source = latexStageSource(stages, texFile);
+          if (!source) {
+            void vscode.window.showInformationMessage(
+              "No LaTeX stage in the pipeline builds this PDF.",
+            );
+            return;
+          }
+          texFile = source;
+        }
+        // The newer side is the working tree, so unsaved edits belong in it
+        await vscode.workspace.textDocuments
+          .find((d) => d.uri.fsPath === fileUri.fsPath && d.isDirty)
+          ?.save();
+        // Offer the default branch, then branches and tags, then commits
+        // that touched the document, and accept any typed revision
+        const defaultItem: vscode.QuickPickItem = {
+          label: "$(git-merge) Default branch",
+          description: "merge base with this branch",
+        };
+        // The pipeline's own diffs of this document come first, marked with
+        // whether they're current
+        const pipelineItems = new Map<
+          vscode.QuickPickItem,
+          PipelineLatexDiff
+        >();
+        for (const diff of pipelineLatexDiffs(stages)) {
+          if (diff.document !== texFile) {
+            continue;
+          }
+          let built = true;
+          try {
+            await vscode.workspace.fs.stat(
+              vscode.Uri.file(path.join(workspaceRoot, diff.path)),
+            );
+          } catch {
+            built = false;
+          }
+          const status = !built
+            ? "not built"
+            : staleStageNames.has(diff.stage)
+            ? "stale"
+            : "up to date";
+          pipelineItems.set(
+            {
+              label: `$(diff) ${diff.fromRef} against ${
+                diff.toRef ?? "the working tree"
+              }`,
+              description: `pipeline, ${status}`,
+              detail: status === "up to date" ? undefined : "Builds it first",
+            },
+            diff,
+          );
+        }
+        const items: vscode.QuickPickItem[] = [];
+        if (pipelineItems.size) {
+          items.push(
+            {
+              label: "Kept by the pipeline",
+              kind: vscode.QuickPickItemKind.Separator,
+            },
+            ...pipelineItems.keys(),
+            {
+              label: "Compare against",
+              kind: vscode.QuickPickItemKind.Separator,
+            },
+          );
+        }
+        items.push(defaultItem);
+        try {
+          const { stdout } = await execFileAsync(
+            "git",
+            [
+              "for-each-ref",
+              "--sort=-committerdate",
+              "--count=30",
+              "--format=%(refname:short)|%(objecttype)|%(subject)",
+              "refs/heads",
+              "refs/tags",
+              "refs/remotes",
+            ],
+            { cwd: workspaceRoot },
+          );
+          for (const line of stdout.split("\n").filter(Boolean)) {
+            const [ref, type, ...subject] = line.split("|");
+            if (ref.endsWith("/HEAD")) {
+              continue;
+            }
+            items.push({
+              label: `$(${type === "tag" ? "tag" : "git-branch"}) ${ref}`,
+              description: subject.join("|"),
+            });
+          }
+        } catch {
+          // Not a Git repo; the CLI will say so
+        }
+        for (const commit of await getGitHistory(workspaceRoot, texFile)) {
+          items.push({
+            label: `$(git-commit) ${commit.shortHash}`,
+            description: commit.subject,
+            detail: `${commit.author}, ${commit.date}`,
+          });
+        }
+        const picker = vscode.window.createQuickPick();
+        picker.title = `Diff ${path.basename(texFile)} against...`;
+        picker.placeholder = "Pick or type a Git revision";
+        picker.items = items;
+        picker.onDidChangeValue((value) => {
+          const typed = value.trim();
+          picker.items =
+            typed && !items.some((i) => i.label.endsWith(` ${typed}`))
+              ? [{ label: typed, description: "revision" }, ...items]
+              : items;
+        });
+        const picked = await new Promise<vscode.QuickPickItem | undefined>(
+          (resolve) => {
+            picker.onDidAccept(() => resolve(picker.selectedItems[0]));
+            picker.onDidHide(() => resolve(undefined));
+            picker.show();
+          },
+        );
+        picker.dispose();
+        if (!picked) {
+          return;
+        }
+        const pipelineDiff = pipelineItems.get(picked);
+        if (pipelineDiff) {
+          // What's there opens straight away; a stale one is rebuilt after,
+          // and the viewer reloads it when the new one lands
+          const status = picked.description ?? "";
+          if (!status.endsWith("not built")) {
+            await openPdf(pipelineDiff.path);
+          }
+          if (!status.endsWith("up to date")) {
+            const ok = await runCalkit(
+              ["run", pipelineDiff.stage],
+              `Building ${pipelineDiff.stage}...`,
+            );
+            ensureRunStatusPolling(context);
+            if (ok && status.endsWith("not built")) {
+              await openPdf(pipelineDiff.path);
+            }
+          }
+          return;
+        }
+        const fromRef =
+          picked === defaultItem
+            ? undefined
+            : picked.label.replace(/^\$\([^)]*\)\s*/, "");
+        const outPath = latexWorkingDiffPath(texFile, fromRef);
+        const args = [
+          "latex",
+          "diff",
+          texFile,
+          ...(fromRef ? ["--from", fromRef] : []),
+          "-o",
+          outPath,
+        ];
+        // A previous comparison against the same revision opens straight
+        // away while it's brought up to date
+        let existed = true;
+        try {
+          await vscode.workspace.fs.stat(
+            vscode.Uri.file(path.join(workspaceRoot, outPath)),
+          );
+          await openPdf(outPath);
+        } catch {
+          existed = false;
+        }
+        const ok = await runCalkit(
+          args,
+          `${existed ? "Updating the diff" : "Diffing"} ${path.basename(
+            texFile,
+          )} against ${fromRef ?? "the default branch"}...`,
+        );
+        if (ok && !existed) {
+          await openPdf(outPath);
+        }
       },
     ),
   );
@@ -742,20 +1280,23 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  // Remove a project question by its 1-based index (its nodeId).
+  // Remove a project question by its 1-based index (its nodeId), which counts
+  // subprojects' questions too, so it's removed by its index where declared.
   context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_DELETE_QUESTION,
       async (item?: import("./sidebar").SidebarItem) => {
         const workspaceRoot = getWorkspaceRoot();
-        const index = item?.nodeId;
-        if (!workspaceRoot || !index) {
+        const origin = currentQuestionOrigins[Number(item?.nodeId) - 1];
+        if (!workspaceRoot || !origin) {
           return;
         }
         try {
-          await execFileAsync("calkit", ["rm", "question", index], {
-            cwd: workspaceRoot,
-          });
+          await execFileAsync(
+            "calkit",
+            ["rm", "question", String(origin.index)],
+            { cwd: path.join(workspaceRoot, origin.dir) },
+          );
         } catch (error) {
           const err = error as { stderr?: string; message?: string };
           void vscode.window.showErrorMessage(
@@ -804,13 +1345,17 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        // A subproject's stage is edited in its own calkit.yaml, where its
+        // paths and environment are named from there
+        const project = projectForName(workspaceRoot, stageName);
+        const stage = (await readCalkitConfig(project.projectDir))?.pipeline
+          ?.stages?.[project.name];
         await showStageEditor(
           context,
-          workspaceRoot,
+          project.projectDir,
           undefined,
           undefined,
-          stageName,
+          project.name,
           stage,
         );
       },
@@ -829,7 +1374,13 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        await defineProvenance(context, workspaceRoot, fileUri);
+        // Recorded where the file is declared, or else in the calkit.yaml
+        // of the subproject it's in
+        const { projectDir } = projectForArtifact(
+          workspaceRoot,
+          path.relative(workspaceRoot, fileUri.fsPath).replace(/\\/g, "/"),
+        );
+        await defineProvenance(context, projectDir, fileUri);
       },
     ),
   );
@@ -848,10 +1399,11 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const artifactKind =
           item?.nodeKind === "dataset" ? "dataset" : "figure";
+        const project = projectForArtifact(workspaceRoot, artifactPath);
         await showStageEditor(
           context,
-          workspaceRoot,
-          artifactPath,
+          project.projectDir,
+          project.path,
           undefined,
           undefined,
           undefined,
@@ -882,11 +1434,12 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!url) {
           return;
         }
+        const project = projectForArtifact(workspaceRoot, artifactPath);
         try {
           await execFileAsync(
             "calkit",
-            ["update", artifactKind, artifactPath, "--imported-from-url", url],
-            { cwd: workspaceRoot },
+            ["update", artifactKind, project.path, "--imported-from-url", url],
+            { cwd: project.projectDir },
           );
           void refreshPipelineOutputContext(context);
         } catch (error: unknown) {
@@ -968,45 +1521,71 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+      const project = projectForName(workspaceRoot, stageName);
+      const stage = (await readCalkitConfig(project.projectDir))?.pipeline
+        ?.stages?.[project.name];
       await showStageEditor(
         context,
-        workspaceRoot,
+        project.projectDir,
         undefined,
         undefined,
-        stageName,
+        project.name,
         stage,
       );
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND_DEFINE_NOTEBOOK_STAGE, async () => {
-      const workspaceRoot = getWorkspaceRoot();
-      if (!workspaceRoot) {
-        return;
-      }
-      const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
-      if (!notebookUri) {
-        return;
-      }
-      const relPath = path
-        .relative(workspaceRoot, notebookUri.fsPath)
-        .replace(/\\/g, "/");
-      const profile = getLaunchProfileForActiveNotebook(context);
-      const envName = profile?.environmentName;
-      const prefillStage = envName
-        ? { kind: "jupyter-notebook", environment: envName }
-        : { kind: "jupyter-notebook" };
-      await showStageEditor(
-        context,
-        workspaceRoot,
-        undefined,
-        relPath,
-        undefined,
-        prefillStage,
-      );
-    }),
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_NOTEBOOK_STAGE,
+      async (arg?: unknown) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        // The explorer passes the notebook; the toolbar passes its own context
+        const notebookUri =
+          arg instanceof vscode.Uri
+            ? arg
+            : vscode.window.activeNotebookEditor?.notebook.uri;
+        if (!notebookUri) {
+          return;
+        }
+        const project = projectForPath(
+          workspaceRoot,
+          path.relative(workspaceRoot, notebookUri.fsPath).replace(/\\/g, "/"),
+        );
+        // The notebooks section is authoritative, then the kernel chosen in VS
+        // Code, which is only usable if it's declared in the notebook's project
+        const projectConfig = await readCalkitConfig(project.projectDir);
+        const profile = getLaunchProfileForNotebookUri(
+          context,
+          notebookUri.toString(),
+        );
+        const env = profile?.environmentName
+          ? splitQualifiedName(profile.environmentName, currentSubprojectDirs)
+          : undefined;
+        const envName =
+          (projectConfig &&
+            resolveNotebookEnvironmentName(projectConfig, project.path)) ||
+          (env &&
+          path.resolve(workspaceRoot, env.dir) ===
+            path.resolve(project.projectDir)
+            ? env.name
+            : undefined);
+        const prefillStage = envName
+          ? { kind: "jupyter-notebook", environment: envName }
+          : { kind: "jupyter-notebook" };
+        await showStageEditor(
+          context,
+          project.projectDir,
+          undefined,
+          project.path,
+          undefined,
+          prefillStage,
+        );
+      },
+    ),
   );
 
   context.subscriptions.push(
@@ -1029,7 +1608,15 @@ export function activate(context: vscode.ExtensionContext): void {
             .relative(workspaceRoot, notebookUri.fsPath)
             .replace(/\\/g, "/");
         }
-        const htmlRelPath = getExecutedNotebookHtmlPath(relPath);
+        // Under the .calkit of the project its stage runs in
+        const nbStage = Object.values(
+          currentCalkitConfig?.pipeline?.stages ?? {},
+        ).find((s) => s.notebook_path === relPath);
+        const htmlRelPath = getExecutedNotebookHtmlPath(
+          relPath,
+          nbStage?.subproject_wdir ??
+            splitSubprojectPath(relPath, currentSubprojectDirs).dir,
+        );
         if (!(await fileExists(path.join(workspaceRoot, htmlRelPath)))) {
           void vscode.window.showInformationMessage(
             `No executed HTML found for ${relPath}. Run the notebook to generate it.`,
@@ -1478,6 +2065,19 @@ async function ensureCalkitCliReady(): Promise<void> {
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     log(`Calkit CLI check failed: ${details}`);
+    // Installing again wouldn't help when Windows won't run what's there
+    if (isAppControlBlock(error, process.platform)) {
+      const choice = await vscode.window.showWarningMessage(
+        "Windows blocked the Calkit CLI from running. Smart App Control does this to unsigned programs it doesn't trust.",
+        "Learn More",
+      );
+      if (choice === "Learn More") {
+        await vscode.env.openExternal(
+          vscode.Uri.parse(SMART_APP_CONTROL_DOCS_URL),
+        );
+      }
+      return;
+    }
     await promptCalkitInstallOrUpgrade({
       mode: "install",
       title: "Calkit CLI not found",
@@ -1632,17 +2232,31 @@ export function deactivate(): void {
 
 async function fetchEnvDescriptions(
   workspaceRoot: string,
+  subprojectDirs: string[],
 ): Promise<Record<string, EnvDescription> | undefined> {
-  try {
-    const { stdout } = await execFileAsync("calkit", ["describe", "envs"], {
-      cwd: workspaceRoot,
-      timeout: 15_000,
-    });
-    return JSON.parse(stdout) as Record<string, EnvDescription>;
-  } catch (error) {
-    log(`Failed to fetch env descriptions: ${String(error)}`);
+  // The CLI describes only the project it's run in
+  const described = await Promise.all(
+    [".", ...subprojectDirs].map(async (dir) => {
+      try {
+        const { stdout } = await execFileAsync(
+          "calkit",
+          ["describe", "envs", "--json"],
+          { cwd: path.join(workspaceRoot, dir), timeout: 15_000 },
+        );
+        return qualifyEnvDescriptions(
+          dir,
+          JSON.parse(stdout) as Record<string, EnvDescription>,
+        );
+      } catch (error) {
+        log(`Failed to fetch env descriptions in ${dir}: ${String(error)}`);
+        return undefined;
+      }
+    }),
+  );
+  if (described.every((d) => d === undefined)) {
     return undefined;
   }
+  return Object.assign({}, ...described);
 }
 
 async function readDvcYaml(
@@ -1802,32 +2416,42 @@ async function getSubmodulePaths(workspaceRoot: string): Promise<string[]> {
 // artifacts reserved so they aren't listed twice) and flags auto-detected
 // entries with `detected: true`; we keep only those, since declared artifacts
 // already come from calkit.yaml.
+// Each subproject is listed from its own directory, so what it declares
+// keeps its files from being detected, and the root's listing skips them.
 async function listDetectedArtifacts(
   workspaceRoot: string,
   kind: "figures" | "datasets" | "results" | "presentations",
+  subprojectDirs: string[],
 ): Promise<string[]> {
-  try {
-    const { stdout } = await execFileAsync("calkit", ["list", kind, "--json"], {
-      cwd: workspaceRoot,
-      timeout: 30_000,
-    });
-    const entries = JSON.parse(stdout) as {
-      path?: string;
-      detected?: boolean;
-    }[];
-    return entries
-      .filter((e) => e.detected === true && typeof e.path === "string")
-      .map((e) => e.path as string)
-      .sort();
-  } catch (error) {
-    log(`Failed to list detected ${kind}: ${String(error)}`);
-    return [];
-  }
+  const listed = await Promise.all(
+    [".", ...subprojectDirs].map(async (dir) => {
+      try {
+        const { stdout } = await execFileAsync(
+          "calkit",
+          ["list", kind, "--json"],
+          { cwd: path.join(workspaceRoot, dir), timeout: 30_000 },
+        );
+        const entries = JSON.parse(stdout) as {
+          path?: string;
+          detected?: boolean;
+        }[];
+        return entries
+          .filter((e) => e.detected === true && typeof e.path === "string")
+          .map((e) => path.posix.join(dir, e.path as string))
+          .filter((p) => splitSubprojectPath(p, subprojectDirs).dir === dir);
+      } catch (error) {
+        log(`Failed to list detected ${kind} in ${dir}: ${String(error)}`);
+        return [];
+      }
+    }),
+  );
+  return listed.flat().sort();
 }
 
 async function scanDetectedFiles(
   workspaceRoot: string,
   calkitYamlExists: boolean,
+  generation: number,
 ): Promise<void> {
   // Outside a Calkit project the sidebar shows the welcome view, so detected
   // files are never displayed. Skip the scan (including the `calkit list`
@@ -1853,11 +2477,19 @@ async function scanDetectedFiles(
       DETECTED_FILES_EXCLUDE,
     ),
     getSubmodulePaths(workspaceRoot),
-    listDetectedArtifacts(workspaceRoot, "figures"),
-    listDetectedArtifacts(workspaceRoot, "datasets"),
-    listDetectedArtifacts(workspaceRoot, "results"),
-    listDetectedArtifacts(workspaceRoot, "presentations"),
+    listDetectedArtifacts(workspaceRoot, "figures", currentSubprojectDirs),
+    listDetectedArtifacts(workspaceRoot, "datasets", currentSubprojectDirs),
+    listDetectedArtifacts(workspaceRoot, "results", currentSubprojectDirs),
+    listDetectedArtifacts(
+      workspaceRoot,
+      "presentations",
+      currentSubprojectDirs,
+    ),
   ]);
+  // Left to the refresh that overtook this one
+  if (generation !== pipelineContextGeneration) {
+    return;
+  }
   const toRel = (u: vscode.Uri): string =>
     path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
   currentDetectedNotebooks = notebookUris
@@ -1913,19 +2545,50 @@ async function refreshPipelineOutputContext(
   if (!workspaceRoot) {
     return;
   }
-  const [dvcYaml, calkitConfig, envDescriptions] = await Promise.all([
-    readDvcYaml(workspaceRoot),
-    readCalkitConfig(workspaceRoot),
-    fetchEnvDescriptions(workspaceRoot),
-  ]);
+  const generation = ++pipelineContextGeneration;
+  const superseded = (): boolean => {
+    if (generation === pipelineContextGeneration) {
+      return false;
+    }
+    // The newer refresh may not check status, so a forced check still runs
+    if (force) {
+      ensureRunStatusPolling(context);
+    }
+    return true;
+  };
+  const {
+    config: calkitConfig,
+    dvcYaml,
+    subprojects,
+    questionOrigins,
+    artifactOrigins,
+  } = await readMergedProject(workspaceRoot);
+  const subprojectDirs = subprojects.map((sp) => sp.dir);
+  const envDescriptions = await fetchEnvDescriptions(
+    workspaceRoot,
+    subprojectDirs,
+  );
+  if (superseded()) {
+    return;
+  }
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
+  currentSubprojectDirs = subprojectDirs;
+  currentQuestionOrigins = questionOrigins;
+  currentArtifactOrigins = artifactOrigins;
   currentEnvDescriptions = envDescriptions;
+  pdfReviewProvider?.stagesChanged();
+  void refreshActiveFileBuildsPdfContext(
+    vscode.window.activeTextEditor?.document,
+  );
   // Gate the sidebar on the presence of a calkit.yaml file. When absent, the
   // tree is left empty so the "Initialize Calkit Project" welcome view shows.
   const calkitYamlExists = await fileExists(
     path.join(workspaceRoot, "calkit.yaml"),
   );
+  if (superseded()) {
+    return;
+  }
   const calkitStatusChanged = calkitYamlExists !== currentCalkitYamlExists;
   currentCalkitYamlExists = calkitYamlExists;
   void vscode.commands.executeCommand(
@@ -1961,6 +2624,12 @@ async function refreshPipelineOutputContext(
       pipelineNotebookUris.add(path.join(workspaceRoot, stage.notebook_path));
     }
   }
+  // For explorer menus; resourcePath's form varies by platform, so list both
+  void vscode.commands.executeCommand(
+    "setContext",
+    "calkit-vscode.stagedNotebooks",
+    [...pipelineNotebookUris].flatMap((p) => [p, vscode.Uri.file(p).path]),
+  );
   if (!decorationProvider) {
     decorationProvider = new PipelineOutputDecorationProvider();
     context.subscriptions.push(
@@ -1979,7 +2648,10 @@ async function refreshPipelineOutputContext(
   // "not produced by the pipeline" badges appear or clear across the tree; the
   // affected figure/notebook files aren't in changedUris otherwise.
   decorationProvider.refresh(calkitStatusChanged ? undefined : changedUris);
-  await scanDetectedFiles(workspaceRoot, calkitYamlExists);
+  await scanDetectedFiles(workspaceRoot, calkitYamlExists, generation);
+  if (superseded()) {
+    return;
+  }
   renderSidebarFromState();
   // Run the staleness check after the fast decoration pass: "not produced
   // by the pipeline" badges are applied immediately, and stale-output
@@ -1988,6 +2660,7 @@ async function refreshPipelineOutputContext(
   // forces it.
   if (force || isAutoRefreshStatusEnabled()) {
     ensureRunStatusPolling(context);
+    void refreshQuestionChecks(workspaceRoot, force);
   }
 }
 
@@ -2179,10 +2852,13 @@ async function pollPipelineRunStatus(
       // update the spinners and keep the previous stale badges. An iterate_over
       // sweep reports its expanded DVC items (e.g. "benchmark@zdt1"); the
       // sidebar keys stages by the base name, so collapse "stage@item" back to
-      // "stage" to drive the parent stage's spinner.
+      // "stage" to drive the parent stage's spinner. A subproject's stages
+      // come back as DVC addresses, named here as they are when stale.
       applyRunningStages(
         new Set(
-          (pipeline.running_stages ?? []).map((name) => name.split("@")[0]),
+          (pipeline.running_stages ?? []).map(
+            (name) => stageNameFromDvcAddress(name).split("@")[0],
+          ),
         ),
       );
     } else {
@@ -2208,6 +2884,102 @@ async function pollPipelineRunStatus(
     );
   } else {
     runStatusPolling = false;
+  }
+}
+
+// Each question's status from `calkit check questions`, shown in the sidebar.
+// It reads Git history, so it runs in the background, one at a time, with a
+// request made while one runs queued to run after it, and only when what it
+// reads has changed, unless forced.
+let questionChecksRunning = false;
+let questionChecksQueued = false;
+let questionChecksForced = false;
+let questionChecksInputs: string | undefined;
+
+async function refreshQuestionChecks(
+  workspaceRoot: string,
+  force = false,
+): Promise<void> {
+  questionChecksForced ||= force;
+  if (questionChecksRunning) {
+    questionChecksQueued = true;
+    return;
+  }
+  questionChecksRunning = true;
+  try {
+    do {
+      questionChecksQueued = false;
+      const questions = currentCalkitConfig?.questions ?? [];
+      if (!questions.length) {
+        sidebarProvider?.setQuestionChecks([]);
+        continue;
+      }
+      // What the check reads: the commit, and each project's calkit.yaml,
+      // dvc.lock, and evidence
+      let head = "";
+      try {
+        ({ stdout: head } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+          cwd: workspaceRoot,
+        }));
+      } catch {
+        // No commits yet
+      }
+      const paths = [
+        ...new Set(currentQuestionOrigins.map((o) => o.dir)),
+      ].flatMap((dir) =>
+        ["calkit.yaml", "dvc.lock"].map((f) => path.join(dir, f)),
+      );
+      questions.forEach((q, n) => {
+        const dir = currentQuestionOrigins[n]?.dir ?? ".";
+        for (const ev of typeof q === "string" ? [] : q.evidence ?? []) {
+          if (ev.path) {
+            paths.push(path.join(dir, ev.path));
+          }
+        }
+      });
+      const mtimes = await Promise.all(
+        paths.map((p) =>
+          fs.promises.stat(path.join(workspaceRoot, p)).then(
+            (stat) => stat.mtimeMs,
+            () => 0,
+          ),
+        ),
+      );
+      const inputs = JSON.stringify([head.trim(), paths, mtimes]);
+      if (!questionChecksForced && inputs === questionChecksInputs) {
+        continue;
+      }
+      questionChecksForced = false;
+      questionChecksInputs = inputs;
+      let stdout = "";
+      try {
+        suppressRwlockUntil = Date.now() + 5000;
+        // Without the pipeline, since the sidebar already knows which stages
+        // are stale and asking DVC is the slow part
+        ({ stdout } = await execFileAsync(
+          "calkit",
+          ["check", "questions", "--json", "--no-pipeline"],
+          { cwd: workspaceRoot, timeout: 120_000, maxBuffer: 32 * 1024 * 1024 },
+        ));
+      } catch (error) {
+        // It exits nonzero when a question fails, with the report still on
+        // stdout; with no report, e.g., an older CLI, questions show no status
+        stdout = String((error as { stdout?: unknown }).stdout ?? "");
+        if (!stdout.trim()) {
+          log(`Question check failed: ${String(error)}`);
+        }
+      } finally {
+        suppressRwlockUntil = Date.now() + 5000;
+      }
+      sidebarProvider?.setQuestionChecks(
+        alignQuestionChecks(
+          parseQuestionChecks(stdout),
+          currentQuestionOrigins,
+        ),
+      );
+    } while (questionChecksQueued);
+  } finally {
+    questionChecksRunning = false;
   }
 }
 
@@ -2489,6 +3261,8 @@ async function getGitVisibleFiles(
   }
 }
 
+// The workspaceRoot here is the project the stage is in, which is a
+// subproject's directory when editing one of its stages.
 async function showStageEditor(
   context: vscode.ExtensionContext,
   workspaceRoot: string,
@@ -2499,23 +3273,35 @@ async function showStageEditor(
   artifactKind?: "figure" | "dataset",
 ): Promise<void> {
   const nonce = getNonce();
-  const [sourceUris, allUris, gitVisibleFiles] = await Promise.all([
-    vscode.workspace.findFiles(SOURCE_GLOB, SOURCE_EXCLUDE),
-    vscode.workspace.findFiles("**/*", ALL_FILES_EXCLUDE),
-    getGitVisibleFiles(workspaceRoot),
-  ]);
+  const [sourceUris, allUris, gitVisibleFiles, projectConfig] =
+    await Promise.all([
+      vscode.workspace.findFiles(SOURCE_GLOB, SOURCE_EXCLUDE),
+      vscode.workspace.findFiles("**/*", ALL_FILES_EXCLUDE),
+      getGitVisibleFiles(workspaceRoot),
+      readCalkitConfig(workspaceRoot),
+    ]);
+  const toProjectRelative = (u: vscode.Uri): string =>
+    path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
   // Don't suggest gitignored source files (e.g. scripts inside a venv). When
   // the Git listing is unavailable, keep everything.
   const workspaceFiles = sourceUris
-    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .map(toProjectRelative)
+    .filter((rel) => !rel.startsWith("../"))
     .filter((rel) => !gitVisibleFiles || gitVisibleFiles.has(rel))
     .sort();
   // Outputs are left unfiltered: a stage output may legitimately be a
   // DVC-tracked (and therefore gitignored) file.
   const allProjectFiles = allUris
-    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .map(toProjectRelative)
+    .filter((rel) => !rel.startsWith("../"))
     .sort();
-  const envs = currentCalkitConfig?.environments ?? {};
+  // The calkit run terminal is shared, so it opens at the root and a
+  // subproject's commands say where to run
+  const terminalCwd = getWorkspaceRoot() ?? workspaceRoot;
+  const calkitCmd = path.relative(terminalCwd, workspaceRoot)
+    ? `calkit -C ${shQuote(workspaceRoot)}`
+    : "calkit";
+  const envs = projectConfig?.environments ?? {};
   const envEntries = Object.entries(envs).map(([name, env]) => ({
     name,
     kind: typeof env.kind === "string" ? env.kind : "",
@@ -2597,15 +3383,15 @@ async function showStageEditor(
             );
           });
         }
-        const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+        const terminal = getOrCreateTerminal("calkit: run", terminalCwd);
         terminal.show();
-        let cmd = `calkit xr ${args.map(shQuote).join(" ")}`;
+        let cmd = `${calkitCmd} xr ${args.map(shQuote).join(" ")}`;
         if (gitOuts.length > 0) {
           const gitOutArgs = ["update", "stage", msg.stageName];
           for (const o of gitOuts) {
             gitOutArgs.push("--set-outputs-git", o);
           }
-          cmd += ` && calkit ${gitOutArgs.map(shQuote).join(" ")}`;
+          cmd += ` && ${calkitCmd} ${gitOutArgs.map(shQuote).join(" ")}`;
         }
         terminal.sendText(cmd);
         void panel.dispose();
@@ -2641,12 +3427,9 @@ async function showStageEditor(
         void execFileAsync("calkit", updateArgs, { cwd: workspaceRoot })
           .then(() => {
             if (msg.andRun) {
-              const terminal = getOrCreateTerminal(
-                "calkit: run",
-                workspaceRoot,
-              );
+              const terminal = getOrCreateTerminal("calkit: run", terminalCwd);
               terminal.show();
-              terminal.sendText(`calkit run ${shQuote(editStageName)}`);
+              terminal.sendText(`${calkitCmd} run ${shQuote(editStageName)}`);
             }
             void panel.dispose();
           })
@@ -2726,6 +3509,15 @@ function buildStageEditorHtml(
           e.name === existingEnv ? " selected" : ""
         }>${escHtml(e.name)}${e.kind ? ` (${escHtml(e.kind)})` : ""}</option>`,
     ),
+    // Keep one that isn't listed, e.g., a nested slurm:uv env, rather than
+    // silently dropping it
+    ...(existingEnv && !envEntries.some((e) => e.name === existingEnv)
+      ? [
+          `<option value="${escHtml(existingEnv)}" selected>${escHtml(
+            existingEnv,
+          )}</option>`,
+        ]
+      : []),
     `<option value="__new__">New environment (enter spec path below)…</option>`,
   ].join("\n");
 
@@ -3692,10 +4484,8 @@ async function openStageSourceFile(
 async function buildOutputToStageMap(
   workspaceRoot: string,
 ): Promise<Map<string, string>> {
-  const [dvcYaml, calkitConfig] = await Promise.all([
-    readDvcYaml(workspaceRoot),
-    readCalkitConfig(workspaceRoot),
-  ]);
+  const { dvcYaml, config: calkitConfig } =
+    await readMergedProject(workspaceRoot);
   const map = new Map<string, string>();
   for (const [stageName, stage] of Object.entries(
     calkitConfig?.pipeline?.stages ?? {},
@@ -3723,10 +4513,8 @@ async function findStageForFile(
   const relPath = path
     .relative(workspaceRoot, fileUri.fsPath)
     .replace(/\\/g, "/");
-  const [dvcYaml, calkitConfig] = await Promise.all([
-    readDvcYaml(workspaceRoot),
-    readCalkitConfig(workspaceRoot),
-  ]);
+  const { dvcYaml, config: calkitConfig } =
+    await readMergedProject(workspaceRoot);
   for (const [stageName, stage] of Object.entries(dvcYaml?.stages ?? {})) {
     if (dvcStageOutputPaths(stage).includes(relPath)) {
       return stageName;
@@ -3774,10 +4562,8 @@ async function findStageProducingOutput(
   const relPath = path
     .relative(workspaceRoot, fileUri.fsPath)
     .replace(/\\/g, "/");
-  const [dvcYaml, calkitConfig] = await Promise.all([
-    readDvcYaml(workspaceRoot),
-    readCalkitConfig(workspaceRoot),
-  ]);
+  const { dvcYaml, config: calkitConfig } =
+    await readMergedProject(workspaceRoot);
   for (const [stageName, stage] of Object.entries(
     calkitConfig?.pipeline?.stages ?? {},
   )) {
@@ -3904,12 +4690,13 @@ async function selectCalkitEnvironment(
 
   let slurmOptions: SlurmLaunchOptions | undefined;
   if (picked.outerSlurmEnvironment) {
-    const defaultSlurmOptions = getNotebookSlurmOptionsWithDefaults(
+    slurmOptions = await chooseSlurmOptionsForLaunch(
+      picked.outerSlurmEnvironment,
       getDefaultSlurmOptions(
         config?.environments?.[picked.outerSlurmEnvironment],
       ),
+      getLaunchProfileForNotebookUri(context, targetNotebookUri)?.slurmOptions,
     );
-    slurmOptions = await chooseSlurmOptionsForLaunch(defaultSlurmOptions);
     if (!slurmOptions) {
       await refreshNotebookToolbarContext(context);
       return undefined;
@@ -3996,10 +4783,13 @@ async function selectCalkitEnvironment(
     notebookUri: targetNotebookUri,
   });
 
-  const uri = serverToken
+  // SLURM servers run on a compute node we only learn once the job starts
+  let uri = serverToken
     ? `http://localhost:${port}/lab?token=${encodeURIComponent(serverToken)}`
     : `http://localhost:${port}/lab`;
-  await vscode.env.clipboard.writeText(uri);
+  if (!picked.outerSlurmEnvironment) {
+    await vscode.env.clipboard.writeText(uri);
+  }
   const kernelsBeforeConnect =
     await getResolvedKernelIdsForActiveNotebook(targetNotebookUri);
 
@@ -4007,6 +4797,18 @@ async function selectCalkitEnvironment(
   if (picked.outerSlurmEnvironment || picked.innerKind === "docker") {
     const envType = picked.outerSlurmEnvironment ? "Slurm" : "Docker";
     const runConnectFlow = async (): Promise<string | undefined> => {
+      if (picked.outerSlurmEnvironment && serverToken) {
+        const slurmUri = await waitForSlurmServerUri(
+          serverToken,
+          targetNotebookUri,
+        );
+        if (!slurmUri) {
+          await refreshNotebookToolbarContext(context);
+          return undefined;
+        }
+        uri = slurmUri;
+        await vscode.env.clipboard.writeText(uri);
+      }
       const serverReady = picked.outerSlurmEnvironment
         ? await waitForServerReady(uri, {
             sessionKind: "slurm",
@@ -4127,6 +4929,92 @@ async function selectCalkitEnvironment(
 
 function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+// The root's calkit.yaml and dvc.yaml with every subproject's folded in.
+// Only for reading: writing this back would copy the subprojects into the
+// root.
+async function readMergedProject(workspaceRoot: string): Promise<{
+  config: CalkitInfo | undefined;
+  dvcYaml: DvcYaml | undefined;
+  subprojects: Subproject[];
+  questionOrigins: QuestionOrigin[];
+  artifactOrigins: Map<string, string>;
+}> {
+  const [config, dvcYaml] = await Promise.all([
+    readCalkitConfig(workspaceRoot),
+    readDvcYaml(workspaceRoot),
+  ]);
+  if (!config) {
+    return {
+      config,
+      dvcYaml,
+      subprojects: [],
+      questionOrigins: [],
+      artifactOrigins: new Map(),
+    };
+  }
+  const found = await collectSubprojects(
+    config,
+    async (dir) => {
+      const projectDir = path.join(workspaceRoot, dir);
+      return (await fileExists(path.join(projectDir, "calkit.yaml")))
+        ? readCalkitConfig(projectDir)
+        : undefined;
+    },
+    (dir) =>
+      fs.promises
+        .realpath(path.join(workspaceRoot, dir))
+        .catch(() => path.join(workspaceRoot, dir)),
+  );
+  const subprojects: Subproject[] = await Promise.all(
+    found.map(async (sp) => ({
+      ...sp,
+      dvcYaml: await readDvcYaml(path.join(workspaceRoot, sp.dir)),
+    })),
+  );
+  const merged = mergeSubprojectConfigs(config, subprojects);
+  return {
+    config: merged.config,
+    dvcYaml: dvcYaml && mergeSubprojectDvcYaml(dvcYaml, subprojects),
+    subprojects,
+    questionOrigins: merged.questionOrigins,
+    artifactOrigins: merged.artifactOrigins,
+  };
+}
+
+// The project a sidebar name or root-relative path belongs to, and what it's
+// called there, for commands that write to that project's calkit.yaml.
+function projectForName(
+  workspaceRoot: string,
+  name: string,
+): { projectDir: string; name: string } {
+  const split = splitQualifiedName(name, currentSubprojectDirs);
+  return { projectDir: path.join(workspaceRoot, split.dir), name: split.name };
+}
+
+function projectForPath(
+  workspaceRoot: string,
+  relPath: string,
+): { projectDir: string; path: string } {
+  const split = splitSubprojectPath(relPath, currentSubprojectDirs);
+  return { projectDir: path.join(workspaceRoot, split.dir), path: split.path };
+}
+
+// An artifact is edited where it's declared, falling back to the project its
+// file is in
+function projectForArtifact(
+  workspaceRoot: string,
+  relPath: string,
+): { projectDir: string; path: string } {
+  const dir = currentArtifactOrigins.get(relPath);
+  if (dir === undefined) {
+    return projectForPath(workspaceRoot, relPath);
+  }
+  return {
+    projectDir: path.join(workspaceRoot, dir),
+    path: dir === "." ? relPath : path.posix.relative(dir, relPath),
+  };
 }
 
 async function readCalkitConfig(
@@ -5417,7 +6305,7 @@ async function runCreateSlurmEnvironmentWizard(
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   let name = "cluster";
-  let host = await detectLocalHostname(workspaceRoot);
+  let host = await suggestSlurmHost(workspaceRoot);
   let defaults: SlurmLaunchOptions = {};
   let step = 0;
 
@@ -5757,7 +6645,16 @@ function toRepoRelativePath(inputPath: string, workspaceRoot: string): string {
   return path.relative(workspaceRoot, inputPath);
 }
 
-async function detectLocalHostname(workspaceRoot: string): Promise<string> {
+// Prefer the name used to log in over this node's own, since clusters often
+// have several login nodes behind one name. Short names are likely local SSH
+// aliases, which don't work for anyone else.
+async function suggestSlurmHost(workspaceRoot: string): Promise<string> {
+  const remoteHost = parseRemoteSshHost(
+    vscode.workspace.workspaceFolders?.[0]?.uri.authority ?? "",
+  );
+  if (remoteHost?.includes(".")) {
+    return remoteHost;
+  }
   try {
     const { stdout } = await execFileAsync("hostname", [], {
       cwd: workspaceRoot,
@@ -5774,19 +6671,28 @@ async function detectLocalHostname(workspaceRoot: string): Promise<string> {
 }
 
 async function chooseSlurmOptionsForLaunch(
-  defaults?: SlurmLaunchOptions,
+  environmentName: string,
+  envDefaults: SlurmLaunchOptions | undefined,
+  previous: SlurmLaunchOptions | undefined,
 ): Promise<SlurmLaunchOptions | undefined> {
-  const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
+  const values = await askForMissingSlurmResources(
+    environmentName,
+    envDefaults,
+    previous,
+  );
+  if (!values) {
+    return undefined;
+  }
   const choice = await vscode.window.showQuickPick(
     [
       {
         label: "Use saved/default SLURM options",
-        description: summarizeSlurmOptions(effectiveDefaults),
+        description: slurmOptionsToOptionList(values).join(" "),
         action: "use",
       },
       {
         label: "Modify SLURM options...",
-        description: "Edit --gpus, --time, and extra srun flags",
+        description: "Edit partition, time, CPUs, memory, GPUs, and more",
         action: "edit",
       },
     ],
@@ -5796,33 +6702,13 @@ async function chooseSlurmOptionsForLaunch(
       ignoreFocusOut: true,
     },
   );
-
   if (!choice) {
     return undefined;
   }
-
   if (choice.action === "use") {
-    return effectiveDefaults;
+    return values;
   }
-
-  return await askForSlurmOptions(effectiveDefaults);
-}
-
-function summarizeSlurmOptions(options: SlurmLaunchOptions): string {
-  const parts: string[] = [];
-  if (options.gpus) {
-    parts.push(`--gpus=${options.gpus}`);
-  }
-  if (options.time) {
-    parts.push(`--time=${options.time}`);
-  }
-  if (options.partition) {
-    parts.push(`--partition=${options.partition}`);
-  }
-  if (options.extra) {
-    parts.push(options.extra);
-  }
-  return parts.length > 0 ? parts.join(" ") : "No extra options";
+  return await askForSlurmOptions(values);
 }
 
 async function askForSlurmSetupCommandsStep(): Promise<
@@ -5865,73 +6751,95 @@ async function askForSlurmSetupCommandsStep(): Promise<
   return { kind: "value", value: setupCommands };
 }
 
-async function askForSlurmOptionsWizard(
-  defaults: SlurmLaunchOptions,
+const SLURM_OPTION_PROMPTS: Record<
+  keyof SlurmLaunchOptions,
+  { title: string; prompt: string }
+> = {
+  partition: {
+    title: "--partition",
+    prompt: "Partition (queue) to run in",
+  },
+  time: {
+    title: "--time",
+    prompt: "Time limit, in minutes or as HH:MM:SS",
+  },
+  cpus: { title: "--cpus-per-task", prompt: "Number of CPUs" },
+  mem: { title: "--mem", prompt: "Memory, e.g., 16G" },
+  gpus: {
+    title: "--gpus",
+    prompt: "GPU count or type:count, e.g., 1 or a100:1",
+  },
+  extra: {
+    title: "Additional srun options",
+    prompt: "Raw options appended as-is, e.g., --account=myaccount",
+  },
+};
+
+// Ask for SLURM options one at a time, so Back steps through them
+async function askForSlurmOptionFields(
+  fields: Array<keyof SlurmLaunchOptions>,
+  initial: SlurmLaunchOptions,
+  options?: { canGoBack?: boolean; titleNote?: string },
 ): Promise<WizardStepResult<SlurmLaunchOptions>> {
-  const values: SlurmLaunchOptions = {
-    ...defaults,
-  };
+  const values: SlurmLaunchOptions = { ...initial };
   let step = 0;
-
-  while (step >= 0) {
-    if (step === 0) {
-      const result = await showInputBoxStep({
-        title: "Slurm option: --gpus",
-        prompt: "Optional GPU count or value (e.g., 1 or a100:1)",
-        value: values.gpus ?? "",
-        placeHolder: "leave blank to skip",
-        canGoBack: true,
-      });
-      if (result.kind === "cancel") {
-        return result;
-      }
-      if (result.kind === "back") {
-        return { kind: "back" };
-      }
-      values.gpus = result.value;
-      step = 1;
-      continue;
-    }
-
-    if (step === 1) {
-      const result = await showInputBoxStep({
-        title: "Slurm option: --time",
-        prompt: "Optional time (e.g., 60 or 01:00:00)",
-        value: values.time ?? "",
-        placeHolder: "leave blank to skip",
-        canGoBack: true,
-      });
-      if (result.kind === "cancel") {
-        return result;
-      }
-      if (result.kind === "back") {
-        step = 0;
-        continue;
-      }
-      values.time = result.value;
-      step = 2;
-      continue;
-    }
-
+  while (step < fields.length) {
+    const field = fields[step];
+    const { title, prompt } = SLURM_OPTION_PROMPTS[field];
     const result = await showInputBoxStep({
-      title: "Additional srun options",
-      prompt: "Optional raw options appended as-is (e.g., --cpus-per-task=8)",
-      value: values.extra ?? "",
-      placeHolder: "leave blank to skip",
-      canGoBack: true,
+      title: `SLURM ${title}${options?.titleNote ?? ""} (${step + 1}/${
+        fields.length
+      })`,
+      prompt,
+      value: values[field] ?? "",
+      placeHolder: "leave blank for the cluster default",
+      canGoBack: step > 0 || options?.canGoBack,
     });
     if (result.kind === "cancel") {
       return result;
     }
     if (result.kind === "back") {
-      step = 1;
+      if (step === 0) {
+        return result;
+      }
+      step--;
       continue;
     }
-    values.extra = result.value;
-    return { kind: "value", value: compactSlurmOptions(values) };
+    values[field] = result.value;
+    step++;
   }
+  return { kind: "value", value: compactSlurmOptions(values) };
+}
 
-  return { kind: "cancel" };
+async function askForSlurmOptionsWizard(
+  defaults: SlurmLaunchOptions,
+): Promise<WizardStepResult<SlurmLaunchOptions>> {
+  return await askForSlurmOptionFields(
+    ["partition", "time", "cpus", "mem", "gpus", "extra"],
+    defaults,
+    { canGoBack: true },
+  );
+}
+
+// Ask for the resources an environment leaves unset, so a notebook job doesn't
+// silently get the cluster's defaults. Previous answers are prefilled.
+async function askForMissingSlurmResources(
+  environmentName: string,
+  envDefaults: SlurmLaunchOptions | undefined,
+  previous: SlurmLaunchOptions | undefined,
+): Promise<SlurmLaunchOptions | undefined> {
+  const values = mergeSlurmOptions(
+    mergeSlurmOptions({ time: DEFAULT_NOTEBOOK_SLURM_TIME }, previous),
+    envDefaults,
+  );
+  const missing = getMissingSlurmResources(envDefaults);
+  if (missing.length === 0) {
+    return values;
+  }
+  const result = await askForSlurmOptionFields(missing, values, {
+    titleNote: ` (not set in '${environmentName}')`,
+  });
+  return result.kind === "value" ? result.value : undefined;
 }
 
 async function runCreateCondaEnvironmentWizard(
@@ -6032,7 +6940,7 @@ async function runCreateUvEnvironmentWizard(
   workspaceRoot: string,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
-  let name = "my-uv-env";
+  let name = "py";
   let pyprojectPath = "pyproject.toml";
   let step = 0;
 
@@ -6105,6 +7013,8 @@ async function runCreateUvEnvironmentWizard(
           "--path",
           pyprojectPath,
           "--no-commit",
+          // Only notebooks use this wizard, and they need a kernel
+          "ipykernel",
         ],
         { cwd: workspaceRoot },
       );
@@ -6221,11 +7131,27 @@ async function openEnvironmentEditor(
   workspaceRoot: string,
   envName: string,
 ): Promise<void> {
-  const env = currentCalkitConfig?.environments?.[envName];
-  const desc = currentEnvDescriptions?.[envName];
-  const specPath =
-    desc?.spec_path ?? (typeof env?.path === "string" ? env.path : undefined);
-  await showEnvCreatorWebview(context, workspaceRoot, envName, env, specPath);
+  // A subproject's environment is edited in its own calkit.yaml, with its
+  // spec path from there
+  const project = projectForName(workspaceRoot, envName);
+  const env = (await readCalkitConfig(project.projectDir))?.environments?.[
+    project.name
+  ];
+  const descSpecPath = currentEnvDescriptions?.[envName]?.spec_path;
+  const specPath = descSpecPath
+    ? path
+        .relative(project.projectDir, path.join(workspaceRoot, descSpecPath))
+        .replace(/\\/g, "/")
+    : typeof env?.path === "string"
+    ? env.path
+    : undefined;
+  await showEnvCreatorWebview(
+    context,
+    project.projectDir,
+    project.name,
+    env,
+    specPath,
+  );
 }
 
 async function getConfiguredCandidateForNotebookPath(
@@ -6350,11 +7276,9 @@ async function autoSelectEnvironmentForActiveNotebook(
         innerEnvironment: configuredCandidate.innerEnvironment,
         innerKind: configuredCandidate.innerKind,
         outerSlurmEnvironment: configuredCandidate.outerSlurmEnvironment,
-        slurmOptions: getNotebookSlurmOptionsWithDefaults(
-          getDefaultSlurmOptions(
-            config.environments?.[configuredCandidate.outerSlurmEnvironment],
-          ),
-        ),
+        // Kept for prefilling; the launch merges in the env's defaults
+        slurmOptions: getLaunchProfileForNotebookUri(context, notebookUri)
+          ?.slurmOptions,
         preferredPort: getDefaultPort(),
       });
 
@@ -6415,56 +7339,13 @@ async function autoSelectEnvironmentForActiveNotebook(
 }
 
 async function askForSlurmOptions(
-  defaults?: SlurmLaunchOptions,
+  defaults: SlurmLaunchOptions,
 ): Promise<SlurmLaunchOptions | undefined> {
-  const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
-  const gpus = await vscode.window.showInputBox({
-    title: "Slurm option: --gpus",
-    prompt: "Optional GPU count or value (e.g., 1 or a100:1)",
-    value: effectiveDefaults.gpus ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (gpus === undefined) {
-    return undefined;
-  }
-
-  const time = await vscode.window.showInputBox({
-    title: "Slurm option: --time",
-    prompt: "Optional time (e.g., 60 or 01:00:00)",
-    value: effectiveDefaults.time ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (time === undefined) {
-    return undefined;
-  }
-
-  const extra = await vscode.window.showInputBox({
-    title: "Additional srun options",
-    prompt: "Optional raw options appended as-is (e.g., --cpus-per-task=8)",
-    value: effectiveDefaults.extra ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (extra === undefined) {
-    return undefined;
-  }
-
-  return compactSlurmOptions({
-    gpus,
-    time,
-    partition: effectiveDefaults.partition,
-    extra,
-  });
-}
-
-function getNotebookSlurmOptionsWithDefaults(
-  defaults?: SlurmLaunchOptions,
-): SlurmLaunchOptions {
-  return compactSlurmOptions({
-    gpus: defaults?.gpus,
-    time: defaults?.time ?? DEFAULT_NOTEBOOK_SLURM_TIME,
-    partition: defaults?.partition,
-    extra: defaults?.extra,
-  });
+  const result = await askForSlurmOptionFields(
+    ["partition", "time", "cpus", "mem", "gpus", "extra"],
+    defaults,
+  );
+  return result.kind === "value" ? result.value : undefined;
 }
 
 async function confirmAutoStartSlurmNotebookSession(
@@ -6555,27 +7436,17 @@ function buildLaunchCommand(
     picked,
     notebookRelativePath,
   );
-  const opts: string[] = [];
-  if (slurmOptions?.gpus?.trim()) {
-    opts.push(`--gpus=${slurmOptions.gpus.trim()}`);
-  }
-  if (slurmOptions?.time?.trim()) {
-    opts.push(`--time=${slurmOptions.time.trim()}`);
-  }
-  if (slurmOptions?.partition?.trim()) {
-    opts.push(`--partition=${slurmOptions.partition.trim()}`);
-  }
-  if (slurmOptions?.extra?.trim()) {
-    opts.push(slurmOptions.extra.trim());
-  }
-
+  const opts = slurmOptionsToOptionList(slurmOptions ?? {});
   // For a SLURM outer environment, run jupyter directly under srun.
   // Run checks and launch in the same remote shell so setup side effects
   // (e.g., module loads) apply to both kernel checks and Jupyter startup.
+  // The server runs on a compute node, so it must listen on all interfaces
+  // for VS Code to reach it from the login node.
   const rawJupyterCmd = `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
     serverToken ? ` --IdentityProvider.token=${shQuote(serverToken)}` : ""
   }${defaultKernelFlag}`;
   const remoteParts = [
+    `echo "${SLURM_NODE_MARKER}$(hostname)"`,
     ...slurmSetupCommands,
     checkPart,
     ...(picked.innerKind === "docker" ? [] : [kernelCheckPart]),
@@ -6877,6 +7748,36 @@ async function waitForServerReady(
     await sleep(pollMs);
   }
   return false;
+}
+
+// Wait for a SLURM job's Jupyter server to report its compute node and port,
+// which can take a while if the job is queued.
+async function waitForSlurmServerUri(
+  serverToken: string,
+  notebookUri?: string,
+  timeoutMs = 300_000,
+  pollMs = 1_000,
+): Promise<string | undefined> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (!hasRunningServerSession("slurm", notebookUri)) {
+      void vscode.window.showWarningMessage(
+        "SLURM Jupyter server failed to start. See Calkit output for details.",
+      );
+      return undefined;
+    }
+    const { host, port } = activeJupyterServerSession ?? {};
+    if (host && port) {
+      return `http://${host}:${port}/lab?token=${encodeURIComponent(
+        serverToken,
+      )}`;
+    }
+    await sleep(pollMs);
+  }
+  void vscode.window.showWarningMessage(
+    "SLURM job has not started Jupyter after 5 minutes (may be queued). See Calkit output.",
+  );
+  return undefined;
 }
 
 async function isHttpEndpointReachable(targetUrl: string): Promise<boolean> {
@@ -7730,6 +8631,18 @@ async function startSlurmJobForActiveNotebook(
     return false;
   }
 
+  const slurmOptions = await askForMissingSlurmResources(
+    profile.outerSlurmEnvironment,
+    getDefaultSlurmOptions(config.environments[profile.outerSlurmEnvironment]),
+    profile.slurmOptions,
+  );
+  if (!slurmOptions) {
+    return false;
+  }
+  await saveLaunchProfileForNotebookUri(context, profile.notebookUri, {
+    ...profile,
+    slurmOptions,
+  });
   const picked: CalkitEnvNotebookKernelSource = {
     label: profile.environmentName,
     description: `${profile.outerSlurmEnvironment} + ${profile.innerKind}`,
@@ -7757,7 +8670,7 @@ async function startSlurmJobForActiveNotebook(
         workspaceRoot,
         config,
         port,
-        profile.slurmOptions,
+        slurmOptions,
         serverToken,
         undefined,
         expectedKernel?.kernelName,
@@ -7769,14 +8682,15 @@ async function startSlurmJobForActiveNotebook(
         notebookUri: profile.notebookUri,
       });
 
-      const uri = `http://localhost:${port}/lab?token=${encodeURIComponent(
-        serverToken,
-      )}`;
-      await vscode.env.clipboard.writeText(uri);
       const kernelsBeforeConnect = await getResolvedKernelIdsForActiveNotebook(
         profile.notebookUri,
       );
-
+      const uri = await waitForSlurmServerUri(serverToken, profile.notebookUri);
+      if (!uri) {
+        await refreshNotebookToolbarContext(context);
+        return false;
+      }
+      await vscode.env.clipboard.writeText(uri);
       const serverReady = await waitForServerReady(uri, {
         sessionKind: "slurm",
         notebookUri: profile.notebookUri,
@@ -7971,6 +8885,27 @@ async function restartCalkitJobForActiveNotebook(
   }
 }
 
+// Whether a stage builds the active file into a PDF, for the buttons that go
+// between them. It depends on the config as well as the file, so it's
+// refreshed when either changes.
+async function refreshActiveFileBuildsPdfContext(
+  document: vscode.TextDocument | undefined,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  const buildsPdf =
+    workspaceRoot !== undefined &&
+    document !== undefined &&
+    documentStagePdf(
+      currentCalkitConfig?.pipeline?.stages ?? {},
+      path.relative(workspaceRoot, document.uri.fsPath).replace(/\\/g, "/"),
+    ) !== undefined;
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.activeFileBuildsPdf",
+    buildsPdf,
+  );
+}
+
 async function refreshActiveFileStageContext(
   document: vscode.TextDocument | undefined,
 ): Promise<void> {
@@ -7991,6 +8926,7 @@ async function refreshActiveFileStageContext(
     path.extname(document.uri.fsPath).toLowerCase() === ".json" &&
     isPlotlyJsonText(document.getText());
   await Promise.all([
+    refreshActiveFileBuildsPdfContext(document),
     vscode.commands.executeCommand(
       "setContext",
       "calkit.activeFileHasStage",
@@ -8197,8 +9133,27 @@ function startServerInBackground(
   });
   jupyterServerProcess = child;
   activeJupyterServerSession = session;
+  // Accumulate SLURM output until we know which node and port to connect to
+  const slurmOutput = { stdout: "", stderr: "" };
+  const findSlurmServer = (stream: "stdout" | "stderr", chunk: string) => {
+    if (session.kind !== "slurm" || (session.host && session.port)) {
+      return;
+    }
+    slurmOutput[stream] += chunk;
+    // Parse streams separately so joining them can't end a partial line
+    const fromStdout = parseSlurmServerOutput(slurmOutput.stdout);
+    const fromStderr = parseSlurmServerOutput(slurmOutput.stderr);
+    const host = fromStdout.host ?? fromStderr.host;
+    const port = fromStdout.port ?? fromStderr.port;
+    session.host = host;
+    session.port = port;
+    if (host && port) {
+      log(`SLURM Jupyter server is on ${host}:${port}`);
+    }
+  };
 
   child.stdout?.on("data", (chunk: Buffer | string) => {
+    findSlurmServer("stdout", chunk.toString());
     const text = chunk.toString().trim();
     if (text) {
       log(`[server] ${text}`);
@@ -8206,6 +9161,7 @@ function startServerInBackground(
   });
 
   child.stderr?.on("data", (chunk: Buffer | string) => {
+    findSlurmServer("stderr", chunk.toString());
     const text = chunk.toString().trim();
     if (text) {
       log(`[server:err] ${text}`);

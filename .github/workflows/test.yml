@@ -17,7 +17,9 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
-      cli: ${{ steps.filter.outputs.cli }}
+      cli: >-
+        ${{ steps.filter.outputs.cli == 'true'
+        || steps.docs.outputs.checked == 'true' }}
       jlab: ${{ steps.filter.outputs.jlab }}
       vscode: ${{ steps.filter.outputs.vscode }}
       browser: ${{ steps.filter.outputs.browser }}
@@ -29,11 +31,25 @@ jobs:
           # quantifier, which would make this match every change
           predicate-quantifier: "every"
           filters: |
+            # Prose and docs don't affect the package; the few docs files a
+            # test does read are picked up by the step below
             cli:
               - "**"
               - "!hub/**"
               - "!vscode-ext/**"
               - "!browser-ext/**"
+              - "!docs/**"
+              - "!*.md"
+              - "!mkdocs.yml"
+              - "!CITATION.cff"
+              - "!LICENSE"
+              # Subprojects with suites of their own, which nothing in the
+              # package reads
+              - "!images/**"
+              - "!assistant/**"
+              - "!.github/workflows/test-latex-image.yml"
+              - "!.github/workflows/publish-latex-image.yml"
+              - "!.github/workflows/test-assistant.yml"
             # The JupyterLab extension depends on the core Python package,
             # so run its tests for any change outside the other subprojects
             jlab:
@@ -41,10 +57,33 @@ jobs:
               - "!hub/**"
               - "!vscode-ext/**"
               - "!browser-ext/**"
+              - "!docs/**"
+              - "!*.md"
+              - "!mkdocs.yml"
+              - "!CITATION.cff"
+              - "!LICENSE"
+              # Subprojects with suites of their own, which nothing in the
+              # package reads
+              - "!images/**"
+              - "!assistant/**"
+              - "!.github/workflows/test-latex-image.yml"
+              - "!.github/workflows/publish-latex-image.yml"
+              - "!.github/workflows/test-assistant.yml"
             vscode:
               - "vscode-ext/**"
             browser:
               - "browser-ext/**"
+      # A separate step because these are alternatives, which the 'every'
+      # quantifier above can't express. Tests check these files against
+      # the models, so a hand edit to them has to run the suite.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: docs
+        with:
+          filters: |
+            checked:
+              - "docs/schemas/calkit.json"
+              - "docs/pipeline/index.md"
+              - "docs/environments.md"
 
   main:
     needs: changes
@@ -68,23 +107,25 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
           enable-cache: true
       - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
+        uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
         with:
-          miniforge-version: latest
+          # 26.9.4-0 fails 'conda init' on Windows; back to latest once
+          # https://github.com/conda-forge/miniforge/issues/913 is fixed
+          miniforge-version: 26.7.2-1
           auto-activate-base: true
           conda-remove-defaults: true
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        uses: prefix-dev/setup-pixi@9936258fee697aff89b3fed6ca1f80a382ef694e # v0.11.3
         with:
           run-install: false
       - name: Install Juliaup
-        uses: julia-actions/install-juliaup@1cc1b0ecfb06c04ff09fe24cab1476106460750e # v3.1.5
+        uses: julia-actions/install-juliaup@8d13b44e0eb1620c4e2d2d0a4ceee7d98100b955 # v3.1.6
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
       # Juliaup installs Julia but leaves the depot empty, and the first Pkg
@@ -117,7 +158,7 @@ jobs:
         with:
           node-version: "20"
       - name: Setup R
-        uses: r-lib/actions/setup-r@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
+        uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
           r-version: latest
       - name: Run tests
@@ -132,7 +173,8 @@ jobs:
   jupyterlab-ext:
     needs: changes
     if: needs.changes.outputs.jlab == 'true'
-    runs-on: ubuntu-latest
+    # Playwright 1.56 cannot install Chromium on Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: jupyterlab-ext
@@ -146,7 +188,7 @@ jobs:
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
       - name: Setup uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run

@@ -44,8 +44,78 @@ export const AccountPublicSchema = {
   title: "AccountPublic",
 } as const
 
+export const ActiveCountsSchema = {
+  properties: {
+    last_day: {
+      type: "integer",
+      title: "Last Day",
+    },
+    last_7_days: {
+      type: "integer",
+      title: "Last 7 Days",
+    },
+    last_30_days: {
+      type: "integer",
+      title: "Last 30 Days",
+    },
+  },
+  type: "object",
+  required: ["last_day", "last_7_days", "last_30_days"],
+  title: "ActiveCounts",
+} as const
+
+export const AnalyticsStatsSchema = {
+  properties: {
+    active_users: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Likely human users with any event in Mixpanel, sent by the hub's backend or frontend, so last_30_days is MAU. Only users who accepted analytics are tracked, so this is a lower bound.",
+    },
+    active_visitors: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Active users plus visitors who accepted analytics and, without signing in, sent two or more events on a day, at least one after input. Anonymous page views aren't counted, since their IDs change daily.",
+    },
+    human_visits: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Visitor-days from visitors who didn't accept analytics, i.e., distinct (UTC day, visitor) pairs with a page view in the window that followed input and wasn't from a bot. Not unique people: their IDs reset daily, so one person visiting on three days counts three times.",
+    },
+    human_project_visits: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Human visits as above that included a project page, leaving out projects owned by excluded accounts",
+    },
+    projects_viewed: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Distinct projects, not owned by excluded accounts, with human visits as above",
+    },
+  },
+  type: "object",
+  required: [
+    "active_users",
+    "active_visitors",
+    "human_visits",
+    "human_project_visits",
+    "projects_viewed",
+  ],
+  title: "AnalyticsStats",
+} as const
+
 export const Body_login_login_access_tokenSchema = {
   properties: {
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
     grant_type: {
       anyOf: [
         {
@@ -635,6 +705,16 @@ export const ConnectedAccountsSchema = {
     overleaf: {
       type: "boolean",
       title: "Overleaf",
+    },
+    overleaf_token: {
+      type: "boolean",
+      title: "Overleaf Token",
+      default: false,
+    },
+    overleaf_session: {
+      type: "boolean",
+      title: "Overleaf Session",
+      default: false,
     },
     google: {
       type: "boolean",
@@ -2026,6 +2106,79 @@ export const ExistsResultSchema = {
   title: "ExistsResult",
 } as const
 
+export const ExportStageSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    exported_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Exported By",
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "stage"],
+  title: "ExportStage",
+} as const
+
+export const ExportStagePostSchema = {
+  properties: {
+    source: {
+      type: "string",
+      title: "Source",
+    },
+    output: {
+      type: "string",
+      title: "Output",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: true,
+    },
+  },
+  type: "object",
+  required: ["source", "output"],
+  title: "ExportStagePost",
+} as const
+
 export const ExternalReleasePostSchema = {
   properties: {
     name: {
@@ -2889,6 +3042,32 @@ export const FsOpResponseSchema = {
     "Response describing how to perform a file system operation\n(get/put/exists/list) for a given path within the project.",
 } as const
 
+export const GitHubActionsRunOptionsSchema = {
+  properties: {
+    workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Workflow",
+    },
+    inputs: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Inputs",
+      default: {},
+    },
+  },
+  type: "object",
+  title: "GitHubActionsRunOptions",
+} as const
+
 export const GitHubInstallationsSchema = {
   properties: {
     total_count: {
@@ -3408,6 +3587,38 @@ export const HttpRequestAccessSchema = {
   title: "HttpRequestAccess",
 } as const
 
+export const HubStatsSchema = {
+  properties: {
+    users: {
+      $ref: "#/components/schemas/UserStats",
+    },
+    projects: {
+      $ref: "#/components/schemas/ProjectStats",
+    },
+    excluded_accounts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Excluded Accounts",
+    },
+    analytics: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/AnalyticsStats",
+        },
+        {
+          type: "null",
+        },
+      ],
+      description: "From Mixpanel; null when not configured or unreachable",
+    },
+  },
+  type: "object",
+  required: ["users", "projects", "excluded_accounts"],
+  title: "HubStats",
+} as const
+
 export const HubVersionSchema = {
   properties: {
     version: {
@@ -3640,6 +3851,11 @@ export const IssueSchema = {
       ],
       title: "Artifact Path",
     },
+    is_pull_request: {
+      type: "boolean",
+      title: "Is Pull Request",
+      default: false,
+    },
   },
   type: "object",
   required: [
@@ -3714,6 +3930,362 @@ export const ItemLockSchema = {
   type: "object",
   required: ["created", "user_id", "user_email", "user_github_username"],
   title: "ItemLock",
+} as const
+
+export const LatexCommentMessageSchema = {
+  properties: {
+    author: {
+      type: "string",
+      title: "Author",
+    },
+    email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Email",
+    },
+    date: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date",
+    },
+    text: {
+      type: "string",
+      title: "Text",
+    },
+  },
+  type: "object",
+  required: ["author", "text"],
+  title: "LatexCommentMessage",
+} as const
+
+export const LatexCommentPatchSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ref",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    resolved: {
+      type: "boolean",
+      title: "Resolved",
+    },
+  },
+  type: "object",
+  required: ["path", "key", "resolved"],
+  title: "LatexCommentPatch",
+} as const
+
+export const LatexCommentPostSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ref",
+    },
+    comment: {
+      type: "string",
+      title: "Comment",
+    },
+    highlight: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/CommentHighlight",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    create_github_issue: {
+      type: "boolean",
+      title: "Create Github Issue",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path", "comment"],
+  title: "LatexCommentPost",
+} as const
+
+export const LatexCommentReplyPostSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ref",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    body: {
+      type: "string",
+      title: "Body",
+    },
+  },
+  type: "object",
+  required: ["path", "key", "body"],
+  title: "LatexCommentReplyPost",
+} as const
+
+export const LatexCommentThreadSchema = {
+  properties: {
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Id",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    line: {
+      type: "integer",
+      title: "Line",
+    },
+    resolved: {
+      type: "boolean",
+      title: "Resolved",
+    },
+    issue: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Issue",
+    },
+    highlight: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Highlight",
+    },
+    position: {
+      anyOf: [
+        {
+          additionalProperties: true,
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Position",
+    },
+    messages: {
+      items: {
+        $ref: "#/components/schemas/LatexCommentMessage",
+      },
+      type: "array",
+      title: "Messages",
+    },
+  },
+  type: "object",
+  required: ["key", "path", "line", "resolved", "messages"],
+  title: "LatexCommentThread",
+} as const
+
+export const LatexCommentsSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    source: {
+      type: "string",
+      title: "Source",
+    },
+    rev: {
+      type: "string",
+      title: "Rev",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    can_comment: {
+      type: "boolean",
+      title: "Can Comment",
+    },
+    threads: {
+      items: {
+        $ref: "#/components/schemas/LatexCommentThread",
+      },
+      type: "array",
+      title: "Threads",
+    },
+  },
+  type: "object",
+  required: ["path", "source", "rev", "branch", "can_comment", "threads"],
+  title: "LatexComments",
+} as const
+
+export const LatexCommentsMoveSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ref",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "LatexCommentsMove",
+} as const
+
+export const LatexComponentsSchema = {
+  properties: {
+    loads_calkit: {
+      type: "boolean",
+      title: "Loads Calkit",
+    },
+    style: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Style",
+    },
+    values: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
+    copies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Copies",
+      default: [],
+    },
+    problems: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Problems",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["loads_calkit"],
+  title: "LatexComponents",
+  description:
+    "What a document needs beside it for calkit.sty's commands, as\n``calkit latex build`` would write it.",
+} as const
+
+export const LatexComponentsRequestSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    sources: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Sources",
+      default: {},
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "LatexComponentsRequest",
+  description: "A LaTeX document to bring calkit.sty's components in for.",
 } as const
 
 export const MapPathEntrySchema = {
@@ -4144,22 +4716,6 @@ export const NotificationSchema = {
     "In-app notification delivered to a user when a comment is posted on\ntheir project (or a project they collaborate on).\n\nDesigned to be lightweight: no fan-out to external services here.\n``link`` stores a frontend URL (e.g., ``/owner/project/publications?path=…``)\nso the notification can deep-link directly to the relevant item.",
 } as const
 
-export const OAuthCodeExchangeSchema = {
-  properties: {
-    code: {
-      type: "string",
-      title: "Code",
-    },
-    redirect_uri: {
-      type: "string",
-      title: "Redirect Uri",
-    },
-  },
-  type: "object",
-  required: ["code", "redirect_uri"],
-  title: "OAuthCodeExchange",
-} as const
-
 export const OnboardingFlagPostSchema = {
   properties: {
     step: {
@@ -4248,6 +4804,19 @@ export const OperationResultSchema = {
   required: ["success"],
   title: "OperationResult",
   description: "Result for file operations like delete, move, copy.",
+} as const
+
+export const OrgMemberPatchSchema = {
+  properties: {
+    role: {
+      type: "string",
+      enum: ["read", "write", "admin", "owner"],
+      title: "Role",
+    },
+  },
+  type: "object",
+  required: ["role"],
+  title: "OrgMemberPatch",
 } as const
 
 export const OrgMemberPostSchema = {
@@ -4492,7 +5061,14 @@ export const OrgUserPublicSchema = {
       title: "Name",
     },
     github_name: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Github Name",
     },
     role: {
@@ -4558,6 +5134,17 @@ export const OverleafLinkPublicSchema = {
       ],
       title: "Current User Access",
     },
+    github_repo_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Repo Url",
+    },
   },
   type: "object",
   required: [
@@ -4569,6 +5156,8 @@ export const OverleafLinkPublicSchema = {
     "current_user_access",
   ],
   title: "OverleafLinkPublic",
+  description:
+    "A folder of a Calkit project an Overleaf project syncs with, and what\nthe current user can do with that project.\n\n``github_repo_url`` is the project's repo on GitHub, in one canonical\nform, e.g., to open it in a Codespace, or none if it's elsewhere.",
 } as const
 
 export const OverleafLookupSchema = {
@@ -4592,6 +5181,30 @@ export const OverleafLookupSchema = {
   type: "object",
   required: ["links", "projects_scanned", "projects_remaining"],
   title: "OverleafLookup",
+} as const
+
+export const OverleafSessionPutSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionPut",
+} as const
+
+export const OverleafSessionResponseSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionResponse",
 } as const
 
 export const OverleafSyncPostSchema = {
@@ -4841,6 +5454,285 @@ export const PipelineSchema = {
   title: "Pipeline",
 } as const
 
+export const PipelinePutSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelinePut",
+} as const
+
+export const PipelineRunSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    started: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started",
+    },
+    finished: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Finished",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    started_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started By",
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    github_run_id: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Run Id",
+    },
+  },
+  type: "object",
+  required: ["id", "location", "status", "created"],
+  title: "PipelineRun",
+  description: "A run of the pipeline, wherever it ran.",
+} as const
+
+export const PipelineRunLogPartSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    phases: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPhase",
+      },
+      type: "array",
+      title: "Phases",
+      default: [],
+    },
+    log: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Log",
+    },
+    log_truncated: {
+      type: "boolean",
+      title: "Log Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPart",
+  description: "Part of a run's log, e.g., a GitHub Actions job's.",
+} as const
+
+export const PipelineRunLogPhaseSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPhase",
+} as const
+
+export const PipelineRunLogsSchema = {
+  properties: {
+    parts: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPart",
+      },
+      type: "array",
+      title: "Parts",
+      default: [],
+    },
+  },
+  type: "object",
+  title: "PipelineRunLogs",
+} as const
+
+export const PipelineRunPostSchema = {
+  properties: {
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+      default: "github-actions",
+    },
+    github_actions: {
+      $ref: "#/components/schemas/GitHubActionsRunOptions",
+    },
+  },
+  type: "object",
+  title: "PipelineRunPost",
+} as const
+
+export const PipelineRunsSchema = {
+  properties: {
+    runs: {
+      items: {
+        $ref: "#/components/schemas/PipelineRun",
+      },
+      type: "array",
+      title: "Runs",
+      default: [],
+    },
+    total: {
+      type: "integer",
+      title: "Total",
+      default: 0,
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    can_start: {
+      type: "boolean",
+      title: "Can Start",
+      default: false,
+    },
+    cannot_start_reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Cannot Start Reason",
+    },
+  },
+  type: "object",
+  title: "PipelineRuns",
+} as const
+
 export const PipelineStageSchema = {
   properties: {
     name: {
@@ -4915,6 +5807,20 @@ export const PipelineStagePutSchema = {
   type: "object",
   required: ["yaml"],
   title: "PipelineStagePut",
+} as const
+
+export const PipelineYamlSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelineYaml",
+  description:
+    "The project's whole pipeline, as editable YAML.\n\nThe YAML is the ``pipeline:`` block of calkit.yaml, exactly as the\npipeline page shows it -- same key order, same comments.",
 } as const
 
 export const PresentationSchema = {
@@ -5490,6 +6396,18 @@ export const ProjectCommentSchema = {
       ],
       title: "Git Rev",
     },
+    moved_to_source: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Moved To Source",
+    },
     user_github_username: {
       anyOf: [
         {
@@ -5886,13 +6804,13 @@ export const ProjectOptionalExtendedSchema = {
     name: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Name",
     },
     title: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Title",
     },
     description: {
@@ -6110,13 +7028,20 @@ export const ProjectPostSchema = {
     name: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Name",
     },
     title: {
-      type: "string",
-      maxLength: 255,
-      minLength: 4,
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+          minLength: 3,
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Title",
     },
     description: {
@@ -6249,9 +7174,26 @@ export const ProjectPostSchema = {
       title: "Keep Template History",
       default: false,
     },
+    empty_repo: {
+      type: "boolean",
+      title: "Empty Repo",
+      default: false,
+    },
+    overleaf_project_url: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 2048,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Overleaf Project Url",
+    },
   },
   type: "object",
-  required: ["name", "title"],
+  required: ["name"],
   title: "ProjectPost",
 } as const
 
@@ -6260,13 +7202,13 @@ export const ProjectPublicSchema = {
     name: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Name",
     },
     title: {
       type: "string",
       maxLength: 255,
-      minLength: 4,
+      minLength: 3,
       title: "Title",
     },
     description: {
@@ -6470,6 +7412,45 @@ export const ProjectPushEventPostSchema = {
     "A push that happened somewhere else.\n\nWhat was pushed and where, recorded for reference: the hub works out the\ncurrent state from the repo itself, so none of this is trusted as input,\nbut it is what makes a log line worth reading.",
 } as const
 
+export const ProjectStatsSchema = {
+  properties: {
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    public: {
+      type: "integer",
+      title: "Public",
+    },
+    private: {
+      type: "integer",
+      title: "Private",
+    },
+    owners: {
+      type: "integer",
+      title: "Owners",
+    },
+    worked_on: {
+      type: "integer",
+      title: "Worked On",
+    },
+    updated_last_90_days: {
+      type: "integer",
+      title: "Updated Last 90 Days",
+    },
+  },
+  type: "object",
+  required: [
+    "total",
+    "public",
+    "private",
+    "owners",
+    "worked_on",
+    "updated_last_90_days",
+  ],
+  title: "ProjectStats",
+} as const
+
 export const ProjectStatusSchema = {
   properties: {
     timestamp: {
@@ -6540,6 +7521,264 @@ export const ProjectsPublicSchema = {
   type: "object",
   required: ["data", "count"],
   title: "ProjectsPublic",
+} as const
+
+export const ProvenanceSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    exists: {
+      type: "boolean",
+      title: "Exists",
+      default: false,
+    },
+    value: {
+      title: "Value",
+    },
+    value_error: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Value Error",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_kind: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Kind",
+    },
+    stage_app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage App",
+    },
+    source: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Source",
+    },
+    command: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Command",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+    },
+    input_to_stages: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Input To Stages",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    stale_reason: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["pipeline", "frozen"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stale Reason",
+    },
+    copied_from: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copied From",
+    },
+    copy_stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copy Stage",
+    },
+    origin: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin",
+    },
+    origin_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Url",
+    },
+    origin_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Path",
+    },
+    gaps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceGap",
+      },
+      type: "array",
+      title: "Gaps",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "Provenance",
+  description:
+    "Where an artifact, or one value inside a results file, came from.",
+} as const
+
+export const ProvenanceGapSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    steps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceStep",
+      },
+      type: "array",
+      title: "Steps",
+    },
+    unchecked: {
+      type: "boolean",
+      title: "Unchecked",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceGap",
+  description: "Something nothing records the origin of, and the chain to it.",
+} as const
+
+export const ProvenanceStepSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceStep",
+  description:
+    "A path on the way back from an artifact, and the stage producing it.",
 } as const
 
 export const PublicationSchema = {
@@ -6671,6 +7910,14 @@ export const PublicationSchema = {
       ],
       title: "Storage",
     },
+    latex_diffs: {
+      items: {
+        $ref: "#/components/schemas/PublicationLatexDiff",
+      },
+      type: "array",
+      title: "Latex Diffs",
+      default: [],
+    },
   },
   type: "object",
   required: ["path", "title"],
@@ -6691,7 +7938,7 @@ export const PublicationComponentSchema = {
     },
     via: {
       type: "string",
-      enum: ["folder", "input"],
+      enum: ["folder", "input", "included"],
       title: "Via",
       default: "folder",
     },
@@ -6779,6 +8026,73 @@ export const PublicationComponentsSchema = {
   type: "object",
   required: ["folder", "items", "n_unknown"],
   title: "PublicationComponents",
+} as const
+
+export const PublicationLatexDiffSchema = {
+  properties: {
+    from_ref: {
+      type: "string",
+      title: "From Ref",
+    },
+    to_ref: {
+      type: "string",
+      title: "To Ref",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    storage: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["git", "dvc", "dvc-zip"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Storage",
+    },
+  },
+  type: "object",
+  required: ["from_ref", "to_ref", "path"],
+  title: "PublicationLatexDiff",
+  description:
+    "A PDF marking up what changed in a publication between revisions.",
 } as const
 
 export const PublicationOverleafSchema = {
@@ -6872,7 +8186,7 @@ export const QuestionEvidenceSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "result", "value", "table", "publication", "document"],
       title: "Kind",
     },
     path: {
@@ -6890,6 +8204,53 @@ export const QuestionEvidenceSchema = {
       ],
       title: "Key",
     },
+    values: {
+      anyOf: [
+        {
+          items: {
+            $ref: "#/components/schemas/QuestionEvidenceValue",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    section: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Section",
+    },
+    label: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Label",
+    },
     explanation: {
       anyOf: [
         {
@@ -6900,6 +8261,17 @@ export const QuestionEvidenceSchema = {
         },
       ],
       title: "Explanation",
+    },
+    explanation_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Explanation Path",
     },
     git_ref: {
       anyOf: [
@@ -6996,7 +8368,7 @@ export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "result", "value", "table", "publication", "document"],
       title: "Kind",
     },
     path: {
@@ -7014,6 +8386,53 @@ export const QuestionEvidencePostSchema = {
       ],
       title: "Key",
     },
+    values: {
+      anyOf: [
+        {
+          additionalProperties: {
+            type: "string",
+          },
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    section: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Section",
+    },
+    label: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Label",
+    },
     explanation: {
       anyOf: [
         {
@@ -7024,6 +8443,17 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Explanation",
+    },
+    explanation_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Explanation Path",
     },
     git_ref: {
       anyOf: [
@@ -7040,6 +8470,34 @@ export const QuestionEvidencePostSchema = {
   type: "object",
   required: ["kind", "path"],
   title: "QuestionEvidencePost",
+} as const
+
+export const QuestionEvidenceValueSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    value: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Value",
+    },
+  },
+  type: "object",
+  required: ["name", "key"],
+  title: "QuestionEvidenceValue",
+  description: "One of the named values a result evidence entry cites.",
 } as const
 
 export const QuestionPostSchema = {
@@ -7096,6 +8554,17 @@ export const QuestionPublicSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7113,6 +8582,22 @@ export const QuestionPublicSchema = {
       },
       type: "array",
       title: "Evidence",
+      default: [],
+    },
+    verifications: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Verifications",
+      default: [],
+    },
+    validations: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Validations",
       default: [],
     },
   },
@@ -7145,6 +8630,17 @@ export const QuestionPutSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7167,6 +8663,66 @@ export const QuestionPutSchema = {
   },
   type: "object",
   title: "QuestionPut",
+} as const
+
+export const QuestionSignOffSchema = {
+  properties: {
+    by: {
+      type: "string",
+      title: "By",
+    },
+    date: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date",
+    },
+    notes: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Notes",
+    },
+    with_ai: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "With Ai",
+      default: [],
+    },
+    status: {
+      type: "string",
+      enum: ["current", "stale", "unchecked"],
+      title: "Status",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["by", "status"],
+  title: "QuestionSignOff",
+  description:
+    "A verification or validation of a question, checked against history.\n\nA verification says the stages behind the evidence implement the\napproach; a validation says the approach suits the question and the\nevidence justifies the answer. Stale means what it vouches for changed\nafter the commit that added it; unchecked means that commit couldn't be\nfound.",
 } as const
 
 export const ReferenceEntrySchema = {
@@ -8782,6 +10338,22 @@ export const ReproCheckSchema = {
       title: "Misc Needing Provenance",
       default: [],
     },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
@@ -8951,6 +10523,16 @@ export const ResultSchema = {
         },
       ],
       title: "Key",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
     },
   },
   type: "object",
@@ -9242,6 +10824,241 @@ export const SoftwareItemSchema = {
   type: "object",
   required: ["title", "path"],
   title: "SoftwareItem",
+} as const
+
+export const StageFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    created_by_me: {
+      type: "boolean",
+      title: "Created By Me",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "StageFile",
+  description:
+    "A file a new stage needs, e.g., a script or the file a figure is\nexported from.",
+} as const
+
+export const StageFromScriptOrNotebookPostSchema = {
+  properties: {
+    script_path: {
+      type: "string",
+      title: "Script Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    shows: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Shows",
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["script_path"],
+  title: "StageFromScriptOrNotebookPost",
+} as const
+
+export const StageFromScriptOrNotebookResponseSchema = {
+  properties: {
+    stage_name: {
+      type: "string",
+      title: "Stage Name",
+    },
+    stage_yaml: {
+      type: "string",
+      title: "Stage Yaml",
+    },
+    environment: {
+      type: "string",
+      title: "Environment",
+    },
+    environment_is_new: {
+      type: "boolean",
+      title: "Environment Is New",
+    },
+    environment_spec_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Path",
+    },
+    environment_spec_content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Content",
+    },
+    dependencies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Dependencies",
+      default: [],
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+      default: [],
+    },
+    outputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Outputs",
+      default: [],
+    },
+    missing_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Missing Inputs",
+      default: [],
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    included_in: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Included In",
+      default: [],
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+    git_repo_url: {
+      type: "string",
+      title: "Git Repo Url",
+    },
+  },
+  type: "object",
+  required: [
+    "stage_name",
+    "stage_yaml",
+    "environment",
+    "environment_is_new",
+    "git_repo_url",
+  ],
+  title: "StageFromScriptOrNotebookResponse",
+} as const
+
+export const StagePostSchema = {
+  properties: {
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["stage"],
+  title: "StagePost",
 } as const
 
 export const StageStatusSchema = {
@@ -9857,6 +11674,106 @@ export const UpdateSubscriptionResponseSchema = {
   title: "UpdateSubscriptionResponse",
 } as const
 
+export const UserAdminPublicSchema = {
+  properties: {
+    email: {
+      type: "string",
+      maxLength: 255,
+      format: "email",
+      title: "Email",
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_superuser: {
+      type: "boolean",
+      title: "Is Superuser",
+      default: false,
+    },
+    full_name: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Full Name",
+    },
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    github_username: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Username",
+    },
+    email_verified: {
+      type: "boolean",
+      title: "Email Verified",
+    },
+    subscription: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/UserSubscription",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
+    n_projects: {
+      type: "integer",
+      title: "N Projects",
+      default: 0,
+    },
+    n_private_projects: {
+      type: "integer",
+      title: "N Private Projects",
+      default: 0,
+    },
+  },
+  type: "object",
+  required: [
+    "email",
+    "id",
+    "created",
+    "github_username",
+    "email_verified",
+    "subscription",
+  ],
+  title: "UserAdminPublic",
+  description: "A user as listed for a superuser, with what they own.",
+} as const
+
 export const UserCreateSchema = {
   properties: {
     email: {
@@ -9988,6 +11905,17 @@ export const UserPublicSchema = {
         },
       ],
     },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
   },
   type: "object",
   required: [
@@ -10039,10 +11967,43 @@ export const UserRegisterSchema = {
       ],
       title: "Full Name",
     },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
   },
   type: "object",
   required: ["email", "password"],
   title: "UserRegister",
+} as const
+
+export const UserStatsSchema = {
+  properties: {
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    verified: {
+      type: "integer",
+      title: "Verified",
+    },
+    likely_human: {
+      type: "integer",
+      title: "Likely Human",
+      description:
+        "Users with a GitHub or other connected identity, a verified email, an invitation to a project or org, a personal access token, or sessions on two or more days. Password signup checks none of these, so it's how bot accounts get in.",
+    },
+  },
+  type: "object",
+  required: ["total", "verified", "likely_human"],
+  title: "UserStats",
 } as const
 
 export const UserSubscriptionSchema = {
@@ -10146,6 +12107,43 @@ export const UserSubscriptionSchema = {
   type: "object",
   required: ["period_months", "price", "plan_id", "user_id", "plan_name"],
   title: "UserSubscription",
+} as const
+
+export const UserSubscriptionAdminUpdateSchema = {
+  properties: {
+    plan_name: {
+      type: "string",
+      enum: ["free", "standard", "professional"],
+      title: "Plan Name",
+    },
+    period_months: {
+      type: "integer",
+      enum: [1, 12],
+      title: "Period Months",
+    },
+    price: {
+      type: "number",
+      minimum: 0,
+      title: "Price",
+    },
+    paid_until: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Paid Until",
+    },
+  },
+  type: "object",
+  required: ["plan_name", "period_months", "price"],
+  title: "UserSubscriptionAdminUpdate",
+  description:
+    "A superuser's direct edit of a user's subscription, bypassing Stripe.",
 } as const
 
 export const UserTokenPublicSchema = {
@@ -10314,6 +12312,17 @@ export const UserUpdateMeSchema = {
       ],
       title: "Github Username",
     },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
   },
   type: "object",
   title: "UserUpdateMe",
@@ -10323,7 +12332,7 @@ export const UsersPublicSchema = {
   properties: {
     data: {
       items: {
-        $ref: "#/components/schemas/UserPublic",
+        $ref: "#/components/schemas/UserAdminPublic",
       },
       type: "array",
       title: "Data",
@@ -10715,6 +12724,49 @@ export const _ContentsItemBaseSchema = {
   title: "_ContentsItemBase",
 } as const
 
+export const app__api__routes__login__OAuthCodeExchangeSchema = {
+  properties: {
+    code: {
+      type: "string",
+      title: "Code",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
+  },
+  type: "object",
+  required: ["code", "redirect_uri"],
+  title: "OAuthCodeExchange",
+} as const
+
+export const app__api__routes__users__OAuthCodeExchangeSchema = {
+  properties: {
+    code: {
+      type: "string",
+      title: "Code",
+    },
+    redirect_uri: {
+      type: "string",
+      title: "Redirect Uri",
+    },
+  },
+  type: "object",
+  required: ["code", "redirect_uri"],
+  title: "OAuthCodeExchange",
+} as const
+
 export const FileLockWritableSchema = {
   properties: {
     project_id: {
@@ -10984,6 +13036,18 @@ export const ProjectCommentWritableSchema = {
       ],
       title: "Git Rev",
     },
+    moved_to_source: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Moved To Source",
+    },
   },
   type: "object",
   required: ["project_id", "user_id", "comment"],
@@ -11106,6 +13170,22 @@ export const ReproCheckWritableSchema = {
       title: "Misc Needing Provenance",
       default: [],
     },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
@@ -11189,6 +13269,106 @@ export const UpdateSubscriptionResponseWritableSchema = {
   title: "UpdateSubscriptionResponse",
 } as const
 
+export const UserAdminPublicWritableSchema = {
+  properties: {
+    email: {
+      type: "string",
+      maxLength: 255,
+      format: "email",
+      title: "Email",
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_superuser: {
+      type: "boolean",
+      title: "Is Superuser",
+      default: false,
+    },
+    full_name: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Full Name",
+    },
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    github_username: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Username",
+    },
+    email_verified: {
+      type: "boolean",
+      title: "Email Verified",
+    },
+    subscription: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/UserSubscriptionWritable",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
+    },
+    n_projects: {
+      type: "integer",
+      title: "N Projects",
+      default: 0,
+    },
+    n_private_projects: {
+      type: "integer",
+      title: "N Private Projects",
+      default: 0,
+    },
+  },
+  type: "object",
+  required: [
+    "email",
+    "id",
+    "created",
+    "github_username",
+    "email_verified",
+    "subscription",
+  ],
+  title: "UserAdminPublic",
+  description: "A user as listed for a superuser, with what they own.",
+} as const
+
 export const UserPublicWritableSchema = {
   properties: {
     email: {
@@ -11253,6 +13433,17 @@ export const UserPublicWritableSchema = {
           type: "null",
         },
       ],
+    },
+    analytics_consent: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Analytics Consent",
     },
   },
   type: "object",
@@ -11369,7 +13560,7 @@ export const UsersPublicWritableSchema = {
   properties: {
     data: {
       items: {
-        $ref: "#/components/schemas/UserPublicWritable",
+        $ref: "#/components/schemas/UserAdminPublicWritable",
       },
       type: "array",
       title: "Data",

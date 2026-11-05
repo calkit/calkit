@@ -23,8 +23,10 @@ const FONT_CALL =
 const renderTextRun = (text: string, keyPrefix: string): React.ReactNode[] => {
   const nodes: React.ReactNode[] = []
   let last = 0
-  FONT_CALL.lastIndex = 0
-  let match = FONT_CALL.exec(text)
+  // This recurses into the command's argument, so each level needs its own
+  // cursor; sharing the global regex's lastIndex loops on the first match
+  const fontCall = new RegExp(FONT_CALL.source, "g")
+  let match = fontCall.exec(text)
   const literal = (raw: string) => raw.replace(/\\([%$&#_{}])/g, "$1")
   while (match !== null) {
     if (match.index > last) {
@@ -38,7 +40,7 @@ const renderTextRun = (text: string, keyPrefix: string): React.ReactNode[] => {
       </span>,
     )
     last = match.index + match[0].length
-    match = FONT_CALL.exec(text)
+    match = fontCall.exec(text)
   }
   if (last < text.length) {
     nodes.push(literal(text.slice(last)))

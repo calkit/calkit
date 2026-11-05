@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typer
+from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import AliasGroup, raise_error
@@ -31,3 +32,27 @@ def delete_question(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     typer.echo(f"Removed question: {removed}")
+
+
+@delete_app.command(name="comment")
+def delete_comment(
+    path: Annotated[
+        str | None,
+        typer.Argument(help="File the thread is in, if not found by --id."),
+    ] = None,
+    id: Annotated[
+        str | None,
+        typer.Option(
+            "--id",
+            help="ID of the thread, which finds it in any of the project's documents.",
+        ),
+    ] = None,
+    line: Annotated[
+        int | None,
+        typer.Option("--line", "-l", help="Number of any line in the thread."),
+    ] = None,
+) -> None:
+    """Delete a review comment thread and its replies."""
+    from calkit.cli.latex import edit_comment
+
+    edit_comment(path, id, line, None)

@@ -1,14 +1,14 @@
 import {
-  Button,
   AlertDialog,
   AlertDialogBody,
+  AlertDialogCloseButton,
+  AlertDialogContent,
   AlertDialogFooter,
   AlertDialogHeader,
-  AlertDialogContent,
   AlertDialogOverlay,
-  AlertDialogCloseButton,
+  Button,
 } from "@chakra-ui/react"
-import { useQueryClient, useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi } from "@tanstack/react-router"
 import axios from "axios"
 import { useRef } from "react"
@@ -55,6 +55,7 @@ const DiscardChanges = ({ isOpen, onClose }: DiscardChangesProps) => {
         leastDestructiveRef={cancelRef}
         onClose={onClose}
         isCentered
+        motionPreset="none"
       >
         <AlertDialogOverlay>
           <AlertDialogContent>

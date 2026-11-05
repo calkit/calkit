@@ -14,6 +14,8 @@ import { client } from "./client.gen"
 import type {
   AddOrgMemberErrors,
   AddOrgMemberResponses,
+  AppApiRoutesLoginOAuthCodeExchange,
+  AppApiRoutesUsersOAuthCodeExchange,
   BodyLoginLoginAccessToken,
   BodyProjectsPostProjectDatasetUpload,
   BodyProjectsPostProjectFigure,
@@ -33,6 +35,8 @@ import type {
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
+  DeleteOrgMemberErrors,
+  DeleteOrgMemberResponses,
   DeleteProjectByIdErrors,
   DeleteProjectByIdResponses,
   DeleteProjectCollaboratorErrors,
@@ -44,10 +48,14 @@ import type {
   DeleteProjectFileLockResponses,
   DeleteProjectInvitationErrors,
   DeleteProjectInvitationResponses,
+  DeleteProjectLatexCommentErrors,
+  DeleteProjectLatexCommentResponses,
   DeleteProjectMapPathsErrors,
   DeleteProjectMapPathsResponses,
   DeleteProjectNativeCollaboratorErrors,
   DeleteProjectNativeCollaboratorResponses,
+  DeleteProjectQuestionErrors,
+  DeleteProjectQuestionResponses,
   DeleteProjectReferenceItemErrors,
   DeleteProjectReferenceItemResponses,
   DeleteProjectReferencesErrors,
@@ -74,6 +82,7 @@ import type {
   EmailVerificationConfirm,
   EmailVerificationToken,
   Environment,
+  ExportStagePost,
   ExternalReleasePost,
   FeedbackPatch,
   FeedbackPost,
@@ -96,6 +105,8 @@ import type {
   GetFeatureVoteStatusResponses,
   GetFeedbackErrors,
   GetFeedbackResponses,
+  GetHubStatsErrors,
+  GetHubStatsResponses,
   GetHubVersionResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
@@ -168,16 +179,24 @@ import type {
   GetProjectInvitationsResponses,
   GetProjectIssuesErrors,
   GetProjectIssuesResponses,
+  GetProjectLatexCommentsErrors,
+  GetProjectLatexCommentsResponses,
   GetProjectNotebooksErrors,
   GetProjectNotebooksResponses,
   GetProjectOverleafSyncStatusErrors,
   GetProjectOverleafSyncStatusResponses,
   GetProjectPipelineErrors,
   GetProjectPipelineResponses,
+  GetProjectPipelineRunLogsErrors,
+  GetProjectPipelineRunLogsResponses,
+  GetProjectPipelineRunsErrors,
+  GetProjectPipelineRunsResponses,
   GetProjectPipelineStageErrors,
   GetProjectPipelineStageResponses,
   GetProjectPresentationsErrors,
   GetProjectPresentationsResponses,
+  GetProjectProvenanceErrors,
+  GetProjectProvenanceResponses,
   GetProjectPublicationComponentsErrors,
   GetProjectPublicationComponentsResponses,
   GetProjectPublicationsErrors,
@@ -233,9 +252,12 @@ import type {
   GetUserGithubTokenResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
+  GetUserOverleafSessionResponses,
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
+  GetUserStorageByIdErrors,
+  GetUserStorageByIdResponses,
   GetUserStorageResponses,
   GetUserTokensErrors,
   GetUserTokensResponses,
@@ -247,6 +269,11 @@ import type {
   ImportGithubReleasesResponses,
   IssuePatch,
   IssuePost,
+  LatexCommentPatch,
+  LatexCommentPost,
+  LatexCommentReplyPost,
+  LatexCommentsMove,
+  LatexComponentsRequest,
   ListReleaseSharesErrors,
   ListReleaseSharesResponses,
   LoginAccessTokenErrors,
@@ -267,11 +294,12 @@ import type {
   MiscArtifactPost,
   NativeCollaboratorPost,
   NewPassword,
-  OAuthCodeExchange,
   OnboardingFlagPost,
+  OrgMemberPatch,
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
+  OverleafSessionPut,
   OverleafSyncPost,
   ParseReleaseUrlErrors,
   ParseReleaseUrlResponses,
@@ -284,9 +312,13 @@ import type {
   PatchProjectErrors,
   PatchProjectIssueErrors,
   PatchProjectIssueResponses,
+  PatchProjectLatexCommentErrors,
+  PatchProjectLatexCommentResponses,
   PatchProjectResponses,
   PatchUserTokenErrors,
   PatchUserTokenResponses,
+  PipelinePut,
+  PipelineRunPost,
   PipelineStageEdit,
   PipelineStagePut,
   PostDiscountCodeErrors,
@@ -338,6 +370,14 @@ import type {
   PostProjectInvitationResponses,
   PostProjectIssueErrors,
   PostProjectIssueResponses,
+  PostProjectLatexCommentErrors,
+  PostProjectLatexCommentReplyErrors,
+  PostProjectLatexCommentReplyResponses,
+  PostProjectLatexCommentResponses,
+  PostProjectLatexCommentsMoveErrors,
+  PostProjectLatexCommentsMoveResponses,
+  PostProjectLatexComponentsErrors,
+  PostProjectLatexComponentsResponses,
   PostProjectMapPathsErrors,
   PostProjectMapPathsResponses,
   PostProjectMiscErrors,
@@ -346,6 +386,12 @@ import type {
   PostProjectOverleafPublicationResponses,
   PostProjectOverleafSyncErrors,
   PostProjectOverleafSyncResponses,
+  PostProjectPipelineExportStageErrors,
+  PostProjectPipelineExportStageResponses,
+  PostProjectPipelineRunErrors,
+  PostProjectPipelineRunResponses,
+  PostProjectPipelineStageErrors,
+  PostProjectPipelineStageResponses,
   PostProjectPublicationErrors,
   PostProjectPublicationResponses,
   PostProjectPushEventErrors,
@@ -359,6 +405,8 @@ import type {
   PostProjectReleaseErrors,
   PostProjectReleaseResponses,
   PostProjectResponses,
+  PostProjectStageFromScriptOrNotebookErrors,
+  PostProjectStageFromScriptOrNotebookResponses,
   PostProjectStatusErrors,
   PostProjectStatusResponses,
   PostProjectSyncErrors,
@@ -402,6 +450,8 @@ import type {
   PutProjectContentsResponses,
   PutProjectDevContainerErrors,
   PutProjectDevContainerResponses,
+  PutProjectPipelineErrors,
+  PutProjectPipelineResponses,
   PutProjectPipelineStageErrors,
   PutProjectPipelineStageResponses,
   PutProjectQuestionErrors,
@@ -412,8 +462,12 @@ import type {
   PutProjectReferenceNotesResponses,
   PutUserOnboardingFlagErrors,
   PutUserOnboardingFlagResponses,
+  PutUserOverleafSessionErrors,
+  PutUserOverleafSessionResponses,
   PutUserOverleafTokenErrors,
   PutUserOverleafTokenResponses,
+  PutUserSubscriptionAdminErrors,
+  PutUserSubscriptionAdminResponses,
   PutUserSubscriptionErrors,
   PutUserSubscriptionResponses,
   QuestionPost,
@@ -450,6 +504,8 @@ import type {
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
+  StageFromScriptOrNotebookPost,
+  StagePost,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -461,11 +517,14 @@ import type {
   UpdateCurrentUserPasswordErrors,
   UpdateCurrentUserPasswordResponses,
   UpdateCurrentUserResponses,
+  UpdateOrgMemberErrors,
+  UpdateOrgMemberResponses,
   UpdatePassword,
   UpdateUserErrors,
   UpdateUserResponses,
   UserCreate,
   UserRegister,
+  UserSubscriptionAdminUpdate,
   UserUpdate,
   UserUpdateMe,
   ZoteroAuthFinish,
@@ -752,7 +811,7 @@ export class LoginService {
    */
   public static loginWithGithub<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesLoginOAuthCodeExchange: AppApiRoutesLoginOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -762,7 +821,7 @@ export class LoginService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesLoginOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       LoginWithGithubResponses,
@@ -792,7 +851,7 @@ export class LoginService {
    */
   public static loginWithGoogle<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesLoginOAuthCodeExchange: AppApiRoutesLoginOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -802,7 +861,7 @@ export class LoginService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesLoginOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       LoginWithGoogleResponses,
@@ -1351,6 +1410,39 @@ export class UsersService {
   }
 
   /**
+   * Get User Storage By Id
+   *
+   * Get a user's storage usage, which is slow enough to list a page of
+   * users without, so it's fetched per user.
+   */
+  public static getUserStorageById<ThrowOnError extends boolean = true>(
+    parameters: {
+      user_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserStorageByIdResponses,
+    GetUserStorageByIdErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "user_id" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetUserStorageByIdResponses,
+      GetUserStorageByIdErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/users/{user_id}/storage",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Delete User
    *
    * Delete a user.
@@ -1437,6 +1529,51 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/users/{user_id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Put User Subscription Admin
+   *
+   * Set a user's subscription directly, without touching Stripe.
+   */
+  public static putUserSubscriptionAdmin<ThrowOnError extends boolean = true>(
+    parameters: {
+      user_id: string
+      userSubscriptionAdminUpdate: UserSubscriptionAdminUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutUserSubscriptionAdminResponses,
+    PutUserSubscriptionAdminErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "user_id" },
+            { key: "userSubscriptionAdminUpdate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).put<
+      PutUserSubscriptionAdminResponses,
+      PutUserSubscriptionAdminErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/users/{user_id}/subscription",
       ...options,
       ...params,
       headers: {
@@ -1708,7 +1845,7 @@ export class UsersService {
    */
   public static postUserZenodoAuth<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesUsersOAuthCodeExchange: AppApiRoutesUsersOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -1718,7 +1855,7 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesUsersOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       PostUserZenodoAuthResponses,
@@ -1830,13 +1967,69 @@ export class UsersService {
   }
 
   /**
+   * Get User Overleaf Session
+   */
+  public static getUserOverleafSession<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserOverleafSessionResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserOverleafSessionResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-session",
+      ...options,
+    })
+  }
+
+  /**
+   * Put User Overleaf Session
+   *
+   * Save the current user's Overleaf browser session, for syncing
+   * without Overleaf Premium.
+   */
+  public static putUserOverleafSession<ThrowOnError extends boolean = true>(
+    parameters: {
+      overleafSessionPut: OverleafSessionPut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutUserOverleafSessionResponses,
+    PutUserOverleafSessionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "overleafSessionPut", map: "body" }] }],
+    )
+    return (options?.client ?? client).put<
+      PutUserOverleafSessionResponses,
+      PutUserOverleafSessionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-session",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Post User Google Auth
    *
    * Authenticate with Google using authorization code.
    */
   public static postUserGoogleAuth<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesUsersOAuthCodeExchange: AppApiRoutesUsersOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -1846,7 +2039,7 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesUsersOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       PostUserGoogleAuthResponses,
@@ -1877,7 +2070,7 @@ export class UsersService {
    */
   public static postUserGithubAuth<ThrowOnError extends boolean = true>(
     parameters: {
-      oAuthCodeExchange: OAuthCodeExchange
+      appApiRoutesUsersOAuthCodeExchange: AppApiRoutesUsersOAuthCodeExchange
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -1887,7 +2080,7 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ key: "oAuthCodeExchange", map: "body" }] }],
+      [{ args: [{ key: "appApiRoutesUsersOAuthCodeExchange", map: "body" }] }],
     )
     return (options?.client ?? client).post<
       PostUserGithubAuthResponses,
@@ -2182,7 +2375,8 @@ export class MiscService {
    * List the templates in the calkit registry, optionally of one kind.
    *
    * Read from the package rather than repeated in the frontend, so adding
-   * one there is enough.
+   * one there is enough. In registry order, which is the order they should
+   * be offered in.
    */
   public static getTemplates<ThrowOnError extends boolean = true>(
     parameters?: {
@@ -2276,6 +2470,49 @@ export class MiscService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Hub Stats
+   *
+   * Count the hub's users and projects, e.g., to report usage.
+   *
+   * Superusers and what their accounts own are left out by default, since
+   * staff and their demos aren't usage. ``exclude`` names more accounts to
+   * leave out, e.g., an org holding examples. Subprojects count with their
+   * parent rather than on their own. Activity follows ``Project.updated``,
+   * which tracks the latest commit the hub has seen. ``analytics`` comes from
+   * Mixpanel, when read access to it is configured.
+   */
+  public static getHubStats<ThrowOnError extends boolean = true>(
+    parameters?: {
+      exclude?: Array<string>
+      include_superusers?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetHubStatsResponses, GetHubStatsErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "exclude" },
+            { in: "query", key: "include_superusers" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetHubStatsResponses,
+      GetHubStatsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/stats",
+      ...options,
+      ...params,
     })
   }
 
@@ -3596,6 +3833,46 @@ export class ProjectsService {
   }
 
   /**
+   * Delete Project Question
+   */
+  public static deleteProjectQuestion<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      number: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteProjectQuestionResponses,
+    DeleteProjectQuestionErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "number" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteProjectQuestionResponses,
+      DeleteProjectQuestionErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/questions/{number}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Put Project Question
    */
   public static putProjectQuestion<ThrowOnError extends boolean = true>(
@@ -4445,6 +4722,64 @@ export class ProjectsService {
   }
 
   /**
+   * Post Project Latex Components
+   *
+   * What a LaTeX document needs beside it for calkit.sty's commands, as
+   * ``calkit latex build`` would write it, for compiling it elsewhere, e.g.,
+   * in the browser.
+   *
+   * The document and the files it inputs are read from ``sources`` where
+   * given, e.g., an editor's unsaved text, and otherwise from the project at
+   * ``ref``. Values are read here, from Git or DVC storage. Copies are named
+   * by their project paths, each going at the same path under ``_calkit``
+   * beside the document, for the caller to fetch, since a figure may be
+   * large or stored with DVC.
+   */
+  public static postProjectLatexComponents<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      ref?: string | null
+      latexComponentsRequest: LatexComponentsRequest
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexComponentsResponses,
+    PostProjectLatexComponentsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "ref" },
+            { key: "latexComponentsRequest", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexComponentsResponses,
+      PostProjectLatexComponentsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-components",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Post Project Misc
    *
    * Declare a misc artifact: attest to who made a file, or record where
@@ -4753,14 +5088,7 @@ export class ProjectsService {
   /**
    * Post Project Sync
    *
-   * Synchronize a project with its Git repo.
-   *
-   * Do we actually need this? It will give us a way to operate if GitHub is
-   * down, at least in read-only mode.
-   * Or perhaps we can bidirectionally sync, allowing users to update Calkit
-   * entities and we'll commit them back on sync.
-   * It would probably be better to use Git for that, so we can handle
-   * asynchronous edits with merges.
+   * Fetch the latest from a project's Git repo, e.g., to see a new branch.
    */
   public static postProjectSync<ThrowOnError extends boolean = true>(
     parameters: {
@@ -4890,6 +5218,57 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/pipeline",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Put Project Pipeline
+   *
+   * Replace the project's pipeline with the YAML the editor holds.
+   *
+   * Only the ``pipeline`` key of calkit.yaml is touched, so editing the
+   * pipeline can't disturb the datasets, figures, or publications sitting
+   * beside it in the same file.
+   */
+  public static putProjectPipeline<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      pipelinePut: PipelinePut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutProjectPipelineResponses,
+    PutProjectPipelineErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "pipelinePut", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).put<
+      PutProjectPipelineResponses,
+      PutProjectPipelineErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
@@ -7298,6 +7677,353 @@ export class ProjectsService {
   }
 
   /**
+   * Post Project Stage From Script Or Notebook
+   *
+   * Make a stage from a script, uploaded or already in the project.
+   *
+   * The script is read, not run, as ``calkit xr --dry-run`` reads it: its
+   * environment from what it imports, and its inputs and outputs from the
+   * paths it opens. That happens in a checkout of its own, so an uploaded
+   * script isn't left in the project's clone before it's saved. With
+   * ``save``, the script, its environment, and the stage are committed,
+   * with each document that shows the output elsewhere changed to show it
+   * with ``\ckfigure`` from where it's made.
+   */
+  public static postProjectStageFromScriptOrNotebook<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stageFromScriptOrNotebookPost: StageFromScriptOrNotebookPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectStageFromScriptOrNotebookResponses,
+    PostProjectStageFromScriptOrNotebookErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "stageFromScriptOrNotebookPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectStageFromScriptOrNotebookResponses,
+      PostProjectStageFromScriptOrNotebookErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Pipeline Stage
+   *
+   * Add a stage, with any files it needs, in one commit.
+   *
+   * An upload never replaces a different file already there, and one too
+   * big for Git is stored with DVC. An output another stage already makes
+   * is refused, and one already in Git stays there.
+   */
+  public static postProjectPipelineStage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stagePost: StagePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPipelineStageResponses,
+    PostProjectPipelineStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "stagePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPipelineStageResponses,
+      PostProjectPipelineStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Pipeline Export Stage
+   *
+   * Add the stage that exports a figure from the file it's drawn in.
+   *
+   * An app that can do it as the pipeline runs does, unless the person
+   * named another; otherwise it's a manual step.
+   */
+  public static postProjectPipelineExportStage<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      exportStagePost: ExportStagePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPipelineExportStageResponses,
+    PostProjectPipelineExportStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "exportStagePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPipelineExportStageResponses,
+      PostProjectPipelineExportStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/export",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Pipeline Runs
+   *
+   * The pipeline's runs, newest first, and whether one can be started
+   * here.
+   *
+   * Only on GitHub Actions so far, where the default branch's runs of every
+   * workflow that runs the Calkit action are recorded, however each was
+   * started.
+   */
+  public static getProjectPipelineRuns<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      limit?: number
+      offset?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPipelineRunsResponses,
+    GetProjectPipelineRunsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "offset" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPipelineRunsResponses,
+      GetProjectPipelineRunsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/runs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Pipeline Run
+   *
+   * Start the pipeline, on the default branch.
+   *
+   * Only on GitHub Actions so far, where a project without a workflow that
+   * runs the Calkit action gets one that only runs when started, since
+   * every Overleaf sync is a push.
+   */
+  public static postProjectPipelineRun<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      pipelineRunPost: PipelineRunPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectPipelineRunResponses,
+    PostProjectPipelineRunErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "pipelineRunPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectPipelineRunResponses,
+      PostProjectPipelineRunErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/runs",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Pipeline Run Logs
+   *
+   * A pipeline run's logs, in parts, e.g., one per GitHub Actions job,
+   * with what each did.
+   */
+  public static getProjectPipelineRunLogs<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      run_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPipelineRunLogsResponses,
+    GetProjectPipelineRunLogsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "run_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPipelineRunLogsResponses,
+      GetProjectPipelineRunLogsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Provenance
+   */
+  public static getProjectProvenance<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      key?: string | null
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectProvenanceResponses,
+    GetProjectProvenanceErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "key" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectProvenanceResponses,
+      GetProjectProvenanceErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/provenance",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Post Project Figure Script
    *
    * Commit a figure editor script as a stage that produces the figure.
@@ -7507,6 +8233,294 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/activity",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Delete Project Latex Comment
+   *
+   * Delete a thread and its replies from the source.
+   */
+  public static deleteProjectLatexComment<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      key: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteProjectLatexCommentResponses,
+    DeleteProjectLatexCommentErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "key" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteProjectLatexCommentResponses,
+      DeleteProjectLatexCommentErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Latex Comments
+   *
+   * The comment threads in the source of a PDF a latex stage builds.
+   */
+  public static getProjectLatexComments<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectLatexCommentsResponses,
+    GetProjectLatexCommentsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectLatexCommentsResponses,
+      GetProjectLatexCommentsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Patch Project Latex Comment
+   *
+   * Resolve a thread, or reopen it.
+   */
+  public static patchProjectLatexComment<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      latexCommentPatch: LatexCommentPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PatchProjectLatexCommentResponses,
+    PatchProjectLatexCommentErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "latexCommentPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      PatchProjectLatexCommentResponses,
+      PatchProjectLatexCommentErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Latex Comment
+   *
+   * Start a thread on some text selected in the PDF, in its source above
+   * the paragraph it's in, or on the whole document without a selection.
+   */
+  public static postProjectLatexComment<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      latexCommentPost: LatexCommentPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexCommentResponses,
+    PostProjectLatexCommentErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "latexCommentPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexCommentResponses,
+      PostProjectLatexCommentErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Latex Comment Reply
+   */
+  public static postProjectLatexCommentReply<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      latexCommentReplyPost: LatexCommentReplyPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexCommentReplyResponses,
+    PostProjectLatexCommentReplyErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "latexCommentReplyPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexCommentReplyResponses,
+      PostProjectLatexCommentReplyErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments/replies",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Latex Comments Move
+   *
+   * Move the comments on a PDF that are kept here into its LaTeX source,
+   * in one commit, so the source holds all of its discussion.
+   *
+   * Each goes above the paragraph it was made on, found from where it was
+   * selected in the PDF as built when it was made, with its replies, its
+   * authors, whether it's resolved, and its GitHub issue. One whose
+   * paragraph is gone goes at the top of the document, quoting what it was
+   * about.
+   */
+  public static postProjectLatexCommentsMove<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      latexCommentsMove: LatexCommentsMove
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectLatexCommentsMoveResponses,
+    PostProjectLatexCommentsMoveErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "latexCommentsMove", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectLatexCommentsMoveResponses,
+      PostProjectLatexCommentsMoveErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/latex-comments/move",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }
@@ -8481,6 +9495,89 @@ export class OrgsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/orgs/{org_name}/members",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete Org Member
+   */
+  public static deleteOrgMember<ThrowOnError extends boolean = true>(
+    parameters: {
+      org_name: string
+      username: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteOrgMemberResponses,
+    DeleteOrgMemberErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "org_name" },
+            { in: "path", key: "username" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteOrgMemberResponses,
+      DeleteOrgMemberErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/orgs/{org_name}/members/{username}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update Org Member
+   */
+  public static updateOrgMember<ThrowOnError extends boolean = true>(
+    parameters: {
+      org_name: string
+      username: string
+      orgMemberPatch: OrgMemberPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    UpdateOrgMemberResponses,
+    UpdateOrgMemberErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "org_name" },
+            { in: "path", key: "username" },
+            { key: "orgMemberPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      UpdateOrgMemberResponses,
+      UpdateOrgMemberErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/orgs/{org_name}/members/{username}",
       ...options,
       ...params,
       headers: {

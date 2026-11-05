@@ -19,17 +19,25 @@ import type {
   ContentsItem,
   DvcOutput,
   TextDiff,
-  Figure,
+  FiguresPage,
   GithubRepo,
+  ExportStage,
+  PipelineRun,
+  ProjectPipeline,
+  PipelineRuns,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
   ProjectsPublic,
+  Provenance,
   PullRequestRefs,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
+  Result,
+  StageFromScriptOrNotebookResponse,
+  Table,
 } from "../core/types";
 
 function projectPath(owner: string, project: string): string {
@@ -37,6 +45,11 @@ function projectPath(owner: string, project: string): string {
     project,
   )}`;
 }
+
+// The session Overleaf's web app signs in with, which lets the hub sync for
+// users without Overleaf Premium, whose Git integration needs a token
+const OVERLEAF_URL = "https://www.overleaf.com";
+const OVERLEAF_SESSION_COOKIE = "overleaf_session2";
 
 const MAX_PREVIEW_BYTES = 2_000_000;
 const MAX_VIEWER_BYTES = 25_000_000;
@@ -147,6 +160,7 @@ async function handle(message: Request): Promise<unknown> {
           search_for: message.searchFor,
           limit: message.limit ?? 100,
           min_access_level: message.minAccessLevel ?? "write",
+          github_repo: message.githubRepo,
         },
       });
     case "projects.create":
@@ -169,6 +183,10 @@ async function handle(message: Request): Promise<unknown> {
       return request<GithubRepo[]>("/user/github/repos", {
         query: { per_page: message.perPage ?? 100 },
       });
+    case "github.installations":
+      // Where the Calkit GitHub app is installed, without which the hub can't
+      // create or update a project's repo
+      return request<{ total_count: number }>("/user/github-app-installations");
     case "github.pullRequest":
       // Through the hub, which holds a GitHub token, so a private repo
       // resolves where an unauthenticated request would not
@@ -211,9 +229,98 @@ async function handle(message: Request): Promise<unknown> {
           hub: hubFor(message),
         },
       );
-    case "project.figures":
-      return request<Figure[]>(
-        `${projectPath(message.owner, message.project)}/figures`,
+    case "project.contentPaths":
+      return request<string[]>(
+        `${projectPath(message.owner, message.project)}/contents-paths`,
+      );
+    case "project.figures": {
+      // The hub pages at most 100 figures, so gather paths and titles only
+      const items: FiguresPage["items"] = [];
+      let total = 0;
+      do {
+        const page = await request<FiguresPage>(
+          `${projectPath(message.owner, message.project)}/figures`,
+          {
+            query: {
+              limit: 100,
+              offset: items.length,
+              include_content: false,
+            },
+          },
+        );
+        items.push(...page.items);
+        total = page.items.length ? page.total : items.length;
+      } while (items.length < total);
+      return { items, total };
+    }
+    case "project.tables":
+      return request<Table[]>(
+        `${projectPath(message.owner, message.project)}/tables`,
+      );
+    case "project.results":
+      return request<Result[]>(
+        `${projectPath(message.owner, message.project)}/results`,
+      );
+    case "project.provenance":
+      return request<Provenance>(
+        `${projectPath(message.owner, message.project)}/provenance`,
+        { query: { path: message.path, key: message.key } },
+      );
+    case "project.stageFromScriptOrNotebook":
+      return request<StageFromScriptOrNotebookResponse>(
+        `${projectPath(message.owner, message.project)}` +
+          "/pipeline/stages/from-script-or-notebook",
+        {
+          method: "POST",
+          body: {
+            script_path: message.scriptPath,
+            content: message.content,
+            shows: message.shows,
+            produces: message.produces,
+            save: message.save ?? false,
+          },
+        },
+      );
+    case "project.recordOrigin":
+      // Recorded as a misc artifact, which the hub only takes for a path
+      // nothing else declares
+      return request<{ path: string }>(
+        `${projectPath(message.owner, message.project)}/misc`,
+        {
+          method: "POST",
+          body: {
+            path: message.path,
+            imported_from: message.importedFrom,
+            created_by: message.createdBy,
+            message: `Record where ${message.path} came from`,
+          },
+        },
+      );
+    case "project.pipeline":
+      return request<ProjectPipeline>(
+        `${projectPath(message.owner, message.project)}/pipeline`,
+      );
+    case "project.pipelineRuns":
+      return request<PipelineRuns>(
+        `${projectPath(message.owner, message.project)}/pipeline/runs`,
+      );
+    case "project.startPipelineRun":
+      return request<PipelineRun>(
+        `${projectPath(message.owner, message.project)}/pipeline/runs`,
+        { method: "POST", body: { location: "github-actions" } },
+      );
+    case "project.addExportStage":
+      return request<ExportStage>(
+        `${projectPath(message.owner, message.project)}/pipeline/stages/export`,
+        {
+          method: "POST",
+          body: {
+            source: message.source,
+            output: message.output,
+            app: message.app || null,
+            files: message.files ?? [],
+          },
+        },
       );
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });
@@ -246,6 +353,26 @@ async function handle(message: Request): Promise<unknown> {
         `${projectPath(message.owner, message.project)}/overleaf-syncs`,
         { method: "POST", body: { path: message.path } },
       );
+    case "overleaf.setToken":
+      return request<{ message: string }>("/user/overleaf-token", {
+        method: "PUT",
+        body: { token: message.token },
+      });
+    case "overleaf.connectSession": {
+      // Read here, since Overleaf keeps the cookie from page scripts, and
+      // only when the user asks, so it's never held otherwise
+      const cookie = await chrome.cookies.get({
+        url: OVERLEAF_URL,
+        name: OVERLEAF_SESSION_COOKIE,
+      });
+      if (!cookie) {
+        throw new Error("Sign in to Overleaf first");
+      }
+      return request<{ message: string }>("/user/overleaf-session", {
+        method: "PUT",
+        body: { session: cookie.value },
+      });
+    }
     case "overleaf.import":
       return request<{ path: string; title: string }>(
         `${projectPath(message.owner, message.project)}/publications/overleaf`,

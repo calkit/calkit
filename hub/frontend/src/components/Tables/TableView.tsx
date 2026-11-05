@@ -54,6 +54,7 @@ import {
 } from "../../lib/tables"
 import ClearableInput from "../Common/ClearableInput"
 import LoadingSpinner from "../Common/LoadingSpinner"
+import Markdown from "../Common/Markdown"
 import TexText from "../Common/TexText"
 
 // Rendering every row of a large table locks the page up for seconds, and
@@ -245,7 +246,10 @@ export default function TableView({
   }
   if (!parsed) {
     // Nothing tabular in the file: show what's actually there rather than an
-    // empty grid claiming the table has no rows.
+    // empty grid claiming the table has no rows. Markdown is shown as
+    // markdown -- a file written to be read, cited as evidence for an
+    // answer, shouldn't arrive as its own source.
+    const isMarkdown = /\.(md|markdown)$/i.test(table.path)
     return (
       <Box
         borderWidth={1}
@@ -255,15 +259,19 @@ export default function TableView({
         overflow="auto"
         maxHeight={maxHeight}
       >
-        <Code
-          display="block"
-          whiteSpace="pre"
-          bg="transparent"
-          fontSize="xs"
-          p={0}
-        >
-          {text}
-        </Code>
+        {isMarkdown ? (
+          <Markdown>{text}</Markdown>
+        ) : (
+          <Code
+            display="block"
+            whiteSpace="pre"
+            bg="transparent"
+            fontSize="xs"
+            p={0}
+          >
+            {text}
+          </Code>
+        )}
       </Box>
     )
   }

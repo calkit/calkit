@@ -15,14 +15,35 @@ install: ## Create the project's virtual environment.
 dev: ## Start up the hub containers for development.
 	@$(MAKE) -C hub dev
 
+.PHONY: dev-reset-user
+dev-reset-user: ## Reset the hub development user's data.
+	@$(MAKE) -C hub dev-reset-user
+
 .PHONY: frontend-client
 frontend-client: ## Regenerate the hub frontend's API client.
 	@$(MAKE) -C hub/frontend client
 
 .PHONY: format
-format: sync-docs sync-resources ## Automatically format files.
+format: ## Automatically format files and regenerate what's generated.
 	@echo "🚀 Linting code with pre-commit"
 	@uv run pre-commit run -a
+
+.PHONY: pr
+pr: ## Get a pull request ready to pass: format, and run the pipeline.
+	@echo "🚀 Formatting, then checking it's done"
+	@uv run pre-commit run -a > /dev/null || uv run pre-commit run -a
+	@echo "🚀 Pulling the pipeline's outputs, so only what changed reruns"
+	@uv run calkit dvc pull || true
+	@echo "🚀 Running the pipeline"
+	@uv run calkit run
+	@echo "🚀 Pushing the pipeline's outputs"
+	@uv run calkit dvc push
+	@echo "🚀 Checking the run left nothing to format or rerun"
+	@files="$$(git diff --name-only)"; \
+		[ -z "$$files" ] || uv run pre-commit run --files $$files
+	@uv run calkit status --json | uv run python -c \
+		"import json, sys; sys.exit(json.load(sys.stdin)['pipeline']['is_stale'])" \
+		|| (echo "The pipeline is stale; see 'calkit status'" && exit 1)
 
 .PHONY: check
 check: format ## Run code quality tools.
@@ -76,6 +97,8 @@ devcontainer-image: ## Build the dev container image and smoke test it.
 	@echo "🚀 Smoke testing the dev container image"
 	@docker run --rm calkit/devcontainer:dev bash -c \
 		"calkit --version && uv --version && pixi --version && conda --version"
+	@docker run --rm --user vscode calkit/devcontainer:dev bash -lc \
+		"calkit --version && dvc --version && conda --version"
 
 .PHONY: docs
 docs: sync-docs ## Build and serve the documentation.
@@ -141,3 +164,11 @@ browser-ext-dev: ## Rebuild the browser extension on every change.
 .PHONY: browser-ext-clean-zips
 browser-ext-clean-zips: ## Delete all built browser extension ZIPs.
 	@rm -rf browser-ext/zip
+
+.PHONY: assistant
+assistant: ## Run the desktop assistant locally for development.
+	@cd assistant && uv run main.py
+
+.PHONY: test-assistant
+test-assistant: ## Run the desktop assistant's offscreen smoke tests.
+	@cd assistant && QT_QPA_PLATFORM=offscreen uv run pytest

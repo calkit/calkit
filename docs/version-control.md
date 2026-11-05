@@ -1,7 +1,10 @@
 # Version control
 
-Version control is one of the pillars of reproducibility.
-However, the current de facto version control system (VCS),
+Keeping a history of all changes to the project
+is one of the pillars of reproducibility,
+and using a real version control system (VCS) instead of, e.g., ad hoc
+file name suffixes is a must to improve efficiency and avoid mistakes.
+However, the current de facto VCS,
 [Git](https://git-scm.com),
 was designed primarily for complex software development projects,
 and thus provides lots of control and flexibility,
@@ -208,6 +211,76 @@ Options:
   Only compatible when adding one path.
 - `--push`: Push to the Git or DVC remote after committing.
 
+## Merging branches
+
+Calkit keeps a record of each pipeline stage's last run,
+in `dvc.lock` and `.calkit/stage-runs.json`.
+When you and a collaborator both run the pipeline,
+e.g., on different branches,
+Git can report conflicts in these files when you merge,
+since it merges them line by line,
+or mix lines from two runs into a record neither of you made.
+
+Calkit merges them one stage at a time instead.
+To merge a branch into the current one, run:
+
+```sh
+calkit merge other-branch
+```
+
+A stage that only ran on one side keeps that side's results,
+with no questions asked.
+For a stage that ran on both sides,
+Calkit shows when each side ran it and which inputs differ,
+and asks which to keep:
+
+- **Ours**: the results from the current branch.
+- **Theirs**: the results from the branch being merged in.
+- **Rerun**: neither, so `calkit run` runs the stage again.
+
+The choice applies to everything the stage produced,
+so its outputs and its records always agree.
+If a stage's inputs changed on both sides,
+e.g., you both edited its script,
+the merged inputs match neither run,
+so it will rerun either way.
+
+Choices can also be given up front:
+
+```sh
+calkit merge other-branch --theirs fit-model --rerun make-figures
+calkit merge other-branch --prefer theirs
+```
+
+To combine the branch's changes into a single commit, add `--squash`.
+
+If other files conflict, e.g., a script you both edited,
+Calkit stops so you can resolve them.
+Then run `calkit merge --continue` to finish,
+or `calkit merge --abort` to go back to where you started.
+
+### Conflicts from `git pull` and other tools
+
+A merge started some other way, e.g., by `git pull` or your editor,
+can leave these files in conflict too,
+and `calkit status` and `calkit pull` will say so.
+To resolve them, run:
+
+```sh
+calkit fix merge-conflicts
+```
+
+It takes the same choices as `calkit merge`,
+and says how to finish, e.g., with `calkit merge --continue`.
+
+<!-- prettier-ignore -->
+!!! tip
+
+    Running the pipeline, or cloning or pulling with Calkit, sets Git up
+    to merge these files one stage at a time on its own,
+    so most merges won't conflict in them at all.
+    Only stages that ran on both sides need a choice.
+
 ## Line endings across platforms
 
 Windows writes CRLF line endings where macOS and Linux write LF, and Git
@@ -275,3 +348,23 @@ pipeline:
         - path: results
           storage: dvc-zip
 ```
+
+## Moving files between Git and DVC
+
+If a file is stored in Git and it would be better in DVC,
+e.g., because it's large and its changes are starting to make the
+repo expensive to clone or download,
+its storage location can be changed with:
+
+```sh
+calkit update path-storage
+```
+
+Note that this will not clean out all the previous versions stored in
+Git.
+That can be achieved with
+[git-filter-repo](https://github.com/newren/git-filter-repo).
+Likewise, old versions of files kept in DVC will still live in the local
+and remote caches.
+These can be managed with DVC's garbage collection functionality,
+accessible at `calkit dvc gc`.

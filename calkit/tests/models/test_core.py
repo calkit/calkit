@@ -188,7 +188,7 @@ def test_machine_property_requirements():
                 {"kind": "cpu-count", "min": 2},
                 {"kind": "memory-gb", "min": 8, "max": 128},
                 {"kind": "os", "equals": ["Linux", "Darwin"]},
-                {"kind": "python-version", "version_spec": ">=3.11"},
+                {"kind": "calkit-python-version", "version_spec": ">=3.11"},
             ]
         }
     )
@@ -225,3 +225,138 @@ def test_machine_property_requirements():
     )
     assert len(env.requirements) == 2
     assert env.lock == ["cpu-count", "julia-version"]
+    # A version can be locked to a given precision, but only a known one
+    lock = [
+        "python-version-minor",
+        "gcc-version-major",
+        "gcc-version-patch",
+        "gcc-version-full",
+    ]
+    env = SystemEnvironment.model_validate({"kind": "system", "lock": lock})
+    assert env.lock == lock
+    with pytest.raises(ValidationError):
+        SystemEnvironment.model_validate(
+            {"kind": "system", "lock": ["gcc-version-micro"]}
+        )
+
+
+def test_env_var_inputs():
+    from calkit.models.core import SystemEnvironment
+    from calkit.models.io import EnvVarInput, PathInput
+
+    env = SystemEnvironment.model_validate(
+        {"kind": "system", "inputs": [{"kind": "env-var", "name": "SITE"}]}
+    )
+    assert env.inputs == [EnvVarInput(kind="env-var", name="SITE")]
+    # A misspelled key is refused rather than ignored
+    with pytest.raises(ValidationError):
+        SystemEnvironment.model_validate(
+            {"kind": "system", "inputs": [{"kind": "env-var", "path": "X"}]}
+        )
+    with pytest.raises(ValidationError):
+        EnvVarInput.model_validate(
+            {"kind": "env-var", "name": "SITE", "default": "x"}
+        )
+    # Nor does a malformed env-var input fall through to being a path
+    with pytest.raises(ValidationError, match="not a path"):
+        PathInput.model_validate({"kind": "env-var", "path": "X"})
+    assert (
+        PathInput.model_validate({"path": "a", "storage": "git"}).path == "a"
+    )
+
+
+def test_switch_env_model():
+    from calkit.models.core import (
+        CondaEnvironment,
+        EnvVarEqualsCondition,
+        OsIsCondition,
+        SlurmEnvironment,
+        SwitchEnvironment,
+    )
+
+    def switch(*options: dict) -> dict:
+        return {"kind": "switch", "switch": list(options)}
+
+    env = SwitchEnvironment.model_validate(
+        switch(
+            {"when": [{"hostname_matches": "*.edu"}], "use": "a"},
+            {
+                "when": [
+                    {"os_is": ["linux", "macos"]},
+                    {"env_var_equals": "SITE=y"},
+                ],
+                "use": "b",
+            },
+            {"when": [{"app_exists": "sbatch"}], "use": "c"},
+            {"use": "d"},
+        )
+    )
+    assert [o.use for o in env.switch] == ["a", "b", "c", "d"]
+    when = env.switch[1].when
+    assert when is not None
+    assert isinstance(when[0], OsIsCondition)
+    assert isinstance(when[1], EnvVarEqualsCondition)
+    # Written back the way it was read
+    assert env.model_dump(exclude_defaults=True)["switch"][1]["when"] == [
+        {"os_is": ["linux", "macos"]},
+        {"env_var_equals": "SITE=y"},
+    ]
+    # Mistakes are caught when the project loads, naming what's wrong
+    refused = [
+        ([{"os_is": "Darwin"}], "'linux', 'macos' or 'windows'"),
+        ([{"os_iz": "linux"}], "named one of: app_exists, env_var_set,"),
+        ([{"os_is": "linux", "app_exists": "x"}], "one 'name: value' pair"),
+        ([{"env_var_equals": "SITE"}], "pattern"),
+        ([{"app_exists": {"name": "x"}}], "app_exists"),
+        ({"os_is": "linux"}, "valid list"),
+        ([], "at least 1"),
+    ]
+    for bad, problem in refused:
+        with pytest.raises(ValidationError, match=problem):
+            SwitchEnvironment.model_validate(switch({"when": bad, "use": "a"}))
+    for options, problem in [
+        ([], "at least 1"),
+        ([{"use": "a"}, {"use": "b"}], "only the last option"),
+        ([{"environment": "a"}], "use"),
+    ]:
+        with pytest.raises(ValidationError, match=problem):
+            SwitchEnvironment.model_validate(switch(*options))
+    with pytest.raises(ValidationError, match="switch"):
+        SwitchEnvironment.model_validate(
+            {"kind": "switch", "use": {"else": "a"}}
+        )
+    # An option can be defined in place, as any kind but a switch
+    env = SwitchEnvironment.model_validate(
+        switch(
+            {
+                "when": [{"app_exists": "sbatch"}],
+                "use": {"kind": "slurm", "default_options": ["--gpus=1"]},
+            },
+            {"use": "d"},
+        )
+    )
+    assert isinstance(env.switch[0].use, SlurmEnvironment)
+    for inline, problem in [
+        ({"kind": "switch", "switch": [{"use": "a"}]}, "slurm"),
+        ({"kind": "uv-venv"}, "path"),
+        (
+            {"kind": "uv-venv", "path": "r.txt", "requirements": ["x"]},
+            "describe a machine",
+        ),
+    ]:
+        with pytest.raises(ValidationError, match=problem):
+            SwitchEnvironment.model_validate(switch({"use": inline}))
+    # Only environments that describe a machine have requirements
+    reqs = ["sbatch", {"kind": "cpu-count", "min": 4}]
+    slurm = SlurmEnvironment.model_validate(
+        {"kind": "slurm", "requirements": reqs}
+    )
+    assert len(slurm.requirements) == 2
+    with pytest.raises(ValidationError, match="describe a machine"):
+        CondaEnvironment.model_validate(
+            {"kind": "conda", "path": "env.yml", "requirements": reqs}
+        )
+    with pytest.raises(ValidationError, match="environments it picks from"):
+        SwitchEnvironment.model_validate(
+            switch({"use": "a"}) | {"requirements": reqs}
+        )

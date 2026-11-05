@@ -58,12 +58,22 @@ def test_sync_dvc_calls_pull_and_push():
 
 
 def test_sync_dvc_errors_when_not_initialized():
+    from dvc.exceptions import NotDvcRepoError
+
     with patch(
-        "calkit.dvc.get_dvc_repo", side_effect=Exception("not a dvc repo")
+        "calkit.dvc.get_dvc_repo", side_effect=NotDvcRepoError("no repo")
     ):
         result = runner.invoke(app, ["sync", "dvc"])
         assert result.exit_code != 0
         assert "No DVC repository found" in result.output
+    # A repo that exists but can't be opened says why instead
+    with patch(
+        "calkit.dvc.get_dvc_repo", side_effect=PermissionError("site cache")
+    ):
+        result = runner.invoke(app, ["sync", "dvc"])
+        assert result.exit_code != 0
+        assert "Failed to open DVC repo: PermissionError" in result.output
+        assert "No DVC repository found" not in result.output
 
 
 def test_sync_all_runs_all_targets():

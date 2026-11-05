@@ -15,6 +15,12 @@ This runs `npm run generate-client` in the frontend directory, which:
 - Generates TypeScript client SDK files in `frontend/src/client`
 - Formats the output with Biome
 
+The spec is fetched over HTTP, so a dev stack has to be up (`make dev`).
+`frontend/openapi.json` is gitignored, but `frontend/src/client` is
+committed, and the end-to-end CI job regenerates it against the stack it
+already runs and fails if it differs, so a backend change that lands
+without a regenerated client won't merge.
+
 ## Code Formatting
 
 Format all code (frontend and backend) in one command:
@@ -42,6 +48,14 @@ Key points:
 - **Frontend**: React + Vite in `frontend/` directory
 - **Docker**: Services orchestrated with Docker Compose; see `docker-compose.yml`
 - **Development**: Use `make dev` to start all services
+- **Stacks per worktree**: each worktree has its own stack, with its own
+  database and DVC data, named by `COMPOSE_PROJECT_NAME` in `hub/.env`, so
+  plain `docker compose` commands from `hub/` reach this worktree's stack.
+  `make dev` sets the name the first time, from the worktree's directory
+  (the checkout named `calkit` keeps `calkit`), and copies `.env` from the
+  main checkout if there isn't one; `make dotenv` does both without starting
+  the stack. Stacks share ports, so stop another worktree's stack before
+  starting this one; `make dev` says which.
 
 ## Testing
 
@@ -67,6 +81,11 @@ docker compose exec backend bash ./tests-start.sh app/tests/api/routes/test_user
 
 Note the paths are relative to `backend/`, which is the container's working
 directory, not the repo root.
+
+Backend tests go in the module that mirrors the code they exercise, e.g.,
+tests for routes in `app/api/routes/projects/core.py` go in
+`app/tests/api/routes/projects/test_core.py`.
+Don't start a new test module for a feature.
 
 ## Troubleshooting
 
@@ -178,7 +197,7 @@ divergence from that baseline noise.
 ### Modifying API Contracts
 
 1. Update backend route in `backend/app/api/routes/`
-2. Regenerate the client: `make frontend-client`
+2. Regenerate the client: `make frontend-client` (required; CI checks it)
 3. Update frontend code to use new/changed SDK methods
 4. Format both: `make format`
 

@@ -86,6 +86,7 @@ const UploadFile = ({ isOpen, onClose, path }: UploadFileProps) => {
         onClose={onClose}
         size={{ base: "sm", md: "md" }}
         isCentered
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>

@@ -1,7 +1,6 @@
 import { ExternalLinkIcon } from "@chakra-ui/icons"
 import { Button, Link, useDisclosure } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Link as RouterLink } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
 import { FaChrome, FaGithub } from "react-icons/fa"
 import { SiOverleaf, SiZotero } from "react-icons/si"
@@ -13,6 +12,7 @@ import { handleError } from "../../lib/errors"
 import { startGitHubOAuth } from "../../lib/github"
 import { DISMISSED, buildAccountSteps } from "../../lib/onboarding"
 import { stashZoteroReturn } from "../../lib/zotero"
+import NewProjectModal from "../Projects/NewProjectModal"
 import UpdateOverleafToken from "../UserSettings/UpdateOverleafToken"
 import ChecklistCard from "./ChecklistCard"
 import CommandBlock from "./CommandBlock"
@@ -32,6 +32,7 @@ const CHROME_EXT_URL =
 const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
   const showToast = useCustomToast()
   const overleafModal = useDisclosure()
+  const newProjectModal = useDisclosure()
   const { accountFlags, setFlag, flagsLoading } = useOnboardingFlags()
   const connectedAccountsQuery = useQuery({
     queryKey: ["user", "connected-accounts"],
@@ -72,15 +73,21 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
         size="xs"
         variant="primary"
         leftIcon={<FaGithub />}
-        onClick={() => startGitHubOAuth("/")}
+        onClick={() => startGitHubOAuth("/", { chooseAccount: true })}
       >
         Connect GitHub
       </Button>
     ),
     project: (
-      <Button size="xs" variant="primary" as={RouterLink} to="/new">
-        Start a project
-      </Button>
+      <>
+        <Button size="xs" variant="primary" onClick={newProjectModal.onOpen}>
+          Start a project
+        </Button>
+        <NewProjectModal
+          isOpen={newProjectModal.isOpen}
+          onClose={newProjectModal.onClose}
+        />
+      </>
     ),
     cli: (
       <>
@@ -139,11 +146,6 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
   return (
     <ChecklistCard
       title="Set up your workspace"
-      intro={
-        "Connect the tools you already use. Nothing moves into Calkit that " +
-        "you can't take back out -- your repo, your .bib, your Overleaf " +
-        "project stay yours."
-      }
       steps={steps}
       actions={actions}
       // These can be done in any order and the card spans the page, so two
@@ -152,7 +154,6 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
       onMarkDone={setFlag}
       dismissed={accountFlags.includes(DISMISSED)}
       onDismissedChange={(dismissed) => setFlag(DISMISSED, dismissed)}
-      doneMessage="You're all set up. Everything's connected."
     />
   )
 }

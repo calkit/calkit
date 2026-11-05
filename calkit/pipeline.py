@@ -2,9 +2,10 @@
 
 import itertools
 import os
+import posixpath
 import re
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,9 @@ from calkit.models.pipeline import (
     LatexStage,
     PathOutput,
     Pipeline,
+    ShellCommandStage,
     Stage,
+    is_flag_and_value,
 )
 
 
@@ -63,13 +66,15 @@ def frozen_stage_base_names(
 def frozen_tainted_stage_names(
     ck_info: dict | None = None, wdir: str | None = None
 ) -> set[str]:
-    """Base names of frozen stages, plus every stage downstream of one.
+    """Base names of out-of-date frozen stages, plus every stage downstream.
 
     A frozen stage doesn't re-run when its inputs change, so DVC never calls
     it out of date -- and never calls anything built from its outputs out of
     date either. Nothing in a status report will say so, which is the point
     of naming them here: an answer resting on one of those outputs is
-    resting on whatever the stage last happened to produce.
+    resting on whatever the stage last happened to produce. One whose deps
+    and outs still match ``dvc.lock`` is left out, since it's as current as
+    if it weren't frozen.
 
     Read from ``dvc.lock`` where there is one, since its deps and outs are
     concrete, falling back to ``dvc.yaml``. Names come back without their
@@ -80,6 +85,32 @@ def frozen_tainted_stage_names(
     tainted = frozen_stage_base_names(ck_info=ck_info, wdir=wdir)
     if not tainted:
         return set()
+    # One whose deps and outs still match dvc.lock is as current as any
+    # other stage, so only one that would be out of date if unfrozen taints;
+    # reading just this project's dvc.yaml keeps that cheap
+    try:
+        import dvc.repo
+
+        dvc_repo = calkit.dvc.get_dvc_repo(wdir)
+        try:
+            dvc_yaml = os.path.join(os.path.abspath(wdir or "."), "dvc.yaml")
+            current: set[str] = set()
+            changed: set[str] = set()
+            with dvc.repo.lock_repo(dvc_repo):
+                for stage in dvc_repo.stage.load_all(path=dvc_yaml):
+                    base = stage.name.split("@")[0]
+                    if base not in tainted or not stage.frozen:
+                        continue
+                    stage.frozen = False
+                    if stage.changed():
+                        changed.add(base)
+                    else:
+                        current.add(base)
+            tainted -= current - changed
+        finally:
+            dvc_repo.close()
+    except Exception:
+        pass
     stages: dict = {}
     for fname in ("dvc.lock", "dvc.yaml"):
         fpath = os.path.join(wdir or ".", fname)
@@ -150,6 +181,17 @@ class PipelineStatus(BaseModel):
     ignored_files_in_inputs: dict[str, dict[str, list[str]]] = Field(
         default_factory=dict
     )
+    # What each switch environment the pipeline uses picks on this machine,
+    # None where it picks nothing
+    switches: dict[str, str | None] = Field(default_factory=dict)
+    # Stages that can't run on this machine, with why
+    gated_stages: dict[str, str] = Field(default_factory=dict)
+    # DVC's data status, when asked for, computed alongside the stage status
+    # so it reuses that index and those hashes; not part of the output
+    dvc_data_status: dict | None = Field(default=None, exclude=True)
+    # Likewise for paths tracked where they shouldn't be, from
+    # calkit.dvc.get_storage_problems
+    storage_problems: list[dict] | None = Field(default=None, exclude=True)
 
     @field_validator("stale_stages", mode="before")
     @classmethod
@@ -248,6 +290,9 @@ class StaleStage(BaseModel):
     # mechanism, so they should not be advertised as always-run stages of the
     # parent project.
     is_subproject: bool = False
+    # Why the stage can't run on this machine, if it can't; it stays stale
+    # here, since running elsewhere is what brings it up to date
+    cannot_run_here: str | None = None
 
     @staticmethod
     def _as_path_list(paths: object) -> list[str]:
@@ -484,6 +529,108 @@ def stages_are_similar(stage1: dict, stage2: dict) -> bool:
     return True
 
 
+_TABLE_ITEM_RE = re.compile(r"\$\{item\._arg\d+\.([^}]+)\}")
+
+
+def _is_table_key(key: str, values: list) -> bool:
+    """Whether a matrix key holds the rows of a table-form iteration."""
+    return (
+        re.fullmatch(r"_arg\d+", key) is not None
+        and bool(values)
+        and all(isinstance(v, dict) for v in values)
+    )
+
+
+def _name_table_items(
+    dvc_stage: dict,
+) -> tuple[dict, dict[str, str]]:
+    """Name a table-form stage's items by their values.
+
+    DVC names a matrix item after each value, except that a mapping, which
+    is what a table row is, is named after its position, e.g.,
+    ``stage@_arg00-1`` for the first row and first seed. That says nothing
+    about which item is which, so a stage with a table is written as a
+    ``foreach`` over items named the way DVC names scalars, with a row
+    named by its values, e.g., ``stage@3-_mm-1``.
+
+    Returns the stage as it should be written, and a map from each item's
+    DVC matrix name to its new name, so ``dvc.lock`` entries can follow.
+    Nothing changes for a stage with no table, or where naming by value
+    would be ambiguous.
+    """
+    from dvc.parsing.interpolate import to_str
+
+    matrix = dvc_stage.get("matrix")
+    if not matrix or not any(_is_table_key(k, v) for k, v in matrix.items()):
+        return dvc_stage, {}
+    items: dict[str, dict] = {}
+    renames: dict[str, str] = {}
+    keys = list(matrix)
+    for combination in itertools.product(
+        *[list(enumerate(matrix[k])) for k in keys]
+    ):
+        item: dict = {}
+        old_fragments = []
+        new_fragments = []
+        for key, (i, value) in zip(keys, combination):
+            if _is_table_key(key, matrix[key]):
+                old_fragments.append(f"{key}{i}")
+                row = [to_str(v) for v in value.values()]
+                new_fragments.append("-".join(v for v in row if v))
+                for col, v in value.items():
+                    if col in item:
+                        return dvc_stage, {}
+                    item[col] = v
+            else:
+                old_fragments.append(to_str(value))
+                new_fragments.append(to_str(value))
+                if key in item:
+                    return dvc_stage, {}
+                item[key] = value
+        name = "-".join(new_fragments)
+        if not all(new_fragments) or name in items:
+            return dvc_stage, {}
+        items[name] = item
+        renames["-".join(old_fragments)] = name
+
+    def unnest(obj: Any) -> Any:
+        if isinstance(obj, str):
+            return _TABLE_ITEM_RE.sub(r"${item.\1}", obj)
+        if isinstance(obj, list):
+            return [unnest(o) for o in obj]
+        if isinstance(obj, dict):
+            return {unnest(k): unnest(v) for k, v in obj.items()}
+        return obj
+
+    body = {k: unnest(v) for k, v in dvc_stage.items() if k != "matrix"}
+    return {"foreach": items, "do": body}, renames
+
+
+def _rename_lock_entries(
+    renames: dict[str, str], wdir: str | None = None
+) -> bool:
+    """Rename ``dvc.lock`` entries, keeping their order and contents.
+
+    An item that was run under its old name is still up to date under its
+    new one, since what it runs, reads, and writes are unchanged.
+    """
+    lock_fpath = os.path.join(wdir, "dvc.lock") if wdir else "dvc.lock"
+    if not renames or not os.path.isfile(lock_fpath):
+        return False
+    with open(lock_fpath) as f:
+        lock = calkit.ryaml.load(f)
+    stages = (lock or {}).get("stages") or {}
+    if not any(k in stages and v not in stages for k, v in renames.items()):
+        return False
+    lock["stages"] = {
+        renames[k] if k in renames and renames[k] not in stages else k: v
+        for k, v in stages.items()
+    }
+    with open(lock_fpath, "w") as f:
+        calkit.ryaml.dump(lock, f)
+    return True
+
+
 def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
     """Restructure a dictionary with list values into a list of dictionaries,
     where each dictionary represents a permutation of the input dictionary's
@@ -606,8 +753,20 @@ def collapse_dvc_stages(
     all_outs: set[str] = set()
     all_deps: set[str] = set()
     for stage_cfg in stages.values():
-        matrix = stage_cfg.get("matrix")
-        replacements = _expand_matrix(matrix) if matrix else [{}]
+        # A stage iterating over a table is written as a foreach; see
+        # _name_table_items
+        if "foreach" in stage_cfg:
+            foreach = stage_cfg["foreach"]
+            replacements = list(
+                foreach.values() if isinstance(foreach, dict) else foreach
+            )
+            # A hand-written foreach over scalars has no named fields
+            if not all(isinstance(r, dict) for r in replacements):
+                replacements = [{}]
+            stage_cfg = stage_cfg.get("do", {})
+        else:
+            matrix = stage_cfg.get("matrix")
+            replacements = _expand_matrix(matrix) if matrix else [{}]
         for out in stage_cfg.get("outs", []):
             raw = out if isinstance(out, str) else list(out.keys())[0]
             for r in replacements:
@@ -730,21 +889,392 @@ def _status_target_matches(
     return any(_paths_overlap(norm_target, p) for p in candidate_paths)
 
 
+def get_gated_stages(
+    ck_info: dict,
+    stage_names: list[str] | set[str] | None = None,
+    interactive: bool | None = None,
+    system_info: dict | None = None,
+    remote: bool = True,
+    manual: bool = True,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Stages that can't run on this machine, with the reason for each.
+
+    Returns two mappings. The first is stages the project says can't run
+    here: a requirement of the stage or of an environment it uses isn't
+    met where it would run, a switch it uses picks nothing here, or a
+    machine it locks isn't this one. The second is stages that can't run
+    because something is wrong, e.g., their machine can't be reached. Both
+    are skipped, keeping their outputs, but only the first is expected.
+
+    Requirements are only checked here, never prompted for or installed,
+    and anything the checks print goes to stderr, keeping stdout for,
+    e.g., ``calkit status --json``. ``interactive`` only decides whether
+    connecting to a machine may prompt. Without ``remote``, nothing is
+    checked on another machine, which would take connecting to it. Without
+    ``manual``, nobody is there to do a manual step, so those can't run.
+    """
+    import contextlib
+    import json
+    import subprocess
+    import sys
+
+    import calkit.environments as envs_mod
+
+    if interactive is None:
+        from calkit.core import is_tty
+
+        interactive = is_tty()
+    envs = ck_info.get("environments", {})
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    gated: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    cache: dict[str, tuple[str | None, bool]] = {}
+    # What each switch picks, resolved once
+    picks: dict[str, str | None] = {}
+    # The app each export kind needs
+    from calkit.export import exporters
+
+    apps = {e.kind: e for e in exporters()}
+
+    def check(key: Any, func: Any) -> tuple[str | None, bool]:
+        """Memoize a check, returning its problem and whether it's an error."""
+        key = json.dumps(key, default=str)
+        if key not in cache:
+            with contextlib.redirect_stdout(sys.stderr):
+                cache[key] = func()
+        return cache[key]
+
+    def reach(machine_name: str, machine: dict) -> Any:
+        """Get a workspace for a machine, set up to answer without a prompt."""
+        import calkit.workspace as workspace
+
+        machine = dict(machine)
+        for field in workspace.CONNECTION_FIELDS:
+            if isinstance(machine.get(field), str):
+                machine[field] = workspace.expand_with_prompts(
+                    machine[field],
+                    interactive=interactive,
+                    described_as=(
+                        f"environment '{machine_name}' "
+                        f"{field.replace('_', ' ')}"
+                    ),
+                )
+        ws = workspace.Workspace.from_env(
+            env=machine, env_name=machine_name, ck_info=ck_info
+        )
+        return workspace.ensure_reachable(ws, interactive=interactive)
+
+    def machine_requirements(env: dict) -> list:
+        """An env's requirements, plus its scheduler when that's here."""
+        from calkit.cli.scheduler import _BINARIES, _mock_enabled
+
+        requirements = list(env.get("requirements") or [])
+        kind = env.get("kind")
+        if (
+            kind in _BINARIES
+            and not _mock_enabled()
+            and envs_mod.host_is_local(env.get("host") or "localhost")
+        ):
+            requirements.append(_BINARIES[kind]["submit"])
+        return requirements
+
+    def requirements_problem(
+        requirements: list, machine_name: str | None, machine: dict
+    ) -> tuple[str | None, bool]:
+        """Why these requirements can't be met where the stage runs."""
+        nonlocal system_info
+        # A machine with nothing to check isn't connected to
+        if not requirements:
+            return None, False
+        if machine_name is not None:
+            import calkit.workspace as workspace
+
+            try:
+                ws = reach(machine_name, machine)
+            except (ValueError, subprocess.CalledProcessError) as e:
+                host = machine.get("host")
+                return f"can't reach host '{host}': {e}", True
+            try:
+                workspace.check_requirements(ws, requirements)
+            except (ValueError, subprocess.CalledProcessError) as e:
+                return str(e), False
+            return None, False
+        if system_info is None:
+            system_info = calkit.get_system_info(
+                apps=calkit.get_version_checked_app_names(
+                    ck_info, stage_names=stage_names
+                ),
+                all_apps=False,
+            )
+        try:
+            calkit.check_requirements(
+                requirements=requirements,
+                interactive=False,
+                system_info=system_info,
+            )
+        except ValueError as e:
+            return str(e), False
+        return None, False
+
+    def lock_problem(
+        lock_name: str, lock_env: dict, machine_name: str, machine: dict
+    ) -> tuple[str | None, bool]:
+        """Why a machine lock rules this one out, if it does."""
+        if lock_env.get("relock") == "auto" or not lock_env.get("lock"):
+            return None, False
+        try:
+            if envs_mod.read_system_env_lock(lock_name, lock_env) is None:
+                # The first check here writes it
+                return None, False
+            info = envs_mod.picked_machine_info(
+                machine_name, machine, ck_info, lock=lock_env.get("lock")
+            )
+            mismatch = envs_mod.system_env_lock_mismatch(
+                env_name=lock_name, env=lock_env, system_info=info
+            )
+        except (ValueError, subprocess.CalledProcessError) as e:
+            return f"environment '{lock_name}': {e}", True
+        if not mismatch:
+            return None, False
+        props = ", ".join(
+            f"{prop} {d['locked']!r} there, {d['actual']!r} here"
+            for prop, d in sorted(mismatch.items())
+        )
+        return (
+            f"environment '{lock_name}' is locked to another machine "
+            f"({props}); to make this machine the one its results come "
+            f"from, run 'calkit update env -n {lock_name} --lock'"
+        ), False
+
+    def paths(items: list) -> list[str]:
+        """The literal paths among a stage's inputs or outputs."""
+        out = []
+        for item in items:
+            path = item.get("path") if isinstance(item, dict) else item
+            if isinstance(path, str) and "{" not in path:
+                out.append(Path(path).as_posix().rstrip("/"))
+        return out
+
+    def missing_output(stage: dict) -> tuple[str, str] | None:
+        """A skipped stage, and its output this stage needs but lacks."""
+        for input_path in paths(stage.get("inputs") or []):
+            for upstream in list(gated) + list(errors):
+                for output in paths(stages[upstream].get("outputs") or []):
+                    related = (
+                        input_path == output
+                        or input_path.startswith(output + "/")
+                        or output.startswith(input_path + "/")
+                    )
+                    if related and not os.path.exists(output):
+                        return upstream, output
+        for item in stage.get("inputs") or []:
+            source = (
+                item.get("from_stage_outputs", "")
+                if isinstance(item, dict)
+                else ""
+            )
+            if source in gated or source in errors:
+                for output in paths(stages[source].get("outputs") or []):
+                    if not os.path.exists(output):
+                        return source, output
+        return None
+
+    for name, stage in stages.items():
+        if stage_names is not None and name not in stage_names:
+            continue
+        if stage.get("frozen"):
+            continue
+        if not manual and stage.get("kind") == "manual-step":
+            gated[name] = f"needs a manual step: {stage.get('message')}"
+            continue
+        if stage.get("kind") in apps:
+            exporter = apps[stage["kind"]]
+            if exporter.find_executable() is None:
+                source = stage.get("source_path")
+                gated[name] = (
+                    f"needs {exporter.app} installed to export {source}"
+                )
+                continue
+        env_names = str(stage.get("environment") or "_system").split(
+            envs_mod.COMPOSITE_ENV_SEP
+        )
+        resolved: list[tuple[str, dict]] = []
+        reason = None
+        is_error = False
+        switch_locks: list[tuple[str, dict, str, dict]] = []
+        for env_name in dict.fromkeys(env_names):
+            env = envs.get(env_name)
+            if env is None:
+                continue
+            resolved.append((env_name, env))
+            if env.get("kind") != envs_mod.SWITCH_KIND:
+                continue
+            try:
+                if env_name not in picks:
+                    picks[env_name] = envs_mod.resolve_switch(env_name, envs)
+                picked = picks[env_name]
+            except ValueError as e:
+                reason, is_error = str(e), True
+                break
+            if picked is None:
+                reason = envs_mod.describe_switch_no_match(env_name, env)
+                break
+            resolved.append((picked, (envs_mod.get_env(picked, envs) or {})))
+            if env.get("lock"):
+                switch_locks.append(
+                    (
+                        env_name,
+                        envs_mod.switch_machine_lock_env(env),
+                        picked,
+                        (envs_mod.get_env(picked, envs) or {}),
+                    )
+                )
+        # Checked on the machine the stage runs on, which a remote outer
+        # env names
+        machine_name = None
+        machine: dict = {}
+        for env_name, env in resolved:
+            if not envs_mod.runs_elsewhere(env):
+                continue
+            if env.get("kind") == "system" and not env.get("host"):
+                # Named by its ID alone, so there's no reaching it
+                reason = reason or (
+                    f"environment '{env_name}' is the machine with ID "
+                    f"{env.get('machine_id')!r}, which isn't this one, "
+                    "and has no 'host' to reach it from here"
+                )
+                break
+            machine_name, machine = env_name, env
+        if machine_name is not None and not remote and reason is None:
+            continue
+        if reason is None:
+            requirements = list(stage.get("requirements") or [])
+            for _, env in resolved:
+                requirements += machine_requirements(env)
+            reason, is_error = check(
+                ["requirements", machine_name, requirements],
+                lambda: requirements_problem(
+                    requirements, machine_name, machine
+                ),
+            )
+            # A machine that is only described here could run its stages
+            # from here if Calkit knew how to reach it
+            local_machines = [
+                n
+                for n, env in resolved
+                if env.get("kind") in ("system", "slurm", "pbs")
+                and not env.get("host")
+                and machine_requirements(env)
+            ]
+            if (
+                reason is not None
+                and not is_error
+                and machine_name is None
+                and local_machines
+                and check(
+                    ["requirements", None, dict(resolved)[local_machines[0]]],
+                    lambda: requirements_problem(
+                        machine_requirements(
+                            dict(resolved)[local_machines[0]]
+                        ),
+                        None,
+                        {},
+                    ),
+                )[0]
+                is not None
+            ):
+                reason += (
+                    f"; giving environment '{local_machines[0]}' a 'host' "
+                    "would let its stages run there from here over SSH"
+                )
+        if reason is None:
+            locks = [
+                (n, env, n, env)
+                for n, env in resolved
+                if env.get("kind") == "system"
+            ] + switch_locks
+            for lock_name, lock_env, m_name, m_env in locks:
+                reason, is_error = check(
+                    ["lock", lock_name],
+                    lambda: lock_problem(lock_name, lock_env, m_name, m_env),
+                )
+                if reason is not None:
+                    break
+        if reason is not None:
+            (errors if is_error else gated)[name] = reason
+    # A stage that needs an output a skipped stage hasn't made can't run
+    # either, and nor can the stages after it
+    added = True
+    while added:
+        added = False
+        for name, stage in stages.items():
+            if (
+                (stage_names is not None and name not in stage_names)
+                or name in gated
+                or name in errors
+                or stage.get("frozen")
+            ):
+                continue
+            found = missing_output(stage)
+            if found is None:
+                continue
+            upstream, output = found
+            (errors if upstream in errors else gated)[name] = (
+                f"it needs '{output}' from stage '{upstream}', which "
+                "can't run here and hasn't made it; if it was made "
+                "elsewhere, 'calkit pull' gets it"
+            )
+            added = True
+    return gated, errors
+
+
 def get_status(
     ck_info: dict | None = None,
     targets: list[str] | None = None,
     wdir: str | None = None,
     check_environments: bool = True,
     clean_notebooks: bool = True,
+    preprocess_stages: bool = True,
     compile_to_dvc: bool = True,
     force_env_check: bool = False,
+    with_data_status: bool = False,
+    with_storage_problems: bool = False,
+    quiet_environment_checks: bool = False,
+    progress: Callable[[str], None] | None = None,
+    start_docker: Callable[[], None] | None = None,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
-    This can compile the Calkit pipeline to DVC, clean notebook outputs,
-    check pipeline environments, then query DVC for out-of-date stages.
+    This can compile the Calkit pipeline to DVC, letting stages write the
+    files they read that aren't kept in the project as it does, clean
+    notebook outputs, check pipeline environments, then query DVC for
+    out-of-date stages.
+    With ``with_data_status``, DVC's data status is attached as well, left
+    None if it fails so the caller can ask again and report why.
+    ``progress`` is told what's being done as each step starts.
+    ``start_docker`` is called when a stage needs Docker and it isn't
+    ready, e.g., to offer to start it, and raises ``DockerNotReadyError``
+    if it still isn't.
     """
+
+    def step(text: str) -> None:
+        if progress is not None:
+            progress(text)
+
+    def check_envs(docker_required: bool) -> dict:
+        return calkit.environments.check_all_in_pipeline(
+            ck_info=ck_info,
+            targets=targets,
+            force=force_env_check,
+            skip_stages=list(result["gated_stages"]),
+            quiet=quiet_environment_checks,
+            progress=progress,
+            docker_required=docker_required,
+        )
+
+    import calkit.docker
     import calkit.environments
+    import calkit.latex
     import calkit.markdown
 
     prev_cwd = os.getcwd()
@@ -775,13 +1305,52 @@ def get_status(
                 f"Failed to read markdown stages: {e.__class__.__name__}: {e}"
             )
             return PipelineStatus.model_validate(result)
+        environments = ck_info.get("environments", {})
+        for stage in ck_info.get("pipeline", {}).get("stages", {}).values():
+            names = str(stage.get("environment") or "").split(
+                calkit.environments.COMPOSITE_ENV_SEP
+            )
+            for name in names:
+                env = environments.get(name) or {}
+                if env.get(
+                    "kind"
+                ) != calkit.environments.SWITCH_KIND or name in result.get(
+                    "switches", {}
+                ):
+                    continue
+                try:
+                    result.setdefault("switches", {})[name] = (
+                        calkit.environments.resolve_switch(name, environments)
+                    )
+                except ValueError as e:
+                    result["errors"].append(str(e))
+                    return PipelineStatus.model_validate(result)
         if check_environments:
+            step("Checking environments")
             try:
-                env_checks = calkit.environments.check_all_in_pipeline(
-                    ck_info=ck_info,
-                    targets=targets,
-                    force=force_env_check,
+                # Run often, e.g., by an editor, so it doesn't connect to
+                # other machines; 'calkit run' checks those
+                gated, gate_errors = get_gated_stages(
+                    ck_info,
+                    stage_names=get_stages_to_gate(targets),
+                    interactive=False,
+                    remote=False,
                 )
+                result["gated_stages"] = gated | gate_errors
+
+                try:
+                    env_checks = check_envs(docker_required=True)
+                except calkit.docker.DockerNotReadyError:
+                    # Docker not running doesn't make anything stale, so
+                    # without it only the environments that need it fail
+                    ready = False
+                    if start_docker is not None:
+                        try:
+                            start_docker()
+                            ready = True
+                        except calkit.docker.DockerNotReadyError:
+                            pass
+                    env_checks = check_envs(docker_required=ready)
                 result["environment_checks"] = env_checks
             except Exception as e:
                 result["errors"].append(
@@ -800,14 +1369,21 @@ def get_status(
             ck_info.get("pipeline", {}).get("stages", {})
             or ck_info.get("subprojects")
         ):
+            step("Compiling pipeline")
             try:
-                to_dvc(ck_info=ck_info, write=True, manage_gitignore=False)
+                to_dvc(
+                    ck_info=ck_info,
+                    write=True,
+                    manage_gitignore=False,
+                    preprocess_stages=preprocess_stages,
+                )
             except Exception as e:
                 result["errors"].append(
                     f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
                 )
                 return PipelineStatus.model_validate(result)
         if clean_notebooks and ck_info.get("pipeline", {}).get("stages", {}):
+            step("Cleaning notebooks")
             try:
                 cleaned = calkit.notebooks.clean_all_in_pipeline(
                     ck_info=ck_info
@@ -819,6 +1395,7 @@ def get_status(
                     f"{e.__class__.__name__}: {e}"
                 )
                 return PipelineStatus.model_validate(result)
+        import dvc.repo
         from dvc.lock import LockError
 
         try:
@@ -829,7 +1406,36 @@ def get_status(
             # DVC's own target filtering can miss stale propagation from
             # isolated subprojects, which makes targeted status disagree with
             # the full-project status view.
-            raw_status = dvc_repo.status()
+            # Held across all of these so DVC builds its index and hashes
+            # each path once, rather than dropping them between calls
+            dvc_data_status = None
+            storage_problems = None
+            with (
+                dvc.repo.lock_repo(dvc_repo),
+                calkit.dvc.memoized_hashes(),
+            ):
+                step("Finding stale stages")
+                raw_status = dvc_repo.status()
+                dvc_out_paths = [
+                    Path(os.path.relpath(out.fs_path)).as_posix()
+                    for out in dvc_repo.index.outs
+                ]
+                if with_storage_problems:
+                    step("Checking where files are stored")
+                    try:
+                        storage_problems = calkit.dvc.get_storage_problems(
+                            dvc_repo=dvc_repo, ck_info=ck_info
+                        )
+                    except Exception:
+                        pass
+                # Last, since switching to HEAD to diff against it drops the
+                # workspace index
+                if with_data_status:
+                    step("Getting DVC status")
+                    try:
+                        dvc_data_status = dict(dvc_repo.data_status())
+                    except Exception:
+                        pass
             raw_status = calkit.dvc.status_as_posix(raw_status)
         except LockError:
             # Another DVC process is holding the repo lock---most often a
@@ -1092,9 +1698,7 @@ def get_status(
         # actually needs listing, so a pipeline without directory inputs
         # never pays for them.
         ignored_files_by_dir: dict[str, list[str]] = {}
-        git_repo = None
-        git_root = ""
-        dvc_out_paths: list[str] = []
+        stage_dirs: list[tuple[str, str]] = []
         for name, stage_def in dvc_yaml_stage_defs.items():
             if not isinstance(stage_def, dict):
                 continue
@@ -1115,71 +1719,75 @@ def get_status(
                     for target in targets
                 ):
                     continue
-                if dep_path not in ignored_files_by_dir:
-                    if git_repo is None:
-                        git_repo = calkit.git.get_repo()
-                        git_root = str(git_repo.working_tree_dir)
-                        dvc_out_paths = [
-                            Path(os.path.relpath(out.fs_path)).as_posix()
-                            for out in dvc_repo.index.outs
-                        ]
-                    # Git prints paths relative to the repo root, which may be
-                    # above the project, so make them project-relative; -z
-                    # keeps unusual file names from being quoted
-                    listing = git_repo.git.ls_files(
-                        "-z",
-                        "--others",
-                        "--ignored",
-                        "--exclude-standard",
-                        "--",
-                        os.path.abspath(dep_path),
-                    )
-                    files: list[str] = []
-                    for ignored_path in listing.split("\0"):
-                        if not ignored_path:
-                            continue
-                        ignored_path = Path(
-                            os.path.relpath(
-                                os.path.join(git_root, ignored_path)
-                            )
-                        ).as_posix()
-                        if any(
-                            ignored_path == out
-                            or ignored_path.startswith(out + "/")
-                            for out in dvc_out_paths
-                        ):
-                            continue
-                        if dvc_repo.dvcignore.is_ignored_file(
-                            os.path.abspath(ignored_path)
-                        ):
-                            continue
-                        files.append(ignored_path)
-                    ignored_files_by_dir[dep_path] = files
-                files = ignored_files_by_dir[dep_path]
-                if not files:
+                stage_dirs.append((name, dep_path))
+        if stage_dirs:
+            dirs = list(dict.fromkeys(d for _, d in stage_dirs))
+            ignored_files_by_dir = {d: [] for d in dirs}
+            git_repo = calkit.git.get_repo()
+            git_root = str(git_repo.working_tree_dir)
+            # One listing for every directory, chunked to stay under
+            # command line length limits, rather than a subprocess each
+            listing = ""
+            for i in range(0, len(dirs), 100):
+                # Git prints paths relative to the repo root, which may be
+                # above the project, so make them project-relative; -z
+                # keeps unusual file names from being quoted
+                listing += git_repo.git.ls_files(
+                    "-z",
+                    "--others",
+                    "--ignored",
+                    "--exclude-standard",
+                    "--",
+                    *[os.path.abspath(d) for d in dirs[i : i + 100]],
+                )
+                listing += "\0"
+            for ignored_path in dict.fromkeys(listing.split("\0")):
+                if not ignored_path:
                     continue
-                # When DVC reports the directory (or, if the dep was expanded
-                # around a subproject, a path inside it) as modified, annotate
-                # that input on the stale stage; otherwise it goes in the
-                # status-wide list as something that will bite elsewhere
-                annotated = False
-                for stale_stage in stale_by_base.get(name, []):
-                    for modified_input in stale_stage.modified_inputs:
-                        inside = [
-                            p
-                            for p in files
-                            if p == modified_input
-                            or p.startswith(modified_input.rstrip("/") + "/")
-                        ]
-                        if inside:
-                            stale_stage.ignored_files_in_inputs[
-                                modified_input
-                            ] = inside
-                            annotated = True
-                if not annotated:
-                    ignored_files_in_inputs.setdefault(name, {})[dep_path] = (
-                        files
-                    )
+                ignored_path = Path(
+                    os.path.relpath(os.path.join(git_root, ignored_path))
+                ).as_posix()
+                if any(
+                    ignored_path == out or ignored_path.startswith(out + "/")
+                    for out in dvc_out_paths
+                ):
+                    continue
+                if dvc_repo.dvcignore.is_ignored_file(
+                    os.path.abspath(ignored_path)
+                ):
+                    continue
+                for d in dirs:
+                    if ignored_path.startswith(d + "/") or d == ".":
+                        ignored_files_by_dir[d].append(ignored_path)
+        for name, dep_path in stage_dirs:
+            files = ignored_files_by_dir[dep_path]
+            if not files:
+                continue
+            # When DVC reports the directory (or, if the dep was expanded
+            # around a subproject, a path inside it) as modified, annotate
+            # that input on the stale stage; otherwise it goes in the
+            # status-wide list as something that will bite elsewhere
+            annotated = False
+            for stale_stage in stale_by_base.get(name, []):
+                for modified_input in stale_stage.modified_inputs:
+                    inside = [
+                        p
+                        for p in files
+                        if p == modified_input
+                        or p.startswith(modified_input.rstrip("/") + "/")
+                    ]
+                    if inside:
+                        stale_stage.ignored_files_in_inputs[modified_input] = (
+                            inside
+                        )
+                        annotated = True
+            if not annotated:
+                ignored_files_in_inputs.setdefault(name, {})[dep_path] = files
+        gated_stages = result.get("gated_stages", {})
+        for display_name, stale_stage in ordered_stale_stages.items():
+            reason = gated_stages.get(display_name.split("@")[0])
+            if reason is not None:
+                stale_stage.cannot_run_here = reason
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
@@ -1188,25 +1796,80 @@ def get_status(
             stale_stages=result["stale_stages"],
             errors=result["errors"],
             ignored_files_in_inputs=ignored_files_in_inputs,
+            switches=result.get("switches", {}),
+            gated_stages=result.get("gated_stages", {}),
+            dvc_data_status=dvc_data_status,
+            storage_problems=storage_problems,
         )
     finally:
         if wdir is not None:
             os.chdir(prev_cwd)
 
 
+def get_map_paths_outputs(stage: dict) -> list[str]:
+    """Where a ``map-paths`` stage writes, relative to the project, which it
+    declares under ``paths`` rather than ``outputs``.
+    """
+    from calkit.models.pipeline import MapPathsStage
+
+    if stage.get("kind") != "map-paths":
+        return []
+    try:
+        parsed = MapPathsStage.model_validate(stage)
+    except Exception:
+        return []
+    return [
+        posixpath.normpath(posixpath.join(parsed.wdir or "", mapping.out_path))
+        for mapping in parsed.paths
+    ]
+
+
+def get_map_paths_source(stage: dict, path: str) -> str | None:
+    """Where a ``map-paths`` stage copied ``path`` from, both relative to the
+    project, so a copy can be followed back to whatever made the original.
+    """
+    from calkit.models.pipeline import MapPathsStage
+
+    if stage.get("kind") != "map-paths":
+        return None
+    try:
+        parsed = MapPathsStage.model_validate(stage)
+    except Exception:
+        return None
+    wdir = parsed.wdir or ""
+    target = posixpath.normpath(path)
+    for mapping in parsed.paths:
+        src = posixpath.normpath(posixpath.join(wdir, mapping.src))
+        out = posixpath.normpath(posixpath.join(wdir, mapping.out_path))
+        if target == out:
+            return src
+        # A directory copy maps everything inside it
+        if mapping.kind.startswith("dir-") and target.startswith(out + "/"):
+            return posixpath.join(src, target[len(out) + 1 :])
+    return None
+
+
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     """Return the name of the pipeline stage that produces ``path``, if any."""
-    target = Path(path).as_posix()
-    stages = ck_info.get("pipeline", {}).get("stages", {})
+    target = posixpath.normpath(Path(path).as_posix())
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if not isinstance(stages, dict):
         return None
     for name, stage in stages.items():
         if not isinstance(stage, dict):
             continue
-        for out in stage.get("outputs", []):
+        wdir = stage.get("wdir") or ""
+        for out in stage.get("outputs") or []:
             out_path = out.get("path") if isinstance(out, dict) else out
-            if out_path and Path(out_path).as_posix() == target:
-                return name
+            if out_path and target == posixpath.normpath(
+                posixpath.join(wdir, Path(out_path).as_posix())
+            ):
+                return str(name)
+        for out in get_map_paths_outputs(stage):
+            # A directory mapping produces everything it writes into, except
+            # into the project root, which would claim every path
+            if target == out or (out != "." and target.startswith(out + "/")):
+                return str(name)
     return None
 
 
@@ -1243,9 +1906,12 @@ def get_output_storage_map(
     for stage in stages.values():
         if not isinstance(stage, dict):
             continue
+        # Output paths are relative to the stage's working directory
+        wdir = stage.get("wdir") or "."
         for out in stage.get("outputs", []):
             if isinstance(out, dict) and "path" in out and "storage" in out:
-                result[Path(out["path"]).as_posix()] = out["storage"]
+                path = Path(os.path.normpath(os.path.join(wdir, out["path"])))
+                result[path.as_posix()] = out["storage"]
     return result
 
 
@@ -1407,36 +2073,109 @@ def _ensure_latex_aux_gitignore(
     can be wiped by a clean build (``latexmk -C``). The globs are unanchored,
     so aux files are caught wherever latexmk writes them relative to the
     source -- next to it, or in an ``aux``/output subdirectory via
-    ``$aux_dir``/``$out_dir``/``output_dir``. ``*.pdf`` is never ignored so the
-    compiled output stays tracked.
+    ``$aux_dir``/``$out_dir``/``output_dir``. A stage's own ``aux_dir`` is
+    also ignored whole, from its own ``.gitignore`` if it's outside the
+    source directory. ``*.pdf`` is never ignored so the compiled output
+    stays tracked.
 
     Returns True if ``.gitignore`` was modified.
     """
+
+    def norm(path: str) -> str:
+        return posixpath.normpath(path.replace("\\", "/"))
+
     aux_globs = [
+        # Acronym lists from glossaries
+        "*.acn",
+        "*.acr",
+        "*.alg",
         "*.aux",
         "*.bbl",
         "*.bcf",
         "*.blg",
+        # Back references from backref
+        "*.brf",
+        "*.dvi",
+        # Endnotes from endnotes
+        "*.ent",
         "*.fdb_latexmk",
         "*.fls",
+        "*.glg",
+        "*.glo",
+        "*.gls",
+        "*.idx",
+        "*.ilg",
+        "*.ind",
+        "*.ist",
+        # Lists of algorithms and listings
+        "*.loa",
         "*.lof",
+        "*.log",
+        "*.lol",
         "*.lot",
         "*.nav",
+        # Nomenclature from nomencl
+        "*.nlg",
+        "*.nlo",
+        "*.nls",
         "*.out",
         "*.run.xml",
         "*.snm",
+        # Written by elsarticle, among other classes
+        "*.spl",
         "*.synctex.gz",
+        # The list of todos from todonotes
+        "*.tdo",
+        # Theorem lists from ntheorem
+        "*.thm",
         "*.toc",
         "*.vrb",
+        "*.xdv",
     ]
+    # Written by Calkit before the pipeline runs or is checked, and when
+    # syncing with Overleaf, for a document that loads it
+    if stage._loads_calkit:
+        aux_globs.append("/calkit.sty")
     # Stage path fields are relative to the stage's wdir, which in turn is
     # relative to the (sub)project being compiled.
     base = os.path.join(wdir or ".", stage.wdir) if stage.wdir else wdir or "."
     source_dir = os.path.dirname(stage.target_path)
     gitignore_path = os.path.join(base, source_dir, ".gitignore")
-    return _write_managed_gitignore_block(
+    # An aux dir is ignored whole, since packages like glossaries write
+    # files with extensions no list could anticipate. Pure path
+    # arithmetic, since os.path.relpath resolves 'aux' to a device on
+    # Windows.
+    aux_dir_changed = False
+    if stage.aux_dir is not None:
+        aux = norm(stage.aux_dir)
+        src = norm(source_dir or ".")
+        # Unless the PDF goes there too
+        pdf_there = (
+            stage.output_dir is not None and norm(stage.output_dir) == aux
+        )
+        if (
+            aux in (".", "..")
+            or aux.startswith(("../", "/"))
+            or re.match(r"[A-Za-z]:", aux)
+        ):
+            # The project itself, or outside it
+            pass
+        elif src == "." or aux.startswith(src + "/"):
+            rel = aux if src == "." else aux[len(src) + 1 :]
+            aux_globs.append(f"/{rel}/*")
+            if pdf_there:
+                aux_globs.append(f"!/{rel}/*.pdf")
+        elif not (src + "/").startswith(aux + "/"):
+            # The source's .gitignore can't name it, so it ignores itself
+            aux_dir_changed = _write_managed_gitignore_block(
+                os.path.join(base, aux, ".gitignore"),
+                marker="calkit latex aux files",
+                lines=["*"] + (["!*.pdf"] if pdf_there else []),
+            )
+    source_changed = _write_managed_gitignore_block(
         gitignore_path, marker="calkit latex aux files", lines=aux_globs
     )
+    return source_changed or aux_dir_changed
 
 
 def sync_markdown(
@@ -1621,6 +2360,8 @@ def to_dvc(
     write: bool = False,
     verbose: bool = False,
     manage_gitignore: bool = True,
+    for_run: bool = False,
+    preprocess_stages: bool = False,
 ) -> dict:
     """Compile a Calkit pipeline to a DVC pipeline.
 
@@ -1631,10 +2372,31 @@ def to_dvc(
     Returns a dictionary of DVC stages for the `stages` key of a dvc.yaml.
     Returns ``{}`` when the project has no pipeline and no subprojects (e.g.
     a subproject that is a library with no defined pipeline stages).
+
+    ``for_run`` is for compiling where the stages will run, which is the
+    only place an env var a stage depends on is recorded as unset, since
+    elsewhere, e.g., an editor's process, it may just not be set.
+
+    ``preprocess_stages`` lets stages write files they read that aren't
+    kept in the project, which they depend on, for compiling before the
+    pipeline is run or checked. Off otherwise, so compiling has no side
+    effects for, e.g., the hub committing an edit.
     """
     import calkit.dvc.zip
+    import calkit.latex
     import calkit.markdown
-    from calkit.environments import get_env_input_paths, get_env_lock_fpath
+    import calkit.questions
+    from calkit.environments import (
+        SWITCH_KIND,
+        get_env,
+        get_env_input_env_vars,
+        get_env_input_paths,
+        get_env_lock_fpath,
+        get_switch_options,
+        resolve_env_var,
+        write_switch_env_lock,
+    )
+    from calkit.models.io import EnvVarInput, ScheduleInput
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -1645,6 +2407,17 @@ def to_dvc(
     # options and iteration need no knowledge of Markdown.
     markdown = calkit.markdown.expand_ck_info(ck_info, wdir=wdir)
     ck_info = markdown.ck_info
+    # Likewise give questions-to-latex stages the evidence they read
+    ck_info = calkit.questions.expand_questions_stages(ck_info)
+    # The project model isn't validated on every load, so this rule is
+    # enforced where stages are compiled
+    from calkit.models.core import env_requirements_problem
+
+    for env_name, env in (ck_info.get("environments") or {}).items():
+        if isinstance(env, dict) and (
+            problem := env_requirements_problem(env)
+        ):
+            raise ValueError(f"Environment '{env_name}': {problem}")
     if write and markdown.environments:
         _write_markdown_environments(markdown, wdir=wdir)
     # Everything Markdown derives is rewritten on every compile, so it
@@ -1701,17 +2474,21 @@ def to_dvc(
         if not isinstance(subproject, dict) or not subproject.get("path"):
             raise ValueError("Subprojects must have a 'path' defined")
         sp = Path(subproject["path"]).as_posix()
-        if not os.path.isdir(sp):
+        # The path is relative to this project, which may itself be nested
+        sp_dir = os.path.join(wdir, sp) if wdir else sp
+        if not os.path.isdir(sp_dir):
             raise NotADirectoryError(f"Subproject path '{sp}' does not exist")
-        sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        sp_is_isolated = os.path.isdir(os.path.join(sp_dir, ".dvc"))
         # Always compile the subproject's dvc.yaml recursively.
         # Inline subprojects need their dvc.yaml written so DVC discovers them
         # via --all-pipelines; isolated subprojects get a wrapper stage instead.
         sp_dvc_stages = to_dvc(
-            wdir=sp,
+            wdir=sp_dir,
             write=write,
             verbose=verbose,
             manage_gitignore=manage_gitignore,
+            for_run=for_run,
+            preprocess_stages=preprocess_stages,
         )
         if not sp_is_isolated:
             continue
@@ -1798,20 +2575,18 @@ def to_dvc(
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
-        # An env that runs setup commands can name the files they read---a
-        # setup script it sources, most often. Those are inputs to every
-        # stage using the env, in the same way its lock file is: editing
-        # how a build is set up changes what the build produces. Declared
-        # rather than parsed out of the commands, since a shell command
-        # doesn't reliably say which of its words is a path. Only the kinds
-        # with a ``default_setup``: a Docker env's ``inputs`` are files
-        # copied into the image, and their checksums already ride along in
-        # its lock file, which stages depend on.
-        if env.get("kind") in ("system", "slurm", "pbs"):
+        # Files an env is built or set up from are inputs to every stage
+        # using it, as its lock file is. Not a Docker env's: those are
+        # copied into the image, and their checksums are in its lock.
+        if env.get("kind") != "docker":
             for env_input in get_env_input_paths(env, env_name):
                 env_lock_fpaths.setdefault(env_name, []).append(
                     Path(env_input).as_posix()
                 )
+        if env.get("kind") == SWITCH_KIND and write:
+            # The same on every machine, so it is written here rather than
+            # by an environment check, which only runs where stages do
+            write_switch_env_lock(env_name, environments, wdir=wdir)
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=True, for_dvc=True, wdir=wdir
         )
@@ -1888,9 +2663,26 @@ def to_dvc(
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
+    # Env vars each stage depends on, its own and its environments'
+    for stage in pipeline.stages.values():
+        names = [i.name for i in stage.inputs if isinstance(i, EnvVarInput)]
+        for env_name in dict.fromkeys(
+            [stage.outer_environment, stage.inner_environment]
+        ):
+            env = environments.get(env_name) or {}
+            names += get_env_input_env_vars(env)
+            if env.get("kind") == SWITCH_KIND:
+                for option in get_switch_options(env_name, environments):
+                    names += get_env_input_env_vars(
+                        get_env(option, environments) or {}
+                    )
+        stage._env_var_names = sorted(set(names))
     # Tell procedure stages where their procedure is written down, which
     # only calkit.yaml knows
     pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
+    # Stages that work out what they depend on from the project, which only
+    # the pipeline knows the location of
+    pipeline.preprocess_stages(wdir, write_files=preprocess_stages)
     if write:
         # The resolved setup commands each stage runs, written beside the
         # pipeline so the compiled command can name a path instead of
@@ -1912,14 +2704,69 @@ def to_dvc(
                 marker="calkit stage setup",
                 lines=["/.calkit/stage-setup/"],
             )
+        # Committed, unlike the setup files, so a remote workspace gets them
+        # with the rest of the snapshot
+        command_files = [
+            path
+            for stage in pipeline.stages.values()
+            if isinstance(stage, ShellCommandStage)
+            and (path := stage.write_command_file(wdir=wdir)) is not None
+        ]
+        # Hashes of this machine's values, so like the setup files they are
+        # rewritten by every compile and not committed
+        env_var_files = [
+            path
+            for stage in pipeline.stages.values()
+            if (
+                path := stage.write_env_var_file(
+                    {
+                        name: resolve_env_var(name, ck_info, wdir=wdir)
+                        for name in stage._env_var_names
+                    },
+                    wdir=wdir,
+                    keep_unset=not for_run,
+                )
+            )
+            is not None
+        ]
+        if manage_gitignore and env_var_files:
+            _write_managed_gitignore_block(
+                os.path.join(wdir, ".gitignore") if wdir else ".gitignore",
+                marker="calkit stage env vars",
+                lines=["/.calkit/env-vars/"],
+            )
+        # The current period of each schedule a stage runs on, so the stage
+        # goes out of date when the next period starts
+        for stage in pipeline.stages.values():
+            for i in stage.inputs:
+                if isinstance(i, ScheduleInput):
+                    i.write_period_file(wdir=wdir)
+        # Remove files left by stages that were renamed, deleted, or no
+        # longer need one, since the command files are committed
+        for gen_dir, kept in [
+            ("stage-setup", setup_files),
+            ("stage-commands", command_files),
+            ("env-vars", env_var_files),
+        ]:
+            gen_dpath = os.path.join(wdir or ".", ".calkit", gen_dir)
+            if not os.path.isdir(gen_dpath):
+                continue
+            kept_names = {posixpath.basename(p) for p in kept}
+            for fname in os.listdir(gen_dpath):
+                fpath = os.path.join(gen_dpath, fname)
+                if fname not in kept_names and os.path.isfile(fpath):
+                    os.remove(fpath)
         # Only when there is a lock file to protect. A project with no
         # environment that locks under .calkit has nothing whose hash a
         # line-ending rewrite could change, and shouldn't get a
         # .gitattributes it never needed.
-        if manage_gitignore and any(
-            Path(p).as_posix().startswith(".calkit/env-locks/")
-            for paths in env_lock_fpaths.values()
-            for p in paths
+        if manage_gitignore and (
+            command_files
+            or any(
+                Path(p).as_posix().startswith(".calkit/env-locks/")
+                for paths in env_lock_fpaths.values()
+                for p in paths
+            )
         ):
             _ensure_calkit_gitattributes(wdir=wdir)
     # Ensure environment lock files are set as stage inputs if necessary
@@ -1930,6 +2777,15 @@ def to_dvc(
         # parameters if any reference project-level parameters
         if stage.kind == "jupyter-notebook":
             stage.update_parameters(params=project_params)
+        # The one form of arg that isn't passed as a single argument
+        for arg in getattr(stage, "args", None) or []:
+            if is_flag_and_value(arg):
+                warnings.warn(
+                    f"Stage '{stage_name}' has the arg {arg!r}, which the "
+                    "shell splits into separate arguments. Write each as "
+                    f"its own item instead: {arg.split()}.",
+                    stacklevel=2,
+                )
         dvc_stage = stage.to_dvc()
         # Check if this stage iterates, which means we should create a matrix
         # stage
@@ -2145,6 +3001,15 @@ def to_dvc(
                         else:
                             stage_output_paths.append(out)
                             dvc_stages[stage_name]["deps"].append(out)
+        # What a document reads from a folder those stages make is covered
+        if stage_output_paths and isinstance(stage, LatexStage):
+            folders = tuple(p.rstrip("/") + "/" for p in stage_output_paths)
+            found = set(stage.found_paths)
+            dvc_stages[stage_name]["deps"] = [
+                d
+                for d in dvc_stages[stage_name]["deps"]
+                if d not in found or not d.startswith(folders)
+            ]
         # Stages generated from this one read these too, e.g., a latex
         # stage's diffs, but the paths are only known now
         if stage_output_paths:
@@ -2161,13 +3026,27 @@ def to_dvc(
             # Preserve any existing stage not already in the new compilation
             # and not auto-generated (auto-generated stages are re-emitted
             # from scratch each time and must not be carried over).
-            if stage_name not in dvc_stages and not stage.get(
-                "desc", ""
-            ).startswith("Automatically generated"):
+            # A foreach stage keeps its description under 'do'
+            desc = stage.get("desc") or stage.get("do", {}).get("desc") or ""
+            if stage_name not in dvc_stages and not desc.startswith(
+                "Automatically generated"
+            ):
                 dvc_stages[stage_name] = stage
-        dvc_yaml["stages"] = dvc_stages
+        # Only what's written changes form; callers get the matrix form,
+        # which everything that reads a compiled stage expects
+        written_stages = {}
+        lock_renames: dict[str, str] = {}
+        for stage_name, stage in dvc_stages.items():
+            written, renames = _name_table_items(stage)
+            written_stages[stage_name] = written
+            lock_renames |= {
+                f"{stage_name}@{old}": f"{stage_name}@{new}"
+                for old, new in renames.items()
+            }
+        dvc_yaml["stages"] = written_stages
         dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
         _dump_yaml_if_changed(dvc_yaml, dvc_yaml_fpath, verbose=verbose)
+        _rename_lock_entries(lock_renames, wdir=wdir)
         # DVC errors out (FileIsGitIgnored) if dvc.lock is Git-ignored, so make
         # sure it isn't---this keeps both status and pipeline runs working
         calkit.dvc.ensure_dvc_lock_not_ignored(wdir)
@@ -2303,6 +3182,9 @@ def translate_run_targets(
       directly inside the subproject directory)
     - ``stage.diffs`` → every diff stage a latex stage generates
 
+    A subproject is named by its path; a declared one, and a nested one
+    whose directory name is unambiguous, by its directory name too.
+
     Any target that does not match a known subproject is passed through
     unchanged into the first return value.
 
@@ -2316,8 +3198,18 @@ def translate_run_targets(
     import calkit.latex
     import calkit.markdown
 
-    def expand_diffs(target: str, stages: dict) -> list[str]:
-        """Turn a target naming all of a latex stage's diffs into theirs."""
+    def expand(target: str, info: dict, wdir: str | None = None) -> list[str]:
+        """Turn a target standing for other stages into theirs."""
+        stages = info.get("pipeline", {}).get("stages", {})
+        # A markdown stage stands in for the stages its blocks declare
+        md_path = calkit.markdown.get_markdown_stages(info).get(target)
+        if md_path is not None:
+            return calkit.markdown.get_stage_names(
+                os.path.join(wdir, md_path) if wdir else md_path,
+                target,
+                pdf=bool(stages[target].get("pdf")),
+            )
+        # A latex stage's diffs are separate DVC stages
         stage_name = target.removesuffix(calkit.latex.DIFFS_TARGET_SUFFIX)
         if stage_name == target or stage_name not in stages:
             return [target]
@@ -2330,32 +3222,29 @@ def translate_run_targets(
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
-    subprojects = ck_info.get("subprojects", [])
-    sp_map: dict[str, dict] = {}
-    for sp_cfg in subprojects:
+    # A subproject is named by its path, as status names its stages, and
+    # one declared here by its directory name too
+    sp_map: dict[str, str] = {}
+    for sp_cfg in ck_info.get("subprojects", []):
         if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
             continue
         sp = Path(sp_cfg["path"]).as_posix()
-        sp_map[sp] = sp_cfg
-        sp_map[Path(sp).name] = sp_cfg
-    # A markdown stage stands in for the stages its blocks declare, so a
-    # target naming it has to become the stages DVC actually knows about.
-    # Done before subproject handling because a Markdown path contains no
-    # ':' and so can't be a subproject shorthand.
-    md_stages = calkit.markdown.get_markdown_stages(ck_info)
-    if md_stages:
-        expanded: list[str] = []
-        for target in targets:
-            md_path = md_stages.get(target)
-            if md_path is None:
-                expanded.append(target)
-                continue
-            expanded += calkit.markdown.get_stage_names(md_path, target)
-        targets = expanded
-    # A latex stage's diffs are separate DVC stages, so a target addressing
-    # them all has to become their names
-    stages = ck_info.get("pipeline", {}).get("stages", {})
-    targets = [name for t in targets for name in expand_diffs(t, stages)]
+        sp_map[sp] = sp
+        sp_map[Path(sp).name] = sp
+    declared = set(sp_map.values())
+    root_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # A nested one by its directory name too, when that's unambiguous
+    nested_by_name: dict[str, list[str]] = {}
+    for sp_wdir, _ in calkit.iter_projects(ck_info=ck_info):
+        sp = Path(sp_wdir).as_posix()
+        if sp != ".":
+            sp_map.setdefault(sp, sp)
+            if sp not in declared:
+                nested_by_name.setdefault(Path(sp).name, []).append(sp)
+    # Targets have to become the stages DVC actually knows about. Done
+    # before subproject handling because a Markdown path contains no ':'
+    # and so can't be a subproject shorthand.
+    targets = [name for t in targets for name in expand(t, ck_info)]
     parent_targets: list[str] = []
     isolated_sp_targets: list[tuple[str, str | None]] = []
     for target in targets:
@@ -2364,28 +3253,61 @@ def translate_run_targets(
         else:
             sp_part = target
             stage_part = None
+        nested = nested_by_name.get(sp_part, [])
+        # A bare name is a stage of this project's before a nested
+        # subproject's
+        if (
+            sp_part not in sp_map
+            and nested
+            and (stage_part or sp_part not in root_stages)
+        ):
+            if len(nested) > 1:
+                raise ValueError(
+                    f"'{sp_part}' could be any of the subprojects "
+                    f"{', '.join(nested)}; name one by its path"
+                )
+            sp_map[sp_part] = nested[0]
         if sp_part not in sp_map:
             parent_targets.append(target)
             continue
-        sp_cfg = sp_map[sp_part]
-        sp = Path(sp_cfg["path"]).as_posix()
-        sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        sp = sp_map[sp_part]
+        # A nested subproject's stages are run by the nearest project with
+        # its own DVC repo, which is the parent's unless one is isolated
+        parts = sp.split("/")
+        dvc_root = next(
+            (
+                d
+                for d in (
+                    "/".join(parts[:i]) for i in range(len(parts), 0, -1)
+                )
+                if os.path.isdir(os.path.join(d, ".dvc"))
+            ),
+            None,
+        )
         if not stage_part:
-            if sp_is_isolated:
+            if dvc_root is None:
+                parent_targets.append(f"{sp}/dvc.yaml")
+            elif dvc_root != sp:
+                rel = sp.removeprefix(f"{dvc_root}/")
+                isolated_sp_targets.append((dvc_root, f"{rel}/dvc.yaml"))
+            elif sp in declared:
+                # The parent runs it through its wrapper stage
                 parent_targets.append(Path(sp).name)
             else:
-                parent_targets.append(f"{sp}/dvc.yaml")
+                isolated_sp_targets.append((sp, None))
             continue
-        # A subproject's diffs are named after its own stages
-        sp_stages: dict = {}
-        if stage_part.endswith(calkit.latex.DIFFS_TARGET_SUFFIX):
-            sp_info = calkit.load_calkit_info(wdir=sp)
-            sp_stages = sp_info.get("pipeline", {}).get("stages", {})
-        for stage_name in expand_diffs(stage_part, sp_stages):
-            if sp_is_isolated:
+        # A subproject's stages expand to its own
+        sp_info = calkit.load_calkit_info(wdir=sp)
+        for stage_name in expand(stage_part, sp_info, wdir=sp):
+            if dvc_root is None:
+                parent_targets.append(f"{sp}/dvc.yaml:{stage_name}")
+            elif dvc_root == sp:
                 isolated_sp_targets.append((sp, stage_name))
             else:
-                parent_targets.append(f"{sp}/dvc.yaml:{stage_name}")
+                rel = sp.removeprefix(f"{dvc_root}/")
+                isolated_sp_targets.append(
+                    (dvc_root, f"{rel}/dvc.yaml:{stage_name}")
+                )
     return parent_targets, isolated_sp_targets
 
 
@@ -2408,3 +3330,373 @@ def get_upstream_stages(target: str, wdir: str | None = None) -> set[str]:
             names.add(name)
             names.add(name.split("@")[0])
     return names
+
+
+def get_stages_to_gate(targets: list[str] | None) -> set[str] | None:
+    """The stages a run of these targets can reach, or None for all."""
+    if not targets:
+        return None
+    names: set[str] = set()
+    try:
+        for target in targets:
+            names |= get_upstream_stages(target)
+    except Exception:
+        # E.g., a stage that isn't compiled yet
+        return None
+    return names
+
+
+def stages_by_output(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> dict[str, list[str]]:
+    """Map each pipeline output path to the stages that write it.
+
+    Keyed the way the paths are written in ``calkit.yaml``, relative to the
+    project, with each stage's own ``wdir`` folded in. Subprojects' stages
+    are included under their qualified names, as ``calkit status`` names
+    them. An iterated stage's outputs are keyed by their templates, e.g.,
+    ``results/{case}.csv``.
+    """
+    base = os.path.normpath(wdir) if wdir else "."
+    out: dict[str, list[str]] = {}
+    for project_wdir, info in calkit.iter_projects(ck_info=ck_info, wdir=wdir):
+        project = Path(os.path.relpath(project_wdir, base)).as_posix()
+        stages = ((info.get("pipeline") or {}).get("stages") or {}).items()
+        for name, stage in stages:
+            if not isinstance(stage, dict):
+                continue
+            paths = [
+                o.get("path") if isinstance(o, dict) else o
+                for o in stage.get("outputs") or []
+            ]
+            paths += get_map_paths_outputs(stage)
+            prefix = posixpath.join(
+                "" if project == "." else project, stage.get("wdir") or ""
+            )
+            for path in paths:
+                if not isinstance(path, str) or not path:
+                    continue
+                full = posixpath.normpath(posixpath.join(prefix, path))
+                qualified = calkit.qualify_with_project(project, name)
+                out.setdefault(full, []).append(qualified)
+    return out
+
+
+def list_artifacts(
+    kind: str,
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    declared_only: bool = False,
+    status: bool = False,
+    pending_extensions: Iterable[str] | None = None,
+) -> list[dict]:
+    """The project's artifacts of one kind, declared then auto-detected.
+
+    Detection only finds files that exist, so with ``pending_extensions``,
+    pipeline outputs of those types that haven't been written yet are
+    listed too. Each entry is annotated as by ``annotate_artifacts``.
+    """
+    import calkit.detect
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    declared = [o for o in ck_info.get(kind) or [] if isinstance(o, dict)]
+    entries = [{**o, "detected": False} for o in declared]
+    if not declared_only:
+        listed = {o.get("path") for o in declared}
+        found = calkit.detect.detect_project_artifacts(
+            wdir=wdir, ck_info=ck_info
+        )
+        for path in found.get(kind, []):
+            if path not in listed:
+                entries.append({"path": path, "detected": True})
+                listed.add(path)
+        extensions = set(pending_extensions or [])
+        by_output = stages_by_output(ck_info=ck_info, wdir=wdir)
+        for path in sorted(by_output) if extensions else []:
+            # A template stands for files only the stage's run names
+            if (
+                path not in listed
+                and "{" not in path
+                and os.path.splitext(path)[1].lower() in extensions
+            ):
+                entries.append({"path": path, "detected": True})
+    return annotate_artifacts(
+        entries, ck_info=ck_info, wdir=wdir, status=status
+    )
+
+
+# A pipeline artifact's status, worst first, so one written by more than
+# one stage reports the one worth acting on
+ARTIFACT_STATUSES = ["not built", "stale", "up to date"]
+
+
+def annotate_artifacts(
+    artifacts: list[dict],
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    status: bool = False,
+) -> list[dict]:
+    """Add each artifact's producing stages, and whether they're current.
+
+    Mutates and returns ``artifacts``, which are entries carrying a
+    ``path``. Asking for ``status`` queries DVC, which costs the same prep
+    ``calkit status`` does, so it's left to the caller to ask for.
+    """
+    root = wdir or os.getcwd()
+    by_output = stages_by_output(ck_info=ck_info, wdir=wdir)
+    # An iterated stage's output template matches what each iteration
+    # writes, the way preprocessing matches it
+    templates = [
+        (
+            re.compile(
+                re.sub(r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)) + r"\Z"
+            ),
+            stages,
+        )
+        for path, stages in by_output.items()
+        if "{" in path
+    ]
+    stale: set[str] = set()
+    if status:
+        # The same prep 'calkit status' does, since compiling the pipeline
+        # and cleaning notebooks both change whether a stage is stale
+        state = get_status(ck_info=ck_info, wdir=wdir)
+        if state.errors:
+            raise RuntimeError("; ".join(state.errors))
+        # Iterations are named 'stage@item', and an output is matched to
+        # its stage rather than to one iteration
+        stale = {n.split("@")[0] for n in state.stale_stage_names}
+    for artifact in artifacts:
+        path = artifact.get("path") or ""
+        artifact["exists"] = os.path.exists(os.path.join(root, path))
+        stages = list(by_output.get(path, []))
+        for pattern, names in templates:
+            if pattern.match(path):
+                stages += [n for n in names if n not in stages]
+        if stages:
+            artifact["stages"] = stages
+        if not status:
+            continue
+        if not stages:
+            artifact["status"] = "not from the pipeline"
+            continue
+        worst = "up to date"
+        for stage in stages:
+            if not artifact["exists"]:
+                current = "not built"
+            elif stage in stale:
+                current = "stale"
+            else:
+                current = "up to date"
+            if ARTIFACT_STATUSES.index(current) < ARTIFACT_STATUSES.index(
+                worst
+            ):
+                worst = current
+        artifact["status"] = worst
+    return artifacts
+
+
+def read_artifact_at_ref(
+    path: str, ref: str, wdir: str | None = None
+) -> bytes:
+    """A pipeline artifact's contents at a Git ref.
+
+    Read from the Git blob where Git holds the artifact, and from the DVC
+    cache, by the hash ``dvc.lock`` recorded at that ref, where it doesn't.
+    """
+    import calkit.dvc
+    import calkit.git
+
+    repo = calkit.git.get_repo()
+    rel = _repo_relpath(repo, path, wdir)
+    blob = calkit.git.read_at_ref(repo, ref, rel)
+    if blob is not None:
+        return blob
+    lock, _ = _lock_stages_at_ref(repo, ref, wdir)
+    recorded = {
+        out.get("md5")
+        for stage in lock.values()
+        for out in stage.get("outs") or []
+        if isinstance(out, dict) and out.get("path") == rel and out.get("md5")
+    }
+    if not recorded:
+        raise FileNotFoundError(
+            f"{rel} is neither in Git at {ref} nor an output in its dvc.lock"
+        )
+    root = str(repo.working_dir)
+    cached = next(
+        (
+            c
+            for c in (calkit.dvc.cache_path(md5, root) for md5 in recorded)
+            if c
+        ),
+        None,
+    )
+    if cached is None:
+        raise FileNotFoundError(
+            f"{rel} at {ref} is tracked by DVC and isn't in the local "
+            f"cache; fetch it with 'calkit dvc fetch --rev {ref} {rel}'"
+        )
+    with open(cached, "rb") as f:
+        return f.read()
+
+
+def artifact_status_at_ref(
+    path: str, ref: str, wdir: str | None = None
+) -> dict[str, Any]:
+    """Whether a pipeline artifact was up to date at a Git ref.
+
+    DVC answers this for the working tree by hashing what's on disk, and at
+    an old commit there is nothing on disk to hash, so this reconstructs it
+    from the record that ref does carry. A stage's ``dvc.lock`` entry
+    stores the hash of every dependency as of its last run, so comparing
+    those against that commit's own contents says whether the stage had
+    been run since its inputs last changed. Dependencies written by another
+    stage are compared against that stage's recorded output hashes, which
+    covers the ones Git does not hold.
+
+    What can't be checked is counted in ``unverifiable`` rather than
+    assumed current: a directory hash, or a file that is neither in Git at
+    that ref nor produced by another stage.
+    """
+    import hashlib
+
+    import calkit.git
+
+    def blob_md5s(dep_path: str) -> set[str] | None:
+        # DVC hashed the working tree, which can have CRLF where Git holds
+        # LF, e.g., with core.autocrlf on Windows, so either ending counts
+        blob = calkit.git.read_at_ref(repo, ref, dep_path)
+        if blob is None:
+            return None
+        variants = {blob}
+        if b"\0" not in blob:
+            lf = blob.replace(b"\r\n", b"\n")
+            variants |= {lf, lf.replace(b"\n", b"\r\n")}
+        return {hashlib.md5(v).hexdigest() for v in variants}
+
+    repo = calkit.git.get_repo()
+    rel = _repo_relpath(repo, path, wdir)
+    lock, defined = _lock_stages_at_ref(repo, ref, wdir)
+    produced: dict[str, set[str]] = {}
+    for stage in lock.values():
+        for out in stage.get("outs") or []:
+            if isinstance(out, dict) and out.get("path") and out.get("md5"):
+                produced.setdefault(out["path"], set()).add(out["md5"])
+    stages = [
+        name
+        for name, stage in lock.items()
+        if rel in {o.get("path") for o in stage.get("outs") or []}
+    ]
+    if not stages:
+        return {
+            "status": "not from the pipeline",
+            "reasons": [f"no dvc.lock stage at {ref} writes {rel}"],
+            "unverifiable": 0,
+        }
+    # What dvc.yaml declares there, so a stage whose definition moved on
+    # without being re-run is stale even with every input untouched
+    declared = {
+        name: stage.get("cmd")
+        for name, stage in defined.items()
+        if isinstance(stage, dict)
+    }
+    reasons: list[str] = []
+    unverifiable = 0
+    for name in stages:
+        stage = lock[name]
+        for dep in stage.get("deps") or []:
+            recorded, dep_path = dep.get("md5"), dep.get("path")
+            if not dep_path:
+                continue
+            if produced.get(dep_path):
+                if recorded not in produced[dep_path]:
+                    reasons.append(
+                        f"{name}: {dep_path} was rewritten by the stage "
+                        "that produces it after this one last ran"
+                    )
+                continue
+            if not recorded or recorded.endswith(".dir"):
+                unverifiable += 1
+                continue
+            committed = blob_md5s(dep_path)
+            if committed is None:
+                unverifiable += 1
+            elif recorded not in committed:
+                reasons.append(f"{name}: {dep_path} changed after it ran")
+        if name in declared and declared[name] != stage.get("cmd"):
+            reasons.append(f"{name}: dvc.yaml defines a different command")
+        for out in stage.get("outs") or []:
+            if out.get("path") != rel:
+                continue
+            committed = blob_md5s(rel)
+            if committed is not None and out.get("md5") not in committed:
+                reasons.append(
+                    f"{name}: {rel} was committed with different contents "
+                    "than the run produced"
+                )
+    return {
+        "status": "stale" if reasons else "up to date",
+        "stages": stages,
+        "reasons": reasons,
+        "unverifiable": unverifiable,
+    }
+
+
+def _lock_stages_at_ref(
+    repo: Any, ref: str, wdir: str | None
+) -> tuple[dict[str, dict], dict[str, Any]]:
+    """``dvc.lock``'s stages at a ref with repo-relative paths, and
+    ``dvc.yaml``'s.
+
+    A lock records paths relative to its stage's ``wdir``, which only
+    ``dvc.yaml`` says.
+    """
+    import io
+
+    import calkit.dvc
+    import calkit.git
+
+    def rebase(entries: Any, base: str) -> list:
+        return [
+            {**e, "path": posixpath.normpath(posixpath.join(base, e["path"]))}
+            if isinstance(e, dict) and isinstance(e.get("path"), str)
+            else e
+            for e in entries or []
+        ]
+
+    project = _repo_relpath(repo, ".", wdir)
+    defined: dict[str, Any] = {}
+    blob = calkit.git.read_at_ref(
+        repo, ref, _repo_relpath(repo, "dvc.yaml", wdir)
+    )
+    if blob is not None:
+        compiled = calkit.ryaml.load(io.StringIO(blob.decode())) or {}
+        if isinstance(compiled, dict):
+            defined = dict(compiled.get("stages") or {})
+    stages: dict[str, dict] = {}
+    for name, stage in calkit.dvc.read_lock_stages_at_ref(ref, wdir).items():
+        if not isinstance(stage, dict):
+            continue
+        # An iteration, 'stage@item', is defined under 'do' of its stage
+        definition = defined.get(str(name).split("@")[0])
+        if isinstance(definition, dict) and isinstance(
+            definition.get("do"), dict
+        ):
+            definition = definition["do"]
+        stage_wdir = (
+            definition.get("wdir") if isinstance(definition, dict) else None
+        )
+        base = posixpath.join(project, str(stage_wdir or ""))
+        stages[name] = {
+            **stage,
+            "deps": rebase(stage.get("deps"), base),
+            "outs": rebase(stage.get("outs"), base),
+        }
+    return stages, defined
+
+
+def _repo_relpath(repo: Any, path: str, wdir: str | None) -> str:
+    full = os.path.join(wdir or os.getcwd(), path)
+    return os.path.relpath(full, str(repo.working_dir)).replace(os.sep, "/")

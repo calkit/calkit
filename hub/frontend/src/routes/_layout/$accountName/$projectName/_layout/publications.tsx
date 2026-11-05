@@ -26,7 +26,7 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 import { FaCodeBranch, FaPlus, FaSync } from "react-icons/fa"
 import { FiBookOpen, FiFile } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
@@ -35,7 +35,7 @@ import { z } from "zod"
 import Tooltip from "../../../../../components/Common/Tooltip"
 
 import type { AxiosError } from "axios"
-import type { Publication } from "../../../../../client"
+import type { Publication, PublicationLatexDiff } from "../../../../../client"
 import { ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import CommentsPanel, {
@@ -47,12 +47,14 @@ import InputsRow, {
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import PageMenu from "../../../../../components/Common/PageMenu"
-import TipBubble from "../../../../../components/Onboarding/TipBubble"
 import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewPublication from "../../../../../components/Publications/NewPublication"
 import PdfAnnotator, {
   commentToHighlight,
+  latexThreadToHighlight,
+  latexThreadToPanelComments,
+  useLatexComments,
   type AnnotationHighlight,
 } from "../../../../../components/Publications/PdfAnnotator"
 import PublicationComponents from "../../../../../components/Publications/PublicationComponents"
@@ -75,12 +77,22 @@ const pubSearchSchema = z.object({
   compare_open: z.boolean().optional(),
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
+  compare_view: z.enum(["side-by-side", "latex-diff"]).optional(),
   editor_open: z.boolean().optional(),
+  // Whether the editor is showing the comment threads in the source
+  editor_comments: z.boolean().optional(),
   components_open: z.boolean().optional(),
   // Which file of unknown origin is being resolved, and how
   resolve_path: z.string().optional(),
   resolve_as: z.enum(["figure", "attest", "import"]).optional(),
+  // Path of the LaTeX diff being viewed in place of the publication
+  diff: z.string().optional(),
 })
+
+const getDiffLabel = (diff: PublicationLatexDiff) =>
+  diff.to_ref === "HEAD"
+    ? `Changes since ${diff.from_ref}`
+    : `Changes from ${diff.from_ref} to ${diff.to_ref}`
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/publications",
@@ -111,10 +123,20 @@ function PubInfo({
   const queryClient = useQueryClient()
   // Editor open state lives in the URL (editor_open) so a session is shareable
   // and restorable by link, like the compare modal.
-  const { editor_open: editorOpen } = Route.useSearch()
+  const {
+    editor_open: editorOpen,
+    editor_comments: editorComments,
+    diff: diffPath,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const closeEditor = () =>
-    navigate({ search: (prev) => ({ ...prev, editor_open: undefined }) })
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        editor_open: undefined,
+        editor_comments: undefined,
+      }),
+    })
   const texPath = getLatexSourcePath(publication)
   // What went into the publication: its stage's concrete inputs in dvc.yaml,
   // sorted against the declared figures, plus any stage that copies files
@@ -241,6 +263,15 @@ function PubInfo({
           texPath={texPath}
           deps={publication.stage_info?.deps ?? undefined}
           stage={publication.stage}
+          commentsOpen={Boolean(editorComments)}
+          onCommentsOpenChange={(open) =>
+            navigate({
+              search: (prev) => ({
+                ...prev,
+                editor_comments: open || undefined,
+              }),
+            })
+          }
         />
       )}
       <Text fontSize="sm" mb={1}>
@@ -303,6 +334,27 @@ function PubInfo({
       </Text>
       <InputsRow label="Figures" items={figureLinks} />
       <InputsRow label="References" items={referenceLinks} />
+      {(publication.latex_diffs?.length ?? 0) > 0 && (
+        <Box fontSize="sm" mb={1}>
+          <Text as="span" fontWeight="semibold">
+            Diffs:
+          </Text>{" "}
+          {publication.latex_diffs?.map((d, i) => (
+            <Fragment key={d.path}>
+              {i > 0 && ", "}
+              <Link
+                as={RouterLink}
+                from={Route.fullPath}
+                to="."
+                search={((prev: any) => ({ ...prev, diff: d.path })) as any}
+                fontWeight={d.path === diffPath ? "semibold" : undefined}
+              >
+                {getDiffLabel(d)}
+              </Link>
+            </Fragment>
+          ))}
+        </Box>
+      )}
       <PublicationComponents
         ownerName={ownerName}
         projectName={projectName}
@@ -369,10 +421,12 @@ function Publications() {
     compare_open,
     base_ref,
     compare_ref,
+    compare_view,
+    diff: diffPath,
   } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const setSelectedPath = (p: string) =>
-    navigate({ search: (prev) => ({ ...prev, path: p }) })
+    navigate({ search: (prev) => ({ ...prev, path: p, diff: undefined }) })
 
   const openCompare = (pubPath: string) =>
     navigate({
@@ -386,6 +440,7 @@ function Publications() {
         compare_open: undefined,
         base_ref: undefined,
         compare_ref: undefined,
+        compare_view: undefined,
       }),
     })
   const { user } = useAuth()
@@ -432,6 +487,9 @@ function Publications() {
     selectedPath,
   ])
 
+  const selectedDiff = selectedPub?.latex_diffs?.find(
+    (d) => d.path === diffPath,
+  )
   const isPdf = selectedPub?.path?.endsWith(".pdf") ?? false
   const texPath = selectedPub ? getLatexSourcePath(selectedPub) : null
   const canEditLatex = userHasWriteAccess && !!texPath
@@ -445,22 +503,32 @@ function Publications() {
           </Tooltip>
         )}
         {canEditLatex && (
-          <TipBubble tip="edit-latex" where="page" placement="bottom">
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() =>
-                navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
-              }
-            >
-              <Icon as={MdEdit} mr={1} />
-              Edit LaTeX
-            </Button>
-          </TipBubble>
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() =>
+              navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
+            }
+          >
+            <Icon as={MdEdit} mr={1} />
+            Edit LaTeX
+          </Button>
         )}
       </HStack>
     ) : undefined
 
+  // A PDF a latex stage builds keeps its comments in its source
+  const isLatexPub =
+    (selectedPub?.calkit_stage as { kind?: string } | null | undefined)
+      ?.kind === "latex"
+  const latexComments = useLatexComments(
+    accountName,
+    projectName,
+    selectedPub?.path ?? "",
+    ref,
+    !!selectedPub && isLatexPub,
+  )
+  const latexThreads = latexComments.query.data?.threads ?? []
   const commentsQuery = useQuery({
     queryKey: [
       "projects",
@@ -534,9 +602,17 @@ function Publications() {
   })
 
   const pdfComments = commentsQuery.data ?? []
-  const pdfHighlights: AnnotationHighlight[] = pdfComments
-    .map(commentToHighlight)
-    .filter((h): h is AnnotationHighlight => h !== null)
+  const pdfHighlights: AnnotationHighlight[] = [
+    ...(isLatexPub ? latexThreads.map(latexThreadToHighlight) : []),
+    ...pdfComments.map(commentToHighlight),
+  ].filter((h): h is AnnotationHighlight => h !== null)
+  // On a PDF built from LaTeX, comments kept here rather than in the source
+  // are from before the source kept them, until they're moved into it
+  const keptHere = new Set(pdfComments.map((c) => c.id))
+  const keptHereThreads = isLatexPub
+    ? pdfComments.filter((c) => !c.parent_id).length
+    : 0
+  const canMove = keptHereThreads > 0 && !!latexComments.query.data?.can_comment
 
   return (
     <>
@@ -551,18 +627,16 @@ function Publications() {
               {userHasWriteAccess && (
                 <>
                   <Menu>
-                    <TipBubble tip="publication" where="page">
-                      <MenuButton
-                        as={Button}
-                        variant="primary"
-                        height="25px"
-                        width="9px"
-                        px={1}
-                        ml={2}
-                      >
-                        <Icon as={FaPlus} fontSize="xs" />
-                      </MenuButton>
-                    </TipBubble>
+                    <MenuButton
+                      as={Button}
+                      variant="primary"
+                      height="25px"
+                      width="9px"
+                      px={1}
+                      ml={2}
+                    >
+                      <Icon as={FaPlus} fontSize="xs" />
+                    </MenuButton>
                     <Portal>
                       <MenuList zIndex="popover">
                         <MenuItem onClick={newPubTemplateModal.onOpen}>
@@ -630,7 +704,41 @@ function Publications() {
           <Box flex={1} minW={0} mr={6} minH={0}>
             {selectedPub ? (
               <>
-                {isPdf && selectedPub.url ? (
+                {selectedDiff ? (
+                  // Shown like the publication itself, but without comments,
+                  // which belong to the publication's own PDF
+                  <Box height="82vh" borderRadius="lg" overflow="hidden">
+                    <PublicationView
+                      publication={{
+                        ...selectedPub,
+                        path: selectedDiff.path,
+                        title: getDiffLabel(selectedDiff),
+                        stage: selectedDiff.stage,
+                        url: selectedDiff.url,
+                        content: selectedDiff.content,
+                      }}
+                      toolbarAction={
+                        <HStack spacing={2}>
+                          <Badge>{getDiffLabel(selectedDiff)}</Badge>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() =>
+                              navigate({
+                                search: (prev) => ({
+                                  ...prev,
+                                  diff: undefined,
+                                }),
+                              })
+                            }
+                          >
+                            Close diff
+                          </Button>
+                        </HStack>
+                      }
+                    />
+                  </Box>
+                ) : isPdf && selectedPub.url ? (
                   <Box height="82vh">
                     <PdfAnnotator
                       url={String(selectedPub.url)}
@@ -641,6 +749,7 @@ function Publications() {
                       showResolved={showResolved}
                       externalScrollRef={pdfScrollRef}
                       toolbarAction={toolbarAction}
+                      latex={isLatexPub}
                     />
                   </Box>
                 ) : (
@@ -690,6 +799,12 @@ function Publications() {
                   initialRef={base_ref}
                   initialRef2={compare_ref}
                   initialArtifact={selectedPub}
+                  compareView={compare_view}
+                  onCompareViewChange={(view) =>
+                    navigate({
+                      search: (prev) => ({ ...prev, compare_view: view }),
+                    })
+                  }
                   onRefsChange={(r1, r2) =>
                     navigate({
                       search: (prev) => ({
@@ -711,48 +826,109 @@ function Publications() {
                     />
                   </Box>
                 )}
+                {canMove && (
+                  <Box bg={secBgColor} borderRadius="lg" p={3}>
+                    <Text fontSize="sm" mb={2}>
+                      {keptHereThreads === 1
+                        ? "1 comment is kept on the hub rather than in the LaTeX source."
+                        : `${keptHereThreads} comments are kept on the hub rather than in the LaTeX source.`}
+                    </Text>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      isLoading={latexComments.move.isPending}
+                      onClick={() => latexComments.move.mutate()}
+                    >
+                      Move into the source
+                    </Button>
+                  </Box>
+                )}
                 {selectedPub && (
                   <CommentsPanel
-                    comments={pdfComments.map(projectCommentToPanelComment)}
-                    isLoading={commentsQuery.isPending}
-                    canComment={!!user}
-                    canResolve={!!user}
+                    key={selectedPub.path}
+                    comments={[
+                      ...(isLatexPub
+                        ? latexThreads.flatMap(latexThreadToPanelComments)
+                        : []),
+                      ...pdfComments.map((c) => ({
+                        ...projectCommentToPanelComment(c),
+                        note: isLatexPub ? "Kept on the hub" : null,
+                      })),
+                    ]}
+                    isLoading={
+                      isLatexPub
+                        ? latexComments.query.isPending
+                        : commentsQuery.isPending
+                    }
+                    canComment={
+                      isLatexPub
+                        ? !!latexComments.query.data?.can_comment
+                        : !!user
+                    }
+                    canResolve={
+                      isLatexPub
+                        ? !!latexComments.query.data?.can_comment
+                        : !!user
+                    }
                     showResolved={showResolved}
                     onShowResolvedChange={setShowResolved}
                     showCreateIssueCheckbox
+                    defaultCreateIssue={!isLatexPub}
                     emptyText="Select text in the PDF or use the button below to add a comment."
                     onHighlightClick={(c) => {
                       const h = pdfHighlights.find((x) => x.dbId === c.id)
                       if (h) pdfScrollRef.current(h)
                     }}
                     onPostComment={(body, opts) =>
-                      postCommentMutation.mutateAsync({
-                        body,
-                        createIssue: opts.createIssue,
-                      })
+                      isLatexPub
+                        ? latexComments.post.mutateAsync({
+                            comment: body,
+                            highlight: null,
+                            createIssue: opts.createIssue,
+                          })
+                        : postCommentMutation.mutateAsync({
+                            body,
+                            createIssue: opts.createIssue,
+                          })
                     }
-                    postingComment={postCommentMutation.isPending}
+                    postingComment={
+                      isLatexPub
+                        ? latexComments.post.isPending
+                        : postCommentMutation.isPending
+                    }
                     onPostReply={(parentId, body) =>
-                      replyCommentMutation.mutateAsync({
-                        commentId: parentId,
-                        body,
-                      })
+                      isLatexPub && !keptHere.has(parentId)
+                        ? latexComments.reply.mutateAsync({
+                            key: parentId,
+                            body,
+                          })
+                        : replyCommentMutation.mutateAsync({
+                            commentId: parentId,
+                            body,
+                          })
                     }
                     postingReplyForId={
-                      replyCommentMutation.isPending
-                        ? replyCommentMutation.variables?.commentId ?? null
-                        : null
+                      latexComments.reply.isPending
+                        ? latexComments.reply.variables?.key ?? null
+                        : replyCommentMutation.isPending
+                          ? replyCommentMutation.variables?.commentId ?? null
+                          : null
                     }
                     onResolve={(id, resolved) =>
-                      resolvePubCommentMutation.mutate({
-                        commentId: id,
-                        resolved,
-                      })
+                      isLatexPub && !keptHere.has(id)
+                        ? latexComments.resolve.mutate({ key: id, resolved })
+                        : resolvePubCommentMutation.mutate({
+                            commentId: id,
+                            resolved,
+                          })
                     }
                     resolvingId={
-                      resolvePubCommentMutation.isPending
-                        ? resolvePubCommentMutation.variables?.commentId ?? null
-                        : null
+                      latexComments.resolve.isPending
+                        ? latexComments.resolve.variables?.key ?? null
+                        : resolvePubCommentMutation.isPending
+                          ? resolvePubCommentMutation.variables?.commentId ??
+                            null
+                          : null
                     }
                   />
                 )}

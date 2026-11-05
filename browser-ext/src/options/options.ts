@@ -1,4 +1,4 @@
-import { send } from "../core/messages";
+import { onAuthChange, send } from "../core/messages";
 import type { ProjectPublic } from "../core/types";
 import { clear, el, errorMessage, loading, textInput } from "../core/ui";
 
@@ -273,3 +273,4 @@ async function render(): Promise<void> {
 }
 
 void render();
+onAuthChange(() => void render());

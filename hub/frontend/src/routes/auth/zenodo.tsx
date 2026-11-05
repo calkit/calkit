@@ -27,7 +27,7 @@ function ZenodoAuth() {
   const zenodoAuthMutation = useMutation({
     mutationFn: (code: string) =>
       UsersService.postUserZenodoAuth({
-        oAuthCodeExchange: {
+        appApiRoutesUsersOAuthCodeExchange: {
           code,
           redirect_uri: getZenodoRedirectUri(),
         },

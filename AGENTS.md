@@ -6,7 +6,10 @@
 - The JupyterLab extension lives in `src`
 - The VS Code extension lives in `vscode-ext`
 - The Chrome extension lives in `browser-ext`
+- The Calkit Assistant desktop app lives in `assistant`
 - GitHub Actions live in `actions`, e.g., `calkit/calkit/actions/run`
+- Docker images we publish live in `images`, e.g., `images/latex`, which
+  is released on its own `latex-image/vX.Y.Z` tag rather than with the CLI
 - Config Calkit installs into projects, e.g., the dev container, VS Code, and
   GitHub Actions configs, lives in `calkit/resources`; see the README there
   before editing, since some of those files are generated
@@ -22,6 +25,9 @@ To run tests, use `uv run pytest`.
 
 To sync the docs and format all the code, run `make format`.
 
+Before pushing a pull request, run `make pr`, which also runs the project's
+pipeline and pushes its outputs, so the pipeline check passes.
+
 Before finishing a change, type-check it. The CLI gate is mypy
 (`uv run mypy <changed files>`, or `make check` for the full suite), and the
 VS Code editor uses Pylance (Pyright). Keep new code clean under both, and do
@@ -35,7 +41,15 @@ preceded by a `<!-- prettier-ignore -->` comment. Otherwise Prettier reformats
 the block and strips the 4-space indentation of the admonition body, which
 breaks rendering.
 
-Agents should never make commits to Git.
+`calkit run` and `calkit status` preprocess the pipeline before asking DVC:
+they check environments and clean notebooks, and compiling a LaTeX stage for
+them maps its document's components into `_calkit/`, since each generates
+dependencies the compiled DVC pipeline reads.
+This runs on every call, so only very fast work belongs there, e.g.,
+skipping unchanged files by size and timestamp rather than reading them.
+Anything slow belongs in a stage.
+
+Agents should never make commits to Git unless asked to.
 
 Tests belong in the test module named after the module the exercised code
 lives in, e.g., tests for `calkit/cli/new.py` go in
@@ -70,4 +84,9 @@ respectively.
 Never create `helpers` or `utils` modules or packages--tight coupling and
 low cohesion architecture.
 
-Don't be verbose in comments. One sentence is usually fine.
+Don't be verbose in comments. One sentence is usually fine, if anything at all.
+
+Agents should typically not be writing prose for human consumption.
+If some is needed, notify
+the human developer and ask them to write in a given file at a specified
+line and make a commit.

@@ -9,6 +9,7 @@ Registered as ``scheduler|sch``.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import random
 import re
@@ -141,6 +142,35 @@ def _record_job_result(name: str, exit_code: int) -> None:
         info["exit_code"] = exit_code
         info["finished_at"] = calkit.utcnow().isoformat()
         jobs[name] = info
+
+
+def record_interactive_job(prefix: str) -> None:
+    """Record the scheduler job we're running in, if any.
+
+    Interactive sessions, e.g., a Jupyter server started with ``srun`` from
+    VS Code, aren't submitted by Calkit but still hold an allocation for the
+    project, so ``scheduler queue`` and ``cancel`` should see them. The
+    record is for the allocation, which can outlive or be shared by several
+    sessions, so it stays until ``queue`` finds the job gone.
+    """
+    kind, job_id = None, None
+    if os.getenv("SLURM_JOB_ID"):
+        kind, job_id = "slurm", os.environ["SLURM_JOB_ID"]
+    elif os.getenv("PBS_JOBID"):
+        kind, job_id = "pbs", os.environ["PBS_JOBID"]
+    if job_id is None or not os.path.isfile("calkit.yaml"):
+        return
+    # The colon keeps it apart from stage records, since stage names can't
+    # contain one
+    _record_job(
+        f"{prefix}:{job_id}",
+        {
+            "kind": kind,
+            "job_id": job_id,
+            "interactive": True,
+            "submitted_at": calkit.utcnow().isoformat(),
+        },
+    )
 
 
 def _mock_enabled() -> bool:
@@ -503,7 +533,7 @@ def _count_queued_jobs(environment: str, exclude: str) -> int:
     """
     by_kind: dict[str, list[str]] = {}
     for job_name, info in _load_jobs().items():
-        if job_name == exclude:
+        if job_name == exclude or info.get("interactive"):
             continue
         # Records written before environments were tracked have no
         # environment key. Count them: over-counting delays a submission,
@@ -821,6 +851,17 @@ def run_batch(
             ),
         ),
     ] = [],
+    setup_file: Annotated[
+        str | None,
+        typer.Option(
+            "--setup-file",
+            help=(
+                "Path to a JSON list of setup commands, used instead of "
+                "--setup, since a path survives cmd.exe and a POSIX shell "
+                "alike, and quoted commands don't."
+            ),
+        ),
+    ] = None,
     log_path: Annotated[
         str | None, typer.Option("--log-path", help="Output log path.")
     ] = None,
@@ -856,6 +897,18 @@ def run_batch(
             ),
         ),
     ] = EnvDefaultsModeChoice.replace,
+    check_inner_env: Annotated[
+        bool,
+        typer.Option(
+            "--check-inner-env",
+            hidden=True,
+            help=(
+                "Check the inner environment the job runs in before "
+                "submitting, which is how a machine that was sent the job "
+                "builds it once for all of a stage's jobs."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Submit a batch job through the scheduler associated with the env.
 
@@ -869,16 +922,172 @@ def run_batch(
     iterated stage does not put all of its jobs into a shared cluster's queue
     at once.
     """
+
+    def check_inner_env_once(argv: list[str]) -> None:
+        """Check the env the job runs in, once for all of a stage's jobs.
+
+        Jobs submitted at the same time take turns, so the first builds it
+        and the rest find it checked.
+        """
+        import zc.lockfile
+
+        from calkit.cli.check import check_environment
+
+        inner = calkit.environments.inner_env_name(argv)
+        inner_env = envs.get(inner) if inner else None
+        if inner is None or inner_env is None:
+            return
+        lock_fpath = os.path.join(
+            calkit.ensure_local_dir(), f"check-env-{inner}.lock"
+        )
+        while True:
+            try:
+                lock = zc.lockfile.LockFile(lock_fpath)
+                break
+            except zc.lockfile.LockError:
+                time.sleep(1)
+        try:
+            if calkit.environments.cacheable(
+                inner_env
+            ) and calkit.environments.check_cache(
+                env_name=inner, env=inner_env
+            ):
+                return
+            check_environment(env_name=inner)
+            calkit.environments.save_cache(
+                env_name=inner, env=inner_env, success=True
+            )
+        finally:
+            lock.close()
+
+    def replace_environment_arg(argv: list[str], env_name: str) -> list[str]:
+        """Return ``argv`` with its ``--environment`` value replaced."""
+        out = list(argv)
+        for i, arg in enumerate(out):
+            if arg in ("--environment", "-e") and i + 1 < len(out):
+                out[i + 1] = env_name
+                return out
+            if arg.startswith("--environment="):
+                out[i] = f"--environment={env_name}"
+                return out
+        return out
+
+    def run_on_system(
+        env_name: str,
+        env: dict,
+        target: str,
+        args: list[str],
+        outs: list[str],
+        setup_cmds: list[str],
+        log_path: str,
+        is_command: bool,
+    ) -> None:
+        """Run a job on a ``system`` env a switch picked, rather than queue it.
+
+        Goes through ``calkit xenv``, which knows how to reach the machine, and
+        writes the log a scheduler would, since the stage declares it.
+        """
+        for out in outs:
+            if os.path.isfile(out):
+                os.remove(out)
+            elif os.path.isdir(out):
+                shutil.rmtree(out)
+        parts = [target] + list(args)
+        if (
+            not is_command
+            and os.path.isfile(target)
+            and not os.access(target, os.X_OK)
+        ):
+            parts = _detect_interpreter(target) + parts
+        cmd = ["calkit", "xenv", "-n", env_name, "--no-check"]
+        for setup_cmd in setup_cmds:
+            cmd += ["--setup", setup_cmd]
+        cmd += ["--", *parts]
+        logs_dir = os.path.dirname(log_path)
+        if logs_dir:
+            os.makedirs(logs_dir, exist_ok=True)
+        with open(log_path, "w") as log_file:
+            p = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            assert p.stdout is not None
+            for line in p.stdout:
+                sys.stdout.write(line)
+                log_file.write(line)
+            returncode = p.wait()
+        if returncode != 0:
+            raise typer.Exit(returncode)
+
     if args is None:
         args = []
+    if setup_file is not None:
+        if setup_cmds:
+            raise_error("Give --setup or --setup-file, not both")
+        try:
+            with open(setup_file) as f:
+                setup_cmds = json.load(f)
+        except (OSError, ValueError) as e:
+            raise_error(
+                f"Could not read setup commands from {setup_file}: {e}"
+            )
     if environment == "_system":
         raise_error(
             "Scheduler batch submission requires a scheduler environment; "
             "got '_system'"
         )
     ck_info = calkit.load_calkit_info()
-    env = ck_info.get("environments", {}).get(environment, {})
+    envs = ck_info.get("environments", {})
+    # Including an option a switch defines in place, which a switch on
+    # another machine forwards by name
+    env = calkit.environments.get_env(environment, envs) or {}
     kind = env.get("kind")
+    argv = sys.argv[1:]
+    if kind == calkit.environments.SWITCH_KIND:
+        switch_name = environment
+        try:
+            if not calkit.environments.switch_is_outer(switch_name, envs):
+                raise ValueError(
+                    f"Switch environment '{switch_name}' picks runtimes, "
+                    "not machines to run a job on"
+                )
+            picked = calkit.environments.resolve_switch(switch_name, envs)
+        except ValueError as e:
+            raise_error(str(e))
+        if picked is None:
+            raise_error(
+                calkit.environments.describe_switch_no_match(switch_name, env)
+            )
+        _gate_switch_machine_lock(switch_name, env, picked, envs, ck_info)
+        typer.echo(f"Environment '{switch_name}' picks '{picked}' here")
+        environment, env = (
+            picked,
+            (calkit.environments.get_env(picked, envs) or {}),
+        )
+        kind = env.get("kind")
+        # Resolved once, here, so a far end re-running this doesn't pick
+        # again from where it sits
+        argv = replace_environment_arg(argv, picked)
+    if kind == "system":
+        run_on_system(
+            env_name=environment,
+            env=env,
+            target=target,
+            args=args,
+            outs=outs,
+            setup_cmds=calkit.environments.merge_setup_commands(
+                env.get("default_setup"), setup_cmds, env_default_setup
+            ),
+            log_path=log_path or os.path.join(LOGS_DIR, f"{name}.out"),
+            is_command=(
+                is_command
+                if is_command is not None
+                else not os.path.isfile(target)
+            ),
+        )
+        return
     if kind not in SCHEDULER_KINDS:
         raise_error(
             f"Environment '{environment}' is not a scheduler environment "
@@ -907,7 +1116,12 @@ def run_batch(
             # Re-run this same invocation over there. It terminates rather
             # than bouncing onward, since on the cluster the env's host is
             # local and this branch isn't taken.
-            remote_command = "calkit " + shlex.join(sys.argv[1:])
+            # The job keeps skipping the inner env check, which runs once
+            # there before submitting rather than in every job
+            batch = argv.index("batch") + 1
+            remote_command = "calkit " + shlex.join(
+                [*argv[:batch], "--check-inner-env", *argv[batch:]]
+            )
             workspace.run_in_workspace(
                 workspace=ws,
                 command=remote_command,
@@ -920,6 +1134,8 @@ def run_batch(
         except (ValueError, subprocess.CalledProcessError) as e:
             raise_error(str(e))
         return
+    if check_inner_env:
+        check_inner_env_once(argv)
     # Apply env defaults per mode
     env_setup_cmds = env.get("default_setup", []) or []
     if env_default_setup == "merge" and env_setup_cmds:
@@ -1158,6 +1374,34 @@ def run_batch(
     _finalize_job(name, job_id, exit_code, log_path)
 
 
+def _gate_switch_machine_lock(
+    switch_name: str, env: dict, picked: str, envs: dict, ck_info: dict
+) -> None:
+    """Refuse to run where a switch's locked machine properties differ."""
+    if not env.get("lock"):
+        return
+    machine_env = calkit.environments.switch_machine_lock_env(env)
+    try:
+        mismatch = calkit.environments.gate_system_env_lock(
+            switch_name,
+            machine_env,
+            system_info=calkit.environments.picked_machine_info(
+                picked,
+                (calkit.environments.get_env(picked, envs) or {}),
+                ck_info,
+                lock=env.get("lock"),
+            ),
+        )
+    except ValueError as e:
+        raise_error(f"Environment '{switch_name}': {e}")
+    if mismatch:
+        raise_error(
+            calkit.environments.describe_system_env_lock_mismatch(
+                switch_name, mismatch
+            )
+        )
+
+
 def _detect_interpreter(target: str) -> list[str]:
     """Return the interpreter to invoke a non-executable script with.
 
@@ -1263,7 +1507,10 @@ def _build_pbs_submit(
 
 @scheduler_app.command(name="queue|q")
 def get_queue() -> None:
-    """List scheduler jobs submitted via Calkit (across SLURM and PBS)."""
+    """List scheduler jobs submitted via Calkit (across SLURM and PBS).
+
+    Includes interactive jobs, e.g., Jupyter servers for notebooks.
+    """
     jobs = _load_jobs()
     if not jobs:
         typer.echo("No jobs found for this project")
@@ -1280,18 +1527,32 @@ def get_queue() -> None:
         by_kind.setdefault(info.get("kind", "slurm"), []).append(
             info["job_id"]
         )
-    for kind, job_ids in by_kind.items():
+    # Only ask about live jobs, since squeue errors on purged IDs
+    active = {
+        kind: _active_job_ids(kind, job_ids)
+        for kind, job_ids in by_kind.items()
+    }
+    for job_name, info in jobs.items():
+        kind = info.get("kind", "slurm")
+        if info.get("interactive") and info["job_id"] not in active[kind]:
+            _delete_job(job_name)
+    if not any(active.values()):
+        typer.echo("No queued or running jobs for this project")
+        raise typer.Exit(0)
+    for kind, job_ids in active.items():
+        if not job_ids:
+            continue
         query_bin = _BINARIES[kind]["query"]
         if kind == "slurm":
             subprocess.run(
-                [query_bin, "-j", ",".join(job_ids)],
+                [query_bin, "-j", ",".join(sorted(job_ids))],
                 capture_output=False,
                 text=True,
                 check=False,
             )
         else:
             subprocess.run(
-                [query_bin] + job_ids,
+                [query_bin] + sorted(job_ids),
                 capture_output=False,
                 text=True,
                 check=False,

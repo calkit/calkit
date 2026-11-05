@@ -1,5 +1,6 @@
 import {
   Button,
+  Container,
   HStack,
   Heading,
   Icon,
@@ -147,8 +148,8 @@ function ConnectedAccounts() {
   }
 
   return (
-    <>
-      <Heading size="md" mb={4}>
+    <Container maxW="full">
+      <Heading size="md" py={4}>
         Connected accounts
       </Heading>
       {connectedAccountsQuery.isPending ? (
@@ -165,7 +166,9 @@ function ConnectedAccounts() {
               <Button
                 size="xs"
                 variant="primary"
-                onClick={() => startGitHubOAuth()}
+                onClick={() =>
+                  startGitHubOAuth(undefined, { chooseAccount: true })
+                }
               >
                 Connect
               </Button>
@@ -221,8 +224,18 @@ function ConnectedAccounts() {
             <Text>Overleaf:</Text>
             {connectedAccountsQuery.data?.overleaf ? (
               <>
-                <Icon as={FaCheck} color="green.500" />
-                {isEditingOverleaf ? (
+                {/* A Git token and a browser session are saved separately,
+                    so either or both can be connected */}
+                <Text>Git token</Text>
+                {!connectedAccountsQuery.data.overleaf_token ? (
+                  <Button
+                    variant="primary"
+                    size="xs"
+                    onClick={overleafTokenModal.onOpen}
+                  >
+                    Add
+                  </Button>
+                ) : isEditingOverleaf ? (
                   <>
                     <Input
                       autoComplete="off"
@@ -255,6 +268,7 @@ function ConnectedAccounts() {
                   </>
                 ) : (
                   <>
+                    <Icon as={FaCheck} color="green.500" />
                     <IconButton
                       aria-label="Edit token"
                       icon={<MdEdit />}
@@ -265,19 +279,23 @@ function ConnectedAccounts() {
                       ml={-1}
                       mr={-3}
                     />
-                    <IconButton
-                      aria-label="Disconnect Overleaf"
-                      icon={<FaTrash />}
-                      size="xs"
-                      variant="ghost"
-                      colorScheme="red"
-                      onClick={() =>
-                        disconnectAccountMutation.mutate("overleaf")
-                      }
-                      isLoading={disconnectAccountMutation.isPending}
-                    />
                   </>
                 )}
+                {connectedAccountsQuery.data.overleaf_session ? (
+                  <>
+                    <Text ml={2}>Browser session</Text>
+                    <Icon as={FaCheck} color="green.500" />
+                  </>
+                ) : null}
+                <IconButton
+                  aria-label="Disconnect Overleaf"
+                  icon={<FaTrash />}
+                  size="xs"
+                  variant="ghost"
+                  colorScheme="red"
+                  onClick={() => disconnectAccountMutation.mutate("overleaf")}
+                  isLoading={disconnectAccountMutation.isPending}
+                />
               </>
             ) : (
               <Button
@@ -342,7 +360,7 @@ function ConnectedAccounts() {
           />
         </>
       )}
-    </>
+    </Container>
   )
 }
 

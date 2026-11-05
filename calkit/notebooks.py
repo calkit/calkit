@@ -96,6 +96,11 @@ def clean_notebook(nb: dict) -> dict:
         if cell.get("cell_type") == "code":
             cell["outputs"] = []
             cell["execution_count"] = None
+        # Cell IDs are editor residue, and nbstripout rewrites them to
+        # ordinals. Keeping them would make the cleaned copy depend on whether
+        # the source had been through a clean filter, which differs between a
+        # working tree and a fresh clone of the same commit.
+        cell.pop("id", None)
         # Clean metadata but keep tags
         if "tags" in cell.get("metadata", {}):
             cell["metadata"] = {"tags": cell["metadata"]["tags"]}

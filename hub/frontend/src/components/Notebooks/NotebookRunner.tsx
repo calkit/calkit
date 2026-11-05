@@ -308,6 +308,7 @@ const NotebookRunner = ({
       size="6xl"
       scrollBehavior="inside"
       isCentered
+      motionPreset="none"
     >
       <ModalOverlay />
       {/* A notebook reads best at a page's width, not a table's */}
@@ -616,6 +617,7 @@ const NotebookRunner = ({
         leastDestructiveRef={keepEditingRef}
         onClose={discardDialog.onClose}
         isCentered
+        motionPreset="none"
       >
         <AlertDialogOverlay>
           <AlertDialogContent>

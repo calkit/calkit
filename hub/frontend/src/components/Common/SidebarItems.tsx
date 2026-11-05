@@ -1,9 +1,18 @@
-import { Box, Flex, Icon, Text, useColorModeValue } from "@chakra-ui/react"
+import {
+  Box,
+  Flex,
+  Icon,
+  Spinner,
+  Text,
+  useColorModeValue,
+} from "@chakra-ui/react"
+import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
 import type { IconType } from "react-icons"
 import { FaLaptop } from "react-icons/fa"
 import { FaCubes } from "react-icons/fa"
 import {
+  FiBarChart2,
   FiBookOpen,
   FiDatabase,
   FiFolder,
@@ -20,10 +29,11 @@ import { IoLibraryOutline } from "react-icons/io5"
 import { MdOutlineDashboard } from "react-icons/md"
 import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
+import { ProjectsService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import { useLocalServer } from "../../hooks/useOnboarding"
-import { TIPS, type TipId } from "../../lib/tips"
-import TipBubble from "../Onboarding/TipBubble"
+import { isRunGoing, useProjectPipelineRuns } from "../../hooks/useProject"
+import Tooltip from "./Tooltip"
 
 export interface ProjectNavItem {
   icon: IconType
@@ -42,6 +52,7 @@ export const projectNavItems: ProjectNavItem[] = [
   { icon: FiDatabase, title: "Datasets", path: "/datasets" },
   { icon: FiImage, title: "Figures", path: "/figures" },
   { icon: FiGrid, title: "Tables", path: "/tables" },
+  { icon: FiBarChart2, title: "Results", path: "/results" },
   { icon: FiBookOpen, title: "Publications", path: "/publications" },
   { icon: FiMonitor, title: "Presentations", path: "/presentations" },
   { icon: SiJupyter, title: "Notebooks", path: "/notebooks" },
@@ -69,11 +80,6 @@ interface SidebarItemsProps {
   basePath: string
 }
 
-// Sidebar items that a first-project tip points at from other pages
-const TIP_FOR_NAV: Partial<Record<string, TipId>> = Object.fromEntries(
-  TIPS.map((t) => [t.nav, t.id]),
-)
-
 const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
   const textColor = useColorModeValue("ui.main", "ui.light")
   const bgActive = useColorModeValue("#E2E8F0", "#4A5568")
@@ -91,13 +97,41 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
   // query with the onboarding checklist so the page asks localhost once.
   const { projectConnected } = useLocalServer(accountName, projectName)
   const localMachineColor = projectConnected ? "ui.success" : "gray"
+  // A pipeline that has run but no longer matches the code. The checklist
+  // stops at "has it run at all", so this is where a project says its
+  // results have drifted -- visible from any page, without reopening a
+  // setup list the user has finished. Same key as the pipeline page and
+  // the checklist, so the three share one request.
+  const pipelineQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "pipeline", currentRef],
+    queryFn: () =>
+      ProjectsService.getProjectPipeline({
+        owner_name: accountName,
+        project_name: projectName,
+        ref: currentRef,
+      }).then((response) => response.data),
+    enabled: Boolean(user),
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
+  const pipelineIsStale = pipelineQuery.data?.status === "stale"
+  // Whether it's running somewhere, e.g., on GitHub Actions, shared with
+  // the pipeline page
+  const { runsRequest } = useProjectPipelineRuns(accountName, projectName, {
+    enabled: Boolean(user) && !currentRef,
+  })
+  const pipelineIsRunning = isRunGoing(runsRequest.data?.runs?.[0])
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {
       return null
     }
 
-    const item = (
+    // The Apps section has sub-routes (/apps/<appName>), so it should stay
+    // highlighted on any of them, not just the exact /apps path.
+    const isApps = path === "/apps"
+
+    return (
       <Flex
         key={title}
         as={Link}
@@ -106,7 +140,7 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
         search={currentRef ? ({ ref: currentRef } as any) : undefined}
         w="100%"
         p={2}
-        activeOptions={{ exact: true, includeSearch: false }}
+        activeOptions={{ exact: !isApps, includeSearch: false }}
         activeProps={{
           style: {
             background: bgActive,
@@ -122,21 +156,38 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
           alignSelf="center"
         />
         <Text ml={2}>{title}</Text>
+        {title === "Pipeline" && pipelineIsRunning ? (
+          <Tooltip label="The pipeline is running on GitHub Actions">
+            <Spinner
+              ml="auto"
+              mr={1}
+              size="xs"
+              alignSelf="center"
+              flexShrink={0}
+              aria-label="Pipeline is running"
+            />
+          </Tooltip>
+        ) : title === "Pipeline" && pipelineIsStale ? (
+          <Tooltip label="The pipeline has changed since it was last run">
+            <Box
+              // Pushed to the far edge rather than trailing the label, so
+              // it reads as a status on the row instead of punctuation.
+              ml="auto"
+              mr={1}
+              boxSize={2}
+              borderRadius="full"
+              bg="orange.400"
+              alignSelf="center"
+              flexShrink={0}
+              // A bare div with a label is invisible to a screen reader;
+              // the role is what makes it an announceable status rather
+              // than decoration.
+              role="img"
+              aria-label="Pipeline is out of date"
+            />
+          </Tooltip>
+        ) : null}
       </Flex>
-    )
-    const tipId = TIP_FOR_NAV[title]
-    return tipId ? (
-      <TipBubble
-        key={title}
-        tip={tipId}
-        where="nav"
-        placement="right"
-        display="block"
-      >
-        {item}
-      </TipBubble>
-    ) : (
-      item
     )
   })
 

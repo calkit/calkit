@@ -1,0 +1,574 @@
+"""Logic for checking project requirements declared in ``calkit.yaml``.
+
+The ``app``, ``env-var``, and ``calkit-config`` kinds are handled directly
+by :func:`calkit.core.check_dep_exists`. This module adds support for the
+``setup`` kind, which represents a per-machine precondition that isn't a
+file -- the canonical example is ``gh auth login``, which must be done
+once per clone and can be probed with ``gh auth status`` -- and the
+``aws-credentials`` kind, a setup step Calkit knows how to check itself.
+
+A ``setup`` requirement declares:
+
+- ``check_command``: a shell command; exit 0 = satisfied.
+- ``setup_command``: optional. Printed as a fix-it command for non-TTY
+  runs (CI); on an interactive TTY the user is asked before we exec it.
+- ``cache_ttl``: optional. Successful checks are cached in
+  ``.calkit/local/dep-checks.sqlite`` for this long (default
+  :data:`DEFAULT_SETUP_CACHE_TTL`) so repeated ``calkit run`` invocations
+  don't re-probe network-bound commands. Cache entries also invalidate
+  whenever the ``check_command`` itself changes, so editing
+  ``calkit.yaml`` never silently relies on a stale result. Set
+  ``cache_ttl: 0`` to disable caching for a specific requirement.
+
+To run a command inside a project environment, the user prefixes it with
+``calkit xenv -n <env> --`` explicitly -- there's no implicit wrap,
+because explicit is easier to reason about when commands fail.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import shlex
+import subprocess
+import time
+from typing import Any, Callable
+
+# Path constants are duplicated from ``calkit/dvc/zip.py`` rather than
+# imported to avoid pulling the DVC stack in for a simple dep check.
+LOCAL_DIR = ".calkit/local"
+DEP_CHECK_CACHE_PATH = LOCAL_DIR + "/dep-checks.sqlite"
+# How long to cache a successful setup-dep check by default. One day is
+# short enough that expiring credentials surface within a workday, and
+# long enough that repeated ``calkit run`` invocations during active
+# development don't re-probe network checks every time. Override per dep
+# with ``cache_ttl``, or disable for one dep with ``cache_ttl: 0``.
+DEFAULT_SETUP_CACHE_TTL = 24 * 60 * 60
+# AWS session credentials, e.g., from SSO, often last only hours.
+DEFAULT_AWS_CACHE_TTL = 60 * 60
+_TTL_UNITS = {
+    "s": 1,
+    "m": 60,
+    "h": 60 * 60,
+    "d": 24 * 60 * 60,
+    "w": 7 * 24 * 60 * 60,
+}
+_TTL_RE = re.compile(r"^\s*(\d+)\s*([smhdw]?)\s*$", re.IGNORECASE)
+
+
+def _format_uvx_from(spec: str) -> str:
+    """Format a calkit version spec into a ``uvx --from`` argument.
+
+    A bare version like ``0.38`` becomes ``calkit-python@0.38`` (uv's
+    exact-pin shorthand); a PEP 440 specifier like ``>=0.38`` is
+    appended directly, e.g. ``calkit-python>=0.38``.
+    """
+    spec = spec.strip()
+    if not spec:
+        return "calkit-python"
+    if spec[0].isdigit():
+        return f"calkit-python@{spec}"
+    return f"calkit-python{spec}"
+
+
+def _suggest_version_from_spec(spec: str) -> str | None:
+    """Pull the first version-looking token out of ``spec`` for a hint."""
+    m = re.search(r"\d[\w.+\-!]*", spec)
+    return m.group(0) if m else None
+
+
+def check_calkit_version(spec: str) -> None:
+    """Verify the running calkit satisfies ``spec`` (e.g. ``>=0.38``).
+
+    Raises ``ValueError`` with a fix-it message pointing the user at
+    ``calkit --use-version`` or ``calkit upgrade`` when the installed
+    version is outside the requested specifier. A bare version like
+    ``0.38`` is interpreted as ``==0.38`` so users can write
+    ``- calkit==0.38`` or simply ``- calkit>=0.38`` in ``calkit.yaml``.
+    """
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import InvalidVersion, Version
+
+    import calkit
+
+    raw = (spec or "").strip()
+    if not raw:
+        return
+    spec_str = raw if raw[0] in "<>=!~" else f"=={raw}"
+    try:
+        spec_set = SpecifierSet(spec_str)
+    except Exception as e:
+        raise ValueError(f"Invalid calkit version spec '{spec}': {e}")
+    try:
+        current = Version(calkit.__version__)
+    except InvalidVersion:
+        # A dev/editable install with an unparseable version: don't block.
+        return
+    if current in spec_set:
+        return
+    # A development build of X sorts *before* X under PEP 440, so someone
+    # running a dev build of the very version a project asks for would be
+    # told to upgrade to what they are already running -- which is exactly
+    # the position anyone working on Calkit itself is in. Judge it by the
+    # release it is a development of.
+    if current.is_devrelease or current.is_prerelease:
+        try:
+            if Version(current.base_version) in spec_set:
+                return
+        except InvalidVersion:
+            pass
+    suggested = _suggest_version_from_spec(spec_str)
+    msg = (
+        f"calkit{spec_str} required, but installed version is "
+        f"{calkit.__version__}."
+    )
+    if suggested:
+        msg += (
+            f" Re-run with 'calkit --use-version {suggested} ...' or "
+            "upgrade with 'calkit upgrade'."
+        )
+    else:
+        msg += " Upgrade with 'calkit upgrade'."
+    raise ValueError(msg)
+
+
+def parse_ttl(ttl: str | int | float) -> int:
+    """Parse a TTL like ``30s``, ``5m``, ``2h``, ``7d``, ``1w`` into seconds.
+
+    Bare numbers are seconds. ``0`` disables caching (caller's contract).
+    Raises ``ValueError`` on garbage so misconfiguration surfaces at
+    check time rather than silently disabling the cache.
+    """
+    if isinstance(ttl, (int, float)):
+        return int(ttl)
+    m = _TTL_RE.match(str(ttl))
+    if m is None:
+        raise ValueError(
+            f"Invalid cache_ttl '{ttl}'; expected forms like '30s', '5m', "
+            "'2h', '7d', '1w', or a bare integer number of seconds"
+        )
+    n, unit = m.groups()
+    return int(n) * _TTL_UNITS.get(unit.lower(), 1)
+
+
+def _hash_check_cmd(check: str | None) -> str:
+    """Hash the check command so cache entries invalidate when it changes."""
+    return hashlib.sha256((check or "").encode("utf-8")).hexdigest()
+
+
+def _cache_path(wdir: str | None) -> str:
+    return (
+        os.path.join(wdir, DEP_CHECK_CACHE_PATH)
+        if wdir
+        else DEP_CHECK_CACHE_PATH
+    )
+
+
+def _cache_open(wdir: str | None):
+    """Open the SqliteDict cache, creating the local dir on demand."""
+    from sqlitedict import SqliteDict
+
+    import calkit
+
+    calkit.ensure_local_dir(wdir)
+    return SqliteDict(_cache_path(wdir), autocommit=True)
+
+
+def cache_lookup(
+    name: str,
+    check: str | None,
+    *,
+    wdir: str | None = None,
+) -> dict | None:
+    """Return a fresh cache entry for ``name``, or None if missing/expired.
+
+    Entries also invalidate when the ``check`` command hash changes, so
+    editing ``calkit.yaml`` never silently relies on a stale result.
+    """
+    if not os.path.isfile(_cache_path(wdir)):
+        return None
+    with _cache_open(wdir) as cache:
+        entry = cache.get(name)
+        if not entry:
+            return None
+        ttl_s = entry.get("ttl_seconds", 0)
+        passed_at = entry.get("passed_at", 0)
+        if ttl_s > 0 and (time.time() - passed_at) > ttl_s:
+            return None
+        if entry.get("check_hash") != _hash_check_cmd(check):
+            return None
+        return entry
+
+
+def cache_record(
+    name: str,
+    check: str | None,
+    ttl_seconds: int,
+    *,
+    wdir: str | None = None,
+) -> None:
+    with _cache_open(wdir) as cache:
+        cache[name] = {
+            "passed_at": time.time(),
+            "ttl_seconds": int(ttl_seconds),
+            "check_hash": _hash_check_cmd(check),
+        }
+
+
+def cache_clear(*, wdir: str | None = None) -> None:
+    """Remove all cached dependency-check entries (used by ``--no-cache``)."""
+    if not os.path.isfile(_cache_path(wdir)):
+        return
+    with _cache_open(wdir) as cache:
+        cache.clear()
+
+
+def _run_shell(
+    cmd: str, *, capture: bool = True
+) -> subprocess.CompletedProcess:
+    """Run ``cmd`` through the user's shell; mirrors how they would run it."""
+    return subprocess.run(cmd, shell=True, capture_output=capture, text=True)
+
+
+def _resolve_cache_ttl(
+    req: dict[str, Any], default: int = DEFAULT_SETUP_CACHE_TTL
+) -> int:
+    """Resolve the effective cache TTL for a setup req.
+
+    Defaults to ``default`` when ``cache_ttl`` is absent; ``cache_ttl: 0``
+    explicitly disables caching.
+    """
+    raw = req.get("cache_ttl")
+    if raw is None:
+        return default
+    return parse_ttl(raw)
+
+
+def check_setup_dep(
+    req: dict[str, Any],
+    *,
+    interactive: bool | None = None,
+    use_cache: bool = True,
+    wdir: str | None = None,
+) -> bool:
+    """Check a ``kind: setup`` dependency.
+
+    Returns True if satisfied (or successfully made satisfied via the
+    setup command), False otherwise. Successful checks are cached for
+    ``cache_ttl`` (defaulting to one day) under ``.calkit/local`` so
+    repeated runs skip re-probing. The caller can pass ``use_cache=False``
+    to bypass and force re-probing, which the CLI exposes as ``--no-cache``.
+    """
+    name = req.get("name")
+    if not name:
+        raise ValueError(f"setup requirement missing 'name': {req}")
+    check_command = req.get("check_command")
+    setup_command = req.get("setup_command")
+    if not check_command:
+        raise ValueError(
+            f"setup requirement '{name}' must declare 'check_command'"
+        )
+    if interactive is None:
+        from calkit.core import is_tty
+
+        interactive = is_tty()
+    ttl_seconds = _resolve_cache_ttl(req)
+    # Cache hit short-circuits the probe entirely.
+    if use_cache and ttl_seconds > 0:
+        hit = cache_lookup(name, check_command, wdir=wdir)
+        if hit is not None:
+            return True
+
+    def probe() -> str | None:
+        result = _run_shell(check_command)
+        if result.returncode == 0:
+            return None
+        return (result.stderr or result.stdout or "").strip()
+
+    return _probe_or_set_up(
+        name=name,
+        probe=probe,
+        cache_key=check_command,
+        setup_command=setup_command,
+        interactive=interactive,
+        ttl_seconds=ttl_seconds,
+        wdir=wdir,
+    )
+
+
+def check_aws_credentials_req(
+    req: dict[str, Any],
+    *,
+    interactive: bool | None = None,
+    use_cache: bool = True,
+    wdir: str | None = None,
+) -> bool:
+    """Check a ``kind: aws-credentials`` dependency.
+
+    Credentials are valid if ``aws sts get-caller-identity`` succeeds, and
+    are for the right account if it reports ``account_id``. Without a
+    declared ``setup_command``, the fix offered is ``aws sso login`` for a
+    profile set up for SSO, else ``aws configure``.
+    """
+    import json
+    import shutil
+
+    if shutil.which("aws") is None:
+        raise ValueError(
+            "The AWS CLI ('aws') is needed to check AWS credentials, but it "
+            "isn't installed"
+        )
+    name = req.get("name") or "aws-credentials"
+    profile = req.get("profile")
+    account_id = req.get("account_id")
+    if account_id is not None:
+        account_id = str(account_id)
+    profile_args = ["--profile", profile] if profile else []
+    cmd = ["aws", "sts", "get-caller-identity", "--output", "json"]
+    cmd += profile_args
+    if interactive is None:
+        from calkit.core import is_tty
+
+        interactive = is_tty()
+    ttl_seconds = _resolve_cache_ttl(req, default=DEFAULT_AWS_CACHE_TTL)
+    # The account and what selects credentials are part of the key, so
+    # changing them invalidates the cache; only the key's hash is stored
+    aws_env = [
+        f"{var}={os.environ.get(var, '')}"
+        for var in (
+            "AWS_PROFILE",
+            "AWS_DEFAULT_PROFILE",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_CONFIG_FILE",
+            "AWS_SHARED_CREDENTIALS_FILE",
+        )
+    ]
+    cache_key = " ".join(cmd + aws_env) + f" == {account_id}"
+    if use_cache and ttl_seconds > 0:
+        if cache_lookup(name, cache_key, wdir=wdir) is not None:
+            return True
+
+    def probe() -> str | None:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            return (result.stderr or result.stdout or "").strip()
+        try:
+            found = str(json.loads(result.stdout).get("Account"))
+        except (ValueError, AttributeError):
+            return f"Unexpected output from AWS CLI: {result.stdout.strip()}"
+        if account_id is not None and found != account_id:
+            return (
+                f"Credentials are for account {found}, but {account_id} is "
+                "required"
+            )
+        return None
+
+    def default_setup_command() -> str:
+        sso = any(
+            subprocess.run(
+                ["aws", "configure", "get", key] + profile_args,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            for key in ("sso_session", "sso_start_url")
+        )
+        return " ".join(
+            ["aws", "sso login" if sso else "configure"]
+            + [shlex.quote(a) for a in profile_args]
+        )
+
+    return _probe_or_set_up(
+        name=name,
+        probe=probe,
+        cache_key=cache_key,
+        setup_command=req.get("setup_command") or default_setup_command,
+        interactive=interactive,
+        ttl_seconds=ttl_seconds,
+        wdir=wdir,
+    )
+
+
+def prompt_and_store_env_var(
+    name: str,
+    *,
+    default: str | None = None,
+    dotenv_path: str = ".env",
+) -> str | None:
+    """Prompt the user for an env-var value, persist it to ``.env``, set it
+    on ``os.environ``, and return the value.
+
+    Returns ``None`` if the user aborted (EOF / no value and no default).
+    The caller decides whether that is fatal. ``.env`` is appended to
+    ``.gitignore`` if not already ignored, mirroring ``calkit check
+    env-vars`` so secrets don't sneak into git.
+    """
+    import dotenv
+
+    prompt = f"Enter a value for {name}"
+    if default is not None:
+        prompt += f" [{default}]"
+    try:
+        raw = input(prompt + ": ")
+    except EOFError:
+        return None
+    value = raw.strip() or default
+    if value is None:
+        return None
+    dotenv.set_key(
+        dotenv_path=dotenv_path, key_to_set=name, value_to_set=value
+    )
+    os.environ[name] = value
+    _ensure_env_gitignored(dotenv_path)
+    return value
+
+
+def prompt_for_env_var_req(req: dict[str, Any]) -> str | None:
+    """Ask for a missing ``env-var`` dependency's value and store it.
+
+    A declared ``setup_command`` is offered first, attached to the
+    terminal, since getting a value often means a login flow, e.g.,
+    ``claude setup-token``, that ends by printing it for the user to copy.
+    Without a terminal it's only printed, so piped input is the value.
+    """
+    from calkit.core import is_tty
+
+    name = req["name"]
+    print(f"Missing env var '{name}'")
+    for key in ("description", "notes"):
+        if req.get(key):
+            print(f"  {str(req[key]).strip()}")
+    setup_command = req.get("setup_command")
+    if setup_command and not is_tty():
+        print(f"  To get a value, run:  {setup_command}")
+    elif setup_command:
+        try:
+            answer = (
+                input(f"Run {setup_command!r} to get a value? [Y/n] ")
+                .strip()
+                .lower()
+            )
+        except EOFError:
+            answer = "n"
+        if answer in ("", "y", "yes"):
+            result = _run_shell(setup_command, capture=False)
+            if result.returncode != 0:
+                print(f"  {setup_command!r} exited {result.returncode}.")
+    return prompt_and_store_env_var(name, default=req.get("default"))
+
+
+def resolve_env_var_deps(
+    ck_info: dict,
+    interactive: bool | None = None,
+) -> list[str]:
+    """Set any declared env-var requirements that aren't set yet.
+
+    A project shares its ``calkit.yaml`` but not its ``.env``, so the
+    variables it declares are the first thing missing for anyone but its
+    author. Asking on a terminal turns that from an error someone has to
+    decode into a question they can answer.
+
+    Returns the names still unset, so a caller that reports rather than
+    enforces -- ``calkit status``, say -- can mention them without failing.
+    """
+    from calkit.core import _normalize_requirement, get_requirements
+
+    if interactive is None:
+        from calkit.core import is_tty
+
+        interactive = is_tty()
+    missing = []
+    for raw in get_requirements(ck_info):
+        req = _normalize_requirement(raw)
+        if req["kind"] != "env-var" or os.environ.get(req["name"]):
+            continue
+        if not interactive or prompt_for_env_var_req(req) is None:
+            missing.append(req["name"])
+    return missing
+
+
+def _ensure_env_gitignored(dotenv_path: str) -> None:
+    """Append ``dotenv_path`` to ``.gitignore`` if not already ignored.
+
+    Falls back to a plain ``.gitignore`` append when the project isn't a
+    git repo so this helper is safe to call from non-git contexts.
+    """
+    try:
+        import calkit.git
+
+        repo = calkit.git.get_repo()
+        if repo.ignored(dotenv_path):
+            return
+    except Exception:
+        pass
+    try:
+        with open(".gitignore", "a") as f:
+            f.write(f"\n{dotenv_path}\n")
+    except OSError:
+        pass
+
+
+def _probe_or_set_up(
+    *,
+    name: str,
+    probe: Callable[[], str | None],
+    cache_key: str,
+    setup_command: str | Callable[[], str] | None,
+    interactive: bool,
+    ttl_seconds: int,
+    wdir: str | None,
+) -> bool:
+    """Probe a req, then prompt-and-run setup on TTY, else print and abort.
+
+    ``probe`` returns why the req isn't satisfied, or ``None`` if it is.
+    ``setup_command`` may be a function, called only if the probe fails.
+    After setup runs we re-probe so a setup that *claims* success but
+    doesn't actually satisfy the req is caught here instead of failing
+    later inside the pipeline. A successful probe populates the cache so
+    we don't immediately re-probe on the next ``calkit run``.
+    """
+    failure_reason = probe()
+    if failure_reason is None:
+        if ttl_seconds > 0:
+            cache_record(name, cache_key, ttl_seconds, wdir=wdir)
+        return True
+    print(f"Setup requirement '{name}' is not satisfied.")
+    if failure_reason:
+        print(f"  Reason: {failure_reason}")
+    if callable(setup_command):
+        setup_command = setup_command()
+    if not setup_command:
+        print(
+            f"  No 'setup_command' declared; satisfy '{name}' manually and "
+            "re-run."
+        )
+        return False
+    if not interactive:
+        print(f"  To satisfy, run:  {setup_command}")
+        return False
+    try:
+        answer = (
+            input(f"Run setup now ({setup_command!r})? [Y/n] ").strip().lower()
+        )
+    except EOFError:
+        answer = "n"
+    if answer not in ("", "y", "yes"):
+        print(f"  Skipped. To satisfy, run:  {setup_command}")
+        return False
+    # capture=False so interactive setup tools (e.g., the browser-based
+    # ``gh auth login`` flow) can talk to the terminal directly.
+    result = _run_shell(setup_command, capture=False)
+    if result.returncode != 0:
+        print(f"  Setup command exited {result.returncode}.")
+        return False
+    failure_reason = probe()
+    if failure_reason is not None:
+        print(
+            "  Setup ran but check still fails; satisfy manually and re-run."
+        )
+        if failure_reason:
+            print(f"  Reason: {failure_reason}")
+        return False
+    if ttl_seconds > 0:
+        cache_record(name, cache_key, ttl_seconds, wdir=wdir)
+    return True

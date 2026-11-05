@@ -1,5 +1,6 @@
 """Tests for ``cli.new``."""
 
+import json
 import os
 import re
 import subprocess
@@ -12,6 +13,7 @@ import typer
 from typer.testing import CliRunner
 
 import calkit
+import calkit.latex
 import calkit.schema
 from calkit.cli.main.core import app
 from calkit.environments import get_env_lock_fpath
@@ -385,8 +387,8 @@ def test_new_publication(tmp_dir):
     print(ck_info)
     assert ck_info["environments"]["my-latex-env"] == dict(
         kind="docker",
-        image="texlive/texlive:latest-full",
-        description="TeXlive full.",
+        image=calkit.latex.DEFAULT_LATEX_IMAGE,
+        description="TeX Live via Calkit's LaTeX image.",
     )
     assert ck_info["publications"][0]["path"] == "my-paper/paper.pdf"
     stage = ck_info["pipeline"]["stages"]["build-latex-article"]
@@ -2059,6 +2061,37 @@ def test_parse_template():
         _parse_template("just-a-name")
 
 
+def test_new_project_from_a_known_template_skips_the_hub(tmp_dir, monkeypatch):
+    # A template this package knows needs no hub to resolve. The repo URL is in
+    # the registry, so `calkit new project --from calkit/example-r` works
+    # without being logged in, or online to anything but the repo host.
+    import calkit.hub
+    from calkit.cli.new import _parse_template
+
+    asked: list[str] = []
+
+    def fake_get(path, *args, **kwargs):
+        asked.append(path)
+        raise AssertionError(f"should not have asked the hub for {path}")
+
+    monkeypatch.setattr(calkit.hub, "get", fake_get)
+    # The resolution the CLI does before cloning: parse, then look the
+    # project up. A known one comes back from the registry.
+    name, url, subdir = _parse_template(
+        "calkit/example-r", calkit.hub.get_hub_url()
+    )
+    assert (name, url, subdir) == ("calkit/example-r", None, None)
+    known = calkit.templates.find_template(name, kind="project")
+    assert known is not None
+    assert known.git_repo_url == "https://github.com/calkit/example-r"
+    assert asked == []
+    # Something unregistered still has to be asked about, which is the
+    # path that keeps any other project usable as a template
+    assert calkit.templates.find_template(
+        "someone/theirs", kind="project"
+    ) is (None)
+
+
 def test_release_with_pipeline(tmp_dir):
     ck_info = {
         "title": "Test Project",
@@ -2264,3 +2297,62 @@ def test_release_detached_head(tmp_dir):
         ],
     )
     assert res.exit_code == 0, res.stdout
+
+
+def test_new_comment(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    with open("main.tex", "w") as f:
+        f.write("First paragraph.\n\nSecond paragraph.\n")
+    with open("note.md", "w") as f:
+        f.write("# Note\n\nSome text.\n")
+    # A thread goes above the paragraph, in each language's own comments
+    id_ = ck(
+        "new", "comment", "main.tex", "-l", "3", "-m", "Why?", "--author", "A"
+    )
+    with open("main.tex") as f:
+        lines = f.read().split("\n")
+    assert lines[2] == f"% COMMENT id={id_}"
+    assert lines[3].startswith("%   A (")
+    assert lines[4:6] == ["%     Why?", "Second paragraph."]
+    added = json.loads(
+        ck(
+            "new",
+            "comment",
+            "note.md",
+            "-l",
+            "3",
+            "-m",
+            "Hm.",
+            "--highlight",
+            "Some",
+            "--author",
+            "B",
+            "--json",
+        )
+    )
+    assert added["anchor"]["text"] == "Some text."
+    assert added["highlight"] == {"text": "Some", "occ": 0}
+    with open("note.md") as f:
+        assert f.read().startswith(
+            f'# Note\n\n<!-- COMMENT id={added["id"]} highlight={{text: "Some"}}\n'
+        )
+    for args in [
+        ["new", "comment", "main.tex", "-l", "99", "-m", "x", "--author", "A"],
+        [
+            "new",
+            "comment",
+            "missing.md",
+            "-l",
+            "1",
+            "-m",
+            "x",
+            "--author",
+            "A",
+        ],
+    ]:
+        res = subprocess.run(["calkit", *args], capture_output=True)
+        assert res.returncode != 0, args

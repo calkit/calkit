@@ -30,8 +30,8 @@ import { z } from "zod"
 import type { Table } from "../../../../../client"
 import ClearableInput from "../../../../../components/Common/ClearableInput"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
-import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import Markdown from "../../../../../components/Common/Markdown"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import TableThumbnail from "../../../../../components/Tables/TableThumbnail"
 import TableView from "../../../../../components/Tables/TableView"
 import { useProjectTables } from "../../../../../hooks/useProject"
@@ -122,6 +122,7 @@ function TableModal({
       size="6xl"
       scrollBehavior="inside"
       isCentered
+      motionPreset="none"
     >
       <ModalOverlay />
       {/* Wide enough for a table's columns, still a dialog over the page,

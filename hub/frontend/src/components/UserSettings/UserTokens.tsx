@@ -1,6 +1,8 @@
 import {
   Button,
   Checkbox,
+  Container,
+  Heading,
   SkeletonText,
   Table,
   TableContainer,
@@ -39,8 +41,11 @@ function UserTokens() {
   const newTokenModal = useDisclosure()
 
   return (
-    <>
-      <Button variant={"primary"} mb={4} ml={4} onClick={newTokenModal.onOpen}>
+    <Container maxW="full">
+      <Heading size="md" py={4}>
+        Tokens
+      </Heading>
+      <Button variant={"primary"} mb={4} onClick={newTokenModal.onOpen}>
         Create new token
       </Button>
       <NewToken isOpen={newTokenModal.isOpen} onClose={newTokenModal.onClose} />
@@ -106,7 +111,7 @@ function UserTokens() {
           )}
         </Table>
       </TableContainer>
-    </>
+    </Container>
   )
 }
 

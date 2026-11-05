@@ -46,6 +46,28 @@ def db() -> Generator[Session, None, None]:
         yield session
 
 
+@pytest.fixture(autouse=True)
+def clear_cache() -> Generator[None, None, None]:
+    """Start each test with an empty cache.
+
+    Tests share one Redis and most of them stand a project up with the same
+    repo URL, which is what several cache keys are built from. Anything one
+    test leaves behind is therefore addressed to the next one's project, and
+    a cached answer about a repo is exactly the kind of thing that makes a
+    test pass or fail depending on what ran before it.
+    """
+    from app import cache
+
+    client = cache.get_client()
+    if client is not None:
+        # Deliberately not caught: a flush that fails leaves the next test
+        # reading another one's cached answers, which is the ordering
+        # dependence this fixture exists to remove. Better to fail setup
+        # than to keep running without the isolation it promises.
+        client.flushdb()
+    yield
+
+
 @pytest.fixture(scope="session")
 def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as c:

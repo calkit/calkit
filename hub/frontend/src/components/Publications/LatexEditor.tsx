@@ -24,11 +24,11 @@ import {
   useDisclosure,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { EditorView } from "codemirror"
+import { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
-import { FaPlus, FaTimes } from "react-icons/fa"
 import { merge as diff3Merge } from "node-diff3"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { FaPlus, FaTimes } from "react-icons/fa"
 
 import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
@@ -41,17 +41,33 @@ import {
   findMissingPackages,
 } from "../../lib/latexCompiler"
 import {
+  type MappedPath,
+  type ProjectFile,
   TEXT_EXT,
   ext,
+  loadCalkitComponents,
   loadLatexProject,
-  type MappedPath,
+  loadsCalkit,
   mappedPaths,
 } from "../../lib/latexProject"
 import { fetchTree, newBudget } from "../../lib/projectFiles"
-import PathPicker from "../Releases/PathPicker"
 import { trimForSave } from "../../lib/strings"
+import useAuth from "../../hooks/useAuth"
+import {
+  type TexThread,
+  addComment,
+  commentDate,
+  commentHighlighter,
+  editComment,
+  newCommentId,
+  paragraphStart,
+  parseComments,
+} from "../../lib/latexComments"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import CommentsPanel, { type PanelComment } from "../Common/CommentsPanel"
+import DiscardChangesDialog from "../Common/DiscardChangesDialog"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
+import PathPicker from "../Releases/PathPicker"
 
 interface LatexEditorProps {
   isOpen: boolean
@@ -64,7 +80,21 @@ interface LatexEditorProps {
   deps?: string[] | null
   // The publication's build stage, which a mapped path is wired into.
   stage?: string | null
+  // Whether the comment threads in the source are showing, kept in the URL
+  // by the caller
+  commentsOpen?: boolean
+  onCommentsOpenChange?: (open: boolean) => void
 }
+
+// How comment blocks look in the source
+const commentTheme = EditorView.theme({
+  ".cm-texComment": { backgroundColor: "rgba(232, 163, 23, 0.10)" },
+  ".cm-texComment.cm-resolved": { opacity: 0.6 },
+})
+
+// A thread's key in the panel: its ID, or for one without, its line
+const threadKey = (t: TexThread) => t.id ?? `line:${t.lineno}`
+const texExtensions = [commentHighlighter, commentTheme]
 
 // Display a repo path relative to the main file's directory, surfacing `../`
 // for files that live above the paper directory.
@@ -90,7 +120,10 @@ const LatexEditor = ({
   texPath,
   deps,
   stage,
+  commentsOpen = false,
+  onCommentsOpenChange,
 }: LatexEditorProps) => {
+  const { user } = useAuth()
   // Files are keyed by their full repo path so relative refs (e.g.
   // \includegraphics{../figures/x.png}) resolve against the real layout.
   const viewRef = useRef<EditorView | null>(null)
@@ -106,6 +139,8 @@ const LatexEditor = ({
   const binariesRef = useRef<Map<string, Uint8Array>>(new Map())
   // Text files the pipeline produces: compiled with, but never edited or saved.
   const generatedRef = useRef<Set<string>>(new Set())
+  // What calkit.sty's commands include, fetched once, by project path
+  const calkitCopiesRef = useRef<Map<string, ProjectFile | null>>(new Map())
   const initializedRef = useRef(false)
   const compilingRef = useRef(false)
   const pendingCompileRef = useRef(false)
@@ -119,6 +154,7 @@ const LatexEditor = ({
   const queryClient = useQueryClient()
   const logPanel = useDisclosure()
   const commitModal = useDisclosure()
+  const discardDialog = useDisclosure()
   const [textPaths, setTextPaths] = useState<string[]>([])
   const [activePath, setActivePath] = useState<string>(texPath)
   const [mainPath, setMainPath] = useState<string>(texPath)
@@ -131,7 +167,10 @@ const LatexEditor = ({
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [compiling, setCompiling] = useState(false)
   const [autoCompile, setAutoCompile] = useState(true)
-  const [commitMessage, setCommitMessage] = useState("")
+  // Pre-filled so saving is one keystroke away and the history stays
+  // readable for anyone who doesn't stop to write one.
+  const defaultMessage = `Update ${texPath}`
+  const [commitMessage, setCommitMessage] = useState(defaultMessage)
   // Concurrent-editing: origin advanced past what we loaded, and files that
   // came back with conflict markers from the last pull. mergeNonce forces the
   // CodeMirror pane to remount with merged content.
@@ -139,6 +178,10 @@ const LatexEditor = ({
   const [pulling, setPulling] = useState(false)
   const [conflicts, setConflicts] = useState<Set<string>>(new Set())
   const [mergeNonce, setMergeNonce] = useState(0)
+  // Bumped on every edit, so the comment threads are read again from the
+  // source
+  const [docVersion, setDocVersion] = useState(0)
+  const [showResolvedComments, setShowResolvedComments] = useState(false)
 
   // What map-paths stages copy into the paper's directory, so a mapping
   // can be undone from here as well as made.
@@ -355,13 +398,45 @@ const LatexEditor = ({
           onLog: (line) => setLog((l) => `${l}${line}\n`),
         })
       }
-      const files: LatexFile[] = []
+      const contents = new Map<string, string | Uint8Array>()
       for (const [path, text] of buffersRef.current) {
-        files.push({ path, contents: text })
+        contents.set(path, text)
       }
       for (const [path, bytes] of binariesRef.current) {
-        files.push({ path, contents: bytes })
+        contents.set(path, bytes)
       }
+      // What calkit.sty's commands include, which isn't committed, read
+      // from the editor's text so a new command works before it's saved.
+      // Calkit's calkit.sty replaces any committed copy.
+      if (loadsCalkit(buffersRef.current.values())) {
+        try {
+          const { files: components, problems } = await loadCalkitComponents(
+            ownerName,
+            projectName,
+            mainPath,
+            Object.fromEntries(buffersRef.current),
+            calkitCopiesRef.current,
+          )
+          for (const f of components) {
+            contents.set(
+              f.path,
+              f.kind === "text" ? f.text ?? "" : f.bytes ?? new Uint8Array(),
+            )
+          }
+          for (const problem of problems) {
+            setLog((l) => `${l}Calkit: ${problem}; it will print as ??\n`)
+          }
+        } catch (e) {
+          setLog(
+            (l) =>
+              `${l}Calkit: couldn't bring in what calkit.sty includes: ${e}\n`,
+          )
+        }
+      }
+      const files: LatexFile[] = [...contents].map(([path, c]) => ({
+        path,
+        contents: c,
+      }))
       const result = await compilerRef.current.compile(files, mainPath)
       // exit_code can be 0 with an empty PDF (busytex returns an empty array
       // when no PDF was written) — treat that as a failure, not a blank preview.
@@ -428,6 +503,7 @@ const LatexEditor = ({
 
   const markDirty = (path: string, text: string) => {
     buffersRef.current.set(path, text)
+    setDocVersion((v) => v + 1)
     setDirty((d) => (d.has(path) ? d : new Set(d).add(path)))
     // Clear the conflict flag once the user has removed the markers.
     setConflicts((c) => {
@@ -440,6 +516,125 @@ const LatexEditor = ({
     })
     scheduleCompile()
   }
+
+  // The comment threads in the file being edited, read from it again on
+  // every edit
+  // biome-ignore lint/correctness/useExhaustiveDependencies: ready, docVersion, and mergeNonce say the buffer was loaded or changed
+  const threads = useMemo(
+    () =>
+      activePath.endsWith(".tex")
+        ? parseComments((buffersRef.current.get(activePath) ?? "").split("\n"))
+        : [],
+    [activePath, ready, docVersion, mergeNonce],
+  )
+  const panelComments: PanelComment[] = threads.flatMap((t) =>
+    t.entries.map((e, i) => ({
+      id: i ? `${threadKey(t)}#${i}` : threadKey(t),
+      parentId: i ? threadKey(t) : null,
+      authorName: e.author,
+      comment: e.text,
+      created: e.date,
+      resolved: t.resolved ? "resolved" : null,
+      externalUrl: i ? null : t.issue,
+      hasHighlight: !i,
+      highlightText: i ? null : t.highlight,
+    })),
+  )
+  // A comment is an edit to the source like any other: it can be undone,
+  // and it's committed when the source is saved. Only what changed is
+  // replaced, so the undo history stays tidy.
+  const applyLines = (next: string[]) => {
+    const view = viewRef.current
+    if (!view) return
+    const a = view.state.doc.toString()
+    const b = next.join("\n")
+    let start = 0
+    while (start < a.length && start < b.length && a[start] === b[start]) {
+      start++
+    }
+    let end = 0
+    while (
+      end < a.length - start &&
+      end < b.length - start &&
+      a[a.length - 1 - end] === b[b.length - 1 - end]
+    ) {
+      end++
+    }
+    view.dispatch({
+      changes: {
+        from: start,
+        to: a.length - end,
+        insert: b.slice(start, b.length - end),
+      },
+    })
+  }
+  const newEntry = (text: string) => ({
+    author: user?.full_name || user?.github_username || user?.email || "",
+    email: user?.email ?? null,
+    date: commentDate(),
+    text,
+  })
+  // A thread above the paragraph the cursor is in, on what's selected
+  const postComment = (body: string) => {
+    const view = viewRef.current
+    if (!view) return
+    const doc = view.state.doc
+    const lines = doc.toString().split("\n")
+    const sel = view.state.selection.main
+    const line = doc.lineAt(sel.from).number
+    const selected = view.state
+      .sliceDoc(sel.from, sel.to)
+      .replace(/\s+/g, " ")
+      .trim()
+    // It's the highlight when it reads the same in the PDF, i.e., has no
+    // LaTeX in it
+    const highlight = selected && !/[\\{}$%~]/.test(selected) ? selected : null
+    const start = paragraphStart(lines, line)
+    if (start === null) {
+      showToast(
+        "Nowhere to comment",
+        "Put the cursor in a paragraph to comment on it.",
+        "error",
+      )
+      return
+    }
+    // Which time the highlight appears in its paragraph
+    const before = view.state
+      .sliceDoc(doc.line(start).from, sel.from)
+      .replace(/\s+/g, " ")
+    const occ = highlight ? before.split(highlight).length - 1 : 0
+    applyLines(
+      addComment(lines, line, {
+        entries: [newEntry(body)],
+        highlight,
+        occ,
+        resolved: false,
+        id: newCommentId(),
+        issue: null,
+        attrs: [],
+      }),
+    )
+  }
+  const changeThread = (key: string, change: (t: TexThread) => TexThread) => {
+    const view = viewRef.current
+    if (!view) return
+    const lines = view.state.doc.toString().split("\n")
+    const thread = parseComments(lines).find((t) => threadKey(t) === key)
+    if (thread) applyLines(editComment(lines, thread, change))
+  }
+  // Show the paragraph a thread is about
+  const goToThread = (key: string) => {
+    const view = viewRef.current
+    const thread = threads.find((t) => threadKey(t) === key)
+    if (!view || !thread) return
+    const n = Math.min(thread.lineno + thread.nlines, view.state.doc.lines)
+    view.dispatch({
+      selection: { anchor: view.state.doc.line(n).from },
+      scrollIntoView: true,
+    })
+    view.focus()
+  }
+  const openComments = threads.filter((t) => !t.resolved).length
 
   const saveMutation = useMutation({
     mutationFn: async (message: string) => {
@@ -493,7 +688,7 @@ const LatexEditor = ({
       }
       setUpdatesAvailable(false)
       setDirty(new Set())
-      setCommitMessage("")
+      setCommitMessage(defaultMessage)
       commitModal.onClose()
       // Show the trimmed text if trimming changed anything, so the pane
       // isn't left displaying whitespace that wasn't committed. Remounting
@@ -564,6 +759,7 @@ const LatexEditor = ({
     }
     setPulling(true)
     setStatus("Pulling latest changes…")
+    calkitCopiesRef.current.clear()
     try {
       const files = await loadLatexProject(
         ownerName,
@@ -724,7 +920,8 @@ const LatexEditor = ({
   }, [isOpen])
 
   const handleClose = () => {
-    if (dirty.size > 0 && !window.confirm("Discard unsaved changes?")) {
+    if (dirty.size > 0) {
+      discardDialog.onOpen()
       return
     }
     onClose()
@@ -737,7 +934,12 @@ const LatexEditor = ({
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={handleClose} size="full">
+      <Modal
+        isOpen={isOpen}
+        onClose={handleClose}
+        size="full"
+        motionPreset="none"
+      >
         <ModalOverlay />
         <ModalContent>
           <Flex align="center" gap={3} px={4} py={2} borderBottomWidth="1px">
@@ -797,6 +999,14 @@ const LatexEditor = ({
             </Text>
             <Button size="sm" variant="ghost" onClick={logPanel.onToggle}>
               {logPanel.isOpen ? "Hide log" : "Show log"}
+            </Button>
+            <Button
+              size="sm"
+              variant={commentsOpen ? "solid" : "ghost"}
+              onClick={() => onCommentsOpenChange?.(!commentsOpen)}
+              isDisabled={!activePath.endsWith(".tex")}
+            >
+              Comments{openComments ? ` (${openComments})` : ""}
             </Button>
             <Text fontSize="sm" color="ui.dim">
               {status}
@@ -952,6 +1162,9 @@ const LatexEditor = ({
                     viewRef={viewRef}
                     onChange={(text) => markDirty(activePath, text)}
                     onModEnter={requestSave}
+                    extensions={
+                      activePath.endsWith(".tex") ? texExtensions : undefined
+                    }
                   />
                 </Box>
                 <Box flex="1" minW={0} position="relative" bg="blackAlpha.50">
@@ -1051,6 +1264,35 @@ const LatexEditor = ({
                     </Box>
                   </Collapse>
                 </Box>
+                {commentsOpen && activePath.endsWith(".tex") && (
+                  <Box
+                    w="280px"
+                    flexShrink={0}
+                    borderLeftWidth="1px"
+                    overflowY="auto"
+                    p={2}
+                  >
+                    <CommentsPanel
+                      comments={panelComments}
+                      canComment
+                      canResolve
+                      showResolved={showResolvedComments}
+                      onShowResolvedChange={setShowResolvedComments}
+                      emptyText="Select text in the source, then add a comment on it."
+                      onHighlightClick={(c) => goToThread(c.id)}
+                      onPostComment={(body) => postComment(body)}
+                      onPostReply={(parentId, body) =>
+                        changeThread(parentId, (t) => ({
+                          ...t,
+                          entries: [...t.entries, newEntry(body)],
+                        }))
+                      }
+                      onResolve={(id, resolved) =>
+                        changeThread(id, (t) => ({ ...t, resolved }))
+                      }
+                    />
+                  </Box>
+                )}
               </Flex>
             )}
           </ModalBody>
@@ -1062,6 +1304,7 @@ const LatexEditor = ({
         size={{ base: "sm", md: "md" }}
         isCentered
         initialFocusRef={commitInputRef}
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent
@@ -1079,7 +1322,7 @@ const LatexEditor = ({
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
-              placeholder="Ex: Add paragraph about the boundary conditions"
+              placeholder={defaultMessage}
             />
           </ModalBody>
           <ModalFooter gap={3}>
@@ -1094,6 +1337,14 @@ const LatexEditor = ({
           </ModalFooter>
         </ModalContent>
       </Modal>
+      <DiscardChangesDialog
+        isOpen={discardDialog.isOpen}
+        onKeepEditing={discardDialog.onClose}
+        onDiscard={() => {
+          discardDialog.onClose()
+          onClose()
+        }}
+      />
     </>
   )
 }

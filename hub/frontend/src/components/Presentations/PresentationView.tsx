@@ -12,6 +12,7 @@ import { init as initPptxPreview } from "pptx-preview"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { FiChevronLeft, FiChevronRight } from "react-icons/fi"
 
+import SandboxedHtml from "../Common/SandboxedHtml"
 import type { Presentation } from "../../client"
 import NotBuiltAlert from "../Common/NotBuiltAlert"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
@@ -292,15 +293,10 @@ function PresentationView({ presentation }: PresentationViewProps) {
   }
   if (path.endsWith(".html") && hasContent) {
     return (
-      <embed
-        height="100%"
-        width="100%"
-        type="text/html"
-        src={
-          presentation.url
-            ? String(presentation.url)
-            : `data:text/html;base64,${presentation.content}`
-        }
+      <SandboxedHtml
+        title={presentation.title || path}
+        content={presentation.content}
+        url={presentation.url}
       />
     )
   }

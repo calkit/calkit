@@ -209,6 +209,31 @@ def _steps() -> list[
             ref=None,
         )
 
+    def index(project: Project, user: User | None, session: Session) -> None:
+        # The one step that writes rather than warms a cache. It is what
+        # lets one query find an artifact across every project, and it runs
+        # here so no page load pays for it. Everything a project's own pages
+        # show is read from calkit.yaml, so this lagging costs nothing but a
+        # stale search result.
+        import app.index
+        import app.projects
+        from app.git import get_repo
+
+        # Same TTL the routes use, so this lands on the fast path rather
+        # than refetching the checkout the first step just refreshed.
+        repo = get_repo(
+            project=project,
+            user=user,
+            session=session,
+            ttl=routes.DEFAULT_REPO_TTL,
+            read_only=True,
+        )
+        app.index.index_project(
+            session=session,
+            project=project,
+            ck_info=app.projects.get_ck_info_from_repo(repo, read_only=True),
+        )
+
     def datasets(
         project: Project, user: User | None, session: Session
     ) -> None:
@@ -238,5 +263,6 @@ def _steps() -> list[
         ("references", references),
         ("publications", publications),
         ("questions", questions),
+        ("index", index),
         ("datasets", datasets),
     ]

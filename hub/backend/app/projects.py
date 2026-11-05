@@ -168,24 +168,36 @@ def _resolve_github_collaborator_access(
             f"Failed to fetch permissions from GitHub ({resp.status_code})"
         )
     project.current_user_access = permissions
+    # Read off the instances before the commit that may fail. A failed flush
+    # expires every attribute and refuses to load one back until the session
+    # is rolled back, so reading `current_user.id` in the handler below is a
+    # second, uncatchable error on top of the first -- which is what turned
+    # this race into a 500 rather than the no-op it is meant to be.
+    user_id = current_user.id
+    project_id = project.id
     # Concurrent requests for the same user and project can both get here and
     # try to insert. Losing that race is harmless (the winner cached the same
     # permission), but the unique violation would otherwise 500 the request.
     session.add(
         UserProjectAccess(
-            project_id=project.id,
-            user_id=current_user.id,
+            project_id=project_id,
+            user_id=user_id,
             github_access=permissions,
         )
     )
     try:
         session.commit()
     except IntegrityError:
-        logger.info(
-            f"Access record for user {current_user.id} and project "
-            f"{project.id} was written concurrently; ignoring"
-        )
+        # Rolled back first: nothing else can touch this session until it is.
         session.rollback()
+        logger.info(
+            f"Access record for user {user_id} and project "
+            f"{project_id} was written concurrently; ignoring"
+        )
+    # The rollback (and the commit) expire the project's mapped attributes;
+    # `current_user_access` isn't one, but say it again rather than leave the
+    # answer depending on that.
+    project.current_user_access = permissions
 
 
 def get_project(
@@ -222,7 +234,9 @@ def get_project(
     if current_user is None and project.is_public:
         project.current_user_access = "read"
     elif current_user is not None:
-        # Compute access
+        # Compute access, not keeping one worked out for whoever this
+        # instance was last fetched for in the same session
+        project.current_user_access = None
         if project.owner == current_user:
             project.current_user_access = "owner"
         elif isinstance(project.owner, Org):
@@ -237,12 +251,11 @@ def get_project(
                         else "read"
                     )
                     break
-            if project.current_user_access is None and project.is_public:
-                project.current_user_access = "read"
-        else:
+        if project.current_user_access is None:
             # Non-owner: a native Calkit grant (role_id, e.g., from an invite)
             # takes precedence over GitHub-derived access, and is the only
-            # access path for GitHub-less collaborators.
+            # access path for GitHub-less collaborators. This includes
+            # collaborators on an org's repo who aren't in the org.
             access_row = session.exec(
                 select(UserProjectAccess)
                 .where(UserProjectAccess.project_id == project.id)
@@ -278,6 +291,9 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
     Two sources: dvc.lock, which covers anything a pipeline stage
     produces, and the standalone ``.dvc`` pointer files that ``dvc add``
     leaves next to a tracked file, which the lock knows nothing about.
+    The lock also lists stage outputs stored in Git, e.g., with Calkit's
+    ``storage: git``, which are left out since they're in the tree itself
+    and were never pushed to object storage.
     """
     outs: dict[str, dict] = dict(
         get_ck_info_and_dvc_outs_from_tree(
@@ -315,7 +331,7 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
             else pointer_path[: -len(".dvc")]
         )
         outs.setdefault(path, out)
-    return outs
+    return {path: out for path, out in outs.items() if not tree.exists(path)}
 
 
 def read_project_file(
@@ -818,7 +834,15 @@ def get_ck_info_and_dvc_outs_from_tree(
         f"(read {t_read * 1000:.0f}ms)"
     )
     t1 = time.perf_counter()
-    ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
+    try:
+        ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
+    except yaml.YAMLError as e:
+        # Bad data in the user's repo, so show its files without metadata
+        # rather than failing the whole page
+        logger.warning(
+            f"Failed to parse calkit.yaml for {owner_name}/{project_name}: {e}"
+        )
+        ck_info = {}
     # calkit.yaml can hold any YAML value, and only a mapping is usable
     if not isinstance(ck_info, dict):
         ck_info = {}
@@ -923,7 +947,9 @@ def get_contents_from_tree(
         "datasets",
         "references",
         "notebooks",
+        "results",
     ]
+    kinds = CATEGORIES_PLURAL_TO_SINGULAR | {"results": "result"}
     ck_objects = {}
     for category, itemlist in ck_info.items():
         if category not in categories_with_path:
@@ -933,13 +959,10 @@ def get_contents_from_tree(
                 f"{owner_name}/{project_name} {category} is not a list"
             )
             continue
-        if category not in CATEGORIES_PLURAL_TO_SINGULAR:
-            logger.warning(
-                f"{owner_name}/{project_name} {category} not understood"
-            )
-            continue
         for item in itemlist:
-            item["kind"] = CATEGORIES_PLURAL_TO_SINGULAR[category]
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            item = item | {"kind": kinds[category]}
             ck_objects[item["path"]] = item
             # Handle files inside references objects
             if category == "references":

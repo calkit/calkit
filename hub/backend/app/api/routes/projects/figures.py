@@ -12,6 +12,7 @@ import logging
 import os
 import posixpath
 import re
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -24,7 +25,12 @@ from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import _validate_ck_stage
 from app.core import ryaml
 from app.formatting import format_python
-from app.git import get_ck_info_from_repo, get_repo, record_project_update
+from app.git import (
+    get_ck_info_from_repo,
+    get_repo,
+    push_and_expire,
+    record_project_update,
+)
 from app.models import Figure
 
 logger = logging.getLogger(__name__)
@@ -363,8 +369,7 @@ def post_project_figure_script(
     else:
         figures.append(entry)
     ck_info["figures"] = figures
-    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # The project page reads the committed dvc.yaml, so the stage has to be
     # compiled into it here rather than waiting for the next `calkit run`.
@@ -381,7 +386,7 @@ def post_project_figure_script(
         else f"Add stage {stage_name} to produce {figure_path}"
     )
     repo.git.commit(["-m", message])
-    repo.git.push(["origin", repo.active_branch.name])
+    push_and_expire(project, repo)
     record_project_update(project, repo, session)
     mixpanel.user_saved_figure_script(
         user=current_user,

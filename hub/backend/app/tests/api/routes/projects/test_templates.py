@@ -1,100 +1,51 @@
-from types import SimpleNamespace
-from unittest.mock import patch
-
-import yaml
+"""Tests for what a project started from a template looks like."""
 
 
-def test_copy_template_dvc_objects(tmp_path) -> None:
-    from app.api.routes.projects.core import _copy_template_dvc_objects
+def test_clear_template_pipeline_outputs(tmp_path) -> None:
+    # A project started from a template hasn't run the pipeline yet.
+    from app.api.routes.projects.core import _clear_template_pipeline_outputs
 
-    lock = {
-        "stages": {
-            "analyze": {
-                "outs": [
-                    {"path": "figures/x.png", "md5": "aa11"},
-                    {"path": "data/raw", "md5": "bb22.dir"},
-                ]
-            }
-        }
-    }
-    (tmp_path / "dvc.lock").write_text(yaml.safe_dump(lock))
-    template = SimpleNamespace(owner_account_name="calkit", name="example")
-    project = SimpleNamespace(owner_account_name="me", name="mine")
-    # What expand_dvc_lock_outs would find: the file, the directory listing
-    # object, and a child of the directory
-    outs = {
-        "figures/x.png": {"path": "figures/x.png", "md5": "aa11"},
-        "data/raw": {"path": "data/raw", "md5": "bb22.dir"},
-        "data/raw/a.csv": {"path": "data/raw/a.csv", "md5": "cc33"},
-        "results/summary.json": {"path": "results/summary.json"},
-    }
-    existing = {"calkit/example/aa11", "calkit/example/bb22.dir"}
-    copied: list[tuple[str, str]] = []
-
-    class FakeFS:
-        def exists(self, path):
-            return path in existing
-
-        def copy(self, src, dst):
-            copied.append((src, dst))
-            existing.add(dst)
-
-    def fake_fpath(owner_name, project_name, idx, md5, **kwargs):
-        return f"{owner_name}/{project_name}/{idx}{md5}"
-
-    with (
-        patch(
-            "app.api.routes.projects.core.get_object_fs",
-            return_value=FakeFS(),
-        ),
-        patch(
-            "app.api.routes.projects.core.expand_dvc_lock_outs",
-            return_value=outs,
-        ),
-        patch(
-            "app.api.routes.projects.core.make_data_fpath",
-            side_effect=fake_fpath,
-        ),
-    ):
-        n = _copy_template_dvc_objects(
-            repo_dir=str(tmp_path), template_project=template, project=project
-        )
-    # Only objects the template actually has get copied; a child missing
-    # from storage and an entry with no md5 are skipped, not errors
-    assert n == 2
-    assert sorted(copied) == [
-        ("calkit/example/aa11", "me/mine/aa11"),
-        ("calkit/example/bb22.dir", "me/mine/bb22.dir"),
-    ]
-    # A second run copies nothing, since the destinations now exist
-    with (
-        patch(
-            "app.api.routes.projects.core.get_object_fs",
-            return_value=FakeFS(),
-        ),
-        patch(
-            "app.api.routes.projects.core.expand_dvc_lock_outs",
-            return_value=outs,
-        ),
-        patch(
-            "app.api.routes.projects.core.make_data_fpath",
-            side_effect=fake_fpath,
-        ),
-    ):
-        assert (
-            _copy_template_dvc_objects(
-                repo_dir=str(tmp_path),
-                template_project=template,
-                project=project,
-            )
-            == 0
-        )
-    # No lock file, nothing to do
-    assert (
-        _copy_template_dvc_objects(
-            repo_dir=str(tmp_path / "nope"),
-            template_project=template,
-            project=project,
-        )
-        == 0
+    repo_dir = tmp_path / "repo"
+    (repo_dir / "figures").mkdir(parents=True)
+    (repo_dir / "results").mkdir()
+    (repo_dir / "paper").mkdir()
+    (repo_dir / "figures" / "plot.png").write_bytes(b"png")
+    (repo_dir / "results" / "summary.json").write_text("{}")
+    (repo_dir / "paper" / "paper.tex").write_text("\\documentclass{a}")
+    # The template's own source, which the project is meant to keep
+    (repo_dir / "scripts").mkdir()
+    (repo_dir / "scripts" / "plot.py").write_text("print('hi')")
+    (repo_dir / "dvc.lock").write_text(
+        "schema: '2.0'\n"
+        "stages:\n"
+        "  plot:\n"
+        "    cmd: python scripts/plot.py\n"
+        "    deps:\n"
+        "      - path: scripts/plot.py\n"
+        "    outs:\n"
+        "      - path: figures/plot.png\n"
+        "        hash: md5\n"
+        "      - path: results\n"
+        "        hash: md5\n"
+        "  paper:\n"
+        "    cmd: latexmk paper/paper.tex\n"
+        "    outs:\n"
+        "      - path: paper/paper.pdf\n"
+        "        hash: md5\n"
     )
+    removed = _clear_template_pipeline_outputs(str(repo_dir))
+    # The record of the template's run goes, which is what says this
+    # project's pipeline hasn't been run
+    assert not (repo_dir / "dvc.lock").exists()
+    assert "dvc.lock" in removed
+    # So do its results, file or directory
+    assert not (repo_dir / "figures" / "plot.png").exists()
+    assert not (repo_dir / "results").exists()
+    # An output that was never in the tree (DVC-tracked, so not cloned)
+    # is simply nothing to remove
+    assert "paper/paper.pdf" not in removed
+    # The source the project is starting from stays
+    assert (repo_dir / "scripts" / "plot.py").read_text() == "print('hi')"
+    assert (repo_dir / "paper" / "paper.tex").exists()
+    # Nothing to do for a project not started from a template
+    assert _clear_template_pipeline_outputs(str(repo_dir)) == []

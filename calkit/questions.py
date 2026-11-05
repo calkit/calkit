@@ -7,16 +7,18 @@ Numbers are templated, not retyped. A ``value`` evidence entry names one
 value in a results file, and the question's text can refer to it with
 Python format syntax, ``"about {improvement:.1f}x"``; the text is rendered
 from the file whenever it is shown, so a number in an answer is always the
-pipeline's own.
+pipeline's own. A ``result`` entry with ``values`` names several related
+values in one file, e.g., the outputs of one calculation, the same way.
 
 What can go wrong, worst first: the evidence isn't there at all (never run,
 never pushed, or pinned to a Git ref that doesn't exist); a reference is
 broken (a key that doesn't resolve, a placeholder that names no evidence, a
 label missing from the LaTeX); the stage that produces it is out of date, so
 what's on disk isn't what the project would produce now; or the stage is
-frozen, or downstream of one, in which case the pipeline will never call it
-out of date however far its inputs have moved -- and only a ``git_ref`` on
-the citation says which version is meant.
+frozen, or downstream of one, and its inputs or outputs have moved from
+what dvc.lock records, in which case the pipeline will never rerun it --
+and only a ``git_ref`` on the citation says which version is meant. A
+frozen stage that still matches dvc.lock is as current as any other.
 
 Evidence pinned with ``git_ref`` is checked at that ref rather than in the
 working tree. A pin is a claim about one version, so nothing about the
@@ -28,21 +30,40 @@ changed after the commit that last edited the question, the report says so
 and what it was, since that is worth a reader's attention. It is not a
 failure -- prose can stay true while a number moves, and a templated number
 updates itself.
+
+Whether the answer holds is a person's call, recorded as a sign-off of one
+of two kinds. A verification says the stages behind the evidence implement
+the question's approach, i.e., the answer was worked out right. A
+validation says the approach suits the question and the evidence justifies
+the answer, i.e., the right thing was worked out. Each applies to the
+project as of the commit that added it. A verification goes stale when the
+approach or any of those stages changes, and a validation when the
+question or its evidence does. A stale sign-off fails the check: someone
+signed off on something that is no longer there.
 """
 
 from __future__ import annotations
 
+import datetime
 import glob
 import io
 import json
 import os
+import posixpath
 import re
 import string
+from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 import calkit
+from calkit.conditions import (
+    evaluate_condition,
+    is_conditional,
+    parse_conditional,
+    select_branch,
+)
 
 EvidenceStatus = Literal[
     "ok",
@@ -77,10 +98,30 @@ class EvidenceCheck(BaseModel):
     message: str | None = None
     #: Current value, for value evidence
     current: Any = None
+    #: Current values by name, for result evidence with values
+    values: dict[str, Any] | None = None
     #: The pipeline stage that produces the path, if any
     stage: str | None = None
     #: The Git ref this citation pins itself to, if any
     git_ref: str | None = None
+
+
+SignOffStatus = Literal["none", "current", "stale"]
+
+
+class SignOffCheck(BaseModel):
+    """The result of checking one verification or validation."""
+
+    #: The signer's name, or their email if no name is given
+    by: str
+    date: str | None = None
+    notes: str | None = None
+    #: Generative AI tools they used
+    with_ai: list[str] = Field(default_factory=list)
+    status: Literal["current", "stale", "unchecked"]
+    #: Commit that added the sign-off, if committed
+    commit: str | None = None
+    message: str | None = None
 
 
 class QuestionCheck(BaseModel):
@@ -88,6 +129,8 @@ class QuestionCheck(BaseModel):
 
     #: 1-based, matching ``calkit list questions``
     index: int
+    #: The subproject it belongs to, relative to the project, if not this one
+    project: str | None = None
     question: str
     answered: bool
     status: QuestionStatus
@@ -95,6 +138,31 @@ class QuestionCheck(BaseModel):
     commit: str | None = None
     message: str | None = None
     evidence: list[EvidenceCheck] = Field(default_factory=list)
+    #: Stages behind the evidence, upstream first
+    stages: list[str] = Field(default_factory=list)
+    hypothesis: bool = False
+    approach: bool = False
+    verifications: list[SignOffCheck] = Field(default_factory=list)
+    validations: list[SignOffCheck] = Field(default_factory=list)
+
+    # Stale if any one is, since each person vouches for what they checked
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def verification_status(self) -> SignOffStatus:
+        return _sign_off_status(self.verifications)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def validation_status(self) -> SignOffStatus:
+        return _sign_off_status(self.validations)
+
+
+def _sign_off_status(checks: list[SignOffCheck]) -> SignOffStatus:
+    if not checks:
+        return "none"
+    if any(c.status == "stale" for c in checks):
+        return "stale"
+    return "current"
 
 
 class QuestionsStatus(BaseModel):
@@ -122,6 +190,16 @@ class QuestionsStatus(BaseModel):
         return [q for q in self.questions if q.status == "error"]
 
     @property
+    def stale_verifications(self) -> list[QuestionCheck]:
+        """Questions verified against an approach or stages that changed."""
+        return [q for q in self.questions if q.verification_status == "stale"]
+
+    @property
+    def stale_validations(self) -> list[QuestionCheck]:
+        """Questions validated against text or evidence that changed."""
+        return [q for q in self.questions if q.validation_status == "stale"]
+
+    @property
     def answered(self) -> list[QuestionCheck]:
         return [q for q in self.questions if q.answered]
 
@@ -141,12 +219,20 @@ class QuestionsStatus(BaseModel):
 
     @property
     def ok(self) -> bool:
-        """True if no answered question is missing, stale, or broken.
+        """True if no answered question is missing, stale, broken, or signed
+        off on something that has since changed.
 
         Frozen evidence doesn't fail the check: nothing can be re-run to fix
-        it, and whether a pin is wanted is the author's call.
+        it, and whether a pin is wanted is the author's call. Nor does a
+        question nobody has signed off on, since signing off is opt-in.
         """
-        return not self.missing and not self.stale and not self.errors
+        return (
+            not self.missing
+            and not self.stale
+            and not self.errors
+            and not self.stale_verifications
+            and not self.stale_validations
+        )
 
     @property
     def unattributed(self) -> list[EvidenceCheck]:
@@ -198,27 +284,35 @@ def read_evidence_file(path: str) -> Any:
 def resolve_key(data: Any, key: str) -> Any:
     """Look up ``key`` in a loaded results file.
 
-    A key that exists literally at the top level wins, so a key containing
-    dots keeps working. Otherwise the key is split on dots and walked, with
-    integer parts indexing into lists, so ``results.case-a.score`` reaches
-    into nested output.
+    The key is split on dots and walked, with integer parts indexing into
+    lists, so ``results.case-a.score`` reaches into nested output. At each
+    level the longest run of parts that names a key wins, so keys that
+    contain dots work at any depth, e.g., ``sweep.back_off_1.50_k.failed``.
     """
-    if isinstance(data, dict) and key in data:
-        return data[key]
-    node = data
-    for part in key.split("."):
-        if isinstance(node, dict) and part in node:
-            node = node[part]
-        elif isinstance(node, list) and re.fullmatch(r"-?\d+", part):
+
+    def walk(node: Any, parts: list[str]) -> Any:
+        if not parts:
+            return node
+        if isinstance(node, dict):
+            for end in range(len(parts), 0, -1):
+                name = ".".join(parts[:end])
+                if name in node:
+                    try:
+                        return walk(node[name], parts[end:])
+                    except KeyError:
+                        continue
+            raise KeyError(key)
+        if isinstance(node, list) and re.fullmatch(r"-?\d+", parts[0]):
             try:
-                node = node[int(part)]
+                item = node[int(parts[0])]
             except IndexError:
                 # An index past the end of a list is a key that isn't
                 # there, and callers handle a missing key
                 raise KeyError(key)
-        else:
-            raise KeyError(key)
-    return node
+            return walk(item, parts[1:])
+        raise KeyError(key)
+
+    return walk(data, key.split("."))
 
 
 class _Formatter(string.Formatter):
@@ -235,6 +329,17 @@ class _Formatter(string.Formatter):
             raise KeyError(field_name)
         return kwargs[field_name], field_name
 
+    def format_field(self, value: Any, format_spec: str) -> Any:
+        # A value the spec can't format, e.g., a null under ':.2f', raises
+        # TypeError, which callers don't expect; as ValueError it is
+        # reported as a template that cannot render rather than a crash
+        try:
+            return super().format_field(value, format_spec)
+        except TypeError as e:
+            raise ValueError(
+                f"{value!r} cannot be formatted as {format_spec!r}"
+            ) from e
+
 
 _FORMATTER = _Formatter()
 _PLACEHOLDER = re.compile(r"(?<!\{)\{([^{}:!]+)(?:[:!][^{}]*)?\}(?!\})")
@@ -245,14 +350,66 @@ def placeholders(text: str) -> list[str]:
     return [m.group(1) for m in _PLACEHOLDER.finditer(text or "")]
 
 
-def render(text: str | None, values: dict[str, Any]) -> str | None:
+def _placeholder_problems(text: str, values: dict[str, Any]) -> list[str]:
+    if "{" not in text:
+        return []
+    try:
+        _FORMATTER.vformat(text, (), values)
+    except KeyError as e:
+        return [
+            f"placeholder {{{e.args[0]}}} names no evidence; write "
+            "'{{' and '}}' for braces meant to stay in the text"
+        ]
+    except (ValueError, IndexError) as e:
+        return [f"cannot render {text[:40]!r}...: {e}"]
+    return []
+
+
+def check_conditional(clauses: dict, values: dict[str, Any]) -> list[str]:
+    """Problems with every clause of a conditional, not just the one chosen.
+
+    The clauses the current values don't select are the ones a rerun will
+    reach, so a typo in them is an error now rather than after the rerun.
+    """
+    try:
+        parsed = parse_conditional(clauses)
+    except ValueError as e:
+        return [f"conditional answer: {e}"]
+    messages: list[str] = []
+    held = False
+    for condition, wording in parsed:
+        if condition is None:
+            held = True
+        else:
+            try:
+                held = evaluate_condition(condition, values) or held
+            except KeyError as e:
+                messages.append(
+                    f"condition {condition!r} names no evidence {e.args[0]!r}"
+                )
+            except ValueError as e:
+                messages.append(str(e))
+        messages += _placeholder_problems(wording, values)
+    if not messages and not held:
+        messages.append(
+            "no condition of the conditional answer holds and there is no "
+            "'else' clause"
+        )
+    return messages
+
+
+def render(text: str | dict | None, values: dict[str, Any]) -> str | None:
     """Fill a question text's placeholders from its evidence values.
 
     Raises ``KeyError`` for a name with no evidence and ``ValueError`` for
     a format spec the value cannot satisfy, so a template that cannot be
     rendered is an error rather than a silently unfilled sentence.
     """
-    if text is None or "{" not in text:
+    if text is None:
+        return text
+    if isinstance(text, dict):
+        text = select_branch(text, values)
+    if "{" not in text:
         return text
     return _FORMATTER.vformat(text, (), values)
 
@@ -268,37 +425,81 @@ def evidence_name(ev: dict) -> str | None:
     return ev.get("name") or ev.get("key")
 
 
-TEMPLATED_FIELDS = ("hypothesis", "answer", "notes")
+def named_keys(ev: dict) -> dict[str, str]:
+    """The values an entry cites, as a map of name to key.
+
+    One for ``value`` evidence, or a ``result`` with a key, and one per
+    entry for a ``result`` with ``values``.
+    """
+    if is_value_evidence(ev):
+        name = evidence_name(ev)
+        return {name: ev["key"]} if name else {}
+    values = ev.get("values")
+    if ev.get("kind", "result") == "result" and isinstance(values, dict):
+        return {str(n): str(k) for n, k in values.items()}
+    return {}
+
+
+TEMPLATED_FIELDS = ("hypothesis", "approach", "answer", "notes")
 
 
 def render_question(
-    question: str | dict, ck_info: dict | None = None, wdir: str | None = None
+    question: str | dict,
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    strict: bool = False,
 ) -> str | dict:
     """A copy of a question with its templates filled from the evidence.
 
     A placeholder that cannot be filled is left as written rather than
     raising, since this is for display; ``check_questions`` is where a
-    broken template is an error.
+    broken template is an error. With ``strict``, an unreadable value or
+    an unfillable placeholder raises instead, for output such as a paper
+    where a literal ``{name}`` would be printed as though it were prose.
     """
     if isinstance(question, str):
         return question
     wdir = wdir or os.getcwd()
     values: dict[str, Any] = {}
     for ev in question.get("evidence") or []:
-        if not is_value_evidence(ev):
+        keys = named_keys(ev)
+        if not keys:
             continue
-        name = evidence_name(ev)
         try:
-            data = read_evidence_file(os.path.join(wdir, ev["path"]))
-            values[name or ""] = resolve_key(data, ev["key"])
-        except Exception:
+            git_ref = _declared_git_ref(ev)
+            if git_ref is None:
+                data = read_evidence_file(os.path.join(wdir, ev["path"]))
+            else:
+                # Pinned, so read as it was there
+                import calkit.git
+
+                repo = calkit.git.get_repo(wdir)
+                text = _read_at_ref(repo, git_ref, ev["path"], wdir)
+                if text is None:
+                    raise FileNotFoundError(f"not found at {git_ref}")
+                data = parse_evidence_text(text, ev["path"])
+        except Exception as e:
+            if strict:
+                raise ValueError(f"Can't read {ev['path']}: {e}") from e
             continue
+        for name, key in keys.items():
+            try:
+                values[name] = resolve_key(data, key)
+            except Exception as e:
+                if strict:
+                    raise ValueError(
+                        f"Can't read value {name!r} from {ev['path']}: {e}"
+                    ) from e
     out = dict(question)
     for field in TEMPLATED_FIELDS:
         try:
             out[field] = render(out.get(field), values)
-        except (KeyError, ValueError, IndexError):
-            pass
+        except (KeyError, ValueError, IndexError) as e:
+            if strict:
+                raise ValueError(
+                    f"Can't render the {field} of question "
+                    f"{question.get('question')!r}: {e}"
+                ) from e
     if out.get("evidence"):
         rendered_evidence = []
         for ev in out["evidence"]:
@@ -310,6 +511,183 @@ def render_question(
             rendered_evidence.append(ev)
         out["evidence"] = rendered_evidence
     return out
+
+
+#: The parts of a question a document can quote.
+LATEX_FIELDS = ("question", "hypothesis", "approach", "answer", "notes")
+
+
+def latex_values(ck_info: dict, wdir: str | None = None) -> dict[str, str]:
+    """Every question's rendered text, keyed for a document to quote.
+
+    Each field is keyed ``<name>.<field>``, where the name is the question's
+    1-based position and, when it has one, also its ``name``, which survives
+    reordering where the position does not. Rendering is strict, so a
+    template that cannot be filled is an error here rather than a literal
+    placeholder in a paper.
+
+    Parameters
+    ----------
+    ck_info : dict
+        The project's ``calkit.yaml`` content.
+    wdir : str, optional
+        Directory evidence paths are relative to.
+
+    Returns
+    -------
+    dict of str to str
+        Rendered text by key, e.g., ``{"staging.answer": "Yes..."}``.
+
+    Raises
+    ------
+    ValueError
+        If two questions share a name, a name is a number, or a template
+        cannot be rendered.
+    """
+    out: dict[str, str] = {}
+    seen: set[str] = set()
+    for position, question in enumerate(ck_info.get("questions") or [], 1):
+        rendered = render_question(question, ck_info, wdir=wdir, strict=True)
+        fields: dict[str, Any] = (
+            {"question": rendered}
+            if isinstance(rendered, str)
+            else {f: rendered.get(f) for f in LATEX_FIELDS}
+        )
+        names = [str(position)]
+        qname = question.get("name") if isinstance(question, dict) else None
+        if qname:
+            if str(qname).isdigit():
+                raise ValueError(
+                    f"Question name {qname!r} can't be a number, since "
+                    "questions are also addressed by position"
+                )
+            if qname in seen:
+                raise ValueError(f"Two questions have the name {qname!r}")
+            seen.add(qname)
+            names.append(qname)
+        for name in names:
+            for field, text in fields.items():
+                if text is not None:
+                    out[f"{name}.{field}"] = " ".join(str(text).split())
+    return out
+
+
+def evidence_paths(ck_info: dict) -> list[str]:
+    """Every path the project's questions cite as evidence."""
+    paths = {
+        ev["path"]
+        for question in ck_info.get("questions") or []
+        if isinstance(question, dict)
+        for ev in question.get("evidence") or []
+        if ev.get("path")
+    }
+    return sorted(paths)
+
+
+def expand_questions_stages(ck_info: dict) -> dict:
+    """Give each ``questions-to-latex`` stage the files its output reads.
+
+    Its text comes from ``calkit.yaml`` and its numbers from the evidence
+    files, so the stage has to rerun when either changes. The evidence is
+    listed once here, from the questions themselves, rather than repeated
+    by hand in the stage.
+    """
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    if not any(
+        isinstance(st, dict) and st.get("kind") == "questions-to-latex"
+        for st in stages.values()
+    ):
+        return ck_info
+    derived = ["calkit.yaml", *evidence_paths(ck_info)]
+    expanded = {}
+    for name, stage in stages.items():
+        if (
+            isinstance(stage, dict)
+            and stage.get("kind") == "questions-to-latex"
+        ):
+            stage = dict(stage)
+            declared = list(stage.get("inputs") or [])
+            stage["inputs"] = declared + [
+                p for p in derived if p not in declared
+            ]
+        expanded[name] = stage
+    out = dict(ck_info)
+    out["pipeline"] = {**ck_info["pipeline"], "stages": expanded}
+    return out
+
+
+def stage_for_path(path: str, ck_info: dict) -> str | None:
+    """The stage that produces ``path``, counting the files a stage makes
+    without listing them as outputs: a Markdown stage's target and a LaTeX
+    stage's PDF."""
+    from calkit.models.pipeline import LatexStage
+    from calkit.pipeline import get_stage_for_output
+
+    def implicit_output(st: dict) -> str | None:
+        if st.get("kind") == "markdown":
+            return st.get("target_path")
+        if st.get("kind") == "latex":
+            try:
+                return LatexStage.model_validate(st).pdf_path
+            except Exception:
+                return None
+        return None
+
+    stage = get_stage_for_output(path, ck_info)
+    if stage is not None:
+        return stage
+    target = posixpath.normpath(Path(path).as_posix())
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, st in stages.items():
+        out = implicit_output(st) if isinstance(st, dict) else None
+        if out and target == posixpath.normpath(
+            posixpath.join(st.get("wdir") or "", Path(out).as_posix())
+        ):
+            return str(name)
+    return None
+
+
+def question_stages(question: str | dict, ck_info: dict) -> list[str]:
+    """The pipeline stages behind a question's evidence, upstream first.
+
+    Read from ``calkit.yaml`` alone, following each stage's inputs to the
+    stages that produce them, so it costs nothing to show alongside the
+    question and can't disagree with the pipeline it's derived from.
+    """
+
+    def visit(name: str, seen: set[str]) -> None:
+        if name in order or name in seen or name not in stages:
+            return
+        seen.add(name)
+        for i in stages[name].get("inputs") or []:
+            if isinstance(i, dict) and i.get("from_stage_outputs"):
+                upstream = i["from_stage_outputs"]
+            else:
+                # Relative to the stage's wdir, like its other paths
+                path = i if isinstance(i, str) else (i or {}).get("path")
+                if path:
+                    path = posixpath.join(stages[name].get("wdir") or "", path)
+                upstream = stage_for_path(path, ck_info) if path else None
+            if upstream:
+                visit(upstream, seen)
+        order.append(name)
+
+    if isinstance(question, str):
+        return []
+    stages = {
+        name: st
+        for name, st in (
+            (ck_info.get("pipeline") or {}).get("stages") or {}
+        ).items()
+        if isinstance(st, dict)
+    }
+    order: list[str] = []
+    for ev in question.get("evidence") or []:
+        path = ev.get("path") if isinstance(ev, dict) else None
+        stage = stage_for_path(path, ck_info) if path else None
+        if stage:
+            visit(stage, set())
+    return order
 
 
 # -- history -------------------------------------------------------------
@@ -324,13 +702,55 @@ def _load_calkit_yaml_text(text: str) -> dict:
     """
     import yaml
 
+    from calkit.core import _load_yaml_readonly
+
     try:
-        loaded = yaml.safe_load(io.StringIO(text))
+        loaded = _load_yaml_readonly(text)
     except yaml.YAMLError:
         # A revision whose calkit.yaml uses something PyYAML refuses is
         # still worth reading; the round-trip parser is more forgiving
         loaded = calkit.ryaml.load(io.StringIO(text))
     return loaded if isinstance(loaded, dict) else {}
+
+
+class _MemoizedRepo:
+    """A repo whose ``git`` calls are run once per distinct set of arguments.
+
+    Checking questions asks the same few things of Git over and over, e.g.,
+    whether a results file is tracked and what it held at the commit an
+    answer was written, once for every value cited from it. Nothing a check
+    asks changes while it runs, so each is a subprocess only the first time.
+    """
+
+    def __init__(self, repo: Any) -> None:
+        self._repo = repo
+        self._memo: dict[tuple, tuple[bool, Any]] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._repo, name)
+
+    @property
+    def git(self) -> Any:
+        repo = self
+
+        class _Git:
+            def __getattr__(self, cmd: str) -> Any:
+                def call(*args: str) -> Any:
+                    key = (cmd, args)
+                    if key not in repo._memo:
+                        try:
+                            result = getattr(repo._repo.git, cmd)(*args)
+                            repo._memo[key] = (True, result)
+                        except Exception as e:
+                            repo._memo[key] = (False, e)
+                    ok, value = repo._memo[key]
+                    if not ok:
+                        raise value
+                    return value
+
+                return call
+
+        return _Git()
 
 
 class CalkitYamlHistory:
@@ -344,25 +764,47 @@ class CalkitYamlHistory:
     checking a handful of questions take double-digit seconds.
     """
 
-    def __init__(self, repo: Any, wdir: str) -> None:
+    def __init__(self, repo: Any, wdir: str, ref: str | None = None) -> None:
         self.repo = repo
+        #: Where history is read back from; None for HEAD
+        self.ref = ref
         self.rel = os.path.relpath(
             os.path.join(wdir, CALKIT_YAML), str(repo.working_dir)
         ).replace(os.sep, "/")
         self._shas: list[str] | None = None
+        self._parents: dict[str, list[str]] = {}
         self._parsed: dict[str, dict | None] = {}
 
     @property
     def shas(self) -> list[str]:
         """Commits that touched the file, newest first."""
         if self._shas is None:
+            self._shas = []
             try:
-                self._shas = str(
-                    self.repo.git.log("--format=%H", "--", self.rel)
-                ).split()
+                # With --parents, each commit's parents are the nearest
+                # ones that also touched the file
+                args = ["--parents", "--format=%H %P"]
+                lines = str(
+                    self.repo.git.log(
+                        *args,
+                        *([self.ref] if self.ref else []),
+                        "--",
+                        self.rel,
+                    )
+                ).splitlines()
             except Exception:
-                self._shas = []
+                lines = []
+            for line in lines:
+                sha, *parents = line.split()
+                self._shas.append(sha)
+                self._parents[sha] = parents
         return self._shas
+
+    def parents(self, sha: str) -> list[str]:
+        """The commits before ``sha`` that touched the file, nearest first."""
+        if self._shas is None:
+            self.shas
+        return self._parents.get(sha, [])
 
     def at(self, sha: str) -> dict | None:
         """The file as of one commit, or None if it can't be read.
@@ -395,6 +837,10 @@ def _plain(value: Any) -> Any:
         return {str(k): _plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_plain(v) for v in value]
+    # One loader reads a date as a date and another, or a quoted one, as a
+    # string, and a review written either way is the same review
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
     return value
 
 
@@ -430,15 +876,43 @@ def question_commit(
     return found
 
 
-def _lock_hash(lock_text: str, path: str) -> str | None:
-    """The hash ``dvc.lock`` records for an output path, if any."""
+SIGN_OFF_FIELDS = ("verifications", "validations")
+#: What a validation vouches for is the claim, not its bookkeeping
+_NOT_VALIDATED = ("name", "notes", *SIGN_OFF_FIELDS)
+
+
+def _stage_wdirs(ck_info: dict) -> dict[str, str]:
+    """Each stage's ``wdir``, which ``dvc.lock`` paths are relative to but
+    which it doesn't record."""
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    return {
+        str(name): str(st.get("wdir") or "")
+        for name, st in stages.items()
+        if isinstance(st, dict)
+    }
+
+
+def _lock_hash(
+    lock_text: str, path: str, stage_wdirs: dict[str, str] | None = None
+) -> str | None:
+    """The hash ``dvc.lock`` records for an output path, relative to the
+    project, if any."""
     try:
         lock = _load_calkit_yaml_text(lock_text)
     except Exception:
         return None
-    for stage in (lock.get("stages") or {}).values():
+    target = posixpath.normpath(Path(path).as_posix())
+    for name, stage in (lock.get("stages") or {}).items():
+        stage_wdir = (stage_wdirs or {}).get(str(name).split("@")[0], "")
         for out in (stage or {}).get("outs") or []:
-            if isinstance(out, dict) and out.get("path") == path:
+            if (
+                isinstance(out, dict)
+                and out.get("path")
+                and target
+                == (
+                    posixpath.normpath(posixpath.join(stage_wdir, out["path"]))
+                )
+            ):
                 return str(out.get("md5") or out.get("hash") or "") or None
     return None
 
@@ -467,6 +941,17 @@ def _values_equal(a: Any, b: Any) -> bool:
     return bool(a == b)
 
 
+def _read_lock(repo: Any, wdir: str, ref: str | None) -> str | None:
+    """``dvc.lock`` at ``ref``, or in the working tree if None."""
+    if ref is None:
+        try:
+            with open(os.path.join(wdir, "dvc.lock"), encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return None
+    return _read_at_ref(repo, ref, "dvc.lock", wdir)
+
+
 def evidence_change(
     path: str,
     since: str,
@@ -474,9 +959,16 @@ def evidence_change(
     wdir: str,
     key: str | None = None,
     current: Any = None,
+    ref: str | None = None,
+    stage_wdirs: dict[str, str] | None = None,
 ) -> str | None:
     """How ``path`` has changed since commit ``since``, or None if it has
     not.
+
+    Changed as of ``ref``, or of the working tree if None, in which case a
+    ``key``'s ``current`` value is passed in rather than read.
+    ``stage_wdirs`` locates ``dvc.lock``'s paths, as from
+    :func:`_stage_wdirs`.
 
     For a value in a Git-tracked results file the comparison is made on
     the value itself, read from the file as it was at ``since``: a results
@@ -489,10 +981,27 @@ def evidence_change(
     root = str(repo.working_dir)
     rel = os.path.relpath(os.path.join(wdir, path), root).replace(os.sep, "/")
     short = since[:7]
-    try:
-        tracked = bool(str(repo.git.ls_files("--", rel)).strip())
-    except Exception:
-        tracked = False
+    until = ref or "HEAD"
+
+    def is_tracked(p: str) -> bool:
+        try:
+            if ref is not None:
+                return bool(str(repo.git.ls_tree(ref, "--", p)).strip())
+            return bool(str(repo.git.ls_files("--", p)).strip())
+        except Exception:
+            return False
+
+    tracked = is_tracked(rel)
+    if tracked and key is not None and ref is not None:
+        try:
+            current = resolve_key(
+                parse_evidence_text(str(repo.git.show(f"{ref}:{rel}")), rel),
+                key,
+            )
+        except KeyError:
+            return f"{key} no longer exists in {rel}"
+        except Exception:
+            return f"{rel} could not be read"
     if tracked and key is not None:
         try:
             old_text = str(repo.git.show(f"{since}:{rel}"))
@@ -514,17 +1023,22 @@ def evidence_change(
             return None
         return f"{key} was {_fmt(old)} at {short}, now {_fmt(current)}"
     if tracked:
-        commits = str(repo.git.rev_list(f"{since}..HEAD", "--", rel)).split()
+        commits = str(
+            repo.git.rev_list(f"{since}..{until}", "--", rel)
+        ).split()
         if commits:
             return f"changed in {len(commits)} commit(s) since {short}"
-        if str(repo.git.diff("HEAD", "--name-only", "--", rel)).strip():
+        if (
+            ref is None
+            and str(repo.git.diff("HEAD", "--name-only", "--", rel)).strip()
+        ):
             return "modified in the working tree"
         return None
     pointer = rel + ".dvc"
     try:
-        if str(repo.git.ls_files("--", pointer)).strip():
+        if is_tracked(pointer):
             commits = str(
-                repo.git.rev_list(f"{since}..HEAD", "--", pointer)
+                repo.git.rev_list(f"{since}..{until}", "--", pointer)
             ).split()
             if commits:
                 return f"{pointer} changed since {short}"
@@ -535,14 +1049,17 @@ def evidence_change(
         os.sep, "/"
     )
     try:
-        old = _lock_hash(str(repo.git.show(f"{since}:{lock_rel}")), rel)
+        old = _lock_hash(
+            str(repo.git.show(f"{since}:{lock_rel}")), path, stage_wdirs
+        )
     except Exception:
         old = None
-    try:
-        with open(os.path.join(wdir, "dvc.lock"), encoding="utf-8") as f:
-            new = _lock_hash(f.read(), rel)
-    except OSError:
-        new = None
+    new_lock = _read_lock(repo, wdir, ref)
+    new = (
+        _lock_hash(new_lock, path, stage_wdirs)
+        if new_lock is not None
+        else None
+    )
     if old != new and (old or new):
         return f"hash in dvc.lock changed since {short}"
     return None
@@ -581,8 +1098,7 @@ def _check_publication_label(
     sources = _find_latex_sources(ev["path"], ck_info, wdir)
     if not sources:
         return "skipped", (
-            f"label {label!r} not checked: no LaTeX stage produces "
-            f"{ev['path']}"
+            f"label {label!r} not checked: no LaTeX stage produces {ev['path']}"
         )
     pattern = re.compile(r"\\label\{" + re.escape(label) + r"\}")
     for src in sources:
@@ -596,7 +1112,11 @@ def _check_publication_label(
 
 
 def _is_attributed(
-    path: str, stage: str | None, ck_info: dict, wdir: str
+    path: str,
+    stage: str | None,
+    ck_info: dict,
+    wdir: str,
+    computed: bool = False,
 ) -> bool:
     """Whether the project says where an evidence path came from.
 
@@ -605,7 +1125,9 @@ def _is_attributed(
     may be declared as an artifact that records an import or a person,
     which is what :func:`calkit.provenance.has_provenance` reads---an
     imported dataset or a hand-drawn schematic is accounted for even
-    though there is nothing upstream to point at.
+    though there is nothing upstream to point at. With ``computed``, a
+    person doesn't count, since a number someone typed into a file is
+    still a magic number.
     """
     from calkit.provenance import has_provenance
 
@@ -613,7 +1135,7 @@ def _is_attributed(
         return True
     try:
         with open(os.path.join(wdir, "dvc.lock"), encoding="utf-8") as f:
-            if _lock_hash(f.read(), path) is not None:
+            if _lock_hash(f.read(), path, _stage_wdirs(ck_info)) is not None:
                 return True
     except OSError:
         pass
@@ -624,7 +1146,12 @@ def _is_attributed(
             if (
                 isinstance(artifact, dict)
                 and artifact.get("path") == path
-                and has_provenance(artifact)
+                and (
+                    artifact.get("stage") is not None
+                    or artifact.get("imported_from") is not None
+                    if computed
+                    else has_provenance(artifact)
+                )
             ):
                 return True
     return False
@@ -642,16 +1169,26 @@ def _declared_git_ref(ev: dict) -> str | None:
     return git_ref if isinstance(git_ref, str) else str(git_ref)
 
 
-def _read_at_ref(repo: Any, git_ref: str, path: str) -> str | None:
-    """The text of ``path`` at ``git_ref``, or None if it isn't there."""
+def _read_at_ref(
+    repo: Any, git_ref: str, path: str, wdir: str = "."
+) -> str | None:
+    """The text of ``path``, relative to ``wdir``, at ``git_ref``, or None if
+    it isn't there.
+    """
+    # The project can be a subproject, and Git reads paths from the root
+    rel = os.path.relpath(os.path.join(wdir, path), repo.working_dir)
     try:
-        return str(repo.git.show(f"{git_ref}:{path}"))
+        return str(repo.git.show(f"{git_ref}:{Path(rel).as_posix()}"))
     except Exception:
         return None
 
 
 def check_pinned_evidence(
-    out: EvidenceCheck, ev: dict, repo: Any, wdir: str
+    out: EvidenceCheck,
+    ev: dict,
+    repo: Any,
+    wdir: str,
+    stage_wdirs: dict[str, str] | None = None,
 ) -> EvidenceCheck:
     """Check evidence pinned to a Git ref, at that ref.
 
@@ -672,13 +1209,16 @@ def check_pinned_evidence(
         out.status = "missing"
         out.message = f"Git ref {git_ref!r} was not found; push it or fix it"
         return out
-    text = _read_at_ref(repo, git_ref, out.path)
+    text = _read_at_ref(repo, git_ref, out.path, wdir)
     if text is None:
-        lock = _read_at_ref(repo, git_ref, "dvc.lock")
-        if lock is not None and _lock_hash(lock, out.path) is not None:
+        lock = _read_at_ref(repo, git_ref, "dvc.lock", wdir)
+        if (
+            lock is not None
+            and _lock_hash(lock, out.path, stage_wdirs) is not None
+        ):
             # Tracked by DVC at that commit: present, but its content lives
             # in storage, so a cited value can't be read from here.
-            if is_value_evidence(ev):
+            if named_keys(ev):
                 out.status = "skipped"
                 out.message = (
                     f"DVC-tracked at {git_ref}; value not read from storage"
@@ -703,6 +1243,28 @@ def check_pinned_evidence(
                 f"cannot read {out.path} at {git_ref}: "
                 f"{e.__class__.__name__}: {e}"
             )
+    elif named_keys(ev):
+        try:
+            data = parse_evidence_text(text, out.path)
+        except Exception as e:
+            out.status = "error"
+            out.message = (
+                f"cannot read {out.path} at {git_ref}: "
+                f"{e.__class__.__name__}: {e}"
+            )
+            return out
+        out.values = {}
+        not_found = []
+        for name, value_key in named_keys(ev).items():
+            try:
+                out.values[name] = resolve_key(data, value_key)
+            except KeyError:
+                not_found.append(value_key)
+        if not_found:
+            out.status = "error"
+            out.message = f"key(s) not found in {out.path} at {git_ref}: " + (
+                ", ".join(repr(k) for k in not_found)
+            )
     return out
 
 
@@ -721,8 +1283,34 @@ def check_evidence(
     pipeline: the ones DVC would re-run, and the ones it never will because
     they're frozen or downstream of a freeze.
     """
-    from calkit.pipeline import get_stage_for_output
 
+    def change_since(check: EvidenceCheck, since: str) -> str | None:
+        if check.values is not None:
+            # Each value is compared on its own, as a value entry would be
+            changes = [
+                evidence_change(
+                    check.path,
+                    since,
+                    repo,
+                    wdir,
+                    key=value_key,
+                    current=check.values[name],
+                    stage_wdirs=stage_wdirs,
+                )
+                for name, value_key in named_keys(ev).items()
+            ]
+            return "; ".join(dict.fromkeys(c for c in changes if c)) or None
+        return evidence_change(
+            check.path,
+            since,
+            repo,
+            wdir,
+            key=check.key if is_value_evidence(ev) else None,
+            current=check.current,
+            stage_wdirs=stage_wdirs,
+        )
+
+    stage_wdirs = _stage_wdirs(ck_info)
     kind = ev.get("kind", "result")
     path = ev.get("path", "")
     key = ev.get("key")
@@ -732,7 +1320,8 @@ def check_evidence(
         key=key,
         name=evidence_name(ev) if is_value_evidence(ev) else None,
         status="ok",
-        stage=get_stage_for_output(path, ck_info) if path else None,
+        # A document may also be a Markdown stage's target
+        stage=stage_for_path(path, ck_info) if path else None,
         git_ref=_declared_git_ref(ev),
     )
     if not path:
@@ -740,7 +1329,7 @@ def check_evidence(
         out.message = "evidence has no path"
         return out
     if out.git_ref is not None:
-        return check_pinned_evidence(out, ev, repo, wdir)
+        return check_pinned_evidence(out, ev, repo, wdir, stage_wdirs)
     if not os.path.exists(os.path.join(wdir, path)):
         out.status = "missing"
         out.message = "path does not exist; run the pipeline or pull"
@@ -751,6 +1340,10 @@ def check_evidence(
     if kind == "value" and not key:
         out.status = "error"
         out.message = "value evidence needs a key"
+        return out
+    if kind == "result" and key and "values" in ev:
+        out.status = "error"
+        out.message = "a result takes 'values' or 'key', not both"
         return out
     if is_value_evidence(ev):
         try:
@@ -767,15 +1360,32 @@ def check_evidence(
             return out
         if kind == "result":
             out.message = "a result with a key is a value; use kind: value"
+    elif kind == "result" and "values" in ev:
+        if not isinstance(ev["values"], dict) or not ev["values"]:
+            out.status = "error"
+            out.message = "values must map each name to a key"
+            return out
+        try:
+            data = read_evidence_file(os.path.join(wdir, path))
+        except Exception as e:
+            out.status = "error"
+            out.message = f"cannot read {path}: {e.__class__.__name__}: {e}"
+            return out
+        out.values = {}
+        not_found = []
+        for name, value_key in named_keys(ev).items():
+            try:
+                out.values[name] = resolve_key(data, value_key)
+            except KeyError:
+                not_found.append(value_key)
+        if not_found:
+            out.status = "error"
+            out.message = f"key(s) not found in {path}: " + ", ".join(
+                repr(k) for k in not_found
+            )
+            return out
     if since is not None and repo is not None:
-        change = evidence_change(
-            path,
-            since,
-            repo,
-            wdir,
-            key=key if is_value_evidence(ev) else None,
-            current=out.current,
-        )
+        change = change_since(out, since)
         if change:
             out.status = "changed"
             # Not overwritten: a deprecated entry that also changed is
@@ -783,8 +1393,13 @@ def check_evidence(
             # said
             out.message = "; ".join(filter(None, [out.message, change]))
     base = (out.stage or "").split("@")[0]
+    # A Markdown stage runs as sub-stages named after it, e.g., 'doc/analyze'
+    stale_hit, frozen_hit = (
+        any(n == base or n.startswith(base + "/") for n in names or ())
+        for names in (stale_stages, frozen_stages)
+    )
     if out.status in ("ok", "changed") and base:
-        if base in (stale_stages or set()):
+        if stale_hit:
             out.status = "stale"
             out.message = "; ".join(
                 filter(
@@ -795,20 +1410,60 @@ def check_evidence(
                     ],
                 )
             )
-        elif base in (frozen_stages or set()):
+        elif frozen_hit:
             out.status = "frozen"
             out.message = "; ".join(
                 filter(
                     None,
                     [
                         out.message,
-                        f"stage '{base}' is frozen, or downstream of one, so "
-                        "nothing will report it out of date; cite a git_ref "
-                        "to pin which version this is",
+                        f"stage '{base}' is frozen, or downstream of one, "
+                        "and no longer matches dvc.lock, so it won't be "
+                        "rerun; cite a git_ref to pin which version this is",
                     ],
                 )
             )
-    if out.status == "ok" and not _is_attributed(
+    if (
+        out.status in ("ok", "changed")
+        and (
+            is_value_evidence(ev)
+            or out.values is not None
+            or kind == "document"
+        )
+        and not _is_attributed(path, out.stage, ck_info, wdir, computed=True)
+    ):
+        out.status = "error"
+        out.message = (
+            "no pipeline stage computes this value, so nothing can show "
+            "where the number came from or keep it current; produce the file "
+            "with a stage, or declare it with 'imported_from' if another "
+            "project computed it"
+            if kind != "document"
+            else "no pipeline stage builds this document, so nothing checks "
+            "what it says against the results; build it with a Markdown "
+            "stage, or declare it with 'imported_from' if another project "
+            "produced it"
+        )
+        # A Quarto source is only evidence once rendered, so point there
+        for name, stage in (
+            ck_info.get("pipeline", {}).get("stages") or {}
+        ).items():
+            if (
+                kind == "document"
+                and isinstance(stage, dict)
+                and stage.get("kind") == "quarto"
+                and stage.get("target_path") == path
+            ):
+                rendered = [
+                    o.get("path") if isinstance(o, dict) else o
+                    for o in stage.get("outputs") or []
+                ]
+                out.message = (
+                    f"this is the source Quarto stage '{name}' renders; cite "
+                    "what it renders instead"
+                    + (f", e.g., {rendered[0]}" if rendered else "")
+                )
+    elif out.status == "ok" and not _is_attributed(
         path, out.stage, ck_info, wdir
     ):
         out.status = "unattributed"
@@ -820,6 +1475,270 @@ def check_evidence(
     return out
 
 
+def check_sign_offs(
+    question: dict,
+    ck_info: dict,
+    wdir: str,
+    repo: Any = None,
+    history: CalkitYamlHistory | None = None,
+    ref: str | None = None,
+    stages: list[str] | None = None,
+) -> tuple[list[SignOffCheck], list[SignOffCheck]]:
+    """Check a question's verifications and validations.
+
+    Each is checked against the project as of the commit that added it, up
+    to ``ref``, or the working tree if None, where ``question`` and
+    ``ck_info`` are read from. Without a repo they're left unchecked.
+    """
+    from calkit.models.pipeline import Pipeline
+
+    def validated_part(q: dict) -> dict:
+        return {k: v for k, v in _plain(q).items() if k not in _NOT_VALIDATED}
+
+    def lock_stages(lock_text: str | None) -> dict[str, dict]:
+        # Including each 'name@item' of a stage that iterates
+        assert stages is not None
+        try:
+            lock = _load_calkit_yaml_text(lock_text or "")
+        except Exception:
+            return {}
+        return {
+            str(k): v
+            for k, v in (lock.get("stages") or {}).items()
+            if isinstance(v, dict) and str(k).split("@")[0] in stages
+        }
+
+    def sign_off_commit(
+        sign_off: dict, field: str
+    ) -> tuple[str | None, dict | None, dict | None]:
+        # The commit that added the sign-off, with the question and the
+        # whole calkit.yaml as they were then. The question is found by the
+        # sign-off it carries rather than its text, so an edit afterward
+        # still finds what was signed off on; among several carrying an
+        # identical one, the same name, then the same text, wins.
+        hist = history
+        assert hist is not None
+        target = _plain(sign_off)
+
+        def signed_at(sha: str) -> tuple[dict, dict] | None:
+            old = hist.at(sha)
+            candidates = [
+                q
+                for q in (old or {}).get("questions") or []
+                if isinstance(q, dict) and target in _plain(q.get(field) or [])
+            ]
+            if old is None or not candidates:
+                return None
+            signed = next(
+                (
+                    q
+                    for key in ("name", "question")
+                    if question.get(key)
+                    for q in candidates
+                    if q.get(key) == question.get(key)
+                ),
+                candidates[0],
+            )
+            return signed, old
+
+        # Back through parents rather than by date, so one added on a
+        # branch is found where it was added, not at the merge, and what
+        # the branch hadn't seen counts as changed since
+        found: tuple[str | None, dict | None, dict | None] = (None, None, None)
+        sha = hist.shas[0] if hist.shas else None
+        hit = signed_at(sha) if sha is not None else None
+        while sha is not None and hit is not None:
+            found = (sha, *hit)
+            parent_hits = ((p, signed_at(p)) for p in hist.parents(sha))
+            sha, hit = next(
+                ((p, h) for p, h in parent_hits if h is not None),
+                (None, None),
+            )
+        return found
+
+    if stages is None:
+        stages = question_stages(question, ck_info)
+    if repo is not None and history is None:
+        history = CalkitYamlHistory(repo, wdir, ref)
+    stage_wdirs = _stage_wdirs(ck_info)
+
+    def evidence_changes(since: str) -> list[str]:
+        reasons = []
+        for ev in question.get("evidence") or []:
+            path = ev.get("path") if isinstance(ev, dict) else None
+            if not path:
+                continue
+            git_ref = _declared_git_ref(ev)
+            ev_since, ev_ref = since, ref
+            if git_ref is not None:
+                # A commit can't move, but a branch or tag can, so compare
+                # where it points now with where it pointed at the sign-off
+                try:
+                    resolved = str(
+                        repo.git.rev_parse(f"{git_ref}^{{commit}}")
+                    ).strip()
+                except Exception:
+                    # A ref that doesn't resolve fails on its own
+                    continue
+                if re.fullmatch(r"[0-9a-f]{7,40}", git_ref) and (
+                    resolved.startswith(git_ref)
+                ):
+                    continue
+                signed_at = str(repo.git.show("-s", "--format=%cI", since))
+                then = str(
+                    repo.git.rev_list(
+                        "-1", f"--before={signed_at.strip()}", resolved
+                    )
+                ).strip()
+                if not then:
+                    reasons.append(
+                        f"{path}: {git_ref} has no commits from before it"
+                    )
+                    continue
+                ev_since, ev_ref = then, resolved
+            keys = (
+                [ev["key"]]
+                if is_value_evidence(ev) and ev.get("key")
+                else list(named_keys(ev).values())
+            )
+            data: Any = None
+            if keys and ev_ref is None:
+                try:
+                    data = read_evidence_file(os.path.join(wdir, path))
+                except Exception:
+                    # Missing or broken evidence fails on its own
+                    continue
+            changes = []
+            for key in keys or [None]:
+                current = None
+                if key is not None and data is not None:
+                    try:
+                        current = resolve_key(data, key)
+                    except KeyError:
+                        continue
+                changes.append(
+                    evidence_change(
+                        path,
+                        ev_since,
+                        repo,
+                        wdir,
+                        key=key,
+                        current=current,
+                        ref=ev_ref,
+                        stage_wdirs=stage_wdirs,
+                    )
+                )
+            change = "; ".join(dict.fromkeys(c for c in changes if c))
+            if change:
+                reasons.append(f"{path}: {change}")
+        return reasons
+
+    def stage_changes(since: str, old_q: dict, old_info: dict) -> list[str]:
+        assert stages is not None
+        reasons = []
+        old_stages = question_stages(old_q, old_info)
+        if old_stages != stages:
+            reasons.append(
+                f"its stages were {', '.join(old_stages) or 'none'}, "
+                f"now {', '.join(stages) or 'none'}"
+            )
+        old_defs = (old_info.get("pipeline") or {}).get("stages") or {}
+        defs = (ck_info.get("pipeline") or {}).get("stages") or {}
+        for name in stages:
+            if name in old_stages and _plain(old_defs.get(name)) != _plain(
+                defs.get(name)
+            ):
+                reasons.append(f"stage {name} was redefined")
+        # The code and inputs each stage reads, as its definition declares
+        # them, so one that hasn't run is covered, and as dvc.lock recorded
+        # them, both relative to the stage's wdir
+        deps: dict[str, None] = {}
+        for info, wdirs in [
+            (old_info, _stage_wdirs(old_info)),
+            (ck_info, stage_wdirs),
+        ]:
+            info_defs = (info.get("pipeline") or {}).get("stages") or {}
+            for name in stages:
+                if not isinstance(info_defs.get(name), dict):
+                    continue
+                try:
+                    model = Pipeline.model_validate(
+                        {"stages": {name: info_defs[name]}}
+                    ).stages[name]
+                    declared = list(model.dvc_deps)
+                except Exception:
+                    declared = []
+                for dep in declared:
+                    deps[posixpath.join(wdirs[name], dep)] = None
+        for lock_ref in (since, ref):
+            for name, entry in lock_stages(
+                _read_lock(repo, wdir, lock_ref)
+            ).items():
+                for d in entry.get("deps") or []:
+                    if isinstance(d, dict) and d.get("path"):
+                        base = name.split("@")[0]
+                        stage_wdir = stage_wdirs.get(base, "")
+                        deps[posixpath.join(stage_wdir, str(d["path"]))] = None
+        # Every sign-off is written into calkit.yaml, and what a stage reads
+        # from it, its definition and the approach, is compared above
+        deps = {posixpath.normpath(p): None for p in deps}
+        deps.pop(CALKIT_YAML, None)
+        for path in deps:
+            change = evidence_change(
+                path, since, repo, wdir, ref=ref, stage_wdirs=stage_wdirs
+            )
+            if change:
+                reasons.append(f"{path}: {change}")
+        return reasons
+
+    def check(sign_off: dict, field: str) -> SignOffCheck:
+        by = sign_off.get("by") or {}
+        with_ai = by.get("with_ai") or []
+        out = SignOffCheck(
+            by=str(by.get("name") or by.get("email") or "unknown"),
+            date=str(sign_off["date"]) if sign_off.get("date") else None,
+            notes=sign_off.get("notes"),
+            with_ai=[with_ai] if isinstance(with_ai, str) else list(with_ai),
+            status="unchecked",
+        )
+        if repo is None or history is None:
+            return out
+        sha, old_q, old_info = sign_off_commit(sign_off, field)
+        out.status = "current"
+        out.commit = sha
+        if sha is None or old_q is None or old_info is None:
+            out.message = (
+                "not yet committed, so it covers the working tree"
+                if ref is None
+                else f"not found in the history of {ref}"
+            )
+            return out
+        if field == "validations":
+            reasons = evidence_changes(sha)
+            if validated_part(old_q) != validated_part(question):
+                reasons.insert(0, "the question was edited after it")
+        else:
+            reasons = stage_changes(sha, old_q, old_info)
+            if _plain(old_q.get("approach")) != _plain(
+                question.get("approach")
+            ):
+                reasons.insert(0, "the approach was edited after it")
+        if reasons:
+            out.status = "stale"
+            out.message = "; ".join(reasons)
+        return out
+
+    verifications, validations = (
+        [
+            check(s, field)
+            for s in question.get(field) or []
+            if isinstance(s, dict)
+        ]
+        for field in SIGN_OFF_FIELDS
+    )
+    return verifications, validations
+
+
 def check_question(
     index: int,
     question: str | dict,
@@ -829,26 +1748,40 @@ def check_question(
     history: CalkitYamlHistory | None = None,
     stale_stages: set[str] | None = None,
     frozen_stages: set[str] | None = None,
+    check_history: bool = True,
+    check_changes: bool = True,
 ) -> QuestionCheck:
     """Check one question, as it appears in ``calkit.yaml``."""
     if isinstance(question, str):
         return QuestionCheck(
             index=index, question=question, answered=False, status="unanswered"
         )
-    text = question.get("question", "")
     answered = bool(question.get("answer"))
     evidence = question.get("evidence") or []
-    if not answered:
-        return QuestionCheck(
-            index=index, question=text, answered=False, status="unanswered"
-        )
-    if not evidence:
-        return QuestionCheck(
-            index=index, question=text, answered=True, status="no-evidence"
-        )
+    checks: list[EvidenceCheck] = []
+    stages = question_stages(question, ck_info)
+    out = QuestionCheck(
+        index=index,
+        question=question.get("question", ""),
+        answered=answered,
+        status="no-evidence" if answered else "unanswered",
+        hypothesis=bool(question.get("hypothesis")),
+        approach=bool(question.get("approach")),
+        stages=stages,
+    )
+    out.verifications, out.validations = check_sign_offs(
+        question,
+        ck_info,
+        wdir,
+        repo if check_history else None,
+        history,
+        stages=stages,
+    )
+    if not answered or not evidence:
+        return out
     since = (
         question_commit(question, repo, wdir, history)
-        if repo is not None
+        if repo is not None and check_history and check_changes
         else None
     )
     checks = [
@@ -867,6 +1800,9 @@ def check_question(
     # Every placeholder in the prose must name a value and format with it
     values = {c.name: c.current for c in checks if c.name is not None}
     names = [c.name for c in checks if c.name is not None]
+    for c in checks:
+        values.update(c.values or {})
+        names += list(c.values or {})
     dupes = sorted({n for n in names if names.count(n) > 1})
     if dupes:
         messages.append(f"duplicate evidence name(s): {', '.join(dupes)}")
@@ -874,17 +1810,10 @@ def check_question(
         ev.get("explanation") for ev in evidence
     ]
     for t in texts:
-        if not t or "{" not in t:
-            continue
-        try:
-            render(t, values)
-        except KeyError as e:
-            messages.append(
-                f"placeholder {{{e.args[0]}}} names no evidence; write "
-                "'{{' and '}}' for braces meant to stay in the text"
-            )
-        except (ValueError, IndexError) as e:
-            messages.append(f"cannot render {t[:40]!r}...: {e}")
+        if is_conditional(t):
+            messages += check_conditional(t, values)
+        elif t:
+            messages += _placeholder_problems(t, values)
     # Worst first, matching what the hub shows against each question: an
     # answer resting on nothing anyone can find is worse off than one
     # resting on something merely out of date.
@@ -898,24 +1827,21 @@ def check_question(
         status = "stale"
     elif "frozen" in statuses:
         status = "frozen"
-    if "changed" in statuses:
+    if "changed" in statuses and not out.validations:
         # Said either way, since it is the one thing here that asks for a
-        # reader rather than a command.
+        # reader rather than a command. A validated question says it per
+        # validation instead.
         messages.append(
             "evidence changed since the answer was last edited; worth "
-            "re-reading, and editing the question if it no longer holds"
+            "re-reading, then editing the answer or validating it"
         )
-    if since is None and repo is not None:
+    if since is None and repo is not None and check_history and check_changes:
         messages.append("not yet committed, so history cannot be checked")
-    return QuestionCheck(
-        index=index,
-        question=text,
-        answered=True,
-        status=status,
-        commit=since,
-        message="; ".join(messages) or None,
-        evidence=checks,
-    )
+    out.status = status
+    out.commit = since
+    out.message = "; ".join(messages) or None
+    out.evidence = checks
+    return out
 
 
 def pipeline_stage_sets(
@@ -933,17 +1859,25 @@ def pipeline_stage_sets(
         return set(), set()
     stale: set[str] = set()
     frozen: set[str] = set()
-    try:
-        status = get_status(
-            ck_info=ck_info,
-            wdir=wdir,
-            check_environments=False,
-            clean_notebooks=False,
-            compile_to_dvc=False,
-        )
-        stale = {n.split("@")[0] for n in status.stale_stage_names}
-    except Exception:
-        pass
+    # DVC never calls a frozen stage out of date, so with nothing else in the
+    # pipeline, e.g., a subproject of decisions, there's nothing to ask it
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    all_frozen = all(
+        isinstance(stage, dict) and stage.get("frozen")
+        for stage in stages.values()
+    )
+    if not all_frozen:
+        try:
+            status = get_status(
+                ck_info=ck_info,
+                wdir=wdir,
+                check_environments=False,
+                clean_notebooks=False,
+                compile_to_dvc=False,
+            )
+            stale = {n.split("@")[0] for n in status.stale_stage_names}
+        except Exception:
+            pass
     try:
         frozen = frozen_tainted_stage_names(ck_info=ck_info, wdir=wdir)
     except Exception:
@@ -955,41 +1889,121 @@ def check_questions(
     ck_info: dict | None = None,
     wdir: str | None = None,
     check_pipeline: bool = True,
+    stale_stages: set[str] | None = None,
+    frozen_stages: set[str] | None = None,
+    check_history: bool = True,
+    check_changes: bool = True,
+    only: int | None = None,
 ) -> QuestionsStatus:
     """Check every question in a project against its evidence.
 
     ``check_pipeline`` asks DVC which stages are out of date, which is the
     slowest thing here; turning it off skips that and the frozen check with
-    it, leaving the rest of the report intact.
+    it, leaving the rest of the report intact. A caller that already has
+    those stage sets, e.g., ``calkit status``, can pass them instead.
+
+    ``check_history`` reads ``calkit.yaml``'s history to find evidence that
+    changed after an answer was last edited, which is most of what the
+    check costs once the pipeline is known; turning it off leaves every
+    other check as it is. ``check_changes`` turns off just that comparison,
+    still checking sign-offs, which is all listing needs.
+
+    ``only`` checks just the question at that 1-based position, without
+    subprojects.
     """
     wdir = wdir or os.getcwd()
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     try:
-        repo = calkit.git.get_repo(wdir)
+        repo = _MemoizedRepo(calkit.git.get_repo(wdir))
     except Exception:
         repo = None
     questions = ck_info.get("questions", []) or []
     # One reading of calkit.yaml's history, and one of the pipeline, for all
     # of them
-    history = CalkitYamlHistory(repo, wdir) if repo is not None else None
-    stale_stages, frozen_stages = pipeline_stage_sets(
-        ck_info, wdir, check_pipeline
+    history = (
+        CalkitYamlHistory(repo, wdir)
+        if repo is not None and check_history
+        else None
     )
-    return QuestionsStatus(
-        questions=[
-            check_question(
-                n,
-                q,
-                ck_info,
-                wdir,
-                repo,
-                history,
-                stale_stages=stale_stages,
-                frozen_stages=frozen_stages,
+    if stale_stages is None or frozen_stages is None:
+        stale_stages, frozen_stages = pipeline_stage_sets(
+            ck_info, wdir, check_pipeline
+        )
+    checks = [
+        check_question(
+            n,
+            q,
+            ck_info,
+            wdir,
+            repo,
+            history,
+            stale_stages=stale_stages,
+            frozen_stages=frozen_stages,
+            check_history=check_history,
+            check_changes=check_changes,
+        )
+        for n, q in enumerate(questions, start=1)
+        if only is None or n == only
+    ]
+    if only is not None:
+        return QuestionsStatus(questions=checks)
+    # A subproject's questions are part of what the project answers
+    for subproject in ck_info.get("subprojects") or []:
+        path = subproject.get("path") if isinstance(subproject, dict) else None
+        if not isinstance(path, str) or not os.path.isfile(
+            os.path.join(wdir, path, "calkit.yaml")
+        ):
+            continue
+        sp_status = check_questions(
+            wdir=os.path.join(wdir, path),
+            check_pipeline=check_pipeline,
+            check_history=check_history,
+            check_changes=check_changes,
+        )
+        for q in sp_status.questions:
+            q.project = Path(path, q.project or "").as_posix()
+            checks.append(q)
+    return QuestionsStatus(questions=checks)
+
+
+def question_index(questions: list, ref: str) -> int:
+    """The 0-based index of a question given by its 1-based position or its
+    name."""
+    if ref.isdigit():
+        index = int(ref) - 1
+        if not 0 <= index < len(questions):
+            raise ValueError(
+                f"There is no question {ref}; there are {len(questions)}."
             )
-            for n, q in enumerate(questions, start=1)
-        ]
+        return index
+    for n, q in enumerate(questions):
+        if isinstance(q, dict) and q.get("name") == ref:
+            return n
+    raise ValueError(f"No question is named {ref!r}.")
+
+
+def format_letters(check: QuestionCheck) -> str:
+    """The H A V V row: hypothesis, answer, verified, and validated, colored
+    as the hub colors them, with a dash for each that isn't there yet."""
+    import click
+
+    answer = {
+        "unanswered": None,
+        "ok": "green",
+        "missing": "red",
+        "error": "red",
+    }.get(check.status, "yellow")
+    sign_off = {"none": None, "current": "green", "stale": "yellow"}
+    letters = [
+        ("H", "green" if check.hypothesis else None),
+        ("A", answer),
+        ("V", sign_off[check.verification_status]),
+        ("V", sign_off[check.validation_status]),
+    ]
+    return " ".join(
+        click.style(letter, fg=color) if color else click.style("-", dim=True)
+        for letter, color in letters
     )
 
 
@@ -1005,17 +2019,41 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     for q in status.questions:
         # An unattributed entry is advisory rather than a failure, but it
         # is only ever said here, so it earns the question a block
-        needs_attention = q.status in (
-            "missing",
-            "error",
-            "stale",
-            "frozen",
-        ) or any(ev.status in ("unattributed", "changed") for ev in q.evidence)
+        needs_attention = (
+            q.status in ("missing", "error", "stale", "frozen")
+            or "stale" in (q.verification_status, q.validation_status)
+            or any(
+                ev.status in ("unattributed", "changed") for ev in q.evidence
+            )
+        )
         if not verbose and not needs_attention:
             continue
-        lines.append(f"{q.index}. [{q.status}] {q.question}")
+        where = f"{q.project}: " if q.project else ""
+        signed = "".join(
+            f", {label} {state}"
+            for label, state in [
+                ("verification", q.verification_status),
+                ("validation", q.validation_status),
+            ]
+            if state != "none"
+        )
+        lines.append(f"{where}{q.index}. [{q.status}{signed}] {q.question}")
         if q.message:
             lines.append(f"     {q.message}")
+        if verbose and q.stages:
+            lines.append(f"     stages: {' -> '.join(q.stages)}")
+        for label, sign_offs in [
+            ("verified", q.verifications),
+            ("validated", q.validations),
+        ]:
+            for c in sign_offs:
+                if not verbose and c.status != "stale":
+                    continue
+                when = f" on {c.date}" if c.date else ""
+                detail = f" -- {c.message}" if c.message else ""
+                lines.append(
+                    f"     {label} by {c.by}{when} [{c.status}]{detail}"
+                )
         for ev in q.evidence:
             if not verbose and ev.status in ("ok", "skipped"):
                 continue
@@ -1045,6 +2083,28 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
             f"Answers whose evidence the pipeline would rebuild: "
             f"{len(status.stale)} {calkit.check_or_x(not status.stale)}"
         )
+        for label, what, n_signed, stale_qs in [
+            (
+                "verified",
+                "approach or stages",
+                sum(1 for q in answered if q.verifications),
+                status.stale_verifications,
+            ),
+            (
+                "validated",
+                "question or evidence",
+                sum(1 for q in answered if q.validations),
+                status.stale_validations,
+            ),
+        ]:
+            # No mark on the count: signing off is opt-in
+            line = f"Answers {label}: {n_signed}/{len(answered)}"
+            if n_signed:
+                line += (
+                    f", stale since their {what} changed: {len(stale_qs)} "
+                    f"{calkit.check_or_x(not stale_qs)}"
+                )
+            lines.append(line)
     # No check mark either way on the rest: worth a look, not a verdict
     if status.frozen:
         lines.append(
@@ -1072,3 +2132,28 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
             f"{len(status.deprecated)} (use 'kind: value')"
         )
     return "\n".join(lines)
+
+
+def format_summary(status: QuestionsStatus) -> str:
+    """One line on the state of the project's questions."""
+    n_questions = len(status.questions)
+    if not n_questions:
+        return "No questions defined."
+    parts = [f"{n_questions} question" + ("s" if n_questions != 1 else "")]
+    counts = [
+        (n_questions - len(status.answered), "unanswered"),
+        (len(status.stale), "with stale evidence"),
+        (len(status.missing), "with missing evidence"),
+        (len(status.errors), "with broken references"),
+        (len(status.frozen), "resting on a frozen stage"),
+        (len(status.stale_verifications), "with a stale verification"),
+        (len(status.stale_validations), "with a stale validation"),
+        (
+            sum(1 for q in status.answered if q.status == "no-evidence"),
+            "with no evidence",
+        ),
+    ]
+    parts += [f"{count} {label}" for count, label in counts if count]
+    if len(parts) == 1:
+        parts.append("all answered with current evidence ✅")
+    return ", ".join(parts)

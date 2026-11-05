@@ -13,7 +13,6 @@ if TYPE_CHECKING:
         conda,
         config,
         datasets,
-        dependencies,
         detect,
         docker,
         docx,
@@ -44,10 +43,12 @@ if TYPE_CHECKING:
         questions,
         releases,
         reproducibility,
+        requirements,
         resources,
         schema,
         server,
         templates,
+        upgrade,
         workspace,
     )
 
@@ -59,7 +60,6 @@ _SUBMODULES = {
     "conda",
     "config",
     "datasets",
-    "dependencies",
     "detect",
     "docker",
     "docx",
@@ -90,10 +90,12 @@ _SUBMODULES = {
     "questions",
     "releases",
     "reproducibility",
+    "requirements",
     "resources",
     "schema",
     "server",
     "templates",
+    "upgrade",
     "workspace",
 }
 

@@ -172,6 +172,10 @@ services:
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
+      - MIXPANEL_SERVICE_ACCOUNT_USERNAME=${MIXPANEL_SERVICE_ACCOUNT_USERNAME:-}
+      - MIXPANEL_SERVICE_ACCOUNT_SECRET=${MIXPANEL_SERVICE_ACCOUNT_SECRET:-}
+      - MIXPANEL_PROJECT_ID=${MIXPANEL_PROJECT_ID:-}
+      - MIXPANEL_EXPORT_HOST=${MIXPANEL_EXPORT_HOST:-}
       - ZENODO_CLIENT_ID=${ZENODO_CLIENT_ID?Variable not set}
       - ZENODO_CLIENT_SECRET=${ZENODO_CLIENT_SECRET?Variable not set}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID?Variable not set}
@@ -452,8 +456,9 @@ services:
   # COMPOSE_PROFILES includes 'objects'; either way the app reaches it
   # through OBJECT_STORAGE_ENDPOINT_URL.
   minio:
-    # Pulled from Quay since MinIO's Docker Hub repo no longer exists
-    image: quay.io/minio/minio:RELEASE.2025-05-24T17-08-30Z
+    # Pigsty's build of upstream MinIO, since MinIO no longer publishes
+    # public images to Docker Hub or Quay
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     command: server /data --console-address ":9001"
     restart: always
     profiles:

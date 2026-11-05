@@ -1,0 +1,335 @@
+name: Test LaTeX image
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "images/latex/**"
+      - ".github/workflows/test-latex-image.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      # Only the runner's platform here; the multi-platform build happens
+      # on release, where the QEMU emulation time is worth paying
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: images/latex
+          load: true
+          tags: calkit/latex:pr
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # Compactness is the point of this image rather than texlive-full,
+      # so every change shows what it costs. The download size is the
+      # compressed layers, which is what a registry serves, next to the
+      # published image's.
+      - name: Report image size
+        run: |
+          set -euo pipefail
+          unpacked="$(docker image inspect calkit/latex:pr --format '{{.Size}}')"
+          download="$(docker save calkit/latex:pr | gzip -c | wc -c)"
+          published="$(docker buildx imagetools inspect --raw \
+            "$(docker buildx imagetools inspect ghcr.io/calkit/latex:latest \
+              --format '{{range .Manifest.Manifests}}{{if eq .Platform.Architecture "amd64"}}ghcr.io/calkit/latex@{{.Digest}}{{end}}{{end}}')" \
+            | jq '[.layers[].size] | add')"
+          mb() { echo "$(( $1 / 1000000 )) MB"; }
+          {
+            echo "### LaTeX image size"
+            echo
+            echo "| | This change | Published latest |"
+            echo "|---|---|---|"
+            echo "| Download | $(mb "$download") | $(mb "$published") |"
+            echo "| Unpacked | $(mb "$unpacked") | |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Smoke test image
+        run: |
+          set -euxo pipefail
+          # The tools have to be on PATH, not merely installed: tlmgr
+          # doesn't symlink scripts it installs after setup, which once
+          # shipped an image whose latexdiff was invisible
+          docker run --rm calkit/latex:pr sh -c '
+            set -eux
+            latexmk --version
+            latexdiff --version
+            command -v makeindex
+            pandoc --version
+          '
+          # As a non-root user, which is how Calkit runs it so output
+          # isn't owned by root. TinyTeX under /root would be unreadable
+          # here, which is what once made the image unusable.
+          docker run --rm --user 1234:1234 calkit/latex:pr sh -c '
+            set -eux
+            latexmk --version
+            latexdiff --version
+            command -v makeindex
+            pandoc --version
+          '
+          # A document that needs the curated set and the packages papers
+          # load most, built the way the docs say to build it: with a
+          # cache mounted at TEXMFHOME. Mounting it over the distribution
+          # instead is what used to leave the container with no TeX at
+          # all. Courier (via times' \texttt) and tcolorbox's libraries
+          # are here because each needs packages nothing loads by name.
+          work="$(mktemp -d)"
+          cache="$(mktemp -d)"
+          mkdir -p "$work/paper"
+          cat > "$work/paper/main.tex" <<'EOF'
+          \documentclass{article}
+          \usepackage[english]{babel}
+          \usepackage{times}
+          \usepackage{threeparttable}
+          \usepackage{multirow}
+          \usepackage{enumitem}
+          \usepackage{todonotes}
+          \usepackage{mathtools}
+          \usepackage{mathrsfs}
+          \usepackage{bbm}
+          \usepackage{dsfont}
+          \usepackage{physics}
+          \usepackage{placeins}
+          \usepackage{makecell}
+          \usepackage{soul}
+          \usepackage{wrapfig}
+          \usepackage{titlesec}
+          \usepackage{colortbl}
+          \usepackage{adjustbox}
+          \usepackage{appendix}
+          \usepackage{xurl}
+          \usepackage{listings}
+          \usepackage{tcolorbox}
+          \tcbuselibrary{most}
+          \usepackage{pgfplots}
+          \pgfplotsset{compat=1.18}
+          \begin{document}
+          Smoke test in \texttt{Courier}, with $\mathscr{L}$, $\mathbbm{1}$,
+          $\mathds{R}$ and $\dv{f}{x}$, \hl{highlighted}, at
+          \url{https://calkit.io}.
+          \begin{itemize}[noitemsep]
+          \item One
+          \end{itemize}
+          \begin{tcolorbox}Boxed\end{tcolorbox}
+          \begin{tikzpicture}
+          \begin{axis}[width=4cm]\addplot {x^2};\end{axis}
+          \end{tikzpicture}
+          \end{document}
+          EOF
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "$work":/work \
+            -v "$cache":/texmf \
+            -w /work \
+            calkit/latex:pr \
+            latexmk -pdf -cd -interaction=nonstopmode paper/main.tex
+          test -f "$work/paper/main.pdf"
+          # Owned by the user who ran it, not by root
+          test -O "$work/paper/main.pdf"
+          # In a Calkit project, packages fetched at run time go to the
+          # project's .calkit/local, which is how a Docker environment
+          # built on this image can fetch them with nothing extra mounted
+          project="$(mktemp -d)"
+          mkdir -p "$project/.calkit/local"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "$project":/work \
+            -w /work \
+            calkit/latex:pr \
+            sh -c 'test "$TEXMFHOME" = /work/.calkit/local/texmf &&
+              test -d "$TEXMFHOME/tlpkg"'
+          # A package outside the curated set installs into the mounted
+          # cache and persists there, which is how a project gets what the
+          # image doesn't ship
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "$cache":/texmf calkit/latex:pr sh -c '
+            set -eux
+            tlmgr --usermode install lipsum
+            kpsewhich lipsum.sty
+          '
+          test -n "$(find "$cache" -name lipsum.sty -print -quit)"
+      # What Matplotlib's text.usetex runs for each label, with the source
+      # it generates, so a Docker environment that adds Python to this
+      # image can plot with LaTeX labels: latex to DVI, then dvipng for
+      # raster output and dvips for PostScript. Nothing fetches packages
+      # on demand here, since Matplotlib calls latex itself.
+      - name: Render a Matplotlib usetex label
+        run: |
+          set -euxo pipefail
+          work="$(mktemp -d)"
+          cat > "$work/file.tex" <<'EOF'
+          \RequirePackage{fix-cm}
+          \documentclass{article}
+          \newcommand{\mathdefault}[1]{#1}
+          \IfFileExists{type1ec.sty}{}{\PackageError{matplotlib-support}{Missing cm-super package, required by Matplotlib}{}}
+          \usepackage{type1cm}
+          \usepackage[utf8]{inputenc}
+          \DeclareUnicodeCharacter{2212}{\ensuremath{-}}
+          \usepackage[papersize=72in, margin=1in]{geometry}
+          \makeatletter\@ifpackageloaded{underscore}{}{\usepackage[strings]{underscore}}\makeatother
+          \makeatletter\@ifpackageloaded{textcomp}{}{\usepackage{textcomp}}\makeatother
+          \pagestyle{empty}
+          \begin{document}
+          \fontsize{10}{12.5}%
+          \hbox{}%
+          {\rmfamily $\frac{\omega^2 h}{g}$ added_mass}%
+          \end{document}
+          EOF
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "$work":/work -w /work calkit/latex:pr sh -c '
+            set -eux
+            latex -interaction=nonstopmode -halt-on-error \
+              -no-shell-escape file.tex
+            dvipng -bg Transparent -D 100 -T tight -o file.png file.dvi
+            dvips -E -o file.ps file.dvi
+          '
+          test -s "$work/file.png"
+          test -s "$work/file.ps"
+      # What `calkit latex to-docx --engine libreoffice` runs: TeX4ht
+      # converting a paper with math and a PDF figure to ODT, which needs
+      # luaxml, Ghostscript and zip besides TeX4ht itself, as the user.
+      # Each equation becomes an object in the ODT, and the figure an
+      # image; a figure that failed to convert leaves an ODT LibreOffice
+      # can't open. make4ht warns that xtpipes and then tidy failed, once
+      # per file, which is expected: that post-processing needs Java, which
+      # the image leaves out, and the ODT only loses a few text styles.
+      - name: Convert a paper with TeX4ht
+        run: |
+          set -euxo pipefail
+          work="$(mktemp -d)"
+          cat > "$work/fig.tex" <<'EOF'
+          \documentclass{article}
+          \pagestyle{empty}
+          \begin{document}
+          Figure
+          \end{document}
+          EOF
+          cat > "$work/main.tex" <<'EOF'
+          \documentclass{article}
+          \usepackage{graphicx}
+          \begin{document}
+          Inline $a^2 + b^2 = c^2$ and
+          \begin{equation}
+            \frac{x}{y} = 1
+          \end{equation}
+          \includegraphics[width=2cm]{fig.pdf}
+          \end{document}
+          EOF
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "$work":/work -w /work calkit/latex:pr sh -c '
+            set -eux
+            latexmk -pdf -interaction=nonstopmode fig.tex
+            make4ht --format odt main.tex mathml
+          '
+          unzip -l "$work/main.odt" | tee "$work/odt.txt"
+          test "$(grep -c "main-m[0-9]*/content.xml" "$work/odt.txt")" -eq 2
+          grep -q "Pictures/fig-.png" "$work/odt.txt"
+      # Every journal class the image claims to carry has to build with
+      # nothing installed at run time. Trimming a package that only one
+      # class needs would otherwise go unnoticed until someone submitted
+      # a paper.
+      - name: Build a paper in each journal class
+        run: |
+          set -euxo pipefail
+          work="$(mktemp -d)"
+          fail=0
+          write() { mkdir -p "$work/$1"; cat > "$work/$1/main.tex"; }
+          write elsarticle <<'EOF'
+          \documentclass{elsarticle}
+          \begin{document}\begin{frontmatter}\title{T}\author{A}
+          \begin{abstract}S.\end{abstract}\end{frontmatter}
+          Hello.\end{document}
+          EOF
+          write revtex <<'EOF'
+          \documentclass[aps,prl]{revtex4-2}
+          \begin{document}\title{T}\author{A}\affiliation{S}
+          \maketitle Hello.\end{document}
+          EOF
+          write ieeetran <<'EOF'
+          \documentclass[conference]{IEEEtran}
+          \begin{document}\title{T}\author{\IEEEauthorblockN{A}}
+          \maketitle Hello.\end{document}
+          EOF
+          write acmart <<'EOF'
+          \documentclass[sigconf,nonacm]{acmart}
+          \begin{document}\title{T}\author{A}
+          \affiliation{\institution{S}\country{C}}\maketitle
+          Hello.\end{document}
+          EOF
+          write achemso <<'EOF'
+          \documentclass{achemso}
+          \author{A}\affiliation{S}\title{T}
+          \begin{document}\maketitle Hello.\end{document}
+          EOF
+          write mnras <<'EOF'
+          \documentclass{mnras}
+          \begin{document}\title{T}\author{A}\maketitle
+          Hello.\end{document}
+          EOF
+          write llncs <<'EOF'
+          \documentclass{llncs}
+          \begin{document}\title{T}\author{A}\institute{S}
+          \maketitle Hello.\end{document}
+          EOF
+          write amsart <<'EOF'
+          \documentclass{amsart}
+          \begin{document}\title{T}\author{A}\maketitle
+          Hello.\end{document}
+          EOF
+          # Not a class, but what JFM and others pair with one: newtx's
+          # text-companion symbols need tex-gyre's metrics, which, like
+          # txfonts', can't be fetched on demand
+          write newtx <<'EOF'
+          \documentclass{article}
+          \usepackage{newtxtext}
+          \usepackage{newtxmath}
+          \begin{document}25\textdegree, 3\,\textmu m.\end{document}
+          EOF
+          for d in "$work"/*/; do
+            name="$(basename "$d")"
+            if docker run --rm --user "$(id -u):$(id -g)" \
+                -v "$d":/work -w /work calkit/latex:pr \
+                latexmk -pdf -interaction=nonstopmode main.tex \
+                > "$d/build.log" 2>&1; then
+              echo "$name: ok"
+            else
+              echo "$name: FAILED"
+              grep -E '^! ' "$d/main.log" | head -3 || true
+              fail=1
+            fi
+          done
+          exit "$fail"
+      # Every paper template Calkit ships has to build, since that is what
+      # someone gets before they have asked for anything. JFM also needs
+      # txfonts' metrics, which report as a font error rather than a
+      # missing file, so nothing would fetch it on demand; the same goes
+      # for tex-gyre's, which its text-companion symbols need.
+      - name: Build each paper template
+        run: |
+          set -euxo pipefail
+          work="$(mktemp -d)"
+          fail=0
+          for t in calkit/templates/latex/*/; do
+            name="$(basename "$t")"
+            mkdir -p "$work/$name"
+            cp "$t"* "$work/$name/"
+            mv "$work/$name/paper.tex" "$work/$name/main.tex"
+            if docker run --rm --user "$(id -u):$(id -g)" \
+                -v "$work/$name":/work -w /work calkit/latex:pr \
+                latexmk -pdf -interaction=nonstopmode main.tex \
+                > "$work/$name/build.log" 2>&1; then
+              echo "$name: ok"
+            else
+              echo "$name: FAILED"
+              grep -E '^! ' "$work/$name/main.log" | head -3 || true
+              fail=1
+            fi
+          done
+          exit "$fail"

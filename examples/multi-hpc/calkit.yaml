@@ -1,0 +1,69 @@
+name: example-multi-hpc
+title: Calkit multi-HPC example
+
+environments:
+  either-cluster:
+    kind: switch
+    # Each option is the scheduler on the machine Calkit runs on, defined in
+    # place since only this switch uses it
+    switch:
+      - when:
+          - hostname_matches: "*.inst1.edu"
+        use:
+          kind: slurm
+          default_options:
+            - --gpus=1
+          default_setup:
+            - module load something
+      - when:
+          - hostname_matches: "*.inst2.edu"
+        use:
+          kind: pbs
+          # Passed to qsub as is, so these are PBS options
+          default_options:
+            - -l select=10
+            - -q my-queue
+          default_setup:
+            - module load something_else
+    # Elsewhere, e.g., on a laptop, this picks nothing, so the simulation is
+    # skipped and stays out of date in 'calkit status' rather than running
+    # there. Stages depend on each option's definition, so editing, e.g.,
+    # the first one's 'default_setup' reruns them, but moving between
+    # clusters doesn't.
+  # This environment uses whichever scheduler is available, and runs
+  # directly on the machine if there's none
+  maybe-scheduler:
+    kind: switch
+    switch:
+      - when:
+          - app_exists: sbatch
+        use:
+          kind: slurm
+      - when:
+          - app_exists: qsub
+        use:
+          kind: pbs
+      - use:
+          kind: system
+  # Runs anywhere uv is installed, including either cluster
+  plotting:
+    kind: uv-venv
+    path: envs/plotting.txt
+    python: "3.14"
+
+pipeline:
+  stages:
+    my-simulation:
+      kind: shell-script
+      script_path: scripts/run.sh
+      environment: either-cluster
+      outputs:
+        - data/simulation
+    figures:
+      kind: python-script
+      script_path: scripts/plot.py
+      environment: plotting
+      inputs:
+        - from_stage_outputs: my-simulation
+      outputs:
+        - figures/simulation.png

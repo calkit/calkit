@@ -91,6 +91,7 @@ const HelpFeedback = ({ isOpen, onClose }: HelpFeedbackProps) => {
       onClose={onClose}
       size={{ base: "sm", md: "lg" }}
       isCentered
+      motionPreset="none"
     >
       <ModalOverlay />
       <ModalContent

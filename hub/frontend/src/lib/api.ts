@@ -47,11 +47,14 @@ export const dataOrNull = <T>(response: AxiosResponse<T>): T | null => {
 /**
  * Make the app show a project's just-committed content.
  *
- * The contents endpoints read a server-side clone that's only re-pulled
- * once its TTL lapses, so invalidating the client cache alone would just
- * refetch the same stale bytes. One `ttl=0` read forces the server to
- * re-pull first; that also warms the clone, so the refetches triggered by
- * the invalidation below see the new commit without each re-pulling.
+ * The contents endpoints read a server-side clone shared by every reader
+ * of the project. A save pushes into that clone directly, so it already
+ * holds the commit; where it couldn't, the save marked it stale and the
+ * first read re-pulls. Either way one read settles it before the
+ * invalidation below fans out, so the refetches don't queue behind each
+ * other's re-pull. It deliberately doesn't ask for `ttl=0`: that skips the
+ * cached answer for where the remote is and pays an `ls-remote` to be told
+ * the commit we just pushed, which is the one thing here nobody needs.
  *
  * Never rejects. Callers fire this off after a save has already succeeded,
  * so a failure here means the UI is briefly stale, not that anything went
@@ -67,7 +70,6 @@ export const refreshProjectContents = async (
     await ProjectsService.getProjectContents({
       owner_name: ownerName,
       project_name: projectName,
-      ttl: 0,
     })
   } catch {
     // Best effort: still invalidate, so a failed refresh doesn't leave the

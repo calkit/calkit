@@ -434,17 +434,26 @@ def new_project(
         )
         if template_git_url is None:
             project = "/".join(template_name.split("/")[:2])
-            typer.echo(f"Fetching Git repo URL for {project} from the hub")
-            try:
-                template_git_url = calkit.hub.get(f"/projects/{project}")[
-                    "git_repo_url"
-                ]
-            except Exception as e:
-                raise_error(
-                    f"Could not fetch project {project} from the hub ({e}); "
-                    "for a repo not on the hub, pass its URL, e.g., "
-                    f"https://github.com/{template_name}"
-                )
+            # A template this package knows about carries its own repo URL,
+            # so the common case needs no hub: no request, no login, and it
+            # still works offline once the repo is reachable.
+            known = calkit.templates.find_project_template(project)
+            if known is not None:
+                if verbose:
+                    typer.echo(f"Using known template {project}")
+                template_git_url = known.git_repo_url
+            else:
+                typer.echo(f"Fetching Git repo URL for {project} from the hub")
+                try:
+                    template_git_url = calkit.hub.get(f"/projects/{project}")[
+                        "git_repo_url"
+                    ]
+                except Exception as e:
+                    raise_error(
+                        f"Could not fetch project {project} from the hub "
+                        f"({e}); for a repo not on the hub, pass its URL, "
+                        f"e.g., https://github.com/{template_name}"
+                    )
         if template_subdir is None:
             # Now clone it
             subprocess.run(["git", "clone", template_git_url, abs_path])
@@ -495,8 +504,10 @@ def new_project(
                 git_rev=git_rev,
             ),
         )
-        # Remove questions and owner if they're there
-        _ = ck_info.pop("questions", None)
+        # The template's questions are kept: an example template's question,
+        # its evidence, and the stages that produce it are the working
+        # example, and a new project reproduces the same answer from the
+        # same pipeline. They're there to be edited or deleted.
         _ = ck_info.pop("owner", None)
         # Write Calkit info
         with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
@@ -931,6 +942,73 @@ def new_question(
         repo = calkit.git.get_repo()
         repo.git.add("calkit.yaml")
         repo.git.commit(["-m", "Add question"])
+
+
+@new_app.command(name="comment")
+def new_comment(
+    path: Annotated[str, typer.Argument(help="File to comment in.")],
+    line: Annotated[
+        int,
+        typer.Option(
+            "--line",
+            "-l",
+            help="A line in, or just above, the paragraph to comment on.",
+        ),
+    ],
+    text: Annotated[str, typer.Option("--text", "-m", help="The comment.")],
+    highlight: Annotated[
+        str | None,
+        typer.Option(
+            "--highlight", help="Rendered text in the paragraph it's about."
+        ),
+    ] = None,
+    occ: Annotated[
+        int,
+        typer.Option(
+            "--occ", help="Which occurrence of the highlight text, from 0."
+        ),
+    ] = 0,
+    author: Annotated[
+        str | None,
+        typer.Option("--author", help="Defaults to Git's user.name."),
+    ] = None,
+    email: Annotated[
+        str | None,
+        typer.Option("--email", help="Defaults to Git's user.email."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output the thread as JSON.")
+    ] = False,
+) -> None:
+    """Start a review comment thread above a paragraph of a LaTeX or
+    Markdown document, printing its ID."""
+    import json
+
+    import calkit.latex
+    from calkit.cli.latex import comment_entry
+
+    if not os.path.isfile(path):
+        raise_error(f"{path} does not exist")
+    lines = pathlib.Path(path).read_text(encoding="utf-8").split("\n")
+    tc = calkit.latex.TexComment(
+        [comment_entry(text, author, email)],
+        highlight=highlight or None,
+        highlight_occ=occ,
+        id=calkit.latex.new_comment_id(),
+        markdown=calkit.latex.is_markdown(path),
+    )
+    try:
+        calkit.latex.add_comment(lines, line, tc)
+    except ValueError as e:
+        raise_error(str(e))
+    pathlib.Path(path).write_text("\n".join(lines), encoding="utf-8")
+    if as_json:
+        blks = calkit.latex.file_blocks(path, lines)
+        typer.echo(
+            json.dumps(calkit.latex.comment_to_dict(path, tc, blks), indent=2)
+        )
+    else:
+        typer.echo(tc.id)
 
 
 @new_app.command("notebook|nb")
@@ -1562,12 +1640,9 @@ def new_publication(
     repo = calkit.git.get_repo()
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
-        env = dict(
-            kind="docker",
-            image="texlive/texlive:latest-full",
-            description="TeXlive full.",
-        )
-        envs[env_name] = env
+        from calkit.latex import DEFAULT_LATEX_ENVIRONMENT
+
+        envs[env_name] = dict(DEFAULT_LATEX_ENVIRONMENT)
         ck_info["environments"] = envs
     # Copy in template files if applicable. This happens before the stage is
     # built so its inputs can be detected from the document itself: a template

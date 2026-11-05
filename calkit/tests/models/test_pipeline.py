@@ -5,20 +5,26 @@ from pydantic import ValidationError
 
 from calkit.models.io import PathOutput
 from calkit.models.pipeline import (
+    GimpExportStage,
+    InkscapeExportStage,
     JsonToLatexStage,
     JuliaCommandStage,
     JuliaScriptStage,
     JupyterNotebookStage,
     LatexStage,
+    ManualStepStage,
     MapPathsStage,
     MarimoHtmlWasmStage,
+    MarkdownStage,
     MatlabCommandStage,
     MatlabScriptStage,
     Pipeline,
     PythonScriptStage,
     QuartoStage,
+    ShellScriptStage,
     StageIteration,
     WordToPdfStage,
+    quote_arg,
 )
 
 
@@ -50,6 +56,38 @@ def test_pythonscriptstage():
     }
 
 
+def test_quote_arg():
+    # One argument with a space is quoted for both cmd.exe and POSIX shells
+    assert quote_arg("2026-06-09 12:00:00") == '"2026-06-09 12:00:00"'
+    assert quote_arg(r"C:\My Data\\") == r'"C:\My Data\\\\"'
+    # Args that compiled to these before keep doing so
+    assert quote_arg("--model={var}") == "--model={var}"
+    assert quote_arg("$HOME") == "$HOME"
+    assert quote_arg("") == ""
+    assert quote_arg('--date="{date}"') == '--date="{date}"'
+    assert quote_arg("'a b'") == "'a b'"
+    assert quote_arg("--theta {theta}") == "--theta {theta}"
+    # Each stage kind with script args passes them through it
+    s = PythonScriptStage(
+        name="sample",
+        environment="py1",
+        script_path="scripts/x.py",
+        args=["--before", "2026-06-09 12:00:00", "--theta 5"],
+    )
+    assert s.to_dvc()["cmd"] == (
+        "calkit xenv -n py1 --no-check -- python scripts/x.py "
+        '--before "2026-06-09 12:00:00" --theta 5'
+    )
+    s = ShellScriptStage(
+        name="sample",
+        kind="shell-script",
+        environment="_system",
+        script_path="scripts/x.sh",
+        args=["a b"],
+    )
+    assert s.to_dvc()["cmd"].endswith('scripts/x.sh "a b"')
+
+
 def test_wordtopdfstage():
     s = WordToPdfStage(
         name="none",
@@ -59,6 +97,79 @@ def test_wordtopdfstage():
     assert sd["cmd"] == (
         'calkit office word-to-pdf "my word doc.docx" -o "my word doc.pdf"'
     )
+
+
+def test_manualstage():
+    s = ManualStepStage(
+        message="In Photoshop, export figures/wake.png",
+        inputs=["figures/src/wake diagram.psd", "fonts/brand.otf"],
+        outputs=[
+            "figures/wake.png",
+            {"path": "paper/wake.png", "storage": "git"},
+        ],
+    )
+    sd = s.to_dvc()
+    # What the person writes is checked
+    assert sd["cmd"] == (
+        "calkit manual-step --message 'In Photoshop, export "
+        "figures/wake.png' --output figures/wake.png --output paper/wake.png"
+    )
+    assert sd["deps"] == ["figures/src/wake diagram.psd", "fonts/brand.otf"]
+    # Outputs are kept while it runs, since the person replaces them
+    assert sd["outs"] == [
+        {"figures/wake.png": {"persist": True}},
+        {"paper/wake.png": {"cache": False, "persist": True}},
+    ]
+    assert s.environment == "_system"
+    # A file it opens is opened with the app named, since the default app
+    # for it differs between machines
+    s = ManualStepStage(
+        message="Export figures/wake.png",
+        open={"app": "Inkscape", "path": "figures/src/wake diagram.svg"},
+    )
+    assert s.to_dvc()["cmd"] == (
+        "calkit manual-step --message 'Export figures/wake.png' --app "
+        "Inkscape --open 'figures/src/wake diagram.svg'"
+    )
+    s = ManualStepStage(message="Count fish", open={"app": "FishCounter"})
+    assert s.to_dvc()["cmd"].endswith("--app FishCounter")
+    with pytest.raises(ValidationError, match="app"):
+        ManualStepStage(message="Export it", open={"path": "wake.svg"})
+
+
+def test_appexportstage():
+    s = InkscapeExportStage(
+        source_path="figures/src/setup.svg",
+        outputs=[{"path": "paper/setup.png", "storage": "git"}],
+        dpi=150,
+    )
+    sd = s.to_dvc()
+    # The command names the app it needs
+    assert sd["cmd"] == (
+        "calkit export inkscape figures/src/setup.svg -o paper/setup.png "
+        "--dpi 150"
+    )
+    assert sd["deps"] == ["figures/src/setup.svg"]
+    assert sd["outs"] == [
+        {"paper/setup.png": {"cache": False, "persist": False}}
+    ]
+    s = GimpExportStage(
+        source_path="figures/src/photo.xcf", outputs=["paper/photo.tif"]
+    )
+    assert s.to_dvc()["cmd"] == (
+        "calkit export gimp figures/src/photo.xcf -o paper/photo.tif"
+    )
+    # What an app doesn't export from, or to, is refused, as is a stage
+    # with other than one output
+    for model, bad, error in [
+        (InkscapeExportStage, dict(source_path="a.psd"), "from an SVG"),
+        (InkscapeExportStage, dict(outputs=["a.jpg"]), "not 'a.jpg'"),
+        (InkscapeExportStage, dict(outputs=[]), "exactly one output"),
+        (GimpExportStage, dict(source_path="a.svg"), "from an XCF"),
+        (GimpExportStage, dict(source_path="a.xcf", dpi=72), "dpi"),
+    ]:
+        with pytest.raises(ValidationError, match=error):
+            model(**{"source_path": "a.svg", "outputs": ["a.png"], **bad})
 
 
 def test_latexstage():
@@ -344,6 +455,21 @@ def test_matlabcommandstage():
     assert sd["cmd"] == (
         'matlab -noFigureWindows -batch "disp(\\"Hello, MATLAB!\\");"'
     )
+    # A named system environment on its own is the machine's own MATLAB,
+    # so the stage starts it, as it does for _system
+    s = MatlabCommandStage(name="d", environment="lab", command="disp(1);")
+    s._system_env = "lab"
+    assert s.to_dvc()["cmd"] == (
+        "calkit xenv -n lab --no-check -- matlab -noFigureWindows -batch "
+        '"disp(1);"'
+    )
+    # Wrapping a MATLAB environment, that environment starts MATLAB
+    s = MatlabCommandStage(name="e", environment="lab:m1", command="disp(1);")
+    s._system_env = "lab"
+    assert s.to_dvc()["cmd"] == (
+        "calkit xenv -n lab --no-check -- calkit xenv -n m1 --no-check -- "
+        '"disp(1);"'
+    )
 
 
 def test_matlabscriptstage():
@@ -559,9 +685,8 @@ def test_latex_stage_diffs():
         inputs=["figures/fig1.png"],
         diffs=[["v1", "v2"], "main"],
     )
-    # A bare revision compares it against HEAD. Every comparison in a
-    # pipeline is between two commits; one against the working tree can't
-    # be reproduced, so it isn't the project's to keep.
+    # A bare revision is named for HEAD, which is what the working tree it's
+    # compared with becomes once committed
     assert stage.diff_pairs == [("v1", "v2"), ("main", "HEAD")]
     # Building the document and comparing revisions of it have different
     # inputs, so they are separate DVC stages: adding a comparison
@@ -585,6 +710,13 @@ def test_latex_stage_diffs():
         "calkit latex diff -e tex --no-check --from v1 --to v2 "
         "--revision-key aaa1111..bbb2222 --input figures/fig1.png "
         "--output-dir .calkit/latex-diffs/v1..v2 pubs/paper-1/main.tex"
+    )
+    # A bare revision is compared with the working tree, like any other
+    # stage reads it, so there's no --to and only its own key
+    assert extra["paper-1-diff-main"]["cmd"] == (
+        "calkit latex diff -e tex --no-check --from main "
+        "--revision-key ccc3333 --input figures/fig1.png "
+        "--output-dir .calkit/latex-diffs/main pubs/paper-1/main.tex"
     )
     # HEAD is what a comparison runs up to unless it says otherwise, so
     # naming it would only add noise
@@ -630,11 +762,12 @@ def test_latex_stage_diffs():
         latexdiff_args=["--graphics-markup=both"],
         inputs=["pubs/paper-1/figs/"],
         diffs=[["v1", "v2"]],
+        keep_diff_tex=True,
     )
     assert configured.extra_dvc_stages()["paper-1-diff-v1-v2"]["cmd"] == (
         "calkit latex diff -e tex --no-check --from v1 --to v2 "
         "-r pubs/paper-1/.latexmkrc --latexmk-arg -shell-escape "
-        "--latexdiff-arg --graphics-markup=both "
+        "--latexdiff-arg --graphics-markup=both --keep-tex "
         "--input pubs/paper-1/figs/ "
         "--output-dir .calkit/latex-diffs/v1..v2 pubs/paper-1/main.tex"
     )
@@ -645,6 +778,39 @@ def test_latex_stage_diffs():
     assert "--input figures/fig2.png" in main_diff["cmd"]
     assert "figures/fig2.png" in main_diff["deps"]
     assert with_outputs["paper-1-diff-v1-v2"]["deps"] == []
+    # A filter's script is passed along and depended on, and runs in an
+    # environment only if one is named
+    filtered = LatexStage(
+        name="paper-1",
+        kind="latex",
+        environment="tex",
+        target_path="pubs/paper-1/main.tex",
+        diffs=[["v1", "v2"]],
+        diff_filter={
+            "kind": "python-script",
+            "script_path": "scripts/filter.py",
+            "args": ["--quiet"],
+        },
+    )
+    filtered_diff = filtered.extra_dvc_stages()["paper-1-diff-v1-v2"]
+    assert (
+        "--filter-script scripts/filter.py --filter-arg --quiet"
+        in filtered_diff["cmd"]
+    )
+    assert "--filter-env" not in filtered_diff["cmd"]
+    assert filtered_diff["deps"] == ["scripts/filter.py"]
+    assert filtered.diff_filter is not None
+    filtered.diff_filter.environment = "py"
+    filtered_diff = filtered.extra_dvc_stages()["paper-1-diff-v1-v2"]
+    assert "--filter-env py" in filtered_diff["cmd"]
+    with pytest.raises(ValidationError):
+        LatexStage(
+            name="paper-1",
+            kind="latex",
+            environment="tex",
+            target_path="pubs/paper-1/main.tex",
+            diff_filter="python3 scripts/filter.py",
+        )
     for bad in [[["v1"]], [["v1", "v2", "v3"]], [["v1", ""]], [["v1", "v1"]]]:
         with pytest.raises(ValidationError):
             LatexStage(
@@ -870,6 +1036,18 @@ def test_json_to_latex_cmd_uses_paths_not_objects():
     assert "'b.json'" in cmd
     assert "PathInput" not in cmd
     assert "from_stage_outputs" not in cmd
+    # A schedule's period file is a dependency, but not data to read
+    stage = JsonToLatexStage.model_validate(
+        {
+            "kind": "json-to-latex",
+            "inputs": ["a.json", {"kind": "schedule", "period": "1 day"}],
+            "outputs": ["out.tex"],
+        }
+    )
+    period_file = ".calkit/local/current-periods/1-day-utc.txt"
+    assert period_file in stage.to_dvc()["deps"]
+    assert "current-periods" not in stage.dvc_cmd
+    assert "'a.json'" in stage.dvc_cmd
 
 
 def test_system_env_can_wrap_a_runtime():
@@ -950,3 +1128,74 @@ def test_system_env_can_wrap_a_runtime():
             bad.set_stage_scheduler_options(
                 envs | {"sched": {"kind": "slurm", "host": "hpc.edu"}}
             )
+
+
+def test_dvc_deps_are_unique_per_stage():
+    # A generated dvc.yaml lists each dependency once. A stage that names the
+    # same path twice otherwise reaches DVC as a duplicate, which it warns
+    # about on every run
+    def assert_unique(deps: list[str]) -> None:
+        assert len(deps) == len(set(deps)), f"duplicates in {deps}"
+
+    # The target is also a common input, e.g. a bib or a figure the document
+    # reads, so it arrives as both target_path and an input
+    latex = LatexStage(
+        name="paper",
+        environment="tex",
+        target_path="main.tex",
+        inputs=["main.tex", "figures/plot.png"],
+    )
+    assert_unique(latex.dvc_deps)
+    # One source copied to two destinations is one dependency, not two
+    mapped = MapPathsStage(
+        name="copy",
+        paths=[
+            dict(kind="file-to-file", src="paper/main.tex", dest="out/a.tex"),
+            dict(kind="file-to-file", src="paper/main.tex", dest="out/b.tex"),
+        ],
+    )
+    assert_unique(mapped.dvc_deps)
+    # The compiled stage is what reaches dvc.yaml
+    for stage in [latex, mapped]:
+        assert_unique(stage.to_dvc()["deps"])
+
+
+def test_to_dvc_deps_have_no_duplicates():
+    # A script named as its own input reaches the generated stage twice:
+    # once through the script_path override and once through inputs
+    for stage in [
+        PythonScriptStage(
+            name="run",
+            environment="py",
+            script_path="run.py",
+            inputs=["run.py", "data/in.csv"],
+        ),
+        ShellScriptStage(
+            name="shell",
+            kind="shell-script",
+            environment="_system",
+            script_path="run.sh",
+            inputs=["run.sh"],
+        ),
+        WordToPdfStage(
+            name="doc",
+            environment="tex",
+            word_doc_path="document.docx",
+            inputs=["document.docx"],
+        ),
+    ]:
+        deps = stage.to_dvc()["deps"]
+        assert len(deps) == len(set(deps)), f"duplicates in {deps}"
+
+
+def test_markdownstage():
+    # The file's blocks become their own stages with their own outputs, so
+    # the stage standing in for them has none, e.g., when the hub lists
+    # what each stage produces without expanding Markdown first
+    s = MarkdownStage(
+        target_path="docs/main.md",
+        pdf={"output_path": "docs/main.pdf", "environment": "tex"},
+    )
+    assert s.outputs is None
+    assert s.dvc_outs == []
+    assert s.dvc_out_paths == []

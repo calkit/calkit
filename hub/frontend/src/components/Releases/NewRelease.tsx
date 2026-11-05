@@ -335,6 +335,7 @@ const NewRelease = ({
       onClose={handleClose}
       size={{ base: "sm", md: "md" }}
       isCentered
+      motionPreset="none"
     >
       <ModalOverlay />
       {created ? (

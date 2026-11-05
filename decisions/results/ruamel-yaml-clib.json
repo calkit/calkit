@@ -1,0 +1,33 @@
+{
+  "lock": {
+    "md5": "877436d9126007eb20abfa537774c95a",
+    "bytes": 565712,
+    "stages": 300,
+    "paths": 4500,
+    "parsed_md5": "3d607d31a660fb1892c15b4c8d43478c",
+    "kb": 565.712
+  },
+  "seconds": {
+    "pure": 1.6210274589830078,
+    "clib": 0.33104266700684093
+  },
+  "speedup": 4.896732719198126,
+  "packages": {
+    "pure": {
+      "dvc": "3.67.1",
+      "ruamel.yaml": "0.19.1",
+      "ruamel.yaml.clib": null
+    },
+    "clib": {
+      "dvc": "3.67.1",
+      "ruamel.yaml": "0.19.1",
+      "ruamel.yaml.clib": "0.2.15"
+    }
+  },
+  "machine": {
+    "python": "3.12.4",
+    "system": "Darwin",
+    "machine": "arm64",
+    "cpus": 10
+  }
+}

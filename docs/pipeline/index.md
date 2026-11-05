@@ -34,7 +34,7 @@ environments:
     python: "3.13"
   texlive:
     kind: docker
-    image: texlive/texlive:latest-full
+    image: ghcr.io/calkit/latex:0.1.8
 
 # Define the pipeline
 pipeline:
@@ -103,6 +103,10 @@ rather than building on the previous run's file.
 Set `delete_before_run: false` for an output the stage appends to
 or updates in place;
 this maps to DVC's `persist`.
+
+If the pipeline has been run and outputs are already tracked,
+changing an output's storage location
+can be done with `calkit update path-storage`.
 
 ### Depending on another stage's outputs
 
@@ -335,20 +339,21 @@ Stage definitions belong in `pipeline.stages` in `calkit.yaml`.
 
 Common stage parameters:
 
-| Parameter           | Type                                             | Required | Default   | Description                                                                                                                                                                                                                                                                                                           |
-| ------------------- | ------------------------------------------------ | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment`       | str                                              | yes      |           | Name of the environment in which to run this stage.                                                                                                                                                                                                                                                                   |
-| `wdir`              | str \| None                                      | no       | null      | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                                                                                                                                                                                         |
-| `inputs`            | list[str \| PathInput \| InputsFromStageOutputs] | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.                                                                                                                                                                       |
-| `outputs`           | list[str \| PathOutput]                          | no       |           | Paths this stage produces.                                                                                                                                                                                                                                                                                            |
-| `always_run`        | bool                                             | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
-| `iterate_over`      | list[StageIteration] \| None                     | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
-| `description`       | str \| None                                      | no       | null      | A description of what this stage does.                                                                                                                                                                                                                                                                                |
-| `frozen`            | bool                                             | no       | False     | Never rerun this stage, treating its outputs as up-to-date.                                                                                                                                                                                                                                                           |
-| `scheduler`         | StageSchedulerOptions \| None                    | no       | null      | Options for running this stage on a job scheduler (SLURM or PBS).                                                                                                                                                                                                                                                     |
-| `setup`             | list[str] \| None                                | no       | null      | Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'. |
-| `env_default_setup` | Literal['ignore', 'replace', 'merge']            | no       | 'replace' | How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.                                                                   |
-| `slurm`             | StageSchedulerOptions \| None                    | no       | null      | Deprecated name for 'scheduler'; set 'scheduler' instead.                                                                                                                                                                                                                                                             |
+| Parameter           | Type                                                                                                                                                                  | Required | Default   | Description                                                                                                                                                                                                                                                                                                           |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`       | str                                                                                                                                                                   | yes      |           | Name of the environment in which to run this stage.                                                                                                                                                                                                                                                                   |
+| `wdir`              | str \| None                                                                                                                                                           | no       | null      | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                                                                                                                                                                                         |
+| `inputs`            | list[str \| EnvVarInput \| ScheduleInput \| PathInput \| InputsFromStageOutputs]                                                                                      | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.                  |
+| `outputs`           | list[str \| PathOutput]                                                                                                                                               | no       |           | Paths this stage produces.                                                                                                                                                                                                                                                                                            |
+| `always_run`        | bool                                                                                                                                                                  | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
+| `iterate_over`      | list[StageIteration] \| None                                                                                                                                          | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
+| `description`       | str \| None                                                                                                                                                           | no       | null      | A description of what this stage does.                                                                                                                                                                                                                                                                                |
+| `frozen`            | bool                                                                                                                                                                  | no       | False     | Never rerun this stage, treating its outputs as up-to-date.                                                                                                                                                                                                                                                           |
+| `scheduler`         | StageSchedulerOptions \| None                                                                                                                                         | no       | null      | Options for running this stage on a job scheduler (SLURM or PBS).                                                                                                                                                                                                                                                     |
+| `setup`             | list[str] \| None                                                                                                                                                     | no       | null      | Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'. |
+| `env_default_setup` | Literal['ignore', 'replace', 'merge']                                                                                                                                 | no       | 'replace' | How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.                                                                   |
+| `requirements`      | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| AwsCredentialsRequirement \| Requirement \| dict[str, RequirementAttrs \| None]] | no       |           | What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.                                                                                                                                               |
+| `slurm`             | StageSchedulerOptions \| None                                                                                                                                         | no       | null      | Deprecated name for 'scheduler'; set 'scheduler' instead.                                                                                                                                                                                                                                                             |
 
 Parameters whose type is a named object, like `PathOutput`, are described under [nested parameter types](#nested-parameter-types).
 
@@ -391,10 +396,10 @@ Model class: `JuliaCommandStage`
 
 Model class: `JuliaScriptStage`
 
-| Kind-specific parameter | Type      | Required | Default | Description                      |
-| ----------------------- | --------- | -------- | ------- | -------------------------------- |
-| `script_path`           | str       | yes      |         | Path to the Julia script to run. |
-| `args`                  | list[str] | no       |         | Arguments passed to the script.  |
+| Kind-specific parameter | Type      | Required | Default | Description                                             |
+| ----------------------- | --------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str       | yes      |         | Path to the Julia script to run.                        |
+| `args`                  | list[str] | no       |         | Arguments passed to the script, each item one argument. |
 
 ### `jupyter-notebook`
 
@@ -419,20 +424,39 @@ automatically.
 
 Model class: `LatexStage`
 
-| Kind-specific parameter | Type                          | Required | Default | Description                                                                                                                                                                   |
-| ----------------------- | ----------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target_path`           | str                           | yes      |         | Path to the .tex file to compile.                                                                                                                                             |
-| `output_dir`            | str \| None                   | no       | null    | Directory for latexmk output. Defaults to compiling in place, alongside the target.                                                                                           |
-| `aux_dir`               | str \| None                   | no       | null    | Directory for latexmk auxiliary files.                                                                                                                                        |
-| `latexmkrc_path`        | str \| None                   | no       | null    | Path to a latexmkrc file to use.                                                                                                                                              |
-| `pdf_storage`           | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store the resulting PDF.                                                                                                                                             |
-| `diffs`                 | list[str \| list[str]]        | no       |         | Comparisons to keep for this document, each a pair of revisions. A bare string is shorthand for comparing that revision against the working tree.                             |
-| `diff_pdf_storage`      | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store the resulting diff PDFs.                                                                                                                                       |
-| `verbose`               | bool                          | no       | False   | Show full latexmk output.                                                                                                                                                     |
-| `force`                 | bool                          | no       | False   | Keep compiling despite errors (latexmk -f).                                                                                                                                   |
-| `synctex`               | bool                          | no       | True    | Generate SyncTeX data for editor/PDF navigation.                                                                                                                              |
-| `latexmk_args`          | list[str]                     | no       |         | Extra arguments passed straight through to latexmk, for control Calkit does not model.                                                                                        |
-| `latexdiff_args`        | list[str]                     | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--type=CFONT'. Changed figures are shown old and new unless '--graphics-markup' is set here. |
+| Kind-specific parameter | Type                           | Required | Default | Description                                                                                                                                                                   |
+| ----------------------- | ------------------------------ | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target_path`           | str                            | yes      |         | Path to the .tex file to compile.                                                                                                                                             |
+| `output_dir`            | str \| None                    | no       | null    | Directory for latexmk output. Defaults to compiling in place, alongside the target.                                                                                           |
+| `aux_dir`               | str \| None                    | no       | null    | Directory for latexmk auxiliary files.                                                                                                                                        |
+| `latexmkrc_path`        | str \| None                    | no       | null    | Path to a latexmkrc file to use.                                                                                                                                              |
+| `pdf_storage`           | Literal['git', 'dvc'] \| None  | no       | 'dvc'   | Where to store the resulting PDF.                                                                                                                                             |
+| `diffs`                 | list[str \| list[str]]         | no       |         | Comparisons to keep for this document, each a pair of revisions. A bare string compares that revision against the working tree, like the document itself is built from.       |
+| `diff_pdf_storage`      | Literal['git', 'dvc'] \| None  | no       | 'dvc'   | Where to store the resulting diff PDFs.                                                                                                                                       |
+| `keep_diff_tex`         | bool                           | no       | False   | Keep the old, new, and marked-up .tex files beside each diff PDF for inspection.                                                                                              |
+| `verbose`               | bool                           | no       | False   | Show full latexmk output.                                                                                                                                                     |
+| `force`                 | bool                           | no       | False   | Keep compiling despite errors (latexmk -f).                                                                                                                                   |
+| `synctex`               | bool                           | no       | True    | Generate SyncTeX data for editor/PDF navigation.                                                                                                                              |
+| `latexmk_args`          | list[str]                      | no       |         | Extra arguments passed straight through to latexmk, for control Calkit does not model.                                                                                        |
+| `latexdiff_args`        | list[str]                      | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--type=CFONT'. Changed figures are shown old and new unless '--graphics-markup' is set here. |
+| `diff_filter`           | PythonScriptDiffFilter \| None | no       | null    | Script each marked-up document is piped through before it's built, e.g., to drop changes that don't change the rendered text.                                                 |
+
+### `manual-step`
+
+Model class: `ManualStepStage`
+
+A step someone does manually, e.g., exporting a figure from
+Photoshop, which the pipeline asks for when its inputs change, e.g.,
+the Photoshop file.
+
+Its outputs are kept while it runs, since they're what the person
+replaces, and the step checks that they changed.
+
+| Kind-specific parameter | Type                   | Required | Default    | Description                                                        |
+| ----------------------- | ---------------------- | -------- | ---------- | ------------------------------------------------------------------ |
+| `environment`           | str                    | no       | '\_system' | Name of the environment in which to run this stage.                |
+| `message`               | str                    | yes      |            | What to do, e.g., 'In Photoshop, export figures/wake-diagram.png'. |
+| `open`                  | ManualStepOpen \| None | no       | null       | App to open for the step, and the file to open in it.              |
 
 ### `map-paths`
 
@@ -497,13 +521,14 @@ outputs as a whole, since those belong to the individual stages in
 it, and its stages always run in the project root, where the scripts
 extracted from it are written.
 
-| Kind-specific parameter | Type | Required | Default    | Description                                                      |
-| ----------------------- | ---- | -------- | ---------- | ---------------------------------------------------------------- |
-| `environment`           | str  | no       | '\_system' | Environment used by blocks that don't name one.                  |
-| `wdir`                  | None | no       | null       | Not supported; a Markdown file's stages run in the project root. |
-| `outputs`               | None | no       | null       | Not supported; declare outputs on the file's blocks.             |
-| `iterate_over`          | None | no       | null       | Not supported; markdown stages can't iterate.                    |
-| `target_path`           | str  | yes      |            | Path to the Markdown file.                                       |
+| Kind-specific parameter | Type                | Required | Default    | Description                                                                                               |
+| ----------------------- | ------------------- | -------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| `environment`           | str                 | no       | '\_system' | Environment used by blocks that don't name one.                                                           |
+| `wdir`                  | None                | no       | null       | Not supported; a Markdown file's stages run in the project root.                                          |
+| `outputs`               | None                | no       | null       | Not supported; declare outputs on the file's blocks.                                                      |
+| `iterate_over`          | None                | no       | null       | Not supported; markdown stages can't iterate.                                                             |
+| `target_path`           | str                 | yes      |            | Path to the Markdown file.                                                                                |
+| `pdf`                   | MarkdownPdf \| None | no       | null       | Also build the file into a PDF with pandoc and LaTeX. A file that only builds a PDF needs no code blocks. |
 
 ### `matlab-command`
 
@@ -552,10 +577,10 @@ writes something else too, e.g., a file the instrument saves.
 
 Model class: `PythonScriptStage`
 
-| Kind-specific parameter | Type      | Required | Default | Description                       |
-| ----------------------- | --------- | -------- | ------- | --------------------------------- |
-| `script_path`           | str       | yes      |         | Path to the Python script to run. |
-| `args`                  | list[str] | no       |         | Arguments passed to the script.   |
+| Kind-specific parameter | Type      | Required | Default | Description                                             |
+| ----------------------- | --------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str       | yes      |         | Path to the Python script to run.                       |
+| `args`                  | list[str] | no       |         | Arguments passed to the script, each item one argument. |
 
 ### `quarto`
 
@@ -581,26 +606,42 @@ instead.
 | `to`                    | str \| None | no       | null    | Output format, passed to 'quarto render --to'. Defaults to what the document's metadata specifies. |
 | `args`                  | list[str]   | no       |         | Extra arguments passed to 'quarto render'.                                                         |
 
+### `questions-to-latex`
+
+Model class: `QuestionsToLatexStage`
+
+The project's questions and answers, rendered for a LaTeX document.
+
+Its inputs are `calkit.yaml` and every file the questions cite as
+evidence, added when the pipeline is compiled, so the output reruns
+when an answer or a value it reads changes.
+
+| Kind-specific parameter | Type | Required | Default     | Description                                                                                                        |
+| ----------------------- | ---- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| `environment`           | str  | no       | '\_system'  | Name of the environment in which to run this stage.                                                                |
+| `wdir`                  | None | no       | null        | Not supported; the stage reads the project's calkit.yaml and evidence from the project root.                       |
+| `command_name`          | str  | no       | 'questions' | Name of the LaTeX command the document quotes questions through, e.g., 'questions' for \questions[staging.answer]. |
+
 ### `r-script`
 
 Model class: `RScriptStage`
 
-| Kind-specific parameter | Type      | Required | Default | Description                     |
-| ----------------------- | --------- | -------- | ------- | ------------------------------- |
-| `script_path`           | str       | yes      |         | Path to the R script to run.    |
-| `args`                  | list[str] | no       |         | Arguments passed to the script. |
+| Kind-specific parameter | Type      | Required | Default | Description                                             |
+| ----------------------- | --------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str       | yes      |         | Path to the R script to run.                            |
+| `args`                  | list[str] | no       |         | Arguments passed to the script, each item one argument. |
 
 ### `sbatch`
 
 Model class: `SBatchStage`
 
-| Kind-specific parameter | Type                          | Required | Default | Description                         |
-| ----------------------- | ----------------------------- | -------- | ------- | ----------------------------------- |
-| `script_path`           | str                           | yes      |         | Path to the script to submit.       |
-| `args`                  | list[str]                     | no       |         | Arguments passed to the script.     |
-| `sbatch_options`        | list[str]                     | no       |         | Options passed to sbatch.           |
-| `log_path`              | str \| None                   | no       | null    | Path at which to write the job log. |
-| `log_storage`           | Literal['git', 'dvc'] \| None | no       | 'git'   | Where to store the job log.         |
+| Kind-specific parameter | Type                          | Required | Default | Description                                             |
+| ----------------------- | ----------------------------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str                           | yes      |         | Path to the script to submit.                           |
+| `args`                  | list[str]                     | no       |         | Arguments passed to the script, each item one argument. |
+| `sbatch_options`        | list[str]                     | no       |         | Options passed to sbatch.                               |
+| `log_path`              | str \| None                   | no       | null    | Path at which to write the job log.                     |
+| `log_storage`           | Literal['git', 'dvc'] \| None | no       | 'git'   | Where to store the job log.                             |
 
 ### `shell-command`
 
@@ -615,11 +656,11 @@ Model class: `ShellCommandStage`
 
 Model class: `ShellScriptStage`
 
-| Kind-specific parameter | Type                         | Required | Default | Description                       |
-| ----------------------- | ---------------------------- | -------- | ------- | --------------------------------- |
-| `script_path`           | str                          | yes      |         | Path to the shell script to run.  |
-| `args`                  | list[str]                    | no       |         | Arguments passed to the script.   |
-| `shell`                 | Literal['sh', 'bash', 'zsh'] | no       | 'bash'  | Shell in which to run the script. |
+| Kind-specific parameter | Type                         | Required | Default | Description                                             |
+| ----------------------- | ---------------------------- | -------- | ------- | ------------------------------------------------------- |
+| `script_path`           | str                          | yes      |         | Path to the shell script to run.                        |
+| `args`                  | list[str]                    | no       |         | Arguments passed to the script, each item one argument. |
+| `shell`                 | Literal['sh', 'bash', 'zsh'] | no       | 'bash'  | Shell in which to run the script.                       |
 
 ### `word-to-pdf`
 
@@ -633,6 +674,43 @@ Model class: `WordToPdfStage`
 ### Nested parameter types
 
 Some parameters above take objects rather than plain values. The properties of each are described below.
+
+#### `EnvVarInput`
+
+An environment variable whose value a stage's results depend on.
+
+The value is hashed, not stored, into a file the stage depends on, so
+changing it reruns the stage. A short or guessable value could be
+recovered from its hash, so this isn't a way to keep one secret.
+It is read where `calkit run` runs, from the project's `env_vars`,
+the environment or `.env`, even for a stage that runs on another
+machine.
+
+| Parameter | Type               | Required | Default | Description                       |
+| --------- | ------------------ | -------- | ------- | --------------------------------- |
+| `kind`    | Literal['env-var'] | yes      |         | Always 'env-var'.                 |
+| `name`    | str                | yes      |         | Name of the environment variable. |
+
+#### `ScheduleInput`
+
+A schedule a stage runs on, e.g., once a day.
+
+Every compile writes the current period, e.g., today's date, to a file
+the stage depends on, so the stage reruns once each period and is
+skipped until the next one starts. The stage can read the file to learn
+which period it's running for, e.g.,
+`.calkit/local/current-periods/1-day-utc.txt` holds `2026-10-20` on
+that day. A period of more than one unit, e.g., '3 days', is counted
+from the start of 1970 (or for weeks, its first Monday), so every machine
+agrees where one starts, and is written as its first unit, e.g., the day
+it starts. Set `CALKIT_NOW` to an ISO 8601 time to compile as if it
+were then, e.g., to redo a past day.
+
+| Parameter  | Type                | Required | Default | Description                                                                                                                                                                                                                |
+| ---------- | ------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`     | Literal['schedule'] | yes      |         | Always 'schedule'.                                                                                                                                                                                                         |
+| `period`   | str                 | yes      |         | How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, and years; 'm' is a minute and 'mo' a month. |
+| `timezone` | str                 | no       | 'UTC'   | Time zone periods start in, e.g., 'America/New_York'.                                                                                                                                                                      |
 
 #### `PathInput`
 
@@ -704,6 +782,173 @@ accepted here and hoisted onto the stage when it loads.
 | `log_path`            | str \| None                           | no       | null      | Path at which to write the job log.                                                                                                            |
 | `log_storage`         | Literal['git', 'dvc'] \| None         | no       | 'git'     | Where to store the job log.                                                                                                                    |
 
+#### `SystemNumberRequirement`
+
+A bound on a numeric property of the machine.
+
+A property can't be installed, so there is nothing to name and nothing
+to fix: the check either passes on this machine or reports what it
+found against what was asked for.
+
+At least one of `min` and `max` must be given. To record a property
+that results depend on rather than constrain it, add it to a
+`system` environment's `lock`.
+
+| Parameter     | Type                              | Required | Default | Description                                         |
+| ------------- | --------------------------------- | -------- | ------- | --------------------------------------------------- |
+| `kind`        | Literal['cpu-count', 'memory-gb'] | yes      |         | Which numeric property of the machine to constrain. |
+| `min`         | float \| None                     | no       | null    | Smallest acceptable value, inclusive.               |
+| `max`         | float \| None                     | no       | null    | Largest acceptable value, inclusive.                |
+| `description` | str \| None                       | no       | null    |                                                     |
+
+#### `SystemValueRequirement`
+
+A constraint on a string-valued property of the machine.
+
+`equals` matches exactly and `matches` as a glob, both
+case-insensitively, and a list of values means any of them will do.
+`version_spec` compares as a version, for properties like
+`os-version` and `calkit-python-version` where '>=' means
+something.
+
+At least one of `equals`, `matches` and `version_spec` must be
+given. To record a property that results depend on rather than
+constrain it, add it to a `system` environment's `lock`.
+
+| Parameter      | Type                                                                                                                                        | Required | Default | Description                                                                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `kind`         | Literal['os', 'os-version', 'platform', 'machine', 'processor', 'hostname', 'machine-id', 'calkit-python-version', 'python-implementation'] | yes      |         | Which property of the machine to constrain.                                                                           |
+| `equals`       | str \| list[str] \| None                                                                                                                    | no       | null    | Value the property must have, matched case-insensitively. A list means any one of them is acceptable.                 |
+| `version_spec` | str \| None                                                                                                                                 | no       | null    | PEP 440 version specifier the property must satisfy, e.g., '>=3.11'. For properties that are versions.                |
+| `matches`      | str \| list[str] \| None                                                                                                                    | no       | null    | Glob the property must match, case-insensitively, e.g., `*.cluster.edu` for a hostname. A list means any one of them. |
+| `description`  | str \| None                                                                                                                                 | no       | null    |                                                                                                                       |
+
+#### `SetupRequirement`
+
+A `setup` requirement, whose `name` may be omitted.
+
+Without a `name`, Calkit derives a stable `setup-<hash>` one from
+`check_command`.
+
+| Parameter       | Type               | Required | Default | Description                                                                                                                                                                         |
+| --------------- | ------------------ | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['setup']   | no       | 'setup' |                                                                                                                                                                                     |
+| `name`          | str \| None        | no       | null    |                                                                                                                                                                                     |
+| `check_command` | str \| None        | no       | null    |                                                                                                                                                                                     |
+| `setup_command` | str \| None        | no       | null    | Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'. |
+| `cache_ttl`     | str \| int \| None | no       | null    |                                                                                                                                                                                     |
+| `description`   | str \| None        | no       | null    |                                                                                                                                                                                     |
+| `default`       | str \| None        | no       | null    |                                                                                                                                                                                     |
+| `version_spec`  | str \| None        | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.                                                               |
+| `account_id`    | str \| None        | no       | null    | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                                                                        |
+| `profile`       | str \| None        | no       | null    | AWS profile 'aws-credentials' are checked with, if not the default.                                                                                                                 |
+| `notes`         | str \| None        | no       | null    |                                                                                                                                                                                     |
+
+#### `AwsCredentialsRequirement`
+
+An `aws-credentials` requirement, whose `name` may be omitted.
+
+| Parameter       | Type                       | Required | Default           | Description                                                                                                                                                                         |
+| --------------- | -------------------------- | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['aws-credentials'] | no       | 'aws-credentials' |                                                                                                                                                                                     |
+| `name`          | str \| None                | no       | null              |                                                                                                                                                                                     |
+| `check_command` | str \| None                | no       | null              |                                                                                                                                                                                     |
+| `setup_command` | str \| None                | no       | null              | Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'. |
+| `cache_ttl`     | str \| int \| None         | no       | null              |                                                                                                                                                                                     |
+| `description`   | str \| None                | no       | null              |                                                                                                                                                                                     |
+| `default`       | str \| None                | no       | null              |                                                                                                                                                                                     |
+| `version_spec`  | str \| None                | no       | null              | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.                                                               |
+| `account_id`    | str \| None                | no       | null              | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                                                                        |
+| `profile`       | str \| None                | no       | null              | AWS profile 'aws-credentials' are checked with, if not the default.                                                                                                                 |
+| `notes`         | str \| None                | no       | null              |                                                                                                                                                                                     |
+
+#### `Requirement`
+
+Something that must be true of a machine before the project runs.
+
+Five kinds are supported:
+
+- `app`: an executable that must be on `PATH`, optionally
+  satisfying a `version_spec`.
+- `env-var`: an environmental variable that must be defined.
+  `setup_command` says how to get a value, e.g., a login flow that
+  prints a token, and is offered before the value is asked for.
+- `setup`: a per-machine precondition that isn't a file---e.g.,
+  the user must have authenticated a CLI like `gh auth login`.
+  A `setup` requirement declares `check_command` (a shell command
+  whose exit code determines whether it is satisfied) and
+  `setup_command` (run on a TTY when the user agrees, or printed
+  as a fix-it command otherwise). To run either inside a project
+  environment, prefix it with `calkit xenv -n <env> --`.
+  `cache_ttl` skips re-probing slow checks.
+- `aws-credentials`: valid AWS credentials, optionally for a given
+  `account_id` and `profile`, checked with
+  `aws sts get-caller-identity`.
+- `calkit-config`: a value that must be set in the user's Calkit
+  configuration.
+
+These name a thing that must be present, so each has a `name`. The
+properties of a machine that can't be installed, e.g., how many CPUs
+it has or what OS it runs, are constrained by giving the property as
+the `kind` instead, e.g., `kind: cpu-count` with a `min`.
+
+| Parameter       | Type                                                                   | Required | Default | Description                                                                                                                                                                         |
+| --------------- | ---------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['app', 'env-var', 'setup', 'aws-credentials', 'calkit-config'] | no       | 'app'   |                                                                                                                                                                                     |
+| `name`          | str                                                                    | yes      |         |                                                                                                                                                                                     |
+| `check_command` | str \| None                                                            | no       | null    |                                                                                                                                                                                     |
+| `setup_command` | str \| None                                                            | no       | null    | Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'. |
+| `cache_ttl`     | str \| int \| None                                                     | no       | null    |                                                                                                                                                                                     |
+| `description`   | str \| None                                                            | no       | null    |                                                                                                                                                                                     |
+| `default`       | str \| None                                                            | no       | null    |                                                                                                                                                                                     |
+| `version_spec`  | str \| None                                                            | no       | null    | Version specifier an 'app' must satisfy, e.g., '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.                                                               |
+| `account_id`    | str \| None                                                            | no       | null    | AWS account ID that 'aws-credentials' must be for. Quote it so YAML keeps any leading zeros.                                                                                        |
+| `profile`       | str \| None                                                            | no       | null    | AWS profile 'aws-credentials' are checked with, if not the default.                                                                                                                 |
+| `notes`         | str \| None                                                            | no       | null    |                                                                                                                                                                                     |
+
+#### `RequirementAttrs`
+
+A requirement's properties, as written under `{name: {...}}`.
+
+`Requirement` is this plus the name; the mapping form supplies the
+name as its key instead.
+
+| Parameter       | Type                                                                   | Required | Default | Description |
+| --------------- | ---------------------------------------------------------------------- | -------- | ------- | ----------- |
+| `kind`          | Literal['app', 'env-var', 'setup', 'aws-credentials', 'calkit-config'] | no       | 'app'   |             |
+| `check_command` | str \| None                                                            | no       | null    |             |
+| `setup_command` | str \| None                                                            | no       | null    |             |
+| `cache_ttl`     | str \| int \| None                                                     | no       | null    |             |
+| `description`   | str \| None                                                            | no       | null    |             |
+| `default`       | str \| None                                                            | no       | null    |             |
+| `version_spec`  | str \| None                                                            | no       | null    |             |
+| `account_id`    | str \| None                                                            | no       | null    |             |
+| `profile`       | str \| None                                                            | no       | null    |             |
+| `notes`         | str \| None                                                            | no       | null    |             |
+
+#### `PythonScriptDiffFilter`
+
+A Python script each marked-up document is piped through.
+
+| Parameter     | Type                     | Required | Default | Description                                                                                                                       |
+| ------------- | ------------------------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`        | Literal['python-script'] | yes      |         | Run a Python script, reading the marked-up document on stdin and writing the result to stdout.                                    |
+| `script_path` | str                      | yes      |         | Path to the Python script to run.                                                                                                 |
+| `environment` | str \| None              | no       | null    | Environment to run the script in. Defaults to Calkit's own Python, which has only the standard library and Calkit's dependencies. |
+| `args`        | list[str]                | no       |         | Arguments passed to the script, each item one argument.                                                                           |
+
+#### `ManualStepOpen`
+
+What a manual step opens.
+
+The app is always named, since the default app for a file differs
+between machines, e.g., Illustrator rather than Inkscape for an SVG.
+
+| Parameter | Type        | Required | Default | Description                                 |
+| --------- | ----------- | -------- | ------- | ------------------------------------------- |
+| `app`     | str         | yes      |         | App to open, e.g., 'Inkscape'.              |
+| `path`    | str \| None | no       | null    | File to open in it, e.g., the Inkscape SVG. |
+
 #### `CopyFileToFile`
 
 Copy a single file to a single destination path.
@@ -743,6 +988,23 @@ Replace a directory with the contents of another.
 | `kind`    | Literal['dir-to-dir-replace'] | no       | 'dir-to-dir-replace' | Replace the destination directory entirely.               |
 | `src`     | str                           | yes      |                      | Path to the directory to copy from.                       |
 | `dest`    | str                           | yes      |                      | Path to the directory to replace, which is deleted first. |
+
+#### `MarkdownPdf`
+
+How a Markdown stage's file is built into a PDF.
+
+Pandoc turns it into LaTeX and LaTeX builds the PDF, both in one
+environment, e.g., Calkit's LaTeX image, which includes both, so their
+versions are pinned with it.
+
+| Parameter       | Type                  | Required | Default | Description                                                                         |
+| --------------- | --------------------- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `environment`   | str                   | yes      |         | Environment that runs pandoc and LaTeX.                                             |
+| `output_path`   | str \| None           | no       | null    | Where to write the PDF. Defaults to the Markdown file's path with a .pdf extension. |
+| `template_path` | str \| None           | no       | null    | Pandoc template for the LaTeX.                                                      |
+| `filters`       | list[str]             | no       |         | Pandoc Lua filters, applied in order.                                               |
+| `args`          | list[str]             | no       |         | Other pandoc arguments, e.g., '--shift-heading-level-by=-1'.                        |
+| `storage`       | Literal['git', 'dvc'] | no       | 'dvc'   | Where to store the PDF.                                                             |
 
 #### `RangeIteration`
 

@@ -8,7 +8,11 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field, computed_field
 
 import calkit
-from calkit.provenance import PROVENANCE_ARTIFACT_TYPES, has_provenance
+from calkit.provenance import (
+    PROVENANCE_ARTIFACT_TYPES,
+    find_project_provenance_gaps,
+    has_provenance,
+)
 
 INSTRUCTIONS_NOTE = (
     "Note that these could be as simple as telling the user to "
@@ -98,6 +102,8 @@ DETAIL_CATEGORIES = {
     "scripts": "scripts_not_in_pipeline",
     "environments": "stages_without_env",
     "provenance": "misc_needing_provenance",
+    "gaps": "provenance_gaps",
+    "imports": "unchecked_imports",
 }
 
 
@@ -130,6 +136,14 @@ class ReproCheck(BaseModel):
     # Paths of misc artifacts with no provenance whose file type is one
     # nobody makes by hand, so something should be recorded for them
     misc_needing_provenance: list[str] = []
+    # Where figures, tables, and results, declared or cited by a document,
+    # lead back to something nothing records the origin of, e.g., a figure
+    # made from a dataset with no source
+    provenance_gaps: list[str] = []
+    # Where they lead back to an import from somewhere only described, e.g.,
+    # a folder on someone's computer. Advisory, since it is recorded, but
+    # nobody else can check it.
+    unchecked_imports: list[str] = []
     # Paths of Git-tracked scripts no pipeline stage refers to, which the
     # pipeline therefore can't be reproducing
     scripts_not_in_pipeline: list[str] = []
@@ -210,6 +224,15 @@ class ReproCheck(BaseModel):
                 "of a kind that isn't made by hand, with no provenance "
                 "recorded. Add the stage that produces them, the project "
                 "file they were exported from, or who created them."
+            )
+        if self.provenance_gaps:
+            return (
+                f"There are {len(self.provenance_gaps)} figures, tables, or "
+                "results whose origin isn't defined, e.g., "
+                f"{self.provenance_gaps[0]}. Record where each came from "
+                "in calkit.yaml with imported_from or created_by, or add "
+                "the stage that makes it. A person can't create an "
+                "exported format like PNG, so it needs a stage or an import."
             )
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
@@ -330,12 +353,24 @@ class ReproCheck(BaseModel):
             f"{self._tag('provenance')}\n"
         )
         txt += (
+            "Figures, tables, and results with origin not defined: "
+            f"{len(self.provenance_gaps)} "
+            f"{calkit.check_or_x(not self.provenance_gaps)}"
+            f"{self._tag('gaps')}\n"
+        )
+        txt += (
             "Values typed out rather than read from the pipeline: "
             f"{len(self.retyped_values)} "
             f"{calkit.check_or_x(not self.retyped_values)}"
             f"{self._tag('retyped')}\n"
         )
         # No check mark either way: these are worth a look, not a verdict
+        if self.unchecked_imports:
+            txt += (
+                "Imported from somewhere that can't be checked: "
+                f"{len(self.unchecked_imports)} (worth a look)"
+                f"{self._tag('imports')}\n"
+            )
         if self.unattributed_numbers:
             txt += (
                 "Numbers with nothing recorded behind them: "
@@ -861,6 +896,33 @@ def check_reproducibility(
         and posixpath.splitext(a["path"])[1].lower()
         in MISC_EXTENSIONS_NEEDING_PROVENANCE
     ]
+    # Followed back from what a reader sees, declared or shown by a LaTeX
+    # document the pipeline builds
+    shown = [
+        a["path"]
+        for kind in ("figures", "tables", "results")
+        for a in ck_info.get(kind, [])
+        if isinstance(a, dict) and a.get("path")
+    ]
+    for stage in (
+        (ck_info.get("pipeline", {}) or {}).get("stages", {}).values()
+    ):
+        if not isinstance(stage, dict) or stage.get("kind") != "latex":
+            continue
+        target = stage.get("target_path")
+        if not target:
+            continue
+        # Relative to the stage's working directory, like its other paths
+        target = posixpath.normpath(
+            posixpath.join(stage.get("wdir") or "", target)
+        )
+        if os.path.isfile(os.path.join(wdir, target)):
+            shown += calkit.latex.find_shown(target, wdir=wdir)
+    gaps = find_project_provenance_gaps(
+        list(dict.fromkeys(shown)), wdir=wdir, ck_info=ck_info
+    )
+    res["provenance_gaps"] = [str(gap) for gap in gaps if not gap.unchecked]
+    res["unchecked_imports"] = [str(gap) for gap in gaps if gap.unchecked]
     res["scripts_not_in_pipeline"] = find_scripts_not_in_pipeline(
         wdir=wdir, ck_info=ck_info, pipeline=pipeline
     )

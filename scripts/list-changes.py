@@ -29,7 +29,13 @@ class Product:
 # The CLI's tags carry no prefix, and it owns everything that isn't one of
 # the separately released subprojects; the JupyterLab extension ships inside
 # the Python package rather than on its own, so it counts as part of the CLI.
-OTHER_PRODUCT_DIRS = ["hub", "vscode-ext", "browser-ext"]
+OTHER_PRODUCT_DIRS = [
+    "hub",
+    "vscode-ext",
+    "browser-ext",
+    "assistant",
+    "images/latex",
+]
 
 PRODUCTS = [
     Product(
@@ -42,6 +48,10 @@ PRODUCTS = [
     Product(name="vscode-ext", tag_glob="vscode-ext/v*", paths=["vscode-ext"]),
     Product(
         name="browser-ext", tag_glob="browser-ext/v*", paths=["browser-ext"]
+    ),
+    Product(name="assistant", tag_glob="assistant/v*", paths=["assistant"]),
+    Product(
+        name="latex-image", tag_glob="latex-image/v*", paths=["images/latex"]
     ),
 ]
 

@@ -3,7 +3,6 @@ import mixpanel from "mixpanel-browser"
 import { FaGithub, FaGoogle } from "react-icons/fa"
 
 import { startGitHubOAuth } from "../../lib/github"
-import { setPostLoginRedirect } from "../../lib/auth"
 import { startGoogleOAuth } from "../../lib/google"
 
 interface OAuthButtonsProps {
@@ -13,6 +12,14 @@ interface OAuthButtonsProps {
   page: "login" | "signup"
   githubLoading?: boolean
   googleLoading?: boolean
+  /**
+   * Hide Google. Creating a project needs a GitHub repo, so offering Google
+   * to someone on their way to one signs them up twice: once here and again
+   * at the connect-GitHub step. Drop this once the hub can host the repo.
+   */
+  githubOnly?: boolean
+  /** The "or" rule only makes sense when an email form follows. */
+  showDivider?: boolean
 }
 
 /**
@@ -26,6 +33,8 @@ const OAuthButtons = ({
   page,
   githubLoading,
   googleLoading,
+  githubOnly = false,
+  showDivider = true,
 }: OAuthButtonsProps) => (
   <>
     <Button
@@ -34,32 +43,34 @@ const OAuthButtons = ({
       isLoading={githubLoading}
       onClick={() => {
         mixpanel.track("Clicked login", { provider: "github", page })
-        if (page === "signup") setPostLoginRedirect("/new")
         startGitHubOAuth()
       }}
       rightIcon={<FaGithub />}
     >
       {verb} with GitHub
     </Button>
-    <Button
-      width="full"
-      isLoading={googleLoading}
-      onClick={() => {
-        mixpanel.track("Clicked Google login", { page })
-        if (page === "signup") setPostLoginRedirect("/new")
-        startGoogleOAuth()
-      }}
-      rightIcon={<FaGoogle />}
-    >
-      {verb} with Google
-    </Button>
-    <HStack width="full">
-      <Divider />
-      <Text fontSize="xs" color="ui.dim" whiteSpace="nowrap">
-        or
-      </Text>
-      <Divider />
-    </HStack>
+    {githubOnly ? null : (
+      <Button
+        width="full"
+        isLoading={googleLoading}
+        onClick={() => {
+          mixpanel.track("Clicked Google login", { page })
+          startGoogleOAuth()
+        }}
+        rightIcon={<FaGoogle />}
+      >
+        {verb} with Google
+      </Button>
+    )}
+    {showDivider ? (
+      <HStack width="full">
+        <Divider />
+        <Text fontSize="xs" color="ui.dim" whiteSpace="nowrap">
+          or
+        </Text>
+        <Divider />
+      </HStack>
+    ) : null}
   </>
 )
 

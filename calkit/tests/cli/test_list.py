@@ -20,6 +20,87 @@ def test_list_environments(tmp_dir):
     assert json.loads(out) == envs
 
 
+def test_list_requirements(tmp_dir):
+    subprocess.check_call(["calkit", "list", "reqs"])
+    ck_info = {
+        "requirements": [
+            "git>=2.40",
+            {
+                "kind": "env-var",
+                "name": "TOKEN",
+                "setup_command": "claude setup-token",
+            },
+            {"kind": "aws-credentials", "account_id": "012345678901"},
+            {"kind": "cpu-count", "min": 4},
+        ],
+        "environments": {
+            "cluster": {
+                "kind": "system",
+                "requirements": [{"kind": "hostname", "matches": "*.edu"}],
+            },
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+            "site": {
+                "kind": "switch",
+                "switch": [
+                    {
+                        "when": [{"os_is": "linux"}],
+                        "use": {
+                            "kind": "system",
+                            "requirements": ["sbatch"],
+                        },
+                    },
+                    {"use": "cluster"},
+                ],
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "fetch": {
+                    "kind": "shell-command",
+                    "command": "echo hi",
+                    "requirements": [{"kind": "env-var", "name": "DATA"}],
+                },
+                "other": {"kind": "shell-command", "command": "echo hi"},
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Each is normalized and says where it was declared
+    out = subprocess.check_output(
+        ["calkit", "list", "requirements", "--json"], text=True
+    )
+    reqs = json.loads(out)
+    assert [(r["source"], r["name"]) for r in reqs] == [
+        ("project", "git"),
+        ("project", "TOKEN"),
+        ("project", "aws-credentials-012345678901"),
+        ("project", "cpu-count"),
+        ("environment 'cluster'", "hostname"),
+        ("environment 'site.1'", "sbatch"),
+        ("stage 'fetch'", "DATA"),
+    ]
+    assert reqs[0]["version_spec"] == ">=2.40"
+    assert reqs[1]["setup_command"] == "claude setup-token"
+    out = subprocess.check_output(["calkit", "list", "reqs"], text=True)
+    assert "Project:\n  - git (app)\n      version_spec: >=2.40" in out
+    assert "setup_command: claude setup-token" in out
+    assert "  - cpu-count\n      min: 4" in out
+    assert "Environment 'cluster':\n  - hostname" in out
+    assert "Stage 'fetch':\n  - DATA (env-var)" in out
+    # A malformed one says where it is
+    ck_info["pipeline"]["stages"]["fetch"]["requirements"] = [
+        {"kind": "env-var"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = subprocess.run(
+        ["calkit", "list", "reqs"], capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "In stage 'fetch'" in res.stderr + res.stdout
+
+
 def test_list_releases(tmp_dir):
     # Internal releases are never published, so no lookup is attempted, but
     # a stray 'published' key must not override the status we determined
@@ -43,11 +124,37 @@ def test_list_releases(tmp_dir):
 
 
 def test_list_templates():
-    subprocess.check_call("calkit list templates", shell=True)
+    # Templates are grouped by kind, since they aren't interchangeable.
+    out = subprocess.check_output(["calkit", "list", "templates"], text=True)
+    assert "latex:" in out and "project:" in out
+    # A LaTeX template is named within the package; a project template
+    # names a project on a hub, so it isn't `project/example-r`
+    assert "  latex/article" in out
+    assert "  calkit/example-r" in out
+    assert "project/example-r" not in out
+    # Each one says what it is, which is the point of a listing
+    assert "Article (generic)" in out
     out = subprocess.check_output(
         ["calkit", "list", "templates", "--json"], text=True
     )
-    assert "latex/article" in json.loads(out)
+    groups = json.loads(out)
+    assert set(groups) == {"latex", "project"}
+    assert "latex/article" in [t["name"] for t in groups["latex"]]
+    assert all(t["title"] for t in groups["project"])
+    # One kind at a time, for a picker that only wants one
+    out = subprocess.check_output(
+        ["calkit", "list", "templates", "--kind", "project", "--json"],
+        text=True,
+    )
+    assert set(json.loads(out)) == {"project"}
+    assert (
+        subprocess.call(
+            ["calkit", "list", "templates", "--kind", "nope"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        != 0
+    )
 
 
 def test_list_stages(tmp_dir):
@@ -99,6 +206,140 @@ def test_list_stages(tmp_dir):
         text=True,
     )
     assert set(json.loads(out)) == {"stage1"}
+    # Subprojects' stages are listed as 'calkit run' addresses them
+    os.makedirs("sub/nested")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "subprojects": [{"path": "nested"}],
+                "pipeline": {
+                    "stages": {"s": ck_info["pipeline"]["stages"]["stage2"]}
+                },
+            },
+            f,
+        )
+    with open("sub/nested/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": {"n": {}}}}, f)
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "list", "stages"], text=True)
+    assert out.split() == ["stage1", "stage2", "sub:s", "sub/nested:n"]
+
+
+def test_list_subprojects(tmp_dir):
+    out = subprocess.check_output(["calkit", "list", "subprojects"], text=True)
+    assert out == ""
+    os.makedirs("a/b")
+    os.makedirs("c")
+    os.makedirs("missing-config")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "subprojects": [
+                    {"path": "a", "description": "The A one."},
+                    {"path": "c"},
+                    # Skipped, as 'calkit run' skips it
+                    {"path": "missing-config"},
+                ]
+            },
+            f,
+        )
+    # A nested one, and one naming its parent, which isn't repeated
+    with open("a/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"subprojects": [{"path": "b"}, {"path": ".."}]}, f)
+    for path in ["a/b", "c"]:
+        with open(f"{path}/calkit.yaml", "w") as f:
+            calkit.ryaml.dump({}, f)
+    out = subprocess.check_output(["calkit", "list", "subprojects"], text=True)
+    assert out.split() == ["a", "a/b", "c"]
+    out = subprocess.check_output(
+        ["calkit", "list", "subprojects", "--json"], text=True
+    )
+    assert json.loads(out) == {
+        "a": {"parent": ".", "description": "The A one."},
+        "a/b": {"parent": "a", "description": None},
+        "c": {"parent": ".", "description": None},
+    }
+
+
+def test_list_latex_diffs(tmp_dir):
+    def commit(message: str) -> None:
+        subprocess.check_call(["git", "add", "-A"])
+        subprocess.check_call(
+            [
+                "git",
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-qm",
+                message,
+            ]
+        )
+
+    def listed() -> dict:
+        out = subprocess.check_output(
+            ["calkit", "list", "latex-diffs", "--json"], text=True
+        )
+        return {diff["stage"]: diff for diff in json.loads(out)}
+
+    subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
+    subprocess.check_call(["calkit", "dvc", "init", "-q"])
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("Hello\n")
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                    "diffs": ["v1", ["v1", "v2"]],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    commit("first")
+    subprocess.check_call(["git", "tag", "v1"])
+    subprocess.check_call(["git", "tag", "v2"])
+    diffs = listed()
+    # A bare revision is compared with the working tree, and nothing has
+    # been built yet
+    assert diffs["paper-diff-v1"] == {
+        "path": ".calkit/latex-diffs/v1/paper/main.pdf",
+        "document": "paper/main.tex",
+        "latex_stage": "paper",
+        "stage": "paper-diff-v1",
+        "from_ref": "v1",
+        "to_ref": None,
+        "status": "not built",
+    }
+    assert diffs["paper-diff-v1-v2"]["to_ref"] == "v2"
+    assert diffs["paper-diff-v1-v2"]["status"] == "not built"
+    # Once built it's current, until something it reads changes
+    os.makedirs(".calkit/env-locks/tex")
+    with open(".calkit/env-locks/tex/arm64.json", "w") as f:
+        f.write("{}\n")
+    out = ".calkit/latex-diffs/v1/paper/main.pdf"
+    os.makedirs(os.path.dirname(out))
+    with open(out, "w") as f:
+        f.write("diff\n")
+    subprocess.check_call(["calkit", "dvc", "commit", "-qf", "paper-diff-v1"])
+    assert listed()["paper-diff-v1"]["status"] == "up to date"
+    with open("paper/main.tex", "a") as f:
+        f.write("More\n")
+    assert listed()["paper-diff-v1"]["status"] == "stale"
+    # The human-readable listing says what each compares
+    out = subprocess.check_output(["calkit", "list", "latex-diffs"], text=True)
+    assert "- path: .calkit/latex-diffs/v1/paper/main.pdf" in out
+    assert "to: working tree" in out
+    assert "status: stale" in out
 
 
 def test_list_results(tmp_dir):
@@ -135,54 +376,111 @@ def test_list_presentations(tmp_dir):
 
 
 def test_list_questions(tmp_dir):
+    def ls(*args: str) -> str:
+        return subprocess.check_output(["calkit", "ls", "q", *args], text=True)
+
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(["calkit", "new", "question", "Does it work?"])
     ck_info = calkit.load_calkit_info()
+    ada = {"name": "Ada", "email": "ada@example.org"}
     ck_info["questions"].append(
         {
             "question": "What is the effect?",
             "hypothesis": "It improves performance.",
             "answer": "It improves performance by 10%.",
-            "evidence": [
-                {"kind": "figure", "path": "figures/performance.png"},
-                {
-                    "kind": "result",
-                    "path": "results/metrics.json",
-                    "key": "accuracy",
-                },
-                {
-                    "kind": "publication",
-                    "path": "paper/paper.pdf",
-                    "explanation": "See the results section.",
-                },
-            ],
+            "evidence": [{"kind": "figure", "path": "figures/p.png"}],
+            "validations": [{"by": ada, "date": "2026-10-04"}],
         }
     )
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    out = subprocess.check_output(
-        ["calkit", "list", "questions", "--json"], text=True
+    # One line each, with a dash for what each doesn't have yet
+    assert ls().splitlines() == [
+        "1. - - - -  Does it work?",
+        "2. H A - V  What is the effect?",
+    ]
+    rows = json.loads(ls("--json"))
+    assert rows[0]["question"] == "Does it work?"
+    assert not rows[0]["answered"] and rows[0]["project"] is None
+    assert rows[1]["hypothesis"] and rows[1]["status"] == "missing"
+    assert rows[1]["verification_status"] == "none"
+    assert rows[1]["validation_status"] == "current"
+    # Subprojects' are listed too, numbered within each
+    os.makedirs("sub/nested")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {"questions": ["Sub?"], "subprojects": [{"path": "nested"}]}, f
+        )
+    with open("sub/nested/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"questions": ["How accurate?"]}, f)
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    lines = ls().splitlines()
+    assert "sub: 1. - - - -  Sub?" in lines
+    assert "sub/nested: 1. - - - -  How accurate?" in lines
+    assert json.loads(ls("--json"))[-1]["project"] == "sub/nested"
+
+
+def test_list_comments(tmp_dir):
+    def ck(*args: str) -> str:
+        return subprocess.run(
+            ["calkit", *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    INTRO = "% COMMENT id=aaaa0001\n%   A:\n%     Why?\nIntro text.\n"
+    NOTE = (
+        "# Note\n\n<!-- COMMENT id=bbbb0002 resolved=true\n  B:\n    Hm.\n"
+        "-->\nSome text.\n"
     )
-    questions = json.loads(out)
-    assert questions[0] == "Does it work?"
-    assert questions[1]["question"] == "What is the effect?"
-    assert questions[1]["hypothesis"] == "It improves performance."
-    assert questions[1]["evidence"][2]["kind"] == "publication"
-    assert questions[1]["evidence"][2]["path"] == "paper/paper.pdf"
-    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
-    assert "1. Does it work?" in out
-    assert "2. question: What is the effect?" in out
-    assert "hypothesis: It improves performance." in out
-    assert "answer: It improves performance by 10%." in out
-    assert "evidence:" in out
-    assert "- kind: figure" in out
-    assert "path: figures/performance.png" in out
-    assert "- kind: result" in out
-    assert "path: results/metrics.json" in out
-    assert "key: accuracy" in out
-    assert "- kind: publication" in out
-    assert "path: paper/paper.pdf" in out
-    assert "explanation: See the results section." in out
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\input{intro}\n\nA paragraph.\n")
+    with open("paper/intro.tex", "w") as f:
+        f.write(INTRO)
+    os.makedirs("docs")
+    with open("docs/note.md", "w") as f:
+        f.write(NOTE)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "paper": {
+                            "kind": "latex",
+                            "target_path": "main.tex",
+                            "wdir": "paper",
+                            "environment": "_system",
+                        },
+                        "note": {
+                            "kind": "markdown",
+                            "target_path": "docs/note.md",
+                            "pdf": {"environment": "_system"},
+                        },
+                    }
+                }
+            },
+            f,
+        )
+    with open("README.md", "w") as f:
+        f.write("% COMMENT id=cccc0003\n%   C:\n%     Not built.\nText.\n")
+    # Without a path, every document built into a PDF is listed, with the
+    # files it inputs, but nothing else
+    listed = json.loads(ck("list", "comments", "--json"))
+    assert [(c["path"], c["id"]) for c in listed] == [
+        ("paper/intro.tex", "aaaa0001"),
+        ("docs/note.md", "bbbb0002"),
+    ]
+    assert listed[1]["anchor"]["text"] == "Some text."
+    # With one, only that document is, and open threads can be picked out
+    listed = json.loads(ck("list", "comments", "docs/note.md", "--json"))
+    assert [c["id"] for c in listed] == ["bbbb0002"]
+    assert "bbbb0002" not in ck("list", "comments", "-u")
+    assert "paper/intro.tex:1 [aaaa0001]" in ck("list", "comments")
+    res = subprocess.run(
+        ["calkit", "list", "comments", "missing.md"], capture_output=True
+    )
+    assert res.returncode != 0
 
 
 def test_list_remotes(tmp_dir):
@@ -251,3 +549,54 @@ def test_list_objects_json(tmp_dir):
     assert "uv" in by_name
     assert "unix" in by_name["uv"]["scripts"]
     assert "rustup" in by_name["cargo"]["aliases"]
+
+
+def test_list_tables(tmp_dir):
+    import git
+
+    git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    with open("results/kernels.csv", "w") as f:
+        f.write(
+            "kernel,registers_baseline,registers_mod\nmicrophysics,255,153\n"
+        )
+    with open("results/summary.json", "w") as f:
+        f.write("{}")
+    ck_info = {
+        "tables": [
+            {"path": "results/kernels.csv", "title": "Kernel resources"}
+        ],
+        "pipeline": {
+            "stages": {
+                "export": {
+                    "kind": "shell-command",
+                    "command": "echo hi",
+                    "outputs": ["results/kernels.csv"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(
+        ["calkit", "list", "tables", "--json"], text=True
+    )
+    tables = {t["path"]: t for t in json.loads(out)}
+    assert tables["results/kernels.csv"]["title"] == "Kernel resources"
+    assert tables["results/kernels.csv"]["stages"] == ["export"]
+    assert "results/summary.json" not in tables
+    # The column names can be read from the header, which is how a
+    # listing shows which table holds what
+    out = subprocess.check_output(
+        ["calkit", "list", "tables", "--columns", "--json"], text=True
+    )
+    tables = {t["path"]: t for t in json.loads(out)}
+    assert tables["results/kernels.csv"]["columns"] == [
+        "kernel",
+        "registers_baseline",
+        "registers_mod",
+    ]
+    # Human-readable output names the path and its title
+    out = subprocess.check_output(["calkit", "list", "tables"], text=True)
+    assert "results/kernels.csv" in out
+    assert "Kernel resources" in out

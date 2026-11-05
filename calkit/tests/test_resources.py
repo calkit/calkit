@@ -1,5 +1,6 @@
 """Tests for ``resources``."""
 
+import json
 import os
 import re
 
@@ -24,9 +25,27 @@ def test_resources(monkeypatch):
         "recommendations"
     ]
     customizations = spec["customizations"]["vscode"]
+    base_settings = calkit.resources.load_json("devcontainer", "base.json")[
+        "customizations"
+    ]["vscode"]["settings"]
     for key, value in settings.items():
-        assert customizations["settings"][key] == value
-    assert customizations["extensions"] == extensions
+        assert customizations["settings"][key] == base_settings.get(key, value)
+    # The base can leave out shared extensions in the container, e.g., ones
+    # that only clutter the sidebar there
+    excluded = calkit.resources.load_json("devcontainer", "base.json")[
+        "customizations"
+    ]["vscode"]["extensions"]
+    assert excluded
+    assert "-lakefs.lakefs-dvc" in excluded
+    in_container = [e for e in extensions if f"-{e}" not in excluded]
+    assert "lakefs.lakefs-dvc" not in in_container
+    assert customizations["extensions"] == in_container + excluded
+    for ext in excluded:
+        assert re.fullmatch(r"-[\w-]+\.[\w-]+", ext), ext
+    # PDFs open in Calkit's viewer, in the container too
+    assert customizations["settings"]["workbench.editorAssociations"] == {
+        "*.pdf": "calkit.pdfReview"
+    }
     # Extension IDs are 'publisher.name', and a typo in one means it silently
     # never gets installed
     assert len(set(extensions)) == len(extensions)
@@ -54,11 +73,61 @@ def test_resources(monkeypatch):
         "vscode"
     ]
     assert merged["snippets"] == ["python"]
-    assert merged["extensions"] == extensions
+    assert merged["extensions"] == customizations["extensions"]
     assert merged["settings"] == customizations["settings"]
 
 
-def test_github_actions_workflow():
+def test_make_devcontainer_spec(tmp_path):
+    spec = calkit.resources.load_json(
+        "devcontainer", calkit.resources.DEVCONTAINER_FNAME
+    )
+    julia_features = [k for k in spec["features"] if "julia" in k]
+    assert julia_features
+    assert (
+        "julialang.language-julia"
+        in spec["customizations"]["vscode"]["extensions"]
+    )
+    # Without a Julia environment, Julia isn't installed
+    for ck_info in [{}, {"environments": {"py": {"kind": "uv"}}}]:
+        txt = calkit.resources.make_devcontainer_spec(ck_info, wdir=tmp_path)
+        assert txt.endswith("}\n")
+        rendered = json.loads(txt)
+        assert not [k for k in rendered["features"] if "julia" in k]
+        assert (
+            "julialang.language-julia"
+            not in rendered["customizations"]["vscode"]["extensions"]
+        )
+        assert (
+            "ghcr.io/devcontainers/features/docker-in-docker:2"
+            in (rendered["features"])
+        )
+    # With one, the spec is the bundled one as-is, whether it's defined in
+    # place in a switch or only in a subproject
+    julia = {"kind": "julia", "julia": "1.11"}
+    switch = {
+        "kind": "switch",
+        "switch": [{"when": [{"os_is": "linux"}], "use": julia}],
+    }
+    for ck_info in [
+        {"environments": {"jl": julia}},
+        {"environments": {"jl": switch}},
+    ]:
+        txt = calkit.resources.make_devcontainer_spec(ck_info, wdir=tmp_path)
+        assert json.loads(txt) == spec
+    (tmp_path / "sim").mkdir()
+    with open(tmp_path / "sim" / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"jl": julia}}, f)
+    ck_info = {"subprojects": [{"path": "sim"}]}
+    txt = calkit.resources.make_devcontainer_spec(ck_info, wdir=tmp_path)
+    assert json.loads(txt) == spec
+    # Read from the project when not given
+    with open(tmp_path / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    txt = calkit.resources.make_devcontainer_spec(wdir=tmp_path)
+    assert json.loads(txt) == spec
+
+
+def test_github_actions_workflow(tmp_path):
     workflow = calkit.ryaml.load(
         calkit.resources.read_text(
             "github-actions", calkit.resources.GITHUB_ACTIONS_FNAME
@@ -111,6 +180,74 @@ def test_github_actions_workflow():
     assert not calkit.resources.is_default_github_actions_workflow(
         pinned + "\n      - run: echo custom\n"
     )
+    # Its triggers can be replaced, leaving the rest as it was, given as
+    # event names or GitHub's mapping
+    on_demand = calkit.resources.render_github_actions_workflow(
+        on=["workflow_dispatch"]
+    )
+    assert calkit.ryaml.load(on_demand)["on"] == {"workflow_dispatch": None}
+    assert "\non:\n  workflow_dispatch:\n\npermissions:" in on_demand
+    default = calkit.resources.render_github_actions_workflow()
+    assert on_demand.replace("  workflow_dispatch:\n", "") == default.replace(
+        "  push:\n    branches:\n      - main\n  pull_request:\n"
+        "  workflow_dispatch:\n",
+        "",
+    )
+    assert not calkit.resources.is_default_github_actions_workflow(on_demand)
+    for on, expected in [
+        ("push", {"push": None}),
+        (["push", "pull_request"], {"push": None, "pull_request": None}),
+        ({"push": {"branches": ["main"]}}, {"push": {"branches": ["main"]}}),
+    ]:
+        txt = calkit.resources.set_workflow_triggers(on_demand, on)
+        assert calkit.ryaml.load(txt)["on"] == expected
+    # Even when a YAML 1.1 writer quoted the key
+    quoted = calkit.resources.set_workflow_triggers(
+        "'on': push\njobs: {}\n", "workflow_dispatch"
+    )
+    assert calkit.ryaml.load(quoted) == {
+        "on": {"workflow_dispatch": None},
+        "jobs": {},
+    }
+    # Whether a workflow can be started, however its triggers are written
+    for txt, can in [
+        (pinned, True),
+        (on_demand, True),
+        ("on: workflow_dispatch\n", True),
+        ("on: [push, workflow_dispatch]\n", True),
+        ("'on':\n  push:\n", False),
+        ("on: push\n", False),
+        ("jobs: {}\n", False),
+        ("{{ not yaml\n", False),
+        ("just text\n", False),
+        ("- on\n", False),
+    ]:
+        assert calkit.resources.can_start_workflow(txt) is can, txt
+    # Every workflow that runs the action is found, in name order, but not
+    # others
+    assert calkit.resources.find_run_workflows(str(tmp_path)) == []
+    workflows_dir = tmp_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True)
+    (workflows_dir / "tests.yml").write_text(other)
+    (workflows_dir / "run.yaml").write_text(pinned)
+    (workflows_dir / "on-demand.yml").write_text(on_demand)
+    (workflows_dir / "notes.txt").write_text(pinned)
+    # Nor symlinks, which could point anywhere, or files too big to be one
+    outside = tmp_path / "outside.yml"
+    outside.write_text(pinned)
+    (workflows_dir / "link.yml").symlink_to(outside)
+    (workflows_dir / "huge.yml").write_text(
+        pinned + "#" * calkit.resources.MAX_WORKFLOW_BYTES
+    )
+    assert calkit.resources.find_run_workflows(str(tmp_path)) == [
+        ("on-demand.yml", on_demand),
+        ("run.yaml", pinned),
+    ]
+    # A workflows folder that's a symlink out of the project is skipped too
+    other_project = tmp_path / "other"
+    (other_project / ".github").mkdir(parents=True)
+    (other_project / ".github" / "workflows").symlink_to(workflows_dir)
+    assert calkit.resources.find_run_workflows(str(other_project)) == []
     # The bundled copy is generated from the action's own example, which is
     # only present in the repo, not in an installed package
     repo_copy = os.path.join(

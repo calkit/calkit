@@ -1,15 +1,20 @@
 """Tests for ``calkit.pipeline``."""
 
+import hashlib
+import json
 import os
+import shutil
 import subprocess
 import sys
 import warnings
 from pathlib import Path
+from unittest import mock
 
 import git
 import pytest
 
 import calkit
+import calkit.docker
 import calkit.git
 import calkit.notebooks
 import calkit.pipeline
@@ -228,7 +233,34 @@ def test_to_dvc():
     assert "something" in matrix["param_a"]
     outs = dvc_stages["process-data"]["outs"]
     assert outs[0] == "out-${item.param_a}.txt"
-    print(dvc_stages)
+    # A flag and its value in one item still splits, with a warning even
+    # when it ends in a backslash, and an iterated value with a space in it
+    # stays one argument
+    ck_info["pipeline"]["stages"] = {
+        "plot": {
+            "kind": "python-script",
+            "script_path": "plot.py",
+            "args": [
+                "--theta {theta}",
+                "--output C:\\tmp\\",
+                "--title",
+                "{title}",
+            ],
+            "environment": "py",
+            "iterate_over": [
+                {"arg_name": "theta", "values": [1]},
+                {"arg_name": "title", "values": ["a b"]},
+            ],
+        }
+    }
+    with pytest.warns(UserWarning) as record:
+        dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    messages = [str(w.message) for w in record]
+    assert any("['--theta', '{theta}']" in m for m in messages)
+    assert any(r"['--output', 'C:\\tmp\\']" in m for m in messages)
+    assert dvc_stages["plot"]["cmd"].endswith(
+        "plot.py --theta ${item.theta} --output C:\\tmp\\ --title ${item.title}"
+    )
 
 
 def test_to_dvc_from_matrix_outs():
@@ -833,6 +865,26 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
                 "command": "make plain",
                 "environment": "gpu",
             },
+            # Each shell skips the user's startup files its own way, and a
+            # POSIX sh, which reads none here, takes no options for it
+            "posix": {
+                "kind": "shell-command",
+                "command": "make posix",
+                "environment": "gpu",
+                "shell": "sh",
+            },
+            "z": {
+                "kind": "shell-command",
+                "command": "make z",
+                "environment": "gpu",
+                "shell": "zsh",
+            },
+            "script": {
+                "kind": "shell-script",
+                "script_path": "run.sh",
+                "environment": "gpu",
+                "shell": "sh",
+            },
             # Written the old way, under the scheduler block
             "legacy": {
                 "kind": "shell-command",
@@ -850,6 +902,9 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
         prefix = stages[name]["cmd"].split(" -- ")[0]
         assert "'" not in prefix and '"' not in prefix, name
         assert "--env-default-setup" not in stages[name]["cmd"], name
+    assert stages["posix"]["cmd"].endswith(' -- sh -c "make posix"')
+    assert stages["z"]["cmd"].endswith(' -- zsh -f -c "make z"')
+    assert stages["script"]["cmd"].endswith(" -- sh run.sh")
     assert stages["build"]["cmd"].startswith(
         "calkit xenv -n gpu --no-check "
         "--setup-file .calkit/stage-setup/build.json --"
@@ -955,8 +1010,7 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
 
 
 def test_env_inputs_become_stage_inputs(tmp_dir):
-    # Covers env-level 'inputs' on the kinds that run setup commands, and
-    # the 'deps' alias
+    # Covers env-level 'inputs' and the 'deps' alias
     envs = {
         "gpu": {
             "kind": "system",
@@ -980,9 +1034,19 @@ def test_env_inputs_become_stage_inputs(tmp_dir):
             "image": "some-image",
             "deps": ["Dockerfile.extra"],
         },
+        "py": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "inputs": ["pkg/setup.py"],
+        },
     }
     pipeline = {
         "stages": {
+            "in-venv": {
+                "kind": "shell-command",
+                "command": "make venv",
+                "environment": "py",
+            },
             "build": {
                 "kind": "shell-command",
                 "command": "make",
@@ -1027,6 +1091,9 @@ def test_env_inputs_become_stage_inputs(tmp_dir):
     assert "--dep scripts/cluster_setup.sh" in stages["job"]["cmd"]
     # Docker deps are the image's, not the stage's
     assert "Dockerfile.extra" not in stages["containerized"]["deps"]
+    # Any other kind's inputs are what it's built from, so stages depend
+    # on them too
+    assert "pkg/setup.py" in stages["in-venv"]["deps"]
 
 
 def test_slurm_env_validation_rules(tmp_dir):
@@ -1677,6 +1744,330 @@ def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     assert "# >>> calkit latex aux files (managed by calkit) >>>" in lines
     assert "*.aux" in lines
     assert "*.pdf" not in lines
+    # Including what packages like endnotes and nomencl write
+    assert repo.ignored("paper/main.ent")
+    assert repo.ignored("paper/main.nlo")
+
+
+def test_to_dvc_latex_component_deps(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("paper/sections")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "\\input{sections/results}\n"
+            "\\input{sections/latin}\n"
+            "\\ckfigure{figures/plot}\n"
+            "\\ckfigure{figures/typo.png}\n"
+            "\\ckfigure{figures/photo.png}\n"
+            "\\ckvalue{data/summary.json}{n}\n"
+            "\\ckvalue{../outside.json}{secret}\n"
+            "\\includegraphics{figures/drawn}\n"
+            "\\includegraphics{figures/exported.png}\n"
+            "\\includegraphics{figures/rebuilt}\n"
+            "\\newcommand{\\fig}[1]{\\includegraphics{figures/#1}}\n"
+            "\\includegraphics{\\figdir/macro}\n"
+            "\\includegraphics{figures/missing.jpeg}\n"
+            "\\end{document}\n"
+        )
+    with open("paper/sections/results.tex", "w") as f:
+        f.write("\\ckvalue[.2f]{results/metrics.json}{rmse}\n")
+    # Not UTF-8, which mustn't stop the pipeline compiling
+    with open("paper/sections/latin.tex", "wb") as fb:
+        fb.write("Caf\u00e9\n".encode("latin-1"))
+    # Another document in the same folder, using something else
+    with open("paper/other.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "\\ckvalue{results/other.json}{x}\n\\end{document}\n"
+        )
+    # A figure no stage makes, and one included plainly, beside the paper
+    os.makedirs("figures")
+    with open("figures/photo.png", "wb") as fb:
+        fb.write(b"photo")
+    os.makedirs("paper/figures")
+    with open("paper/figures/drawn.png", "wb") as fb:
+        fb.write(b"drawn")
+    # Left over from before a stage made it as a PDF
+    with open("paper/figures/rebuilt.png", "wb") as fb:
+        fb.write(b"rebuilt")
+    os.makedirs("results")
+    for name, content in [
+        ("metrics", '{"rmse": 0.123}'),
+        ("other", '{"x": 1}'),
+    ]:
+        with open(f"results/{name}.json", "w") as f:
+            f.write(content)
+    # Components kept in other ways, in a document of their own
+    os.makedirs("extra/plots")
+    with open("extra/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\usepackage{calkit}\n"
+            "\\begin{document}\n"
+            "\\ckfigure{maps/world}\n\\ckfigure{maps/typo.png}\n"
+            "\\ckfigure{photos/cat}\n\\ckfigure{images/logo.png}\n"
+            "\\ckfigure{figures/fit_1.5}\n\\ckfigure{figures/sweep-2}\n"
+            "\\includegraphics{plots/a}\n"
+            "\\end{document}\n"
+        )
+    os.makedirs("images")
+    for path in ["images/logo.png", "images/logo.png.dvc", "photos.dvc"]:
+        with open(path, "w") as f:
+            f.write("x")
+    for path in [
+        "figures/fit_1.5.pdf",
+        "figures/sweep-2.png",
+        "extra/plots/a.png",
+    ]:
+        with open(path, "w") as f:
+            f.write("x")
+    # Tracked by DVC but not pulled
+    os.makedirs("data")
+    with open("data/summary.json.dvc", "w") as f:
+        f.write("outs:\n- md5: abc\n  path: summary.json\n")
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                # Makes the figure, which hasn't run yet
+                "plot": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo png > figures/plot.png",
+                    "outputs": ["figures/plot.png"],
+                },
+                "build-paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                },
+                # Exports a figure the paper includes plainly, which isn't
+                # there until it runs
+                "export": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo png > paper/figures/exported.png",
+                    "outputs": [
+                        "paper/figures/exported.png",
+                        "paper/figures/rebuilt.pdf",
+                    ],
+                },
+                # Its outputs are a pattern matching most figure names
+                "render": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo {n} > paper/figures/{n}.pdf",
+                    "outputs": ["paper/figures/{n}.pdf"],
+                    "iterate_over": [{"arg_name": "n", "values": ["a", "b"]}],
+                },
+                "build-other": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/other.tex",
+                },
+                "maps": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "mkdir maps",
+                    "outputs": ["maps"],
+                },
+                "sweep": {
+                    "kind": "python-script",
+                    "environment": "_system",
+                    "script_path": "sweep.py",
+                    "args": ["{n}"],
+                    "outputs": ["figures/sweep-{n}.png"],
+                    "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
+                },
+                "plots": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "mkdir -p extra/plots",
+                    "outputs": ["extra/plots"],
+                },
+                "build-extra": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "extra/main.tex",
+                    "inputs": [{"from_stage_outputs": "plots"}],
+                },
+                # Paths in a stage are relative to its wdir, while component
+                # paths are relative to the project
+                "build-paper-wdir": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "wdir": "paper",
+                    "target_path": "main.tex",
+                    "inputs": ["figures/"],
+                },
+            }
+        },
+    }
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    # The document depends on what it includes that's there, tracked by DVC,
+    # or made by a stage, including through an input, so it builds after the
+    # stages making them; a typo or something outside the project prints as
+    # ?? rather than stopping the run
+    deps = stages["build-paper"]["deps"]
+    assert deps[0] == "paper/main.tex"
+    assert {
+        "results/metrics.json",
+        "figures/plot.png",
+        "data/summary.json",
+    } <= set(deps)
+    assert not any("typo" in d or "outside" in d for d in deps)
+    # What it includes plainly is read just the same, whether it's there or
+    # a stage makes it, and so is a file it inputs
+    assert {
+        "paper/figures/drawn.png",
+        "paper/figures/exported.png",
+        "paper/figures/rebuilt.pdf",
+        "paper/sections/results.tex",
+    } <= set(deps)
+    # But not a macro's parameter, a name built from macros, an extension
+    # added to one already there, or a file that's not there in place of
+    # one that is, just since an iterated stage's outputs match them, though
+    # one a stage declares wins as TeX would pick it
+    assert not [
+        d
+        for d in deps
+        if d.startswith("paper/figures/")
+        and d
+        not in [
+            "paper/figures/drawn.png",
+            "paper/figures/exported.png",
+            "paper/figures/rebuilt.pdf",
+        ]
+    ]
+    assert not any("#" in d or "macro" in d for d in deps)
+    # And on the copies it reads, like a cleaned notebook, so a new value or
+    # calkit.sty rebuilds it, except a figure a stage makes, which is copied
+    # only after DVC checks the stage's dependencies are there
+    assert {
+        "paper/calkit.sty",
+        "paper/_calkit/values.tex",
+        "paper/_calkit/figures/photo.png",
+    } <= set(deps)
+    assert "paper/_calkit/figures/plot.png" not in deps
+    assert "paper/_calkit" not in deps
+    assert (
+        "paper/_calkit/figures/photo.png"
+        not in (stages["build-other"]["deps"])
+    )
+    # Documents in one folder depend only on what each includes
+    assert "results/other.json" in stages["build-other"]["deps"]
+    assert "results/other.json" not in deps
+    assert "results/metrics.json" not in stages["build-other"]["deps"]
+    # One in a folder a stage makes or DVC stores depends on the folder,
+    # since which file it is, if any, isn't known until it's there, and only
+    # a copy of a file kept in Git is there before the stage runs on any
+    # clone, so a file stored with DVC is depended on itself
+    deps = stages["build-extra"]["deps"]
+    assert {"maps", "photos", "images/logo.png"} <= set(deps)
+    assert not any(d.startswith(("maps/", "photos/")) for d in deps)
+    assert "extra/_calkit/images/logo.png" not in deps
+    # Nor is a file an iterated stage makes, once it's there
+    assert "figures/sweep-2.png" in deps
+    assert "extra/_calkit/figures/sweep-2.png" not in deps
+    # A dot in a name isn't taken for an extension
+    assert {"figures/fit_1.5.pdf", "extra/_calkit/figures/fit_1.5.pdf"} <= set(
+        deps
+    )
+    # What's in a folder it reads from another stage is already covered
+    assert "extra/plots" in deps
+    assert "extra/plots/a.png" not in deps
+    deps = stages["build-paper-wdir"]["deps"]
+    assert {
+        "../figures/plot.png",
+        "../results/metrics.json",
+        "_calkit/values.tex",
+        "_calkit/figures/photo.png",
+        "calkit.sty",
+    } <= set(deps)
+    # And so is what's in a folder it declares
+    assert "figures/" in deps
+    assert not any(d.startswith("figures/") and d != "figures/" for d in deps)
+    # A document that doesn't load calkit.sty depends on no copies
+    os.makedirs("plain")
+    with open("plain/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    ck_info["pipeline"]["stages"]["build-plain"] = {
+        "kind": "latex",
+        "environment": "tex",
+        "target_path": "plain/main.tex",
+    }
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    assert not any(
+        "_calkit" in d or d.endswith("calkit.sty")
+        for d in stages["build-plain"]["deps"]
+    )
+    # Compiling for a run or check maps the components in, kept out of Git,
+    # with one stage building each PDF, as DVC requires
+    for name in [
+        "build-paper-wdir",
+        "maps",
+        "sweep",
+        "build-extra",
+        "export",
+        "render",
+        "plots",
+    ]:
+        del ck_info["pipeline"]["stages"][name]
+    del ck_info["pipeline"]["stages"]["build-plain"]
+    with open("figures/plot.png", "wb") as fb:
+        fb.write(b"png")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(write=True, preprocess_stages=True)
+    with open("paper/_calkit/values.tex") as f:
+        values = f.read()
+    assert "{rmse}{n}{0.123}" in values
+    assert "{results/other.json}{x}{n}{1}" in values
+    assert "secret" not in values
+    assert os.path.isfile("paper/_calkit/figures/plot.png")
+    assert calkit.git.get_repo().ignored("paper/calkit.sty")
+    os.makedirs(".calkit/env-locks", exist_ok=True)
+    with open(".calkit/env-locks/tex", "w") as f:
+        f.write("lock")
+    for name in ["main", "other"]:
+        with open(f"paper/{name}.pdf", "wb") as fb:
+            fb.write(b"pdf")
+    for path in ["data/summary.json.dvc", "images/logo.png.dvc", "photos.dvc"]:
+        os.remove(path)
+    calkit.pipeline.to_dvc(write=True)
+    subprocess.check_call(
+        ["dvc", "commit", "-f", "plot", "build-paper", "build-other"]
+    )
+
+    def stale() -> list[str]:
+        status = calkit.pipeline.get_status(check_environments=False)
+        assert not status.errors, status.errors
+        # Nothing the stages read is Git-ignored
+        assert not status.ignored_files_in_inputs
+        return status.stale_stage_names
+
+    assert stale() == []
+    # Without the copies, as in a fresh clone, DVC alone sees the documents
+    # as stale, but checking maps the copies in first, so they aren't
+    shutil.rmtree("paper/_calkit")
+    os.remove("paper/calkit.sty")
+    out = subprocess.check_output(["dvc", "status", "--json"], text=True)
+    assert "build-paper" in json.loads(out)
+    assert stale() == []
+    assert os.path.isfile("paper/_calkit/values.tex")
+    # A new figure makes only the document including it stale
+    with open("figures/photo.png", "wb") as fb:
+        fb.write(b"new photo")
+    assert stale() == ["build-paper"]
+    subprocess.check_call(["dvc", "commit", "-f", "build-paper"])
+    # A new value makes the document using it stale, and the other in its
+    # folder, since they share values.tex
+    with open("results/metrics.json", "w") as f:
+        f.write('{"rmse": 0.456}')
+    assert sorted(stale()) == ["build-other", "build-paper"]
 
 
 def test_get_status(tmp_dir):
@@ -1712,7 +2103,16 @@ def test_get_status(tmp_dir):
             "with open('my-output.out', 'w') as f:\n"
             "    f.write('Hello, world!')\n"
         )
-    status = calkit.pipeline.get_status(ck_info=ck_info)
+    # Each step is reported as it starts, with each environment checked
+    steps: list[str] = []
+    status = calkit.pipeline.get_status(ck_info=ck_info, progress=steps.append)
+    assert steps == [
+        "Checking environments",
+        "Checking environment 'py'",
+        "Compiling pipeline",
+        "Cleaning notebooks",
+        "Finding stale stages",
+    ]
     assert not status.failed_environment_checks
     assert status.is_stale
     assert "get-data" in status.stale_stage_names
@@ -1754,6 +2154,55 @@ def test_get_status(tmp_dir):
     ]
     assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
     assert status.stale_stages["get-data"].modified_outputs == []
+    # Paths tracked where they shouldn't be are found only when asked for,
+    # with the DVC index the status already built
+    assert status.storage_problems is None
+    subprocess.check_call(["git", "add", "-f", "my-output.out"])
+    status = calkit.pipeline.get_status(
+        ck_info=ck_info, with_storage_problems=True
+    )
+    assert status.storage_problems is not None
+    assert [p["path"] for p in status.storage_problems] == ["my-output.out"]
+    assert "storage_problems" not in status.model_dump()
+    # Docker not running doesn't stop the status from being worked out; only
+    # a Docker environment that has to be checked again fails
+    ck_info["environments"]["d"] = {"kind": "docker", "image": "alpine"}
+    ck_info["pipeline"]["stages"]["in-docker"] = {
+        "kind": "command",
+        "command": "echo hi",
+        "environment": "d",
+    }
+    not_running = calkit.docker.DockerNotReadyError("not running")
+    with (
+        mock.patch("calkit.docker.ensure_ready", side_effect=not_running),
+        mock.patch(
+            "calkit.cli.check.check_environment", side_effect=not_running
+        ),
+    ):
+        status = calkit.pipeline.get_status(ck_info=ck_info)
+        assert not status.errors
+        assert status.failed_environment_checks == ["d"]
+        # Nor when it can't be started
+        start_docker = mock.Mock(side_effect=not_running)
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, start_docker=start_docker
+        )
+        start_docker.assert_called_once()
+        assert status.failed_environment_checks == ["d"]
+    # Once it's started, its environment is checked as usual
+    with (
+        mock.patch(
+            "calkit.docker.ensure_ready", side_effect=[not_running, None]
+        ),
+        mock.patch("calkit.cli.check.check_environment"),
+    ):
+        start_docker = mock.Mock()
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info, start_docker=start_docker
+        )
+    start_docker.assert_called_once()
+    assert not status.errors
+    assert not status.failed_environment_checks
 
 
 def test_get_status_excludes_frozen_stage(tmp_dir):
@@ -2333,9 +2782,15 @@ def test_translate_run_targets(tmp_dir):
     subprocess.check_call(["git", "init"])
     os.makedirs("inline-sp/calkit", exist_ok=True)
     os.makedirs("isolated-sp/.dvc", exist_ok=True)
+    # Each has an inline subproject of its own
+    for sp in ["inline-sp", "isolated-sp"]:
+        os.makedirs(f"{sp}/nested")
+        with open(f"{sp}/nested/calkit.yaml", "w") as f:
+            calkit.ryaml.dump({"name": "nested"}, f)
     with open("inline-sp/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
+                "subprojects": [{"path": "nested"}],
                 "pipeline": {
                     "stages": {
                         "stage-a": {
@@ -2349,14 +2804,21 @@ def test_translate_run_targets(tmp_dir):
                             "target_path": "main.tex",
                             "diffs": ["v1"],
                         },
+                        "report": {
+                            "kind": "markdown",
+                            "target_path": "report.md",
+                        },
                     }
-                }
+                },
             },
             f,
         )
+    with open("inline-sp/report.md", "w") as f:
+        f.write("```python calkit stage name=plot environment=env\n1\n```\n")
     with open("isolated-sp/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
+                "subprojects": [{"path": "nested"}],
                 "pipeline": {
                     "stages": {
                         "stage-b": {
@@ -2371,7 +2833,7 @@ def test_translate_run_targets(tmp_dir):
                             "diffs": ["v1"],
                         },
                     }
-                }
+                },
             },
             f,
         )
@@ -2411,6 +2873,11 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:paper-diff-v1"]
     assert isolated == [("isolated-sp", "paper-diff-v1")]
+    # As can a subproject's markdown stage, read from its own directory
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp:report"], ck_info=ck_info
+    )
+    assert parent == ["inline-sp/dvc.yaml:report/plot"]
     # Unrecognized targets pass through unchanged
     parent, isolated = calkit.pipeline.translate_run_targets(
         ["my-parent-stage"], ck_info=ck_info
@@ -2424,6 +2891,37 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:stage-a", "my-parent-stage"]
     assert isolated == [("isolated-sp", "stage-b")]
+    # A nested subproject is named by its path, and run by the nearest
+    # project with its own DVC repo
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp/nested:s", "inline-sp/nested", "isolated-sp/nested:s"],
+        ck_info=ck_info,
+    )
+    assert parent == [
+        "inline-sp/nested/dvc.yaml:s",
+        "inline-sp/nested/dvc.yaml",
+    ]
+    assert isolated == [("isolated-sp", "nested/dvc.yaml:s")]
+    # A nested one's directory name works too, unless it's ambiguous, as
+    # here, where both subprojects have one called 'nested'
+    with pytest.raises(
+        ValueError, match="inline-sp/nested, isolated-sp/nested"
+    ):
+        calkit.pipeline.translate_run_targets(["nested:s"], ck_info=ck_info)
+    os.rename("isolated-sp/nested", "isolated-sp/other")
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["nested:s", "nested"], ck_info=ck_info
+    )
+    assert parent == [
+        "inline-sp/nested/dvc.yaml:s",
+        "inline-sp/nested/dvc.yaml",
+    ]
+    # But a bare name is this project's stage first
+    ck_info["pipeline"] = {"stages": {"nested": {}}}
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["nested"], ck_info=ck_info
+    )
+    assert parent == ["nested"]
 
 
 def test_get_concurrent_scheduler_stages():
@@ -2629,10 +3127,20 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert "*.aux" in contents
     assert "*.fdb_latexmk" in contents
     assert "*.synctex.gz" in contents
+    assert "*.log" in contents
     # The compiled PDF must never be ignored
     assert "*.pdf" not in contents
     assert "managed by calkit" in contents
     assert contents.count("# >>> calkit latex aux files") == 1
+    # calkit.sty is only ignored for a document that loads it, which only
+    # then gets one
+    assert "/calkit.sty" not in contents
+    stage._loads_calkit = True
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "/calkit.sty" in f.read()
+    stage._loads_calkit = False
+    assert _ensure_latex_aux_gitignore(stage)
     # Idempotent: re-running makes no change
     assert _ensure_latex_aux_gitignore(stage) is False
     # The globs are unanchored regardless of output_dir, so they catch aux
@@ -2647,6 +3155,59 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     # The block is not duplicated and the unrelated entry survives
     assert contents.count("# >>> calkit latex aux files") == 1
     assert "figs/*.png" in contents
+    # An aux dir is ignored whole, since packages write files with any
+    # extension, but not one outside the source directory
+    stage.output_dir = None
+    stage.aux_dir = "paper/aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        contents = f.read()
+    assert "/aux/*\n" in contents
+    assert "!/aux/*.pdf" not in contents
+    # Unless the PDF goes there too
+    stage.output_dir = "paper/aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "!/aux/*.pdf" in f.read()
+    # One outside it ignores itself, keeping anything else in its .gitignore
+    stage.output_dir = None
+    stage.aux_dir = "build/aux"
+    os.makedirs("build/aux")
+    with open("build/aux/.gitignore", "w") as f:
+        f.write("mine\n")
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "aux/*" not in f.read()
+    with open("build/aux/.gitignore") as f:
+        contents = f.read()
+    assert contents.startswith("mine\n")
+    assert "\n*\n" in contents
+    assert "!*.pdf" not in contents
+    assert _ensure_latex_aux_gitignore(stage) is False
+    # Including one above the source directory, created if need be
+    for aux_dir, output_dir in [("aux", None), ("aux", "aux")]:
+        stage.aux_dir = aux_dir
+        stage.output_dir = output_dir
+        assert _ensure_latex_aux_gitignore(stage)
+        with open("aux/.gitignore") as f:
+            contents = f.read()
+        assert "\n*\n" in contents
+        assert ("!*.pdf" in contents) == (output_dir is not None)
+    # But not the project itself or one outside it
+    stage.output_dir = None
+    for aux_dir in [".", "build/../", "..", "../aux", "/aux", "C:\\aux"]:
+        stage.aux_dir = aux_dir
+        assert _ensure_latex_aux_gitignore(stage) is False
+    assert not os.path.exists(".gitignore")
+    assert not os.path.exists("../aux")
+    # Nor the source directory itself
+    stage.aux_dir = "paper"
+    assert _ensure_latex_aux_gitignore(stage) is False
+    # Windows separators name the same directory
+    stage.aux_dir = "paper\\aux"
+    assert _ensure_latex_aux_gitignore(stage)
+    with open(gitignore_path) as f:
+        assert "/aux/*\n" in f.read()
     # When the stage has a wdir, paths are relative to it, so the .gitignore
     # lands under <wdir>/<source dir>, not the project root
     os.makedirs("sub/doc")
@@ -2903,6 +3464,86 @@ def test_revision_key(tmp_dir):
         assert key("HEAD") == key("main")
     finally:
         os.chdir(cwd)
+
+
+def test_to_dvc_working_tree_latex_diff_staleness(tmp_dir):
+    import calkit.pipeline
+
+    def commit(message: str) -> None:
+        subprocess.check_call(["git", "add", "-A"])
+        subprocess.check_call(
+            [
+                "git",
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-qm",
+                message,
+            ]
+        )
+
+    def status() -> dict:
+        out = subprocess.check_output(
+            ["calkit", "dvc", "status", "--json", stage], text=True
+        )
+        return json.loads(out)
+
+    subprocess.check_call(["git", "init", "-q", "-b", "main", "."])
+    subprocess.check_call(["calkit", "dvc", "init", "-q"])
+    os.makedirs("paper/figs")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\includegraphics{figs/plot}\n")
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("old\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    commit("first")
+    subprocess.check_call(["git", "tag", "v1"])
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                    "inputs": ["paper/figs"],
+                    "diffs": ["v1"],
+                }
+            }
+        },
+    }
+    stage = "paper-diff-v1"
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    # Stands in for building the diff, recording what it read
+    os.makedirs(".calkit/env-locks/tex")
+    with open(".calkit/env-locks/tex/arm64.json", "w") as f:
+        f.write("{}\n")
+    out = ".calkit/latex-diffs/v1/paper/main.pdf"
+    os.makedirs(os.path.dirname(out))
+    with open(out, "w") as f:
+        f.write("diff\n")
+    subprocess.check_call(["calkit", "dvc", "commit", "-qf", stage])
+    assert status() == {}
+    # Committing what was checked changes nothing the diff reads, so it
+    # stays current rather than needing a second commit
+    commit("second")
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert status() == {}
+    # A change to a DVC-tracked figure in the working tree makes it stale
+    # before anything is committed, since the figures are dependencies
+    with open("paper/figs/plot.png", "w") as f:
+        f.write("new\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "paper/figs"])
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert stage in status()
+    subprocess.check_call(["calkit", "dvc", "commit", "-qf", stage])
+    assert status() == {}
+    # So does an edit to the document itself
+    with open("paper/main.tex", "a") as f:
+        f.write("More text\n")
+    assert stage in status()
 
 
 def test_to_dvc_unfilters_notebook_outputs(tmp_dir):
@@ -3551,3 +4192,901 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open(".gitattributes") as f:
         assert f.read().count("/.calkit/** text eol=lf") == 1
+
+
+def test_get_stage_for_output_reads_map_paths_destinations():
+    from typing import Any
+
+    from calkit.pipeline import get_map_paths_source, get_stage_for_output
+
+    ck_info: dict[str, Any] = {
+        "pipeline": {
+            "stages": {
+                "copy": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-file",
+                            "src": "figures/a.png",
+                            "dest": "paper/figures/a.png",
+                        },
+                        {
+                            "kind": "file-to-dir",
+                            "src": "figures/b.png",
+                            "dest": "paper/figures",
+                        },
+                        {
+                            "kind": "dir-to-dir-merge",
+                            "src": "shared",
+                            "dest": "paper/shared",
+                        },
+                    ],
+                },
+                "plot": {
+                    "kind": "python-script",
+                    "script_path": "plot.py",
+                    "environment": "py",
+                    "outputs": ["figures/a.png"],
+                },
+            }
+        }
+    }
+    assert get_stage_for_output("paper/figures/a.png", ck_info) == "copy"
+    # file-to-dir writes dest/<name>, not dest
+    assert get_stage_for_output("paper/figures/b.png", ck_info) == "copy"
+    # A directory mapping produces everything it writes into
+    assert get_stage_for_output("paper/shared/x/y.tex", ck_info) == "copy"
+    assert get_stage_for_output("paper/shared", ck_info) == "copy"
+    # The original is still the plotting stage's
+    assert get_stage_for_output("figures/a.png", ck_info) == "plot"
+    assert get_stage_for_output("paper/figures/nope.png", ck_info) is None
+    # A copy leads back to its original, which is how a paper's figure is
+    # traced to the stage that plotted it
+    stages = ck_info["pipeline"]["stages"]
+    for copy, original in [
+        ("paper/figures/a.png", "figures/a.png"),
+        ("paper/figures/b.png", "figures/b.png"),
+        ("paper/shared/x/y.tex", "shared/x/y.tex"),
+        ("paper/figures/nope.png", None),
+    ]:
+        assert get_map_paths_source(stages["copy"], copy) == original
+    assert get_map_paths_source(stages["plot"], "figures/a.png") is None
+    # Paths in a stage are relative to its wdir
+    stages["copy"]["wdir"] = "sub"
+    stages["plot"]["wdir"] = "analysis"
+    assert get_stage_for_output("sub/paper/figures/a.png", ck_info) == "copy"
+    assert (
+        get_map_paths_source(stages["copy"], "sub/paper/figures/a.png")
+        == "sub/figures/a.png"
+    )
+    assert get_stage_for_output("paper/figures/a.png", ck_info) is None
+    assert get_stage_for_output("analysis/figures/a.png", ck_info) == "plot"
+    # A merge into the project root doesn't claim every path
+    stages["copy"]["wdir"] = None
+    stages["copy"]["paths"][2]["dest"] = "."
+    assert get_stage_for_output("data/raw.csv", ck_info) is None
+    # A pipeline can be null
+    assert get_stage_for_output("figures/a.png", {"pipeline": None}) is None
+
+
+def test_table_iteration_names(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+
+    def stage(values):
+        return {
+            "kind": "shell-command",
+            "environment": "_system",
+            "command": "echo {scenario}{sfx}-{seed} > s{scenario}-{seed}.txt",
+            "iterate_over": [
+                {"arg_name": ["scenario", "sfx"], "values": values},
+                {"arg_name": "seed", "values": [1, 2]},
+            ],
+            "outputs": ["s{scenario}-{seed}.txt"],
+        }
+
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "ev": stage([[1, ""], [3, "_mm"]]),
+                "plain": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "echo {n} > n{n}.txt",
+                    "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
+                    "outputs": ["n{n}.txt"],
+                },
+                "collect": {
+                    "kind": "shell-command",
+                    "environment": "_system",
+                    "command": "cat s*.txt > all.txt",
+                    "inputs": [{"from_stage_outputs": "ev"}],
+                    "outputs": ["all.txt"],
+                },
+            }
+        }
+    }
+    # An existing project ran its table items under their positions
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "schema": "2.0",
+                "stages": {
+                    "ev@_arg00-1": {"cmd": "a"},
+                    "ev@_arg01-2": {"cmd": "b"},
+                    "plain@1": {"cmd": "c"},
+                },
+            },
+            f,
+        )
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    # Callers still get the matrix form
+    assert "matrix" in stages["ev"]
+    with open("dvc.yaml") as f:
+        written = calkit.ryaml.load(f)["stages"]
+    # Written, a table row is named by its values, blanks left out
+    assert list(written["ev"]["foreach"]) == [
+        "1-1",
+        "1-2",
+        "3-_mm-1",
+        "3-_mm-2",
+    ]
+    assert written["ev"]["foreach"]["3-_mm-2"] == {
+        "scenario": 3,
+        "sfx": "_mm",
+        "seed": 2,
+    }
+    assert written["ev"]["do"]["outs"] == [
+        "s${item.scenario}-${item.seed}.txt"
+    ]
+    # A stage without a table keeps DVC's own naming
+    assert "matrix" in written["plain"]
+    # What depends on the items still sees each one
+    assert written["collect"]["deps"] == [
+        "s1-1.txt",
+        "s1-2.txt",
+        "s3-1.txt",
+        "s3-2.txt",
+    ]
+    # Lock entries follow, so what ran under the old names is still current
+    with open("dvc.lock") as f:
+        lock = calkit.ryaml.load(f)["stages"]
+    assert list(lock) == ["ev@1-1", "ev@3-_mm-2", "plain@1"]
+    assert lock["ev@3-_mm-2"] == {"cmd": "b"}
+    names = subprocess.check_output(["dvc", "stage", "list", "--name-only"])
+    assert "ev@3-_mm-2" in names.decode()
+    # Rows that would share a name keep DVC's positional names
+    ck_info["pipeline"]["stages"]["ev"] = stage([["a", ""], ["", "a"]])
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open("dvc.yaml") as f:
+        assert "matrix" in calkit.ryaml.load(f)["stages"]["ev"]
+
+
+def test_switch_env_compiles(tmp_dir):
+    environments = {
+        "cluster": {
+            "kind": "switch",
+            "switch": [
+                {
+                    "when": [{"app_exists": "sbatch"}],
+                    "use": "slurm-env",
+                },
+                {"use": "here"},
+            ],
+        },
+        "slurm-env": {"kind": "slurm"},
+        "here": {"kind": "system", "default_setup": ["export A=1"]},
+        "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        "py-a": {"kind": "uv-venv", "path": "a/requirements.txt"},
+        "rt": {
+            "kind": "switch",
+            "switch": [
+                {
+                    "when": [{"os_is": "windows"}],
+                    "use": "py-a",
+                },
+                {"use": "py"},
+            ],
+        },
+    }
+    subprocess.check_call(["calkit", "init"])
+    with open("requirements.txt", "w") as f:
+        f.write("idna\n")
+    # A switch of machines compiles like a scheduler stage, resolving where
+    # it runs, and stages depend on its lock directory, not its options'
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": environments,
+            "pipeline": {
+                "stages": {
+                    "train": {
+                        "kind": "python-script",
+                        "script_path": "train.py",
+                        "environment": "cluster:py",
+                        "setup": ["export B=2"],
+                    },
+                    "plain": {
+                        "kind": "shell-command",
+                        "command": "echo hi",
+                        "environment": "cluster",
+                    },
+                    "per-os": {
+                        "kind": "python-script",
+                        "script_path": "s.py",
+                        "environment": "rt",
+                    },
+                }
+            },
+        },
+        write=True,
+    )
+    train = stages["train"]
+    assert train["cmd"].startswith("calkit scheduler batch --name train")
+    assert "--environment cluster" in train["cmd"]
+    # In a file, since a pick of this machine may run it through cmd.exe
+    assert "--setup-file .calkit/stage-setup/train.json" in train["cmd"]
+    assert "calkit xenv -n py --no-check --" in train["cmd"]
+    assert ".calkit/env-locks/cluster" in train["deps"]
+    assert ".calkit/env-locks/slurm-env" not in train["deps"]
+    assert ".calkit/env-locks/py" in train["deps"]
+    assert os.path.isfile(".calkit/env-locks/cluster/switch.json")
+    assert any(
+        ".calkit/scheduler/logs/train.out" in o
+        for o in train["outs"]
+        if isinstance(o, dict)
+    )
+    assert "--environment cluster" in stages["plain"]["cmd"]
+    # A switch of runtimes is resolved by 'calkit xenv'
+    per_os = stages["per-os"]
+    assert per_os["cmd"].startswith("calkit xenv -n rt --no-check --")
+    assert ".calkit/env-locks/rt" in per_os["deps"]
+    assert ".calkit/env-locks/py" not in per_os["deps"]
+    # ...and so can't wrap another env
+    for env_name, match in [
+        ("rt:py", "switch between runtimes"),
+        ("cluster:here", "must not be a job scheduler"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            calkit.pipeline.to_dvc(
+                ck_info={
+                    "environments": environments,
+                    "pipeline": {
+                        "stages": {
+                            "s": {
+                                "kind": "python-script",
+                                "script_path": "s.py",
+                                "environment": env_name,
+                            }
+                        }
+                    },
+                },
+                write=False,
+            )
+
+
+def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
+    import calkit.install
+
+    monkeypatch.delenv("CK_TEST_TOKEN", raising=False)
+    monkeypatch.setattr(calkit, "get_machine_id", lambda: "ab-cd")
+    # An app with an installer, which a check would offer to install
+    monkeypatch.setitem(
+        calkit.install.INSTALLERS,
+        "calkit-test-no-such-app",
+        calkit.install.INSTALLERS["uv"],
+    )
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "system",
+                "requirements": [{"kind": "hostname", "matches": "*"}],
+            },
+            "cluster-only": {
+                "kind": "system",
+                "requirements": [
+                    {"kind": "hostname", "matches": "*.calkit-test.invalid"}
+                ],
+            },
+            "lab": {
+                "kind": "system",
+                "requirements": [{"kind": "env-var", "name": "CK_TEST_TOKEN"}],
+            },
+            "far": {
+                "kind": "system",
+                "host": "calkit-test.invalid",
+                "requirements": ["git"],
+            },
+            "far-free": {"kind": "system", "host": "calkit-test.invalid"},
+            "by-id": {"kind": "system", "machine_id": "ef-01"},
+            "needs-app": {
+                "kind": "system",
+                "requirements": ["calkit-test-no-such-app"],
+            },
+            "nowhere": {
+                "kind": "switch",
+                "switch": [
+                    {
+                        "when": [{"app_exists": "calkit-test-no-such-app"}],
+                        "use": "lab",
+                    }
+                ],
+            },
+            "typo": {
+                "kind": "switch",
+                "switch": [
+                    {
+                        "when": [{"hostname_match": "x"}],
+                        "use": "lab",
+                    },
+                    {"use": "far"},
+                ],
+            },
+            "here": {"kind": "system"},
+            "queue-here": {"kind": "slurm"},
+            "pinned": {"kind": "system", "lock": ["hostname"]},
+            "follows": {
+                "kind": "system",
+                "lock": ["hostname"],
+                "relock": "auto",
+            },
+        },
+        "pipeline": {
+            "stages": {
+                "ok": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "py",
+                },
+                "needs-token": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "_system",
+                    "requirements": [
+                        {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+                    ],
+                },
+                "on-cluster": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "cluster-only",
+                    "outputs": ["cluster.txt", "made"],
+                },
+                "uses-cluster": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": ["cluster.txt"],
+                    "outputs": [{"path": "used.txt"}],
+                },
+                "after-that": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": [{"from_stage_outputs": "uses-cluster"}],
+                },
+                "uses-made": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": ["made/x.txt"],
+                },
+                "queued": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "queue-here",
+                },
+                "in-lab": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "lab",
+                },
+                "far-away": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "far",
+                    "outputs": ["far.txt"],
+                },
+                "uses-far": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "inputs": ["far.txt"],
+                },
+                "far-free": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "far-free",
+                },
+                "by-id": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "by-id",
+                },
+                "no-app": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "needs-app",
+                },
+                "no-pick": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "nowhere",
+                },
+                "frozen": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "lab",
+                    "frozen": True,
+                },
+                "bad-switch": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "typo",
+                },
+                "here-token": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "here",
+                    "requirements": [
+                        {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+                    ],
+                },
+                "elsewhere": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "pinned",
+                },
+                "anywhere": {
+                    "kind": "shell-command",
+                    "command": "true",
+                    "environment": "follows",
+                },
+            }
+        },
+    }
+    # Locked to another machine
+    for name in ["pinned", "follows"]:
+        lock_fpath = calkit.environments.get_env_lock_fpath(
+            env=ck_info["environments"][name], env_name=name
+        )
+        assert lock_fpath is not None
+        os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
+        with open(lock_fpath, "w") as f:
+            json.dump({"hostname": "calkit-test.invalid"}, f)
+    # One of a skipped stage's outputs is already here, e.g., pulled
+    os.makedirs("made")
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, interactive=False
+    )
+    no_sbatch = shutil.which("sbatch") is None
+    assert set(gated) - {"queued"} == {
+        "needs-token",
+        "on-cluster",
+        "uses-cluster",
+        "after-that",
+        "in-lab",
+        "no-pick",
+        "here-token",
+        "elsewhere",
+        "by-id",
+        "no-app",
+    }
+    # A scheduler with no host is this machine's, which needs it installed
+    if no_sbatch:
+        assert "app 'sbatch' not found" in gated["queued"]
+        assert "giving environment 'queue-here' a 'host'" in gated["queued"]
+    # A stage needing an output a skipped stage hasn't made is skipped
+    # too, as are those after it, but not one whose input is already here
+    assert "'cluster.txt' from stage 'on-cluster'" in gated["uses-cluster"]
+    assert "'used.txt' from stage 'uses-cluster'" in gated["after-that"]
+    # A machine named by ID alone isn't one that can be reached, and one
+    # with nothing to check isn't connected to
+    assert "has no 'host' to reach it" in gated["by-id"]
+    # Checks never print to stdout, which, e.g., 'status --json' writes to
+    assert capsys.readouterr().out == ""
+    # Something being wrong isn't the project saying the stage can't run
+    assert set(errors) == {"far-away", "uses-far", "bad-switch"}
+    assert "hostname_match" in errors["bad-switch"]
+    assert "locked to another machine" in gated["elsewhere"]
+    assert "update env -n pinned --lock" in gated["elsewhere"]
+    # A stage's own requirement isn't one a host would help with
+    assert "'host'" not in gated["here-token"]
+    assert "CK_TEST_TOKEN" in gated["needs-token"]
+    assert "*.calkit-test.invalid" in gated["on-cluster"]
+    # A local system env that can't run here could from here with a host
+    assert "giving environment 'lab' a 'host'" in gated["in-lab"]
+    assert "can't reach host 'calkit-test.invalid'" in errors["far-away"]
+    assert "picks no environment" in gated["no-pick"]
+    # Meeting the requirement lets the stages run
+    monkeypatch.setenv("CK_TEST_TOKEN", "x")
+    monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info,
+        stage_names=["needs-token", "in-lab", "queued"],
+        interactive=False,
+    )
+    assert gated == {} and errors == {}
+    # A manual step can't run with nobody here to do it, but can when
+    # someone is
+    ck_info["pipeline"]["stages"]["by-hand"] = {
+        "kind": "manual-step",
+        "message": "Export made/by-hand.png",
+        "outputs": ["made/by-hand.png"],
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["by-hand"], interactive=False, manual=False
+    )
+    assert gated == {"by-hand": "needs a manual step: Export made/by-hand.png"}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["by-hand"], interactive=False
+    )
+    assert gated == {} and errors == {}
+    # An export needs its app installed where it runs
+    from calkit.export import GIMP, INKSCAPE
+
+    ck_info["pipeline"]["stages"]["drawn"] = {
+        "kind": "inkscape-export",
+        "source_path": "made/drawn.svg",
+        "outputs": ["made/drawn.png"],
+    }
+    ck_info["pipeline"]["stages"]["photo"] = {
+        "kind": "gimp-export",
+        "source_path": "made/photo.xcf",
+        "outputs": ["made/photo.png"],
+    }
+    monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
+    monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["drawn", "photo"], interactive=False
+    )
+    assert gated == {
+        "drawn": "needs Inkscape installed to export made/drawn.svg",
+        "photo": "needs GIMP installed to export made/photo.xcf",
+    }
+    monkeypatch.setattr(INKSCAPE, "executables", [sys.executable])
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["drawn"], interactive=False
+    )
+    assert gated == {} and errors == {}
+
+
+def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(
+    tmp_dir,
+):
+    subprocess.check_call(["calkit", "init"])
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "pipeline": {
+                "stages": {
+                    "plain": {
+                        "kind": "shell-command",
+                        "command": "echo hi > a.txt",
+                        "environment": "_system",
+                    },
+                    "var": {
+                        "kind": "shell-command",
+                        "command": 'X=1; echo "$X" `date` > b.txt',
+                        "environment": "_system",
+                    },
+                }
+            }
+        },
+        write=True,
+    )
+    # Nothing to expand, so nothing changes
+    assert (
+        stages["plain"]["cmd"]
+        == 'bash --noprofile --norc -c "echo hi > a.txt"'
+    )
+    # Otherwise the command is read only by the shell meant to run it
+    assert stages["var"]["cmd"] == (
+        "bash --noprofile --norc .calkit/stage-commands/var.sh"
+    )
+    assert ".calkit/stage-commands/var.sh" in stages["var"]["deps"]
+    with open(".calkit/stage-commands/var.sh") as f:
+        assert f.read() == 'X=1; echo "$X" `date` > b.txt\n'
+    with open(".gitattributes") as f:
+        assert ".calkit" in f.read()
+    subprocess.run(stages["var"]["cmd"], shell=True, check=True)
+    with open("b.txt") as f:
+        assert f.read().startswith("1 ")
+    # A stage with a working directory reaches the file from there, names
+    # that sanitize alike get their own files, and a file no stage needs
+    # any more is removed
+    os.makedirs("sub")
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "pipeline": {
+                "stages": {
+                    "in-sub": {
+                        "kind": "shell-command",
+                        "command": 'echo "$HOME" > home.txt',
+                        "environment": "_system",
+                        "wdir": "sub",
+                    },
+                    "a b": {
+                        "kind": "shell-command",
+                        "command": "echo $A",
+                        "environment": "_system",
+                    },
+                    "a_b": {
+                        "kind": "shell-command",
+                        "command": "echo $B",
+                        "environment": "_system",
+                    },
+                }
+            }
+        },
+        write=True,
+    )
+    assert stages["in-sub"]["cmd"] == (
+        "bash --noprofile --norc ../.calkit/stage-commands/in-sub.sh"
+    )
+    assert "../.calkit/stage-commands/in-sub.sh" in stages["in-sub"]["deps"]
+    subprocess.run(stages["in-sub"]["cmd"], shell=True, check=True, cwd="sub")
+    assert os.path.isfile(os.path.join("sub", "home.txt"))
+    assert stages["a b"]["cmd"] != stages["a_b"]["cmd"]
+    assert sorted(os.listdir(".calkit/stage-commands")) == sorted(
+        [
+            "in-sub.sh",
+            "a_b.sh",
+            os.path.basename(stages["a b"]["cmd"].split()[-1]),
+        ]
+    )
+
+
+TABLE = "kernel,registers_baseline,registers_mod\nset_microphysics,255,153\n"
+
+
+def test_artifact_status_at_ref(tmp_dir):
+    repo = git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    # The script ends in a newline, which is the case that matters: read
+    # with 'git show' its trailing byte is dropped and its hash never
+    # matches what DVC recorded
+    files = {
+        "scripts/export.py": "print('hi')\n",
+        "results/kernels.csv": TABLE,
+        "results/intermediate.csv": "a,b\n1,2\n",
+    }
+    os.makedirs("scripts", exist_ok=True)
+    for path, text in files.items():
+        with open(path, "w") as f:
+            f.write(text)
+
+    def md5(text):
+        return hashlib.md5(text.encode()).hexdigest()
+
+    lock = {
+        "stages": {
+            "make-intermediate": {
+                "cmd": "python scripts/make.py",
+                "outs": [
+                    {
+                        "path": "results/intermediate.csv",
+                        "md5": md5(files["results/intermediate.csv"]),
+                    }
+                ],
+            },
+            "export": {
+                "cmd": "python scripts/export.py",
+                "deps": [
+                    {
+                        "path": "scripts/export.py",
+                        "md5": md5(files["scripts/export.py"]),
+                    },
+                    {
+                        "path": "results/intermediate.csv",
+                        "md5": md5(files["results/intermediate.csv"]),
+                    },
+                    {"path": "env", "md5": "abc123.dir"},
+                ],
+                "outs": [
+                    {
+                        "path": "results/kernels.csv",
+                        "md5": md5(files["results/kernels.csv"]),
+                    }
+                ],
+            },
+        }
+    }
+    pipeline = {
+        "stages": {
+            "export": {"cmd": "python scripts/export.py"},
+            "make-intermediate": {"cmd": "python scripts/make.py"},
+        }
+    }
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Up to date")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "up to date"
+    assert state["stages"] == ["export"]
+    # The directory hash is the one thing that couldn't be checked
+    assert state["unverifiable"] == 1
+    # Editing an input without re-running the stage is what stale means
+    with open("scripts/export.py", "w") as f:
+        f.write("print('bye')\n")
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Change the script")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "stale"
+    assert any("export.py changed" in r for r in state["reasons"])
+    # So is redefining the stage, even with every input untouched
+    repo.git.checkout("HEAD~1", "--", "scripts/export.py")
+    pipeline["stages"]["export"]["cmd"] = "python scripts/export.py --new"
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Redefine the stage")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "stale"
+    assert any("different command" in r for r in state["reasons"])
+    # A table no stage writes isn't the pipeline's to be stale
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/intermediate.csv", "HEAD~2"
+    )
+    assert state["status"] == "up to date"
+    state = calkit.pipeline.artifact_status_at_ref("notes.csv", "HEAD")
+    assert state["status"] == "not from the pipeline"
+    # A path two stages record as an output is current if it matches
+    # either of them, since only one of them is its producer here
+    pipeline["stages"]["export"]["cmd"] = "python scripts/export.py"
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    lock["stages"]["copy"] = {
+        "cmd": "cp results/intermediate.csv results/copy.csv",
+        "outs": [{"path": "results/intermediate.csv", "md5": md5("other")}],
+    }
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Add a second producer")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "up to date"
+    # DVC hashing a CRLF checkout of what Git holds with LF, as on Windows,
+    # isn't a change
+    lock["stages"]["export"]["deps"][0]["md5"] = md5(
+        files["scripts/export.py"].replace("\n", "\r\n")
+    )
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Record a CRLF hash")
+    state = calkit.pipeline.artifact_status_at_ref(
+        "results/kernels.csv", "HEAD"
+    )
+    assert state["status"] == "up to date"
+
+
+def test_read_artifact_at_ref(tmp_dir):
+    repo = git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    with open("results/kernels.csv", "w") as f:
+        f.write(TABLE)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Add the table")
+    with open("results/kernels.csv", "a") as f:
+        f.write("new_kernel,1,1,1.0\n")
+    assert calkit.pipeline.read_artifact_at_ref(
+        "results/kernels.csv", "HEAD"
+    ) == (TABLE.encode())
+    # A DVC-tracked table isn't in Git, so it's read from the cache by the
+    # hash dvc.lock recorded at that ref
+    cached = "a,b\n9,9\n"
+    md5 = hashlib.md5(cached.encode()).hexdigest()
+    lock = {
+        "stages": {
+            "export": {
+                "cmd": "echo hi",
+                "outs": [{"path": "results/big.csv", "md5": md5}],
+            }
+        }
+    }
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Track a table with DVC")
+    with pytest.raises(FileNotFoundError, match="local"):
+        calkit.pipeline.read_artifact_at_ref("results/big.csv", "HEAD")
+    obj = os.path.join(".dvc", "cache", "files", "md5", md5[:2])
+    os.makedirs(obj, exist_ok=True)
+    with open(os.path.join(obj, md5[2:]), "wb") as f:
+        f.write(cached.encode())
+    assert calkit.pipeline.read_artifact_at_ref("results/big.csv", "HEAD") == (
+        cached.encode()
+    )
+    with pytest.raises(FileNotFoundError, match="neither in Git"):
+        calkit.pipeline.read_artifact_at_ref("results/absent.csv", "HEAD")
+
+
+def test_artifact_status_at_ref_agrees_with_dvc(tmp_dir):
+    import git
+
+    repo = git.Repo.init()
+    repo.git.config("user.email", "test@example.com")
+    repo.git.config("user.name", "Test")
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("scripts", exist_ok=True)
+    with open("scripts/make.py", "w") as f:
+        f.write(
+            "with open('results.csv', 'w') as f:\n"
+            "    f.write('kernel,registers\\nmicrophysics,255\\n')\n"
+        )
+    # A stage with its own wdir, whose dvc.lock paths are relative to it,
+    # and whose output is in DVC's cache rather than Git
+    os.makedirs("analysis", exist_ok=True)
+    with open("analysis/make.py", "w") as f:
+        f.write("with open('out.csv', 'wb') as f:\n    f.write(b'a\\n1\\n')\n")
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "make": {
+                    "kind": "shell-command",
+                    "command": "python scripts/make.py",
+                    "environment": "_system",
+                    "inputs": ["scripts/make.py"],
+                    "outputs": [{"path": "results.csv", "storage": "git"}],
+                },
+                "analyze": {
+                    "kind": "shell-command",
+                    "command": "python make.py",
+                    "environment": "_system",
+                    "wdir": "analysis",
+                    "inputs": ["make.py"],
+                    "outputs": ["out.csv"],
+                },
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Run the pipeline")
+
+    def live():
+        return calkit.pipeline.annotate_artifacts(
+            [{"path": "results.csv"}], status=True
+        )[0]["status"]
+
+    # The reconstruction from dvc.lock has to agree with what DVC says by
+    # hashing the working tree, or it isn't measuring staleness
+    at_ref = calkit.pipeline.artifact_status_at_ref("results.csv", "HEAD")
+    assert live() == "up to date"
+    assert at_ref["status"] == "up to date"
+    assert at_ref["stages"] == ["make"]
+    at_ref = calkit.pipeline.artifact_status_at_ref("analysis/out.csv", "HEAD")
+    assert at_ref["status"] == "up to date"
+    assert at_ref["stages"] == ["analyze"]
+    assert at_ref["unverifiable"] == 0
+    assert calkit.pipeline.read_artifact_at_ref(
+        "analysis/out.csv", "HEAD"
+    ) == (b"a\n1\n")
+    # Committing an input edit without re-running is stale either way
+    with open("scripts/make.py", "a") as f:
+        f.write("# touch\n")
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Edit the script without rerunning")
+    at_ref = calkit.pipeline.artifact_status_at_ref("results.csv", "HEAD")
+    assert live() == "stale"
+    assert at_ref["status"] == "stale"
+    assert any("make.py changed" in r for r in at_ref["reasons"])
+    # The earlier commit still reads as it did when it was made
+    assert (
+        calkit.pipeline.artifact_status_at_ref("results.csv", "HEAD~1")[
+            "status"
+        ]
+        == "up to date"
+    )

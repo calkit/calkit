@@ -32,7 +32,12 @@ def test_get_project_dataset_csv(client: TestClient, tmp_path) -> None:
     (d / "notes.txt").write_text("not a table\n")
     repo.git.add(all=True)
     repo.git.commit("-m", "Data")
-    fake_project = SimpleNamespace(owner_account_name="o", name="p")
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
     with (
         patch(
             "app.api.routes.projects.datasets.app.projects.get_project",
@@ -114,7 +119,12 @@ def test_get_project_dataset_hdf5(client: TestClient, tmp_path) -> None:
         )
     repo.git.add(all=True)
     repo.git.commit("-m", "Data")
-    fake_project = SimpleNamespace(owner_account_name="o", name="p")
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
     base = "/projects/o/p/dataset-hdf5"
     with (
         patch(
@@ -196,7 +206,12 @@ def test_imported_dataset_reads_from_source_project(
     )
     repo.git.add(all=True)
     repo.git.commit("-m", "Pointer")
-    fake_project = SimpleNamespace(owner_account_name="o", name="p")
+    fake_project = SimpleNamespace(
+        owner_account_name="o",
+        name="p",
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
+    )
     looked_up: list[tuple[str, str]] = []
 
     def fake_fpath(owner_name, project_name, md5, fs):
@@ -265,7 +280,11 @@ def test_post_project_dataset_fetches_imports(
 ) -> None:
     repo, origin = _repo(tmp_path)
     fake_project = SimpleNamespace(
-        owner_account_name="o", name="p", id=uuid.uuid4()
+        owner_account_name="o",
+        name="p",
+        id=uuid.uuid4(),
+        owner_github_name="o",
+        git_repo_url="https://github.com/o/p",
     )
     # A source repo to import from at a pinned commit
     src = git.Repo.init(tmp_path / "src")

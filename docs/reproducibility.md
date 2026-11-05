@@ -2,7 +2,7 @@
 
 ```mermaid
 graph LR
-    A[Inputs] --> B[Processes]
+    A[Inputs] --> B[Process definitions]
     B --> C[Outputs]
 ```
 
@@ -50,7 +50,7 @@ For example:
 
 A more measurable definition of reproducibility would be:
 
-> The inverse of the time it takes to verify the outputs
+> The inverse of the time it takes to verify that the outputs
 > truly reflect the inputs and process definitions.
 
 One way to verify a project's reproducibility is to rerun all the processes
@@ -62,26 +62,29 @@ Thankfully,
 this definition leaves open the possibility of not needing to rerun expensive
 processes by having some sort of traceability on the outputs,
 e.g., a `dvc.lock` file in a Calkit project.
-If we can trace through through the entire path,
-we can know the exact _provenance_.
+If we can trace through the entire path,
+we can know the exact [provenance](provenance.md).
 
 With this measurement methodology,
 a study that shares no code and data will be very hard to reproduce,
 if not impossible.
 One that shares data but no code will be a little better.
 
-Sharing code, environment lock files, and a fully-automated
-pipeline with file content-based tracking
-is the gold standard, however.
+The gold standard is sharing code, environment lock files, and a
+fully-automated pipeline with file content-based tracking.
 Barring misconduct,
-provenance can be verified with a single command
-(`calkit status` for a Calkit project).
+a single command (`calkit status` for a Calkit project) is then enough to
+tell whether every derived output is up-to-date with respect to its
+declared inputs.
+Note that this does not by itself establish where those inputs came from,
+which is why primary artifacts declare their own origins
+(see [provenance](provenance.md)).
 
 ## AI agents and provenance
 
 AI coding agents can accelerate research workflows,
 but they must be used carefully to preserve provenance.
-The key rule: Agents create primary artifacts,
+The key rule: agents create primary artifacts;
 the pipeline creates secondary ones.
 
 An agent should write or modify source code, configuration, and
@@ -98,19 +101,19 @@ inputs change.
 The correct pattern is identical to what a human should do:
 
 1. The agent writes or edits code and defines pipeline stages in `calkit.yaml`
-2. `calkit run` executes the pipeline and produces all derived outputs with
-   full provenance saved
+2. A human (or a CI check) runs `calkit run`, which executes the pipeline and
+   produces all derived outputs with full provenance saved
 
 See [Use with AI tools](ai-tools.md) for setup instructions for specific tools.
 
 ## Consequences of poor reproducibility
 
-On obvious consequence of poor reproducibility is that
+One obvious consequence of poor reproducibility is that
 the research may not be trustworthy.
 The steps claimed to have been taken to produce evidence to back up a
 conclusion may not have actually been taken as described.
-This could simply be due to a lack of knowledge, memory,
-or they may be described imprecisely.
+This could simply be due to a lack of knowledge or memory,
+or the steps may have been described imprecisely.
 Peer review is supposed to catch these sorts of instances in theory,
 but doing a reproducibility check is often a large undertaking.
 
@@ -125,6 +128,6 @@ The project may therefore end up in an inconsistent state,
 which may lead to publication of incorrect results.
 When iteration is slow and/or painful,
 fewer iterations will be done,
-and more iterations typically results in higher quality.
+and more iterations typically produce higher quality results.
 It is therefore important to automate research projects,
 i.e., to keep them highly reproducible throughout their life cycles.

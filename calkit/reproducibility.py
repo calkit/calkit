@@ -100,6 +100,7 @@ DETAIL_CATEGORIES = {
     "retyped": "retyped_values",
     "numbers": "unattributed_numbers",
     "scripts": "scripts_not_in_pipeline",
+    "outside": "paths_outside_project",
     "environments": "stages_without_env",
     "provenance": "misc_needing_provenance",
     "gaps": "provenance_gaps",
@@ -147,6 +148,10 @@ class ReproCheck(BaseModel):
     # Paths of Git-tracked scripts no pipeline stage refers to, which the
     # pipeline therefore can't be reproducing
     scripts_not_in_pipeline: list[str] = []
+    # Files outside the project that pipeline scripts and notebooks read or
+    # write, e.g., an absolute path to a synced drive, which only exist on
+    # the machine they were written on
+    paths_outside_project: list[str] = []
     n_dvc_remotes: int
     # Values the project computes that a manuscript typed out instead,
     # which go stale the next time the stage behind them runs
@@ -205,6 +210,14 @@ class ReproCheck(BaseModel):
                 "with commands "
                 "executed outside a defined environment. "
                 "Define the environment for those next."
+            )
+        if self.paths_outside_project:
+            return (
+                f"There are {len(self.paths_outside_project)} files outside "
+                "the project that pipeline scripts use, e.g., "
+                f"{self.paths_outside_project[0]}. They only exist on one "
+                "machine, so the pipeline can't run anywhere else. Move them "
+                "into the project and use paths relative to it."
             )
         if self.n_scripts_not_in_pipeline > 0:
             return (
@@ -336,6 +349,12 @@ class ReproCheck(BaseModel):
             f"{self.n_scripts_not_in_pipeline} "
             f"{calkit.check_or_x(self.n_scripts_not_in_pipeline == 0)}"
             f"{self._tag('scripts')}\n"
+        )
+        txt += (
+            "Files outside the project used by pipeline scripts: "
+            f"{len(self.paths_outside_project)} "
+            f"{calkit.check_or_x(not self.paths_outside_project)}"
+            f"{self._tag('outside')}\n"
         )
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n = getattr(self, f"n_{artifact_type}")
@@ -849,6 +868,11 @@ def check_reproducibility(
     """Check the reproducibility of a project."""
     from git.exc import InvalidGitRepositoryError
 
+    from calkit.detect import (
+        detect_jupyter_notebook_io,
+        detect_python_script_io,
+    )
+
     res: dict = dict()
     if log_func is None:
         log_func = print
@@ -926,6 +950,35 @@ def check_reproducibility(
     res["scripts_not_in_pipeline"] = find_scripts_not_in_pipeline(
         wdir=wdir, ck_info=ck_info, pipeline=pipeline
     )
+    # Read or written by the pipeline's Python scripts and notebooks, which
+    # are the languages detection reports these for
+    outside = []
+    for stage in (
+        (ck_info.get("pipeline", {}) or {}).get("stages", {}).values()
+    ):
+        if not isinstance(stage, dict):
+            continue
+        if stage.get("kind") == "python-script" and stage.get("script_path"):
+            script = stage["script_path"]
+            io = detect_python_script_io(
+                script, wdir=stage.get("wdir"), project_dir=wdir
+            )
+        elif stage.get("kind") == "jupyter-notebook" and stage.get(
+            "notebook_path"
+        ):
+            script = stage["notebook_path"]
+            io = detect_jupyter_notebook_io(
+                script, wdir=stage.get("wdir"), project_dir=wdir
+            )
+        else:
+            continue
+        outside += [
+            f"{script} reads {p}" for p in io.get("external_inputs", [])
+        ]
+        outside += [
+            f"{script} writes {p}" for p in io.get("external_outputs", [])
+        ]
+    res["paths_outside_project"] = list(dict.fromkeys(outside))
     res["n_environments"] = len(ck_info.get("environments", {}))
     # Check for stages not run with environments
     stages = pipeline.get("stages", {})

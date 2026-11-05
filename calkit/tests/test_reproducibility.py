@@ -1,5 +1,6 @@
 """Tests for ``calkit.reproducibility``."""
 
+import json
 import os
 import subprocess
 
@@ -263,6 +264,59 @@ def test_check_reproducibility(tmp_dir):
         for g in res.provenance_gaps
         if "mystery" not in g and "exported" not in g
     ] == expected
+    # Files outside the project that pipeline scripts and notebooks read or
+    # write only exist on one machine, which is found from anywhere, e.g.,
+    # by the hub, which doesn't run from the project
+    assert res.paths_outside_project == []
+    assert "outside the project used by pipeline scripts: 0" in (
+        res.to_pretty()
+    )
+    ck_info["pipeline"]["stages"]["fit"] = {
+        "kind": "python-script",
+        "script_path": "scripts/fit.py",
+        "environment": "py",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("scripts/fit.py", "w") as f:
+        f.write(
+            "import pandas as pd\n"
+            'df = pd.read_csv("/Users/me/Box/runs.csv")\n'
+            'df.to_csv("data/fit.csv")\n'
+            'df.to_csv("../shared/fit.csv")\n'
+        )
+    with open("analysis.ipynb", "w") as f:
+        json.dump(
+            {
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "source": ['open("~/Desktop/notes.txt")'],
+                    }
+                ],
+                "metadata": {},
+            },
+            f,
+        )
+    wdir = os.getcwd()
+    os.chdir("paper")
+    try:
+        res = check_reproducibility(wdir=wdir)
+    finally:
+        os.chdir(wdir)
+    assert sorted(res.paths_outside_project) == [
+        "analysis.ipynb reads ~/Desktop/notes.txt",
+        "scripts/fit.py reads /Users/me/Box/runs.csv",
+        "scripts/fit.py writes ../shared/fit.csv",
+    ]
+    assert "outside the project used by pipeline scripts: 3" in (
+        res.to_pretty()
+    )
+    assert "outside" in res.categories_with_detail
+    rec = ReproCheck.model_validate(
+        good | {"paths_outside_project": res.paths_outside_project}
+    ).recommendation
+    assert "3 files outside the project" in rec  # type: ignore
 
 
 def test_check_call():

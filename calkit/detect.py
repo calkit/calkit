@@ -22,14 +22,20 @@ NotebookLanguage = Literal["python", "julia", "r"]
 def detect_python_script_io(
     script_path: str,
     wdir: str | None = None,
+    project_dir: str = ".",
 ) -> dict[str, list[str]]:
-    """Detect inputs and outputs from a Python script using static analysis."""
+    """Detect inputs and outputs from a Python script using static analysis.
+
+    Paths are relative to the project, which is only read from
+    ``project_dir``, so it needn't be the current directory.
+    """
     inputs = []
     outputs = []
-    if not os.path.exists(script_path):
+    file_path = os.path.join(project_dir, script_path)
+    if not os.path.exists(file_path):
         return {"inputs": inputs, "outputs": outputs}
     try:
-        with open(script_path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
@@ -354,19 +360,22 @@ def detect_jupyter_notebook_io(
     notebook_path: str,
     language: NotebookLanguage | None = None,
     wdir: str | None = None,
+    project_dir: str = ".",
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Jupyter notebook.
 
     Extracts all code cells and passes them to the appropriate
     language-specific detection function. Detection functions handle
-    variable tracking and directory changes across cells.
+    variable tracking and directory changes across cells. Like for scripts,
+    the notebook is read from ``project_dir``.
     """
     inputs = []
     outputs = []
-    if not os.path.exists(notebook_path):
+    file_path = os.path.join(project_dir, notebook_path)
+    if not os.path.exists(file_path):
         return {"inputs": inputs, "outputs": outputs}
     try:
-        with open(notebook_path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             nb = json.load(f)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {"inputs": inputs, "outputs": outputs}

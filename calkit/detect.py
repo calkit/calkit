@@ -609,10 +609,10 @@ def _resolve_path_expr(node: ast.AST, variables: dict[str, str]) -> str | None:
                             return None
                         parts.append(part)
                     return os.path.join(*parts)
+            # Kept relative, since it's resolved from wherever the code runs,
+            # not from here
             if node.func.attr in ["absolute", "resolve"]:
-                base = _resolve_path_expr(node.func.value, variables)
-                if base:
-                    return os.path.abspath(base)
+                return _resolve_path_expr(node.func.value, variables)
             if node.func.attr in ["cwd", "home"]:
                 if (
                     isinstance(node.func.value, ast.Name)
@@ -844,8 +844,14 @@ def _detect_python_code_io(
             if "\\" in path or re.match(r"[A-Za-z]:", path):
                 return ntpath.normpath(path)
             return posixpath.normpath(path)
-        full_path = os.path.normpath(os.path.join(current_dir, path))
-        if is_outside(current_dir):
+        # Relative Windows paths, e.g., '..\\data.csv', are read the same on
+        # any platform
+        path = path.replace("\\", "/")
+        base = current_dir
+        if not is_outside(base):
+            base = base.replace("\\", "/")
+        full_path = os.path.normpath(os.path.join(base, path))
+        if is_outside(base):
             return Path(full_path).as_posix()
         in_project = os.path.relpath(os.path.abspath(full_path))
         if is_outside(Path(in_project).as_posix()):
@@ -893,7 +899,13 @@ def _detect_python_code_io(
         if arg is None:
             return None
         if module == "glob" and name in ("glob", "iglob"):
-            pass
+            # The pattern may be relative to a root_dir
+            for kw in node.keywords:
+                if kw.arg == "root_dir":
+                    root = _resolve_variable_in_call(kw.value, variables)
+                    if root is None:
+                        return None
+                    arg = os.path.join(root, arg)
         elif module == "os" and name in ("listdir", "scandir", "walk"):
             return arg
         elif owner is not None and name in ("glob", "rglob"):
@@ -901,6 +913,9 @@ def _detect_python_code_io(
             base = _resolve_path_expr(owner, variables)
             if base is None:
                 return None
+            # rglob matches at any depth, so it reads the whole folder
+            if name == "rglob":
+                return base
             arg = os.path.join(base, arg)
         else:
             return None
@@ -1045,13 +1060,19 @@ def _detect_python_code_io(
                             )
                             if path:
                                 outputs.append(resolve_to_root(path))
-    # Reads from outside the project are reported apart, since they're data
-    # the project lacks rather than inputs a stage can declare
-    external = [
-        p
-        for p in inputs
-        if is_outside(p) and not p.startswith(("/dev/", "/proc/", "/sys/"))
-    ]
+    # Paths outside the project are reported apart, since they're data the
+    # project lacks rather than inputs or outputs a stage can declare
+    external_inputs, external_outputs = (
+        list(
+            dict.fromkeys(
+                p
+                for p in paths
+                if is_outside(p)
+                and not p.startswith(("/dev/", "/proc/", "/sys/"))
+            )
+        )
+        for paths in (inputs, outputs)
+    )
     inputs = [
         p
         for p in inputs
@@ -1067,7 +1088,8 @@ def _detect_python_code_io(
     return {
         "inputs": inputs,
         "outputs": outputs,
-        "external_inputs": list(dict.fromkeys(external)),
+        "external_inputs": external_inputs,
+        "external_outputs": external_outputs,
     }
 
 

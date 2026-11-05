@@ -95,10 +95,26 @@ plt.savefig('plot.png')
             'here = glob.glob("*.csv")\n'
             'np.savetxt("out_" + "1.csv", cal)\n'
             'np.savetxt("../elsewhere.csv", cal)\n'
+            # Resolved paths stay relative to where it runs
+            'loc = open(Path("data/local.csv").resolve())\n'
+            'np.savetxt(Path("results/r.csv").absolute(), cal)\n'
+            # Relative Windows paths leave the project the same way
+            'w = open(r"..\\shared\\win.csv")\n'
+            'w2 = open(r"data\\..\\..\\up.csv")\n'
+            'np.savetxt(r"..\\win_out.csv", cal)\n'
+            # A glob relative to its root_dir, and one at any depth
+            'box = glob.glob("Run*.csv", root_dir="/Users/me/Box/runs")\n'
+            'deep = list(Path("data/deep").rglob("Run.csv"))\n'
         )
     result = detect_python_script_io("scripts/wake.py")
-    assert sorted(result["inputs"]) == ["data/raw", "data/runs"]
-    assert result["outputs"] == ["out_1.csv"]
+    assert sorted(result["inputs"]) == [
+        "data/deep",
+        "data/local.csv",
+        "data/raw",
+        "data/runs",
+    ]
+    assert sorted(result["outputs"]) == ["out_1.csv", "results/r.csv"]
+    assert result["external_outputs"] == ["../elsewhere.csv", "../win_out.csv"]
     assert sorted(result["external_inputs"]) == sorted(
         [
             "/Users/me/Box-Box/Lab Data/tow tank/runs",
@@ -107,6 +123,9 @@ plt.savefig('plot.png')
             "~/Dropbox/data.csv",
             "~/Desktop/t.csv",
             "../shared/thing.csv",
+            "../shared/win.csv",
+            "../up.csv",
+            "/Users/me/Box/runs",
         ]
     )
 

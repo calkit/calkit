@@ -14,6 +14,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 
 import app.projects
+import calkit.core
 import calkit.environments
 import calkit.export
 import calkit.pipeline
@@ -269,7 +270,9 @@ def get_project_provenance(
                     else None
                 )
             )
-            out.updatable = entry_path == traced and bool(
+            # Only for the import itself, not a copy a stage makes of it,
+            # since updating that would need the copy regenerated too
+            out.updatable = entry_path == traced == path and bool(
                 src_project or imported.get("git_repo_url")
             )
             # Newer when the source's file isn't what was last brought in.
@@ -286,27 +289,32 @@ def get_project_provenance(
                     src_owner, src_name = (
                         str(src_project).strip("/").split("/", 1)
                     )
+                    src_repo_project = app.projects.get_project(
+                        session=session,
+                        owner_name=src_owner,
+                        project_name=src_name,
+                        current_user=current_user,
+                        min_access_level="read",
+                    )
                     src_repo = get_repo(
-                        project=app.projects.get_project(
-                            session=session,
-                            owner_name=src_owner,
-                            project_name=src_name,
-                            current_user=current_user,
-                            min_access_level="read",
-                        ),
+                        project=src_repo_project,
                         user=current_user,
                         session=session,
                         ttl=DEFAULT_REPO_TTL,
                         read_only=True,
                     )
                     src_tree = get_repo_tree_for_ref(src_repo, None)
-                    src_file = posixpath.normpath(str(src_path))
-                    if isinstance(recorded, str) and src_tree.is_file(
-                        src_file
-                    ):
-                        digest = hashlib.sha256(
-                            src_tree.read_bytes(src_file)
-                        ).hexdigest()
+                    if isinstance(recorded, str):
+                        # From Git or DVC storage, as importing reads it
+                        data = app.projects.read_project_file(
+                            project=src_repo_project,
+                            tree=src_tree,
+                            path=posixpath.normpath(str(src_path)),
+                            max_bytes=calkit.core.DVC_SIZE_THRESH_BYTES - 1,
+                            session=session,
+                            current_user=current_user,
+                        )
+                        digest = hashlib.sha256(data).hexdigest()
                         out.update_available = recorded != (
                             f"{calkit.provenance.HASH_ALGORITHM}:{digest}"
                         )

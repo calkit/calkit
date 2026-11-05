@@ -10,10 +10,22 @@ import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import {
   type Citation,
   type CitationProblem,
+  type ResultValue,
+  type TableFile,
+  type TypedNumber,
   canBeCreatedByPerson,
+  IGNORE_COMMENT,
   citationProblems,
   citationText,
   citationCandidates,
+  resultValues,
+  roundedLike,
+  tableFile,
+  typedNumberCitation,
+  typedNumberMatches,
+  typedNumberProblem,
+  typedTableMatches,
+  typedTableProblem,
 } from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
 import {
@@ -46,7 +58,7 @@ import {
   STYLES,
   textInput,
 } from "../core/ui";
-import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
+import type { EditorItem, FromEditor, ToEditor } from "./overleaf-editor";
 
 const PANEL_ID = "calkit-overleaf-panel";
 const LAUNCHER_ID = "calkit-overleaf-launcher";
@@ -106,6 +118,90 @@ function provenanceFor(
   provenance.catch(() => provenanceCache.delete(cacheKey));
   provenanceCache.set(cacheKey, { at: Date.now(), provenance });
   return provenance;
+}
+
+// Kept for a minute too, since checking a document asks for them each time
+// it changes
+const valuesCache = new Map<
+  string,
+  { at: number; values: Promise<ResultValue[]> }
+>();
+
+/**
+ * Every number in the project's results files, which a typed number may be
+ * a copy of.
+ */
+function projectValues(link: OverleafLinkPublic): Promise<ResultValue[]> {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const cacheKey = `${owner}/${project}`;
+  const cached = valuesCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.values;
+  }
+  const values = (async () => {
+    const results = await send({ type: "project.results", owner, project });
+    const paths = [...new Set(results.map((result) => result.path))].filter(
+      (path) => /\.(json|ya?ml|toml)$/i.test(path),
+    );
+    const files = await Promise.all(
+      paths.map((path) => provenanceFor(link, path).catch(() => null)),
+    );
+    return files.flatMap((file, i) =>
+      file && !file.value_error ? resultValues(paths[i], file.value) : [],
+    );
+  })();
+  values.catch(() => valuesCache.delete(cacheKey));
+  valuesCache.set(cacheKey, { at: Date.now(), values });
+  return values;
+}
+
+const tablesCache = new Map<
+  string,
+  { at: number; tables: Promise<TableFile[]> }
+>();
+
+/** The tables stages write as TeX, which a typed table may be a copy of. */
+function projectTables(link: OverleafLinkPublic): Promise<TableFile[]> {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const cacheKey = `${owner}/${project}`;
+  const cached = tablesCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.tables;
+  }
+  const tables = (async () => {
+    const listed = await send({ type: "project.tables", owner, project });
+    const paths = [...new Set(listed.map((table) => table.path))].filter(
+      (path) => /\.tex$/i.test(path),
+    );
+    const files = await Promise.all(
+      paths.map(async (path) => {
+        try {
+          const item = await send({
+            type: "project.contents",
+            owner,
+            project,
+            path,
+          });
+          if (!item.content) {
+            return null;
+          }
+          // Base64, as the hub sends every file
+          const bytes = Uint8Array.from(atob(item.content), (c) =>
+            c.charCodeAt(0),
+          );
+          return tableFile(path, new TextDecoder().decode(bytes));
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return files.filter((file): file is TableFile => file !== null);
+  })();
+  tables.catch(() => tablesCache.delete(cacheKey));
+  tablesCache.set(cacheKey, { at: Date.now(), tables });
+  return tables;
 }
 
 /**
@@ -1537,7 +1633,7 @@ type Without<T> = T extends unknown ? Omit<T, "calkit"> : never;
 
 // What the editor last said the open document shows, and what's wrong with
 // each, by its index there
-let editorCitations: { version: number; items: EditorCitation[] } | null = null;
+let editorCitations: { version: number; items: EditorItem[] } | null = null;
 let editorProblems: { version: number; found: CitationProblem[][] } | null =
   null;
 
@@ -1558,12 +1654,21 @@ async function checkCitations(): Promise<void> {
   const work = async () => {
     while (next < snapshot.items.length) {
       const i = next++;
-      const { citation } = snapshot.items[i];
+      const { citation, typed, table } = snapshot.items[i];
       try {
-        found[i] = citationProblems(
-          citation,
-          await citationProvenance(link, citation),
-        );
+        found[i] = typed
+          ? [typedNumberProblem(typed, await projectValues(link))]
+          : table
+          ? [
+              typedTableProblem(
+                { numbers: table.numbers },
+                await projectTables(link),
+              ),
+            ]
+          : citationProblems(
+              citation,
+              await citationProvenance(link, citation),
+            );
       } catch {
         found[i] = [];
       }
@@ -1635,7 +1740,7 @@ async function fillTooltip(
   style.textContent = STYLES + TOOLTIP_STYLES;
   const body = el("div", { class: "tip" });
   root.append(style, body);
-  await fillCard(body, link, item);
+  await fillCard(body, link, item, { version, index });
 }
 
 /**
@@ -1645,10 +1750,23 @@ async function fillTooltip(
 async function fillCard(
   body: HTMLElement,
   link: OverleafLinkPublic,
-  item: EditorCitation,
+  item: EditorItem,
+  at: { version: number; index: number },
 ): Promise<void> {
   clear(body).append(loading());
   try {
+    if (item.typed) {
+      const values = await projectValues(link);
+      clear(body);
+      renderTyped(body, link, item.typed, values, at);
+      return;
+    }
+    if (item.table) {
+      const tables = await projectTables(link);
+      clear(body);
+      renderTypedTable(body, link, item.table.numbers, tables, at);
+      return;
+    }
     const provenance = await citationProvenance(link, item.citation);
     clear(body);
     renderProvenance(body, link, item.citation, provenance);
@@ -1658,6 +1776,257 @@ async function fillCard(
       errorMessage(e instanceof Error ? e.message : String(e)),
     );
   }
+}
+
+// Replacements asked of the editor, by id, until it says how they went
+const replacing = new Map<string, (error: string | undefined) => void>();
+let replacements = 0;
+
+/**
+ * Have the editor swap something typed for what shows it instead, then
+ * sync, so it shows up. Says why if the editor couldn't.
+ *
+ * The edit closes the tooltip that asked for it, so a failed sync is shown
+ * in the panel.
+ */
+async function replaceInEditor(
+  link: OverleafLinkPublic,
+  at: { version: number; index: number },
+  text: string,
+  endOfLine = false,
+): Promise<string | undefined> {
+  const id = `replace-${++replacements}`;
+  const error = await new Promise<string | undefined>((resolve) => {
+    const timer = setTimeout(() => {
+      replacing.delete(id);
+      resolve("The editor didn't respond; reload the page and try again");
+    }, 5000);
+    replacing.set(id, (error) => {
+      clearTimeout(timer);
+      replacing.delete(id);
+      resolve(error);
+    });
+    toEditor({
+      type: "replace",
+      id,
+      ...at,
+      text,
+      usePackage: !endOfLine,
+      endOfLine,
+    });
+  });
+  if (error) {
+    return error;
+  }
+  // Overleaf saves an edit a moment after it's made, and a sync started
+  // first would miss it
+  void new Promise((resolve) => setTimeout(resolve, 3000))
+    .then(() =>
+      send({
+        type: "overleaf.sync",
+        owner: link.project_owner_name,
+        project: link.project_name,
+        path: link.path,
+      }),
+    )
+    .catch((e) =>
+      showInPanel((body) =>
+        body.append(errorMessage(e instanceof Error ? e.message : String(e))),
+      ),
+    );
+  return undefined;
+}
+
+/**
+ * A way to say a typed number or table isn't a result, e.g., one quoted
+ * from a datasheet, which marks its line with `% calkit: ignore`.
+ */
+function ignoreRow(
+  link: OverleafLinkPublic,
+  at: { version: number; index: number },
+  message: HTMLElement,
+  what: string,
+): HTMLElement {
+  return el("div", { class: "row", style: { marginTop: "6px" } }, [
+    el("div", {
+      class: "grow dim small",
+      text: `Not ${what}, e.g., quoted from somewhere else?`,
+    }),
+    el("button", {
+      class: "action secondary",
+      text: "Ignore",
+      onClick: async () => {
+        const error = await replaceInEditor(
+          link,
+          at,
+          ` ${IGNORE_COMMENT}`,
+          true,
+        );
+        if (error) {
+          clear(message).append(errorMessage(error));
+        }
+      },
+    }),
+  ]);
+}
+
+/**
+ * A typed number, what's wrong with it, and the results that could show
+ * it instead, which replace it with a \\ckvalue and sync.
+ */
+function renderTyped(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  number: TypedNumber,
+  values: ResultValue[],
+  at: { version: number; index: number },
+): void {
+  const { exact, close } = typedNumberMatches(number, values);
+  const canWrite = link.current_user_access !== "read";
+  const message = el("div", { class: "small", style: { marginTop: "6px" } });
+  const use = async (value: ResultValue) => {
+    const text = citationText(typedNumberCitation(number, value));
+    const error = await replaceInEditor(link, at, text);
+    if (error) {
+      clear(message).append(errorMessage(error));
+    }
+  };
+  const row = (value: ResultValue) => {
+    const reads = roundedLike(number, value.value);
+    return el("div", { class: "row" }, [
+      el("div", { class: "grow" }, [
+        el("div", { class: "small", text: `${value.path}: ${value.key}` }),
+        el("div", {
+          class: "dim small",
+          text:
+            reads === number.text
+              ? String(value.value)
+              : `${value.value}, which would read ${reads}`,
+        }),
+      ]),
+      canWrite
+        ? el("button", {
+            class: "action secondary",
+            text: "Use",
+            onClick: () => void use(value),
+          })
+        : null,
+    ]);
+  };
+  container.append(
+    el("div", { class: "name", text: `Typed-in number: ${number.text}` }),
+    problemLine(typedNumberProblem(number, values)),
+  );
+  if (exact.length) {
+    container.append(
+      el("div", {
+        class: "dim small",
+        text: "Show it from the results file instead, so it stays current:",
+      }),
+      ...exact.slice(0, 5).map(row),
+    );
+  } else {
+    if (close.length) {
+      container.append(
+        el("div", {
+          class: "dim small",
+          text: "The nearest results, if it's a mistyped or outdated copy:",
+        }),
+        ...close.map(row),
+      );
+    }
+    container.append(
+      el("div", {
+        class: "dim small",
+        style: { marginTop: "6px" },
+        text:
+          "If a script computes it but only prints it, have the script " +
+          "save it to a results file too, e.g., results.json, so the paper " +
+          "can show it from there.",
+      }),
+    );
+  }
+  if (canWrite) {
+    container.append(ignoreRow(link, at, message, "a result"));
+  }
+  container.append(message);
+}
+
+/**
+ * A typed table, what's wrong with it, and the table files that could show
+ * it instead, which replace it with a \\cktable and sync.
+ */
+function renderTypedTable(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  numbers: TypedNumber[],
+  tables: TableFile[],
+  at: { version: number; index: number },
+): void {
+  const matches = typedTableMatches({ numbers }, tables);
+  const canWrite = link.current_user_access !== "read";
+  const message = el("div", { class: "small", style: { marginTop: "6px" } });
+  container.append(
+    el("div", {
+      class: "name",
+      text: `Typed-in table: ${numbers.length} number${
+        numbers.length === 1 ? "" : "s"
+      }`,
+    }),
+    problemLine(typedTableProblem({ numbers }, tables)),
+  );
+  if (matches.length) {
+    container.append(
+      el("div", {
+        class: "dim small",
+        text: "Show it from the file its stage writes instead, so it stays current:",
+      }),
+      ...matches.slice(0, 3).map(({ path, matched }) =>
+        el("div", { class: "row" }, [
+          el("div", { class: "grow" }, [
+            el("div", { class: "small", text: path }),
+            el("div", {
+              class: "dim small",
+              text:
+                matched === numbers.length
+                  ? `Has all ${matched} numbers`
+                  : `Has ${matched} of the ${numbers.length} numbers; ` +
+                    "the rest may be outdated",
+            }),
+          ]),
+          canWrite
+            ? el("button", {
+                class: "action secondary",
+                text: "Use",
+                onClick: async () => {
+                  const error = await replaceInEditor(
+                    link,
+                    at,
+                    citationText({ kind: "table", path, options: "" }),
+                  );
+                  if (error) {
+                    clear(message).append(errorMessage(error));
+                  }
+                },
+              })
+            : null,
+        ]),
+      ),
+    );
+  } else {
+    container.append(
+      el("div", {
+        class: "dim small",
+        text:
+          "Have the script that computes it write the table as TeX, " +
+          "e.g., with pandas' to_latex, so the paper can show it from there.",
+      }),
+    );
+  }
+  if (canWrite) {
+    container.append(ignoreRow(link, at, message, "results"));
+  }
+  container.append(message);
 }
 
 /**
@@ -1718,6 +2087,8 @@ function watchEditor(): void {
       void checkCitations();
     } else if (message.type === "tooltip") {
       void fillTooltip(message.id, message.version, message.index);
+    } else if (message.type === "replaced") {
+      replacing.get(message.id)?.(message.error);
     }
   });
 }
@@ -4240,6 +4611,7 @@ function drawRail(): void {
   // Components the open document shows, each with what's wrong with it
   body.append(el("h3", { text: "Components" }));
   const items = editorCitations?.items ?? [];
+  const version = editorCitations?.version ?? 0;
   const checked =
     editorProblems && editorProblems.version === editorCitations?.version
       ? editorProblems.found
@@ -4256,13 +4628,21 @@ function drawRail(): void {
   items.forEach((item, index) => {
     const problems = checked?.[index];
     // What it shows, and which time, since its line moves with edits
-    const text = citationText(item.citation);
+    const text = item.citation
+      ? citationText(item.citation)
+      : item.typed
+      ? item.typed.text
+      : "table";
     const nth = (seen.get(text) ?? 0) + 1;
     seen.set(text, nth);
     const key = `${text}#${nth}`;
-    const label = item.citation.key
-      ? `${item.citation.path} · ${item.citation.key}`
-      : item.citation.path;
+    const label = item.citation
+      ? item.citation.key
+        ? `${item.citation.path} · ${item.citation.key}`
+        : item.citation.path
+      : item.typed
+      ? `Typed number ${item.typed.text}`
+      : "Typed table";
     body.append(
       el(
         "button",
@@ -4278,7 +4658,10 @@ function drawRail(): void {
             } else {
               const element = el("div", { class: "card" });
               railCard = { key, element };
-              void fillCard(element, link, item);
+              void fillCard(element, link, item, {
+                version,
+                index,
+              });
             }
             drawRail();
           },

@@ -600,6 +600,8 @@ def find_retyped_values(
             preceding = tex_source[:start]
             line_idx = preceding.count("\n")
             col_idx = len(preceding) - preceding.rfind("\n") - 1
+            if line_idx < len(lines) and _IGNORE_RE.search(lines[line_idx]):
+                continue
             findings.append(
                 {
                     "value": text,
@@ -641,6 +643,8 @@ _RESULT_LIKE_PATTERNS = [
 #: A number in a sentence that cites somebody is usually theirs, not this
 #: project's, and there is nothing to trace it to
 _CITE_RE = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]]*\])*\{")
+# A line saying its numbers aren't results, e.g., ones from a datasheet
+_IGNORE_RE = re.compile(r"(?<!\\)%.*calkit:\s*ignore\b")
 
 
 def find_unattributed_numbers(
@@ -681,6 +685,8 @@ def find_unattributed_numbers(
             preceding = tex_source[:start]
             line_idx = preceding.count("\n")
             line = lines[line_idx] if line_idx < len(lines) else ""
+            if _IGNORE_RE.search(line):
+                continue
             findings.append(
                 {
                     "value": text,

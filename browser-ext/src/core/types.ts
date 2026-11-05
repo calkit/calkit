@@ -204,13 +204,6 @@ export interface Provenance {
   gaps?: ProvenanceGap[];
 }
 
-export interface ImportUpdate {
-  path: string;
-  /** Whether the file changed, not only the commit it's recorded at. */
-  changed: boolean;
-  rev?: string | null;
-}
-
 /** The stage exporting a figure from the file it's drawn in. */
 export interface ExportStage {
   name: string;
@@ -228,6 +221,13 @@ export interface StageFile {
   content?: string;
   /** Recorded as created by whoever adds it, e.g., a Photoshop file. */
   created_by_me?: boolean;
+}
+
+export interface ImportUpdate {
+  path: string;
+  /** Whether the file changed, not only the commit it's recorded at. */
+  changed: boolean;
+  rev?: string | null;
 }
 
 /** A stage made from a script, as `calkit xr` makes one, maybe saved. */

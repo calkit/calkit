@@ -1,7 +1,7 @@
 [build-system]
 requires = [
-  # 1.32.1 made the build hook interface take two type parameters, which
-  # hatch-jupyter-builder (last released 2024) subscripts with one
+  # 1.32.1 and 1.32.3 gave the build hook interface a second type parameter,
+  # breaking hatch-jupyter-builder (subscripts it with one); 1.32.4 reverted it
   "hatchling>=1.5.0,<1.33.1",
   "jupyter-builder>=1.2.3",
   "hatch-nodejs-version>=0.3.2",

@@ -2155,6 +2155,34 @@ export type ImportInfo = {
 }
 
 /**
+ * ImportUpdate
+ */
+export type ImportUpdate = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Changed
+   */
+  changed: boolean
+  /**
+   * Rev
+   */
+  rev?: string | null
+}
+
+/**
+ * ImportUpdatePost
+ */
+export type ImportUpdatePost = {
+  /**
+   * Path
+   */
+  path: string
+}
+
+/**
  * ImportedFromPost
  *
  * Where a dataset came from, as one of four mutually exclusive kinds.
@@ -4443,6 +4471,14 @@ export type Provenance = {
    */
   origin_path?: string | null
   /**
+   * Updatable
+   */
+  updatable?: boolean
+  /**
+   * Update Available
+   */
+  update_available?: boolean | null
+  /**
    * Gaps
    */
   gaps?: Array<ProvenanceGap>
@@ -6250,6 +6286,10 @@ export type StageFromScriptOrNotebookResponse = {
    * Outputs
    */
   outputs?: Array<string>
+  /**
+   * Found Outputs
+   */
+  found_outputs?: Array<string>
   /**
    * Missing Inputs
    */
@@ -11585,6 +11625,42 @@ export type PostProjectMiscResponses = {
 
 export type PostProjectMiscResponse =
   PostProjectMiscResponses[keyof PostProjectMiscResponses]
+
+export type PostProjectImportUpdateData = {
+  body: ImportUpdatePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/imports/update"
+}
+
+export type PostProjectImportUpdateErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectImportUpdateError =
+  PostProjectImportUpdateErrors[keyof PostProjectImportUpdateErrors]
+
+export type PostProjectImportUpdateResponses = {
+  /**
+   * Successful Response
+   */
+  200: ImportUpdate
+}
+
+export type PostProjectImportUpdateResponse =
+  PostProjectImportUpdateResponses[keyof PostProjectImportUpdateResponses]
 
 export type GetProjectPresentationsData = {
   body?: never

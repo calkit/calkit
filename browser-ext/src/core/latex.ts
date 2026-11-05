@@ -174,7 +174,7 @@ export function canBeCreatedByPerson(path: string): boolean {
 /** Something wrong with what a command shows, as a lint message. */
 export interface CitationProblem {
   severity: "error" | "warning";
-  kind: "value" | "missing" | "origin" | "stale";
+  kind: "value" | "missing" | "origin" | "update" | "stale";
   message: string;
   /** What it's about, e.g., data a figure is made from. */
   path: string;
@@ -186,7 +186,8 @@ export interface CitationProblem {
  * Its origin has to be defined, whether by the pipeline, an import, or a
  * person, and so does the origin of everything it's made from. A plainly
  * included file may be a section only Overleaf has yet, so only a
- * calkit.sty command has to name something in the project.
+ * calkit.sty command has to name something in the project. A plainly
+ * included figure only Overleaf has yet has no origin, though.
  */
 export function citationProblems(
   citation: Citation,
@@ -207,6 +208,13 @@ export function citationProblems(
       severity: "error",
       kind: "missing",
       message: `${path} isn't in the project`,
+      path,
+    });
+  } else if (missing && citation.kind === "figure" && !provenance.origin) {
+    problems.push({
+      severity: "error",
+      kind: "origin",
+      message: "Origin not defined",
       path,
     });
   }
@@ -230,7 +238,25 @@ export function citationProblems(
       path: gap.path,
     });
   }
+  if (provenance.update_available) {
+    problems.push({
+      severity: "warning",
+      kind: "update",
+      message: "Its source has a newer version",
+      path,
+    });
+  }
   if (provenance.stale_reason) {
+    // What changed, naming the files where the stage's status says
+    const changed = provenance.stage_status?.modified_inputs ?? [];
+    const what = changed.length
+      ? (changed.length <= 2
+          ? changed.join(" and ")
+          : `${changed[0]}, ${changed[1]}, and ${changed.length - 2} more`) +
+        (changed.length === 1 ? " was changed" : " were changed")
+      : provenance.stage_status?.modified_command
+      ? "its command was changed"
+      : "what it's made from was changed";
     problems.push({
       severity: "warning",
       kind: "stale",
@@ -240,9 +266,9 @@ export function citationProblems(
             "writes has moved since it ran"
           : // Made manually, so someone has to do it again
           provenance.stage_kind === "manual-step"
-          ? "Needs a manual step, since what it's made from changed" +
+          ? `Needs a manual step, since ${what}` +
             (provenance.message ? `: ${provenance.message}` : "")
-          : "Out of date: what it's made from changed since it last ran",
+          : `Stale: ${what}`,
       path,
     });
   }

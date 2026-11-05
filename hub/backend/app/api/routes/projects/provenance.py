@@ -5,13 +5,16 @@ all show: the value, the stage that produces it, what to open to change it,
 what it reads, and whether it's out of date.
 """
 
+import hashlib
 import json
 import posixpath
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
 
 import app.projects
+import calkit.core
 import calkit.environments
 import calkit.export
 import calkit.pipeline
@@ -24,6 +27,7 @@ from app.api.routes.projects.core import (
     _imported_from_info,
 )
 from app.api.routes.projects.figures import _clean_rel_path
+from app.config import settings
 from app.core import logger
 from app.git import get_repo, get_repo_tree_for_ref
 from app.models import (
@@ -35,6 +39,9 @@ from app.models import (
 from app.pipeline import find_stage_for_path, pipeline_at_ref
 
 router = APIRouter()
+
+# Where what each import last brought in is recorded
+IMPORT_LOCK_PATH = calkit.provenance.IMPORT_LOCK_FPATH.replace("\\", "/")
 
 # A value bigger than this, e.g., a whole table exported as a key, is
 # described rather than sent
@@ -249,11 +256,70 @@ def get_project_provenance(
                     calkit.provenance.describe_source(imported)
                 )
             doi = imported.get("doi")
+            src_project = imported.get("project")
+            src_path = imported.get("path")
             out.origin_url = (
                 imported.get("url")
                 or (f"https://doi.org/{doi}" if doi else None)
                 or imported.get("git_repo_url")
+                or (
+                    f"{settings.frontend_host.rstrip('/')}/"
+                    f"{str(src_project).strip('/')}/files"
+                    + (f"?path={quote(str(src_path))}" if src_path else "")
+                    if src_project
+                    else None
+                )
             )
+            # Only for the import itself, not a copy a stage makes of it,
+            # since updating that would need the copy regenerated too
+            out.updatable = entry_path == traced == path and bool(
+                src_project or imported.get("git_repo_url")
+            )
+            # Newer when the source's file isn't what was last brought in.
+            # Telling for a Git repo would mean cloning it, so that's left
+            # to updating.
+            if out.updatable and src_project and src_path:
+                try:
+                    locks = (
+                        json.loads(tree.read_text(IMPORT_LOCK_PATH))
+                        if tree.is_file(IMPORT_LOCK_PATH)
+                        else {}
+                    )
+                    recorded = (locks.get(traced) or {}).get("hash")
+                    src_owner, src_name = (
+                        str(src_project).strip("/").split("/", 1)
+                    )
+                    src_repo_project = app.projects.get_project(
+                        session=session,
+                        owner_name=src_owner,
+                        project_name=src_name,
+                        current_user=current_user,
+                        min_access_level="read",
+                    )
+                    src_repo = get_repo(
+                        project=src_repo_project,
+                        user=current_user,
+                        session=session,
+                        ttl=DEFAULT_REPO_TTL,
+                        read_only=True,
+                    )
+                    src_tree = get_repo_tree_for_ref(src_repo, None)
+                    if isinstance(recorded, str):
+                        # From Git or DVC storage, as importing reads it
+                        data = app.projects.read_project_file(
+                            project=src_repo_project,
+                            tree=src_tree,
+                            path=posixpath.normpath(str(src_path)),
+                            max_bytes=calkit.core.DVC_SIZE_THRESH_BYTES - 1,
+                            session=session,
+                            current_user=current_user,
+                        )
+                        digest = hashlib.sha256(data).hexdigest()
+                        out.update_available = recorded != (
+                            f"{calkit.provenance.HASH_ALGORITHM}:{digest}"
+                        )
+                except Exception as e:
+                    logger.info(f"Can't check {src_project} for updates: {e}")
         elif created is not None:
             people = created if isinstance(created, list) else [created]
             names = [

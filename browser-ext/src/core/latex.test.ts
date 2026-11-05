@@ -11,6 +11,7 @@ import {
   latexDiffPath,
   refDirName,
 } from "./latex";
+import type { StageStatus } from "./types";
 
 describe("latexDiffPath", () => {
   test("mirrors the document's own path under the comparison", () => {
@@ -244,9 +245,37 @@ describe("citationProblems", () => {
         stale_reason: "pipeline",
       }).map((p) => p.message),
     ).toEqual([
-      "Needs a manual step, since what it's made from changed: In " +
+      "Needs a manual step, since what it's made from was changed: In " +
         "Photoshop, export figures/a.png",
     ]);
+    // Stale, naming what changed where the stage's status says
+    const stale = (status: Partial<StageStatus>) =>
+      citationProblems(figure, {
+        ...base,
+        stage: "plot",
+        stale_reason: "pipeline",
+        stage_status: {
+          status: "stale",
+          modified_command: false,
+          modified_inputs: [],
+          modified_outputs: [],
+          missing_outputs: [],
+          ...status,
+        },
+      }).map((p) => p.message);
+    expect(stale({ modified_inputs: ["data/raw.csv"] })).toEqual([
+      "Stale: data/raw.csv was changed",
+    ]);
+    expect(stale({ modified_inputs: ["a.csv", "plot.py"] })).toEqual([
+      "Stale: a.csv and plot.py were changed",
+    ]);
+    expect(stale({ modified_inputs: ["a", "b", "c", "d"] })).toEqual([
+      "Stale: a, b, and 2 more were changed",
+    ]);
+    expect(stale({ modified_command: true })).toEqual([
+      "Stale: its command was changed",
+    ]);
+    expect(stale({})).toEqual(["Stale: what it's made from was changed"]);
     // Imported from somewhere only described, which is worth a warning
     expect(
       citationProblems(figure, {
@@ -272,14 +301,40 @@ describe("citationProblems", () => {
     ]);
   });
 
-  test("names what isn't in the project, except a plain include", () => {
+  test("says when an import's source has something newer", () => {
+    const imported = {
+      ...base,
+      origin: "Imported from o/src",
+      updatable: true,
+    };
+    expect(citationProblems(figure, imported)).toEqual([]);
+    expect(
+      citationProblems(figure, { ...imported, update_available: true }).map(
+        (p) => [p.severity, p.message],
+      ),
+    ).toEqual([["warning", "Its source has a newer version"]]);
+  });
+
+  test("names what isn't in the project, or a plain figure's missing origin", () => {
     const missing = { ...base, exists: false, gaps: [self] };
     expect(citationProblems(figure, missing).map((p) => p.message)).toEqual([
       "figures/a.png isn't in the project",
     ]);
-    expect(citationProblems({ ...figure, included: true }, missing)).toEqual(
-      [],
-    );
+    // A figure only Overleaf has yet has no origin, unless one's declared
+    expect(
+      citationProblems({ ...figure, included: true }, missing).map(
+        (p) => p.message,
+      ),
+    ).toEqual(["Origin not defined"]);
+    expect(
+      citationProblems(
+        { ...figure, included: true },
+        { ...missing, origin: "Imported from https://example.com" },
+      ),
+    ).toEqual([]);
+    expect(
+      citationProblems({ ...figure, kind: "file", included: true }, missing),
+    ).toEqual([]);
     // A value says what's wrong with reading it
     const value = {
       kind: "value",

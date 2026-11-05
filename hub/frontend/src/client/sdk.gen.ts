@@ -267,6 +267,7 @@ import type {
   GlobalSearchResponses,
   ImportGithubReleasesErrors,
   ImportGithubReleasesResponses,
+  ImportUpdatePost,
   IssuePatch,
   IssuePost,
   LatexCommentPatch,
@@ -364,6 +365,8 @@ import type {
   PostProjectFsOpResponses,
   PostProjectGithubReleaseErrors,
   PostProjectGithubReleaseResponses,
+  PostProjectImportUpdateErrors,
+  PostProjectImportUpdateResponses,
   PostProjectInvitationErrors,
   PostProjectInvitationRedemptionErrors,
   PostProjectInvitationRedemptionResponses,
@@ -4787,7 +4790,9 @@ export class ProjectsService {
    *
    * The path has to exist in the project and not already be declared as a
    * figure, dataset, publication, or misc artifact, since those carry the
-   * same attribution and are edited as what they are.
+   * same attribution and are edited as what they are. One imported from a
+   * Git repo or another project is fetched from there instead, so it can
+   * be updated later.
    */
   public static postProjectMisc<ThrowOnError extends boolean = true>(
     parameters: {
@@ -4821,6 +4826,54 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/misc",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Import Update
+   *
+   * Bring in the latest of a file imported from a Git repo or another
+   * project, like ``calkit sync import``.
+   */
+  public static postProjectImportUpdate<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      importUpdatePost: ImportUpdatePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectImportUpdateResponses,
+    PostProjectImportUpdateErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "importUpdatePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectImportUpdateResponses,
+      PostProjectImportUpdateErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/imports/update",
       ...options,
       ...params,
       headers: {

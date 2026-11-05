@@ -244,8 +244,17 @@ input, select, textarea {
   font-size: 12px;
   font-family: inherit;
 }
+input[type="radio"], input[type="checkbox"] { width: auto; margin: 0; }
 textarea { min-height: 70px; resize: vertical; }
 label { display: block; font-size: 11px; font-weight: 600; margin: 6px 0 2px; }
+label.choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  margin: 2px 0;
+}
 .error { color: var(--ck-danger); }
 .stack { display: flex; flex-direction: column; gap: 6px; }
 .picks {

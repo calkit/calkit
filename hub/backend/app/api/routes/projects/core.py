@@ -6459,6 +6459,107 @@ def post_project_latex_components(
     )
 
 
+def _fetch_import(
+    imported_from: dict[str, Any],
+    wdir: str,
+    path: str,
+    current_user: User,
+    session: Session,
+) -> dict[str, Any] | None:
+    """Bring in the latest of a file imported from a Git repo or another
+    project, returning what to record in ``.calkit/imports.json``.
+
+    None for any other source, e.g., a DOI, which is recorded as given,
+    since it names a record rather than a file that can move.
+    """
+    # Written only where it stays in the project, e.g., not through a
+    # tracked symlink, and only once what's fetched passes its checks, so a
+    # rejected import leaves the file and its lock as they were
+    dest = os.path.join(wdir, path)
+    if os.path.islink(dest) or not _inside(wdir, dest):
+        raise HTTPException(422, f"'{path}' leads outside the project")
+    too_big = HTTPException(
+        413,
+        f"'{path}' is too big to import here; use 'calkit import path' "
+        "instead",
+    )
+    if imported_from.get("project"):
+        try:
+            src_owner, src_name = (
+                str(imported_from["project"]).strip("/").split("/", 1)
+            )
+        except ValueError:
+            raise HTTPException(422, "Project should be given as owner/name")
+        src_path = _normalize_artifact_file_path(
+            str(imported_from.get("path") or "")
+        )
+        if not src_path:
+            raise HTTPException(422, "Name the file in that project")
+        src_project = app.projects.get_project(
+            session=session,
+            owner_name=src_owner,
+            project_name=src_name,
+            current_user=current_user,
+            min_access_level="read",
+        )
+        # No TTL, so an update gets what's there now
+        src_repo = get_repo(
+            project=src_project,
+            user=current_user,
+            session=session,
+            ttl=None,
+            read_only=True,
+        )
+        rev = src_repo.head.commit.hexsha
+        tree = get_repo_tree_for_ref(src_repo, rev)
+        # From Git or DVC storage, including a DVC file that project
+        # imported in turn, whose bytes are in its source's storage
+        try:
+            content = app.projects.read_project_file(
+                project=src_project,
+                tree=tree,
+                path=src_path,
+                max_bytes=calkit.core.DVC_SIZE_THRESH_BYTES - 1,
+                session=session,
+                current_user=current_user,
+            )
+        except HTTPException as e:
+            if e.status_code == 413:
+                raise too_big
+            if e.status_code == 404:
+                raise HTTPException(
+                    404, f"'{src_path}' isn't a file in {src_owner}/{src_name}"
+                )
+            raise
+    elif imported_from.get("git_repo_url"):
+        if not imported_from.get("path"):
+            raise HTTPException(422, "Name the file in that repo")
+        with tempfile.TemporaryDirectory() as tmp:
+            rev = app.imports.fetch_git_path(
+                str(imported_from["git_repo_url"]),
+                imported_from.get("git_ref"),
+                str(imported_from["path"]),
+                tmp,
+                "fetched",
+            )
+            fetched = os.path.join(tmp, "fetched")
+            if os.path.isdir(fetched):
+                raise HTTPException(
+                    422, "Name a file in that repo, not a folder"
+                )
+            if os.path.getsize(fetched) >= calkit.core.DVC_SIZE_THRESH_BYTES:
+                raise too_big
+            with open(fetched, "rb") as f:
+                content = f.read()
+    else:
+        return None
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, "wb") as f:
+        f.write(content)
+    lock: dict[str, Any] = calkit.provenance.import_lock({}, dest, rev=rev)
+    return lock
+
+
 class MiscArtifactPost(BaseModel):
     """A path to attribute, either to whoever made it here or to where it
     came from, for a file that isn't a figure, dataset, or publication.
@@ -6490,7 +6591,9 @@ def post_project_misc(
 
     The path has to exist in the project and not already be declared as a
     figure, dataset, publication, or misc artifact, since those carry the
-    same attribution and are edited as what they are.
+    same attribution and are edited as what they are. One imported from a
+    Git repo or another project is fetched from there instead, so it can
+    be updated later.
     """
     path = _normalize_artifact_file_path(req.path)
     project = app.projects.get_project(
@@ -6549,10 +6652,20 @@ def post_project_misc(
                         "that entry instead",
                     )
                 declared = existing
-    # Whether tracked by Git or DVC, the path has to be here to attribute
+    # Whether tracked by Git or DVC, the path has to be here to attribute,
+    # unless it's fetched
     wdir = str(repo.working_dir)
-    if not os.path.exists(os.path.join(wdir, path)) and not os.path.isfile(
-        os.path.join(wdir, path + ".dvc")
+    fetched = req.imported_from is not None and any(
+        req.imported_from.get(k) for k in ("project", "git_repo_url")
+    )
+    if fetched and os.path.isfile(os.path.join(wdir, path + ".dvc")):
+        raise HTTPException(
+            409, f"'{path}' is tracked by DVC; import it with the CLI"
+        )
+    if (
+        not fetched
+        and not os.path.exists(os.path.join(wdir, path))
+        and not os.path.isfile(os.path.join(wdir, path + ".dvc"))
     ):
         tree = get_repo_tree_for_ref(repo, None)
         if path not in app.projects.dvc_outputs_from_tree(
@@ -6589,12 +6702,96 @@ def post_project_misc(
         misc = ck_info.get("misc", [])
         misc.append(entry)
         ck_info["misc"] = misc
+    to_add = ["calkit.yaml"]
+    if fetched:
+        lock = _fetch_import(
+            entry["imported_from"], wdir, path, current_user, session
+        )
+        to_add += [
+            path,
+            calkit.provenance.write_import_lock(path, lock, wdir=wdir),
+        ]
     ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
-    repo.git.add("calkit.yaml")
+    repo.git.add(to_add)
     repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
     push_and_expire(project, repo)
     record_project_update(project, repo, session)
     return MiscArtifact.model_validate(entry)
+
+
+class ImportUpdatePost(BaseModel):
+    path: str
+
+
+class ImportUpdate(BaseModel):
+    path: str
+    # Whether the file itself changed, rather than only the commit it's
+    # recorded at
+    changed: bool
+    rev: str | None = None
+
+
+@router.post("/projects/{owner_name}/{project_name}/imports/update")
+def post_project_import_update(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    req: ImportUpdatePost,
+) -> ImportUpdate:
+    """Bring in the latest of a file imported from a Git repo or another
+    project, like ``calkit sync import``.
+    """
+    path = _normalize_artifact_file_path(req.path)
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    found = calkit.provenance.find_artifact(get_ck_info_from_repo(repo), path)
+    imported_from = (
+        _imported_from_info(found[1].get("imported_from")) if (found) else None
+    )
+    if not imported_from or not any(
+        imported_from.get(k) for k in ("project", "git_repo_url")
+    ):
+        raise HTTPException(
+            422,
+            f"'{path}' isn't imported from a Git repo or another project, "
+            "so there's nothing to update it from",
+        )
+    if os.path.isfile(os.path.join(wdir, path + ".dvc")):
+        raise HTTPException(
+            409, f"'{path}' is tracked by DVC; update it with the CLI"
+        )
+    dest = os.path.join(wdir, path)
+    before = calkit.provenance.hash_path(dest)
+    previous = calkit.provenance.read_import_locks(wdir=wdir).get(path)
+    if calkit.provenance.local_edit(dest, previous):
+        raise HTTPException(
+            409,
+            f"'{path}' has changed since it was imported, and updating it "
+            "would discard that",
+        )
+    lock = _fetch_import(imported_from, wdir, path, current_user, session)
+    lock_path = calkit.provenance.write_import_lock(path, lock, wdir=wdir)
+    changed = calkit.provenance.hash_path(dest) != before
+    repo.git.add([path, lock_path])
+    if repo.git.diff("--cached", "--name-only", "--", path, lock_path):
+        repo.git.commit(
+            [path, lock_path, "-m", f"Update {path} from its source"]
+        )
+        push_and_expire(project, repo)
+        record_project_update(project, repo, session)
+    return ImportUpdate(
+        path=path, changed=changed, rev=(lock or {}).get("rev")
+    )
 
 
 @router.get("/projects/{owner_name}/{project_name}/presentations")

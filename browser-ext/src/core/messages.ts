@@ -9,6 +9,7 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  ImportUpdate,
   PipelineRun,
   ProjectPipeline,
   PipelineRuns,
@@ -149,6 +150,12 @@ export type Request =
   | { type: "project.pipelineRuns"; owner: string; project: string }
   | { type: "project.startPipelineRun"; owner: string; project: string }
   | {
+      type: "project.updateImport";
+      owner: string;
+      project: string;
+      path: string;
+    }
+  | {
       type: "project.addExportStage";
       owner: string;
       project: string;
@@ -244,6 +251,7 @@ export interface ResponseMap {
   "project.provenance": Provenance;
   "project.stageFromScriptOrNotebook": StageFromScriptOrNotebookResponse;
   "project.recordOrigin": { path: string };
+  "project.updateImport": ImportUpdate;
   "project.addExportStage": ExportStage;
   "project.pipeline": ProjectPipeline;
   "project.pipelineRuns": PipelineRuns;

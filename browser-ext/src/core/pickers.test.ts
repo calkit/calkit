@@ -1,6 +1,11 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
-import { listDir, pathScore } from "./pickers";
+import { listDir, pathScore, renderPathPicker } from "./pickers";
+
+vi.mock("./messages", () => ({
+  RequestFailed: class extends Error {},
+  send: async () => ["scripts/fit.py", "scripts/plot.py", "run.py"],
+}));
 
 describe("pathScore", () => {
   test("matches fragments in order, best in the file name", () => {
@@ -29,5 +34,35 @@ describe("listDir", () => {
       files: ["scripts/b.py"],
     });
     expect(listDir(paths, "nope")).toEqual({ dirs: [], files: [] });
+  });
+});
+
+describe("renderPathPicker", () => {
+  test("browses into a folder without closing", async () => {
+    const { element, input } = renderPathPicker({ owner: "o", project: "p" });
+    document.body.append(element);
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const picks = () =>
+      [...element.querySelectorAll("button.pick")].map((b) => b.textContent);
+    input.focus();
+    await settle();
+    expect(picks()).toEqual(["scripts/", "run.py"]);
+    const folder = element.querySelector("button.pick") as HTMLButtonElement;
+    // A click doesn't take focus from the input
+    const down = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+    });
+    folder.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    // and if something else gave the folder focus, opening it takes it back
+    folder.focus();
+    folder.click();
+    await settle();
+    expect(document.activeElement).toBe(input);
+    expect(picks()).toEqual(["\u2190 scripts/", "fit.py", "plot.py"]);
+    const list = element.querySelector(".picks") as HTMLElement;
+    expect(list.style.display).toBe("");
+    element.remove();
   });
 });

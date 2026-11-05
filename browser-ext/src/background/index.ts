@@ -22,6 +22,7 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  ImportUpdate,
   PipelineRun,
   ProjectPipeline,
   PipelineRuns,
@@ -295,6 +296,11 @@ async function handle(message: Request): Promise<unknown> {
             message: `Record where ${message.path} came from`,
           },
         },
+      );
+    case "project.updateImport":
+      return request<ImportUpdate>(
+        `${projectPath(message.owner, message.project)}/imports/update`,
+        { method: "POST", body: { path: message.path } },
       );
     case "project.pipeline":
       return request<ProjectPipeline>(

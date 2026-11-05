@@ -3662,6 +3662,45 @@ export const ImportInfoSchema = {
   title: "ImportInfo",
 } as const
 
+export const ImportUpdateSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    changed: {
+      type: "boolean",
+      title: "Changed",
+    },
+    rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Rev",
+    },
+  },
+  type: "object",
+  required: ["path", "changed"],
+  title: "ImportUpdate",
+} as const
+
+export const ImportUpdatePostSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ImportUpdatePost",
+} as const
+
 export const ImportedFromPostSchema = {
   properties: {
     project: {
@@ -7716,6 +7755,22 @@ export const ProvenanceSchema = {
       ],
       title: "Origin Path",
     },
+    updatable: {
+      type: "boolean",
+      title: "Updatable",
+      default: false,
+    },
+    update_available: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Update Available",
+    },
     gaps: {
       items: {
         $ref: "#/components/schemas/ProvenanceGap",
@@ -10976,6 +11031,14 @@ export const StageFromScriptOrNotebookResponseSchema = {
       },
       type: "array",
       title: "Outputs",
+      default: [],
+    },
+    found_outputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Found Outputs",
       default: [],
     },
     missing_inputs: {

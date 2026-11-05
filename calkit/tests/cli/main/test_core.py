@@ -4078,6 +4078,15 @@ def test_clone(monkeypatch):
     )
     assert clone_url("me/proj", "--https") == "https://github.com/me/proj.git"
     assert (
+        clone_url("git@github.com:me/proj.git", "--https")
+        == "https://github.com/me/proj.git"
+    )
+    # An SSH URL is kept without --https, even where SSH isn't set up
+    assert (
+        clone_url("git@github.com:me/proj.git", ssh_set_up=False)
+        == "git@github.com:me/proj.git"
+    )
+    assert (
         clone_url("me/proj", "--ssh", ssh_set_up=False)
         == "git@github.com:me/proj.git"
     )

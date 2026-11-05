@@ -11,7 +11,7 @@ from typing import Annotated, Any
 import typer
 
 import calkit
-from calkit.cli import raise_error
+from calkit.cli import raise_error, warn
 from calkit.cli.main.core import (
     STAGE_RUNS_FPATH,
     app,
@@ -769,11 +769,13 @@ def execute_and_record(
     # Detect inputs and outputs if not disabled
     detected_inputs = list(docker_override_detected_inputs)
     detected_outputs = list(docker_override_detected_outputs)
+    external_inputs: list[str] = []
     if not no_detect_io and not (detected_inputs or detected_outputs):
         try:
             io_info = detect_io(stage)
             detected_inputs = io_info["inputs"]
             detected_outputs = io_info["outputs"]
+            external_inputs = io_info.get("external_inputs", [])
         except Exception as e:
             typer.echo(
                 f"Warning: Failed to detect inputs/outputs: {e}",
@@ -869,6 +871,7 @@ def execute_and_record(
                 "name": stage_name,
                 "stage": stage,
             },
+            "external_inputs": external_inputs,
         }
         if execution_status is not None:
             result["execution"] = {
@@ -879,6 +882,14 @@ def execute_and_record(
             }
         return result
 
+    # Data read from outside the project is only on this machine
+    if not fmt_json:
+        for path in external_inputs:
+            warn(
+                f"This reads {path}, which is outside the project, so it "
+                "will fail on other machines; move the data into the project "
+                "and read it from there"
+            )
     # If dry-run, print environment and stage then return
     if dry_run:
         if fmt_json:

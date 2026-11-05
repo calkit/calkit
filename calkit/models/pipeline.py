@@ -1801,11 +1801,13 @@ class QuestionsToLatexStage(Stage):
 class ReferencesCheckStage(Stage):
     """Whether the references a document cites are real.
 
-    Its inputs are ``calkit.yaml``, the target document, the files it
-    inputs, and the project's reference collections, and its output is
-    that document's report, all added when the pipeline is compiled. One
-    stage checks one document, so a project with two papers has one of
-    these each and each goes out of date on its own.
+    Its inputs are the target document, the files it inputs, and the
+    bibliographies it names, or ``calkit.yaml`` and the collections it
+    declares if it names none, all found when the pipeline is compiled.
+    Its output is that document's report, by default under
+    ``.calkit/reference-checks``. One stage checks one document, so a
+    project with two papers has one of these each and each goes out of
+    date on its own.
     """
 
     kind: Literal["references-check"] = "references-check"
@@ -1832,12 +1834,56 @@ class ReferencesCheckStage(Stage):
         "calkit.yaml and documents from the project root.",
     )
 
+    # What the check reads besides the document, set by preprocess
+    _found_paths: list[str] = PrivateAttr(default_factory=list)
+
+    @model_validator(mode="after")
+    def _default_output(self) -> "ReferencesCheckStage":
+        """The report goes beside other generated files unless an output
+        is declared."""
+        import calkit.references
+
+        if not self.outputs:
+            path = calkit.references.output_path(self.target_path)
+            self.outputs = [PathOutput(path=path, storage="git")]
+        return self
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
+    ) -> None:
+        """Find the files the document inputs and the bibliographies it
+        names, including ones a stage makes that aren't there yet."""
+        import calkit.references
+
+        self._found_paths = calkit.references.document_inputs(
+            self.target_path, project_dir=project_dir, is_output=is_output
+        )
+
+    @property
+    def report_path(self) -> str:
+        """Where the report is written: the first output."""
+        out = self.outputs[0]
+        return out if isinstance(out, str) else out.path
+
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit check references {shlex.quote(self.target_path)}"
+        cmd = (
+            f"calkit check references {shlex.quote(self.target_path)}"
+            f" --output {shlex.quote(self.report_path)}"
+        )
         if self.offline:
             cmd += " --offline"
         return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return _unique_paths(
+            [self.target_path] + super().dvc_deps + self._found_paths
+        )
 
     @property
     def dvc_outs(self) -> list[str | dict]:

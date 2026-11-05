@@ -11,11 +11,12 @@ the same mistake wearing a real DOI.
 Keys are read from the documents the pipeline builds, and from the files
 they input, rather than from the compiled PDF, since that is where a key
 is written and where it has to be fixed. Each is resolved against the
-collections ``calkit.yaml`` declares, and each entry is then looked for in
+bibliographies the document names, or the collections ``calkit.yaml``
+declares when it names none, and each entry is then looked for in
 Crossref, OpenAlex, and arXiv, by identifier when it has one and by title
 when it does not. A candidate is compared on title, first author, and
 year, so an entry whose DOI resolves to something else is reported rather
-than trusted.
+than trusted, even when a search for its title finds the right work.
 
 The check is deliberately quiet about what it cannot know. A title search
 always returns its nearest neighbor, so a candidate that does not
@@ -27,19 +28,22 @@ named, and they do not fail the check. What fails it is decidable: a key
 in no collection, read locally, and an identifier that resolves to
 another work, which carries the record it disagrees with.
 
-Reports are written per document, to ``.calkit/reference-checks``, so
-each is a pipeline output with its own dependencies. They carry no
-timestamp, so a report is a function of the sources that produced it and
-can be checked for staleness like any other output. Answers from the
-services are cached under ``.calkit/local``, which is not tracked, so a
-rerun needs no network and ``--offline`` still reports everything that
-does not.
+A ``references-check`` stage writes one report per document, by default
+to ``.calkit/reference-checks``, so each is a pipeline output with its own
+dependencies. Reports carry no timestamp, so a report is a function of the
+sources that produced it and can be checked for staleness like any other
+output. Answers from the services are cached under ``.calkit/local``,
+which is not tracked, so a rerun needs no network and ``--offline`` still
+reports everything that does not. A request that fails, e.g., without a
+network, is not cached, and what it would have answered is reported as
+unchecked rather than as not found.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Callable
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Literal
@@ -84,6 +88,7 @@ Status = Literal[
     "doi-not-registered",
     "mismatch",
     "not-found",
+    "unchecked",
     "not-checkable",
     "missing-from-bib",
 ]
@@ -105,17 +110,61 @@ SUSPECT: tuple[Status, ...] = (
     "doi-not-registered",
     "mismatch",
     "not-found",
+    "unchecked",
 )
 
-CITE_RE = re.compile(
-    r"\\(?:no)?cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{([^}]*)\}",
+# Commands that cite, from LaTeX, natbib, biblatex, and apacite, named
+# explicitly so that, e.g., \citestyle isn't read as one. Each takes its
+# keys in its last brace group, except biblatex's multicite forms, which
+# take one group per citation.
+_CITE_COMMANDS = (
+    "cite Cite citet Citet citep Citep citealt Citealt citealp Citealp "
+    "citeauthor Citeauthor citeyear citeyearpar citenum citetitle "
+    "Citetitle citedate citeurl parencite Parencite footcite Footcite "
+    "footcitetext textcite Textcite smartcite Smartcite autocite Autocite "
+    "supercite fullcite footfullcite nocite citeA citeNP shortcite "
+    "citeasnoun"
+).split()
+_MULTICITE_COMMANDS = (
+    "cites Cites parencites Parencites footcites footcitetexts textcites "
+    "Textcites smartcites Smartcites autocites Autocites supercites"
+).split()
+_CITE_COMMAND_RE = re.compile(
+    r"\\(" + "|".join(_CITE_COMMANDS + _MULTICITE_COMMANDS) + r")"
+    r"(?![A-Za-z@])\*?"
+)
+# One citation's arguments: multicite's (pre)(post) notes, then [pre][post]
+# notes, then the keys, each allowed to start on the next line.
+_CITE_ARGS_RE = re.compile(
+    r"(?:\s*\([^)]*\))*(?:\s*\[[^\]]*\])*\s*\{([^}]*)\}"
+)
+# Keys an inline bibliography defines with \bibitem, rather than a .bib.
+_BIBITEM_RE = re.compile(r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}")
+# Commands naming the .bib files a LaTeX document's bibliography reads.
+_BIB_RE = re.compile(
+    r"\\(?:bibliography|addbibresource|addglobalbib|addsectionbib)"
+    r"\s*(?:\[[^\]]*\])*\s*\{([^}]*)\}"
 )
 
-# Pandoc citations, e.g., [@key; @other] or a bare @key, for Markdown
-# documents. The lookbehind keeps an email address from reading as one,
-# and a key may contain internal punctuation but not end with it, so a
-# citation at the end of a sentence doesn't swallow the period.
-MARKDOWN_CITE_RE = re.compile(r"(?<![\w.])@([A-Za-z][\w:.#$%&+?<>~/-]*[\w])")
+# Pandoc citations, e.g., [@key; @other], a bare @key, or @{key}, for
+# Markdown documents. The lookbehind keeps an email address from reading
+# as one, and a key may contain internal punctuation but not end with it,
+# so a citation at the end of a sentence doesn't swallow the period.
+MARKDOWN_CITE_RE = re.compile(
+    r"(?<![\w.@])@(?:\{([^}\s]+)\}|([\w][\w:.#$%&+?<>~/-]*[\w]|\w))"
+)
+# Quarto's and pandoc-crossref's cross-references, e.g., @fig-results or
+# @tbl:summary, which are written like citations but aren't.
+CROSSREF_RE = re.compile(
+    r"^(?:fig|tbl|eq|sec|lst|thm|lem|cor|prp|cnj|def|exm|exr|nte|tip|wrn|"
+    r"imp|cau)[-:]"
+)
+# Markdown that doesn't render as text, so a citation in it isn't one.
+_MD_SKIP_RE = re.compile(
+    r"<!--.*?-->|(`+)[^\n]*?(?<!`)\1(?!`)|<https?://[^>\s]*>|https?://\S+",
+    re.S,
+)
+_MD_FENCE_RE = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})")
 
 
 class Found(BaseModel):
@@ -215,6 +264,22 @@ class Reference(BaseModel):
         "which is registrar-agnostic, or None if it was not asked.",
     )
     found: Found | None = Field(default=None, exclude=True)
+    alternative: Found | None = Field(
+        default=None,
+        exclude=True,
+        description="A work that agrees with the entry where the one its "
+        "identifier names doesn't, i.e., what the identifier should be.",
+    )
+    nearest: Found | None = Field(
+        default=None,
+        exclude=True,
+        description="The closest title a search found where none matched.",
+    )
+    unanswered: Literal["offline", "unreachable"] | None = Field(
+        default=None,
+        exclude=True,
+        description="Why a lookup it needed got no answer, if one didn't.",
+    )
 
 
 class DocumentCheck(BaseModel):
@@ -249,7 +314,6 @@ class ReferenceCheck(BaseModel):
     """The whole project's citation check."""
 
     documents: list[DocumentCheck] = Field(default_factory=list)
-    n_requests: int = 0
 
     @property
     def ok(self) -> bool:
@@ -287,7 +351,10 @@ def clean_tex(value: str) -> str:
     str
         The value with TeX markup removed.
     """
-    out = re.sub(r"\\[a-zA-Z]+\s*", "", value)
+    # An accent command keeps its letter, e.g., M{\"u}ller reads as Muller,
+    # which is what a record's Müller folds to.
+    out = re.sub(r"\\[`'^\"~=.]", "", value)
+    out = re.sub(r"\\[a-zA-Z]+\s*", "", out)
     out = out.replace("{", "").replace("}", "").replace("\\", "")
     out = out.replace("--", "-").replace("~", " ")
     return " ".join(out.split())
@@ -342,6 +409,78 @@ def similarity(left: str, right: str) -> float:
     return SequenceMatcher(None, left, right).ratio()
 
 
+def normalize_doi(value: str | None) -> str | None:
+    """A DOI as the services take it, from however an entry writes it.
+
+    Parameters
+    ----------
+    value : str or None
+        A ``doi`` field, e.g., ``https://doi.org/10.1000/a\\_b``.
+
+    Returns
+    -------
+    str or None
+        The bare DOI, e.g., ``10.1000/a_b``, or None if there isn't one.
+    """
+    if not value:
+        return None
+    doi = re.sub(r"\\([_&%#$])", r"\1", value).replace("{", "")
+    doi = doi.replace("}", "").strip()
+    doi = re.sub(
+        r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", "", doi, flags=re.I
+    )
+    return doi.strip() or None
+
+
+def _fold_name(value: str | None) -> str:
+    """A surname reduced to its letters, accents folded."""
+    text = unicodedata.normalize("NFKD", value or "")
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _joined(lines: list[Any]) -> tuple[str, list[int]]:
+    """A flattened document as one text, citations being free to span
+    lines, with each line's offset into it."""
+    from calkit.latex import _strip_comments, is_markdown
+
+    texts: list[str] = []
+    fence: str | None = None
+    for i, line in enumerate(lines):
+        text = line.text
+        if not is_markdown(line.path):
+            # A commented citation is not one
+            text = _strip_comments(text)
+        else:
+            # Front matter and code blocks don't render as text, so are
+            # blanked, keeping offsets
+            first = i == 0 or lines[i - 1].path != line.path
+            if first and text.strip() == "---":
+                fence = "---"
+                text = ""
+            elif fence == "---":
+                if text.strip() in ("---", "..."):
+                    fence = None
+                text = ""
+            else:
+                m = _MD_FENCE_RE.match(text)
+                if fence is None and m:
+                    fence = m.group(1)
+                    text = ""
+                elif fence is not None:
+                    if m and m.group(1)[0] == fence[0]:
+                        if len(m.group(1)) >= len(fence):
+                            fence = None
+                    text = ""
+        texts.append(text)
+    starts = []
+    offset = 0
+    for text in texts:
+        starts.append(offset)
+        offset += len(text) + 1
+    return "\n".join(texts), starts
+
+
 def cited_keys(lines: list[Any]) -> dict[str, list[str]]:
     """Citation keys in a flattened document, and where each appears.
 
@@ -355,35 +494,188 @@ def cited_keys(lines: list[Any]) -> dict[str, list[str]]:
     -------
     dict
         Key to the ``path:lineno`` locations citing it, in source order.
+        ``\\nocite{*}`` appears as the key ``*``.
+    """
+    import bisect
+
+    from calkit.latex import is_markdown
+
+    if not lines:
+        return {}
+    text, starts = _joined(lines)
+    # flatten inputs nothing into Markdown, so a document is one or other
+    markdown = is_markdown(lines[0].path)
+    if markdown:
+        # Blank what doesn't render as text, keeping offsets
+        text = _MD_SKIP_RE.sub(
+            lambda m: re.sub(r"[^\n]", " ", m.group()), text
+        )
+
+    def where(offset: int) -> str:
+        line = lines[bisect.bisect_right(starts, offset) - 1]
+        return f"{line.path}:{line.lineno}"
+
+    found: list[tuple[int, str]] = []
+    for match in _CITE_COMMAND_RE.finditer(text):
+        multi = match.group(1) in _MULTICITE_COMMANDS
+        pos = match.end()
+        while True:
+            args = _CITE_ARGS_RE.match(text, pos)
+            if args is None:
+                break
+            start = args.start(1)
+            for part in args.group(1).split(","):
+                key = part.strip()
+                # A macro's parameter, e.g., #1, or a key built from
+                # macros, can't be looked up
+                if key and "#" not in key and "\\" not in key:
+                    found.append((start + part.index(key[0]), key))
+                start += len(part) + 1
+            pos = args.end()
+            if not multi:
+                break
+    if markdown:
+        for match in MARKDOWN_CITE_RE.finditer(text):
+            found.append((match.start(), match.group(1) or match.group(2)))
+    out: dict[str, list[str]] = {}
+    for offset, key in sorted(found):
+        locations = out.setdefault(key, [])
+        if where(offset) not in locations:
+            locations.append(where(offset))
+    return out
+
+
+def defined_keys(lines: list[Any]) -> dict[str, str]:
+    """Keys an inline ``thebibliography`` defines, and where.
+
+    Parameters
+    ----------
+    lines : list of calkit.latex.SourceLine
+        The document's lines, as ``calkit.latex.flatten`` returns them.
+
+    Returns
+    -------
+    dict
+        Key to the path of the file whose ``\\bibitem`` defines it.
     """
     from calkit.latex import _strip_comments, is_markdown
 
-    out: dict[str, list[str]] = {}
+    out: dict[str, str] = {}
     for line in lines:
-        markdown = is_markdown(line.path)
-        # A commented citation is not one, and in Markdown the comment
-        # syntax is HTML, which flatten leaves alone.
-        text = line.text if markdown else _strip_comments(line.text)
-        keys = []
-        for match in CITE_RE.finditer(text):
-            keys += [k.strip() for k in match.group(1).split(",")]
-        if markdown:
-            keys += MARKDOWN_CITE_RE.findall(text)
-        for key in keys:
-            if key:
-                out.setdefault(key, []).append(f"{line.path}:{line.lineno}")
+        if is_markdown(line.path):
+            continue
+        for match in _BIBITEM_RE.finditer(_strip_comments(line.text)):
+            out.setdefault(match.group(1).strip(), line.path)
+    return out
+
+
+def document_collections(
+    document: str, lines: list[Any], wdir: str | Path | None = None
+) -> list[str]:
+    """The bibliographies a document names, in the order it names them.
+
+    A LaTeX document names them with ``\\bibliography`` or biblatex's
+    ``\\addbibresource``, and a Markdown one in its front matter's
+    ``bibliography``. Each is resolved like ``calkit.latex.detect_inputs``
+    resolves inputs: against the document's folder, then the folder of the
+    file naming it.
+
+    Parameters
+    ----------
+    document : str
+        Project-relative path of the document.
+    lines : list of calkit.latex.SourceLine
+        Its lines, as ``calkit.latex.flatten`` returns them.
+    wdir : str or Path, optional
+        Project working directory, defaulting to the current one.
+
+    Returns
+    -------
+    list of str
+        Project-relative paths, which may not exist, or an empty list if
+        the document names none, e.g., because pandoc is given them on its
+        command line instead.
+    """
+    import posixpath
+
+    from calkit.latex import _strip_comments, is_markdown
+
+    base = Path(wdir or ".")
+    named: list[tuple[str, str]] = []
+    if is_markdown(document):
+        import ruamel.yaml
+
+        head = [ln.text for ln in lines if ln.path == document]
+        if head and head[0].strip() == "---":
+            end = next(
+                (
+                    i
+                    for i, t in enumerate(head[1:], 1)
+                    if t.strip() in ("---", "...")
+                ),
+                None,
+            )
+            try:
+                meta = ruamel.yaml.YAML(typ="safe").load(
+                    "\n".join(head[1:end])
+                )
+            except Exception:
+                meta = None
+            value = (
+                meta.get("bibliography") if isinstance(meta, dict) else None
+            )
+            values = value if isinstance(value, list) else [value]
+            named += [(str(v), document) for v in values if v]
+        parents = [posixpath.dirname(document), ""]
+    else:
+        for line in lines:
+            for match in _BIB_RE.finditer(_strip_comments(line.text)):
+                for name in match.group(1).split(","):
+                    named.append((name.strip(), line.path))
+        parents = [posixpath.dirname(document)]
+    out: list[str] = []
+    for name, named_in in named:
+        if not name or "#" in name or "\\" in name:
+            continue
+        names = [name]
+        if not is_markdown(document) and not name.endswith(".bib"):
+            names = [name + ".bib", name]
+        folders = list(dict.fromkeys(parents + [posixpath.dirname(named_in)]))
+        candidates = [
+            posixpath.normpath(posixpath.join(folder, n))
+            for n in names
+            for folder in folders
+        ]
+        path = next(
+            (c for c in candidates if (base / c).is_file()), candidates[0]
+        )
+        if path not in out:
+            out.append(path)
+    return out
+
+
+def declared_collections(ck_info: dict) -> list[str]:
+    """Paths of the collections ``calkit.yaml`` declares, in order."""
+    out = []
+    for item in ck_info.get("references") or []:
+        path = item.get("path") if isinstance(item, dict) else item
+        if isinstance(path, str) and path and path not in out:
+            out.append(path)
     return out
 
 
 def load_collections(
-    wdir: str | Path | None = None,
+    wdir: str | Path | None = None, paths: list[str] | None = None
 ) -> dict[str, dict[str, dict]]:
-    """Every reference collection the project declares, parsed.
+    """Reference collections, parsed.
 
     Parameters
     ----------
     wdir : str or Path, optional
         Project working directory, defaulting to the current one.
+    paths : list of str, optional
+        Project-relative paths of the collections to read, defaulting to
+        every one the project declares. One that doesn't exist is skipped.
 
     Returns
     -------
@@ -393,12 +685,11 @@ def load_collections(
     import calkit
     from calkit.releases import parse_bibtex
 
-    ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+    if paths is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+        paths = declared_collections(ck_info)
     out: dict[str, dict[str, dict]] = {}
-    for item in ck_info.get("references") or []:
-        path = item.get("path") if isinstance(item, dict) else item
-        if not path:
-            continue
+    for path in paths:
         full = Path(wdir or ".") / path
         if not full.exists():
             continue
@@ -431,7 +722,7 @@ def _fill_from_entry(reference: Reference, entry: dict) -> None:
         )
         or None
     )
-    reference.doi = (entry.get("doi") or "").strip() or None
+    reference.doi = normalize_doi(entry.get("doi"))
     if (entry.get("archiveprefix") or "").lower() == "arxiv":
         reference.arxiv = (entry.get("eprint") or "").strip() or None
     # howpublished is where a software or web citation puts its link,
@@ -475,8 +766,8 @@ def compare(reference: Reference, found: Found) -> Found:
     else:
         # Off by one is the usual online-ahead-of-print gap.
         found.year_matches = abs(reference.year - found.year) <= 1
-    ours_author = (reference.first_author or "").lower()
-    theirs_author = (found.first_author or "").lower()
+    ours_author = _fold_name(reference.first_author)
+    theirs_author = _fold_name(found.first_author)
     if not ours_author or not theirs_author:
         found.author_matches = None
     else:
@@ -508,7 +799,7 @@ def _evidence(reference: Reference, found: Found) -> Evidence:
     """
     matched_by: Literal["doi", "arxiv", "title"] = (
         "doi"
-        if found.source == "crossref-doi"
+        if found.source.endswith("-doi")
         else "arxiv"
         if found.source == "arxiv"
         else "title"
@@ -535,7 +826,7 @@ def _evidence(reference: Reference, found: Found) -> Evidence:
             differs[name] = value
     return Evidence(
         matched_by=matched_by,
-        source="crossref" if found.source == "crossref-doi" else found.source,
+        source=found.source.removesuffix("-doi"),
         url=url,
         agrees_on=agrees,
         differs=differs,
@@ -547,6 +838,16 @@ def _evidence(reference: Reference, found: Found) -> Evidence:
 
 def classify(reference: Reference) -> None:
     """Set a reference's status and notes from what was found."""
+
+    def note_alternative() -> None:
+        alt = reference.alternative
+        if alt is not None:
+            where = _evidence(reference, alt).url or alt.source
+            reference.notes.append(
+                f"a work matching the entry's title, authors, and year is at "
+                f"{where}, so the identifier is likely wrong"
+            )
+
     if reference.collection is None:
         reference.status = "missing-from-bib"
         reference.notes.append(
@@ -557,14 +858,22 @@ def classify(reference: Reference) -> None:
     if reference.also_in:
         reference.notes.append(
             f"also defined in {', '.join(reference.also_in)}, so which "
-            "entry is used depends on the order the collections are "
-            "declared in"
+            "entry is used depends on the order the bibliographies are "
+            "named in"
         )
     if reference.doi_registered is False:
         reference.status = "doi-not-registered"
         reference.notes.append(
             f"the DOI ({reference.doi}) does not exist in the handle system "
             "that registers every DOI, so it cannot be a real identifier"
+        )
+        note_alternative()
+        return
+    if reference.entry_type == "bibitem":
+        reference.status = "not-checkable"
+        reference.notes.append(
+            "defined by a \\bibitem in the document, which has no fields to "
+            "look up; check it by hand"
         )
         return
     found = reference.found
@@ -584,7 +893,8 @@ def classify(reference: Reference) -> None:
             return
         reference.status = "mismatch"
         reference.notes.append(
-            f"found a work, but {', '.join(disagrees)} disagrees with the "
+            f"found a work, but its {', '.join(disagrees)} "
+            f"{'disagrees' if len(disagrees) == 1 else 'disagree'} with the "
             "entry; see what the record says under evidence"
         )
         if (
@@ -596,6 +906,7 @@ def classify(reference: Reference) -> None:
                 "the DOI resolves, but to a different work than this entry "
                 "describes"
             )
+        note_alternative()
         return
     # Nothing was found, which means different things depending on what
     # there was to look for.
@@ -607,6 +918,17 @@ def classify(reference: Reference) -> None:
         reference.notes.append(
             "cites a URL rather than a registered work, so there is nothing "
             "to look up; check the link by hand"
+        )
+    elif reference.unanswered is not None:
+        # Not finding a work only means something if every service asked
+        # gave an answer
+        reference.status = "unchecked"
+        reference.notes.append(
+            "not looked up, since the check ran offline and nothing is "
+            "cached for it"
+            if reference.unanswered == "offline"
+            else "a service could not be reached, so it could not be "
+            "looked up; run the check again to retry"
         )
     elif reference.doi:
         reference.status = "not-found"
@@ -622,6 +944,12 @@ def classify(reference: Reference) -> None:
         reference.notes.append(
             "no work with this title was found in the services checked"
         )
+        if reference.nearest is not None:
+            near = reference.nearest
+            where = _evidence(reference, near).url or near.source
+            reference.notes.append(
+                f"the closest title found is {near.title!r}, at {where}"
+            )
         venue = (reference.venue or "").lower()
         if any(thin in venue for thin in THIN_VENUES):
             reference.notes.append(
@@ -655,12 +983,17 @@ def check_references(
     -------
     ReferenceCheck
         One report per document checked.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a document named in ``paths`` doesn't exist.
     """
     import calkit
-    from calkit.latex import comment_documents, flatten
+    from calkit.latex import comment_documents, flatten, is_markdown
 
     ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
-    collections = load_collections(wdir=wdir)
+    declared = declared_collections(ck_info)
     lookup = Lookup(wdir=wdir, offline=offline, refresh=refresh)
     out = ReferenceCheck()
 
@@ -674,28 +1007,56 @@ def check_references(
             else None
         )
 
+    if paths:
+        missing = [p for p in paths if not (Path(wdir or ".") / p).is_file()]
+        if missing:
+            raise FileNotFoundError(f"No such document: {', '.join(missing)}")
     for document in paths or comment_documents(ck_info):
         lines = flatten(document, read=read)
         if not lines:
             continue
+        # The bibliographies the document names are the ones its citations
+        # resolve against, and the declared ones only stand in for them
+        names = document_collections(document, lines, wdir=wdir) or declared
+        collections = load_collections(wdir=wdir, paths=names)
+        inline = defined_keys(lines)
         check = DocumentCheck(
             path=document,
             sources=list(dict.fromkeys(line.path for line in lines)),
-            collections=list(collections),
+            collections=names,
             offline=offline,
         )
-        for key, locations in cited_keys(lines).items():
+        cited = cited_keys(lines)
+        # \nocite{*} puts every entry in the bibliography, so each is cited
+        everything = cited.pop("*", None)
+        if everything is not None:
+            for entries in collections.values():
+                for key in entries:
+                    cited.setdefault(key, list(everything))
+        for key, locations in cited.items():
+            defining = [
+                n for n, entries in collections.items() if key in entries
+            ]
+            # Quarto and pandoc-crossref write a cross-reference like a
+            # citation, e.g., @fig-results
+            if (
+                not defining
+                and CROSSREF_RE.match(key)
+                and all(
+                    is_markdown(loc.rsplit(":", 1)[0]) for loc in locations
+                )
+            ):
+                continue
             reference = Reference(key=key, cited_at=locations)
-            defining = []
-            for name, entries in collections.items():
-                if key in entries:
-                    defining.append(name)
             if defining:
-                # The first wins, as BibTeX takes them in order.
+                # The first wins, as BibTeX takes them in the order named
                 reference.collection = defining[0]
                 reference.also_in = defining[1:]
                 _fill_from_entry(reference, collections[defining[0]][key])
                 verify(reference, lookup)
+            elif key in inline:
+                reference.collection = inline[key]
+                reference.entry_type = "bibitem"
             classify(reference)
             check.references[key] = reference
         check.n_cited = len(check.references)
@@ -705,7 +1066,6 @@ def check_references(
         check.n_by_status = dict(sorted(counts.items()))
         out.documents.append(check)
     lookup.save()
-    out.n_requests = lookup.calls
     return out
 
 
@@ -718,44 +1078,71 @@ def verify(reference: Reference, lookup: Lookup) -> None:
         The entry to look for, updated in place with the best candidate.
     lookup : Lookup
         The cached service reader to ask.
+
+    Notes
+    -----
+    An identifier is authoritative: the work it resolves to is the one a
+    reader following it gets, so it is what the entry is compared with,
+    even where a search for the title finds a work that agrees better.
+    That search is still made, so a report can say where the right work
+    is.
     """
-    candidates: list[Found] = []
+    unanswered = lookup.unanswered
+    by_id: Found | None = None
     if reference.doi:
-        hit = lookup.crossref_doi(reference.doi)
-        if hit is not None:
-            candidates.append(compare(reference, hit))
-        else:
-            # Crossref is one registrar of several, so an entry it lacks
-            # is not yet evidence of anything; the handle system is.
+        # Crossref and DataCite, e.g., Zenodo, register most DOIs, and
+        # the handle system behind doi.org knows every one
+        by_id = lookup.crossref_doi(reference.doi) or lookup.datacite_doi(
+            reference.doi
+        )
+        if by_id is None:
             reference.doi_registered = lookup.doi_registered(reference.doi)
-    if reference.arxiv and not any(
-        c.title_matches is not False for c in candidates
-    ):
-        hit = lookup.arxiv(reference.arxiv)
-        if hit is not None:
-            candidates.append(compare(reference, hit))
-    if (
-        not [c for c in candidates if c.title_matches is not False]
-        and reference.title
-    ):
+    if by_id is None and reference.arxiv:
+        by_id = lookup.arxiv(reference.arxiv)
+    if by_id is not None:
+        compare(reference, by_id)
+    by_title: list[Found] = []
+    if reference.title and (by_id is None or not _agrees(by_id)):
         for hit in (
             lookup.crossref_title(reference.title),
             lookup.openalex_title(reference.title),
         ):
+            # A search always returns its nearest neighbor, so only a hit
+            # with the same title is the work; one that merely resembles it
+            # is a failed search, worth pointing at but not accusing with
             if hit is not None:
-                candidates.append(compare(reference, hit))
-    # A candidate found by title has to at least resemble the title it was
-    # found with; one found by identifier is kept whatever its title says,
-    # since a DOI resolving to another work is the finding.
-    plausible = [
-        c
-        for c in candidates
-        if c.source in ("crossref-doi", "arxiv")
-        or (c.title_similarity or 0.0) >= TITLE_PLAUSIBLE
-    ]
-    if not plausible:
-        return
-    reference.found = max(plausible, key=_rank)
+                compare(reference, hit)
+                if hit.title_matches:
+                    by_title.append(hit)
+                elif (hit.title_similarity or 0.0) >= TITLE_PLAUSIBLE and (
+                    reference.nearest is None
+                    or (hit.title_similarity or 0.0)
+                    > (reference.nearest.title_similarity or 0.0)
+                ):
+                    reference.nearest = hit
+    best_by_title = max(by_title, key=_rank) if by_title else None
+    if by_id is not None:
+        reference.found = by_id
+    elif reference.doi_registered is not False:
+        # An unregistered DOI is the finding, whatever the title finds
+        reference.found = best_by_title
+    # Where the identifier names the wrong work, or none, say where the
+    # right one is
+    if (
+        best_by_title is not None
+        and best_by_title is not reference.found
+        and _agrees(best_by_title)
+    ):
+        reference.alternative = best_by_title
+    if reference.found is not None:
+        reference.nearest = None
+    if reference.found is None and lookup.unanswered > unanswered:
+        reference.unanswered = "offline" if lookup.offline else "unreachable"
+
+
+def _agrees(found: Found) -> bool:
+    """Whether no compared field disagrees."""
+    return _rank(found)[0] == 1
 
 
 def _rank(found: Found) -> tuple[int, float]:
@@ -812,8 +1199,10 @@ def _from_openalex(item: dict) -> Found:
 class Lookup:
     """Cached, rate-limited reads of the citation services.
 
-    A failed request is cached as a miss so one unreachable record does
-    not make every rerun pay for it again; ``refresh`` clears that.
+    An answer, including a service saying it has no such record, is cached
+    so a rerun needs no network. A request that gets no answer, e.g.,
+    without a network, or one the service turns away, is not, so the next
+    run asks again, and is counted in ``unanswered``.
     """
 
     def __init__(
@@ -826,9 +1215,13 @@ class Lookup:
 
         self.path = Path(wdir or ".") / CACHE_PATH
         self.offline = offline
+        # Refreshing asks again for what this run needs, keeping the rest
+        self.refresh = refresh
+        self.asked: set[str] = set()
         self.cache: dict[str, Any] = {}
         self.calls = 0
-        if self.path.exists() and not refresh:
+        self.unanswered = 0
+        if self.path.exists():
             try:
                 self.cache = json.loads(self.path.read_text())
             except json.JSONDecodeError:
@@ -837,6 +1230,9 @@ class Lookup:
     def save(self) -> None:
         """Write the cache, so the next run needs no network."""
         import json
+
+        if not self.asked:
+            return
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.cache, indent=2, sort_keys=True))
@@ -850,28 +1246,40 @@ class Lookup:
         # A cached entry written by another version may not be text, in
         # which case treat it as a miss and overwrite it.
         cached = self.cache.get(url)
-        if isinstance(cached, str) or (url in self.cache and cached is None):
+        fresh = not self.refresh or url in self.asked
+        if fresh and (
+            isinstance(cached, str) or (url in self.cache and cached is None)
+        ):
             return cached
         if self.offline:
+            self.unanswered += 1
             return None
         request = urllib.request.Request(
             url, headers={"User-Agent": USER_AGENT}
         )
         text = None
+        answered = False
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 text = response.read().decode("utf-8", errors="replace")
+            answered = True
         except urllib.error.HTTPError as e:
             # An error status can still carry the answer: doi.org replies
-            # 404 with the JSON saying the handle doesn't exist.
+            # 404 with the JSON saying the handle doesn't exist. Being
+            # rate limited or a server error is no answer at all.
+            answered = e.code < 500 and e.code != 429
             try:
                 text = e.read().decode("utf-8", errors="replace")
             except OSError:
                 text = None
         except (urllib.error.URLError, TimeoutError, OSError):
-            text = None
+            pass
         self.calls += 1
         time.sleep(REQUEST_DELAY_S)
+        if not answered:
+            self.unanswered += 1
+            return None
+        self.asked.add(url)
         self.cache[url] = text
         return text
 
@@ -896,6 +1304,35 @@ class Lookup:
         if not payload or "message" not in payload:
             return None
         return _from_crossref(payload["message"], source="crossref-doi")
+
+    def datacite_doi(self, doi: str) -> Found | None:
+        """The work DataCite has for a DOI, if any, e.g., a Zenodo one."""
+        import urllib.parse
+
+        quoted = urllib.parse.quote(doi, safe="/")
+        payload = self.get_json(f"https://api.datacite.org/dois/{quoted}")
+        attrs = ((payload or {}).get("data") or {}).get("attributes")
+        if not isinstance(attrs, dict):
+            return None
+        titles = attrs.get("titles") or [{}]
+        creators = attrs.get("creators") or [{}]
+        year = attrs.get("publicationYear")
+        kind = (attrs.get("types") or {}).get("resourceTypeGeneral")
+        return Found(
+            source="datacite-doi",
+            id=attrs.get("doi"),
+            doi=attrs.get("doi"),
+            title=titles[0].get("title"),
+            # A concept DOI for software or data is dated by its latest
+            # version, so its year says nothing about the one cited
+            year=(
+                int(str(year))
+                if str(year).isdigit() and kind not in ("Software", "Dataset")
+                else None
+            ),
+            first_author=creators[0].get("familyName")
+            or creators[0].get("name"),
+        )
 
     def doi_registered(self, doi: str) -> bool | None:
         """Whether the handle system knows a DOI.
@@ -1029,36 +1466,27 @@ def compact(value: Any) -> Any:
     return value
 
 
-def write_reports(
-    check: ReferenceCheck, wdir: str | Path | None = None
-) -> list[str]:
-    """Write one report per document and return where they went.
+def write_report(
+    document: DocumentCheck, path: str, wdir: str | Path | None = None
+) -> None:
+    """Write one document's report.
 
     Parameters
     ----------
-    check : ReferenceCheck
-        The check to write.
+    document : DocumentCheck
+        The document's check.
+    path : str
+        Where to write it, relative to ``wdir``.
     wdir : str or Path, optional
         Project working directory, defaulting to the current one.
-
-    Returns
-    -------
-    list of str
-        Project-relative paths written, in document order.
     """
     import json
 
-    out = []
-    for document in check.documents:
-        path = output_path(document.path)
-        full = Path(wdir or ".") / path
-        full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(
-            json.dumps(compact(document.model_dump(mode="json")), indent=2)
-            + "\n"
-        )
-        out.append(path)
-    return out
+    full = Path(wdir or ".") / path
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_text(
+        json.dumps(compact(document.model_dump(mode="json")), indent=2) + "\n"
+    )
 
 
 def format_check(check: ReferenceCheck, verbose: bool = False) -> str:
@@ -1076,6 +1504,8 @@ def format_check(check: ReferenceCheck, verbose: bool = False) -> str:
     str
         The report.
     """
+    from calkit.core import check_or_x
+
     lines = []
     for document in check.documents:
         counts = ", ".join(
@@ -1109,109 +1539,88 @@ def format_check(check: ReferenceCheck, verbose: bool = False) -> str:
                     f"    found by {evidence.matched_by} at {where}, "
                     f"agreeing on {', '.join(evidence.agrees_on) or 'nothing'}"
                 )
+        lines.append("")
     if not check.documents:
-        lines.append("No documents with citations to check.")
-    elif check.ok:
-        lines.append(
-            "✅ Every cited reference resolves to an entry, and none "
-            "contradicts the record it was found in."
-        )
-    else:
-        n = sum(len(d.blocking) for d in check.documents)
-        lines.append(f"❌ {n} reference(s) cannot be accounted for.")
+        return "No documents with citations to check."
+    references = [r for d in check.documents for r in d.references.values()]
+
+    def n(*statuses: str) -> int:
+        return sum(1 for r in references if r.status in statuses)
+
+    missing = n("missing-from-bib")
+    bad_doi = n("doi-not-registered")
+    mismatch = n("mismatch")
+    lines += [
+        f"References cited: {len(references)}",
+        f"Defined in a bibliography: {len(references) - missing}/"
+        f"{len(references)} {check_or_x(not missing)}",
+        f"With a DOI that isn't registered: {bad_doi} {check_or_x(not bad_doi)}",
+        f"Contradicting the record found for them: {mismatch} "
+        f"{check_or_x(not mismatch)}",
+        f"Verified against a record: {n('verified')}/{len(references)}",
+    ]
     return "\n".join(lines)
 
 
 def document_inputs(
-    ck_info: dict, document: str, wdir: str | Path | None = None
+    document: str,
+    project_dir: str | Path | None = None,
+    is_output: Callable[[str], bool] | None = None,
 ) -> list[str]:
     """Files a check of one document reads: it, its inputs, collections.
 
     Parameters
     ----------
-    ck_info : dict
-        The project's ``calkit.yaml`` contents.
     document : str
         Project-relative path of the document being checked.
-    wdir : str or Path, optional
+    project_dir : str or Path, optional
         Project working directory, defaulting to the current one.
+    is_output : callable, optional
+        Whether a stage makes a project path, so a file the document inputs
+        is depended on before it's first made, and the check runs after.
 
     Returns
     -------
     list of str
-        Project-relative paths, deduplicated and sorted.
+        Project-relative paths, starting with the document, which is
+        depended on even when it does not exist yet.
     """
-    from calkit.latex import flatten
+    import posixpath
+
+    import calkit
+    from calkit.latex import detect_inputs, flatten, is_markdown
+
+    base = Path(project_dir or ".")
 
     def read(path: str) -> str | None:
-        full = Path(wdir or ".") / path
+        full = base / path
         return (
             full.read_text(encoding="utf-8", errors="replace")
             if full.is_file()
             else None
         )
 
-    # The document and everything it inputs, so a generated table that
-    # grew a citation is seen, and the document itself even when it does
-    # not exist yet, so the check runs once it does.
-    out = {document}
-    for line in flatten(document, read=read):
-        out.add(line.path)
-    for item in ck_info.get("references") or []:
-        path = item.get("path") if isinstance(item, dict) else item
-        if path:
-            out.add(path)
-    return sorted(out)
+    def is_input(path: str) -> bool:
+        return (
+            (base / path).is_file()
+            or (base / (path + ".dvc")).is_file()
+            or (is_output is not None and is_output(path))
+        )
 
-
-def expand_reference_check_stages(
-    ck_info: dict, wdir: str | Path | None = None
-) -> dict:
-    """Give each ``references-check`` stage the files it reads and writes.
-
-    A stage names the document it checks, and the check reads that
-    document, the files it inputs, and the project's reference
-    collections, so it has to rerun when any of them changes. All of that
-    is derived here, from the project itself, rather than repeated by
-    hand in the stage. Its output is that document's report, so editing
-    one paper rechecks that paper and leaves another project document's
-    report alone.
-    """
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    if not any(
-        isinstance(st, dict) and st.get("kind") == "references-check"
-        for st in stages.values()
-    ):
-        return ck_info
-    expanded = {}
-    for name, stage in stages.items():
-        if isinstance(stage, dict) and stage.get("kind") == "references-check":
-            document = stage.get("target_path")
-            if not document:
-                # Let the model's own validation report the missing path
-                # rather than guessing one here.
-                expanded[name] = stage
-                continue
-            stage = dict(stage)
-            derived = [
-                "calkit.yaml",
-                *document_inputs(ck_info, document, wdir=wdir),
-            ]
-            declared = list(stage.get("inputs") or [])
-            stage["inputs"] = declared + [
-                p for p in derived if p not in declared
-            ]
-            declared_outs = list(stage.get("outputs") or [])
-            declared_paths = {
-                o.get("path") if isinstance(o, dict) else o
-                for o in declared_outs
-            }
-            report = output_path(document)
-            if report not in declared_paths:
-                stage["outputs"] = declared_outs + [
-                    {"path": report, "storage": "git"}
-                ]
-        expanded[name] = stage
-    out = dict(ck_info)
-    out["pipeline"] = {**ck_info["pipeline"], "stages": expanded}
-    return out
+    out = [document]
+    if not is_markdown(document):
+        # Only what can carry a citation, not, e.g., figures
+        out += [
+            p
+            for p in detect_inputs(
+                document, wdir=str(base), is_output=is_output
+            )
+            if posixpath.splitext(p)[1] in (".tex", ".bib")
+        ]
+    named = document_collections(document, flatten(document, read=read), base)
+    if named:
+        out += [p for p in named if is_input(p)]
+    else:
+        ck_info = calkit.load_calkit_info(wdir=base, read_only=True)
+        out += ["calkit.yaml"] + declared_collections(ck_info)
+    return list(dict.fromkeys(out))

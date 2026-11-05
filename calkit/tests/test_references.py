@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-import calkit
 import calkit.references as refs
 
 BIB = r"""
@@ -114,6 +113,20 @@ def test_keys_come_from_the_source_not_its_comments(tmp_dir: Path) -> None:
     }
     # Each key records where it is cited, so a report can point at it.
     assert keys["real2020thing"] == ["paper/main.tex:1"]
+    # biblatex's commands and multicite forms, capitalized and starred
+    # ones, and a citation split across lines all count, while a command
+    # that merely starts with "cite" and a macro's parameter don't
+    _project(
+        tmp_dir,
+        "\\citestyle{authoryear}\n"
+        "\\parencite{a} \\textcite*{b} \\Citep[see][]{c}\n"
+        "\\citep{d,\n"
+        "  e} \\autocites(all)[p.~1]{f}[2]{g}\n"
+        "\\newcommand{\\mycite}[1]{\\cite{#1}} \\nocite{*}\n",
+    )
+    keys = refs.cited_keys(flatten("paper/main.tex"))
+    assert list(keys) == ["a", "b", "c", "d", "e", "f", "g", "*"]
+    assert keys["e"] == ["paper/main.tex:4"]
 
 
 def test_statuses_separate_what_is_wrong_from_what_is_unknown(
@@ -237,7 +250,9 @@ def test_an_unregistered_doi_is_decisive(tmp_dir: Path) -> None:
     assert any("is registered" in n for n in registered.notes)
 
 
-def test_handle_responses_map_to_an_answer(tmp_dir: Path) -> None:
+def test_handle_responses_map_to_an_answer(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     lookup = refs.Lookup(offline=True)
     url = "https://doi.org/api/handles/10.1000/real"
     lookup.cache[url] = json.dumps({"responseCode": 1, "handle": "x"})
@@ -249,6 +264,32 @@ def test_handle_responses_map_to_an_answer(tmp_dir: Path) -> None:
     assert lookup.doi_registered("10.1000/real") is None
     lookup.cache[url] = None
     assert lookup.doi_registered("10.1000/real") is None
+    # No answer, e.g., without a network or when rate limited, isn't
+    # cached, so the next run asks again
+    import urllib.error
+
+    def fail(request, timeout):
+        raise urllib.error.URLError("no network")
+
+    online = refs.Lookup()
+    online.cache = {"https://kept.example": "old"}
+    monkeypatch.setattr("urllib.request.urlopen", fail)
+    monkeypatch.setattr(refs, "REQUEST_DELAY_S", 0)
+    assert online.get_text("https://down.example") is None
+    assert online.unanswered == 1
+    assert "https://down.example" not in online.cache
+
+    def rate_limited(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 429, "", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", rate_limited)
+    assert online.get_text("https://busy.example") is None
+    assert "https://busy.example" not in online.cache
+    # Refreshing asks again, but keeps what this run didn't need
+    refreshed = refs.Lookup(refresh=True)
+    refreshed.cache = {"https://kept.example": "old", "https://a.example": "x"}
+    assert refreshed.get_text("https://a.example") is None
+    assert refreshed.cache["https://kept.example"] == "old"
 
 
 def test_comparison_forgives_only_what_it_should(tmp_dir: Path) -> None:
@@ -291,6 +332,19 @@ def test_comparison_forgives_only_what_it_should(tmp_dir: Path) -> None:
         ),
     )
     assert mismatched.title_matches is False
+    # An accent written in TeX matches the record's Unicode one, however
+    # short the surname
+    accented = refs.Reference(key="k")
+    refs._fill_from_entry(
+        accented,
+        {"author": '{\\"O}z, Ali', "doi": "https://doi.org/10.1/a\\_b"},
+    )
+    assert accented.doi == "10.1/a_b"
+    assert refs.compare(
+        accented, refs.Found(source="crossref", first_author="Öz")
+    ).author_matches
+    assert refs.normalize_doi("doi:10.1/X") == "10.1/X"
+    assert refs.normalize_doi("  ") is None
     # A title too short to discriminate is left uncompared rather than
     # guessed at.
     short = refs.Reference(key="k", title="Wind")
@@ -315,6 +369,90 @@ def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
     lookup.cache = {}
     refs.verify(reference, lookup)
     assert reference.found is None
+    title = "Large Eddy Simulation of Wind Farm Wakes"
+
+    class Stub:
+        offline = False
+        unanswered = 0
+
+        def __init__(self, by_doi=None, datacite=None, by_title=None):
+            self.by_doi, self.datacite, self.by_title = (
+                by_doi,
+                datacite,
+                by_title,
+            )
+
+        def crossref_doi(self, doi):
+            return self.by_doi
+
+        def datacite_doi(self, doi):
+            return self.datacite
+
+        def doi_registered(self, doi):
+            return True
+
+        def arxiv(self, eprint):
+            return None
+
+        def crossref_title(self, title):
+            return self.by_title
+
+        def openalex_title(self, title):
+            return None
+
+    def entry():
+        return refs.Reference(
+            key="k",
+            collection="refs.bib",
+            title=title,
+            first_author="Smith",
+            year=2020,
+            doi="10.9/wrong",
+        )
+
+    def right():
+        return refs.Found(
+            source="crossref",
+            doi="10.9/right",
+            title=title,
+            year=2020,
+            first_author="Smith",
+        )
+
+    # A DOI naming another work is the finding, even though a search for
+    # the title finds the right one, which the report points at
+    wrong = refs.Found(
+        source="crossref-doi",
+        doi="10.9/wrong",
+        title="Soil Chemistry of an Unrelated Field Site",
+        year=2001,
+        first_author="Nguyen",
+    )
+    reference = entry()
+    refs.verify(reference, Stub(by_doi=wrong, by_title=right()))  # type: ignore[arg-type]
+    refs.classify(reference)
+    assert reference.status == "mismatch"
+    assert any("https://doi.org/10.9/right" in n for n in reference.notes)
+    # A DOI Crossref doesn't have, e.g., a Zenodo one, is found in DataCite
+    reference = entry()
+    zenodo = right()
+    zenodo.source = "datacite-doi"
+    refs.verify(reference, Stub(datacite=zenodo))  # type: ignore[arg-type]
+    refs.classify(reference)
+    assert reference.status == "verified"
+    assert reference.evidence is not None
+    assert reference.evidence.source == "datacite"
+    assert reference.evidence.matched_by == "doi"
+    # A title that only resembles the entry's is a failed search, pointed
+    # at but not a disagreement
+    reference = entry()
+    reference.doi = None
+    near = right()
+    near.title = "Large Eddy Simulation of Wind Turbine Arrays"
+    refs.verify(reference, Stub(by_title=near))  # type: ignore[arg-type]
+    refs.classify(reference)
+    assert reference.status == "not-found"
+    assert any("closest title" in n for n in reference.notes)
 
 
 def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
@@ -332,12 +470,15 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
     assert by_key["ghost"].collection is None
     assert by_key["real2020thing"].collection == "paper/references.bib"
     assert by_key["tool2024software"].status == "not-checkable"
-    # Offline, a real entry cannot be confirmed, but it is not accused.
-    assert by_key["real2020thing"].status == "not-found"
+    # Offline, a real entry cannot be confirmed, but it is not accused,
+    # nor reported as not found, since nothing was asked
+    assert by_key["real2020thing"].status == "unchecked"
+    assert any("offline" in n for n in by_key["real2020thing"].notes)
     assert not check.ok
-    paths = refs.write_reports(check)
-    assert paths == [".calkit/reference-checks/paper/main.tex.json"]
-    payload = json.loads((tmp_dir / paths[0]).read_text())
+    # Nothing is written unless asked for
+    assert not (tmp_dir / ".calkit").exists()
+    refs.write_report(check.documents[0], "report.json")
+    payload = json.loads((tmp_dir / "report.json").read_text())
     assert payload["n_cited"] == 3
     # Keyed by citation key, so the key is not repeated as a field.
     assert set(payload["references"]) == {
@@ -350,7 +491,39 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
     # checked for staleness like any other output.
     assert "checked_at" not in payload
     text = refs.format_check(check)
-    assert "ghost" in text and "cannot be accounted for" in text
+    assert "ghost" in text and "Defined in a bibliography: 2/3 ❌" in text
+    # A document naming its bibliography uses it rather than the declared
+    # collections, and one that doesn't exist is reported, not skipped
+    _project(tmp_dir, "\\citep{real2020thing}\n\\bibliography{refs}\n")
+    check = refs.check_references(offline=True)
+    assert check.documents[0].collections == ["paper/refs.bib"]
+    assert check.documents[0].references["real2020thing"].status == (
+        "missing-from-bib"
+    )
+    (tmp_dir / "paper" / "refs.bib").write_text(BIB)
+    check = refs.check_references(offline=True)
+    assert check.documents[0].references["real2020thing"].status == (
+        "unchecked"
+    )
+    with pytest.raises(FileNotFoundError):
+        refs.check_references(paths=["typo.tex"], offline=True)
+    # \nocite{*} cites every entry, and \bibitem defines a key inline
+    _project(
+        tmp_dir,
+        "\\nocite{*}\\cite{inline}\n"
+        "\\begin{thebibliography}{1}\\bibitem{inline} A. Book.\n"
+        "\\end{thebibliography}\n",
+    )
+    by_key = refs.check_references(offline=True).documents[0].references
+    assert set(by_key) == {
+        "inline",
+        "real2020thing",
+        "thin2021venue",
+        "tool2024software",
+        "preprint2019arxiv",
+    }
+    assert by_key["inline"].status == "not-checkable"
+    assert by_key["inline"].collection == "paper/main.tex"
 
 
 def test_the_report_is_evidence_not_a_copy_of_the_collection(
@@ -481,8 +654,8 @@ def test_the_report_shape_is_what_was_recorded(tmp_dir: Path) -> None:
     for reference in check.documents[0].references.values():
         keys |= set(reference.model_dump(mode="json"))
         statuses.add(reference.status)
-    # Offline, three of the statuses are reachable; the other three need
-    # a record, so build one of each.
+    # Offline, three of the statuses are reachable; the others need
+    # answers, so build one of each.
     verified = refs.Reference(key="k", collection="refs.bib")
     verified.title = "A Study of Something Real"
     verified.found = refs.compare(
@@ -511,7 +684,11 @@ def test_the_report_shape_is_what_was_recorded(tmp_dir: Path) -> None:
         key="k", collection="refs.bib", doi="10.9999/no", doi_registered=False
     )
     refs.classify(bad_doi)
-    for reference in (verified, mismatch, bad_doi):
+    not_found = refs.Reference(
+        key="k", collection="refs.bib", title="A Study of Something Real"
+    )
+    refs.classify(not_found)
+    for reference in (verified, mismatch, bad_doi, not_found):
         keys |= set(reference.model_dump(mode="json"))
         statuses.add(reference.status)
     assert keys == _REFERENCE_KEYS
@@ -530,59 +707,23 @@ def test_compact_drops_only_what_says_nothing(tmp_dir: Path) -> None:
     assert refs.compact([{"a": None}, {"b": 1}]) == [{}, {"b": 1}]
 
 
-def test_stage_expansion_derives_inputs_and_a_report_per_document(
-    tmp_dir: Path,
-) -> None:
-    _project(tmp_dir, "\\input{sec}\n")
-    (tmp_dir / "paper" / "sec.tex").write_text("\\citep{real2020thing}\n")
-    ck_info = calkit.load_calkit_info()
-    # No environment: it defaults to the system, which is where the
-    # Calkit running the pipeline already is.
-    ck_info["pipeline"]["stages"]["check-refs"] = {
-        "kind": "references-check",
-        "target_path": "paper/main.tex",
-    }
-    expanded = refs.expand_reference_check_stages(ck_info)
-    stage = expanded["pipeline"]["stages"]["check-refs"]
-    # The document, the file it inputs, and the collection, so an edit to
-    # any of them reruns the check.
-    assert "calkit.yaml" in stage["inputs"]
-    assert "paper/main.tex" in stage["inputs"]
-    assert "paper/sec.tex" in stage["inputs"]
-    assert "paper/references.bib" in stage["inputs"]
-    assert stage["outputs"] == [
-        {
-            "path": ".calkit/reference-checks/paper/main.tex.json",
-            "storage": "git",
-        }
-    ]
-    # Other stages are untouched.
-    assert expanded["pipeline"]["stages"]["paper"]["kind"] == "latex"
-    # A project with no such stage is returned as it came in.
-    assert refs.expand_reference_check_stages(ck_info) is not ck_info
-
-
-def test_the_stage_compiles_to_a_dvc_stage(tmp_dir: Path) -> None:
-    from calkit.models.pipeline import ReferencesCheckStage
-
-    stage = ReferencesCheckStage(
-        kind="references-check", target_path="paper/main.tex"
-    )
-    # The environment is not required: the check runs where the Calkit
-    # running the pipeline already is.
-    assert stage.environment == "_system"
-    assert stage.dvc_cmd == "calkit check references paper/main.tex"
-    offline = ReferencesCheckStage(
-        kind="references-check", target_path="a b.tex", offline=True
-    )
-    assert offline.dvc_cmd == "calkit check references 'a b.tex' --offline"
-
-
 def test_markdown_citations_are_found(tmp_dir: Path) -> None:
     (tmp_dir / "paper").mkdir()
     (tmp_dir / "paper" / "main.md").write_text(
-        "Text [@real2020thing] and @thin2021venue.\n"
-        "Mail me at someone@example.com though.\n"
+        "---\n"
+        "title: Paper\n"
+        "bibliography: references.bib\n"
+        "---\n"
+        "Text [@real2020thing] and @thin2021venue, as @fig-results shows.\n"
+        "Mail me at someone@example.com, or see https://example.com/@me.\n"
+        "<!-- [@commented]\n"
+        "still a comment @commented -->\n"
+        "Run `@inline` or:\n"
+        "\n"
+        "```python\n"
+        "@property\n"
+        "```\n"
+        "And @{tool2024software}.\n"
     )
     (tmp_dir / "paper" / "references.bib").write_text(BIB)
     (tmp_dir / "calkit.yaml").write_text(
@@ -599,4 +740,25 @@ def test_markdown_citations_are_found(tmp_dir: Path) -> None:
     from calkit.latex import flatten
 
     keys = refs.cited_keys(flatten("paper/main.md"))
-    assert set(keys) == {"real2020thing", "thin2021venue"}
+    assert set(keys) == {
+        "real2020thing",
+        "thin2021venue",
+        "fig-results",
+        "tool2024software",
+    }
+    # The front matter names the bibliography, which wins over the one
+    # calkit.yaml declares, and a cross-reference isn't a citation
+    (tmp_dir / "calkit.yaml").write_text(
+        (tmp_dir / "calkit.yaml")
+        .read_text()
+        .replace("paper/references.bib", "other.bib")
+    )
+    check = refs.check_references(offline=True)
+    document = check.documents[0]
+    assert document.collections == ["paper/references.bib"]
+    assert set(document.references) == {
+        "real2020thing",
+        "thin2021venue",
+        "tool2024software",
+    }
+    assert check.ok

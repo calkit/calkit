@@ -10,7 +10,7 @@ import re
 import shutil
 import subprocess
 import textwrap
-from typing import Annotated, Callable, Optional
+from typing import Annotated, Callable
 
 import dotenv
 import typer
@@ -2577,7 +2577,7 @@ def check_questions(
 @check_app.command(name="references")
 def check_references(
     paths: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         typer.Argument(
             help="Documents whose citations to check. Defaults to every "
             "one the pipeline builds into a PDF.",
@@ -2598,6 +2598,15 @@ def check_references(
     json_output: Annotated[
         bool, typer.Option("--json", help="Output the report as JSON.")
     ] = False,
+    output: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Write the document's report as JSON to this path. Only "
+            "for a single document.",
+        ),
+    ] = None,
     offline: Annotated[
         bool,
         typer.Option(
@@ -2610,14 +2619,7 @@ def check_references(
         bool,
         typer.Option(
             "--refresh",
-            help="Ignore the cache and ask the services again.",
-        ),
-    ] = False,
-    no_write: Annotated[
-        bool,
-        typer.Option(
-            "--no-write",
-            help="Don't write the reports into .calkit/reference-checks.",
+            help="Ignore cached answers and ask the services again.",
         ),
     ] = False,
 ) -> None:
@@ -2625,29 +2627,41 @@ def check_references(
 
     Reads citation keys from the documents named, or from every one the
     pipeline builds into a PDF, and from the files they input, then
-    resolves each against the project's reference collections and looks the entry up in Crossref, OpenAlex, and arXiv.
-    Reports, worst first: a key defined in no collection, so the citation
-    cannot resolve; an entry whose identifier resolves to a different work
-    than it describes; and an entry no service has, which is what a
-    fabricated citation looks like, though a venue that registers no DOIs
-    looks the same and is named as such.
+    resolves each against the bibliographies the document names, or the
+    collections calkit.yaml declares if it names none, and looks the entry
+    up in Crossref, OpenAlex, and arXiv.
+    Reports, worst first: a key defined in no bibliography, so the citation
+    cannot resolve; a DOI that isn't registered; an entry whose identifier
+    resolves to a different work than it describes; and an entry no
+    service has, which is what a fabricated citation looks like, though a
+    venue that registers no DOIs looks the same and is named as such.
 
-    One report per document is written to .calkit/reference-checks, so
-    each is a pipeline output that goes stale when its document or a
-    collection changes. Answers are cached, so a rerun needs no network.
+    Answers are cached, so a rerun needs no network. A references-check
+    pipeline stage runs this for one document with --output, so its report
+    is an output that goes stale when the document or a bibliography
+    changes.
 
-    Exits with an error if a key resolves to no entry, or an entry
-    contradicts the record it was found in. A reference that simply isn't
-    indexed anywhere is reported but doesn't fail the check.
+    Exits with an error if a key resolves to no entry, a DOI isn't
+    registered, or an entry contradicts the record it was found in. A
+    reference that simply isn't indexed anywhere is reported but doesn't
+    fail the check.
     """
     from calkit.references import check_references as _check_references
-    from calkit.references import compact, format_check, write_reports
+    from calkit.references import compact, format_check, write_report
 
-    check = _check_references(
-        wdir=wdir, paths=paths, offline=offline, refresh=refresh
-    )
-    if not no_write:
-        write_reports(check, wdir=wdir)
+    try:
+        check = _check_references(
+            wdir=wdir, paths=paths, offline=offline, refresh=refresh
+        )
+    except FileNotFoundError as e:
+        raise_error(str(e))
+    if output is not None:
+        if len(check.documents) != 1:
+            raise_error(
+                "--output writes one document's report, but "
+                f"{len(check.documents)} were checked; name one document"
+            )
+        write_report(check.documents[0], output, wdir=wdir)
     if json_output:
         calkit.echo(
             json.dumps(compact(check.model_dump(mode="json")), indent=2)

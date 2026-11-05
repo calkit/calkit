@@ -637,11 +637,13 @@ Model class: `ReferencesCheckStage`
 
 Whether the references a document cites are real.
 
-Its inputs are `calkit.yaml`, the target document, the files it
-inputs, and the project's reference collections, and its output is
-that document's report, all added when the pipeline is compiled. One
-stage checks one document, so a project with two papers has one of
-these each and each goes out of date on its own.
+Its inputs are the target document, the files it inputs, and the
+bibliographies it names, or `calkit.yaml` and the collections it
+declares if it names none, all found when the pipeline is compiled.
+Its output is that document's report, by default under
+`.calkit/reference-checks`. One stage checks one document, so a
+project with two papers has one of these each and each goes out of
+date on its own.
 
 | Kind-specific parameter | Type | Required | Default    | Description                                                                                                                       |
 | ----------------------- | ---- | -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------- |

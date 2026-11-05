@@ -8602,7 +8602,7 @@
     },
     "ReferencesCheckStage": {
       "additionalProperties": false,
-      "description": "Whether the references a document cites are real.\n\nIts inputs are ``calkit.yaml``, the target document, the files it\ninputs, and the project's reference collections, and its output is\nthat document's report, all added when the pipeline is compiled. One\nstage checks one document, so a project with two papers has one of\nthese each and each goes out of date on its own.",
+      "description": "Whether the references a document cites are real.\n\nIts inputs are the target document, the files it inputs, and the\nbibliographies it names, or ``calkit.yaml`` and the collections it\ndeclares if it names none, all found when the pipeline is compiled.\nIts output is that document's report, by default under\n``.calkit/reference-checks``. One stage checks one document, so a\nproject with two papers has one of these each and each goes out of\ndate on its own.",
       "properties": {
         "always_run": {
           "default": false,

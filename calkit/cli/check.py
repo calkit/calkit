@@ -556,7 +556,7 @@ def check_environment(
                 f"'{env_name}': set 'image' on it, or set 'owner' and "
                 "'name' in calkit.yaml"
             )
-        check_docker_env(
+        _check_docker_env(
             tag=image,
             fpath=env.get("path"),
             lock_fpath=lock_fpath,
@@ -1138,154 +1138,32 @@ def check_renv(
                 typer.echo("Lockfile is already in sync with DESCRIPTION")
 
 
-@check_app.command(name="docker-env")
-def check_docker_env(
-    tag: Annotated[str, typer.Argument(help="Image tag.")],
-    fpath: Annotated[
-        str | None,
-        typer.Option(
-            "-i", "--input", help="Path to input Dockerfile, if applicable."
-        ),
-    ] = None,
-    lock_fpath: Annotated[
-        str | None,
-        typer.Option(
-            "--output",
-            "-o",
-            help=(
-                "Path to which existing environment should be exported. "
-                "If not specified, will have the same filename with '-lock' "
-                "appended to it, keeping the same extension."
-            ),
-        ),
-    ] = None,
-    alt_lock_fpaths: Annotated[
-        list[str],
-        typer.Option(
-            "--input", help="Alternative lock file input paths to read."
-        ),
-    ] = [],
-    alt_lock_fpaths_delete: Annotated[
-        list[str],
-        typer.Option(
-            "--input-delete",
-            help=(
-                "Alternative lock input file paths to read and "
-                "remove (i.e., legacy paths)."
-            ),
-        ),
-    ] = [],
-    platform: Annotated[
-        str | None,
-        typer.Option(
-            "--platform",
-            help=(
-                "Platform to pull and run the image as, e.g., "
-                "'linux/amd64'. Also used when building, unless "
-                "--platform-build says otherwise."
-            ),
-        ),
-    ] = None,
-    user: Annotated[
-        str | None,
-        typer.Option("--user", help="Which user to run the container as."),
-    ] = None,
-    wdir: Annotated[
-        str | None,
-        typer.Option("--wdir", help="Working directory inside the container."),
-    ] = None,
-    deps: Annotated[
-        list[str],
-        typer.Option(
-            "--dep",
-            "-d",
-            help="Declare an explicit dependency for this Docker image.",
-        ),
-    ] = [],
-    env_vars: Annotated[
-        list[str],
-        typer.Option(
-            "--env-var",
-            "-e",
-            help="Declare an explicit environment variable for the container.",
-        ),
-    ] = [],
-    ports: Annotated[
-        list[str],
-        typer.Option(
-            "--port",
-            "-p",
-            help="Declare an explicit port for the container.",
-        ),
-    ] = [],
-    gpus: Annotated[
-        str | None,
-        typer.Option(
-            "--gpus",
-            "-g",
-            help="Declare an explicit GPU requirement for the container.",
-        ),
-    ] = None,
-    args: Annotated[
-        list[str],
-        typer.Option(
-            "--arg",
-            "-a",
-            help="Declare an explicit run argument for the container.",
-        ),
-    ] = [],
-    build_platforms: Annotated[
-        list[str],
-        typer.Option(
-            "--platform-build",
-            help=(
-                "Platform to build the image for, as opposed to --platform, "
-                "which is the one it's pulled and run as. Repeat for a "
-                "multi-platform image, which requires a registry."
-            ),
-        ),
-    ] = [],
-    registry: Annotated[
-        str | None,
-        typer.Option(
-            "--registry",
-            help=(
-                "Registry prefix to push built images to and pull them from, "
-                "e.g., 'ghcr.io/someone/some-project', or 'none' to disable."
-            ),
-        ),
-    ] = None,
-    lock_archs: Annotated[
-        list[str],
-        typer.Option(
-            "--lock-arch",
-            help=(
-                "Architecture to write an additional lock file for, "
-                "alongside this machine's, e.g., 'amd64'."
-            ),
-        ),
-    ] = [],
-    quiet: Annotated[
-        bool, typer.Option("--quiet", "-q", help="Be quiet.")
-    ] = False,
-    rebuild: Annotated[
-        bool,
-        typer.Option(
-            "--rebuild",
-            help="Build the image from scratch, pulling its base image, "
-            "rather than reusing a cached or locked one.",
-        ),
-    ] = False,
-    env_name: Annotated[
-        str | None,
-        typer.Option(
-            "--env-name",
-            hidden=True,
-            help="Environment name in calkit.yaml, for error messages.",
-        ),
-    ] = None,
+def _check_docker_env(
+    tag: str,
+    fpath: str | None = None,
+    lock_fpath: str | None = None,
+    alt_lock_fpaths: list[str] = [],
+    alt_lock_fpaths_delete: list[str] = [],
+    platform: str | None = None,
+    user: str | None = None,
+    wdir: str | None = None,
+    deps: list[str] = [],
+    env_vars: list[str] = [],
+    ports: list[str] = [],
+    gpus: str | None = None,
+    args: list[str] = [],
+    build_platforms: list[str] = [],
+    registry: str | None = None,
+    lock_archs: list[str] = [],
+    quiet: bool = False,
+    rebuild: bool = False,
+    env_name: str | None = None,
 ) -> None:
-    """Check that Docker environment is up-to-date."""
+    """Check that a Docker environment is up-to-date.
+
+    ``env_name`` is the environment's name in calkit.yaml, if it has one,
+    so errors can suggest commands that use it.
+    """
     from calkit import docker as ck_docker
     from calkit.core import is_tty
     from calkit.environments import get_docker_arch
@@ -1795,6 +1673,168 @@ def check_docker_env(
                     os.remove(arch_lock_fpath)
 
 
+@check_app.command(name="docker-env")
+def check_docker_env(
+    tag: Annotated[str, typer.Argument(help="Image tag.")],
+    fpath: Annotated[
+        str | None,
+        typer.Option(
+            "-i", "--input", help="Path to input Dockerfile, if applicable."
+        ),
+    ] = None,
+    lock_fpath: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "Path to which existing environment should be exported. "
+                "If not specified, will have the same filename with '-lock' "
+                "appended to it, keeping the same extension."
+            ),
+        ),
+    ] = None,
+    alt_lock_fpaths: Annotated[
+        list[str],
+        typer.Option(
+            "--input", help="Alternative lock file input paths to read."
+        ),
+    ] = [],
+    alt_lock_fpaths_delete: Annotated[
+        list[str],
+        typer.Option(
+            "--input-delete",
+            help=(
+                "Alternative lock input file paths to read and "
+                "remove (i.e., legacy paths)."
+            ),
+        ),
+    ] = [],
+    platform: Annotated[
+        str | None,
+        typer.Option(
+            "--platform",
+            help=(
+                "Platform to pull and run the image as, e.g., "
+                "'linux/amd64'. Also used when building, unless "
+                "--platform-build says otherwise."
+            ),
+        ),
+    ] = None,
+    user: Annotated[
+        str | None,
+        typer.Option("--user", help="Which user to run the container as."),
+    ] = None,
+    wdir: Annotated[
+        str | None,
+        typer.Option("--wdir", help="Working directory inside the container."),
+    ] = None,
+    deps: Annotated[
+        list[str],
+        typer.Option(
+            "--dep",
+            "-d",
+            help="Declare an explicit dependency for this Docker image.",
+        ),
+    ] = [],
+    env_vars: Annotated[
+        list[str],
+        typer.Option(
+            "--env-var",
+            "-e",
+            help="Declare an explicit environment variable for the container.",
+        ),
+    ] = [],
+    ports: Annotated[
+        list[str],
+        typer.Option(
+            "--port",
+            "-p",
+            help="Declare an explicit port for the container.",
+        ),
+    ] = [],
+    gpus: Annotated[
+        str | None,
+        typer.Option(
+            "--gpus",
+            "-g",
+            help="Declare an explicit GPU requirement for the container.",
+        ),
+    ] = None,
+    args: Annotated[
+        list[str],
+        typer.Option(
+            "--arg",
+            "-a",
+            help="Declare an explicit run argument for the container.",
+        ),
+    ] = [],
+    build_platforms: Annotated[
+        list[str],
+        typer.Option(
+            "--platform-build",
+            help=(
+                "Platform to build the image for, as opposed to --platform, "
+                "which is the one it's pulled and run as. Repeat for a "
+                "multi-platform image, which requires a registry."
+            ),
+        ),
+    ] = [],
+    registry: Annotated[
+        str | None,
+        typer.Option(
+            "--registry",
+            help=(
+                "Registry prefix to push built images to and pull them from, "
+                "e.g., 'ghcr.io/someone/some-project', or 'none' to disable."
+            ),
+        ),
+    ] = None,
+    lock_archs: Annotated[
+        list[str],
+        typer.Option(
+            "--lock-arch",
+            help=(
+                "Architecture to write an additional lock file for, "
+                "alongside this machine's, e.g., 'amd64'."
+            ),
+        ),
+    ] = [],
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Be quiet.")
+    ] = False,
+    rebuild: Annotated[
+        bool,
+        typer.Option(
+            "--rebuild",
+            help="Build the image from scratch, pulling its base image, "
+            "rather than reusing a cached or locked one.",
+        ),
+    ] = False,
+) -> None:
+    """Check that Docker environment is up-to-date."""
+    _check_docker_env(
+        tag=tag,
+        fpath=fpath,
+        lock_fpath=lock_fpath,
+        alt_lock_fpaths=alt_lock_fpaths,
+        alt_lock_fpaths_delete=alt_lock_fpaths_delete,
+        platform=platform,
+        user=user,
+        wdir=wdir,
+        deps=deps,
+        env_vars=env_vars,
+        ports=ports,
+        gpus=gpus,
+        args=args,
+        build_platforms=build_platforms,
+        registry=registry,
+        lock_archs=lock_archs,
+        quiet=quiet,
+        rebuild=rebuild,
+    )
+
+
 @check_app.command(
     name="conda-env",
     help="Check a conda environment and rebuild if necessary.",
@@ -2200,7 +2240,7 @@ def check_matlab_env(
         ck_info=ck_info,
         env_name=env_name,
     )
-    check_docker_env(
+    _check_docker_env(
         tag=tag,
         fpath=dockerfile_fpath,
         lock_fpath=output_fpath,

@@ -732,20 +732,41 @@ def rewrite_paths(text: str, moves: dict[str, str]) -> tuple[str, list[str]]:
 
     A path is only found written out whole in one string, e.g.,
     ``"/data/runs/"``, not put together from pieces, and anything after it
-    in the string is kept, e.g., a file in a moved folder.
+    in the string is kept, e.g., a file in a moved folder. New paths can't
+    have quotes or backslashes, which each kind of string escapes
+    differently.
     """
+
+    def relocate(match: re.Match, new: str, sep: str | None) -> str:
+        rest: str = match[1]
+        if sep is None:
+            return new + rest
+        # The rest of a Windows path gets slashes too, so it's found on
+        # Linux, but not a backslash escaping the closing quote
+        tail = "\\" if sep == "\\" and rest.endswith("\\") else ""
+        return new + rest[: len(rest) - len(tail)].replace(sep, "/") + tail
+
+    for new in moves.values():
+        if re.search(r"['\"\\]", new):
+            raise ValueError(f"{new} can't have quotes or backslashes")
     found = []
     # Longest first, so a file is moved as itself rather than with its folder
     for old in sorted(moves, key=len, reverse=True):
         count = 0
         # As written, with Windows separators escaped or as slashes, and
         # escaped again in a notebook's JSON
-        for written in dict.fromkeys(
-            old.replace("\\", sep) for sep in ("\\", "/", "\\" * 2, "\\" * 4)
-        ):
+        seps: dict[str, str | None] = {}
+        for written_sep in ("\\", "/", "\\" * 2, "\\" * 4):
+            seps.setdefault(
+                old.replace("\\", written_sep),
+                written_sep if "\\" in old else None,
+            )
+        for written, sep in seps.items():
             text, n = re.subn(
-                r"(?<=['\"])" + re.escape(written) + r"(?=[/\\'\"])",
-                lambda _, new=moves[old]: new,
+                r"(?<=['\"])"
+                + re.escape(written)
+                + r"(?=[/\\'\"])([^'\"\n]*)",
+                lambda m, new=moves[old], sep=sep: relocate(m, new, sep),
                 text,
             )
             count += n

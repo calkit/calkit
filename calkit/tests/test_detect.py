@@ -1676,6 +1676,9 @@ def test_rewrite_paths():
         'cal = open("/Users/me/Box-Box/Lab Data/runs/cal.txt")\n'
         "win = open('C:\\\\Users\\\\me\\\\t.csv')\n"
         "fwd = open(r'C:/Users/me/t.csv')\n"
+        # What follows a Windows folder gets slashes too
+        "raw = open(r'C:\\Users\\me\\runs\\Run1.csv')\n"
+        "sub = 'C:\\\\Users\\\\me\\\\runs\\\\'\n"
         'home = open(os.path.expanduser("~/Desktop/t.csv"))\n'
         # Only whole paths, not ones that merely start the same
         'other = open("/Users/me/Box-Box/Lab Data/runs2/x.csv")\n'
@@ -1685,6 +1688,7 @@ def test_rewrite_paths():
         "/Users/me/Box-Box/Lab Data/runs": "data/runs",
         "/Users/me/Box-Box/Lab Data/runs/cal.txt": "data/cal.txt",
         "C:\\Users\\me\\t.csv": "data/t.csv",
+        "C:\\Users\\me\\runs": "data/win-runs",
         "~/Desktop/t.csv": "data/desk.csv",
         "~/Dropbox/data.csv": "data/data.csv",
     }
@@ -1695,6 +1699,8 @@ def test_rewrite_paths():
         'cal = open("data/cal.txt")',
         "win = open('data/t.csv')",
         "fwd = open(r'data/t.csv')",
+        "raw = open(r'data/win-runs/Run1.csv')",
+        "sub = 'data/win-runs/'",
         'home = open(os.path.expanduser("data/desk.csv"))',
         'other = open("/Users/me/Box-Box/Lab Data/runs2/x.csv")',
         'parts = open(Path.home() / "Dropbox" / "data.csv")',
@@ -1702,9 +1708,17 @@ def test_rewrite_paths():
     # One put together from pieces isn't found
     assert sorted(found) == sorted(set(moves) - {"~/Dropbox/data.csv"})
     # In a notebook, where the JSON escapes it again
-    notebook = json.dumps(
-        {"cells": [{"source": ['x = open("C:\\\\Users\\\\me\\\\t.csv")']}]}
-    )
+    source = [
+        'x = open("C:\\\\Users\\\\me\\\\t.csv")',
+        'y = open(r"C:\\Users\\me\\runs\\Run1.csv")',
+    ]
+    notebook = json.dumps({"cells": [{"source": source}]})
     text, found = rewrite_paths(notebook, moves)
-    assert json.loads(text)["cells"][0]["source"] == ['x = open("data/t.csv")']
-    assert found == ["C:\\Users\\me\\t.csv"]
+    assert json.loads(text)["cells"][0]["source"] == [
+        'x = open("data/t.csv")',
+        'y = open(r"data/win-runs/Run1.csv")',
+    ]
+    assert sorted(found) == ["C:\\Users\\me\\runs", "C:\\Users\\me\\t.csv"]
+    # A new path that would need escaping in the string isn't put in it
+    with pytest.raises(ValueError):
+        rewrite_paths(code, {"C:\\Users\\me\\t.csv": "data/O'Brien.csv"})

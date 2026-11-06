@@ -545,6 +545,19 @@ def test_post_project_stage_from_script_or_notebook(
         save=True,
     )
     assert resp.status_code == 409, resp.text
+    # Or in place of a folder, beneath a file, or where another of the
+    # files goes, before anything is written
+    other_cal = {**data[1], "files": [{"content": b64("4\n")}]}
+    for clash in [
+        [{**data[1], "path": "scripts"}],
+        [{**data[1], "path": "scripts/old.py/cal.txt"}],
+        [data[1], {**other_cal, "external": "/Users/me/Box-Box/x/cal.txt"}],
+    ]:
+        resp = post(**wake_upload, data=clash, save=True)
+        assert resp.status_code == 409, resp.text
+    # A path the script can't name in a string as it is
+    resp = post(**wake_upload, data=[{**data[1], "path": "data/O'Brien.txt"}])
+    assert resp.status_code == 422, resp.text
     assert not (wdir / "data").exists()
     # Something cached already, e.g., pulled, isn't sent again
     subprocess.check_call(["dvc", "init", "-q"], cwd=wdir)
@@ -553,6 +566,14 @@ def test_post_project_stage_from_script_or_notebook(
     old = wdir / ".dvc" / "cache" / "files" / "md5" / "aa" / "old"
     old.parent.mkdir(parents=True)
     old.write_text("old")
+    # One that can't be stored is uncached too, so trying again stores it
+    with patch(
+        "app.api.routes.projects.pipeline._push_dvc_cache_to_storage",
+        side_effect=OSError("Storage is down"),
+    ):
+        resp = post(**wake_upload, data=data + [big_data], save=True)
+    assert resp.status_code == 500, resp.text
+    assert not repo.is_dirty(untracked_files=True)
     resp = post(**wake_upload, data=data + [big_data], save=True)
     assert resp.status_code == 200, resp.text
     assert (wdir / "scripts" / "wake.py").read_text() == wake.replace(
@@ -580,6 +601,14 @@ def test_post_project_stage_from_script_or_notebook(
     )
     assert not repo.is_dirty(untracked_files=True)
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
+    # Data in DVC is there even when it isn't checked out
+    (wdir / "data" / "big.bin").unlink()
+    in_dvc = {**big_data, "files": [{"content": b64("other")}]}
+    resp = post(script_path="scripts/wake.py", data=[in_dvc])
+    assert resp.status_code == 409, resp.text
+    assert post(
+        script_path="scripts/wake.py", data=[big_data]
+    ).status_code == (200)
     # Not a script, or not there to read
     assert post(script_path="paper/paper.tex").status_code == 422
     assert post(script_path="scripts/gone.py").status_code == 404

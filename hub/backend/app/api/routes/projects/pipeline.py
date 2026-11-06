@@ -16,6 +16,7 @@ e.g., for a figure a paper includes that nothing in the pipeline produces.
 import base64
 import binascii
 import glob
+import hashlib
 import json
 import os
 import posixpath
@@ -486,6 +487,9 @@ def post_project_stage_from_script_or_notebook(
             raise HTTPException(
                 422, f"'{data_path}' leads outside the project"
             )
+        # The script names it in a string
+        if re.search("['\"]", data_path):
+            raise HTTPException(422, f"'{data_path}' can't have quotes")
         for file in data.files:
             path = _clean_rel_path(
                 posixpath.join(data_path, file.path)
@@ -510,14 +514,6 @@ def post_project_stage_from_script_or_notebook(
                     "it to the project another way, e.g., with 'calkit add' "
                     "on the computer that has it",
                 )
-            if os.path.isfile(full):
-                with open(full, "rb") as fb:
-                    if fb.read() != content_bytes:
-                        raise HTTPException(
-                            409,
-                            f"'{path}' is already in the project; pick "
-                            "another place for the data",
-                        )
         if (
             req.save
             and not data.files
@@ -529,6 +525,49 @@ def post_project_stage_from_script_or_notebook(
             raise HTTPException(404, f"'{data_path}' is not in the project")
         data_paths.append(data_path)
         moves[data.external] = posixpath.relpath(data_path, run_dir)
+    # Nothing already in the project, or uploaded with it, is replaced, and
+    # a file never goes where a folder is or the other way around
+    planned: dict[str, bytes] = {}
+    for path, content_bytes in data_files:
+        if planned.setdefault(path, content_bytes) != content_bytes:
+            raise HTTPException(
+                409,
+                f"Different files would go to '{path}'; pick another place "
+                "for one",
+            )
+    for path, content_bytes in planned.items():
+        full = os.path.join(wdir, path)
+        parents = []
+        parent = posixpath.dirname(path)
+        while parent:
+            parents.append(parent)
+            parent = posixpath.dirname(parent)
+        same = False
+        if os.path.isfile(full):
+            with open(full, "rb") as fb:
+                same = fb.read() == content_bytes
+        taken = (
+            (os.path.exists(full) and not same)
+            or any(p in planned for p in parents)
+            or any(os.path.isfile(os.path.join(wdir, p)) for p in parents)
+        )
+        # DVC-tracked data is there even when it isn't checked out
+        for p in [path, *parents]:
+            dvc_path = os.path.join(wdir, p + ".dvc")
+            if same or taken or not os.path.isfile(dvc_path):
+                continue
+            with open(dvc_path) as f:
+                outs = (ryaml.load(f) or {}).get("outs") or [{}]
+            taken = (
+                p != path
+                or outs[0].get("md5") != hashlib.md5(content_bytes).hexdigest()
+            )
+        if taken:
+            raise HTTPException(
+                409,
+                f"'{path}' is already in the project; pick another place for "
+                "the data",
+            )
     # The script, changed to read the project's copies
     rewritten: list[str] = []
     if moves:
@@ -727,11 +766,6 @@ def post_project_stage_from_script_or_notebook(
     # The data goes where calkit add puts it, Git or DVC, with only what it
     # newly cached copied to the hub's storage
     if data_files:
-        for path, data_bytes in data_files:
-            full = os.path.join(wdir, path)
-            os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
-            with open(full, "wb") as fb:
-                fb.write(data_bytes)
         cache_dir = os.path.join(wdir, ".dvc", "cache", "files", "md5")
         cached = {
             os.path.relpath(p, cache_dir).replace(os.sep, "/")
@@ -741,26 +775,37 @@ def post_project_stage_from_script_or_notebook(
             {
                 d
                 for d in data_paths
-                if any(p == d or p.startswith(d + "/") for p, _ in data_files)
+                if any(p == d or p.startswith(d + "/") for p in planned)
             }
         )
         try:
+            for path, data_bytes in planned.items():
+                full = os.path.join(wdir, path)
+                os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
+                with open(full, "wb") as fb:
+                    fb.write(data_bytes)
             subprocess.check_call(
                 [sys.executable, "-m", "calkit", "add", *uploaded],
                 cwd=wdir,
                 stdin=subprocess.DEVNULL,
             )
-        except subprocess.CalledProcessError as e:
-            logger.exception(f"calkit add failed for {uploaded}: {e}")
+            _push_dvc_cache_to_storage(
+                repo_dir=wdir,
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                skip=cached,
+            )
+        except Exception as e:
+            logger.exception(f"Adding {uploaded} failed: {e}")
+            # Uncached too, so a retry caches, and so stores, it again
+            for p in glob.glob(os.path.join(cache_dir, "*", "*")):
+                if os.path.relpath(p, cache_dir).replace(os.sep, "/") not in (
+                    cached
+                ):
+                    os.remove(p)
             repo.git.reset("--hard")
             repo.git.clean("-fd")
             raise HTTPException(500, "Couldn't add the data to the project")
-        _push_dvc_cache_to_storage(
-            repo_dir=wdir,
-            owner_name=project.owner_account_name,
-            project_name=project.name,
-            skip=cached,
-        )
         # Recorded as a dataset, from where it was, unless it's already one
         datasets = ck_info.setdefault("datasets", [])
         known = {d.get("path") for d in datasets if isinstance(d, dict)}

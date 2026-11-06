@@ -164,12 +164,15 @@ doesn't change an environment by itself.
 To take it, or to get past a failed check,
 relock the environment, which builds it from the spec again:
 
-- Docker and MATLAB: `calkit check env --name {env-name} --force`
-- uv: `uv lock --upgrade`
-- Pixi: `pixi update`
-- Others, e.g., venv and conda: delete the lock file
-  (`calkit describe env --name {env-name}` shows where it is)
-  and check the environment again
+```sh
+calkit update env --name {env-name} --lock
+```
+
+This works the same way for every kind of environment.
+Where the environment manager has an upgrade command of its own,
+e.g., `uv lock --upgrade` or `pixi update`, Calkit runs it;
+otherwise Calkit removes the environment's lock files,
+rebuilds it from scratch, and locks the result.
 
 This is the same model as uv, Pixi, npm, and Cargo:
 their lock changes when you change the spec or ask for an upgrade,
@@ -540,7 +543,7 @@ Otherwise Calkit tries, in order:
    the lock describes, so the check stops and leaves the lock alone.
    The error says what to do: log in or make the image public, push it
    from the machine that built it, or relock with
-   `calkit check env --name {env-name} --force`.
+   `calkit update env --name {env-name} --lock`.
    Only a lock that names no digest, i.e., for an environment with no
    `registry`, or an image store that records no digest, is rebuilt here,
    and rewritten to record what was built.

@@ -1365,12 +1365,17 @@ def check_docker_env(
                     lock = read_lock(alt_lock_fpath)
                     if lock is not None:
                         break
+    # An environment named after an existing image has that name as its spec
+    spec_image = tag if fpath is None else None
     # A lock that doesn't describe the current spec is stale, not merely
     # out-of-date with the local image: the image it identifies was built
-    # from a different Dockerfile or dependencies, so it must not be pulled
-    # in place of the one asked for
+    # from a different Dockerfile or dependencies, or is a different image
+    # altogether, so it must not be pulled in place of the one asked for
     if lock is not None and not ck_docker.lock_matches_spec(
-        lock, dockerfile_md5=dockerfile_md5, deps_md5s=deps_md5s
+        lock,
+        dockerfile_md5=dockerfile_md5,
+        deps_md5s=deps_md5s,
+        image=spec_image,
     ):
         typer.echo(
             "Lock file does not match the current environment", file=outfile
@@ -1381,6 +1386,10 @@ def check_docker_env(
     if rebuild:
         lock = None
         lock_is_current_arch = False
+    # A lock written before the image was recorded still pins it, and adding
+    # it would rerun every stage in the environment, so it's left out until
+    # the environment is relocked
+    record_image = spec_image if lock is None or "Image" in lock else None
     # Work out where this image lives in a registry, so it can be pulled
     # instead of rebuilt, and pushed after being built. Only an image built
     # from a Dockerfile goes to the project's registry; one named directly
@@ -1513,7 +1522,7 @@ def check_docker_env(
         # rewrite the lock, which only happens when asked for
         if not obtained and pinned:
             relock = (
-                f"'calkit check env -n {env_name} --force'"
+                f"'calkit update env -n {env_name} --lock'"
                 if env_name
                 else "this command with --rebuild"
             )
@@ -1704,6 +1713,7 @@ def check_docker_env(
             dockerfile_md5=dockerfile_md5,
             deps_md5s=deps_md5s,
             run_config=run_config,
+            image=record_image,
         )
         # newline="\n" so the file is byte-identical on every platform,
         # rather than a Windows checkout flipping it to CRLF.
@@ -1736,6 +1746,7 @@ def check_docker_env(
                 existing,
                 dockerfile_md5=dockerfile_md5,
                 deps_md5s=deps_md5s,
+                image=spec_image,
             )
             and ck_docker.get_content_digests(existing)
             == ck_docker.get_content_digests(identity)

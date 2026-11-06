@@ -3284,7 +3284,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
+Supports relocking any environment, and adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -3294,11 +3294,11 @@ calkit update env [OPTIONS]
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                                              |
-| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
-| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
-| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                                                                       |
+| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                                                                 |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                                                         |
+| `--lock`, `--relock`     | boolean | no       | False   | Rebuild the environment from its spec and lock it again, taking the newest versions the spec allows, or for a system environment, lock it to this machine. Reruns every stage that depends on it. |
 
 <a id="subcommand-update-environment"></a>
 
@@ -3306,7 +3306,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
+Supports relocking any environment, and adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -3316,11 +3316,11 @@ calkit update environment [OPTIONS]
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                                              |
-| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
-| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
-| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                                                                       |
+| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                                                                 |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                                                         |
+| `--lock`, `--relock`     | boolean | no       | False   | Rebuild the environment from its spec and lock it again, taking the newest versions the spec allows, or for a system environment, lock it to this machine. Reruns every stage that depends on it. |
 
 <a id="subcommand-update-stage"></a>
 

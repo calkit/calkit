@@ -487,6 +487,33 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     subprocess.check_call(argv + ["--rebuild"])
     with open(f"locks/{arch}.json") as f:
         assert json.load(f)["RepoDigests"] == mine["RepoDigests"]
+    # The image named is the spec, so naming another one relocks rather
+    # than failing to find the old digest in the new repo, or pulling it
+    # from the same repo under a different tag
+    assert mine["Image"] == "alpine:3.18"
+    try:
+        out = subprocess.check_output(
+            [a if a != "alpine:3.18" else "alpine:3.19" for a in argv],
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+        assert "Pulling image by digest" not in out
+        with open(f"locks/{arch}.json") as f:
+            relocked = json.load(f)
+        assert relocked["Image"] == "alpine:3.19"
+        assert relocked["RepoDigests"] != mine["RepoDigests"]
+    finally:
+        subprocess.run(["docker", "rmi", "alpine:3.19"], capture_output=True)
+    # A lock written before the image was recorded still pins it, and is
+    # left as it was rather than rewritten, which would rerun every stage
+    legacy = {k: v for k, v in mine.items() if k != "Image"}
+    with open(f"locks/{arch}.json", "w") as f:
+        json.dump(legacy, f, indent=4)
+    with open(f"locks/{arch}.json", "rb") as f:
+        legacy_bytes = f.read()
+    subprocess.check_call(argv)
+    with open(f"locks/{arch}.json", "rb") as f:
+        assert f.read() == legacy_bytes
 
 
 @pytest.mark.skipif(
@@ -796,8 +823,11 @@ def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
             check_argv = ["calkit", "check", "environment", "-n", "main"]
             result = subprocess.run(check_argv, capture_output=True, text=True)
             assert result.returncode != 0
-            assert "'calkit check env -n main --force'" in result.stderr
-            subprocess.check_call(check_argv + ["--force"])
+            assert "'calkit update env -n main --lock'" in result.stderr
+            subprocess.check_call(
+                ["calkit", "update", "env", "-n", "main", "--lock"]
+            )
+            assert os.path.isfile(f".calkit/env-locks/main/{arch}.json")
     finally:
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
 

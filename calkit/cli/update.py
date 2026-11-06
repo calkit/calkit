@@ -1127,17 +1127,18 @@ def update_environment(
             "--lock",
             "--relock",
             help=(
-                "Record this machine's properties in a system "
-                "environment's lock file, replacing the machine it is "
-                "locked to. Invalidates every stage that depends on it."
+                "Rebuild the environment from its spec and lock it again, "
+                "taking the newest versions the spec allows, or for a "
+                "system environment, lock it to this machine. Reruns every "
+                "stage that depends on it."
             ),
         ),
     ] = False,
 ) -> None:
     """Update an environment.
 
-    Currently supports adding packages to Julia and Nix (flake) envs, and
-    re-locking a system environment to this machine.
+    Supports relocking any environment, and adding packages to Julia and
+    Nix (flake) envs.
     """
     from calkit.cli.main import run_in_env
 
@@ -1157,11 +1158,8 @@ def update_environment(
         env = found
         kind = env.get("kind")
         if kind not in ("system", calkit.environments.SWITCH_KIND):
-            raise_error(
-                f"Environment '{env_name}' is not a system or switch "
-                "environment, so it has no machine to lock; its lock file is "
-                "derived from its spec"
-            )
+            _relock_env(env_name=env_name, env=env)
+            return
         # A switch's lock describes the machine its pick runs on
         machine_name, machine_env = env_name, env
         if kind == calkit.environments.SWITCH_KIND:
@@ -1235,7 +1233,7 @@ def update_environment(
     if add_packages is None:
         raise_error(
             "No updates specified. Use --add to specify packages to add, or "
-            "--lock to re-lock a system environment to this machine."
+            "--lock to relock the environment."
         )
     env = found
     assert isinstance(add_packages, list)
@@ -1332,6 +1330,81 @@ def update_environment(
             "julia and nix environments"
         )
     typer.echo(f"Updated environment '{env_name}'")
+
+
+def _relock_env(env_name: str, env: dict) -> None:
+    """Rebuild an environment from its spec and write a fresh lock.
+
+    Tools with an upgrade command of their own run it. Otherwise the locks
+    are removed and the environment is rebuilt from scratch, since a check
+    with a lock in place reproduces the lock rather than the spec.
+    """
+    import subprocess
+
+    from calkit.cli.check import check_environment
+    from calkit.environments import (
+        get_all_conda_lock_fpaths,
+        get_all_docker_lock_fpaths,
+        get_all_venv_lock_fpaths,
+        get_env_lock_fpath,
+    )
+
+    kind = env.get("kind")
+    spec_path = env.get("path") or ""
+    env_dir = os.path.dirname(spec_path) or "."
+    if kind in ("slurm", "pbs"):
+        typer.echo(
+            f"Environment '{env_name}' is locked to its configuration in "
+            "calkit.yaml, so there is nothing to relock"
+        )
+        return
+    upgrade_cmd = None
+    if kind == "uv":
+        upgrade_cmd = ["uv", "lock", "--upgrade"]
+    elif kind == "pixi":
+        upgrade_cmd = ["pixi", "update"]
+    elif kind == "nix":
+        upgrade_cmd = [
+            "nix",
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "flake",
+            "update",
+        ]
+    if upgrade_cmd is not None:
+        typer.echo(f"Running: {' '.join(upgrade_cmd)}")
+        if subprocess.run(upgrade_cmd, cwd=env_dir).returncode != 0:
+            raise_error(f"Failed to relock environment '{env_name}'")
+        typer.echo(f"Checking environment '{env_name}'")
+        check_environment(env_name=env_name, verbose=True)
+        return
+    # Every lock goes, including other platforms' and legacy ones, since a
+    # check falls back to any of them
+    lock_fpaths = []
+    if kind == "docker":
+        lock_fpaths = get_all_docker_lock_fpaths(env_name, as_posix=False)
+    elif kind == "conda":
+        lock_fpaths = get_all_conda_lock_fpaths(env_name, as_posix=False)
+    elif kind in ("venv", "uv-venv"):
+        lock_fpaths = get_all_venv_lock_fpaths(env_name, as_posix=False)
+    elif kind == "renv":
+        renv_dir = env_dir if spec_path.endswith("DESCRIPTION") else spec_path
+        lock_fpaths = [os.path.join(renv_dir or ".", "renv.lock")]
+    for legacy in (False, True):
+        try:
+            fpath = get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False, legacy=legacy
+            )
+        except ValueError as e:
+            raise_error(f"Environment '{env_name}': {e}")
+        if fpath is not None:
+            lock_fpaths.append(fpath)
+    for fpath in dict.fromkeys(lock_fpaths):
+        if os.path.isfile(fpath):
+            typer.echo(f"Removing lock file: {fpath}")
+            os.remove(fpath)
+    typer.echo(f"Relocking environment '{env_name}'")
+    check_environment(env_name=env_name, verbose=True, force=True)
 
 
 @update_app.command(name="stage")

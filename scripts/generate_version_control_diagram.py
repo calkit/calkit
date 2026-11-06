@@ -378,6 +378,7 @@ if __name__ == "__main__":
 
     # Save
     output_path = f"{OUTPUT_NAME}.{OUTPUT_FORMAT}"
+    ET.register_namespace("", ns)
     ET.ElementTree(root).write(
         output_path,
         encoding="unicode",

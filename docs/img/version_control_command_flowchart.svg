@@ -1,198 +1,198 @@
 <?xml version='1.0' encoding='utf-8'?>
-<ns0:svg xmlns:ns0="http://www.w3.org/2000/svg" width="940pt" height="644pt" viewBox="4.00 4.00 936.00 641.00">
-<ns0:g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(308.1 547.2)">
-<ns0:title>fixed_grid</ns0:title>
-<ns0:polygon fill="white" stroke="none" points="-304.5,93.6 -304.5,-543.6 627.95,-543.6 627.95,93.6 -304.5,93.6" />
+<svg xmlns="http://www.w3.org/2000/svg" width="940pt" height="644pt" viewBox="4.00 4.00 936.00 641.00">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(308.1 547.2)">
+<title>fixed_grid</title>
+<polygon fill="white" stroke="none" points="-304.5,93.6 -304.5,-543.6 627.95,-543.6 627.95,93.6 -304.5,93.6" />
 
-<ns0:g id="edge1" class="edge">
-<ns0:title>A1:s-&gt;A2:n</ns0:title>
-<ns0:path fill="none" stroke="black" d="M0,-428.4C7.56,-428.4 8.77,-353.07 3.63,-328.94" />
-<ns0:polygon fill="black" stroke="black" points="5.97,-328.14 0.67,-322.96 1.58,-330.32 5.97,-328.14" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="-16.88" y="-364.24" font-family="Courier,monospace" font-size="11.00">git fetch</ns0:text>
-</ns0:g>
+<g id="edge1" class="edge">
+<title>A1:s-&gt;A2:n</title>
+<path fill="none" stroke="black" d="M0,-428.4C7.56,-428.4 8.77,-353.07 3.63,-328.94" />
+<polygon fill="black" stroke="black" points="5.97,-328.14 0.67,-322.96 1.58,-330.32 5.97,-328.14" />
+<text xml:space="preserve" text-anchor="middle" x="-16.88" y="-364.24" font-family="Courier,monospace" font-size="11.00">git fetch</text>
+</g>
 
-<ns0:g id="edge3" class="edge">
-<ns0:title>A1:se-&gt;A4:ne</ns0:title>
-<ns0:path fill="none" stroke="black" d="M54.02,-428.5C54.02,-428.5 56.82,-426.88 57.7,-424.7 107.77,-301.13 60.09,-258.01 57.7,-124.7 57.07,-89.42 55.22,-47.39 54.4,-29.88" />
-<ns0:polygon fill="black" stroke="black" points="56.86,-29.99 54.07,-23.11 51.96,-30.22 56.86,-29.99" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="-13.61" y="-211.93" font-family="Courier,monospace" font-size="11.00">git pull / calkit pull --no-dvc</ns0:text>
-</ns0:g>
+<g id="edge3" class="edge">
+<title>A1:se-&gt;A4:ne</title>
+<path fill="none" stroke="black" d="M54.02,-428.5C54.02,-428.5 56.82,-426.88 57.7,-424.7 107.77,-301.13 60.09,-258.01 57.7,-124.7 57.07,-89.42 55.22,-47.39 54.4,-29.88" />
+<polygon fill="black" stroke="black" points="56.86,-29.99 54.07,-23.11 51.96,-30.22 56.86,-29.99" />
+<text xml:space="preserve" text-anchor="middle" x="-13.61" y="-211.93" font-family="Courier,monospace" font-size="11.00">git pull / calkit pull --no-dvc</text>
+</g>
 
-<ns0:g id="edge2" class="edge">
-<ns0:title>A2:n-&gt;A1:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M0,-321.6C-7.56,-321.6 -8.77,-396.93 -3.63,-421.06" />
-<ns0:polygon fill="black" stroke="black" points="-5.97,-421.86 -0.67,-427.04 -1.58,-419.68 -5.97,-421.86" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="-119.62" y="-376.86" font-family="Courier,monospace" font-size="11.00">git push / calkit push --no-dvc --no-docker</ns0:text>
-</ns0:g>
+<g id="edge2" class="edge">
+<title>A2:n-&gt;A1:s</title>
+<path fill="none" stroke="black" d="M0,-321.6C-7.56,-321.6 -8.77,-396.93 -3.63,-421.06" />
+<polygon fill="black" stroke="black" points="-5.97,-421.86 -0.67,-427.04 -1.58,-419.68 -5.97,-421.86" />
+<text xml:space="preserve" text-anchor="middle" x="-119.62" y="-376.86" font-family="Courier,monospace" font-size="11.00">git push / calkit push --no-dvc --no-docker</text>
+</g>
 
-<ns0:g id="edge4" class="edge">
-<ns0:title>A2:se-&gt;A4:ne</ns0:title>
-<ns0:path fill="none" stroke="black" d="M54.02,-278.5C54.02,-278.5 56.82,-276.88 57.7,-274.7 82.74,-212.91 58.9,-191.36 57.7,-124.7 57.07,-89.42 55.22,-47.39 54.4,-29.88" />
-<ns0:polygon fill="black" stroke="black" points="56.86,-29.99 54.07,-23.11 51.96,-30.22 56.86,-29.99" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="26.2" y="-114.24" font-family="Courier,monospace" font-size="11.00">git checkout</ns0:text>
-</ns0:g>
+<g id="edge4" class="edge">
+<title>A2:se-&gt;A4:ne</title>
+<path fill="none" stroke="black" d="M54.02,-278.5C54.02,-278.5 56.82,-276.88 57.7,-274.7 82.74,-212.91 58.9,-191.36 57.7,-124.7 57.07,-89.42 55.22,-47.39 54.4,-29.88" />
+<polygon fill="black" stroke="black" points="56.86,-29.99 54.07,-23.11 51.96,-30.22 56.86,-29.99" />
+<text xml:space="preserve" text-anchor="middle" x="26.2" y="-114.24" font-family="Courier,monospace" font-size="11.00">git checkout</text>
+</g>
 
-<ns0:g id="edge6" class="edge">
-<ns0:title>A3:n-&gt;A2:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M0,-171.6C0,-171.6 0,-244.84 0,-270.02" />
-<ns0:polygon fill="black" stroke="black" points="-2.45,-269.89 0,-276.89 2.45,-269.89 -2.45,-269.89" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="-26.25" y="-226.77" font-family="Courier,monospace" font-size="11.00">git commit</ns0:text>
-</ns0:g>
+<g id="edge6" class="edge">
+<title>A3:n-&gt;A2:s</title>
+<path fill="none" stroke="black" d="M0,-171.6C0,-171.6 0,-244.84 0,-270.02" />
+<polygon fill="black" stroke="black" points="-2.45,-269.89 0,-276.89 2.45,-269.89 -2.45,-269.89" />
+<text xml:space="preserve" text-anchor="middle" x="-26.25" y="-226.77" font-family="Courier,monospace" font-size="11.00">git commit</text>
+</g>
 
-<ns0:g id="edge5" class="edge">
-<ns0:title>A4:n-&gt;A3:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M0,-21.6C0,-21.6 0,-94.84 0,-120.02" />
-<ns0:polygon fill="black" stroke="black" points="-2.45,-119.89 0,-126.89 2.45,-119.89 -2.45,-119.89" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="-18.38" y="-76.77" font-family="Courier,monospace" font-size="11.00">git add</ns0:text>
-</ns0:g>
+<g id="edge5" class="edge">
+<title>A4:n-&gt;A3:s</title>
+<path fill="none" stroke="black" d="M0,-21.6C0,-21.6 0,-94.84 0,-120.02" />
+<polygon fill="black" stroke="black" points="-2.45,-119.89 0,-126.89 2.45,-119.89 -2.45,-119.89" />
+<text xml:space="preserve" text-anchor="middle" x="-18.38" y="-76.77" font-family="Courier,monospace" font-size="11.00">git add</text>
+</g>
 
-<ns0:g id="edge7" class="edge">
-<ns0:title>B1:s-&gt;B2:n</ns0:title>
-<ns0:path fill="none" stroke="black" d="M250,-428.4C257.56,-428.4 258.77,-353.07 253.63,-328.94" />
-<ns0:polygon fill="black" stroke="black" points="255.97,-328.14 250.67,-322.96 251.58,-330.32 255.97,-328.14" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="214.75" y="-364.24" font-family="Courier,monospace" font-size="11.00">calkit dvc fetch</ns0:text>
-</ns0:g>
+<g id="edge7" class="edge">
+<title>B1:s-&gt;B2:n</title>
+<path fill="none" stroke="black" d="M250,-428.4C257.56,-428.4 258.77,-353.07 253.63,-328.94" />
+<polygon fill="black" stroke="black" points="255.97,-328.14 250.67,-322.96 251.58,-330.32 255.97,-328.14" />
+<text xml:space="preserve" text-anchor="middle" x="214.75" y="-364.24" font-family="Courier,monospace" font-size="11.00">calkit dvc fetch</text>
+</g>
 
-<ns0:g id="edge9" class="edge">
-<ns0:title>B1:se-&gt;B4:ne</ns0:title>
-<ns0:path fill="none" stroke="black" d="M304.02,-428.5C304.02,-428.5 306.82,-426.88 307.7,-424.7 357.77,-301.13 310.09,-258.01 307.7,-124.7 307.07,-89.42 305.22,-47.39 304.4,-29.88" />
-<ns0:polygon fill="black" stroke="black" points="306.86,-29.99 304.07,-23.11 301.96,-30.22 306.86,-29.99" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="218.02" y="-211.93" font-family="Courier,monospace" font-size="11.00">calkit dvc pull / calkit pull --no-git</ns0:text>
-</ns0:g>
+<g id="edge9" class="edge">
+<title>B1:se-&gt;B4:ne</title>
+<path fill="none" stroke="black" d="M304.02,-428.5C304.02,-428.5 306.82,-426.88 307.7,-424.7 357.77,-301.13 310.09,-258.01 307.7,-124.7 307.07,-89.42 305.22,-47.39 304.4,-29.88" />
+<polygon fill="black" stroke="black" points="306.86,-29.99 304.07,-23.11 301.96,-30.22 306.86,-29.99" />
+<text xml:space="preserve" text-anchor="middle" x="218.02" y="-211.93" font-family="Courier,monospace" font-size="11.00">calkit dvc pull / calkit pull --no-git</text>
+</g>
 
-<ns0:g id="edge8" class="edge">
-<ns0:title>B2:n-&gt;B1:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M250,-321.6C242.44,-321.6 241.23,-396.93 246.37,-421.06" />
-<ns0:polygon fill="black" stroke="black" points="244.03,-421.86 249.33,-427.04 248.42,-419.68 244.03,-421.86" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="374.5" y="-376.86" font-family="Courier,monospace" font-size="11.00">calkit dvc push / calkit push --no-git --no-docker</ns0:text>
-</ns0:g>
+<g id="edge8" class="edge">
+<title>B2:n-&gt;B1:s</title>
+<path fill="none" stroke="black" d="M250,-321.6C242.44,-321.6 241.23,-396.93 246.37,-421.06" />
+<polygon fill="black" stroke="black" points="244.03,-421.86 249.33,-427.04 248.42,-419.68 244.03,-421.86" />
+<text xml:space="preserve" text-anchor="middle" x="374.5" y="-376.86" font-family="Courier,monospace" font-size="11.00">calkit dvc push / calkit push --no-git --no-docker</text>
+</g>
 
-<ns0:g id="edge10" class="edge">
-<ns0:title>B2:se-&gt;B4:ne</ns0:title>
-<ns0:path fill="none" stroke="black" d="M304.02,-278.5C304.02,-278.5 306.82,-276.88 307.7,-274.7 332.74,-212.91 308.9,-191.36 307.7,-124.7 307.07,-89.42 305.22,-47.39 304.4,-29.88" />
-<ns0:polygon fill="black" stroke="black" points="306.86,-29.99 304.07,-23.11 301.96,-30.22 306.86,-29.99" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="257.82" y="-114.24" font-family="Courier,monospace" font-size="11.00">calkit dvc checkout</ns0:text>
-</ns0:g>
+<g id="edge10" class="edge">
+<title>B2:se-&gt;B4:ne</title>
+<path fill="none" stroke="black" d="M304.02,-278.5C304.02,-278.5 306.82,-276.88 307.7,-274.7 332.74,-212.91 308.9,-191.36 307.7,-124.7 307.07,-89.42 305.22,-47.39 304.4,-29.88" />
+<polygon fill="black" stroke="black" points="306.86,-29.99 304.07,-23.11 301.96,-30.22 306.86,-29.99" />
+<text xml:space="preserve" text-anchor="middle" x="257.82" y="-114.24" font-family="Courier,monospace" font-size="11.00">calkit dvc checkout</text>
+</g>
 
-<ns0:g id="edge14" class="edge">
-<ns0:title>B3:n-&gt;B2:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M250,-171.6C250,-171.6 250,-244.84 250,-270.02" />
-<ns0:polygon fill="black" stroke="black" points="247.55,-269.89 250,-276.89 252.45,-269.89 247.55,-269.89" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="205.38" y="-226.77" font-family="Courier,monospace" font-size="11.00">calkit dvc commit</ns0:text>
-</ns0:g>
+<g id="edge14" class="edge">
+<title>B3:n-&gt;B2:s</title>
+<path fill="none" stroke="black" d="M250,-171.6C250,-171.6 250,-244.84 250,-270.02" />
+<polygon fill="black" stroke="black" points="247.55,-269.89 250,-276.89 252.45,-269.89 247.55,-269.89" />
+<text xml:space="preserve" text-anchor="middle" x="205.38" y="-226.77" font-family="Courier,monospace" font-size="11.00">calkit dvc commit</text>
+</g>
 
-<ns0:g id="edge11" class="edge">
-<ns0:title>B4:n-&gt;B3:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M250,-21.6C234.46,-21.6 232.34,-101.19 243.63,-122.96" />
-<ns0:polygon fill="black" stroke="black" points="241.93,-124.73 248.85,-127.42 245.12,-121.01 241.93,-124.73" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="168.25" y="-76.94" font-family="Courier,monospace" font-size="11.00">calkit dvc add --no-commit</ns0:text>
-</ns0:g>
+<g id="edge11" class="edge">
+<title>B4:n-&gt;B3:s</title>
+<path fill="none" stroke="black" d="M250,-21.6C234.46,-21.6 232.34,-101.19 243.63,-122.96" />
+<polygon fill="black" stroke="black" points="241.93,-124.73 248.85,-127.42 245.12,-121.01 241.93,-124.73" />
+<text xml:space="preserve" text-anchor="middle" x="168.25" y="-76.94" font-family="Courier,monospace" font-size="11.00">calkit dvc add --no-commit</text>
+</g>
 
-<ns0:g id="edge12" class="edge">
-<ns0:title>B4:n-&gt;B3:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M250,-21.6C265.54,-21.6 267.66,-101.19 256.37,-122.96" />
-<ns0:polygon fill="black" stroke="black" points="254.88,-121.01 251.15,-127.42 258.07,-124.73 254.88,-121.01" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="394.75" y="-76.94" font-family="Courier,monospace" font-size="11.00">Automatic: dvc repro --no-commit / run --no-commit</ns0:text>
-</ns0:g>
+<g id="edge12" class="edge">
+<title>B4:n-&gt;B3:s</title>
+<path fill="none" stroke="black" d="M250,-21.6C265.54,-21.6 267.66,-101.19 256.37,-122.96" />
+<polygon fill="black" stroke="black" points="254.88,-121.01 251.15,-127.42 258.07,-124.73 254.88,-121.01" />
+<text xml:space="preserve" text-anchor="middle" x="394.75" y="-76.94" font-family="Courier,monospace" font-size="11.00">Automatic: dvc repro --no-commit / run --no-commit</text>
+</g>
 
-<ns0:g id="edge13" class="edge">
-<ns0:title>B4:n-&gt;B3:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M250,-21.6C250,-21.6 250,-94.84 250,-120.02" />
-<ns0:polygon fill="black" stroke="black" points="247.55,-119.89 250,-126.89 252.45,-119.89 247.55,-119.89" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="137.12" y="-64.77" font-family="Courier,monospace" font-size="11.00">calkit dvc add / automatic pipeline caching</ns0:text>
-</ns0:g>
+<g id="edge13" class="edge">
+<title>B4:n-&gt;B3:s</title>
+<path fill="none" stroke="black" d="M250,-21.6C250,-21.6 250,-94.84 250,-120.02" />
+<polygon fill="black" stroke="black" points="247.55,-119.89 250,-126.89 252.45,-119.89 247.55,-119.89" />
+<text xml:space="preserve" text-anchor="middle" x="137.12" y="-64.77" font-family="Courier,monospace" font-size="11.00">calkit dvc add / automatic pipeline caching</text>
+</g>
 
-<ns0:g id="edge16" class="edge">
-<ns0:title>C1:se-&gt;C4:ne</ns0:title>
-<ns0:path fill="none" stroke="black" d="M554.02,-428.5C554.02,-428.5 557.13,-87.29 554.77,-29.69" />
-<ns0:polygon fill="black" stroke="black" points="557.23,-29.76 554.15,-23.01 552.35,-30.2 557.23,-29.76" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="421.53" y="-226.65" font-family="Courier,monospace" font-size="11.00">calkit update docker-env --lock / calkit check envs</ns0:text>
-</ns0:g>
+<g id="edge16" class="edge">
+<title>C1:se-&gt;C4:ne</title>
+<path fill="none" stroke="black" d="M554.02,-428.5C554.02,-428.5 557.13,-87.29 554.77,-29.69" />
+<polygon fill="black" stroke="black" points="557.23,-29.76 554.15,-23.01 552.35,-30.2 557.23,-29.76" />
+<text xml:space="preserve" text-anchor="middle" x="421.53" y="-226.65" font-family="Courier,monospace" font-size="11.00">calkit update docker-env --lock / calkit check envs</text>
+</g>
 
-<ns0:g id="edge15" class="edge">
-<ns0:title>C2:n-&gt;C1:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M500,-321.6C500,-321.6 500,-394.84 500,-420.02" />
-<ns0:polygon fill="black" stroke="black" points="497.55,-419.89 500,-426.89 502.45,-419.89 497.55,-419.89" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="423.88" y="-364.77" font-family="Courier,monospace" font-size="11.00">calkit push --no-git --no-dvc</ns0:text>
-</ns0:g>
+<g id="edge15" class="edge">
+<title>C2:n-&gt;C1:s</title>
+<path fill="none" stroke="black" d="M500,-321.6C500,-321.6 500,-394.84 500,-420.02" />
+<polygon fill="black" stroke="black" points="497.55,-419.89 500,-426.89 502.45,-419.89 497.55,-419.89" />
+<text xml:space="preserve" text-anchor="middle" x="423.88" y="-364.77" font-family="Courier,monospace" font-size="11.00">calkit push --no-git --no-dvc</text>
+</g>
 
-<ns0:g id="edge17" class="edge">
-<ns0:title>C4:n-&gt;C3:s</ns0:title>
-<ns0:path fill="none" stroke="black" d="M500,-21.6C500,-21.6 500,-94.84 500,-120.02" />
-<ns0:polygon fill="black" stroke="black" points="497.55,-119.89 500,-126.89 502.45,-119.89 497.55,-119.89" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="455.38" y="-64.77" font-family="Courier,monospace" font-size="11.00">calkit check envs</ns0:text>
-</ns0:g>
+<g id="edge17" class="edge">
+<title>C4:n-&gt;C3:s</title>
+<path fill="none" stroke="black" d="M500,-21.6C500,-21.6 500,-94.84 500,-120.02" />
+<polygon fill="black" stroke="black" points="497.55,-119.89 500,-126.89 502.45,-119.89 497.55,-119.89" />
+<text xml:space="preserve" text-anchor="middle" x="455.38" y="-64.77" font-family="Courier,monospace" font-size="11.00">calkit check envs</text>
+</g>
 
-<ns0:g id="node1" class="node">
-<ns0:title>A1</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="54,-471.6 -54,-471.6 -54,-428.4 54,-428.4 54,-471.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="0" y="-446.3" font-family="Arial" font-size="11.00">GitHub</ns0:text>
-</ns0:g>
+<g id="node1" class="node">
+<title>A1</title>
+<polygon fill="none" stroke="black" points="54,-471.6 -54,-471.6 -54,-428.4 54,-428.4 54,-471.6" />
+<text xml:space="preserve" text-anchor="middle" x="0" y="-446.3" font-family="Arial" font-size="11.00">GitHub</text>
+</g>
 
-<ns0:g id="node2" class="node">
-<ns0:title>A2</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="54,-321.6 -54,-321.6 -54,-278.4 54,-278.4 54,-321.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="0" y="-296.3" font-family="Arial" font-size="11.00">Git index</ns0:text>
-</ns0:g>
+<g id="node2" class="node">
+<title>A2</title>
+<polygon fill="none" stroke="black" points="54,-321.6 -54,-321.6 -54,-278.4 54,-278.4 54,-321.6" />
+<text xml:space="preserve" text-anchor="middle" x="0" y="-296.3" font-family="Arial" font-size="11.00">Git index</text>
+</g>
 
-<ns0:g id="node3" class="node">
-<ns0:title>A3</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="54,-171.6 -54,-171.6 -54,-128.4 54,-128.4 54,-171.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="0" y="-146.3" font-family="Arial" font-size="11.00">Staging area</ns0:text>
-</ns0:g>
+<g id="node3" class="node">
+<title>A3</title>
+<polygon fill="none" stroke="black" points="54,-171.6 -54,-171.6 -54,-128.4 54,-128.4 54,-171.6" />
+<text xml:space="preserve" text-anchor="middle" x="0" y="-146.3" font-family="Arial" font-size="11.00">Staging area</text>
+</g>
 
-<ns0:g id="node4" class="node">
-<ns0:title>A4</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="54,-21.6 -54,-21.6 -54,21.6 54,21.6 54,-21.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="0" y="3.7" font-family="Arial" font-size="11.00">Local files</ns0:text>
-</ns0:g>
+<g id="node4" class="node">
+<title>A4</title>
+<polygon fill="none" stroke="black" points="54,-21.6 -54,-21.6 -54,21.6 54,21.6 54,-21.6" />
+<text xml:space="preserve" text-anchor="middle" x="0" y="3.7" font-family="Arial" font-size="11.00">Local files</text>
+</g>
 
-<ns0:g id="node5" class="node">
-<ns0:title>B1</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="304,-471.6 196,-471.6 196,-428.4 304,-428.4 304,-471.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="250" y="-446.3" font-family="Arial" font-size="11.00">ck remote</ns0:text>
-</ns0:g>
+<g id="node5" class="node">
+<title>B1</title>
+<polygon fill="none" stroke="black" points="304,-471.6 196,-471.6 196,-428.4 304,-428.4 304,-471.6" />
+<text xml:space="preserve" text-anchor="middle" x="250" y="-446.3" font-family="Arial" font-size="11.00">ck remote</text>
+</g>
 
-<ns0:g id="node6" class="node">
-<ns0:title>B2</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="304,-321.6 196,-321.6 196,-278.4 304,-278.4 304,-321.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="250" y="-296.3" font-family="Arial" font-size="11.00">Cache in .dvc/cache</ns0:text>
-</ns0:g>
+<g id="node6" class="node">
+<title>B2</title>
+<polygon fill="none" stroke="black" points="304,-321.6 196,-321.6 196,-278.4 304,-278.4 304,-321.6" />
+<text xml:space="preserve" text-anchor="middle" x="250" y="-296.3" font-family="Arial" font-size="11.00">Cache in .dvc/cache</text>
+</g>
 
-<ns0:g id="node7" class="node">
-<ns0:title>B3</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="304,-171.6 196,-171.6 196,-128.4 304,-128.4 304,-171.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="250" y="-146.3" font-family="Arial" font-size="11.00">dvc.lock, &lt;data&gt;.dvc</ns0:text>
-</ns0:g>
+<g id="node7" class="node">
+<title>B3</title>
+<polygon fill="none" stroke="black" points="304,-171.6 196,-171.6 196,-128.4 304,-128.4 304,-171.6" />
+<text xml:space="preserve" text-anchor="middle" x="250" y="-146.3" font-family="Arial" font-size="11.00">dvc.lock, &lt;data&gt;.dvc</text>
+</g>
 
-<ns0:g id="node8" class="node">
-<ns0:title>B4</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="304,-21.6 196,-21.6 196,21.6 304,21.6 304,-21.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="250" y="3.7" font-family="Arial" font-size="11.00">data files</ns0:text>
-</ns0:g>
+<g id="node8" class="node">
+<title>B4</title>
+<polygon fill="none" stroke="black" points="304,-21.6 196,-21.6 196,21.6 304,21.6 304,-21.6" />
+<text xml:space="preserve" text-anchor="middle" x="250" y="3.7" font-family="Arial" font-size="11.00">data files</text>
+</g>
 
-<ns0:g id="node9" class="node">
-<ns0:title>C1</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="554,-471.6 446,-471.6 446,-428.4 554,-428.4 554,-471.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="500" y="-446.3" font-family="Arial" font-size="11.00">ghcr.io registry</ns0:text>
-</ns0:g>
+<g id="node9" class="node">
+<title>C1</title>
+<polygon fill="none" stroke="black" points="554,-471.6 446,-471.6 446,-428.4 554,-428.4 554,-471.6" />
+<text xml:space="preserve" text-anchor="middle" x="500" y="-446.3" font-family="Arial" font-size="11.00">ghcr.io registry</text>
+</g>
 
-<ns0:g id="node10" class="node">
-<ns0:title>C2</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="554,-321.6 446,-321.6 446,-278.4 554,-278.4 554,-321.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="500" y="-296.3" font-family="Arial" font-size="11.00">Docker images</ns0:text>
-</ns0:g>
+<g id="node10" class="node">
+<title>C2</title>
+<polygon fill="none" stroke="black" points="554,-321.6 446,-321.6 446,-278.4 554,-278.4 554,-321.6" />
+<text xml:space="preserve" text-anchor="middle" x="500" y="-296.3" font-family="Arial" font-size="11.00">Docker images</text>
+</g>
 
-<ns0:g id="node11" class="node">
-<ns0:title>C3</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="554,-171.6 446,-171.6 446,-128.4 554,-128.4 554,-171.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="500" y="-146.3" font-family="Arial" font-size="11.00">Docker build cache</ns0:text>
-</ns0:g>
+<g id="node11" class="node">
+<title>C3</title>
+<polygon fill="none" stroke="black" points="554,-171.6 446,-171.6 446,-128.4 554,-128.4 554,-171.6" />
+<text xml:space="preserve" text-anchor="middle" x="500" y="-146.3" font-family="Arial" font-size="11.00">Docker build cache</text>
+</g>
 
-<ns0:g id="node12" class="node">
-<ns0:title>C4</ns0:title>
-<ns0:polygon fill="none" stroke="black" points="554,-21.6 446,-21.6 446,21.6 554,21.6 554,-21.6" />
-<ns0:text xml:space="preserve" text-anchor="middle" x="500" y="3.7" font-family="Arial" font-size="11.00">.calkit/env-locks/</ns0:text>
-</ns0:g>
-</ns0:g>
-<ns0:rect x="239.90000000000003" y="54.24000000000002" width="636.4" height="85.92" fill="none" stroke="red" stroke-width="2" stroke-dasharray="6,3" /><ns0:rect x="239.90000000000003" y="204.24" width="636.4" height="85.92" fill="none" stroke="orange" stroke-width="2" stroke-dasharray="6,3" /><ns0:rect x="239.90000000000003" y="354.24" width="636.4" height="85.92" fill="none" stroke="green" stroke-width="2" stroke-dasharray="6,3" /><ns0:rect x="239.90000000000003" y="504.24" width="636.4" height="85.92" fill="none" stroke="blue" stroke-width="2" stroke-dasharray="6,3" /><ns0:text x="183.10000000000002" y="97.20000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="red">REMOTE</ns0:text><ns0:text x="183.10000000000002" y="247.20000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="orange">CACHE</ns0:text><ns0:text x="183.10000000000002" y="397.20000000000005" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="green">STAGED</ns0:text><ns0:text x="183.10000000000002" y="547.2" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="blue">WORKSPACE</ns0:text><ns0:text x="308.1" y="32.88000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="black">GIT</ns0:text><ns0:text x="558.1" y="32.88000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="black">DVC</ns0:text><ns0:text x="808.1" y="32.88000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="black">DOCKER</ns0:text></ns0:svg>
+<g id="node12" class="node">
+<title>C4</title>
+<polygon fill="none" stroke="black" points="554,-21.6 446,-21.6 446,21.6 554,21.6 554,-21.6" />
+<text xml:space="preserve" text-anchor="middle" x="500" y="3.7" font-family="Arial" font-size="11.00">.calkit/env-locks/</text>
+</g>
+</g>
+<rect x="239.90000000000003" y="54.24000000000002" width="636.4" height="85.92" fill="none" stroke="red" stroke-width="2" stroke-dasharray="6,3" /><rect x="239.90000000000003" y="204.24" width="636.4" height="85.92" fill="none" stroke="orange" stroke-width="2" stroke-dasharray="6,3" /><rect x="239.90000000000003" y="354.24" width="636.4" height="85.92" fill="none" stroke="green" stroke-width="2" stroke-dasharray="6,3" /><rect x="239.90000000000003" y="504.24" width="636.4" height="85.92" fill="none" stroke="blue" stroke-width="2" stroke-dasharray="6,3" /><text x="183.10000000000002" y="97.20000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="red">REMOTE</text><text x="183.10000000000002" y="247.20000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="orange">CACHE</text><text x="183.10000000000002" y="397.20000000000005" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="green">STAGED</text><text x="183.10000000000002" y="547.2" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="blue">WORKSPACE</text><text x="308.1" y="32.88000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="black">GIT</text><text x="558.1" y="32.88000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="black">DVC</text><text x="808.1" y="32.88000000000002" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold" font-size="14" fill="black">DOCKER</text></svg>

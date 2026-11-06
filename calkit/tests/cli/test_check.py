@@ -399,7 +399,8 @@ def test_check_docker_env(tmp_dir):
     )
     with open("Dockerfile-lock.json", "rb") as f:
         assert f.read() == renamed_lock_bytes
-    # Now modify the image to fail to build and ensure the lock file is deleted
+    # A build that fails leaves the lock as it was, like a package manager
+    # whose resolve fails, rather than leaving the environment with none
     with open("Dockerfile", "w") as f:
         f.write("FROM non-existent-image:latest\n")
     with pytest.raises(subprocess.CalledProcessError):
@@ -415,7 +416,8 @@ def test_check_docker_env(tmp_dir):
                 "Dockerfile-lock.json",
             ]
         )
-    assert not os.path.exists("Dockerfile-lock.json")
+    with open("Dockerfile-lock.json", "rb") as f:
+        assert f.read() == renamed_lock_bytes
 
 
 @pytest.mark.skipif(
@@ -466,6 +468,25 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     assert "Pulling image by digest" in out
     with open(f"locks/{arch}.json", "rb") as f:
         assert f.read() == lock_bytes
+    # A locked digest that can't be pulled fails the check rather than
+    # pulling whatever the tag points at now and relocking to it
+    gone = dict(mine, RepoDigests=["sha256:" + "0" * 64])
+    with open(f"locks/{arch}.json", "w") as f:
+        json.dump(gone, f, indent=4)
+    with open(f"locks/{arch}.json", "rb") as f:
+        gone_bytes = f.read()
+    subprocess.check_call(["docker", "rmi", "-f", "alpine:3.18"])
+    result = subprocess.run(argv, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "locked to" in result.stderr
+    assert "--rebuild" in result.stderr
+    assert "Pulling image: alpine:3.18" not in result.stderr
+    with open(f"locks/{arch}.json", "rb") as f:
+        assert f.read() == gone_bytes
+    # Asking for it is what replaces the image and its lock
+    subprocess.check_call(argv + ["--rebuild"])
+    with open(f"locks/{arch}.json") as f:
+        assert json.load(f)["RepoDigests"] == mine["RepoDigests"]
 
 
 @pytest.mark.skipif(
@@ -768,6 +789,15 @@ def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
         assert os.path.isfile(other_lock_fpath)
         with open(other_lock_fpath, "rb") as f:
             assert f.read() == other_lock_bytes
+        # A locked image the registry can't serve fails the check, which
+        # names the command that replaces it, and that command does
+        if engine_records_build_digests():
+            subprocess.check_call(["docker", "rmi", "-f", image])
+            check_argv = ["calkit", "check", "environment", "-n", "main"]
+            result = subprocess.run(check_argv, capture_output=True, text=True)
+            assert result.returncode != 0
+            assert "'calkit check env -n main --force'" in result.stderr
+            subprocess.check_call(check_argv + ["--force"])
     finally:
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
 
@@ -948,6 +978,25 @@ def test_check_docker_env_does_not_push(tmp_dir):
             )
         )
         assert not [d for d in info if d.startswith("localhost:5999")]
+        # Deleting an image that was never pushed leaves nothing to pull
+        # the locked digest from, and a rebuild would lock a different
+        # image, so the check fails, says how to fix it, and keeps the lock
+        with open("lock.json", "rb") as f:
+            lock_bytes = f.read()
+        subprocess.check_call(["docker", "rmi", "-f", "calkit-unpushed-test"])
+        result = subprocess.run(argv, capture_output=True, text=True)
+        assert result.returncode != 0
+        assert "locked to" in result.stderr
+        assert "calkit push docker" in result.stderr
+        with open("lock.json", "rb") as f:
+            assert f.read() == lock_bytes
+        assert (
+            subprocess.run(
+                ["docker", "image", "inspect", "calkit-unpushed-test"],
+                capture_output=True,
+            ).returncode
+            != 0
+        )
     finally:
         subprocess.run(
             ["docker", "rmi", "-f", "calkit-unpushed-test"],

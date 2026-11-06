@@ -575,6 +575,7 @@ def check_environment(
             lock_archs=calkit.docker.get_lock_archs(env),
             quiet=not verbose,
             rebuild=rebuild,
+            env_name=env_name,
         )
     elif env["kind"] == "conda":
         lock_fpath = get_env_lock_fpath(
@@ -1275,6 +1276,14 @@ def check_docker_env(
             "rather than reusing a cached or locked one.",
         ),
     ] = False,
+    env_name: Annotated[
+        str | None,
+        typer.Option(
+            "--env-name",
+            hidden=True,
+            help="Environment name in calkit.yaml, for error messages.",
+        ),
+    ] = None,
 ) -> None:
     """Check that Docker environment is up-to-date."""
     from calkit import docker as ck_docker
@@ -1321,6 +1330,7 @@ def check_docker_env(
     # architectures, which still identify the image well enough to pull it
     lock = None
     lock_is_current_arch = False
+    legacy_lock_fpath = None
     if os.path.isfile(lock_fpath):
         typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
         lock = read_lock(lock_fpath)
@@ -1341,7 +1351,9 @@ def check_docker_env(
                 # against it, and an image left under this tag by something
                 # else would be locked in as this environment's
                 lock_is_current_arch = lock is not None
-                os.remove(alt_lock_fpath)
+                # Removed once its replacement is written, so a failed
+                # check doesn't leave the environment with no lock at all
+                legacy_lock_fpath = alt_lock_fpath
                 break
         if lock is None:
             for alt_lock_fpath in alt_lock_fpaths:
@@ -1408,10 +1420,16 @@ def check_docker_env(
         and ck_docker.lock_matches_image(lock, identity)
     )
 
-    def delete_lock_on_failure() -> None:
-        if lock_fpath and os.path.exists(lock_fpath):
-            os.remove(lock_fpath)
-
+    digest_refs = (
+        ck_docker.get_lock_digest_refs(lock, digest_source_ref)
+        if lock is not None
+        else []
+    )
+    # A lock that names a digest somewhere it can be pulled from pins the
+    # environment to that image, like a package lock pins versions, so it
+    # isn't replaced without being asked. One for a Dockerfile with no
+    # registry names nothing anyone could pull, so a rebuild is all there is.
+    pinned = bool(digest_refs) and (fpath is None or remote_ref is not None)
     pulled_from_registry = False
     already_pushed = False
     built = False
@@ -1421,9 +1439,7 @@ def check_docker_env(
         # can't reproduce it, and would silently pick up whatever its
         # undeclared upstream dependencies have become
         if lock is not None:
-            for digest_ref in ck_docker.get_lock_digest_refs(
-                lock, digest_source_ref
-            ):
+            for digest_ref in digest_refs:
                 typer.echo(f"Pulling image by digest: {digest_ref}", err=True)
                 # A private image needs credentials we may be able to get,
                 # but only a registry that refused us is worth logging in to
@@ -1493,6 +1509,27 @@ def check_docker_env(
                         "Failed to fetch image archived in release "
                         f"'{release_name}'"
                     )
+        # Rebuilding or pulling the tag would swap in a different image and
+        # rewrite the lock, which only happens when asked for
+        if not obtained and pinned:
+            relock = (
+                f"'calkit check env -n {env_name} --force'"
+                if env_name
+                else "this command with --rebuild"
+            )
+            causes = (
+                "if it's in a private package, log in or make it public; if "
+                "it was never pushed, push it from the machine that built it "
+                "with 'calkit push docker'"
+                if fpath is not None
+                else "if it's private, log in to its registry"
+            )
+            raise_error(
+                f"Failed to get the image this environment is locked to "
+                f"({digest_refs[0]}), so it was left alone rather than "
+                f"replaced with a different one; {causes}; or, to replace "
+                f"the image and its lock, run {relock}"
+            )
         if not obtained and fpath is not None:
             dockerfile_dir, dockerfile_name = os.path.split(fpath)
             build_cwd = dockerfile_dir if dockerfile_dir else None
@@ -1535,7 +1572,6 @@ def check_docker_env(
             try:
                 subprocess.check_output(cmd, cwd=build_cwd)
             except subprocess.CalledProcessError:
-                delete_lock_on_failure()
                 raise_error(
                     f"Failed to build Docker image with tag {tag} from {fpath}"
                 )
@@ -1546,7 +1582,6 @@ def check_docker_env(
                 if not ck_docker.pull_image_with_login(
                     remote_ref, platform=platform
                 ) or not ck_docker.tag_image(remote_ref, tag):
-                    delete_lock_on_failure()
                     raise_error(
                         f"Failed to pull image back from {remote_ref} after "
                         "building it"
@@ -1554,11 +1589,9 @@ def check_docker_env(
         elif not obtained:
             typer.echo(f"Pulling image: {tag}", err=True)
             if not ck_docker.pull_image_with_login(tag, platform=platform):
-                delete_lock_on_failure()
                 raise_error(f"Failed to pull image: {tag}")
     identity = ck_docker.inspect_image_for_lock(tag)
     if identity is None:
-        delete_lock_on_failure()
         raise_error(f"Failed to inspect image with tag {tag}")
     assert identity is not None
     # Checking an environment doesn't publish it: that's what 'calkit push'
@@ -1682,6 +1715,8 @@ def check_docker_env(
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)
     write_lock(current_arch, identity)
+    if legacy_lock_fpath is not None:
+        os.remove(legacy_lock_fpath)
     # Lock the platforms this machine can't run, so that moving the project
     # to one of them doesn't invalidate every stage in the environment. An
     # existing lock that still describes this spec is reused rather than
@@ -2160,6 +2195,7 @@ def check_matlab_env(
         lock_fpath=output_fpath,
         platform="linux/amd64",  # Only one available for now
         rebuild=rebuild,
+        env_name=env_name,
     )
 
 

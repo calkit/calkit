@@ -4520,6 +4520,7 @@ def run_in_env(
                 registry=env.get("registry"),
                 lock_archs=calkit.docker.get_lock_archs(env),
                 quiet=not verbose,
+                env_name=env_name,
             )
             save_env_check_cache()
         docker_cmd = [

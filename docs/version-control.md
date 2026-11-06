@@ -158,7 +158,7 @@ Pipeline is up to date.
 `calkit save` will create a commit and push to the remotes in one step.
 It will automatically any ignore any files it deems to be inappropriate to
 save in version control.
-This provides the most automated and hands of experience
+This provides the most automated and hands-off experience
 but gives the least control.
 
 Options:
@@ -368,3 +368,18 @@ Likewise, old versions of files kept in DVC will still live in the local
 and remote caches.
 These can be managed with DVC's garbage collection functionality,
 accessible at `calkit dvc gc`.
+
+## Under the hood
+
+Users who are already fluent in version control may find it helpful to understand more precisely how each calkit operation corresponds to the commands of other version control systems.
+
+Unlike the flowcharts [above](#typical-workflow), where blocks represent actions you take (running commands or modifying the project), in the diagram below, blocks represent the different storage locations that a given change can exist in.
+These locations include the remote, the cache, the staging area, and the workspace.
+Changes made in the workspace are unsaved. Changes in the staging area are ready to save. Changes in the cache are saved locally. Changes in the remote are saved to the cloud.
+Commands that move a changeset between storage locations are shown with arrows.
+
+![Grid-aligned flowchart showing the remote, cache, staged, and workspace storage locations for Git, DVC, and Docker, and the commands to transition file changes between locations using both the native systems and Calkit](img/version_control_command_flowchart.svg "Version Control Commands")
+
+Calkit commands combine the version control operations across platforms and should be sufficient for everyday use, but occasionally scenarios arise where the individual platform commands become necessary.
+One example is the use of `calkit dvc commit <stagename>` to manually force a stale stage to be treated as non-stale, i.e. after adding a comment or other non-functional change to the source code.
+See the [DVC docs](https://doc.dvc.org/command-reference/commit) for further detail.

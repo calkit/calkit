@@ -404,7 +404,6 @@ one it has once it's pushed, so pushing it leaves the lock alone.
     store is in use, the containerd one as a driver type of
     `io.containerd.snapshotter.v1`.
 
-    <!-- needs human review -->
     In GitHub Actions, the `calkit/calkit/actions/run` action switches
     Linux runners to the containerd image store when the project has Docker
     environments.

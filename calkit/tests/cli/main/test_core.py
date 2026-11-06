@@ -1562,32 +1562,6 @@ def test_run_ignore_errors(tmp_dir):
         os.remove("out.txt")
     subprocess.check_call(["calkit", "run", "--ignore-errors"])
     assert os.path.exists("out.txt")
-    # A script stage that fails and reads data outside the project says so,
-    # since that's likely why and the error won't, with its script found in
-    # its working directory
-    ck_info = calkit.load_calkit_info()
-    ck_info["pipeline"] = {
-        "stages": {
-            "wake": {
-                "kind": "python-script",
-                "environment": "_system",
-                "wdir": "analysis",
-                "script_path": "wake.py",
-            }
-        }
-    }
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
-    os.makedirs("analysis")
-    with open("analysis/wake.py", "w") as f:
-        f.write('open("/nonexistent-calkit-data/runs.csv")\n')
-    result = subprocess.run(
-        ["calkit", "run", "wake"], capture_output=True, text=True
-    )
-    assert result.returncode != 0
-    assert "reads /nonexistent-calkit-data/runs.csv, which is outside" in (
-        result.stdout + result.stderr
-    )
 
 
 def test_run_downstream(tmp_dir):

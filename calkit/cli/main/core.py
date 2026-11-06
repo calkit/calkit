@@ -4052,39 +4052,6 @@ def run(
         except Exception as e:
             warn(f"Failed to re-ignore pipeline outputs: {e}")
         warn_app_control(output=log_content)
-        # Data only on the computer a script was written on is a likely
-        # cause, and one the error itself won't mention
-        from calkit.detect import (
-            detect_jupyter_notebook_io,
-            detect_python_script_io,
-        )
-
-        for stage_name, info in stage_run_info.items():
-            stage = run_stages.get(stage_name.split("@")[0])
-            if info.get("status") != "failed" or not isinstance(stage, dict):
-                continue
-            # Its paths are relative to its working directory
-            stage_wdir = stage.get("wdir") or ""
-            if stage.get("kind") == "python-script":
-                io = detect_python_script_io(
-                    os.path.join(stage_wdir, stage.get("script_path", "")),
-                    wdir=stage_wdir or None,
-                )
-            elif stage.get("kind") == "jupyter-notebook":
-                io = detect_jupyter_notebook_io(
-                    os.path.join(stage_wdir, stage.get("notebook_path", "")),
-                    wdir=stage_wdir or None,
-                )
-            else:
-                continue
-            outside = io.get("external_inputs") or []
-            if outside:
-                warn(
-                    f"Stage '{stage_name}' reads {', '.join(outside)}, which "
-                    "is outside the project, so it may have failed because "
-                    "that isn't on this machine; add the data to the project "
-                    "and read it from there"
-                )
         raise_error("Pipeline failed")
     elif skipped_stale:
         for addressing, reason in skipped_stale.items():

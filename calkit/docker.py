@@ -480,6 +480,11 @@ def infer_xr_docker_environment(
 LOCK_INSPECT_KEYS = ["RepoDigests", "Architecture", "Os", "RootFS"]
 # The registry used when an image reference has no registry component
 DEFAULT_REGISTRY = "docker.io"
+# Where Docker explains its containerd image store, which gives a build the
+# digest it will have once pushed
+CONTAINERD_STORE_DOCS_URL = (
+    "https://docs.docker.com/engine/storage/containerd/"
+)
 
 
 def inspect_image(ref: str) -> dict | None:

@@ -2100,6 +2100,7 @@ def push(
                 "No Docker environments are set up to be pushed; set "
                 "'registry' on one built from a Dockerfile to publish it"
             )
+        failed = []
         for env_name, info in pushable.items():
             remote_ref = info["remote_ref"]
             # Ask the registry rather than trusting the image's own
@@ -2113,6 +2114,7 @@ def push(
             typer.echo(f"Pushing image for '{env_name}' to {remote_ref}")
             if not calkit.docker.tag_image(info["image"], remote_ref):
                 warn(f"Failed to tag image as {remote_ref}")
+                failed.append(env_name)
                 continue
             success, push_output = calkit.docker.push_image_with_login(
                 remote_ref, interactive=sys.stdin.isatty()
@@ -2128,6 +2130,20 @@ def push(
                     + textwrap.indent(push_output.strip()[-500:], "    ")
                     + (f"\n{hint}" if hint else "")
                 )
+                failed.append(env_name)
+        # A commit whose lock names an image nobody can pull sends everyone
+        # who checks it out to rebuild that image, so it stays here
+        if failed:
+            msg = "Failed to push the image for " + ", ".join(
+                f"'{name}'" for name in failed
+            )
+            if "git" in selected:
+                msg += (
+                    "; not pushing to Git, since its lock file names an "
+                    "image the registry doesn't have; fix the push, or skip "
+                    "it with --no-docker"
+                )
+            raise_error(msg)
     if "git" in selected:
         typer.echo("Pushing to Git remote")
         try:

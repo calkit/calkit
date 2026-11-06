@@ -574,14 +574,19 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
 
 
 def _push_dvc_cache_to_storage(
-    repo_dir: str, owner_name: str, project_name: str
+    repo_dir: str,
+    owner_name: str,
+    project_name: str,
+    skip: set[str] | None = None,
 ) -> int:
     """Copy a repo's local DVC cache into this project's object storage.
 
     Walking the cache rather than reading each .dvc file covers directory
     outputs and their .dir objects the same way single files are covered,
     which is the difference between a pointer that resolves and one that
-    dangles. Returns how many objects were written.
+    dangles. Objects in ``skip``, named like ``ab/cdef...``, e.g., those
+    cached before something was added, aren't copied. Returns how many
+    objects were written.
     """
     cache_dir = os.path.join(repo_dir, ".dvc", "cache", "files", "md5")
     if not os.path.isdir(cache_dir):
@@ -594,7 +599,7 @@ def _push_dvc_cache_to_storage(
             continue
         for rest in sorted(os.listdir(idx_dir)):
             src = os.path.join(idx_dir, rest)
-            if not os.path.isfile(src):
+            if not os.path.isfile(src) or f"{idx}/{rest}" in (skip or ()):
                 continue
             fpath = make_data_fpath(
                 owner_name=owner_name,

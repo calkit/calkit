@@ -958,17 +958,19 @@ def check_reproducibility(
     ):
         if not isinstance(stage, dict):
             continue
+        # Its paths are relative to its working directory
+        stage_wdir = stage.get("wdir") or ""
         if stage.get("kind") == "python-script" and stage.get("script_path"):
-            script = stage["script_path"]
+            script = posixpath.join(stage_wdir, stage["script_path"])
             io = detect_python_script_io(
-                script, wdir=stage.get("wdir"), project_dir=wdir
+                script, wdir=stage_wdir or None, project_dir=wdir
             )
         elif stage.get("kind") == "jupyter-notebook" and stage.get(
             "notebook_path"
         ):
-            script = stage["notebook_path"]
+            script = posixpath.join(stage_wdir, stage["notebook_path"])
             io = detect_jupyter_notebook_io(
-                script, wdir=stage.get("wdir"), project_dir=wdir
+                script, wdir=stage_wdir or None, project_dir=wdir
             )
         else:
             continue

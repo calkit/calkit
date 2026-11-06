@@ -384,5 +384,3 @@ if __name__ == "__main__":
         encoding="unicode",
         xml_declaration=True,
     )
-
-    print(f"Wrote {output_path}")

@@ -161,6 +161,27 @@ jobs:
         uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
         with:
           r-version: latest
+      # Like the run action, so checks get a build's digest without a push
+      - name: Switch Docker to the containerd image store
+        if: runner.os == 'Linux'
+        run: |
+          sudo mkdir -p /etc/docker
+          sudo python3 - /etc/docker/daemon.json <<'EOF'
+          import json
+          import os
+          import sys
+
+          path = sys.argv[1]
+          cfg = {}
+          if os.path.exists(path) and os.path.getsize(path):
+              with open(path) as f:
+                  cfg = json.load(f)
+          cfg.setdefault("features", {})["containerd-snapshotter"] = True
+          with open(path, "w") as f:
+              json.dump(cfg, f, indent=2)
+          EOF
+          sudo systemctl restart docker
+          docker info --format '{{json .DriverStatus}}'
       - name: Run tests
         run: |
           pixi --version

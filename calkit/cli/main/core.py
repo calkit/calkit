@@ -1832,15 +1832,6 @@ def save(
     if dry_run:
         typer.echo("Would commit" + ("" if no_push else " and push"))
         return
-    # Images go first, since pushing one can give it the digest its lock
-    # file needs, and that belongs in this commit
-    failed_images: list[str] = []
-    if not no_push:
-        failed_images, updated_locks = _push_docker_images()
-        if updated_locks:
-            calkit.git.get_repo().git.add(updated_locks)
-            if paths is not None:
-                paths = list(paths) + updated_locks
     any_dvc = commit(
         paths=paths,
         all_changed=True if paths is None else False,
@@ -1853,19 +1844,10 @@ def save(
             typer.echo("Not pushing to DVC since no DVC files were staged")
         push(
             no_dvc=not any_dvc,
-            no_git=bool(failed_images),
-            no_docker=True,
             git_args=git_push_args,
             dvc_args=dvc_push_args,
             no_recursive=no_recursive,
         )
-        if failed_images:
-            raise_error(
-                "Failed to push the image for "
-                + ", ".join(f"'{name}'" for name in failed_images)
-                + "; committed but not pushed to Git, since its lock file "
-                "names an image the registry doesn't have"
-            )
     if sync_overleaf:
         from calkit.cli.overleaf import sync as overleaf_sync
 
@@ -2094,14 +2076,61 @@ def push(
         else:
             warn("No DVC remotes configured; skipping DVC push")
     if "docker" in selected:
-        failed, updated_locks = _push_docker_images(
-            asked_for_docker="docker" in (targets or [])
-        )
-        for lock_fpath in updated_locks:
-            warn(
-                f"Commit {lock_fpath}, which now records the pushed image's "
-                "digest, so others pull the image rather than rebuild it"
+        # Everything that can be settled locally is settled before the
+        # network: a project with no image to publish must not reach a
+        # registry at all, since that means a round-trip, and credentials
+        # asked for or replaced, on behalf of a push that was never on
+        images = calkit.docker.get_pushable_images()
+        asked_for_docker = "docker" in (targets or [])
+        pushable = {}
+        for env_name, info in images.items():
+            identity = calkit.docker.inspect_image_for_lock(info["image"])
+            if identity is None:
+                # Not an error: an environment whose image was never built
+                # here is one this machine has nothing to publish for
+                if asked_for_docker:
+                    warn(
+                        "No local image for Docker environment "
+                        f"'{env_name}' to push; run the pipeline first"
+                    )
+                continue
+            pushable[env_name] = dict(info, identity=identity)
+        if not images and asked_for_docker:
+            typer.echo(
+                "No Docker environments are set up to be pushed; set "
+                "'registry' on one built from a Dockerfile to publish it"
             )
+        failed = []
+        for env_name, info in pushable.items():
+            remote_ref = info["remote_ref"]
+            # Ask the registry rather than trusting the image's own
+            # digests: tagging an image for a registry gives it one whether
+            # or not anything was ever pushed there
+            if calkit.docker.registry_has_image(remote_ref, info["identity"]):
+                typer.echo(
+                    f"Image for '{env_name}' is already in the registry"
+                )
+                continue
+            typer.echo(f"Pushing image for '{env_name}' to {remote_ref}")
+            if not calkit.docker.tag_image(info["image"], remote_ref):
+                warn(f"Failed to tag image as {remote_ref}")
+                failed.append(env_name)
+                continue
+            success, push_output = calkit.docker.push_image_with_login(
+                remote_ref, interactive=sys.stdin.isatty()
+            )
+            if not success:
+                # Leaving the tag would fake a registry digest on the image
+                calkit.docker.untag_image(remote_ref)
+                hint = calkit.docker.registry_login_hint(
+                    remote_ref, push_output
+                )
+                warn(
+                    f"Failed to push image to {remote_ref}\n"
+                    + textwrap.indent(push_output.strip()[-500:], "    ")
+                    + (f"\n{hint}" if hint else "")
+                )
+                failed.append(env_name)
         # A commit whose lock names an image nobody can pull sends everyone
         # who checks it out to rebuild that image, so it stays here
         if failed:
@@ -2133,78 +2162,6 @@ def push(
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
     _tell_hub_we_pushed(sorted(selected), git_args)
-
-
-def _push_docker_images(
-    asked_for_docker: bool = False,
-) -> tuple[list[str], list[str]]:
-    """Push the project's Docker images.
-
-    Returns the environments whose image failed to push and the lock files
-    updated with a digest a push gave an image, which ``calkit save`` pushes
-    images before committing to include.
-    """
-    # Everything that can be settled locally is settled before the
-    # network: a project with no image to publish must not reach a
-    # registry at all, since that means a round-trip, and credentials
-    # asked for or replaced, on behalf of a push that was never on
-    images = calkit.docker.get_pushable_images()
-    pushable = {}
-    for env_name, info in images.items():
-        identity = calkit.docker.inspect_image_for_lock(info["image"])
-        if identity is None:
-            # Not an error: an environment whose image was never built
-            # here is one this machine has nothing to publish for
-            if asked_for_docker:
-                warn(
-                    "No local image for Docker environment "
-                    f"'{env_name}' to push; run the pipeline first"
-                )
-            continue
-        pushable[env_name] = dict(info, identity=identity)
-    if not images and asked_for_docker:
-        typer.echo(
-            "No Docker environments are set up to be pushed; set "
-            "'registry' on one built from a Dockerfile to publish it"
-        )
-    failed: list[str] = []
-    updated_locks: list[str] = []
-    for env_name, info in pushable.items():
-        remote_ref = info["remote_ref"]
-        # Ask the registry rather than trusting the image's own
-        # digests: tagging an image for a registry gives it one whether
-        # or not anything was ever pushed there
-        if calkit.docker.registry_has_image(remote_ref, info["identity"]):
-            typer.echo(f"Image for '{env_name}' is already in the registry")
-            continue
-        typer.echo(f"Pushing image for '{env_name}' to {remote_ref}")
-        if not calkit.docker.tag_image(info["image"], remote_ref):
-            warn(f"Failed to tag image as {remote_ref}")
-            failed.append(env_name)
-            continue
-        success, push_output = calkit.docker.push_image_with_login(
-            remote_ref, interactive=sys.stdin.isatty()
-        )
-        if not success:
-            # Leaving the tag would fake a registry digest on the image
-            calkit.docker.untag_image(remote_ref)
-            hint = calkit.docker.registry_login_hint(remote_ref, push_output)
-            warn(
-                f"Failed to push image to {remote_ref}\n"
-                + textwrap.indent(push_output.strip()[-500:], "    ")
-                + (f"\n{hint}" if hint else "")
-            )
-            failed.append(env_name)
-            continue
-        lock_fpath = calkit.environments.get_env_lock_fpath(
-            info["env"], env_name
-        )
-        if lock_fpath is not None and calkit.docker.record_pushed_digest(
-            lock_fpath, info["image"], remote_ref, push_output
-        ):
-            typer.echo(f"Recorded the pushed image's digest in {lock_fpath}")
-            updated_locks.append(lock_fpath)
-    return failed, updated_locks
 
 
 def _offer_to_connect() -> bool:

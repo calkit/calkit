@@ -594,19 +594,17 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         arch = calkit.environments.get_docker_arch()
         lock_fpath = f".calkit/env-locks/main/{arch}.json"
         # Checking builds the image and records the digest it will have in
-        # the registry. Where the image store keeps a manifest that digest
-        # is the build's own, and publishing is left to 'calkit push';
-        # where it doesn't, only a push can say what the digest is, so
-        # checking sends the image rather than leave the lock naming
-        # nothing to pull
-        digests_at_build = engine_records_build_digests()
+        # the registry, which is the build's own where the image store keeps
+        # a manifest. Publishing is left to 'calkit push' either way.
         out = subprocess.check_output(
             check_argv, text=True, stderr=subprocess.STDOUT
         )
-        if digests_at_build:
-            assert "Pushing image" not in out
-        else:
-            assert "Pushing image" in out
+        assert "Pushing image" not in out
+        if not engine_records_build_digests():
+            # Only a push could say what the digest is here, so the lock
+            # names nothing to pull, and checking says how to fix that
+            assert "containerd image store" in out
+            return
         with open(lock_fpath, "rb") as f:
             built_lock_bytes = f.read()
         built_lock = json.loads(built_lock_bytes)
@@ -618,12 +616,7 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         out = subprocess.check_output(
             ["calkit", "push", "--no-git", "--no-dvc"], text=True
         )
-        if digests_at_build:
-            assert "Pushing image for 'main'" in out
-        else:
-            # Checking already sent it, and pushing asks the registry rather
-            # than sending it a second time
-            assert "already in the registry" in out
+        assert "Pushing image for 'main'" in out
         assert "exporting layers" not in out
         with open(lock_fpath) as f:
             lock = json.load(f)
@@ -784,40 +777,6 @@ def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
 def test_push_sends_docker_images_to_their_registry(tmp_dir):
-    lock_fpath = (
-        f".calkit/env-locks/main/{calkit.environments.get_docker_arch()}.json"
-    )
-
-    def write_digestless_lock() -> None:
-        # What a check leaves on an engine that only assigns digests on a
-        # push, when it couldn't push
-        identity = calkit.docker.inspect_image_for_lock(image)
-        assert identity is not None
-        lock = calkit.docker.build_lock(
-            identity=dict(identity, RepoDigests=[]),
-            dockerfile_md5=calkit.get_md5("Dockerfile"),
-            deps_md5s={},
-            run_config={},
-        )
-        os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
-        with open(lock_fpath, "w") as f:
-            json.dump(lock, f, indent=4)
-
-    def remote_digest() -> str:
-        out = subprocess.check_output(
-            [
-                "docker",
-                "buildx",
-                "imagetools",
-                "inspect",
-                f"{registry}/proj/{image}:latest",
-                "--format",
-                "{{json .Manifest}}",
-            ],
-            text=True,
-        )
-        return str(json.loads(out)["digest"])
-
     container = "calkit-test-registry-push"
     registry = "localhost:5679"
     subprocess.run(["docker", "rm", "-f", container], capture_output=True)
@@ -884,41 +843,13 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
         )
         assert result.returncode != 0
         assert "Invalid target to push" in result.stderr
-        # Saving pushes the image before committing, so the digest the push
-        # gives it goes out in the same commit as everything else
+        # A Git remote to push to, with everything so far already there
         subprocess.check_call(["git", "init", "--bare", "-q", "remote.git"])
         subprocess.check_call(["git", "remote", "add", "origin", "remote.git"])
         subprocess.check_call(["git", "config", "push.default", "current"])
         with open(".gitignore", "a") as f:
             f.write("remote.git/\n")
-        with open("Dockerfile", "a") as f:
-            f.write("RUN echo saved > /saved.txt\n")
-        subprocess.check_call(["docker", "build", "-t", image, "."])
-        write_digestless_lock()
-        out = subprocess.check_output(
-            ["calkit", "save", "-a", "-m", "Save"], text=True
-        )
-        assert "Recorded the pushed image's digest" in out
-        committed = json.loads(
-            git.Repo().git.show(
-                f"HEAD:{lock_fpath}", strip_newline_in_stdout=False
-            )
-        )
-        assert committed["RepoDigests"] == [remote_digest()]
-        # A plain push can only say the lock needs committing
-        with open("Dockerfile", "a") as f:
-            f.write("RUN echo pushed-again > /again.txt\n")
-        subprocess.check_call(["docker", "build", "-t", image, "."])
-        write_digestless_lock()
-        result = subprocess.run(
-            ["calkit", "push", "--no-git", "--no-dvc"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert f"Commit {lock_fpath}" in result.stdout + result.stderr
-        with open(lock_fpath) as f:
-            assert json.load(f)["RepoDigests"] == [remote_digest()]
+        subprocess.check_call(["calkit", "save", "-a", "-m", "Save"])
         # An image that fails to push holds back the Git push, since the
         # commit's lock would name an image nobody can pull
         ck_info = calkit.load_calkit_info()
@@ -931,7 +862,7 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
         assert result.returncode != 0
         assert "not pushing to Git" in result.stderr
         assert "Pushing to Git remote" not in result.stdout
-        # Saving still commits, but doesn't push to Git either
+        # Saving still commits, since that happens before pushing
         with open("notes.txt", "w") as f:
             f.write("hi\n")
         result = subprocess.run(
@@ -940,7 +871,7 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
             text=True,
         )
         assert result.returncode != 0
-        assert "committed but not pushed to Git" in result.stderr
+        assert "not pushing to Git" in result.stderr
         assert git.Repo().head.commit.message.strip() == "Notes"
         assert "Pushing to Git remote" not in result.stdout
     finally:
@@ -973,18 +904,17 @@ def test_check_docker_env_does_not_push(tmp_dir):
         )
         with open("lock.json") as f:
             lock = json.load(f)
-        if not engine_records_build_digests():
-            # This image store gives a build no digest, so the only way to
-            # learn one is to push, and the registry isn't there. The lock
-            # still describes the image; it just can't say where to pull it
-            # from, which is reported rather than passed off as locked
-            assert "Failed to push image" in out
-            assert lock["RepoDigests"] == []
-            return
         # Publishing an image is 'calkit push', not something that happens
         # on the way to running a stage, so an unreachable registry is not
         # even contacted here
         assert "Pushing image" not in out
+        if not engine_records_build_digests():
+            # This image store gives a build no digest until it's pushed. The
+            # lock still describes the image; it just can't say where to pull
+            # it from, which is reported rather than passed off as locked
+            assert "containerd image store" in out
+            assert lock["RepoDigests"] == []
+            return
         # A manifest is content-addressed, so the digest this build has is
         # the one it will have once pushed. Recording it without contacting
         # the registry is what lets a clone pull rather than rebuild as soon

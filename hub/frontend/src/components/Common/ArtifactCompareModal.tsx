@@ -981,11 +981,12 @@ function StageFromScriptForm({
                       hidden
                       onChange={(e) => {
                         const list = [...(e.target.files ?? [])]
-                        // One file is the data itself when where it goes
-                        // names a file
+                        // One file is the data itself when it's the one
+                        // the script names, or else one in that folder
                         const single =
                           list.length === 1 &&
-                          /\.[^/]+$/.test(destFor(external))
+                          list[0].name ===
+                            external.split(/[\\/]/).filter(Boolean).pop()
                         if (list.length) {
                           choose(
                             external,

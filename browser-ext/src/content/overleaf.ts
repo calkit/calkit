@@ -326,8 +326,9 @@ function renderAddScript(
     pickFolder.addEventListener("click", () => folder.click());
     files.addEventListener("change", () => {
       const list = [...(files.files ?? [])];
-      // One file is the data itself when where it goes names a file
-      const single = list.length === 1 && /\.[^/]+$/.test(dest.value.trim());
+      // One file is the data itself when it's the one the script names, or
+      // else one in that folder
+      const single = list.length === 1 && list[0].name === name;
       if (list.length) {
         void use(list.map((file) => ({ path: single ? "" : file.name, file })));
       }

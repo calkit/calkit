@@ -172,8 +172,8 @@ stages:
       size: 173888
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 066cec4c921c03770e190e49f1089eb4
-      size: 37000
+      md5: 8867d6f2f2723fef5cb528e3942b9adb
+      size: 37025
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: 53cbdd1fe8da4d6897b3b0856b749857
@@ -185,8 +185,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: a6b63aff2556cb6d3fe743105eb2adfe
-      size: 277313
+      md5: 3d5ffeb9b6f9d396c3e1d15d3e9185fa
+      size: 277494
   one-pager-font:
     cmd: calkit xenv -n tex --no-check -- sh 
       .calkit/stage-commands/one-pager-font.sh

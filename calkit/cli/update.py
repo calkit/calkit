@@ -906,10 +906,7 @@ def update_docker_env(
     ] = False,
 ) -> None:
     """Update a docker environment."""
-    from calkit.environments import (
-        get_all_docker_lock_fpaths,
-        get_env_lock_fpath,
-    )
+    from calkit.environments import docker as env_docker
 
     ck_info, env = _load_env(env_name)
     if env.get("kind") != "docker":
@@ -935,15 +932,10 @@ def update_docker_env(
     # Relocking throws away the existing lock files so the image is fetched or
     # rebuilt from the environment's spec, which is the only way to pick up an
     # image whose tag has been moved out from under a recorded digest
-    for lock_fpath in get_all_docker_lock_fpaths(env_name=env_name):
+    for lock_fpath in env_docker.get_lock_fpaths(env_name, as_posix=False):
         if os.path.isfile(lock_fpath):
             typer.echo(f"Removing lock file: {lock_fpath}")
             os.remove(lock_fpath)
-    legacy_lock_fpath = get_env_lock_fpath(
-        env=env, env_name=env_name, as_posix=False, legacy=True
-    )
-    if legacy_lock_fpath is not None and os.path.isfile(legacy_lock_fpath):
-        os.remove(legacy_lock_fpath)
     from calkit.cli.check import check_environment
 
     typer.echo(f"Relocking docker environment '{env_name}'")
@@ -1344,7 +1336,6 @@ def _relock_env(env_name: str, env: dict) -> None:
     from calkit.cli.check import check_environment
     from calkit.environments import (
         get_all_conda_lock_fpaths,
-        get_all_docker_lock_fpaths,
         get_all_venv_lock_fpaths,
         get_env_lock_fpath,
     )
@@ -1382,7 +1373,9 @@ def _relock_env(env_name: str, env: dict) -> None:
     # check falls back to any of them
     lock_fpaths = []
     if kind == "docker":
-        lock_fpaths = get_all_docker_lock_fpaths(env_name, as_posix=False)
+        from calkit.environments import docker as env_docker
+
+        lock_fpaths = env_docker.get_lock_fpaths(env_name, as_posix=False)
     elif kind == "conda":
         lock_fpaths = get_all_conda_lock_fpaths(env_name, as_posix=False)
     elif kind in ("venv", "uv-venv"):

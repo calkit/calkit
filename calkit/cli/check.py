@@ -495,7 +495,6 @@ def check_environment(
     """
     from calkit.environments import (
         get_all_conda_lock_fpaths,
-        get_all_docker_lock_fpaths,
         get_all_venv_lock_fpaths,
         get_default_venv_prefix,
         get_env_lock_fpath,
@@ -533,51 +532,9 @@ def check_environment(
         if removed and verbose:
             typer.echo(f"Removed {removed} to rebuild it")
     if env["kind"] == "docker":
-        lock_fpath = get_env_lock_fpath(
-            env=env, env_name=env_name, as_posix=False
-        )
-        legacy_lock_fpath = get_env_lock_fpath(
-            env=env, env_name=env_name, as_posix=False, legacy=True
-        )
-        # Alt lock paths include other architectures
-        alt_lock_fpaths = get_all_docker_lock_fpaths(
-            env_name=env_name, as_posix=False
-        )
-        image = calkit.docker.get_image_name(env, env_name)
-        if image is None:
-            if not env.get("path"):
-                raise_error(
-                    f"Environment '{env_name}' must define an image, since "
-                    "it has no Dockerfile to build one from"
-                )
-            raise_error(
-                f"Cannot work out what to call the image for environment "
-                f"'{env_name}': set 'image' on it, or set 'owner' and "
-                "'name' in calkit.yaml"
-            )
         from calkit.environments import docker as env_docker
 
-        env_docker.check_env(
-            tag=image,
-            fpath=env.get("path"),
-            lock_fpath=lock_fpath,
-            alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
-            alt_lock_fpaths=alt_lock_fpaths,
-            platform=env.get("platform"),
-            deps=calkit.environments.get_env_input_paths(env, env_name),
-            env_vars=env.get("env_vars", []),
-            ports=env.get("ports", []),
-            gpus=env.get("gpus"),
-            user=env.get("user"),
-            wdir=env.get("wdir"),
-            args=env.get("args", []),
-            build_platforms=env.get("build_platforms", []),
-            registry=env.get("registry"),
-            lock_archs=calkit.docker.get_lock_archs(env),
-            quiet=not verbose,
-            rebuild=rebuild,
-            env_name=env_name,
-        )
+        env_docker.check(env_name, env, rebuild=rebuild, verbose=verbose)
     elif env["kind"] == "conda":
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
@@ -1281,7 +1238,7 @@ def check_docker_env(
     """Check that Docker environment is up-to-date."""
     from calkit.environments import docker as env_docker
 
-    env_docker.check_env(
+    env_docker.check_image(
         tag=tag,
         fpath=fpath,
         lock_fpath=lock_fpath,
@@ -1710,7 +1667,7 @@ def check_matlab_env(
     )
     from calkit.environments import docker as env_docker
 
-    env_docker.check_env(
+    env_docker.check_image(
         tag=tag,
         fpath=dockerfile_fpath,
         lock_fpath=output_fpath,

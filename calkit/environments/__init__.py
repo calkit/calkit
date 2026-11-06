@@ -539,27 +539,6 @@ def get_docker_arch() -> str:
     return mach
 
 
-def get_all_docker_lock_fpaths(
-    env_name: str,
-    wdir: str | None = None,
-    as_posix: bool = True,
-) -> list[str]:
-    """Return docker environment lock file paths for every supported
-    architecture.
-
-    This intentionally excludes legacy (pre-arch) lock file locations;
-    legacy handling is performed separately.
-    """
-    env_lock_dir = get_env_lock_dir(wdir=wdir)
-    docker_dir = os.path.join(env_lock_dir, env_name)
-    fpaths = [
-        os.path.join(docker_dir, arch + ".json") for arch in DOCKER_ARCHS
-    ]
-    if as_posix:
-        fpaths = [Path(p).as_posix() for p in fpaths]
-    return fpaths
-
-
 def get_all_conda_lock_fpaths(
     env_name: str,
     wdir: str | None = None,

@@ -6,12 +6,15 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import subprocess
+import sys
+from pathlib import Path
 
 import calkit
 
 
-def check_env(
+def check_image(
     tag: str,
     fpath: str | None = None,
     lock_fpath: str | None = None,
@@ -32,7 +35,8 @@ def check_env(
     rebuild: bool = False,
     env_name: str | None = None,
 ) -> None:
-    """Check that a Docker environment is up-to-date.
+    """Check that an image matches its lock, getting or building it if
+    not, and lock it.
 
     ``env_name`` is the environment's name in calkit.yaml, if it has one,
     so errors can suggest commands that use it.
@@ -547,3 +551,197 @@ def check_env(
                     # A lock left behind for a platform this image no longer
                     # has would describe an image built from something else
                     os.remove(arch_lock_fpath)
+
+
+def get_image(env_name: str, env: dict) -> str:
+    """Name the image an environment runs in."""
+    from calkit import docker as ck_docker
+    from calkit.cli import raise_error
+
+    image = ck_docker.get_image_name(env, env_name)
+    if image is None:
+        if not env.get("path"):
+            raise_error(
+                f"Environment '{env_name}' must define an image, since "
+                "it has no Dockerfile to build one from"
+            )
+        raise_error(
+            f"Cannot work out what to call the image for environment "
+            f"'{env_name}': set 'image' on it, or set 'owner' and "
+            "'name' in calkit.yaml"
+        )
+    return image
+
+
+def get_lock_fpaths(
+    env_name: str, wdir: str | None = None, as_posix: bool = True
+) -> list[str]:
+    """List every lock an environment can have: one per architecture, then
+    the legacy one from before locks were per architecture.
+    """
+    from calkit.environments import DOCKER_ARCHS, get_env_lock_dir
+
+    env_lock_dir = get_env_lock_dir(wdir=wdir)
+    fpaths = [
+        os.path.join(env_lock_dir, env_name, arch + ".json")
+        for arch in DOCKER_ARCHS
+    ] + [os.path.join(env_lock_dir, env_name + ".json")]
+    if as_posix:
+        fpaths = [Path(p).as_posix() for p in fpaths]
+    return fpaths
+
+
+def check(
+    env_name: str, env: dict, rebuild: bool = False, verbose: bool = False
+) -> None:
+    """Check an environment defined in calkit.yaml, getting or building its
+    image and locking it.
+    """
+    from calkit import docker as ck_docker
+    from calkit.environments import get_env_input_paths, get_env_lock_fpath
+
+    *alt_lock_fpaths, legacy_lock_fpath = get_lock_fpaths(
+        env_name, as_posix=False
+    )
+    check_image(
+        tag=get_image(env_name, env),
+        fpath=env.get("path"),
+        lock_fpath=get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False
+        ),
+        alt_lock_fpaths_delete=[legacy_lock_fpath],
+        alt_lock_fpaths=alt_lock_fpaths,
+        platform=env.get("platform"),
+        deps=get_env_input_paths(env, env_name),
+        env_vars=env.get("env_vars", []),
+        ports=env.get("ports", []),
+        gpus=env.get("gpus"),
+        user=env.get("user"),
+        wdir=env.get("wdir"),
+        args=env.get("args", []),
+        build_platforms=env.get("build_platforms", []),
+        registry=env.get("registry"),
+        lock_archs=ck_docker.get_lock_archs(env),
+        quiet=not verbose,
+        rebuild=rebuild,
+        env_name=env_name,
+    )
+
+
+def run(
+    env_name: str,
+    env: dict,
+    cmd: list[str],
+    wdir: str | None = None,
+    env_vars: dict[str, str] | None = None,
+    verbose: bool = False,
+) -> None:
+    """Run a command in an environment's container, with the project
+    mounted at its working directory.
+
+    ``wdir`` is relative to the project, and ``env_vars`` are passed into
+    the container on top of the environment's and project's own.
+    """
+    import typer
+
+    from calkit import docker as ck_docker
+    from calkit.cli import raise_error, warn
+    from calkit.cli.main.core import _to_shell_cmd
+
+    command_mode = env.get("command_mode", "shell")
+    if command_mode not in ["shell", "entrypoint"]:
+        raise_error(
+            "Invalid Docker environment 'command_mode': "
+            f"{command_mode}; Use 'shell' or 'entrypoint'"
+        )
+    docker_wdir = env.get("wdir", "/work")
+    docker_wdir_mount = docker_wdir
+    if wdir is not None:
+        docker_wdir = posixpath.join(docker_wdir, wdir)
+    shell = env.get("shell", "sh")
+    platform = env.get("platform")
+    docker_cmd = [
+        "docker",
+        "run",
+    ]
+    if platform:
+        docker_cmd += ["--platform", platform]
+    container_env_vars = dict(env.get("env_vars", {}))
+    if "env-vars" in env:
+        warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
+        container_env_vars.update(env["env-vars"])
+    # Add project-level env vars (non-secret)
+    container_env_vars.update(calkit.load_calkit_info().get("env_vars", {}))
+    # Also add any project-level environmental variable dependencies
+    project_env_vars = calkit.get_env_var_dep_names()
+    if project_env_vars:
+        container_env_vars.update({k: f"${k}" for k in project_env_vars})
+    if container_env_vars:
+        for key, value in container_env_vars.items():
+            if isinstance(value, str):
+                value = os.path.expandvars(value)
+            docker_cmd += ["-e", f"{key}={value}"]
+    # A container inherits nothing from here, so what --env-var asked
+    # for has to be handed to it
+    for key, value in (env_vars or {}).items():
+        docker_cmd += ["-e", f"{key}={value}"]
+    if (gpus := env.get("gpus")) is not None:
+        docker_cmd += ["--gpus", gpus]
+    if ports := env.get("ports"):
+        for port in ports:
+            docker_cmd += ["-p", port]
+    docker_user = env.get("user")
+    if docker_user is None:
+        try:
+            uid = os.getuid()
+            gid = os.getgid()
+            docker_user = f"{uid}:{gid}"
+        except AttributeError:
+            # We're probably on Windows, so there is no UID to map
+            pass
+    if docker_user is not None:
+        docker_cmd += ["--user", docker_user]
+    docker_cmd += env.get("args", [])
+    docker_cmd += [
+        # A pipeline stage is nobody's terminal session: asking for a
+        # TTY there puts the user's terminal into raw mode for the
+        # duration, and the container's own line discipline stops
+        # translating newlines, so everything the stage prints
+        # staircases down the screen. DVC sets DVC_STAGE for the
+        # commands it runs, which is how a stage is told apart from
+        # someone running 'calkit xenv' themselves
+        "-it" if sys.stdin.isatty() and not os.getenv("DVC_STAGE") else "-i",
+        "--rm",
+        "-w",
+        docker_wdir,
+        "-v",
+        f"{os.getcwd()}:{docker_wdir_mount}",
+        get_image(env_name, env),
+    ]
+    if command_mode == "shell":
+        shell_cmd = _to_shell_cmd(cmd)
+        docker_cmd += [shell, "-c", shell_cmd]
+    else:
+        if not cmd:
+            raise_error(
+                "No command provided for Docker environment in "
+                "'entrypoint' command mode"
+            )
+        docker_cmd += cmd
+    if verbose:
+        typer.echo(f"Running command: {docker_cmd}")
+    try:
+        subprocess.check_call(docker_cmd, cwd=wdir)
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        # Docker exits 125 when it couldn't run the container at all,
+        # which is most often because Docker itself isn't running
+        if isinstance(e, FileNotFoundError) or e.returncode == 125:
+            try:
+                ck_docker.ensure_ready()
+            except ck_docker.DockerNotReadyError as ready_error:
+                raise_error(str(ready_error))
+        returncode = getattr(e, "returncode", None)
+        raise_error(
+            "Failed to run in Docker environment: command exited with "
+            f"status {returncode}"
+        )

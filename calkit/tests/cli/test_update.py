@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 import calkit
 import calkit.docker
+import calkit.environments.docker
 import calkit.resources
 from calkit.cli.update import update_app
 
@@ -559,7 +560,7 @@ def test_update_latex_image(tmp_dir, monkeypatch):
         },
     }
     calkit.save_calkit_info(ck_info)
-    lock_fpath = calkit.environments.get_all_docker_lock_fpaths("tex")[0]
+    lock_fpath = calkit.environments.docker.get_lock_fpaths("tex")[0]
     os.makedirs(os.path.dirname(lock_fpath))
     with open(lock_fpath, "w") as f:
         json.dump({"RepoDigests": ["sha256:old"]}, f)

@@ -1,9 +1,20 @@
 # Install Calkit with uv (installing the latter if it isn't yet)
+#
+# Options, passed by running it as a script block, e.g.,
+# & ([scriptblock]::Create((irm install-ps1.calkit.org))) --link
+#   --link                 Also link this machine to the hub, which connects
+#                          its workspaces to the hub
+#                          (or set CALKIT_INSTALL_LINK=1, which also works
+#                          with `irm ... | iex`)
+#   --no-shell-completion  Skip installing shell completion
 
 # Every statement below is kept on a single line so the script still does the
 # right thing when a shell feeds it to `iex` one line at a time, which is what
 # happens if the quoting around `irm ... | iex` is lost and the outer shell,
 # rather than the inner one, ends up handling the pipe (see issue #1569)
+
+$InstallLink = ($args -contains "--link") -or ($env:CALKIT_INSTALL_LINK -eq "1")
+$InstallCompletion = -not ($args -contains "--no-shell-completion")
 
 # Check if uv is installed
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Write-Host "Installing uv"; powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex" } else { Write-Host "uv is already installed" }
@@ -25,13 +36,15 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to install Calkit; please check your uv
 # this script's process-wide ByPass (issue #1835), so it's only set here, to
 # RemoteSigned, when the user's own setting would keep the profile from running.
 # Scopes are listed in order of precedence, Process aside.
-$policy = "Restricted"; $byGroupPolicy = $false; foreach ($p in Get-ExecutionPolicy -List) { if ("$($p.Scope)" -ne "Process" -and "$($p.ExecutionPolicy)" -ne "Undefined") { $policy = "$($p.ExecutionPolicy)"; $byGroupPolicy = "$($p.Scope)" -like "*Policy"; break } }
+if ($InstallCompletion) { $policy = "Restricted"; $byGroupPolicy = $false; foreach ($p in Get-ExecutionPolicy -List) { if ("$($p.Scope)" -ne "Process" -and "$($p.ExecutionPolicy)" -ne "Undefined") { $policy = "$($p.ExecutionPolicy)"; $byGroupPolicy = "$($p.Scope)" -like "*Policy"; break } } }
 
 # Setting it succeeds even when the error says this process's ByPass overrides it
-if ($policy -eq "Restricted" -and -not $byGroupPolicy) { Write-Host "Setting your execution policy to RemoteSigned so your PowerShell profile can load shell completion"; try { Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction Stop; $policy = "RemoteSigned" } catch { if ("$($_.FullyQualifiedErrorId)" -like "ExecutionPolicyOverride*") { $policy = "RemoteSigned" } else { Write-Warning "Failed to set execution policy: $_" } } }
+if ($InstallCompletion -and $policy -eq "Restricted" -and -not $byGroupPolicy) { Write-Host "Setting your execution policy to RemoteSigned so your PowerShell profile can load shell completion"; try { Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction Stop; $policy = "RemoteSigned" } catch { if ("$($_.FullyQualifiedErrorId)" -like "ExecutionPolicyOverride*") { $policy = "RemoteSigned" } else { Write-Warning "Failed to set execution policy: $_" } } }
 
 # Per command name, so the `ck` alias gets it too, and only once, so
 # installing again doesn't add it again
-if ($policy -notin @("RemoteSigned", "Unrestricted", "Bypass")) { Write-Warning "Skipping shell completion, since your execution policy ($policy) won't let your PowerShell profile run" } else { Write-Host "Installing shell completion"; foreach ($cmd in @("calkit", "ck")) { $script = (& $cmd --show-completion powershell) -join "`n"; if ($LASTEXITCODE -ne 0 -or -not $script) { Write-Warning "Failed to get shell completion for '$cmd'" } elseif ((Test-Path $PROFILE) -and (Select-String -Path $PROFILE -SimpleMatch -Pattern "-CommandName $cmd -ScriptBlock" -Quiet)) { Write-Host "Shell completion for '$cmd' is already in $PROFILE" } else { New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null; Add-Content -Path $PROFILE -Value $script; Write-Host "Installed shell completion for '$cmd' in $PROFILE" } } }
+if ($InstallCompletion) { if ($policy -notin @("RemoteSigned", "Unrestricted", "Bypass")) { Write-Warning "Skipping shell completion, since your execution policy ($policy) won't let your PowerShell profile run" } else { Write-Host "Installing shell completion"; foreach ($cmd in @("calkit", "ck")) { $script = (& $cmd --show-completion powershell) -join "`n"; if ($LASTEXITCODE -ne 0 -or -not $script) { Write-Warning "Failed to get shell completion for '$cmd'" } elseif ((Test-Path $PROFILE) -and (Select-String -Path $PROFILE -SimpleMatch -Pattern "-CommandName $cmd -ScriptBlock" -Quiet)) { Write-Host "Shell completion for '$cmd' is already in $PROFILE" } else { New-Item -ItemType Directory -Force -Path (Split-Path $PROFILE) | Out-Null; Add-Content -Path $PROFILE -Value $script; Write-Host "Installed shell completion for '$cmd' in $PROFILE" } } } }
+
+if ($InstallLink) { Write-Host "Linking this machine to the hub"; & calkit hub link install; if ($LASTEXITCODE -ne 0) { throw "Failed to link this machine; run 'calkit hub link install' to try again" } }
 
 Write-Host "Success! Restart your shell to pick up Calkit on your PATH."

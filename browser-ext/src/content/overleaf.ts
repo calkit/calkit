@@ -165,7 +165,9 @@ function valueText(value: unknown): string {
  * The hub reads the script the way `calkit xr --dry-run` does, without
  * running it, so the user sees the environment, inputs, and outputs before
  * anything is committed. Overleaf can't run it, so once it's saved the
- * panel says how to, on the user's own computer.
+ * panel says how to, on the user's own computer. Something upstream, e.g.,
+ * data a figure is made from, isn't in the document, so the stage has to
+ * write it where it is.
  */
 function renderAddScript(
   container: HTMLElement,
@@ -173,6 +175,7 @@ function renderAddScript(
   citation: Citation,
   shows: string,
   kind: "script" | "notebook",
+  upstream: boolean,
 ): HTMLElement {
   const owner = link.project_owner_name;
   const project = link.project_name;
@@ -425,14 +428,16 @@ function renderAddScript(
     }
     // Which output this is, when the script writes several or names it
     // differently from the paper
-    const choices = detected.outputs.map((output) => {
-      const radio = el("input", {
-        type: "radio",
-        attrs: { name: "ck-produces", value: output },
+    const choices = detected.outputs
+      .filter((output) => !upstream || output === shows)
+      .map((output) => {
+        const radio = el("input", {
+          type: "radio",
+          attrs: { name: "ck-produces", value: output },
+        });
+        radio.checked = upstream || output === detected.produces;
+        return { output, radio };
       });
-      radio.checked = output === detected.produces;
-      return { output, radio };
-    });
     const citeNote = el("div", { class: "dim small" });
     const chosen = () => choices.find((c) => c.radio.checked)?.output;
     const updateNote = () => {
@@ -442,7 +447,8 @@ function renderAddScript(
           ? `The paper will show it from there, with \\ckfigure{${output}}.`
           : "";
     };
-    if (choices.length) {
+    // Upstream, there's nothing to choose
+    if (choices.length && !upstream) {
       review.append(
         el("div", { class: "small dim", text: `Which output is ${shows}?` }),
         ...choices.map(({ output, radio }) => {
@@ -455,7 +461,7 @@ function renderAddScript(
         citeNote,
       );
       updateNote();
-    } else {
+    } else if (!choices.length) {
       review.append(
         el("div", {
           class: "small dim",
@@ -759,6 +765,7 @@ function renderDefineOrigin(
   link: OverleafLinkPublic,
   citation: Citation,
   target: string,
+  upstream: boolean,
 ): HTMLElement {
   const open = (form: (body: HTMLElement) => HTMLElement) =>
     showInPanel((body) => body.append(form(body)));
@@ -766,13 +773,15 @@ function renderDefineOrigin(
     [
       "Script",
       () =>
-        open((body) => renderAddScript(body, link, citation, target, "script")),
+        open((body) =>
+          renderAddScript(body, link, citation, target, "script", upstream),
+        ),
     ],
     [
       "Notebook",
       () =>
         open((body) =>
-          renderAddScript(body, link, citation, target, "notebook"),
+          renderAddScript(body, link, citation, target, "notebook", upstream),
         ),
     ],
     [
@@ -1348,7 +1357,12 @@ function renderProvenance(
   for (const problem of problems) {
     container.append(problemLine(problem));
     if (problem.kind === "origin" && link.current_user_access !== "read") {
-      container.append(renderDefineOrigin(link, citation, problem.path));
+      // E.g., data it's made from, rather than what the document shows
+      const upstream =
+        problem.path !== path && problem.path !== provenance.copied_from;
+      container.append(
+        renderDefineOrigin(link, citation, problem.path, upstream),
+      );
     }
   }
   if (provenance.copied_from) {

@@ -45,7 +45,6 @@ from calkit.cli import (
     warn_app_control,
 )
 from calkit.cli.check import (
-    _check_docker_env,
     check_app,
     check_conda_env,
     check_environment,
@@ -4502,7 +4501,9 @@ def run_in_env(
                 f"{command_mode}; Use 'shell' or 'entrypoint'"
             )
         if not no_check:
-            _check_docker_env(
+            from calkit.environments import docker as env_docker
+
+            env_docker.check_env(
                 tag=image_name,
                 fpath=env.get("path"),
                 lock_fpath=get_env_lock_fpath(

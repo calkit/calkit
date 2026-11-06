@@ -4062,13 +4062,17 @@ def run(
             stage = run_stages.get(stage_name.split("@")[0])
             if info.get("status") != "failed" or not isinstance(stage, dict):
                 continue
+            # Its paths are relative to its working directory
+            stage_wdir = stage.get("wdir") or ""
             if stage.get("kind") == "python-script":
                 io = detect_python_script_io(
-                    stage.get("script_path", ""), wdir=stage.get("wdir")
+                    os.path.join(stage_wdir, stage.get("script_path", "")),
+                    wdir=stage_wdir or None,
                 )
             elif stage.get("kind") == "jupyter-notebook":
                 io = detect_jupyter_notebook_io(
-                    stage.get("notebook_path", ""), wdir=stage.get("wdir")
+                    os.path.join(stage_wdir, stage.get("notebook_path", "")),
+                    wdir=stage_wdir or None,
                 )
             else:
                 continue

@@ -116,12 +116,19 @@ def parse_bibtex(text: str) -> list[dict]:
     bibtexparser 2 dropped ``loads`` for ``parse_string`` and returns objects
     instead of dicts, so normalize whichever version is installed to the
     shape version 1 produced: a dict of fields per entry, with the citation
-    key under ``ID`` and the entry type under ``ENTRYTYPE``.
+    key under ``ID`` and the entry type under ``ENTRYTYPE``. Entry types
+    BibTeX doesn't define but biblatex does, e.g., ``@software``, are kept,
+    which version 1 drops by default.
     """
     import bibtexparser  # type: ignore[import-untyped]
 
     if hasattr(bibtexparser, "loads"):
-        return list(bibtexparser.loads(text).entries)
+        from bibtexparser.bparser import (  # type: ignore[import-untyped]
+            BibTexParser,
+        )
+
+        parser = BibTexParser(ignore_nonstandard_types=False)
+        return list(bibtexparser.loads(text, parser=parser).entries)
     entries = []
     for entry in bibtexparser.parse_string(text).entries:
         fields = {field.key: field.value for field in entry.fields}

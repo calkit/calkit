@@ -325,6 +325,7 @@ class Stage(Model):
         "markdown-pdf",
         "procedure",
         "questions-to-latex",
+        "references-check",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -1797,6 +1798,113 @@ class QuestionsToLatexStage(Stage):
         return outs
 
 
+class ReferencesCheckStage(Stage):
+    """Whether the references a document cites are real.
+
+    Its inputs are the target document, the files it inputs, and the
+    bibliographies it names, or ``calkit.yaml`` and the collections it
+    declares if it names none, all found when the pipeline is compiled.
+    Its output is that document's report, by default under
+    ``.calkit/reference-checks``. One stage checks one document, so a
+    project with two papers has one of these each and each goes out of
+    date on its own.
+    """
+
+    kind: Literal["references-check"] = "references-check"
+    target_path: str = Field(
+        description="What to check: a .tex or Markdown document, the PDF "
+        "a stage builds from one, or a .bib file, whose every entry is "
+        "checked."
+    )
+    environment: str = Field(
+        default="_system",
+        description="Where to run the check. Defaults to the system, "
+        "which is where the Calkit running the pipeline already is.",
+    )
+    offline: bool = Field(
+        default=False,
+        description=(
+            "Use only cached answers instead of calling out to Crossref, "
+            "OpenAlex, and arXiv, e.g., where the pipeline runs without a "
+            "network."
+        ),
+    )
+    wdir: None = Field(
+        default=None,
+        description="Not supported; the stage reads the project's "
+        "calkit.yaml and documents from the project root.",
+    )
+
+    # What the check reads besides the document, set by preprocess
+    _found_paths: list[str] = PrivateAttr(default_factory=list)
+
+    @model_validator(mode="after")
+    def _default_output(self) -> "ReferencesCheckStage":
+        """The report goes beside other generated files unless an output
+        is declared."""
+        import calkit.references
+
+        if not self.outputs:
+            path = calkit.references.output_path(self.target_path)
+            self.outputs = [PathOutput(path=path, storage="git")]
+        return self
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
+    ) -> None:
+        """Find the files the document inputs and the bibliographies it
+        names, including ones a stage makes that aren't there yet."""
+        import calkit.references
+
+        self._found_paths = calkit.references.document_inputs(
+            self.target_path, project_dir=project_dir, is_output=is_output
+        )
+
+    @property
+    def report_path(self) -> str:
+        """Where the report is written: the first output."""
+        out = self.outputs[0]
+        return out if isinstance(out, str) else out.path
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            f"calkit check references {shlex.quote(self.target_path)}"
+            f" --output {shlex.quote(self.report_path)}"
+        )
+        if self.offline:
+            cmd += " --offline"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return _unique_paths(
+            [self.target_path] + super().dvc_deps + self._found_paths
+        )
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        """Stored with Git by default, since a report is small text."""
+        outs: list[str | dict] = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(cache=False, persist=False)})
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=out.storage == "dvc",
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
+
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
     script_path: RelativeChildPathString = Field(
@@ -2866,6 +2974,7 @@ class Pipeline(Model):
                 | QuartoStage
                 | JsonToLatexStage
                 | QuestionsToLatexStage
+                | ReferencesCheckStage
                 | MatlabScriptStage
                 | MatlabCommandStage
                 | ShellCommandStage

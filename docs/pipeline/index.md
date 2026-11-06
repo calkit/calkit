@@ -631,6 +631,27 @@ Model class: `RScriptStage`
 | `script_path`           | str       | yes      |         | Path to the R script to run.                            |
 | `args`                  | list[str] | no       |         | Arguments passed to the script, each item one argument. |
 
+### `references-check`
+
+Model class: `ReferencesCheckStage`
+
+Whether the references a document cites are real.
+
+Its inputs are the target document, the files it inputs, and the
+bibliographies it names, or `calkit.yaml` and the collections it
+declares if it names none, all found when the pipeline is compiled.
+Its output is that document's report, by default under
+`.calkit/reference-checks`. One stage checks one document, so a
+project with two papers has one of these each and each goes out of
+date on its own.
+
+| Kind-specific parameter | Type | Required | Default    | Description                                                                                                                       |
+| ----------------------- | ---- | -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`           | str  | no       | '\_system' | Where to run the check. Defaults to the system, which is where the Calkit running the pipeline already is.                        |
+| `wdir`                  | None | no       | null       | Not supported; the stage reads the project's calkit.yaml and documents from the project root.                                     |
+| `target_path`           | str  | yes      |            | What to check: a .tex or Markdown document, the PDF a stage builds from one, or a .bib file, whose every entry is checked.        |
+| `offline`               | bool | no       | False      | Use only cached answers instead of calling out to Crossref, OpenAlex, and arXiv, e.g., where the pipeline runs without a network. |
+
 ### `sbatch`
 
 Model class: `SBatchStage`

@@ -21,6 +21,7 @@ from calkit.models.pipeline import (
     Pipeline,
     PythonScriptStage,
     QuartoStage,
+    ReferencesCheckStage,
     ShellScriptStage,
     StageIteration,
     WordToPdfStage,
@@ -1199,3 +1200,85 @@ def test_markdownstage():
     assert s.outputs is None
     assert s.dvc_outs == []
     assert s.dvc_out_paths == []
+
+
+def test_references_check_stage(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "paper").mkdir()
+    (tmp_path / "paper" / "main.tex").write_text(
+        "\\input{results}\n\\input{intro}\n\\bibliography{refs}\n"
+        "\\includegraphics{fig}\n"
+    )
+    (tmp_path / "paper" / "intro.tex").write_text("\\cite{a}\n")
+    (tmp_path / "paper" / "refs.bib").write_text("")
+    (tmp_path / "paper" / "fig.png").write_text("")
+    (tmp_path / "calkit.yaml").write_text(
+        "references:\n  - path: declared.bib\n"
+    )
+    # No environment or output needed: it runs where Calkit is, and the
+    # report goes beside other generated files, stored with Git
+    stage = ReferencesCheckStage(
+        kind="references-check", target_path="paper/main.tex"
+    )
+    assert stage.environment == "_system"
+    report = ".calkit/reference-checks/paper/main.tex.json"
+    assert stage.dvc_cmd == (
+        f"calkit check references paper/main.tex --output {report}"
+    )
+    assert stage.dvc_outs == [{report: dict(cache=False, persist=False)}]
+    # A file a stage generates is an input before it's first made, so the
+    # check runs after that stage, and the bibliography the document names
+    # is used instead of the declared one, while a figure isn't an input
+    stage.preprocess(
+        str(tmp_path), is_output=lambda p: p == "paper/results.tex"
+    )
+    assert stage.dvc_deps == [
+        "paper/main.tex",
+        "paper/intro.tex",
+        "paper/refs.bib",
+        "paper/results.tex",
+    ]
+    # A document naming no bibliography falls back to the declared ones
+    (tmp_path / "paper" / "main.tex").write_text("\\cite{a}\n")
+    stage.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert stage.dvc_deps == ["paper/main.tex", "calkit.yaml", "declared.bib"]
+    # A PDF depends on the source a stage builds it from, and a .bib on
+    # nothing else
+    (tmp_path / "calkit.yaml").write_text(
+        "pipeline:\n"
+        "  stages:\n"
+        "    paper:\n"
+        "      kind: latex\n"
+        "      target_path: paper/main.tex\n"
+        "      environment: tex\n"
+        "references:\n"
+        "  - path: declared.bib\n"
+    )
+    pdf = ReferencesCheckStage(
+        kind="references-check", target_path="paper/main.pdf"
+    )
+    pdf.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert pdf.dvc_deps == [
+        "paper/main.pdf",
+        "paper/main.tex",
+        "calkit.yaml",
+        "declared.bib",
+    ]
+    bib = ReferencesCheckStage(
+        kind="references-check", target_path="paper/refs.bib"
+    )
+    bib.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert bib.dvc_deps == ["paper/refs.bib"]
+    # A declared output is where the report goes
+    custom = ReferencesCheckStage(
+        kind="references-check",
+        target_path="a b.tex",
+        offline=True,
+        outputs=["checks/refs.json"],
+    )
+    assert custom.dvc_cmd == (
+        "calkit check references 'a b.tex' --output checks/refs.json --offline"
+    )
+    assert custom.dvc_outs == [
+        {"checks/refs.json": dict(cache=False, persist=False)}
+    ]

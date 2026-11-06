@@ -1459,6 +1459,42 @@ def push_image_with_login(
     return success, output
 
 
+def record_pushed_digest(
+    lock_fpath: str, image: str, remote_ref: str, push_output: str
+) -> bool:
+    """Record the digest a push gave an image in its lock file.
+
+    A Docker engine that keeps no manifest gives a build no digest until
+    it's pushed, so a check that couldn't push writes a lock with none,
+    sending everyone else back to rebuilding. Only a lock that describes
+    the pushed image is touched. True if the lock file changed.
+    """
+    try:
+        with open(lock_fpath) as f:
+            lock = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(lock, dict):
+        return False
+    identity = inspect_image_for_lock(image)
+    if identity is None or not lock_matches_image(lock, identity):
+        return False
+    # The push reports the digest the registry serves the image by, which is
+    # unambiguous where the image's own list may hold older pushes too
+    match = re.search(r"digest: (sha256:[0-9a-f]{64})", push_output)
+    if match:
+        digests = [match.group(1)]
+    else:
+        digests = keep_only_repo_digests(identity, remote_ref)["RepoDigests"]
+    if not digests or lock.get("RepoDigests") == digests:
+        return False
+    lock["RepoDigests"] = digests
+    # newline="\n" so the file is byte-identical on every platform
+    with open(lock_fpath, "w", newline="\n") as f:
+        json.dump(lock, f, indent=4)
+    return True
+
+
 def get_image_name(
     env: dict, env_name: str, wdir: str | None = None
 ) -> str | None:

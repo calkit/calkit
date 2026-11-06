@@ -784,6 +784,40 @@ def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
 def test_push_sends_docker_images_to_their_registry(tmp_dir):
+    lock_fpath = (
+        f".calkit/env-locks/main/{calkit.environments.get_docker_arch()}.json"
+    )
+
+    def write_digestless_lock() -> None:
+        # What a check leaves on an engine that only assigns digests on a
+        # push, when it couldn't push
+        identity = calkit.docker.inspect_image_for_lock(image)
+        assert identity is not None
+        lock = calkit.docker.build_lock(
+            identity=dict(identity, RepoDigests=[]),
+            dockerfile_md5=calkit.get_md5("Dockerfile"),
+            deps_md5s={},
+            run_config={},
+        )
+        os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
+        with open(lock_fpath, "w") as f:
+            json.dump(lock, f, indent=4)
+
+    def remote_digest() -> str:
+        out = subprocess.check_output(
+            [
+                "docker",
+                "buildx",
+                "imagetools",
+                "inspect",
+                f"{registry}/proj/{image}:latest",
+                "--format",
+                "{{json .Manifest}}",
+            ],
+            text=True,
+        )
+        return str(json.loads(out)["digest"])
+
     container = "calkit-test-registry-push"
     registry = "localhost:5679"
     subprocess.run(["docker", "rm", "-f", container], capture_output=True)
@@ -850,6 +884,65 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
         )
         assert result.returncode != 0
         assert "Invalid target to push" in result.stderr
+        # Saving pushes the image before committing, so the digest the push
+        # gives it goes out in the same commit as everything else
+        subprocess.check_call(["git", "init", "--bare", "-q", "remote.git"])
+        subprocess.check_call(["git", "remote", "add", "origin", "remote.git"])
+        subprocess.check_call(["git", "config", "push.default", "current"])
+        with open(".gitignore", "a") as f:
+            f.write("remote.git/\n")
+        with open("Dockerfile", "a") as f:
+            f.write("RUN echo saved > /saved.txt\n")
+        subprocess.check_call(["docker", "build", "-t", image, "."])
+        write_digestless_lock()
+        out = subprocess.check_output(
+            ["calkit", "save", "-a", "-m", "Save"], text=True
+        )
+        assert "Recorded the pushed image's digest" in out
+        committed = json.loads(
+            git.Repo().git.show(
+                f"HEAD:{lock_fpath}", strip_newline_in_stdout=False
+            )
+        )
+        assert committed["RepoDigests"] == [remote_digest()]
+        # A plain push can only say the lock needs committing
+        with open("Dockerfile", "a") as f:
+            f.write("RUN echo pushed-again > /again.txt\n")
+        subprocess.check_call(["docker", "build", "-t", image, "."])
+        write_digestless_lock()
+        result = subprocess.run(
+            ["calkit", "push", "--no-git", "--no-dvc"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert f"Commit {lock_fpath}" in result.stdout + result.stderr
+        with open(lock_fpath) as f:
+            assert json.load(f)["RepoDigests"] == [remote_digest()]
+        # An image that fails to push holds back the Git push, since the
+        # commit's lock would name an image nobody can pull
+        ck_info = calkit.load_calkit_info()
+        ck_info["environments"]["main"]["registry"] = "localhost:5999/nope"
+        calkit.save_calkit_info(ck_info)
+        git.Repo().git.commit(["-am", "Point at an unreachable registry"])
+        result = subprocess.run(
+            ["calkit", "push", "--no-dvc"], capture_output=True, text=True
+        )
+        assert result.returncode != 0
+        assert "not pushing to Git" in result.stderr
+        assert "Pushing to Git remote" not in result.stdout
+        # Saving still commits, but doesn't push to Git either
+        with open("notes.txt", "w") as f:
+            f.write("hi\n")
+        result = subprocess.run(
+            ["calkit", "save", "notes.txt", "-m", "Notes"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "committed but not pushed to Git" in result.stderr
+        assert git.Repo().head.commit.message.strip() == "Notes"
+        assert "Pushing to Git remote" not in result.stdout
     finally:
         subprocess.run(["docker", "rm", "-f", container], capture_output=True)
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)

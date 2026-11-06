@@ -30,10 +30,11 @@ Or the entry can carry a DOI that resolves to a different work than its
 title and authors name, which is the same mistake wearing a real
 identifier.
 
-`calkit check references` checks all three.
-It reads citation keys from the documents the pipeline builds, and from
-the files they input, since that is where a key is written and where it
-has to be fixed.
+`calkit check references`, or `calkit check refs`, checks all three for
+one document.
+It reads citation keys from the document and the files it inputs, since
+that is where a key is written and where it has to be fixed, so a PDF is
+checked through the `.tex` or Markdown file a stage builds it from.
 Each key is resolved against the bibliographies the document names, with
 `\bibliography` or `\addbibresource`, or in a Markdown document's front
 matter, or against the collections in `calkit.yaml` if it names none.
@@ -45,11 +46,11 @@ resolves to another work is a mismatch even when a search for its title
 finds the right one, which the report then points to.
 
 ```sh
-calkit check references
+calkit check refs paper/main.tex
 ```
 
 ```
-paper/main.tex: 71 cited (1 not-checkable, 1 not-found, 69 verified)
+paper/main.tex: 71 references (1 not-checkable, 1 not-found, 69 verified)
   not-found: daulton2023hvkg
     cited at paper/main.tex:147
     no work with this title was found in the services checked
@@ -66,8 +67,8 @@ Each reference ends up with one status:
 | `verified`           | Found, and the title, first author, and year agree      |
 | `missing-from-bib`   | Cited but defined in no collection, so it can't resolve |
 | `doi-not-registered` | The DOI doesn't exist in the handle system              |
-| `mismatch`           | Found, but the record disagrees with the entry          |
-| `not-found`          | Nothing was found, which may be a coverage gap          |
+| `mismatch`           | Its DOI or arXiv ID names a work that disagrees         |
+| `not-found`          | No matching work found, which may be a coverage gap     |
 | `unchecked`          | Not looked up, since a service couldn't be reached      |
 | `not-checkable`      | A URL or software citation, with nothing to look up     |
 
@@ -85,15 +86,21 @@ Anything in PMLR is the common case: it registers no DOIs, so Crossref has
 none of its proceedings.
 When an entry names such a venue the report says so, rather than implying
 the reference is bad.
-For the same reason a search result only counts as the work if its title
-matches: a title query always returns its nearest neighbor, and reporting
-that would accuse the entry of describing an unrelated paper.
-A close but different title is named in the notes instead.
+For the same reason a search result only counts as the work if its
+title, first author, and year all agree with the entry: a title query
+always returns its nearest neighbor, and a book's other editions,
+reprints, and reviews share its title, so reporting either would accuse
+the entry of describing a work it doesn't.
+A close title, or the same title with another year or author, is named in
+the notes instead.
+Only a record found by the entry's own DOI or arXiv ID can contradict it.
 `unchecked` doesn't fail either, and a lookup that got no answer, e.g.,
 without a network, isn't cached, so the next run asks again.
 
-The command only prints its report, unless given `--output` to write it
-to a file, as a pipeline stage does.
+Given a `.bib` file instead, the command checks every entry in it,
+whether anything cites it or not.
+It only prints its report, unless given `--output` to write it to a file,
+as a pipeline stage does.
 
 ### What the check can and can't catch
 
@@ -149,6 +156,8 @@ pipeline:
       target_path: paper/main.tex
 ```
 
+The target can also be a PDF, whose source is read, or a `.bib` file,
+whose every entry is checked.
 Its inputs are that document, the `.tex` files it inputs, and the
 bibliographies it names, or `calkit.yaml` and its collections if it names
 none, and its output is that document's report, by default under

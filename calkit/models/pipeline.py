@@ -1812,8 +1812,9 @@ class ReferencesCheckStage(Stage):
 
     kind: Literal["references-check"] = "references-check"
     target_path: str = Field(
-        description="Path to the document whose citations to check, e.g., "
-        "the .tex file a LaTeX stage builds."
+        description="What to check: a .tex or Markdown document, the PDF "
+        "a stage builds from one, or a .bib file, whose every entry is "
+        "checked."
     )
     environment: str = Field(
         default="_system",

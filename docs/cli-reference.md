@@ -3553,7 +3553,7 @@ Check things.
 | [`storage`](#subcommand-check-storage)                      | Check that paths are tracked where they're declared to be stored.                                            |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
 | [`questions`](#subcommand-check-questions)                  | Check that answered questions are backed by current evidence.                                                |
-| [`references`](#subcommand-check-references)                | Check that the references the project's documents cite are real.                                             |
+| [`references\|refs`](#subcommand-check-references-refs)     | Check that the references a document cites are real.                                                         |
 
 <a id="subcommand-check-repro"></a>
 
@@ -3948,40 +3948,40 @@ Options:
 | `--json`          | boolean | no       | False   | Output the report as JSON.                                                            |
 | `--no-pipeline`   | boolean | no       | False   | Skip asking DVC which stages are out of date, which is the slowest part of the check. |
 
-<a id="subcommand-check-references"></a>
+<a id="subcommand-check-references-refs"></a>
 
-#### `calkit check references`
+#### `calkit check references|refs`
 
-Check that the references the project's documents cite are real.
+Check that the references a document cites are real.
 
-Reads citation keys from the documents named, or from every one the pipeline builds into a PDF, and from the files they input, then resolves each against the bibliographies the document names, or the collections calkit.yaml declares if it names none, and looks the entry up in Crossref, OpenAlex, and arXiv. Reports, worst first: a key defined in no bibliography, so the citation cannot resolve; a DOI that isn't registered; an entry whose identifier resolves to a different work than it describes; and an entry no service has, which is what a fabricated citation looks like, though a venue that registers no DOIs looks the same and is named as such.
+Reads citation keys from the document and the files it inputs, or, for a PDF, from the .tex or Markdown file it's built from, then resolves each against the bibliographies the document names, or the collections calkit.yaml declares if it names none. A .bib file has each of its entries checked instead. Each entry is looked up in Crossref, DataCite, OpenAlex, and arXiv. Reports, worst first: a key defined in no bibliography, so the citation cannot resolve; a DOI that isn't registered; an entry whose identifier resolves to a different work than it describes; and an entry no service has, which is what a fabricated citation looks like, though a venue that registers no DOIs looks the same and is named as such.
 
-Answers are cached, so a rerun needs no network. A references-check pipeline stage runs this for one document with --output, so its report is an output that goes stale when the document or a bibliography changes.
+Answers are cached, so a rerun needs no network. A references-check pipeline stage runs this with --output, so its report is an output that goes stale when the document or a bibliography changes.
 
 Exits with an error if a key resolves to no entry, a DOI isn't registered, or an entry contradicts the record it was found in. A reference that simply isn't indexed anywhere is reported but doesn't fail the check.
 
 Usage:
 
 ```text
-calkit check references [OPTIONS] [PATHS...]
+calkit check references|refs [OPTIONS] PATH
 ```
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                                                                               |
-| -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------- |
-| `paths`  | str  | no       |         | Documents whose citations to check. Defaults to every one the pipeline builds into a PDF. |
+| Argument | Type | Required | Default | Description                                                                                                 |
+| -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `path`   | str  | yes      |         | What to check: a .tex or Markdown document, a PDF one builds, or a .bib file, whose every entry is checked. |
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                      |
-| ----------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------- |
-| `--wdir`          | str     | no       | .       | Project working directory.                                                       |
-| `--verbose`, `-v` | boolean | no       | False   | List every cited reference, not only the ones needing attention.                 |
-| `--json`          | boolean | no       | False   | Output the report as JSON.                                                       |
-| `--output`, `-o`  | str     | no       |         | Write the document's report as JSON to this path. Only for a single document.    |
-| `--offline`       | boolean | no       | False   | Use only cached answers instead of calling out to Crossref, OpenAlex, and arXiv. |
-| `--refresh`       | boolean | no       | False   | Ignore cached answers and ask the services again.                                |
+| Option            | Type    | Required | Default | Description                                                                                |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------ |
+| `--wdir`          | str     | no       | .       | Project working directory.                                                                 |
+| `--verbose`, `-v` | boolean | no       | False   | List every cited reference, not only the ones needing attention.                           |
+| `--json`          | boolean | no       | False   | Output the report as JSON.                                                                 |
+| `--output`, `-o`  | str     | no       |         | Also write the report as JSON to this path.                                                |
+| `--offline`       | boolean | no       | False   | Use only cached answers instead of calling out to Crossref, DataCite, OpenAlex, and arXiv. |
+| `--refresh`       | boolean | no       | False   | Ignore cached answers and ask the services again.                                          |
 
 <a id="command-group-fix"></a>
 

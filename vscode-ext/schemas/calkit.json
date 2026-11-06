@@ -8825,7 +8825,7 @@
           "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "target_path": {
-          "description": "Path to the document whose citations to check, e.g., the .tex file a LaTeX stage builds.",
+          "description": "What to check: a .tex or Markdown document, the PDF a stage builds from one, or a .bib file, whose every entry is checked.",
           "title": "Target Path",
           "type": "string"
         },

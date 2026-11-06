@@ -1242,6 +1242,33 @@ def test_references_check_stage(tmp_path, monkeypatch):
     (tmp_path / "paper" / "main.tex").write_text("\\cite{a}\n")
     stage.preprocess(str(tmp_path), is_output=lambda p: False)
     assert stage.dvc_deps == ["paper/main.tex", "calkit.yaml", "declared.bib"]
+    # A PDF depends on the source a stage builds it from, and a .bib on
+    # nothing else
+    (tmp_path / "calkit.yaml").write_text(
+        "pipeline:\n"
+        "  stages:\n"
+        "    paper:\n"
+        "      kind: latex\n"
+        "      target_path: paper/main.tex\n"
+        "      environment: tex\n"
+        "references:\n"
+        "  - path: declared.bib\n"
+    )
+    pdf = ReferencesCheckStage(
+        kind="references-check", target_path="paper/main.pdf"
+    )
+    pdf.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert pdf.dvc_deps == [
+        "paper/main.pdf",
+        "paper/main.tex",
+        "calkit.yaml",
+        "declared.bib",
+    ]
+    bib = ReferencesCheckStage(
+        kind="references-check", target_path="paper/refs.bib"
+    )
+    bib.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert bib.dvc_deps == ["paper/refs.bib"]
     # A declared output is where the report goes
     custom = ReferencesCheckStage(
         kind="references-check",

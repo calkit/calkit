@@ -649,7 +649,7 @@ date on its own.
 | ----------------------- | ---- | -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `environment`           | str  | no       | '\_system' | Where to run the check. Defaults to the system, which is where the Calkit running the pipeline already is.                        |
 | `wdir`                  | None | no       | null       | Not supported; the stage reads the project's calkit.yaml and documents from the project root.                                     |
-| `target_path`           | str  | yes      |            | Path to the document whose citations to check, e.g., the .tex file a LaTeX stage builds.                                          |
+| `target_path`           | str  | yes      |            | What to check: a .tex or Markdown document, the PDF a stage builds from one, or a .bib file, whose every entry is checked.        |
 | `offline`               | bool | no       | False      | Use only cached answers instead of calling out to Crossref, OpenAlex, and arXiv, e.g., where the pipeline runs without a network. |
 
 ### `sbatch`

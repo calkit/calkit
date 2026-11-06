@@ -199,8 +199,8 @@ def test_a_key_in_two_collections_names_the_one_that_wins(
     (tmp_dir / "calkit.yaml").write_text(
         (tmp_dir / "calkit.yaml").read_text() + "  - path: paper/extra.bib\n"
     )
-    check = refs.check_references(offline=True)
-    reference = check.documents[0].references["real2020thing"]
+    check = refs.check_references("paper/main.tex", offline=True)
+    reference = check.references["real2020thing"]
     assert reference.collection == "paper/references.bib"
     assert reference.also_in == ["paper/extra.bib"]
     assert any("also defined in" in n for n in reference.notes)
@@ -267,6 +267,7 @@ def test_handle_responses_map_to_an_answer(
     # No answer, e.g., without a network or when rate limited, isn't
     # cached, so the next run asks again
     import urllib.error
+    from email.message import Message
 
     def fail(request, timeout):
         raise urllib.error.URLError("no network")
@@ -280,7 +281,9 @@ def test_handle_responses_map_to_an_answer(
     assert "https://down.example" not in online.cache
 
     def rate_limited(request, timeout):
-        raise urllib.error.HTTPError(request.full_url, 429, "", {}, None)
+        raise urllib.error.HTTPError(
+            request.full_url, 429, "", Message(), None
+        )
 
     monkeypatch.setattr("urllib.request.urlopen", rate_limited)
     assert online.get_text("https://busy.example") is None
@@ -453,6 +456,41 @@ def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
     refs.classify(reference)
     assert reference.status == "not-found"
     assert any("closest title" in n for n in reference.notes)
+    # A search finding the same title in another year may have found
+    # another edition, a reprint, or a review, so it's pointed at instead
+    reference = entry()
+    reference.doi = None
+    edition = right()
+    edition.year = 2011
+    refs.verify(reference, Stub(by_title=edition))  # type: ignore[arg-type]
+    refs.classify(reference)
+    assert reference.status == "not-found"
+    assert reference.evidence is None
+    assert any("another edition" in n and "2011" in n for n in reference.notes)
+    # A whole name in either order agrees, as OpenAlex can give one
+    reference = entry()
+    reference.doi = None
+    named = right()
+    named.first_author = "Smith Jane"
+    refs.verify(reference, Stub(by_title=named))  # type: ignore[arg-type]
+    refs.classify(reference)
+    assert reference.status == "verified"
+    # Crossref titles can carry markup, which isn't part of the title
+    found = refs._from_crossref(
+        {
+            "title": [
+                "A Proof for the Queuing Formula:\n  <i>L</i>\n  = λ <i>W</i>"
+            ]
+        }
+    )
+    assert found.title == "A Proof for the Queuing Formula: L = λ W"
+    little = refs.Reference(
+        key="k",
+        title=refs.clean_tex(
+            r"A proof for the queuing formula: {$L = \lambda W$}"
+        ),
+    )
+    assert refs.compare(little, found).title_matches is True
 
 
 def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
@@ -460,9 +498,7 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
         tmp_dir,
         "\\citep{real2020thing}\n\\citep{tool2024software}\n\\citep{ghost}\n",
     )
-    check = refs.check_references(offline=True)
-    assert len(check.documents) == 1
-    document = check.documents[0]
+    document = refs.check_references("paper/main.tex", offline=True)
     assert document.path == "paper/main.tex"
     assert document.n_cited == 3
     by_key = document.references
@@ -474,10 +510,10 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
     # nor reported as not found, since nothing was asked
     assert by_key["real2020thing"].status == "unchecked"
     assert any("offline" in n for n in by_key["real2020thing"].notes)
-    assert not check.ok
+    assert not document.ok
     # Nothing is written unless asked for
     assert not (tmp_dir / ".calkit").exists()
-    refs.write_report(check.documents[0], "report.json")
+    refs.write_report(document, "report.json")
     payload = json.loads((tmp_dir / "report.json").read_text())
     assert payload["n_cited"] == 3
     # Keyed by citation key, so the key is not repeated as a field.
@@ -490,23 +526,60 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
     # No timestamp, so the report is a function of its inputs and can be
     # checked for staleness like any other output.
     assert "checked_at" not in payload
-    text = refs.format_check(check)
+    text = refs.format_check(document)
     assert "ghost" in text and "Defined in a bibliography: 2/3 ❌" in text
     # A document naming its bibliography uses it rather than the declared
     # collections, and one that doesn't exist is reported, not skipped
     _project(tmp_dir, "\\citep{real2020thing}\n\\bibliography{refs}\n")
-    check = refs.check_references(offline=True)
-    assert check.documents[0].collections == ["paper/refs.bib"]
-    assert check.documents[0].references["real2020thing"].status == (
-        "missing-from-bib"
-    )
+    document = refs.check_references("paper/main.tex", offline=True)
+    assert document.collections == ["paper/refs.bib"]
+    assert document.references["real2020thing"].status == ("missing-from-bib")
     (tmp_dir / "paper" / "refs.bib").write_text(BIB)
-    check = refs.check_references(offline=True)
-    assert check.documents[0].references["real2020thing"].status == (
-        "unchecked"
-    )
+    document = refs.check_references("paper/main.tex", offline=True)
+    assert document.references["real2020thing"].status == "unchecked"
     with pytest.raises(FileNotFoundError):
-        refs.check_references(paths=["typo.tex"], offline=True)
+        refs.check_references("typo.tex", offline=True)
+    # A PDF is checked through the source a stage builds it from, with
+    # paths relative to the stage's working directory, or else through the
+    # one beside it
+    (tmp_dir / "calkit.yaml").write_text(
+        (tmp_dir / "calkit.yaml")
+        .read_text()
+        .replace(
+            "references:\n",
+            "    build:\n"
+            "      kind: latex\n"
+            "      wdir: paper\n"
+            "      target_path: main.tex\n"
+            "      output_dir: build\n"
+            "      environment: tex\n"
+            "references:\n",
+        )
+    )
+    for pdf in ["paper/main.pdf", "paper/build/main.pdf"]:
+        document = refs.check_references(pdf, offline=True)
+        assert document.path == "paper/main.tex"
+        assert set(document.references) == {"real2020thing"}
+    (tmp_dir / "notes").mkdir()
+    (tmp_dir / "notes" / "draft.tex").write_text("\\citep{ghost}\n")
+    draft = refs.check_references("notes/draft.pdf", offline=True)
+    assert draft.path == "notes/draft.tex"
+    with pytest.raises(FileNotFoundError, match="No stage builds"):
+        refs.check_references("other.pdf", offline=True)
+    # A bibliography has every entry checked, none of them cited anywhere
+    document = refs.check_references("paper/refs.bib", offline=True)
+    assert document.path == "paper/refs.bib"
+    assert document.collections == ["paper/refs.bib"]
+    assert set(document.references) == {
+        "real2020thing",
+        "thin2021venue",
+        "tool2024software",
+        "preprint2019arxiv",
+    }
+    assert all(not r.cited_at for r in document.references.values())
+    assert document.references["real2020thing"].collection == (
+        "paper/refs.bib"
+    )
     # \nocite{*} cites every entry, and \bibitem defines a key inline
     _project(
         tmp_dir,
@@ -514,7 +587,7 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
         "\\begin{thebibliography}{1}\\bibitem{inline} A. Book.\n"
         "\\end{thebibliography}\n",
     )
-    by_key = refs.check_references(offline=True).documents[0].references
+    by_key = refs.check_references("paper/main.tex", offline=True).references
     assert set(by_key) == {
         "inline",
         "real2020thing",
@@ -645,13 +718,13 @@ def test_the_report_shape_is_what_was_recorded(tmp_dir: Path) -> None:
         tmp_dir,
         "\\citep{real2020thing}\n\\citep{tool2024software}\n\\citep{ghost}\n",
     )
-    check = refs.check_references(offline=True)
-    payload = check.documents[0].model_dump(mode="json")
+    check = refs.check_references("paper/main.tex", offline=True)
+    payload = check.model_dump(mode="json")
     assert set(payload) == _DOCUMENT_KEYS
     # Every key a reference can carry, over every status it can take.
     statuses = set()
     keys: set[str] = set()
-    for reference in check.documents[0].references.values():
+    for reference in check.references.values():
         keys |= set(reference.model_dump(mode="json"))
         statuses.add(reference.status)
     # Offline, three of the statuses are reachable; the others need
@@ -733,7 +806,9 @@ def test_markdown_citations_are_found(tmp_dir: Path) -> None:
         "      kind: markdown\n"
         "      target_path: paper/main.md\n"
         "      environment: _system\n"
-        "      pdf: true\n"
+        "      pdf:\n"
+        "        environment: _system\n"
+        "        output_path: out/paper.pdf\n"
         "references:\n"
         "  - path: paper/references.bib\n"
     )
@@ -753,12 +828,13 @@ def test_markdown_citations_are_found(tmp_dir: Path) -> None:
         .read_text()
         .replace("paper/references.bib", "other.bib")
     )
-    check = refs.check_references(offline=True)
-    document = check.documents[0]
-    assert document.collections == ["paper/references.bib"]
-    assert set(document.references) == {
-        "real2020thing",
-        "thin2021venue",
-        "tool2024software",
-    }
-    assert check.ok
+    for path in ["paper/main.md", "out/paper.pdf"]:
+        document = refs.check_references(path, offline=True)
+        assert document.path == "paper/main.md"
+        assert document.collections == ["paper/references.bib"]
+        assert set(document.references) == {
+            "real2020thing",
+            "thin2021venue",
+            "tool2024software",
+        }
+        assert document.ok

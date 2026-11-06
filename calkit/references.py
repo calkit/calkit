@@ -8,9 +8,10 @@ invents a plausible citation. Or the entry can carry an identifier that
 resolves to a different work than its title and authors name, which is
 the same mistake wearing a real DOI.
 
-Keys are read from the documents the pipeline builds, and from the files
-they input, rather than from the compiled PDF, since that is where a key
-is written and where it has to be fixed. Each is resolved against the
+Keys are read from a document and the files it inputs rather than from
+the compiled PDF, since that is where a key is written and where it has
+to be fixed, so a PDF is checked by reading the source it is built from.
+A bibliography can also be checked on its own, every entry in it. Each is resolved against the
 bibliographies the document names, or the collections ``calkit.yaml``
 declares when it names none, and each entry is then looked for in
 Crossref, OpenAlex, and arXiv, by identifier when it has one and by title
@@ -308,16 +309,6 @@ class DocumentCheck(BaseModel):
     @property
     def ok(self) -> bool:
         return not self.blocking
-
-
-class ReferenceCheck(BaseModel):
-    """The whole project's citation check."""
-
-    documents: list[DocumentCheck] = Field(default_factory=list)
-
-    @property
-    def ok(self) -> bool:
-        return all(d.ok for d in self.documents)
 
 
 def output_path(document_path: str) -> str:
@@ -768,11 +759,16 @@ def compare(reference: Reference, found: Found) -> Found:
         found.year_matches = abs(reference.year - found.year) <= 1
     ours_author = _fold_name(reference.first_author)
     theirs_author = _fold_name(found.first_author)
+    # A record can give a whole name, in either order
+    theirs_names = {
+        _fold_name(part) for part in (found.first_author or "").split()
+    }
     if not ours_author or not theirs_author:
         found.author_matches = None
     else:
         found.author_matches = (
-            similarity(ours_author, theirs_author) >= 0.85
+            ours_author in theirs_names
+            or similarity(ours_author, theirs_author) >= 0.85
             or ours_author in theirs_author
             or theirs_author in ours_author
         )
@@ -941,11 +937,29 @@ def classify(reference: Reference) -> None:
         )
     else:
         reference.status = "not-found"
-        reference.notes.append(
-            "no work with this title was found in the services checked"
-        )
-        if reference.nearest is not None:
-            near = reference.nearest
+        near = reference.nearest
+        if near is not None and near.title_matches:
+            where = _evidence(reference, near).url or near.source
+            differs = [
+                f"{name} {value!r}"
+                for name, value, ok in (
+                    ("first author", near.first_author, near.author_matches),
+                    ("year", near.year, near.year_matches),
+                )
+                if ok is False
+            ]
+            reference.notes += [
+                "no work matching the entry's title, first author, and year "
+                "was found in the services checked",
+                f"one with this title is at {where}, but with "
+                f"{' and '.join(differs)}, so it may be another edition, a "
+                "reprint, or a review of it, or the entry's details are wrong",
+            ]
+        else:
+            reference.notes.append(
+                "no work with this title was found in the services checked"
+            )
+        if near is not None and not near.title_matches:
             where = _evidence(reference, near).url or near.source
             reference.notes.append(
                 f"the closest title found is {near.title!r}, at {where}"
@@ -959,21 +973,88 @@ def classify(reference: Reference) -> None:
             )
 
 
-def check_references(
-    wdir: str | Path | None = None,
-    paths: list[str] | None = None,
-    offline: bool = False,
-    refresh: bool = False,
-) -> ReferenceCheck:
-    """Check that every reference a project's documents cite is real.
+def source_document(path: str, wdir: str | Path | None = None) -> str:
+    """The document a path's citations are read from.
+
+    A PDF's are read from the source it's built from: the document of the
+    ``latex`` or ``markdown`` stage that outputs it, or else a ``.tex`` or
+    Markdown file beside it with the same name. Any other path is its own.
 
     Parameters
     ----------
+    path : str
+        Project-relative path, e.g., ``paper/main.pdf``.
     wdir : str or Path, optional
         Project working directory, defaulting to the current one.
-    paths : list of str, optional
-        Documents to check. Defaults to every one the pipeline builds
-        into a PDF.
+
+    Returns
+    -------
+    str
+        Project-relative path of the source document.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a PDF has no source.
+    """
+    import posixpath
+
+    import calkit
+    from calkit.models.pipeline import LatexStage
+
+    if not path.lower().endswith(".pdf"):
+        return path
+    want = posixpath.normpath(path)
+    ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for stage in stages.values():
+        if not isinstance(stage, dict) or not stage.get("target_path"):
+            continue
+        target = str(stage["target_path"])
+        pdf = stage.get("pdf")
+        if stage.get("kind") == "latex":
+            # Paths are relative to the stage's working directory
+            try:
+                built = LatexStage.model_validate(stage).pdf_path
+            except ValueError:
+                continue
+            stage_wdir = stage.get("wdir") or ""
+            built = posixpath.join(stage_wdir, built)
+            target = posixpath.join(stage_wdir, target)
+        elif stage.get("kind") == "markdown" and isinstance(pdf, dict):
+            built = pdf.get("output_path") or (
+                posixpath.splitext(target)[0] + ".pdf"
+            )
+        else:
+            continue
+        if posixpath.normpath(built) == want:
+            return posixpath.normpath(target)
+    stem = posixpath.splitext(path)[0]
+    for ext in (".tex", ".md", ".markdown"):
+        if (Path(wdir or ".") / (stem + ext)).is_file():
+            return stem + ext
+    raise FileNotFoundError(
+        f"No stage builds {path}, and there's no .tex or Markdown file "
+        "beside it to read citations from"
+    )
+
+
+def check_references(
+    path: str,
+    wdir: str | Path | None = None,
+    offline: bool = False,
+    refresh: bool = False,
+) -> DocumentCheck:
+    """Check that every reference a document cites is real.
+
+    Parameters
+    ----------
+    path : str
+        Project-relative path of what to check: a document, whose
+        citations are checked, a PDF, whose source's are, or a ``.bib``
+        file, whose every entry is.
+    wdir : str or Path, optional
+        Project working directory, defaulting to the current one.
     offline : bool, optional
         Use only cached answers, and report the rest as unchecked.
     refresh : bool, optional
@@ -981,51 +1062,51 @@ def check_references(
 
     Returns
     -------
-    ReferenceCheck
-        One report per document checked.
+    DocumentCheck
+        The document's report.
 
     Raises
     ------
     FileNotFoundError
-        If a document named in ``paths`` doesn't exist.
+        If the path, or a PDF's source, doesn't exist.
     """
     import calkit
-    from calkit.latex import comment_documents, flatten, is_markdown
-
-    ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
-    declared = declared_collections(ck_info)
-    lookup = Lookup(wdir=wdir, offline=offline, refresh=refresh)
-    out = ReferenceCheck()
+    from calkit.latex import flatten, is_markdown
 
     # flatten names paths relative to the project, so read them there
     # rather than changing the working directory.
-    def read(path: str) -> str | None:
-        full = Path(wdir or ".") / path
+    def read(name: str) -> str | None:
+        full = Path(wdir or ".") / name
         return (
             full.read_text(encoding="utf-8", errors="replace")
             if full.is_file()
             else None
         )
 
-    if paths:
-        missing = [p for p in paths if not (Path(wdir or ".") / p).is_file()]
-        if missing:
-            raise FileNotFoundError(f"No such document: {', '.join(missing)}")
-    for document in paths or comment_documents(ck_info):
+    document = source_document(path, wdir=wdir)
+    if not (Path(wdir or ".") / document).is_file():
+        raise FileNotFoundError(f"No such file: {document}")
+    lookup = Lookup(wdir=wdir, offline=offline, refresh=refresh)
+    # A bibliography is checked whole, as if each entry were cited
+    if document.lower().endswith(".bib"):
+        names = [document]
+        sources = [document]
+        collections = load_collections(wdir=wdir, paths=names)
+        cited: dict[str, list[str]] = {
+            key: [] for key in collections.get(document, {})
+        }
+        inline: dict[str, str] = {}
+    else:
         lines = flatten(document, read=read)
-        if not lines:
-            continue
         # The bibliographies the document names are the ones its citations
         # resolve against, and the declared ones only stand in for them
-        names = document_collections(document, lines, wdir=wdir) or declared
+        ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+        names = document_collections(
+            document, lines, wdir=wdir
+        ) or declared_collections(ck_info)
+        sources = list(dict.fromkeys(line.path for line in lines))
         collections = load_collections(wdir=wdir, paths=names)
         inline = defined_keys(lines)
-        check = DocumentCheck(
-            path=document,
-            sources=list(dict.fromkeys(line.path for line in lines)),
-            collections=names,
-            offline=offline,
-        )
         cited = cited_keys(lines)
         # \nocite{*} puts every entry in the bibliography, so each is cited
         everything = cited.pop("*", None)
@@ -1033,40 +1114,38 @@ def check_references(
             for entries in collections.values():
                 for key in entries:
                     cited.setdefault(key, list(everything))
-        for key, locations in cited.items():
-            defining = [
-                n for n, entries in collections.items() if key in entries
-            ]
-            # Quarto and pandoc-crossref write a cross-reference like a
-            # citation, e.g., @fig-results
-            if (
-                not defining
-                and CROSSREF_RE.match(key)
-                and all(
-                    is_markdown(loc.rsplit(":", 1)[0]) for loc in locations
-                )
-            ):
-                continue
-            reference = Reference(key=key, cited_at=locations)
-            if defining:
-                # The first wins, as BibTeX takes them in the order named
-                reference.collection = defining[0]
-                reference.also_in = defining[1:]
-                _fill_from_entry(reference, collections[defining[0]][key])
-                verify(reference, lookup)
-            elif key in inline:
-                reference.collection = inline[key]
-                reference.entry_type = "bibitem"
-            classify(reference)
-            check.references[key] = reference
-        check.n_cited = len(check.references)
-        counts: dict[str, int] = {}
-        for reference in check.references.values():
-            counts[reference.status] = counts.get(reference.status, 0) + 1
-        check.n_by_status = dict(sorted(counts.items()))
-        out.documents.append(check)
+    check = DocumentCheck(
+        path=document, sources=sources, collections=names, offline=offline
+    )
+    for key, locations in cited.items():
+        defining = [n for n, entries in collections.items() if key in entries]
+        # Quarto and pandoc-crossref write a cross-reference like a
+        # citation, e.g., @fig-results
+        if (
+            not defining
+            and CROSSREF_RE.match(key)
+            and all(is_markdown(loc.rsplit(":", 1)[0]) for loc in locations)
+        ):
+            continue
+        reference = Reference(key=key, cited_at=locations)
+        if defining:
+            # The first wins, as BibTeX takes them in the order named
+            reference.collection = defining[0]
+            reference.also_in = defining[1:]
+            _fill_from_entry(reference, collections[defining[0]][key])
+            verify(reference, lookup)
+        elif key in inline:
+            reference.collection = inline[key]
+            reference.entry_type = "bibitem"
+        classify(reference)
+        check.references[key] = reference
+    check.n_cited = len(check.references)
+    counts: dict[str, int] = {}
+    for reference in check.references.values():
+        counts[reference.status] = counts.get(reference.status, 0) + 1
+    check.n_by_status = dict(sorted(counts.items()))
     lookup.save()
-    return out
+    return check
 
 
 def verify(reference: Reference, lookup: Lookup) -> None:
@@ -1120,7 +1199,13 @@ def verify(reference: Reference, lookup: Lookup) -> None:
                     > (reference.nearest.title_similarity or 0.0)
                 ):
                     reference.nearest = hit
-    best_by_title = max(by_title, key=_rank) if by_title else None
+    # A work with the same title but another author or year may be
+    # another edition, a reprint, or a review of it, so it's pointed at
+    # rather than taken for the entry
+    agreeing = [hit for hit in by_title if _agrees(hit)]
+    best_by_title = max(agreeing, key=_rank) if agreeing else None
+    if by_title and not agreeing:
+        reference.nearest = max(by_title, key=_rank)
     if by_id is not None:
         reference.found = by_id
     elif reference.doi_registered is not False:
@@ -1128,11 +1213,7 @@ def verify(reference: Reference, lookup: Lookup) -> None:
         reference.found = best_by_title
     # Where the identifier names the wrong work, or none, say where the
     # right one is
-    if (
-        best_by_title is not None
-        and best_by_title is not reference.found
-        and _agrees(best_by_title)
-    ):
+    if best_by_title is not None and best_by_title is not reference.found:
         reference.alternative = best_by_title
     if reference.found is not None:
         reference.nearest = None
@@ -1167,11 +1248,15 @@ def _from_crossref(item: dict, source: str = "crossref") -> Found:
     surname = None
     if authors:
         surname = authors[0].get("family") or authors[0].get("name")
+    # Titles can carry JATS markup, e.g., <i>L</i>, over several lines
+    title = (
+        " ".join(re.sub(r"<[^>]+>", " ", titles[0]).split()) if titles else ""
+    )
     return Found(
         source=source,
         id=item.get("DOI"),
         doi=item.get("DOI"),
-        title=titles[0] if titles else None,
+        title=title or None,
         year=int(year) if isinstance(year, int) else None,
         first_author=surname,
     )
@@ -1180,11 +1265,11 @@ def _from_crossref(item: dict, source: str = "crossref") -> Found:
 def _from_openalex(item: dict) -> Found:
     """A ``Found`` from an OpenAlex work record."""
     authorships = item.get("authorships") or []
-    surname = None
+    # The whole name, since which part is the surname isn't marked, and
+    # some records put it first
+    name = None
     if authorships:
-        name = (authorships[0].get("author") or {}).get("display_name") or ""
-        parts = name.split()
-        surname = parts[-1] if parts else None
+        name = (authorships[0].get("author") or {}).get("display_name")
     doi = item.get("doi") or ""
     return Found(
         source="openalex",
@@ -1192,7 +1277,7 @@ def _from_openalex(item: dict) -> Found:
         doi=doi.replace("https://doi.org/", "") or None,
         title=item.get("display_name"),
         year=item.get("publication_year"),
-        first_author=surname,
+        first_author=name or None,
     )
 
 
@@ -1489,12 +1574,12 @@ def write_report(
     )
 
 
-def format_check(check: ReferenceCheck, verbose: bool = False) -> str:
-    """Render a check as text, worst first.
+def format_check(document: DocumentCheck, verbose: bool = False) -> str:
+    """Render a document's check as text, worst first.
 
     Parameters
     ----------
-    check : ReferenceCheck
+    document : DocumentCheck
         The check to render.
     verbose : bool, optional
         List every reference, not only the ones needing attention.
@@ -1506,43 +1591,38 @@ def format_check(check: ReferenceCheck, verbose: bool = False) -> str:
     """
     from calkit.core import check_or_x
 
-    lines = []
-    for document in check.documents:
-        counts = ", ".join(
-            f"{n} {status}" for status, n in document.n_by_status.items()
-        )
-        lines.append(f"{document.path}: {document.n_cited} cited ({counts})")
-        shown = (
-            list(document.references.values()) if verbose else document.suspect
-        )
-        order = {s: i for i, s in enumerate(SUSPECT)}
-        for reference in sorted(
-            shown, key=lambda r: order.get(r.status, len(order))
-        ):
-            lines.append(f"  {reference.status}: {reference.key}")
-            if reference.cited_at:
-                lines.append(f"    cited at {reference.cited_at[0]}")
-            for note in reference.notes:
-                lines.append(f"    {note}")
-            evidence = reference.evidence
-            if evidence is None:
-                continue
-            where = evidence.url or evidence.source
-            if evidence.differs:
-                says = ", ".join(
-                    f"{name} {value!r}"
-                    for name, value in evidence.differs.items()
-                )
-                lines.append(f"    the record at {where} says {says}")
-            else:
-                lines.append(
-                    f"    found by {evidence.matched_by} at {where}, "
-                    f"agreeing on {', '.join(evidence.agrees_on) or 'nothing'}"
-                )
-        lines.append("")
-    if not check.documents:
-        return "No documents with citations to check."
-    references = [r for d in check.documents for r in d.references.values()]
+    references = list(document.references.values())
+    if not references:
+        return f"{document.path}: no references to check."
+    counts = ", ".join(
+        f"{n} {status}" for status, n in document.n_by_status.items()
+    )
+    lines = [f"{document.path}: {document.n_cited} references ({counts})"]
+    shown = references if verbose else document.suspect
+    order = {s: i for i, s in enumerate(SUSPECT)}
+    for reference in sorted(
+        shown, key=lambda r: order.get(r.status, len(order))
+    ):
+        lines.append(f"  {reference.status}: {reference.key}")
+        if reference.cited_at:
+            lines.append(f"    cited at {reference.cited_at[0]}")
+        for note in reference.notes:
+            lines.append(f"    {note}")
+        evidence = reference.evidence
+        if evidence is None:
+            continue
+        where = evidence.url or evidence.source
+        if evidence.differs:
+            says = ", ".join(
+                f"{name} {value!r}" for name, value in evidence.differs.items()
+            )
+            lines.append(f"    the record at {where} says {says}")
+        else:
+            lines.append(
+                f"    found by {evidence.matched_by} at {where}, "
+                f"agreeing on {', '.join(evidence.agrees_on) or 'nothing'}"
+            )
+    lines.append("")
 
     def n(*statuses: str) -> int:
         return sum(1 for r in references if r.status in statuses)
@@ -1551,7 +1631,7 @@ def format_check(check: ReferenceCheck, verbose: bool = False) -> str:
     bad_doi = n("doi-not-registered")
     mismatch = n("mismatch")
     lines += [
-        f"References cited: {len(references)}",
+        f"References checked: {len(references)}",
         f"Defined in a bibliography: {len(references) - missing}/"
         f"{len(references)} {check_or_x(not missing)}",
         f"With a DOI that isn't registered: {bad_doi} {check_or_x(not bad_doi)}",
@@ -1572,7 +1652,8 @@ def document_inputs(
     Parameters
     ----------
     document : str
-        Project-relative path of the document being checked.
+        Project-relative path of what's being checked, as
+        ``check_references`` takes it.
     project_dir : str or Path, optional
         Project working directory, defaulting to the current one.
     is_output : callable, optional
@@ -1583,7 +1664,8 @@ def document_inputs(
     -------
     list of str
         Project-relative paths, starting with the document, which is
-        depended on even when it does not exist yet.
+        depended on even when it does not exist yet, and then a PDF's
+        source.
     """
     import posixpath
 
@@ -1608,6 +1690,14 @@ def document_inputs(
         )
 
     out = [document]
+    # The run reports a PDF with no source, so here it's only depended on
+    try:
+        document = source_document(document, wdir=base)
+    except FileNotFoundError:
+        return out
+    out.append(document)
+    if document.lower().endswith(".bib"):
+        return list(dict.fromkeys(out))
     if not is_markdown(document):
         # Only what can carry a citation, not, e.g., figures
         out += [

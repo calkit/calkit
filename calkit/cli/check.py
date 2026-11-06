@@ -2574,15 +2574,15 @@ def check_questions(
         raise typer.Exit(1)
 
 
-@check_app.command(name="references")
+@check_app.command(name="references|refs")
 def check_references(
-    paths: Annotated[
-        list[str] | None,
+    path: Annotated[
+        str,
         typer.Argument(
-            help="Documents whose citations to check. Defaults to every "
-            "one the pipeline builds into a PDF.",
+            help="What to check: a .tex or Markdown document, a PDF one "
+            "builds, or a .bib file, whose every entry is checked.",
         ),
-    ] = None,
+    ],
     wdir: Annotated[
         str, typer.Option("--wdir", help="Project working directory.")
     ] = ".",
@@ -2603,8 +2603,7 @@ def check_references(
         typer.Option(
             "--output",
             "-o",
-            help="Write the document's report as JSON to this path. Only "
-            "for a single document.",
+            help="Also write the report as JSON to this path.",
         ),
     ] = None,
     offline: Annotated[
@@ -2612,7 +2611,7 @@ def check_references(
         typer.Option(
             "--offline",
             help="Use only cached answers instead of calling out to "
-            "Crossref, OpenAlex, and arXiv.",
+            "Crossref, DataCite, OpenAlex, and arXiv.",
         ),
     ] = False,
     refresh: Annotated[
@@ -2623,13 +2622,14 @@ def check_references(
         ),
     ] = False,
 ) -> None:
-    """Check that the references the project's documents cite are real.
+    """Check that the references a document cites are real.
 
-    Reads citation keys from the documents named, or from every one the
-    pipeline builds into a PDF, and from the files they input, then
+    Reads citation keys from the document and the files it inputs, or,
+    for a PDF, from the .tex or Markdown file it's built from, then
     resolves each against the bibliographies the document names, or the
-    collections calkit.yaml declares if it names none, and looks the entry
-    up in Crossref, OpenAlex, and arXiv.
+    collections calkit.yaml declares if it names none. A .bib file has
+    each of its entries checked instead.
+    Each entry is looked up in Crossref, DataCite, OpenAlex, and arXiv.
     Reports, worst first: a key defined in no bibliography, so the citation
     cannot resolve; a DOI that isn't registered; an entry whose identifier
     resolves to a different work than it describes; and an entry no
@@ -2637,9 +2637,8 @@ def check_references(
     venue that registers no DOIs looks the same and is named as such.
 
     Answers are cached, so a rerun needs no network. A references-check
-    pipeline stage runs this for one document with --output, so its report
-    is an output that goes stale when the document or a bibliography
-    changes.
+    pipeline stage runs this with --output, so its report is an output
+    that goes stale when the document or a bibliography changes.
 
     Exits with an error if a key resolves to no entry, a DOI isn't
     registered, or an entry contradicts the record it was found in. A
@@ -2651,17 +2650,12 @@ def check_references(
 
     try:
         check = _check_references(
-            wdir=wdir, paths=paths, offline=offline, refresh=refresh
+            path, wdir=wdir, offline=offline, refresh=refresh
         )
     except FileNotFoundError as e:
         raise_error(str(e))
     if output is not None:
-        if len(check.documents) != 1:
-            raise_error(
-                "--output writes one document's report, but "
-                f"{len(check.documents)} were checked; name one document"
-            )
-        write_report(check.documents[0], output, wdir=wdir)
+        write_report(check, output, wdir=wdir)
     if json_output:
         calkit.echo(
             json.dumps(compact(check.model_dump(mode="json")), indent=2)

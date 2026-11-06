@@ -1396,6 +1396,8 @@ export type {
   ResolveReleaseCommentResponse,
   ResolveReleaseCommentResponses,
   Result,
+  ScriptData,
+  ScriptDataFile,
   SearchProjectRefsData,
   SearchProjectRefsError,
   SearchProjectRefsErrors,

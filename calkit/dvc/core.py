@@ -176,6 +176,61 @@ def _hash_dirs_inside_nested_repos() -> None:
 _hash_dirs_inside_nested_repos()
 
 
+def _tolerate_purged_rwlock_entries() -> None:
+    """Stop a process's purged rwlock entries from failing its stage.
+
+    DVC records each running stage's paths in ``.dvc/tmp/rwlock`` with the
+    holder's PID, and any DVC process that can't see that PID, e.g., one on
+    another login node or in a container sharing the project directory,
+    removes the entries as left by a killed process. When the stage finishes,
+    DVC's release then fails a bare ``assert`` on its missing entries, so a
+    stage whose command succeeded is reported as "failed to reproduce" with
+    an empty message and its lock entry is never written. Releasing is all
+    that's left to do at that point, so entries already gone are skipped.
+    """
+    import dvc.rwlock
+    from dvc.utils import relpath
+
+    def warn_purged(urls: list[str]) -> None:
+        if urls:
+            logger.warning(
+                "Another process, e.g., on another machine, removed DVC's "
+                f"lock on {', '.join(repr(relpath(u)) for u in urls)} while "
+                "it was in use"
+            )
+
+    def release_write(lock: dict, info: dict, changes: list[str]) -> None:
+        purged = []
+        for url in changes:
+            if lock.get("write", {}).get(url) != info:
+                purged.append(url)
+                continue
+            del lock["write"][url]
+            if not lock["write"]:
+                del lock["write"]
+        warn_purged(purged)
+
+    def release_read(lock: dict, info: dict, changes: list[str]) -> None:
+        purged = []
+        for url in changes:
+            readers = lock.get("read", {}).get(url, [])
+            if info not in readers:
+                purged.append(url)
+                continue
+            readers.remove(info)
+            if not readers:
+                del lock["read"][url]
+            if not lock["read"]:
+                del lock["read"]
+        warn_purged(purged)
+
+    dvc.rwlock._release_write = release_write
+    dvc.rwlock._release_read = release_read
+
+
+_tolerate_purged_rwlock_entries()
+
+
 # Default seconds to wait for DVC's repo-level lock during a pipeline run.
 #
 # DVC's own default is only 3 seconds (``dvc.lock.DEFAULT_TIMEOUT``), after
@@ -668,6 +723,7 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
             return True
 
     register_ck_scheme()
+    ensure_writable_site_cache()
     dvc.cli._log_unknown_exceptions = log_unknown_exceptions
     links = DropLinks()
     dvc.cli.logger.addFilter(links)
@@ -677,9 +733,34 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
         dvc.cli.logger.removeFilter(links)
 
 
+def ensure_writable_site_cache() -> None:
+    """Point DVC at a per-user site cache if the shared one isn't writable.
+
+    On Linux, DVC keeps per-repo state in ``/var/tmp/dvc``, which every user
+    on a machine shares, so on, e.g., an HPC login node, another user can
+    own it and DVC fails to open any repo. The fallback goes in the
+    environment, so DVC subprocesses use it too.
+    """
+    import dvc.dirs
+
+    if os.environ.get("DVC_SITE_CACHE_DIR"):
+        return
+    # DVC creates whatever is missing, so check the deepest part that exists
+    path = os.path.join(dvc.dirs.site_cache_dir(), "repo")
+    while not os.path.exists(path) and os.path.dirname(path) != path:
+        path = os.path.dirname(path)
+    if os.access(path, os.W_OK | os.X_OK):
+        return
+    cache_home = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache"
+    )
+    os.environ["DVC_SITE_CACHE_DIR"] = os.path.join(cache_home, "dvc", "site")
+
+
 def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     """Return a DVC repo with ``ck://`` scheme support registered."""
     register_ck_scheme()
+    ensure_writable_site_cache()
     return dvc.repo.Repo(wdir)
 
 

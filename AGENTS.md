@@ -86,7 +86,11 @@ low cohesion architecture.
 
 Don't be verbose in comments. One sentence is usually fine, if anything at all.
 
-Agents should typically not be writing prose for human consumption.
-If some is needed, notify
-the human developer and ask them to write in a given file at a specified
-line and make a commit.
+Agents may make minor corrections to prose for human consumption,
+e.g., fixing a sentence a change made inaccurate, without changing what it
+argues.
+Major writing, e.g., a new section or explanation, needs the human
+developer's approval first.
+Flag any new prose an agent writes as needing human attention:
+put a `<!-- TODO: needs human review -->` comment above it in Markdown,
+and call it out in the PR description.

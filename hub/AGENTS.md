@@ -82,6 +82,11 @@ docker compose exec backend bash ./tests-start.sh app/tests/api/routes/test_user
 Note the paths are relative to `backend/`, which is the container's working
 directory, not the repo root.
 
+Backend tests go in the module that mirrors the code they exercise, e.g.,
+tests for routes in `app/api/routes/projects/core.py` go in
+`app/tests/api/routes/projects/test_core.py`.
+Don't start a new test module for a feature.
+
 ## Troubleshooting
 
 ### A frontend request "500s" but the backend looks fine

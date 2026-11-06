@@ -9,7 +9,6 @@ import platform as _platform
 import re
 import shutil
 import subprocess
-import textwrap
 from typing import Annotated, Callable
 
 import dotenv
@@ -1603,45 +1602,17 @@ def check_docker_env(
             remote_digests = ck_docker.get_content_digests(identity)
         # An image store that keeps no manifest gives a build no digest of
         # its own: a manifest names the compressed layers, and nothing
-        # compresses them until a push. Pushing is then the only way to
-        # learn the digest, and a lock without one sends everyone else back
-        # to rebuilding an image that's sitting in the registry.
+        # compresses them until a push. Checking doesn't publish, so the
+        # lock records none, and the containerd image store is the way out
         if not remote_digests and fpath is not None:
-            typer.echo(
-                f"Pushing image to {remote_ref} to record its digest, since "
-                "this Docker engine only assigns one on a push",
-                err=True,
+            warn(
+                "This Docker engine only gives an image a digest when it's "
+                "pushed, so this environment's lock file will record none, "
+                "and anyone else who uses this project will rebuild the "
+                "image rather than pull it; switch Docker to the containerd "
+                "image store so a build gets the digest it will have in the "
+                f"registry: {ck_docker.CONTAINERD_STORE_DOCS_URL}"
             )
-            if not ck_docker.tag_image(tag, remote_ref):
-                warn(f"Failed to tag image as {remote_ref}")
-            else:
-                # Checks run inside pipelines, so a missing credential is
-                # reported rather than prompted for
-                pushed_ok, push_output = ck_docker.push_image_with_login(
-                    remote_ref
-                )
-                if pushed_ok:
-                    pushed_identity = ck_docker.inspect_image_for_lock(tag)
-                    if pushed_identity is not None:
-                        identity = pushed_identity
-                    remote_digests = ck_docker.keep_only_repo_digests(
-                        identity, remote_ref
-                    )["RepoDigests"]
-                else:
-                    # Leaving the tag would fake a registry digest on the
-                    # image, making every later push look unnecessary
-                    ck_docker.untag_image(remote_ref)
-                    hint = ck_docker.registry_login_hint(
-                        remote_ref, push_output
-                    )
-                    warn(
-                        f"Failed to push image to {remote_ref}; its lock "
-                        "file will record no digest, so anyone else who "
-                        "uses this project will rebuild this image rather "
-                        "than pull it\n"
-                        + textwrap.indent(push_output.strip()[-500:], "    ")
-                        + (f"\n{hint}" if hint else "")
-                    )
         identity = dict(identity, RepoDigests=remote_digests)
     elif fpath is None:
         # An environment named after someone else's image is pullable by
@@ -1656,7 +1627,8 @@ def check_docker_env(
                 "it's pushed, so this environment's lock file will record "
                 "none, and anyone else who uses this project will rebuild "
                 "the image rather than pull it; set 'registry' on the "
-                "environment to publish it and record its digest"
+                "environment and switch Docker to the containerd image store "
+                f"({ck_docker.CONTAINERD_STORE_DOCS_URL}) to record one"
             )
         identity = ck_docker.keep_only_repo_digests(identity, None)
     # Read the other platforms from the exact image this one locked, rather

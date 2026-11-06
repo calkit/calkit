@@ -5889,6 +5889,17 @@ export const OverleafLinkPublicSchema = {
       ],
       title: "Current User Access",
     },
+    github_repo_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Repo Url",
+    },
   },
   type: "object",
   required: [
@@ -5900,6 +5911,8 @@ export const OverleafLinkPublicSchema = {
     "current_user_access",
   ],
   title: "OverleafLinkPublic",
+  description:
+    "A folder of a Calkit project an Overleaf project syncs with, and what\nthe current user can do with that project.\n\n``github_repo_url`` is the project's repo on GitHub, in one canonical\nform, e.g., to open it in a Codespace, or none if it's elsewhere.",
 } as const
 
 export const OverleafLookupSchema = {
@@ -11171,6 +11184,14 @@ export const ReproCheckSchema = {
       title: "Scripts Not In Pipeline",
       default: [],
     },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
+      default: [],
+    },
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
@@ -11347,6 +11368,49 @@ export const ResultSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Result",
+} as const
+
+export const ScriptDataSchema = {
+  properties: {
+    external: {
+      type: "string",
+      title: "External",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/ScriptDataFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["external", "path"],
+  title: "ScriptData",
+  description:
+    "Data a script reads from outside the project, and its place in it.",
+} as const
+
+export const ScriptDataFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+      default: "",
+    },
+    content: {
+      type: "string",
+      title: "Content",
+    },
+  },
+  type: "object",
+  required: ["content"],
+  title: "ScriptDataFile",
 } as const
 
 export const SearchResultItemSchema = {
@@ -11719,6 +11783,14 @@ export const StageFromScriptOrNotebookPostSchema = {
       ],
       title: "Produces",
     },
+    data: {
+      items: {
+        $ref: "#/components/schemas/ScriptData",
+      },
+      type: "array",
+      title: "Data",
+      default: [],
+    },
     save: {
       type: "boolean",
       title: "Save",
@@ -11800,6 +11872,22 @@ export const StageFromScriptOrNotebookResponseSchema = {
       },
       type: "array",
       title: "Missing Inputs",
+      default: [],
+    },
+    external_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "External Inputs",
+      default: [],
+    },
+    rewritten: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Rewritten",
       default: [],
     },
     produces: {
@@ -14511,6 +14599,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Scripts Not In Pipeline",
+      default: [],
+    },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
       default: [],
     },
     n_dvc_remotes: {

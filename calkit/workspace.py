@@ -1850,7 +1850,7 @@ def dvc_remote_url(workspace: Workspace) -> str:
 def _dvc(
     args: list[str], wdir: str | None = None
 ) -> subprocess.CompletedProcess:
-
+    calkit.dvc.ensure_writable_site_cache()
     return subprocess.run(
         ["dvc"] + args,
         cwd=wdir,

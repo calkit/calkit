@@ -150,6 +150,9 @@ async function insertIntoEditor(text: string): Promise<"inserted" | "copied"> {
   return "copied";
 }
 
+/** All the data that can be uploaded with a script, as the hub allows. */
+const MAX_SCRIPT_DATA_BYTES = 50_000_000;
+
 /** A value as it reads in a panel row. */
 function valueText(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
@@ -192,6 +195,45 @@ function renderAddScript(
     scriptPath: string;
     content?: string;
   } | null = null;
+  // Data the script reads from outside the project, by how it names it,
+  // and the files that go in the project in its place
+  const data = new Map<
+    string,
+    { path: string; files: { path: string; file: File }[] }
+  >();
+  // Contents are only read to save; until then, where it goes is enough to
+  // see the script read it from there
+  const dataRequest = (withContent: boolean) =>
+    Promise.all(
+      [...data].map(async ([external, { path, files }]) => ({
+        external,
+        path,
+        files: withContent
+          ? await Promise.all(
+              files.map(async (f) => ({
+                path: f.path,
+                content: await fileBase64(f.file),
+              })),
+            )
+          : [],
+      })),
+    );
+  const reread = async () => {
+    if (!request) {
+      return;
+    }
+    const detected = await send({
+      type: "project.stageFromScriptOrNotebook",
+      owner,
+      project,
+      ...request,
+      shows,
+      data: await dataRequest(false),
+    });
+    clear(message);
+    clear(review);
+    renderReview(detected);
+  };
   const fail = (e: unknown) =>
     clear(message).append(
       errorMessage(e instanceof Error ? e.message : String(e)),
@@ -207,6 +249,7 @@ function renderAddScript(
     }
     read.disabled = true;
     message.append(loading("Reading"));
+    data.clear();
     try {
       request = upload
         ? {
@@ -215,21 +258,127 @@ function renderAddScript(
             content: await fileBase64(upload),
           }
         : { scriptPath: typed };
-      const detected = await send({
-        type: "project.stageFromScriptOrNotebook",
-        owner,
-        project,
-        ...request,
-        shows,
-      });
-      clear(message);
-      renderReview(detected);
+      await reread();
     } catch (e) {
       fail(e);
     } finally {
       read.disabled = false;
     }
   });
+  // Where data from outside the project goes in it, uploaded from this
+  // computer, which is likely the one the script ran on
+  const renderExternal = (
+    external: string,
+    detected: StageFromScriptOrNotebookResponse,
+  ) => {
+    const chosen = data.get(external);
+    const name = external.split(/[\\/]/).filter(Boolean).pop() ?? "data";
+    const dest = textInput({ value: chosen?.path ?? `data/${name}` });
+    const files = el("input", {
+      type: "file",
+      attrs: { multiple: "" },
+      style: { display: "none" },
+    });
+    const folder = el("input", {
+      type: "file",
+      attrs: { webkitdirectory: "" },
+      style: { display: "none" },
+    });
+    const pickFiles = el("button", {
+      class: "action secondary",
+      text: "Choose files",
+    });
+    const pickFolder = el("button", {
+      class: "action secondary",
+      text: "Choose a folder",
+    });
+    const note = el("div", { class: "small" });
+    const use = async (picked: { path: string; file: File }[]) => {
+      const size = [...data]
+        .filter(([other]) => other !== external)
+        .flatMap(([, d]) => d.files)
+        .concat(picked)
+        .reduce((n, f) => n + f.file.size, 0);
+      if (size > MAX_SCRIPT_DATA_BYTES) {
+        clear(note).append(
+          errorMessage(
+            `That's ${Math.ceil(size / 1e6)} MB, more than the ` +
+              `${MAX_SCRIPT_DATA_BYTES / 1e6} MB that can be uploaded here.`,
+          ),
+        );
+        return;
+      }
+      data.set(external, {
+        path: dest.value.trim() || `data/${name}`,
+        files: picked,
+      });
+      clear(note).append(loading("Reading"));
+      try {
+        await reread();
+      } catch (e) {
+        data.delete(external);
+        clear(note).append(
+          errorMessage(e instanceof Error ? e.message : String(e)),
+        );
+      }
+    };
+    pickFiles.addEventListener("click", () => files.click());
+    pickFolder.addEventListener("click", () => folder.click());
+    files.addEventListener("change", () => {
+      const list = [...(files.files ?? [])];
+      // One file is the data itself when it's the one the script names, or
+      // else one in that folder
+      const single = list.length === 1 && list[0].name === name;
+      if (list.length) {
+        void use(list.map((file) => ({ path: single ? "" : file.name, file })));
+      }
+    });
+    folder.addEventListener("change", () => {
+      const list = [...(folder.files ?? [])];
+      if (list.length) {
+        void use(
+          list.map((file) => ({
+            path: file.webkitRelativePath.split("/").slice(1).join("/"),
+            file,
+          })),
+        );
+      }
+    });
+    dest.addEventListener("change", () => {
+      if (chosen) {
+        void use(chosen.files);
+      }
+    });
+    const n = chosen?.files.length ?? 0;
+    const status = !chosen
+      ? `Reads ${external}, which is outside the project, so it will only ` +
+        "run on the computer it came from. Upload it to read it from the " +
+        "project instead:"
+      : detected.rewritten?.includes(external)
+      ? `Reads ${external}, outside the project. ${n} ` +
+        `${n === 1 ? "file" : "files"} will be uploaded to ${chosen.path}, ` +
+        "and the script will read them from there."
+      : `${n} ${n === 1 ? "file" : "files"} will be uploaded to ` +
+        `${chosen.path}, but Calkit couldn't find where the script names ` +
+        `${external}; change it to read ${chosen.path}.`;
+    return el("div", { class: "stack", style: { marginTop: "4px" } }, [
+      el("div", {
+        class: "small",
+        style: {
+          color:
+            chosen && detected.rewritten?.includes(external)
+              ? ""
+              : "var(--ck-warning)",
+        },
+        text: status,
+      }),
+      dest,
+      el("div", { class: "actions" }, [pickFiles, pickFolder]),
+      files,
+      folder,
+      note,
+    ]);
+  };
   const renderReview = (detected: StageFromScriptOrNotebookResponse) => {
     review.append(
       el("div", { class: "small" }, [
@@ -267,6 +416,12 @@ function renderAddScript(
             "Add it, or record where it came from, before running.",
         }),
       );
+    }
+    for (const external of new Set([
+      ...data.keys(),
+      ...(detected.external_inputs ?? []),
+    ])) {
+      review.append(renderExternal(external, detected));
     }
     // Which output this is, when the script writes several or names it
     // differently from the paper
@@ -317,7 +472,7 @@ function renderAddScript(
         return;
       }
       save.disabled = true;
-      clear(message).append(loading("Saving"));
+      clear(message).append(loading(data.size ? "Uploading" : "Saving"));
       try {
         const saved = await send({
           type: "project.stageFromScriptOrNotebook",
@@ -326,6 +481,7 @@ function renderAddScript(
           ...request,
           shows,
           produces: chosen(),
+          data: await dataRequest(true),
           save: true,
         });
         // Brings the \ckfigure into the editor
@@ -2457,6 +2613,18 @@ function renderStatus(
           class: "dim small",
           text: `Synced folder: ${status.path}`,
         }),
+        // Where to work on what the paper shows, without installing anything
+        link.github_repo_url
+          ? el("a", {
+              class: "small",
+              text: "Open in Codespaces",
+              href: `https://codespaces.new${
+                new URL(link.github_repo_url).pathname
+              }?quickstart=1`,
+              title: "Work on the project in a GitHub Codespace",
+              attrs: { target: "_blank" },
+            })
+          : null,
       ]),
       status.in_sync
         ? el("span", { class: "badge ok", text: "in sync" })
@@ -3772,6 +3940,10 @@ const RAIL_STYLES = `
     padding: 10px 12px; min-height: 100%; box-sizing: border-box;
     color: var(--ck-fg); background: var(--ck-bg);
   }
+  .rail .project {
+    flex-direction: column; align-items: flex-start; gap: 2px;
+    overflow-wrap: anywhere;
+  }
   .rail h3 {
     font-size: 12px; font-weight: 600; margin: 14px 0 4px;
     text-transform: uppercase; letter-spacing: 0.04em;
@@ -3866,11 +4038,24 @@ function drawRail(): void {
     link.project_name,
   );
   body.append(
-    el("a", {
-      text: linkKey(link),
-      href: base,
-      attrs: { target: "_blank" },
-    }),
+    el("div", { class: "row project" }, [
+      el("a", {
+        text: linkKey(link),
+        href: base,
+        attrs: { target: "_blank" },
+      }),
+      link.github_repo_url
+        ? el("a", {
+            class: "small",
+            text: "Open in Codespaces",
+            href: `https://codespaces.new${
+              new URL(link.github_repo_url).pathname
+            }?quickstart=1`,
+            title: "Work on the project in a GitHub Codespace",
+            attrs: { target: "_blank" },
+          })
+        : null,
+    ]),
   );
   // What's going on between the paper and its project
   const running = activeRun();

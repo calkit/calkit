@@ -3,6 +3,7 @@
 import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, get_args
+from urllib.parse import urlparse
 
 import sqlalchemy
 
@@ -921,11 +922,11 @@ class Project(ProjectBase, table=True):
 
     @property
     def github_repo(self) -> str | None:
-        if not self.git_repo_url.startswith("https://github.com"):
-            return
-        return self.git_repo_url.removeprefix(
-            "https://github.com/"
-        ).removesuffix(".git")
+        # Any form project creation accepts, e.g., www. or http://
+        parsed = urlparse(self.git_repo_url or "")
+        if parsed.hostname not in ("github.com", "www.github.com"):
+            return None
+        return parsed.path.strip("/").removesuffix(".git") or None
 
 
 class ProjectPublic(ProjectBase):

@@ -69,6 +69,8 @@ export interface OverleafLinkPublic {
   project_name: string;
   project_title: string;
   current_user_access?: "read" | "write" | "admin" | "owner" | null;
+  /** Its repo on GitHub, e.g., `https://github.com/owner/name`. */
+  github_repo_url?: string | null;
 }
 
 export interface OverleafLookup {
@@ -230,6 +232,10 @@ export interface StageFromScriptOrNotebookResponse {
   outputs: string[];
   /** Inputs that aren't in the project and that no stage produces. */
   missing_inputs: string[];
+  /** Data read from outside the project, as the script names it. */
+  external_inputs?: string[];
+  /** Data paths changed to read from the project instead, as named. */
+  rewritten?: string[];
   /** Which output is what the document shows. */
   produces?: string | null;
   /** Documents changed to show it from there, with `\ckfigure`. */

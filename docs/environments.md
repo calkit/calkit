@@ -396,12 +396,17 @@ one it has once it's pushed, so pushing it leaves the lock alone.
     That holds where the Docker daemon uses the containerd image store,
     which writes a manifest for an image as it builds it. The older image
     store writes none until the image is pushed, so there's no digest to
-    record before then, and checking pushes the image itself to get one.
+    record before then, and checking, which doesn't push, records none and
+    warns.
     With no registry set there's nowhere to push and nothing to record:
     the lock file names no image to pull, so everyone else rebuilds it,
     which Calkit warns about after building. `docker info` reports which
     store is in use, the containerd one as a driver type of
     `io.containerd.snapshotter.v1`.
+
+    In GitHub Actions, the `calkit/calkit/actions/run` action switches
+    Linux runners to the containerd image store when the project has Docker
+    environments.
 
 To rebuild or repull an image and write fresh lock files, e.g., after an
 image's tag has been moved out from under the digest in the lock, run:

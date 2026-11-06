@@ -3437,6 +3437,12 @@ export type OrgsResponse = {
 
 /**
  * OverleafLinkPublic
+ *
+ * A folder of a Calkit project an Overleaf project syncs with, and what
+ * the current user can do with that project.
+ *
+ * ``github_repo_url`` is the project's repo on GitHub, in one canonical
+ * form, e.g., to open it in a Codespace, or none if it's elsewhere.
  */
 export type OverleafLinkPublic = {
   /**
@@ -3463,6 +3469,10 @@ export type OverleafLinkPublic = {
    * Current User Access
    */
   current_user_access: "read" | "write" | "admin" | "owner" | null
+  /**
+   * Github Repo Url
+   */
+  github_repo_url?: string | null
 }
 
 /**
@@ -6361,6 +6371,10 @@ export type ReproCheck = {
    */
   scripts_not_in_pipeline?: Array<string>
   /**
+   * Paths Outside Project
+   */
+  paths_outside_project?: Array<string>
+  /**
    * N Dvc Remotes
    */
   n_dvc_remotes: number
@@ -6449,6 +6463,40 @@ export type Result = {
    */
   key?: string | null
   stage_status?: StageStatus | null
+}
+
+/**
+ * ScriptData
+ *
+ * Data a script reads from outside the project, and its place in it.
+ */
+export type ScriptData = {
+  /**
+   * External
+   */
+  external: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Files
+   */
+  files?: Array<ScriptDataFile>
+}
+
+/**
+ * ScriptDataFile
+ */
+export type ScriptDataFile = {
+  /**
+   * Path
+   */
+  path?: string
+  /**
+   * Content
+   */
+  content: string
 }
 
 /**
@@ -6680,6 +6728,10 @@ export type StageFromScriptOrNotebookPost = {
    */
   produces?: string | null
   /**
+   * Data
+   */
+  data?: Array<ScriptData>
+  /**
    * Save
    */
   save?: boolean
@@ -6729,6 +6781,14 @@ export type StageFromScriptOrNotebookResponse = {
    * Missing Inputs
    */
   missing_inputs?: Array<string>
+  /**
+   * External Inputs
+   */
+  external_inputs?: Array<string>
+  /**
+   * Rewritten
+   */
+  rewritten?: Array<string>
   /**
    * Produces
    */
@@ -8291,6 +8351,10 @@ export type ReproCheckWritable = {
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
+  /**
+   * Paths Outside Project
+   */
+  paths_outside_project?: Array<string>
   /**
    * N Dvc Remotes
    */

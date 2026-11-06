@@ -4,6 +4,7 @@ import logging
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import dvc.repo
@@ -148,6 +149,67 @@ def test_tolerate_lock_release_failures(tmp_dir, caplog):
         )
     finally:
         zc.lockfile._unlock_file = original
+
+
+def test_tolerate_purged_rwlock_entries(
+    tmp_dir: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    import sys
+
+    import dvc.rwlock
+
+    # Importing calkit.dvc installs the patch
+    import calkit.dvc  # noqa: F401
+
+    ours = {"pid": 1, "cmd": "dvc repro s@a"}
+    theirs = {"pid": 2, "cmd": "dvc repro s@b"}
+    lock = {
+        "write": {"a.txt": ours, "b.txt": theirs},
+        "read": {"dep.txt": [ours, theirs], "a.txt": [ours]},
+    }
+    # Releasing entries that are still there removes only ours
+    with caplog.at_level(logging.WARNING, logger="calkit.dvc"):
+        dvc.rwlock._release_write(lock, ours, ["a.txt"])
+        dvc.rwlock._release_read(lock, ours, ["dep.txt", "a.txt"])
+    assert lock == {"write": {"b.txt": theirs}, "read": {"dep.txt": [theirs]}}
+    assert not caplog.records
+    # Entries another process already removed are skipped with a warning
+    # rather than failing a bare assert
+    with caplog.at_level(logging.WARNING, logger="calkit.dvc"):
+        dvc.rwlock._release_write(lock, ours, ["a.txt"])
+        dvc.rwlock._release_read(lock, ours, ["dep.txt", "a.txt"])
+        dvc.rwlock._release_write({}, ours, ["a.txt"])
+        dvc.rwlock._release_read({}, ours, ["a.txt"])
+    assert lock == {"write": {"b.txt": theirs}, "read": {"dep.txt": [theirs]}}
+    assert len(caplog.records) == 4
+    assert "removed DVC's lock on 'a.txt'" in caplog.records[0].getMessage()
+    # A stage whose entries are purged mid-run, as a DVC process on another
+    # machine does since it can't see our PID, still succeeds and is recorded
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    with open("purge.py", "w") as f:
+        f.write(
+            "import json\n"
+            "with open('.dvc/tmp/rwlock', 'w') as f:\n"
+            "    json.dump({}, f)\n"
+            "with open('out.txt', 'w') as f:\n"
+            "    f.write('sup')\n"
+        )
+    py = sys.executable.replace("\\", "/")
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  purged:\n"
+            f"    cmd: '\"{py}\" purge.py'\n"
+            "    deps:\n"
+            "      - purge.py\n"
+            "    outs:\n"
+            "      - out.txt\n"
+        )
+    assert calkit.dvc.run_dvc_command(["repro"]) == 0
+    with open("dvc.lock") as f:
+        lock_file = calkit.ryaml.load(f)
+    assert lock_file["stages"]["purged"]["outs"][0]["path"] == "out.txt"
 
 
 def test_memoized_hashes(tmp_dir, monkeypatch):
@@ -938,3 +1000,44 @@ def test_split_lock_stage_name():
     assert calkit.dvc.split_lock_stage_name("sub\\dvc.yaml:a") == ("sub", "a")
     # A colon that isn't after a dvc.yaml is part of the name
     assert calkit.dvc.split_lock_stage_name("a:b") == (None, "a:b")
+
+
+def test_ensure_writable_site_cache(tmp_path, monkeypatch):
+    import dvc.dirs
+
+    if sys.platform == "win32":
+        pytest.skip("relies on POSIX permissions")
+    if os.geteuid() == 0:
+        pytest.skip("root can write anywhere")
+    shared = tmp_path / "var-tmp" / "dvc"
+    fallback = str(tmp_path / "cache" / "dvc" / "site")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.delenv("DVC_SITE_CACHE_DIR", raising=False)
+    monkeypatch.setattr(
+        dvc.dirs,
+        "site_cache_dir",
+        lambda config=None: os.getenv("DVC_SITE_CACHE_DIR") or str(shared),
+    )
+    # Missing under a writable parent, so DVC can create it
+    calkit.dvc.ensure_writable_site_cache()
+    assert "DVC_SITE_CACHE_DIR" not in os.environ
+    # Another user's, which we can't write to
+    (shared / "repo").mkdir(parents=True)
+    (shared / "repo").chmod(0o555)
+    try:
+        calkit.dvc.ensure_writable_site_cache()
+        assert os.environ["DVC_SITE_CACHE_DIR"] == fallback
+        # DVC then opens repos with the fallback
+        monkeypatch.chdir(tmp_path)
+        subprocess.check_call(["git", "init", "-q", "proj"])
+        subprocess.check_call(["dvc", "init", "-q"], cwd="proj")
+        monkeypatch.delenv("DVC_SITE_CACHE_DIR")
+        repo = calkit.dvc.get_dvc_repo("proj")
+        assert repo.site_cache_dir.startswith(fallback)
+        repo.close()
+        # One the user set is left alone
+        monkeypatch.setenv("DVC_SITE_CACHE_DIR", "/somewhere")
+        calkit.dvc.ensure_writable_site_cache()
+        assert os.environ["DVC_SITE_CACHE_DIR"] == "/somewhere"
+    finally:
+        (shared / "repo").chmod(0o755)

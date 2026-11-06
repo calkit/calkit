@@ -1,5 +1,6 @@
 """Tests for ``resources``."""
 
+import json
 import os
 import re
 
@@ -24,9 +25,27 @@ def test_resources(monkeypatch):
         "recommendations"
     ]
     customizations = spec["customizations"]["vscode"]
+    base_settings = calkit.resources.load_json("devcontainer", "base.json")[
+        "customizations"
+    ]["vscode"]["settings"]
     for key, value in settings.items():
-        assert customizations["settings"][key] == value
-    assert customizations["extensions"] == extensions
+        assert customizations["settings"][key] == base_settings.get(key, value)
+    # The base can leave out shared extensions in the container, e.g., ones
+    # that only clutter the sidebar there
+    excluded = calkit.resources.load_json("devcontainer", "base.json")[
+        "customizations"
+    ]["vscode"]["extensions"]
+    assert excluded
+    assert "-lakefs.lakefs-dvc" in excluded
+    in_container = [e for e in extensions if f"-{e}" not in excluded]
+    assert "lakefs.lakefs-dvc" not in in_container
+    assert customizations["extensions"] == in_container + excluded
+    for ext in excluded:
+        assert re.fullmatch(r"-[\w-]+\.[\w-]+", ext), ext
+    # PDFs open in Calkit's viewer, in the container too
+    assert customizations["settings"]["workbench.editorAssociations"] == {
+        "*.pdf": "calkit.pdfReview"
+    }
     # Extension IDs are 'publisher.name', and a typo in one means it silently
     # never gets installed
     assert len(set(extensions)) == len(extensions)
@@ -54,8 +73,58 @@ def test_resources(monkeypatch):
         "vscode"
     ]
     assert merged["snippets"] == ["python"]
-    assert merged["extensions"] == extensions
+    assert merged["extensions"] == customizations["extensions"]
     assert merged["settings"] == customizations["settings"]
+
+
+def test_make_devcontainer_spec(tmp_path):
+    spec = calkit.resources.load_json(
+        "devcontainer", calkit.resources.DEVCONTAINER_FNAME
+    )
+    julia_features = [k for k in spec["features"] if "julia" in k]
+    assert julia_features
+    assert (
+        "julialang.language-julia"
+        in spec["customizations"]["vscode"]["extensions"]
+    )
+    # Without a Julia environment, Julia isn't installed
+    for ck_info in [{}, {"environments": {"py": {"kind": "uv"}}}]:
+        txt = calkit.resources.make_devcontainer_spec(ck_info, wdir=tmp_path)
+        assert txt.endswith("}\n")
+        rendered = json.loads(txt)
+        assert not [k for k in rendered["features"] if "julia" in k]
+        assert (
+            "julialang.language-julia"
+            not in rendered["customizations"]["vscode"]["extensions"]
+        )
+        assert (
+            "ghcr.io/devcontainers/features/docker-in-docker:2"
+            in (rendered["features"])
+        )
+    # With one, the spec is the bundled one as-is, whether it's defined in
+    # place in a switch or only in a subproject
+    julia = {"kind": "julia", "julia": "1.11"}
+    switch = {
+        "kind": "switch",
+        "switch": [{"when": [{"os_is": "linux"}], "use": julia}],
+    }
+    for ck_info in [
+        {"environments": {"jl": julia}},
+        {"environments": {"jl": switch}},
+    ]:
+        txt = calkit.resources.make_devcontainer_spec(ck_info, wdir=tmp_path)
+        assert json.loads(txt) == spec
+    (tmp_path / "sim").mkdir()
+    with open(tmp_path / "sim" / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"jl": julia}}, f)
+    ck_info = {"subprojects": [{"path": "sim"}]}
+    txt = calkit.resources.make_devcontainer_spec(ck_info, wdir=tmp_path)
+    assert json.loads(txt) == spec
+    # Read from the project when not given
+    with open(tmp_path / "calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    txt = calkit.resources.make_devcontainer_spec(wdir=tmp_path)
+    assert json.loads(txt) == spec
 
 
 def test_github_actions_workflow(tmp_path):

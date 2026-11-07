@@ -679,6 +679,9 @@ class Settings(BaseSettings):
     # the check only notifies, and 'no-check' turns the check off
     auto_upgrade: bool | Literal["no-check"] = True
     run_history_length: int = 10
+    # What 'calkit open project' opens a project in: 'vscode', 'jupyterlab',
+    # or a command that takes the project's folder, e.g., 'cursor'
+    default_editor: str = "vscode"
     github_token: KeyringOptionalSecret | None = None
     # Kept apart from github_token, since pushing to the GitHub Container
     # Registry needs the 'write:packages' scope, which the token Calkit uses

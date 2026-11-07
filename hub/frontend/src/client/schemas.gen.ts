@@ -3042,6 +3042,32 @@ export const FsOpResponseSchema = {
     "Response describing how to perform a file system operation\n(get/put/exists/list) for a given path within the project.",
 } as const
 
+export const GitHubActionsRunOptionsSchema = {
+  properties: {
+    workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Workflow",
+    },
+    inputs: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Inputs",
+      default: {},
+    },
+  },
+  type: "object",
+  title: "GitHubActionsRunOptions",
+} as const
+
 export const GitHubInstallationsSchema = {
   properties: {
     total_count: {
@@ -4780,6 +4806,19 @@ export const OperationResultSchema = {
   description: "Result for file operations like delete, move, copy.",
 } as const
 
+export const OrgMemberPatchSchema = {
+  properties: {
+    role: {
+      type: "string",
+      enum: ["read", "write", "admin", "owner"],
+      title: "Role",
+    },
+  },
+  type: "object",
+  required: ["role"],
+  title: "OrgMemberPatch",
+} as const
+
 export const OrgMemberPostSchema = {
   properties: {
     username: {
@@ -5022,7 +5061,14 @@ export const OrgUserPublicSchema = {
       title: "Name",
     },
     github_name: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Github Name",
     },
     role: {
@@ -5088,6 +5134,17 @@ export const OverleafLinkPublicSchema = {
       ],
       title: "Current User Access",
     },
+    github_repo_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Repo Url",
+    },
   },
   type: "object",
   required: [
@@ -5099,6 +5156,8 @@ export const OverleafLinkPublicSchema = {
     "current_user_access",
   ],
   title: "OverleafLinkPublic",
+  description:
+    "A folder of a Calkit project an Overleaf project syncs with, and what\nthe current user can do with that project.\n\n``github_repo_url`` is the project's repo on GitHub, in one canonical\nform, e.g., to open it in a Codespace, or none if it's elsewhere.",
 } as const
 
 export const OverleafLookupSchema = {
@@ -5416,6 +5475,262 @@ export const PipelinePutSchema = {
   type: "object",
   required: ["yaml"],
   title: "PipelinePut",
+} as const
+
+export const PipelineRunSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    started: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started",
+    },
+    finished: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Finished",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    started_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started By",
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    github_run_id: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Run Id",
+    },
+  },
+  type: "object",
+  required: ["id", "location", "status", "created"],
+  title: "PipelineRun",
+  description: "A run of the pipeline, wherever it ran.",
+} as const
+
+export const PipelineRunLogPartSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    phases: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPhase",
+      },
+      type: "array",
+      title: "Phases",
+      default: [],
+    },
+    log: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Log",
+    },
+    log_truncated: {
+      type: "boolean",
+      title: "Log Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPart",
+  description: "Part of a run's log, e.g., a GitHub Actions job's.",
+} as const
+
+export const PipelineRunLogPhaseSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPhase",
+} as const
+
+export const PipelineRunLogsSchema = {
+  properties: {
+    parts: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPart",
+      },
+      type: "array",
+      title: "Parts",
+      default: [],
+    },
+  },
+  type: "object",
+  title: "PipelineRunLogs",
+} as const
+
+export const PipelineRunPostSchema = {
+  properties: {
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+      default: "github-actions",
+    },
+    github_actions: {
+      $ref: "#/components/schemas/GitHubActionsRunOptions",
+    },
+  },
+  type: "object",
+  title: "PipelineRunPost",
+} as const
+
+export const PipelineRunsSchema = {
+  properties: {
+    runs: {
+      items: {
+        $ref: "#/components/schemas/PipelineRun",
+      },
+      type: "array",
+      title: "Runs",
+      default: [],
+    },
+    total: {
+      type: "integer",
+      title: "Total",
+      default: 0,
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    can_start: {
+      type: "boolean",
+      title: "Can Start",
+      default: false,
+    },
+    cannot_start_reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Cannot Start Reason",
+    },
+  },
+  type: "object",
+  title: "PipelineRuns",
 } as const
 
 export const PipelineStageSchema = {
@@ -7316,6 +7631,13 @@ export const ProvenanceSchema = {
       },
       type: "array",
       title: "Inputs",
+    },
+    input_to_stages: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Input To Stages",
     },
     stage_status: {
       anyOf: [
@@ -10040,6 +10362,14 @@ export const ReproCheckSchema = {
       title: "Scripts Not In Pipeline",
       default: [],
     },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
+      default: [],
+    },
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
@@ -10216,6 +10546,49 @@ export const ResultSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Result",
+} as const
+
+export const ScriptDataSchema = {
+  properties: {
+    external: {
+      type: "string",
+      title: "External",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/ScriptDataFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["external", "path"],
+  title: "ScriptData",
+  description:
+    "Data a script reads from outside the project, and its place in it.",
+} as const
+
+export const ScriptDataFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+      default: "",
+    },
+    content: {
+      type: "string",
+      title: "Content",
+    },
+  },
+  type: "object",
+  required: ["content"],
+  title: "ScriptDataFile",
 } as const
 
 export const SearchResultItemSchema = {
@@ -10573,6 +10946,14 @@ export const StageFromScriptOrNotebookPostSchema = {
       ],
       title: "Produces",
     },
+    data: {
+      items: {
+        $ref: "#/components/schemas/ScriptData",
+      },
+      type: "array",
+      title: "Data",
+      default: [],
+    },
     save: {
       type: "boolean",
       title: "Save",
@@ -10654,6 +11035,22 @@ export const StageFromScriptOrNotebookResponseSchema = {
       },
       type: "array",
       title: "Missing Inputs",
+      default: [],
+    },
+    external_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "External Inputs",
+      default: [],
+    },
+    rewritten: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Rewritten",
       default: [],
     },
     produces: {
@@ -12870,6 +13267,14 @@ export const ReproCheckWritableSchema = {
       },
       type: "array",
       title: "Scripts Not In Pipeline",
+      default: [],
+    },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
       default: [],
     },
     n_dvc_remotes: {

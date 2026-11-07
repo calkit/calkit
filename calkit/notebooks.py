@@ -126,7 +126,7 @@ def clean_notebook_outputs(path: str):
             nb = json.load(f)
         except json.JSONDecodeError as e:
             raise ValueError(f"Error decoding JSON from notebook: {e}")
-    with open(fpath_out, "w", encoding="utf-8") as f:
+    with open(fpath_out, "w", encoding="utf-8", newline="\n") as f:
         json.dump(clean_notebook(nb), f, indent=2)
 
 

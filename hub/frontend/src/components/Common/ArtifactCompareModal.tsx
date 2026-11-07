@@ -771,6 +771,15 @@ function ManualExportForm({
   )
 }
 
+/** All the data that can be uploaded with a script, as the hub allows. */
+const MAX_SCRIPT_DATA_BYTES = 50_000_000
+
+/** Data from outside the project, and the files uploaded in its place. */
+interface ScriptDataChoice {
+  path: string
+  files: { path: string; file: File }[]
+}
+
 /** Make the stage that produces a file from the script that writes it. */
 function StageFromScriptForm({
   ownerName,
@@ -791,18 +800,45 @@ function StageFromScriptForm({
   const [detected, setDetected] =
     useState<StageFromScriptOrNotebookResponse | null>(null)
   const [produces, setProduces] = useState<string | undefined>()
+  // Data the script reads from outside the project, by how it names it,
+  // and the files that go in the project in its place
+  const [data, setData] = useState<Record<string, ScriptDataChoice>>({})
+  const [dests, setDests] = useState<Record<string, string>>({})
   const exts =
     kind === "notebook" ? [".ipynb"] : [".py", ".r", ".jl", ".m", ".sh"]
-  const post = async (save: boolean) => {
-    const content = file
-      ? await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () =>
-            resolve(String(reader.result).replace(/^data:[^,]*,/, ""))
-          reader.onerror = () => reject(reader.error)
-          reader.readAsDataURL(file)
-        })
-      : null
+  const base64 = (f: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () =>
+        resolve(String(reader.result).replace(/^data:[^,]*,/, ""))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(f)
+    })
+  const destFor = (external: string) =>
+    dests[external] ??
+    data[external]?.path ??
+    `data/${external.split(/[\\/]/).filter(Boolean).pop() ?? "data"}`
+  const post = async (
+    save: boolean,
+    chosen: Record<string, ScriptDataChoice> = data,
+  ) => {
+    const content = file ? await base64(file) : null
+    // Contents are only read to save; until then, where it goes is enough
+    // to see the script read it from there
+    const scriptData = await Promise.all(
+      Object.entries(chosen).map(async ([external, d]) => ({
+        external,
+        path: d.path,
+        files: save
+          ? await Promise.all(
+              d.files.map(async (f) => ({
+                path: f.path,
+                content: await base64(f.file),
+              })),
+            )
+          : [],
+      })),
+    )
     return ProjectsService.postProjectStageFromScriptOrNotebook({
       owner_name: ownerName,
       project_name: projectName,
@@ -812,18 +848,38 @@ function StageFromScriptForm({
         content,
         shows,
         produces: save ? produces : null,
+        data: scriptData,
         save,
       },
     }).then((response) => response.data)
   }
   const readMutation = useMutation({
-    mutationFn: () => post(false),
+    mutationFn: (chosen: Record<string, ScriptDataChoice>) =>
+      post(false, chosen),
     onSuccess: (data) => {
       setDetected(data)
       setProduces(data.produces ?? data.outputs?.[0])
     },
     onError: (err: AxiosError) => handleError(err, showToast),
   })
+  const choose = (external: string, files: ScriptDataChoice["files"]) => {
+    const next = { ...data, [external]: { path: destFor(external), files } }
+    const size = Object.values(next)
+      .flatMap((d) => d.files)
+      .reduce((n, f) => n + f.file.size, 0)
+    if (size > MAX_SCRIPT_DATA_BYTES) {
+      showToast(
+        "Too large to upload here",
+        `That's ${Math.ceil(size / 1e6)} MB, more than the ${
+          MAX_SCRIPT_DATA_BYTES / 1e6
+        } MB that can be uploaded here.`,
+        "error",
+      )
+      return
+    }
+    setData(next)
+    readMutation.mutate(next)
+  }
   const saveMutation = useMutation({
     mutationFn: () => post(true),
     onSuccess: (data) => {
@@ -866,7 +922,10 @@ function StageFromScriptForm({
         size="xs"
         isDisabled={!scriptPath && !file}
         isLoading={readMutation.isPending}
-        onClick={() => readMutation.mutate()}
+        onClick={() => {
+          setData({})
+          readMutation.mutate({})
+        }}
       >
         Read the {kind}
       </Button>
@@ -885,6 +944,88 @@ function StageFromScriptForm({
               Not in the project yet: {detected.missing_inputs.join(", ")}
             </Text>
           ) : null}
+          {[
+            ...new Set([
+              ...Object.keys(data),
+              ...(detected.external_inputs ?? []),
+            ]),
+          ].map((external) => {
+            const chosen = data[external]
+            const n = chosen?.files.length ?? 0
+            const files = `${n} ${n === 1 ? "file" : "files"}`
+            const rewritten = detected.rewritten?.includes(external)
+            return (
+              <Box key={external} mt={1}>
+                <Text color={chosen && rewritten ? "gray.500" : "orange.400"}>
+                  {!chosen
+                    ? `Reads ${external}, which is outside the project, so it will only run on the computer it came from. Upload it to read it from the project instead:`
+                    : rewritten
+                      ? `Reads ${external}, outside the project. ${files} will be uploaded to ${chosen.path}, and the script will read them from there.`
+                      : `${files} will be uploaded to ${chosen.path}, but Calkit couldn't find where the script names ${external}; change it to read ${chosen.path}.`}
+                </Text>
+                <Flex gap={2} align="center" wrap="wrap">
+                  <Input
+                    size="sm"
+                    maxW="xs"
+                    value={destFor(external)}
+                    onChange={(e) =>
+                      setDests({ ...dests, [external]: e.target.value })
+                    }
+                    onBlur={() => chosen && choose(external, chosen.files)}
+                  />
+                  <Button size="xs" as="label" cursor="pointer">
+                    Choose files
+                    <input
+                      type="file"
+                      multiple
+                      hidden
+                      onChange={(e) => {
+                        const list = [...(e.target.files ?? [])]
+                        // One file is the data itself when it's the one
+                        // the script names, or else one in that folder
+                        const single =
+                          list.length === 1 &&
+                          list[0].name ===
+                            external.split(/[\\/]/).filter(Boolean).pop()
+                        if (list.length) {
+                          choose(
+                            external,
+                            list.map((f) => ({
+                              path: single ? "" : f.name,
+                              file: f,
+                            })),
+                          )
+                        }
+                      }}
+                    />
+                  </Button>
+                  <Button size="xs" as="label" cursor="pointer">
+                    Choose a folder
+                    <input
+                      type="file"
+                      hidden
+                      {...{ webkitdirectory: "" }}
+                      onChange={(e) => {
+                        const list = [...(e.target.files ?? [])]
+                        if (list.length) {
+                          choose(
+                            external,
+                            list.map((f) => ({
+                              path: f.webkitRelativePath
+                                .split("/")
+                                .slice(1)
+                                .join("/"),
+                              file: f,
+                            })),
+                          )
+                        }
+                      }}
+                    />
+                  </Button>
+                </Flex>
+              </Box>
+            )
+          })}
           {detected.outputs?.length ? (
             <RadioGroup value={produces} onChange={setProduces} mt={1}>
               <Text color="gray.500">

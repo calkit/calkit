@@ -209,7 +209,7 @@ def conda_env_name():
 @pytest.mark.xdist_group("conda")
 @skipif_windows_conda
 def test_check_env_locks_every_platform(tmp_dir, conda_env_name):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -317,7 +317,7 @@ def test_write_cross_platform_locks(tmp_path, monkeypatch):
     import json
     import types
 
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(envs, "_conda_venv_platform", lambda: "linux-64")

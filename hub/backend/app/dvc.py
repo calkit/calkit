@@ -13,10 +13,10 @@ from functools import lru_cache
 from typing import Any
 
 import networkx as nx
-from dvc.commands import dag
 from dvc.exceptions import DvcException
 from dvc.fs import MemoryFileSystem
 from dvc.repo import Repo
+from dvc.repo.graph import get_pipelines
 from dvc.utils import relpath
 
 import calkit.dvc
@@ -74,12 +74,21 @@ def read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
         return None
 
 
+# Past this many arrows, labeling them hides the graph they're on
+MAX_LABELED_EDGES = 30
+
+
 def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
     """Create a Mermaid diagram from a pipeline file (typically ``dvc.yaml``).
 
     DVC reads the pipeline from an in-memory filesystem, so nothing is
     written to disk and the process's working directory is left alone.
     """
+
+    def quoted(text: str) -> str:
+        # Inside a quoted Mermaid label, so a project's names can't end it
+        # and add their own statements
+        return re.sub(r"[\r\n]+", " ", text.replace('"', "#quot;"))
 
     class RootedMemoryFileSystem(MemoryFileSystem):  # type: ignore[misc]
         # DVC resolves relative paths against this, so it has to be the
@@ -103,8 +112,43 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
             # process's working directory, e.g., ../../dvc.yaml:name
             e.args = (str(e).replace(f"{relpath('/dvc.yaml')}:", ""),)
             raise
+        # What each arrow carries: the upstream stage's outputs the
+        # downstream one reads, or that contain or are inside what it reads
+        carried: dict[tuple[str, str], list[str]] = {}
+        for downstream, upstream in graph.edges:
+            reads = [d.fs_path for d in downstream.deps]
+            carried[(upstream.name, downstream.name)] = [
+                out.fs_path.lstrip("/")
+                for out in upstream.outs
+                if any(
+                    path == out.fs_path
+                    or path.startswith(out.fs_path.rstrip("/") + "/")
+                    or out.fs_path.startswith(path.rstrip("/") + "/")
+                    for path in reads
+                )
+            ]
         graph = nx.relabel_nodes(graph, lambda stage: stage.name)
-    mermaid: str = dag._show_mermaid(graph, markdown=False)
+    # As DVC writes it, so node IDs and order match ``dvc dag --mermaid``,
+    # with the arrows labeled by file name, a couple at most, unless there
+    # are so many arrows that labels would bury the graph
+    labeled = len(carried) <= MAX_LABELED_EDGES
+    mermaid = "flowchart TD"
+    total_nodes = 0
+    for pipeline_graph in get_pipelines(graph):
+        node_ids = {}
+        for node in sorted(str(x) for x in pipeline_graph.nodes):
+            total_nodes += 1
+            node_ids[node] = f"node{total_nodes}"
+            mermaid += f'\n\t{node_ids[node]}["{quoted(node)}"]'
+        edges = sorted((str(a), str(b)) for b, a in pipeline_graph.edges)
+        for a, b in edges:
+            names = [os.path.basename(p) or p for p in carried.get((a, b), [])]
+            label = "<br>".join(names[:2]) + (
+                f"<br>+{len(names) - 2} more" if len(names) > 2 else ""
+            )
+            label = quoted(label)
+            arrow = f'-->|"{label}"|' if labeled and label else "-->"
+            mermaid += f"\n\t{node_ids[a]}{arrow}{node_ids[b]}"
     return mermaid
 
 

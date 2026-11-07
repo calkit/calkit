@@ -1,4 +1,11 @@
-import { Box, Flex, Icon, Text, useColorModeValue } from "@chakra-ui/react"
+import {
+  Box,
+  Flex,
+  Icon,
+  Spinner,
+  Text,
+  useColorModeValue,
+} from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
 import type { IconType } from "react-icons"
@@ -25,6 +32,7 @@ import { TiFlowMerge } from "react-icons/ti"
 import { ProjectsService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import { useLocalServer } from "../../hooks/useOnboarding"
+import { isRunGoing, useProjectPipelineRuns } from "../../hooks/useProject"
 import Tooltip from "./Tooltip"
 
 export interface ProjectNavItem {
@@ -107,6 +115,12 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     refetchOnWindowFocus: false,
   })
   const pipelineIsStale = pipelineQuery.data?.status === "stale"
+  // Whether it's running somewhere, e.g., on GitHub Actions, shared with
+  // the pipeline page
+  const { runsRequest } = useProjectPipelineRuns(accountName, projectName, {
+    enabled: Boolean(user) && !currentRef,
+  })
+  const pipelineIsRunning = isRunGoing(runsRequest.data?.runs?.[0])
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {
@@ -142,7 +156,18 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
           alignSelf="center"
         />
         <Text ml={2}>{title}</Text>
-        {title === "Pipeline" && pipelineIsStale ? (
+        {title === "Pipeline" && pipelineIsRunning ? (
+          <Tooltip label="The pipeline is running on GitHub Actions">
+            <Spinner
+              ml="auto"
+              mr={1}
+              size="xs"
+              alignSelf="center"
+              flexShrink={0}
+              aria-label="Pipeline is running"
+            />
+          </Tooltip>
+        ) : title === "Pipeline" && pipelineIsStale ? (
           <Tooltip label="The pipeline has changed since it was last run">
             <Box
               // Pushed to the far edge rather than trailing the label, so

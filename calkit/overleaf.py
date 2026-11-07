@@ -2147,6 +2147,28 @@ def sync(
         main_repo.git.add(src_rel)
         if src_rel not in paths_to_commit:
             paths_to_commit.append(src_rel)
+    # What the document shows from the project is what its stage reads,
+    # so the compiled pipeline follows edits that came from Overleaf, or
+    # the paper wouldn't rebuild when something new it shows changes
+    # One the project doesn't keep in Git is left alone
+    if res["commits_since_last_sync"] and main_repo.git.ls_files("dvc.yaml"):
+        try:
+            from calkit.pipeline import to_dvc
+
+            wdir = str(main_repo.working_dir)
+            ck_info = calkit.load_calkit_info(wdir=wdir)
+            if ck_info.get("pipeline"):
+                to_dvc(
+                    ck_info=ck_info,
+                    wdir=wdir,
+                    write=True,
+                    manage_gitignore=False,
+                )
+                if main_repo.git.status("--porcelain", "--", "dvc.yaml"):
+                    main_repo.git.add("dvc.yaml")
+                    paths_to_commit.append("dvc.yaml")
+        except Exception as e:
+            print_info(f"Not updating dvc.yaml with the sync: {e}")
     if gitignore_modified:
         paths_to_commit.append(".gitignore")
     if style_ignore_source and style_ignore_source not in paths_to_commit:

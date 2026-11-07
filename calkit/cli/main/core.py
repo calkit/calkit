@@ -6,7 +6,6 @@ import csv
 import json
 import logging
 import os
-import posixpath
 import shlex
 import shutil
 import signal
@@ -47,7 +46,6 @@ from calkit.cli import (
 from calkit.cli.check import (
     check_app,
     check_conda_env,
-    check_docker_env,
     check_environment,
     check_matlab_env,
     check_venv,
@@ -71,6 +69,7 @@ from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
+from calkit.cli.open_ import open_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.scheduler import scheduler_app
 from calkit.cli.show import show_app
@@ -97,6 +96,7 @@ app.add_typer(show_app, name="show", help="Show Calkit objects.")
 app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
+app.add_typer(open_app, name="open", help="Open things.")
 app.add_typer(
     export_app,
     name="export",
@@ -366,16 +366,42 @@ def init(
 
 @app.command(name="clone")
 def clone(
-    url: Annotated[str, typer.Argument(help="Repo URL.")],
+    url: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Project as OWNER/NAME, or HUB/OWNER/NAME for one on another "
+                "hub, e.g., calkit.example.edu/someone/my-proj, or a Git "
+                "repo URL."
+            )
+        ),
+    ],
     location: Annotated[
         str | None,
         typer.Argument(
             help="Location to clone to (default will be ./{repo_name})"
         ),
     ] = None,
-    ssh: Annotated[
-        bool, typer.Option("--ssh", help="Use SSH with Git.")
-    ] = False,
+    use_ssh: Annotated[
+        bool | None,
+        typer.Option(
+            "--ssh/--https",
+            help=(
+                "Use SSH or HTTPS with Git. Defaults to SSH for GitHub if "
+                "it's set up, i.e., GitHub accepts a key here."
+            ),
+        ),
+    ] = None,
+    hub: Annotated[
+        str | None,
+        typer.Option(
+            "--hub",
+            help=(
+                "URL of the project's hub, e.g., https://calkit.example.edu. "
+                "Defaults to calkit.io."
+            ),
+        ),
+    ] = None,
     no_config_remote: Annotated[
         bool,
         typer.Option(
@@ -394,16 +420,35 @@ def clone(
     ] = False,
 ) -> None:
     """Clone or download a copy of a project."""
-    # If the URL looks like just a project owner and name, fetch its repo URL
-    # first
-    if not url.startswith("https://") and not url.startswith("git@"):
-        url_split = url.split("/")
-        if len(url_split) != 2:
+    from calkit.config import normalize_hub_url
+
+    def hub_url(hub: str) -> str:
+        # 'localhost' is the development hub, whose web app has a port
+        url = normalize_hub_url(hub)
+        return (
+            calkit.hub.HUB_URLS["local"] if url == "http://localhost" else url
+        )
+
+    # A project named by its owner and name, and maybe its hub, has its repo
+    # URL fetched from that hub
+    parts = url.split("/")
+    if url.startswith(("github.com/", "gitlab.com/")):
+        url = "https://" + url
+    elif not url.startswith(("https://", "http://", "git@")):
+        if len(parts) == 3:
+            if hub is not None and hub_url(hub) != hub_url(parts[0]):
+                raise_error(
+                    f"--hub {hub} doesn't match the hub in {url}; give one"
+                )
+            hub, parts = parts[0], parts[1:]
+        if len(parts) != 2 or not all(parts):
             raise_error(
-                "Calkit projects must be specified like "
-                "{owner_name}/{project_name}"
+                "Calkit projects must be specified like OWNER/NAME, or "
+                "HUB/OWNER/NAME, e.g., calkit.example.edu/someone/my-proj"
             )
-        owner_name, project_name = url_split
+        owner_name, project_name = parts
+        if hub is not None:
+            calkit.config.set_hub(hub_url(hub))
         typer.echo("Fetching Git repo URL from the hub")
         try:
             project = calkit.hub.get(f"/projects/{owner_name}/{project_name}")
@@ -412,9 +457,21 @@ def clone(
         url = project["git_repo_url"]
         if not url.endswith(".git"):
             url += ".git"
-        if ssh:
-            typer.echo("Converting URL to use with SSH")
-            url = url.replace("https://github.com/", "git@github.com:")
+    # Set up the project for its hub, e.g., its DVC remote, even when it's
+    # given by its repo URL
+    if hub is not None:
+        calkit.config.set_hub(hub_url(hub))
+    # Use SSH for GitHub when it's set up, unless asked for one or the other,
+    # so pushing later needs no token
+    if use_ssh is False and url.startswith("git@github.com:"):
+        url = "https://github.com/" + url.removeprefix("git@github.com:")
+    on_github = url.startswith("https://github.com/")
+    if use_ssh is None:
+        use_ssh = on_github and calkit.github.can_use_ssh()
+        if use_ssh:
+            typer.echo("Cloning over SSH, which is set up for GitHub")
+    if use_ssh and on_github:
+        url = url.replace("https://github.com/", "git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
     if not non_recursive:
@@ -2017,11 +2074,13 @@ def push(
         else:
             warn("No DVC remotes configured; skipping DVC push")
     if "docker" in selected:
+        from calkit.environments import docker as env_docker
+
         # Everything that can be settled locally is settled before the
         # network: a project with no image to publish must not reach a
         # registry at all, since that means a round-trip, and credentials
         # asked for or replaced, on behalf of a push that was never on
-        images = calkit.docker.get_pushable_images()
+        images = env_docker.get_pushable_images()
         asked_for_docker = "docker" in (targets or [])
         pushable = {}
         for env_name, info in images.items():
@@ -2041,6 +2100,7 @@ def push(
                 "No Docker environments are set up to be pushed; set "
                 "'registry' on one built from a Dockerfile to publish it"
             )
+        failed = []
         for env_name, info in pushable.items():
             remote_ref = info["remote_ref"]
             # Ask the registry rather than trusting the image's own
@@ -2054,6 +2114,7 @@ def push(
             typer.echo(f"Pushing image for '{env_name}' to {remote_ref}")
             if not calkit.docker.tag_image(info["image"], remote_ref):
                 warn(f"Failed to tag image as {remote_ref}")
+                failed.append(env_name)
                 continue
             success, push_output = calkit.docker.push_image_with_login(
                 remote_ref, interactive=sys.stdin.isatty()
@@ -2069,6 +2130,20 @@ def push(
                     + textwrap.indent(push_output.strip()[-500:], "    ")
                     + (f"\n{hint}" if hint else "")
                 )
+                failed.append(env_name)
+        # A commit whose lock names an image nobody can pull sends everyone
+        # who checks it out to rebuild that image, so it stays here
+        if failed:
+            msg = "Failed to push the image for " + ", ".join(
+                f"'{name}'" for name in failed
+            )
+            if "git" in selected:
+                msg += (
+                    "; not pushing to Git, since its lock file names an "
+                    "image the registry doesn't have; fix the push, or skip "
+                    "it with --no-docker"
+                )
+            raise_error(msg)
     if "git" in selected:
         typer.echo("Pushing to Git remote")
         try:
@@ -2549,6 +2624,7 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
     """
     from dvc.cli import main as dvc_cli_main
 
+    calkit.dvc.ensure_writable_site_cache()
     try:
         return int(dvc_cli_main(argv))
     except ModuleNotFoundError as e:
@@ -4338,12 +4414,6 @@ def run_in_env(
             raise_error(f"Invalid --env-var '{item}'; write it as KEY=VALUE")
         extra_env_vars[key] = value
         os.environ[key] = value
-    docker_wdir = env.get("wdir", "/work")
-    docker_wdir_mount = docker_wdir
-    if wdir is not None:
-        docker_wdir = posixpath.join(docker_wdir, wdir)
-    shell = env.get("shell", "sh")
-    platform = env.get("platform")
 
     def _with_system_env_setup(shell_cmd: str) -> list[str] | None:
         """Chain the setup commands before a stage's command.
@@ -4407,132 +4477,19 @@ def run_in_env(
             )
         no_check = True
     if env["kind"] == "docker":
-        image_name = calkit.docker.get_image_name(env, env_name)
-        if image_name is None:
-            if not env.get("path"):
-                raise_error(
-                    f"Environment '{env_name}' must define an image, since "
-                    "it has no Dockerfile to build one from"
-                )
-            raise_error(
-                f"Cannot work out what to call the image for environment "
-                f"'{env_name}': set 'image' on it, or set 'owner' and "
-                "'name' in calkit.yaml"
-            )
-        command_mode = env.get("command_mode", "shell")
-        if command_mode not in ["shell", "entrypoint"]:
-            raise_error(
-                "Invalid Docker environment 'command_mode': "
-                f"{command_mode}; Use 'shell' or 'entrypoint'"
-            )
+        from calkit.environments import docker as env_docker
+
         if not no_check:
-            check_docker_env(
-                tag=image_name,
-                fpath=env.get("path"),
-                lock_fpath=get_env_lock_fpath(
-                    env=env, env_name=env_name, as_posix=False
-                ),
-                platform=env.get("platform"),
-                deps=calkit.environments.get_env_input_paths(env, env_name),
-                env_vars=env.get("env_vars", []),
-                ports=env.get("ports", []),
-                gpus=env.get("gpus"),
-                user=env.get("user"),
-                wdir=env.get("wdir"),
-                args=env.get("args", []),
-                build_platforms=env.get("build_platforms", []),
-                registry=env.get("registry"),
-                lock_archs=calkit.docker.get_lock_archs(env),
-                quiet=not verbose,
-            )
+            env_docker.check(env_name, env, verbose=verbose)
             save_env_check_cache()
-        docker_cmd = [
-            "docker",
-            "run",
-        ]
-        if platform:
-            docker_cmd += ["--platform", platform]
-        env_vars = env.get("env_vars", {})
-        if "env-vars" in env:
-            warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
-            env_vars.update(env["env-vars"])
-        # Add project-level env vars (non-secret)
-        env_vars.update(ck_info.get("env_vars", {}))
-        # Also add any project-level environmental variable dependencies
-        project_env_vars = calkit.get_env_var_dep_names()
-        if project_env_vars:
-            env_vars.update({k: f"${k}" for k in project_env_vars})
-        if env_vars:
-            for key, value in env_vars.items():
-                if isinstance(value, str):
-                    value = os.path.expandvars(value)
-                docker_cmd += ["-e", f"{key}={value}"]
-        # A container inherits nothing from here, so what --env-var asked
-        # for has to be handed to it
-        for key, value in extra_env_vars.items():
-            docker_cmd += ["-e", f"{key}={value}"]
-        if (gpus := env.get("gpus")) is not None:
-            docker_cmd += ["--gpus", gpus]
-        if ports := env.get("ports"):
-            for port in ports:
-                docker_cmd += ["-p", port]
-        docker_user = env.get("user")
-        if docker_user is None:
-            try:
-                uid = os.getuid()
-                gid = os.getgid()
-                docker_user = f"{uid}:{gid}"
-            except AttributeError:
-                # We're probably on Windows, so there is no UID to map
-                pass
-        if docker_user is not None:
-            docker_cmd += ["--user", docker_user]
-        docker_cmd += env.get("args", [])
-        docker_cmd += [
-            # A pipeline stage is nobody's terminal session: asking for a
-            # TTY there puts the user's terminal into raw mode for the
-            # duration, and the container's own line discipline stops
-            # translating newlines, so everything the stage prints
-            # staircases down the screen. DVC sets DVC_STAGE for the
-            # commands it runs, which is how a stage is told apart from
-            # someone running 'calkit xenv' themselves
-            "-it"
-            if sys.stdin.isatty() and not os.getenv("DVC_STAGE")
-            else "-i",
-            "--rm",
-            "-w",
-            docker_wdir,
-            "-v",
-            f"{os.getcwd()}:{docker_wdir_mount}",
-            image_name,
-        ]
-        if command_mode == "shell":
-            shell_cmd = _to_shell_cmd(cmd)
-            docker_cmd += [shell, "-c", shell_cmd]
-        else:
-            if not cmd:
-                raise_error(
-                    "No command provided for Docker environment in "
-                    "'entrypoint' command mode"
-                )
-            docker_cmd += cmd
-        if verbose:
-            typer.echo(f"Running command: {docker_cmd}")
-        try:
-            subprocess.check_call(docker_cmd, cwd=wdir)
-        except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            # Docker exits 125 when it couldn't run the container at all,
-            # which is most often because Docker itself isn't running
-            if isinstance(e, FileNotFoundError) or e.returncode == 125:
-                try:
-                    calkit.docker.ensure_ready()
-                except calkit.docker.DockerNotReadyError as ready_error:
-                    raise_error(str(ready_error))
-            returncode = getattr(e, "returncode", None)
-            raise_error(
-                "Failed to run in Docker environment: command exited with "
-                f"status {returncode}"
-            )
+        env_docker.run(
+            env_name,
+            env,
+            cmd,
+            wdir=wdir,
+            env_vars=extra_env_vars,
+            verbose=verbose,
+        )
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
@@ -5460,7 +5417,18 @@ def run_jupyter(
     help: Annotated[bool, typer.Option("-h", "--help")] = False,
 ) -> None:
     """Run a command with the Jupyter CLI."""
-    process = subprocess.run([sys.executable, "-m", "jupyter"] + sys.argv[2:])
+    args = sys.argv[2:]
+    # Starting a server, not a subcommand like `server list`, in a scheduler
+    # job is an interactive session worth tracking
+    if (
+        args
+        and args[0] in ("lab", "notebook", "server")
+        and (len(args) == 1 or args[1].startswith("-"))
+    ):
+        from calkit.cli.scheduler import record_interactive_job
+
+        record_interactive_job("jupyter")
+    process = subprocess.run([sys.executable, "-m", "jupyter"] + args)
     sys.exit(process.returncode)
 
 

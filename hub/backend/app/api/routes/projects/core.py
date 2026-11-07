@@ -574,14 +574,19 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
 
 
 def _push_dvc_cache_to_storage(
-    repo_dir: str, owner_name: str, project_name: str
+    repo_dir: str,
+    owner_name: str,
+    project_name: str,
+    skip: set[str] | None = None,
 ) -> int:
     """Copy a repo's local DVC cache into this project's object storage.
 
     Walking the cache rather than reading each .dvc file covers directory
     outputs and their .dir objects the same way single files are covered,
     which is the difference between a pointer that resolves and one that
-    dangles. Returns how many objects were written.
+    dangles. Objects in ``skip``, named like ``ab/cdef...``, e.g., those
+    cached before something was added, aren't copied. Returns how many
+    objects were written.
     """
     cache_dir = os.path.join(repo_dir, ".dvc", "cache", "files", "md5")
     if not os.path.isdir(cache_dir):
@@ -594,7 +599,7 @@ def _push_dvc_cache_to_storage(
             continue
         for rest in sorted(os.listdir(idx_dir)):
             src = os.path.join(idx_dir, rest)
-            if not os.path.isfile(src):
+            if not os.path.isfile(src) or f"{idx}/{rest}" in (skip or ()):
                 continue
             fpath = make_data_fpath(
                 owner_name=owner_name,
@@ -1169,9 +1174,8 @@ def post_project(
                 dc_fpath = os.path.join(dc_dir, "devcontainer.json")
                 with open(dc_fpath, "w", encoding="utf-8") as f:
                     f.write(
-                        calkit.resources.read_text(
-                            "devcontainer",
-                            calkit.resources.DEVCONTAINER_FNAME,
+                        calkit.resources.make_devcontainer_spec(
+                            ck_info, wdir=repo.working_dir
                         )
                     )
                 repo.git.add(".devcontainer")
@@ -4641,13 +4645,16 @@ def _github_token_for_repo(
     session: Session,
     current_user: User,
     owner_repo: str,
+    permissions: dict[str, str] | None = None,
 ) -> str | None:
     """Return a token for GitHub API calls on ``owner/repo``.
 
     Prefers the user's personal token; for GitHub-less collaborators (e.g.
     invite-link members) falls back to the Calkit GitHub App installation
     token so they can still open, close, and comment on issues. Returns None
-    if neither is available.
+    if neither is available. ``permissions`` are what an App token is
+    narrowed to, e.g., ``{"actions": "read"}``, which the App's default
+    token leaves out.
     """
     try:
         return users.get_github_token(session, current_user)
@@ -4655,7 +4662,9 @@ def _github_token_for_repo(
         pass
     try:
         owner_name, repo_name = owner_repo.split("/", 1)
-        return github.get_app_installation_token(owner_name, repo_name)
+        return github.get_app_installation_token(
+            owner_name, repo_name, permissions=permissions
+        )
     except (github.GitHubAppNotConfigured, HTTPException) as e:
         logger.info(
             f"No GitHub token for {current_user.email} on {owner_repo}: {e}"
@@ -7708,12 +7717,20 @@ def get_project_overleaf_sync_status(
 
 
 class OverleafLinkPublic(BaseModel):
+    """A folder of a Calkit project an Overleaf project syncs with, and what
+    the current user can do with that project.
+
+    ``github_repo_url`` is the project's repo on GitHub, in one canonical
+    form, e.g., to open it in a Codespace, or none if it's elsewhere.
+    """
+
     overleaf_project_id: str
     path: str
     project_owner_name: str
     project_name: str
     project_title: str
     current_user_access: Literal["read", "write", "admin", "owner"] | None
+    github_repo_url: str | None = None
 
 
 def _indexed_overleaf_links(
@@ -7746,6 +7763,11 @@ def _indexed_overleaf_links(
                 project_name=project.name,
                 project_title=project.title,
                 current_user_access=project.current_user_access,
+                github_repo_url=(
+                    f"https://github.com/{project.github_repo}"
+                    if project.github_repo
+                    else None
+                ),
             )
         )
     return resp
@@ -8036,9 +8058,10 @@ def get_project_pipeline(
     # commit identifies it. Building the diagram walks the whole graph
     # through DVC, which is over a second on a pipeline of any size.
     commit_sha = resolve_commit_sha(repo, ref)
+    # Versioned, so diagrams drawn before arrows were labeled go
     mermaid_key = (
         cache.make_key(
-            "mermaid", f"{owner_name}/{project_name}".lower(), commit_sha
+            "mermaid-v2", f"{owner_name}/{project_name}".lower(), commit_sha
         )
         if commit_sha
         else None

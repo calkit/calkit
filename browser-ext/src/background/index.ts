@@ -22,6 +22,9 @@ import type {
   FiguresPage,
   GithubRepo,
   ExportStage,
+  PipelineRun,
+  ProjectPipeline,
+  PipelineRuns,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -274,6 +277,7 @@ async function handle(message: Request): Promise<unknown> {
             content: message.content,
             shows: message.shows,
             produces: message.produces,
+            data: message.data ?? [],
             save: message.save ?? false,
           },
         },
@@ -292,6 +296,19 @@ async function handle(message: Request): Promise<unknown> {
             message: `Record where ${message.path} came from`,
           },
         },
+      );
+    case "project.pipeline":
+      return request<ProjectPipeline>(
+        `${projectPath(message.owner, message.project)}/pipeline`,
+      );
+    case "project.pipelineRuns":
+      return request<PipelineRuns>(
+        `${projectPath(message.owner, message.project)}/pipeline/runs`,
+      );
+    case "project.startPipelineRun":
+      return request<PipelineRun>(
+        `${projectPath(message.owner, message.project)}/pipeline/runs`,
+        { method: "POST", body: { location: "github-actions" } },
       );
     case "project.addExportStage":
       return request<ExportStage>(

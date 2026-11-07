@@ -50,12 +50,9 @@ def update_devcontainer(
     os.makedirs(out_dir, exist_ok=True)
     out_fpath = os.path.join(out_dir, "devcontainer.json")
     typer.echo(f"Writing to {out_fpath}")
+    ck_info = calkit.load_calkit_info(wdir=wdir)
     with open(out_fpath, "w", encoding="utf-8") as f:
-        f.write(
-            calkit_resources.read_text(
-                "devcontainer", calkit_resources.DEVCONTAINER_FNAME
-            )
-        )
+        f.write(calkit_resources.make_devcontainer_spec(ck_info, wdir=wdir))
     if not no_commit:
         repo = calkit.git.get_repo(wdir)
         rel_path = os.path.join(".devcontainer", "devcontainer.json")
@@ -387,6 +384,17 @@ def update_github_actions(
             help="Do not create a Git commit for the updated GitHub Actions.",
         ),
     ] = False,
+    on: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--on",
+            help=(
+                "Event that runs the workflow, e.g., push or "
+                "workflow_dispatch; repeat for more. "
+                "An existing workflow's are kept if not given."
+            ),
+        ),
+    ] = None,
 ):
     """Update a project's GitHub Actions to match this version of Calkit's
     recommendations.
@@ -404,23 +412,18 @@ def update_github_actions(
     txt_out = None
     out_dir = os.path.join(wdir or ".", ".github", "workflows")
     os.makedirs(out_dir, exist_ok=True)
-    for fname in sorted(os.listdir(out_dir)):
-        if fname.endswith(".yaml") or fname.endswith(".yml"):
-            fpath = os.path.join(out_dir, fname)
-            with open(fpath, encoding="utf-8") as f:
-                txt = f.read()
-            if calkit_resources.uses_run_action(txt):
-                fname_out = fname
-                # A workflow that's still the example gets replaced outright,
-                # picking up any other improvements to it, but one that's been
-                # customized only has its action ref updated
-                if not calkit_resources.is_default_github_actions_workflow(
-                    txt
-                ):
-                    txt_out = calkit_resources.set_action_ref(txt)
-                break
+    existing = calkit_resources.find_run_workflows(wdir)
+    if existing:
+        fname_out, txt = existing[0]
+        # A workflow that's still the example gets replaced outright, picking
+        # up any other improvements to it, but one that's been customized
+        # only has its action ref updated
+        if not calkit_resources.is_default_github_actions_workflow(txt):
+            txt_out = calkit_resources.set_action_ref(txt)
     if txt_out is None:
-        txt_out = calkit_resources.render_github_actions_workflow()
+        txt_out = calkit_resources.render_github_actions_workflow(on=on)
+    elif on is not None:
+        txt_out = calkit_resources.set_workflow_triggers(txt_out, on)
     out_fpath = os.path.join(out_dir, fname_out)
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w", encoding="utf-8") as f:
@@ -895,6 +898,7 @@ def update_docker_env(
         bool,
         typer.Option(
             "--lock",
+            "--relock",
             help=(
                 "Rebuild or repull the image and write fresh lock files for "
                 "every architecture."
@@ -903,11 +907,6 @@ def update_docker_env(
     ] = False,
 ) -> None:
     """Update a docker environment."""
-    from calkit.environments import (
-        get_all_docker_lock_fpaths,
-        get_env_lock_fpath,
-    )
-
     ck_info, env = _load_env(env_name)
     if env.get("kind") != "docker":
         raise_error(f"Environment '{env_name}' is not a docker environment")
@@ -927,24 +926,8 @@ def update_docker_env(
     if image is not None or registry is not None:
         calkit.save_calkit_info(ck_info)
         typer.echo(f"Updated docker environment '{env_name}'")
-    if not lock:
-        return
-    # Relocking throws away the existing lock files so the image is fetched or
-    # rebuilt from the environment's spec, which is the only way to pick up an
-    # image whose tag has been moved out from under a recorded digest
-    for lock_fpath in get_all_docker_lock_fpaths(env_name=env_name):
-        if os.path.isfile(lock_fpath):
-            typer.echo(f"Removing lock file: {lock_fpath}")
-            os.remove(lock_fpath)
-    legacy_lock_fpath = get_env_lock_fpath(
-        env=env, env_name=env_name, as_posix=False, legacy=True
-    )
-    if legacy_lock_fpath is not None and os.path.isfile(legacy_lock_fpath):
-        os.remove(legacy_lock_fpath)
-    from calkit.cli.check import check_environment
-
-    typer.echo(f"Relocking docker environment '{env_name}'")
-    check_environment(env_name=env_name, verbose=True)
+    if lock:
+        calkit.environments.relock(env_name=env_name, env=env)
 
 
 @update_app.command(name="latex-image")
@@ -1124,17 +1107,18 @@ def update_environment(
             "--lock",
             "--relock",
             help=(
-                "Record this machine's properties in a system "
-                "environment's lock file, replacing the machine it is "
-                "locked to. Invalidates every stage that depends on it."
+                "Rebuild the environment from its spec and lock it again, "
+                "taking the newest versions the spec allows, or for a "
+                "system environment, lock it to this machine. Reruns every "
+                "stage that depends on it."
             ),
         ),
     ] = False,
 ) -> None:
     """Update an environment.
 
-    Currently supports adding packages to Julia and Nix (flake) envs, and
-    re-locking a system environment to this machine.
+    Supports relocking any environment, and adding packages to Julia and
+    Nix (flake) envs.
     """
     from calkit.cli.main import run_in_env
 
@@ -1154,11 +1138,8 @@ def update_environment(
         env = found
         kind = env.get("kind")
         if kind not in ("system", calkit.environments.SWITCH_KIND):
-            raise_error(
-                f"Environment '{env_name}' is not a system or switch "
-                "environment, so it has no machine to lock; its lock file is "
-                "derived from its spec"
-            )
+            calkit.environments.relock(env_name=env_name, env=env)
+            return
         # A switch's lock describes the machine its pick runs on
         machine_name, machine_env = env_name, env
         if kind == calkit.environments.SWITCH_KIND:
@@ -1232,7 +1213,7 @@ def update_environment(
     if add_packages is None:
         raise_error(
             "No updates specified. Use --add to specify packages to add, or "
-            "--lock to re-lock a system environment to this machine."
+            "--lock to relock the environment."
         )
     env = found
     assert isinstance(add_packages, list)

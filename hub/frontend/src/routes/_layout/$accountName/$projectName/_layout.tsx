@@ -299,8 +299,11 @@ function ProjectMenu({
   const refreshProject = useRefreshProject(accountName, projectName)
   // Codespaces gives a browser editor that can also run the pipeline; the
   // CLI signs in on its own there, so no token setup stands in the way.
-  const codespacesUrl = project.git_repo_url
-    ? `${project.git_repo_url.replace("://github.com/", "://codespaces.new/")}?quickstart=1`
+  const githubRepo = project.git_repo_url?.match(
+    /^https?:\/\/(?:www\.)?github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/,
+  )?.[1]
+  const codespacesUrl = githubRepo
+    ? `https://codespaces.new/${githubRepo}?quickstart=1`
     : null
 
   return (

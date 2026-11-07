@@ -69,6 +69,8 @@ export interface OverleafLinkPublic {
   project_name: string;
   project_title: string;
   current_user_access?: "read" | "write" | "admin" | "owner" | null;
+  /** Its repo on GitHub, e.g., `https://github.com/owner/name`. */
+  github_repo_url?: string | null;
 }
 
 export interface OverleafLookup {
@@ -230,12 +232,52 @@ export interface StageFromScriptOrNotebookResponse {
   outputs: string[];
   /** Inputs that aren't in the project and that no stage produces. */
   missing_inputs: string[];
+  /** Data read from outside the project, as the script names it. */
+  external_inputs?: string[];
+  /** Data paths changed to read from the project instead, as named. */
+  rewritten?: string[];
   /** Which output is what the document shows. */
   produces?: string | null;
   /** Documents changed to show it from there, with `\ckfigure`. */
   included_in: string[];
   saved: boolean;
   git_repo_url: string;
+}
+
+/** The project's pipeline, as the hub summarizes it. */
+export interface ProjectPipeline {
+  /** Stages calkit.yaml declares, in its order. */
+  ck_stages: string[];
+  stage_statuses: Record<string, StageStatus>;
+  status: "up-to-date" | "stale" | "unknown";
+  error?: string | null;
+}
+
+/** A run of the pipeline, wherever it ran. */
+export interface PipelineRun {
+  id: string;
+  location: "github-actions";
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
+  created: string;
+  started?: string | null;
+  finished?: string | null;
+  url?: string | null;
+  git_rev?: string | null;
+  branch?: string | null;
+  started_by?: string | null;
+  /** By file name. */
+  github_workflow?: string | null;
+  /** Unknown for one just started, until GitHub lists it. */
+  github_run_id?: number | null;
+}
+
+export interface PipelineRuns {
+  /** Newest first. */
+  runs: PipelineRun[];
+  total: number;
+  github_workflow?: string | null;
+  can_start: boolean;
+  cannot_start_reason?: string | null;
 }
 
 export interface ProvenanceGap {

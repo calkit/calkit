@@ -196,10 +196,19 @@ runs:
             needs_matlab=true
           fi
         fi
+        needs_containerd_store=false
         if has_kind "docker"; then
           if command -v docker >/dev/null 2>&1; then
             if [ "$docker_buildx_missing" = true ]; then
               needs_docker=true
+            fi
+            # Only the containerd image store gives a build the digest it
+            # will have once pushed, which is what lets checking an
+            # environment lock it without publishing it
+            if [ "$(uname -s)" = Linux ] && command -v systemctl >/dev/null 2>&1 \
+              && ! docker info --format '{{json .DriverStatus}}' 2>/dev/null \
+              | grep -q 'io.containerd.snapshotter'; then
+              needs_containerd_store=true
             fi
           else
             docker_cli_missing=true
@@ -222,6 +231,7 @@ runs:
         echo "needs_matlab=${needs_matlab}" >> "$GITHUB_OUTPUT"
         echo "needs_docker=${needs_docker}" >> "$GITHUB_OUTPUT"
         echo "docker_cli_missing=${docker_cli_missing}" >> "$GITHUB_OUTPUT"
+        echo "needs_containerd_store=${needs_containerd_store}" >> "$GITHUB_OUTPUT"
         echo "unsupported_kinds=${unsupported_kinds}" >> "$GITHUB_OUTPUT"
 
     - name: Setup uv for uv and uv-venv environments
@@ -263,6 +273,30 @@ runs:
     - name: Setup MATLAB
       if: ${{ steps.detect.outputs.needs_matlab == 'true' }}
       uses: matlab-actions/setup-matlab@v2
+
+    # Before Buildx, since restarting Docker would take its builder down
+    - name: Switch Docker to the containerd image store
+      if: ${{ steps.detect.outputs.needs_containerd_store == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo mkdir -p /etc/docker
+        sudo python3 - /etc/docker/daemon.json <<'EOF'
+        import json
+        import os
+        import sys
+
+        path = sys.argv[1]
+        cfg = {}
+        if os.path.exists(path) and os.path.getsize(path):
+            with open(path) as f:
+                cfg = json.load(f)
+        cfg.setdefault("features", {})["containerd-snapshotter"] = True
+        with open(path, "w") as f:
+            json.dump(cfg, f, indent=2)
+        EOF
+        sudo systemctl restart docker
+        docker info --format '{{json .DriverStatus}}'
 
     - name: Setup Docker Buildx
       if: ${{ steps.detect.outputs.needs_docker == 'true' }}

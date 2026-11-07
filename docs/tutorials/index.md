@@ -16,3 +16,4 @@
 - [Connect a Jupyter Notebook to a SLURM environment in VS Code](vscode-slurm-notebook.md)
 - [Declarative, structured prompting to make AI agents work reproducibly](ai-agents.md)
 - [Writing first: let the paper drive the project](writing-first.md)
+- [Making an Overleaf paper reproducible](overleaf-paper.md)

@@ -1270,6 +1270,10 @@ class LatexStage(Stage):
         "it's built, e.g., to drop changes that don't change the rendered "
         "text.",
     )
+    latex2arxiv: bool = Field(
+        default=False,
+        description="Whether to export into a .zip file ready to upload to ArXiv",
+    )
 
     @property
     def diff_pairs(self) -> list[tuple[str, str]]:
@@ -1283,11 +1287,7 @@ class LatexStage(Stage):
             for from_ref, to_ref in self.diff_pairs
         ]
 
-    def extra_dvc_stages(
-        self,
-        revision_key: Callable[[str], str] | None = None,
-        extra_inputs: list[str] | None = None,
-    ) -> dict[str, dict]:
+    def latex_diff_stages(self, deps, desc, revision_key) -> dict[str, dict]:
         """One stage per diff, separate from building the document.
 
         A diff has different inputs from the document it describes, and
@@ -1300,12 +1300,7 @@ class LatexStage(Stage):
         Without keys the only honest option for a revision that can move
         is to run every time.
         """
-        desc = (
-            f"Automatically generated from the '{self.name}' stage "
-            "in calkit.yaml. Changes made here will be overwritten."
-        )
         stages: dict[str, dict] = {}
-        deps = self.dvc_deps + (extra_inputs or [])
         inputs = [
             path
             for path in deps
@@ -1320,82 +1315,147 @@ class LatexStage(Stage):
         for entry, (from_ref, to_ref), path in zip(
             self.diffs, self.diff_pairs, self.diff_paths
         ):
-            name = calkit.latex.get_diff_stage_name(
-                str(self.name), from_ref, to_ref
+            stage, name = self.latex_diff_stage(
+                entry,
+                from_ref,
+                to_ref,
+                path,
+                deps,
+                filter_deps,
+                desc,
+                inputs,
+                revision_key,
             )
-            # A bare revision is compared with the working tree, like every
-            # other stage reads it, so a change can be checked before it's
-            # committed. Named for HEAD still, which is what it is once
-            # committed.
-            working = isinstance(entry, str)
-            out: str | dict = path
-            if self.diff_pdf_storage != "dvc":
-                out = {path: {"cache": False}}
-            cmd = (
-                f"calkit latex diff -e {shlex.quote(self.environment)}"
-                f" --no-check --from {shlex.quote(from_ref)}"
-            )
+            stages[name] = stage
+        return stages
+
+    def latex_diff_stage(
+        self,
+        entry,
+        from_ref,
+        to_ref,
+        path,
+        deps,
+        filter_deps,
+        desc,
+        inputs,
+        revision_key,
+    ) -> tuple[dict, str]:
+        name = calkit.latex.get_diff_stage_name(
+            str(self.name), from_ref, to_ref
+        )
+        # A bare revision is compared with the working tree, like every
+        # other stage reads it, so a change can be checked before it's
+        # committed. Named for HEAD still, which is what it is once
+        # committed.
+        working = isinstance(entry, str)
+        out: str | dict = path
+        if self.diff_pdf_storage != "dvc":
+            out = {path: {"cache": False}}
+        cmd = (
+            f"calkit latex diff -e {shlex.quote(self.environment)}"
+            f" --no-check --from {shlex.quote(from_ref)}"
+        )
+        if not working:
+            cmd += f" --to {shlex.quote(to_ref)}"
+        # Named by content rather than by commit: a merge, a rebase, or
+        # a commit to anything else makes a new commit without changing
+        # the document, and would otherwise rewrite this command and
+        # make the stage stale
+        if revision_key is not None:
+            key = revision_key(from_ref)
             if not working:
-                cmd += f" --to {shlex.quote(to_ref)}"
-            # Named by content rather than by commit: a merge, a rebase, or
-            # a commit to anything else makes a new commit without changing
-            # the document, and would otherwise rewrite this command and
-            # make the stage stale
-            if revision_key is not None:
-                key = revision_key(from_ref)
-                if not working:
-                    key += f"..{revision_key(to_ref)}"
-                cmd += f" --revision-key {shlex.quote(key)}"
-            # Built the way the document itself is, so a latexmkrc that sets
-            # search paths or shell escape applies to the diff too
-            if self.latexmkrc_path is not None:
-                cmd += f" -r {shlex.quote(self.latexmkrc_path)}"
-            for arg in self.latexmk_args:
-                cmd += f" --latexmk-arg {shlex.quote(arg)}"
-            for arg in self.latexdiff_args:
-                cmd += f" --latexdiff-arg {shlex.quote(arg)}"
-            if self.keep_diff_tex:
-                cmd += " --keep-tex"
-            if self.diff_filter is not None:
-                script = self.diff_filter.script_path
-                cmd += f" --filter-script {shlex.quote(script)}"
-                if self.diff_filter.environment is not None:
-                    env = self.diff_filter.environment
-                    cmd += f" --filter-env {shlex.quote(env)}"
-                for arg in self.diff_filter.args:
-                    cmd += f" --filter-arg {shlex.quote(arg)}"
-            # Each revision gets its own copies of any of these that are
-            # tracked with DVC, since a checkout only has their pointers
-            for input_path in inputs:
-                cmd += f" --input {shlex.quote(input_path)}"
-            # Named from the pair as written, so the output path is the
-            # same on every branch
-            cmd += (
-                " --output-dir "
-                f"{shlex.quote(calkit.latex.get_diff_dir(from_ref, to_ref))}"
-            )
-            cmd += f" {shlex.quote(self.target_path)}"
-            # The keys cover what Git holds at each revision, so for two
-            # fixed revisions nothing in the working tree is an input. One
-            # that can move also reads the working tree's files, since a
-            # DVC-tracked figure's content isn't in Git and only the
-            # dependency catches a change to it.
-            moving = working or calkit.latex.MOVING_REFS.intersection(
-                {from_ref, to_ref}
-            )
-            stage: dict = {
-                "cmd": cmd,
-                "deps": (deps if moving else []) + filter_deps,
-                "outs": [out],
+                key += f"..{revision_key(to_ref)}"
+            cmd += f" --revision-key {shlex.quote(key)}"
+        # Built the way the document itself is, so a latexmkrc that sets
+        # search paths or shell escape applies to the diff too
+        if self.latexmkrc_path is not None:
+            cmd += f" -r {shlex.quote(self.latexmkrc_path)}"
+        for arg in self.latexmk_args:
+            cmd += f" --latexmk-arg {shlex.quote(arg)}"
+        for arg in self.latexdiff_args:
+            cmd += f" --latexdiff-arg {shlex.quote(arg)}"
+        if self.keep_diff_tex:
+            cmd += " --keep-tex"
+        if self.diff_filter is not None:
+            script = self.diff_filter.script_path
+            cmd += f" --filter-script {shlex.quote(script)}"
+            if self.diff_filter.environment is not None:
+                env = self.diff_filter.environment
+                cmd += f" --filter-env {shlex.quote(env)}"
+            for arg in self.diff_filter.args:
+                cmd += f" --filter-arg {shlex.quote(arg)}"
+        # Each revision gets its own copies of any of these that are
+        # tracked with DVC, since a checkout only has their pointers
+        for input_path in inputs:
+            cmd += f" --input {shlex.quote(input_path)}"
+        # Named from the pair as written, so the output path is the
+        # same on every branch
+        cmd += (
+            " --output-dir "
+            f"{shlex.quote(calkit.latex.get_diff_dir(from_ref, to_ref))}"
+        )
+        cmd += f" {shlex.quote(self.target_path)}"
+        # The keys cover what Git holds at each revision, so for two
+        # fixed revisions nothing in the working tree is an input. One
+        # that can move also reads the working tree's files, since a
+        # DVC-tracked figure's content isn't in Git and only the
+        # dependency catches a change to it.
+        moving = working or calkit.latex.MOVING_REFS.intersection(
+            {from_ref, to_ref}
+        )
+        stage: dict = {
+            "cmd": cmd,
+            "deps": (deps if moving else []) + filter_deps,
+            "outs": [out],
+            "desc": desc,
+        }
+        if self.wdir is not None:
+            stage["wdir"] = self.wdir
+        # Without keys the command holds only names, so there's nothing
+        # for DVC to notice moving
+        if moving and revision_key is None:
+            stage["always_changed"] = True
+        return stage, name
+
+    def to_arxiv_stages(self, deps, desc) -> dict[str, dict]:
+        stages: dict[str, dict] = {}
+        if self.latex2arxiv:
+            # Convert the document to arXiv format
+            arxiv_name = f"{self.name}_to_arxiv"
+            parent_path = Path(self.target_path).parent
+            stem_path = Path(self.target_path).stem
+            path_to_stem = (parent_path / stem_path).as_posix()
+            arxiv_dir = f"{path_to_stem}_arxiv.zip"
+            arxiv_stage: dict = {
+                "cmd": f"calkit latex to-arxiv {shlex.quote(parent_path.as_posix())} {shlex.quote(stem_path)}",
+                "deps": deps,
+                "outs": [arxiv_dir],
                 "desc": desc,
             }
             if self.wdir is not None:
-                stage["wdir"] = self.wdir
-            # Without keys the command holds only names, so there's nothing
-            # for DVC to notice moving
-            if moving and revision_key is None:
-                stage["always_changed"] = True
-            stages[name] = stage
+                arxiv_stage["wdir"] = self.wdir
+
+            stages[arxiv_name] = arxiv_stage
+        return stages
+
+    def extra_dvc_stages(
+        self,
+        revision_key: Callable[[str], str] | None = None,
+        extra_inputs: list[str] | None = None,
+    ) -> dict[str, dict]:
+
+        desc = (
+            f"Automatically generated from the '{self.name}' stage "
+            "in calkit.yaml. Changes made here will be overwritten."
+        )
+        stages: dict[str, dict] = {}
+        deps = self.dvc_deps + (extra_inputs or [])
+
+        diff_stages = self.latex_diff_stages(deps, desc, revision_key)
+        arxiv_stages = self.to_arxiv_stages(deps, desc)
+
+        stages = dict(diff_stages, **arxiv_stages)
         return stages
 
     @field_validator("diffs")

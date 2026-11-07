@@ -440,6 +440,7 @@ Model class: `LatexStage`
 | `latexmk_args`          | list[str]                      | no       |         | Extra arguments passed straight through to latexmk, for control Calkit does not model.                                                                                        |
 | `latexdiff_args`        | list[str]                      | no       |         | Extra arguments passed straight through to latexdiff when building diffs, e.g., '--type=CFONT'. Changed figures are shown old and new unless '--graphics-markup' is set here. |
 | `diff_filter`           | PythonScriptDiffFilter \| None | no       | null    | Script each marked-up document is piped through before it's built, e.g., to drop changes that don't change the rendered text.                                                 |
+| `latex2arxiv`           | bool                           | no       | False   | Whether to export into a .zip file ready to upload to ArXiv                                                                                                                   |
 
 ### `manual-step`
 

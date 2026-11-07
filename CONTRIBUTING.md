@@ -27,6 +27,7 @@ This guide will help you get started.
    - [Miniforge](https://conda-forge.org/download/)
    - [uv](https://docs.astral.sh/uv/getting-started/installation/)
    - [Pixi](https://pixi.sh/latest/)
+   - [node.js](https://nodejs.org/en/download)
 1. **Create the virtual environment:**
    ```bash
    uv sync --all-packages

@@ -4009,6 +4009,7 @@ Work with LaTeX.
 | [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands. |
 | [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                     |
 | [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.             |
+| [`to-arxiv`](#subcommand-latex-tex-to-arxiv)             |                                                                   |
 | [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                |
 | [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.        |
 
@@ -4192,6 +4193,23 @@ Options:
 | `--filter-arg`       | str     | no       |         | Argument to pass to the filter script. Repeat the option to pass more than one.                                                                                                                                       |
 | `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                                                  |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                 |
+
+<a id="subcommand-latex-tex-to-arxiv"></a>
+
+#### `calkit latex|tex to-arxiv`
+
+Usage:
+
+```text
+calkit latex|tex to-arxiv TARGET-FOLDER TEX-FILE
+```
+
+Arguments:
+
+| Argument        | Type | Required | Default | Description                                |
+| --------------- | ---- | -------- | ------- | ------------------------------------------ |
+| `target_folder` | str  | yes      |         | The folder to include in the arxiv upload. |
+| `tex_file`      | str  | yes      |         | The main .tex file for the arxiv upload.   |
 
 <a id="subcommand-latex-tex-to-docx"></a>
 

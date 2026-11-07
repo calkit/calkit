@@ -1,56 +1,43 @@
 # Version control
 
-Keeping a history of all changes to the project
-is one of the pillars of reproducibility,
-and using a real version control system (VCS) instead of, e.g., ad hoc
-file name suffixes is a must to improve efficiency and avoid mistakes.
-However, the current de facto VCS,
-[Git](https://git-scm.com),
-was designed primarily for complex software development projects,
-and thus provides lots of control and flexibility,
-but with a daunting learning curve.
+Keeping a history of all changes to the project is one of the pillars of
+reproducibility, and using a real version control system (VCS) instead of, e.g.,
+ad hoc file name suffixes is a must to improve efficiency and avoid mistakes.
+However, the current de facto VCS, [Git](https://git-scm.com), was designed
+primarily for complex software development projects, and thus provides lots of
+control and flexibility, but with a daunting learning curve.
 
-Since most of the value of using version control for research
-projects comes from
-simply saving checkpoints of the project files so it's clear if they have
-changed, or so they can be reverted if something is broken,
-Calkit provides a simplified interface that focuses on just that.
-Additionally,
-since Git was not designed for large and/or binary files,
-Calkit uses [DVC](https://dvc.org) to version these file types.
+Since most of the value of using version control for research projects comes
+from simply saving checkpoints of the project files so it's clear if they have
+changed, or so they can be reverted if something is broken, Calkit provides a
+simplified interface that focuses on just that. Additionally, since Git was not
+designed for large and/or binary files, Calkit uses [DVC](https://dvc.org) to
+version these file types.
 
 [GitHub](https://github.com) is currently the most popular location to back up
-Git repositories, or repos, remotely, but like Git,
-is primarily designed for software development.
-Similar to how Calkit is a layer on top of Git,
-The Calkit hub ([calkit.io](https://calkit.io))
-integrates with GitHub to add a more purpose-built
-interface for research projects.
-It also serves as a default DVC remote,
-so users are not required to provision their own.
+Git repositories, or repos, remotely, but like Git, is primarily designed for
+software development. Similar to how Calkit is a layer on top of Git, The Calkit
+hub ([calkit.io](https://calkit.io)) integrates with GitHub to add a more
+purpose-built interface for research projects. It also serves as a default DVC
+remote, so users are not required to provision their own.
 
-Though Calkit adds a simplified interface on top of Git and DVC,
-the lower-level tools `git` and `dvc` can be used if desired, e.g.,
-for more complex operations.
+Though Calkit adds a simplified interface on top of Git and DVC, the lower-level
+tools `git` and `dvc` can be used if desired, e.g., for more complex operations.
 
 ## Typical workflow
 
-In order to start working on a project,
-the project repository must exist on your local machine.
-This can be achieved either by creating a new repo or
-downloading, or "cloning," an existing one from a remote.
-After a repo exists on your local machine,
-it is typical to repeat the cycle of
-committing new or changed files with a message describing them,
-and then pushing those commits to the remote.
-This can be achieved with three workflow variants that trade off
+In order to start working on a project, the project repository must exist on
+your local machine. This can be achieved either by creating a new repo or
+downloading, or "cloning," an existing one from a remote. After a repo exists on
+your local machine, it is typical to repeat the cycle of committing new or
+changed files with a message describing them, and then pushing those commits to
+the remote. This can be achieved with three workflow variants that trade off
 automation for control.
 
-The simplest and most hands-off uses `calkit save`,
-which will automatically make decisions about which files belong in Git
-which belong in DVC, which don't belong in either,
-commit them,
-and push them to the hub all with a single command:
+The simplest and most hands-off uses `calkit save`, which will automatically
+make decisions about which files belong in Git which belong in DVC, which don't
+belong in either, commit them, and push them to the hub all with a single
+command:
 
 ```mermaid
 graph LR
@@ -64,14 +51,12 @@ graph LR
     --> edit
 ```
 
-The `-a` flag indicates that we want to save all relevant files
-and the `-m` flag indicates that we are providing a message describing
-the changes.
-If omitted, Calkit will prompt the user for a message.
+The `-a` flag indicates that we want to save all relevant files and the `-m`
+flag indicates that we are providing a message describing the changes. If
+omitted, Calkit will prompt the user for a message.
 
-If more control is desired,
-the `save` step can be broken down into `add`, `commit`
-and `push` steps.
+If more control is desired, the `save` step can be broken down into `add`,
+`commit` and `push` steps.
 
 ```mermaid
 graph LR
@@ -90,8 +75,8 @@ graph LR
     --> edit
 ```
 
-The `add` step can be skipped for files that have been previously committed
-by adding the `-a` flag:
+The `add` step can be skipped for files that have been previously committed by
+adding the `-a` flag:
 
 ```mermaid
 graph LR
@@ -106,27 +91,25 @@ graph LR
     --> edit
 ```
 
-If you have a collaborator working on the same project,
-any time they have pushed commits,
-you will need to pull before being able to push yourself.
+If you have a collaborator working on the same project, any time they have
+pushed commits, you will need to pull before being able to push yourself.
 
 ## Command reference
 
-To view the help for any of these commands,
-execute `calkit {command} --help`.
+To view the help for any of these commands, execute `calkit {command} --help`.
 
 ### `clone`
 
-`calkit clone` will download and create a local copy of the project,
-setup the default Calkit DVC remote and pull any files versioned with DVC.
-The multi-step equivalent would be:
+`calkit clone` will download and create a local copy of the project, setup the
+default Calkit DVC remote and pull any files versioned with DVC. The multi-step
+equivalent would be:
 
 - `git clone`
 - `calkit config remote`
 - `dvc pull`
 
-If the project is hosted on a hub, it can be referenced by
-name rather than Git repo URL. For example:
+If the project is hosted on a hub, it can be referenced by name rather than Git
+repo URL. For example:
 
 ```sh
 calkit clone petebachant/strava-analysis
@@ -134,8 +117,8 @@ calkit clone petebachant/strava-analysis
 
 ### `status`
 
-`calkit status` will show the combined status from both Git and DVC.
-For example:
+`calkit status` will show the combined status from both Git and DVC. For
+example:
 
 ```sh
 $ calkit status
@@ -155,11 +138,10 @@ Pipeline is up to date.
 
 ### `save`
 
-`calkit save` will create a commit and push to the remotes in one step.
-It will automatically any ignore any files it deems to be inappropriate to
-save in version control.
-This provides the most automated and hands-off experience
-but gives the least control.
+`calkit save` will create a commit and push to the remotes in one step. It will
+automatically any ignore any files it deems to be inappropriate to save in
+version control. This provides the most automated and hands-off experience but
+gives the least control.
 
 Options:
 
@@ -173,14 +155,14 @@ Options:
 
 ### `sync`
 
-`calkit sync` is a group of commands for syncing with different systems.
-The available targets are:
+`calkit sync` is a group of commands for syncing with different systems. The
+available targets are:
 
 - `calkit sync git`: sync files stored in Git by pulling and then pushing.
 - `calkit sync dvc`: sync files stored in DVC by pulling and then pushing.
 - `calkit sync overleaf`: sync folders linked to Overleaf projects.
-- `calkit sync all`: sync all registered systems,
-  reporting any that are not set up.
+- `calkit sync all`: sync all registered systems, reporting any that are not set
+  up.
 
 For example, to sync the Git repository only:
 
@@ -196,54 +178,47 @@ calkit sync all
 
 ### `add`
 
-`calkit add` will add a file to the repo "staging area,"
-which sets it up to be committed.
-Calkit will determine based on its type and size if it should be tracked
-with Git or DVC and act accordingly.
+`calkit add` will add a file to the repo "staging area," which sets it up to be
+committed. Calkit will determine based on its type and size if it should be
+tracked with Git or DVC and act accordingly.
 
 Options:
 
 - `--to`, `-t`: Manually specify `git`, `dvc`, or `dvc-zip` as the tracking
   mechanism.
-- `--commit-message`, `-m`: Create a commit after adding
-  and use the provided message.
+- `--commit-message`, `-m`: Create a commit after adding and use the provided
+  message.
 - `--auto-commit-message`, `-M`: Commit with an automatically-generated message.
   Only compatible when adding one path.
 - `--push`: Push to the Git or DVC remote after committing.
 
 ## Merging branches
 
-Calkit keeps a record of each pipeline stage's last run,
-in `dvc.lock` and `.calkit/stage-runs.json`.
-When you and a collaborator both run the pipeline,
-e.g., on different branches,
-Git can report conflicts in these files when you merge,
-since it merges them line by line,
-or mix lines from two runs into a record neither of you made.
+Calkit keeps a record of each pipeline stage's last run, in `dvc.lock` and
+`.calkit/stage-runs.json`. When you and a collaborator both run the pipeline,
+e.g., on different branches, Git can report conflicts in these files when you
+merge, since it merges them line by line, or mix lines from two runs into a
+record neither of you made.
 
-Calkit merges them one stage at a time instead.
-To merge a branch into the current one, run:
+Calkit merges them one stage at a time instead. To merge a branch into the
+current one, run:
 
 ```sh
 calkit merge other-branch
 ```
 
-A stage that only ran on one side keeps that side's results,
-with no questions asked.
-For a stage that ran on both sides,
-Calkit shows when each side ran it and which inputs differ,
-and asks which to keep:
+A stage that only ran on one side keeps that side's results, with no questions
+asked. For a stage that ran on both sides, Calkit shows when each side ran it
+and which inputs differ, and asks which to keep:
 
 - **Ours**: the results from the current branch.
 - **Theirs**: the results from the branch being merged in.
 - **Rerun**: neither, so `calkit run` runs the stage again.
 
-The choice applies to everything the stage produced,
-so its outputs and its records always agree.
-If a stage's inputs changed on both sides,
-e.g., you both edited its script,
-the merged inputs match neither run,
-so it will rerun either way.
+The choice applies to everything the stage produced, so its outputs and its
+records always agree. If a stage's inputs changed on both sides, e.g., you both
+edited its script, the merged inputs match neither run, so it will rerun either
+way.
 
 Choices can also be given up front:
 
@@ -254,24 +229,22 @@ calkit merge other-branch --prefer theirs
 
 To combine the branch's changes into a single commit, add `--squash`.
 
-If other files conflict, e.g., a script you both edited,
-Calkit stops so you can resolve them.
-Then run `calkit merge --continue` to finish,
-or `calkit merge --abort` to go back to where you started.
+If other files conflict, e.g., a script you both edited, Calkit stops so you can
+resolve them. Then run `calkit merge --continue` to finish, or
+`calkit merge --abort` to go back to where you started.
 
 ### Conflicts from `git pull` and other tools
 
-A merge started some other way, e.g., by `git pull` or your editor,
-can leave these files in conflict too,
-and `calkit status` and `calkit pull` will say so.
+A merge started some other way, e.g., by `git pull` or your editor, can leave
+these files in conflict too, and `calkit status` and `calkit pull` will say so.
 To resolve them, run:
 
 ```sh
 calkit fix merge-conflicts
 ```
 
-It takes the same choices as `calkit merge`,
-and says how to finish, e.g., with `calkit merge --continue`.
+It takes the same choices as `calkit merge`, and says how to finish, e.g., with
+`calkit merge --continue`.
 
 <!-- prettier-ignore -->
 !!! tip
@@ -284,19 +257,19 @@ and says how to finish, e.g., with `calkit merge --continue`.
 ## Line endings across platforms
 
 Windows writes CRLF line endings where macOS and Linux write LF, and Git
-rewrites text files on checkout to match when `core.autocrlf` is on, which
-is the default for Git for Windows. DVC hashes files as they are on disk,
-so the same file can hash differently on two machines, and a stage nobody
-touched reads as stale.
+rewrites text files on checkout to match when `core.autocrlf` is on, which is
+the default for Git for Windows. DVC hashes files as they are on disk, so the
+same file can hash differently on two machines, and a stage nobody touched reads
+as stale.
 
-Calkit handles its own generated files. When a project has an environment
-that writes a lock file, compiling the pipeline adds a managed block to
-`.gitattributes` pinning everything under `.calkit` to LF, which holds
-whatever `core.autocrlf` is set to. Nothing to do.
+Calkit handles its own generated files. When a project has an environment that
+writes a lock file, compiling the pipeline adds a managed block to
+`.gitattributes` pinning everything under `.calkit` to LF, which holds whatever
+`core.autocrlf` is set to. Nothing to do.
 
-Files your project commits itself are a different matter, and worth
-thinking about if you collaborate across platforms---a text file that is
-also a stage dependency has the same problem. DVC's
+Files your project commits itself are a different matter, and worth thinking
+about if you collaborate across platforms---a text file that is also a stage
+dependency has the same problem. DVC's
 [guide to running on Windows](https://doc.dvc.org/user-guide/how-to/run-dvc-on-windows)
 covers the options.
 
@@ -309,33 +282,29 @@ covers the options.
 
 ## Large folders of many small files
 
-DVC is designed to track individual files efficiently,
-but some workflows produce directories containing many small files,
-e.g., a simulation that writes thousands of timestep output files.
-Tracking each file individually in DVC creates overhead and slows down
-transfers significantly.
+DVC is designed to track individual files efficiently, but some workflows
+produce directories containing many small files, e.g., a simulation that writes
+thousands of timestep output files. Tracking each file individually in DVC
+creates overhead and slows down transfers significantly.
 
-For these cases, Calkit supports a `dvc-zip` storage mode,
-where the entire directory is zipped into a single archive,
-tracked by DVC, and automatically unzipped to its workspace location
-as needed.
-Calkit will automatically detect a directory as a `dvc-zip` candidate
-when it contains at least 10 files, exceeds the DVC size threshold,
-and has a small average file size (under 10 MB per file).
-You can also specify it explicitly:
+For these cases, Calkit supports a `dvc-zip` storage mode, where the entire
+directory is zipped into a single archive, tracked by DVC, and automatically
+unzipped to its workspace location as needed. Calkit will automatically detect a
+directory as a `dvc-zip` candidate when it contains at least 10 files, exceeds
+the DVC size threshold, and has a small average file size (under 10 MB per
+file). You can also specify it explicitly:
 
 ```sh
 calkit add my-output-folder --to dvc-zip
 ```
 
-The zip archive is stored in `.calkit/zip/` and tracked by DVC.
-The workspace directory is gitignored and kept out of DVC,
-so only the zip moves between machines.
-After a `calkit pull` or `calkit clone`,
-the directory is automatically unzipped to its original location.
+The zip archive is stored in `.calkit/zip/` and tracked by DVC. The workspace
+directory is gitignored and kept out of DVC, so only the zip moves between
+machines. After a `calkit pull` or `calkit clone`, the directory is
+automatically unzipped to its original location.
 
-`dvc-zip` can also be used as the storage type for a pipeline stage output
-in `calkit.yaml`:
+`dvc-zip` can also be used as the storage type for a pipeline stage output in
+`calkit.yaml`:
 
 ```yaml
 pipeline:
@@ -351,35 +320,42 @@ pipeline:
 
 ## Moving files between Git and DVC
 
-If a file is stored in Git and it would be better in DVC,
-e.g., because it's large and its changes are starting to make the
-repo expensive to clone or download,
-its storage location can be changed with:
+If a file is stored in Git and it would be better in DVC, e.g., because it's
+large and its changes are starting to make the repo expensive to clone or
+download, its storage location can be changed with:
 
 ```sh
 calkit update path-storage
 ```
 
-Note that this will not clean out all the previous versions stored in
-Git.
-That can be achieved with
-[git-filter-repo](https://github.com/newren/git-filter-repo).
-Likewise, old versions of files kept in DVC will still live in the local
-and remote caches.
-These can be managed with DVC's garbage collection functionality,
-accessible at `calkit dvc gc`.
+Note that this will not clean out all the previous versions stored in Git. That
+can be achieved with
+[git-filter-repo](https://github.com/newren/git-filter-repo). Likewise, old
+versions of files kept in DVC will still live in the local and remote caches.
+These can be managed with DVC's garbage collection functionality, accessible at
+`calkit dvc gc`.
 
 ## Under the hood
 
-Users who are already fluent in version control may find it helpful to understand more precisely how each calkit operation corresponds to the commands of other version control systems.
+Users who are already fluent in version control may find it helpful to
+understand more precisely how each calkit operation corresponds to the commands
+of other version control systems.
 
-Unlike the flowcharts [above](#typical-workflow), where blocks represent actions you take (running commands or modifying the project), in the diagram below, blocks represent the different storage locations that a given change can exist in.
-These locations include the remote, the cache, the staging area, and the workspace.
-Changes made in the workspace are unsaved. Changes in the staging area are ready to save. Changes in the cache are saved locally. Changes in the remote are saved to the cloud.
-Commands that move a changeset between storage locations are shown with arrows.
+Unlike the flowcharts [above](#typical-workflow), where blocks represent actions
+you take (running commands or modifying the project), in the diagram below,
+blocks represent the different storage locations that a given change can exist
+in. These locations include the remote, the cache, the staging area, and the
+workspace. Changes made in the workspace are unsaved. Changes in the staging
+area are ready to save. Changes in the cache are saved locally. Changes in the
+remote are saved to the cloud. Commands that move a changeset between storage
+locations are shown with arrows.
 
 ![Grid-aligned flowchart showing the remote, cache, staged, and workspace storage locations for Git, DVC, and Docker, and the commands to transition file changes between locations using both the native systems and Calkit](img/version_control_command_flowchart.svg "Version Control Commands")
 
-Calkit commands combine the version control operations across platforms and should be sufficient for everyday use, but occasionally scenarios arise where the individual platform commands become necessary.
-One example is the use of `calkit dvc commit <stagename>` to manually force a stale stage to be treated as non-stale, i.e. after adding a comment or other non-functional change to the source code.
-See the [DVC docs](https://doc.dvc.org/command-reference/commit) for further detail.
+Calkit commands combine the version control operations across platforms and
+should be sufficient for everyday use, but occasionally scenarios arise where
+the individual platform commands become necessary. One example is the use of
+`calkit dvc commit <stagename>` to manually force a stale stage to be treated as
+non-stale, i.e. after adding a comment or other non-functional change to the
+source code. See the [DVC docs](https://doc.dvc.org/command-reference/commit)
+for further detail.

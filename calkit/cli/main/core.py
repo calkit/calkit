@@ -2074,11 +2074,13 @@ def push(
         else:
             warn("No DVC remotes configured; skipping DVC push")
     if "docker" in selected:
+        from calkit.environments import docker as env_docker
+
         # Everything that can be settled locally is settled before the
         # network: a project with no image to publish must not reach a
         # registry at all, since that means a round-trip, and credentials
         # asked for or replaced, on behalf of a push that was never on
-        images = calkit.docker.get_pushable_images()
+        images = env_docker.get_pushable_images()
         asked_for_docker = "docker" in (targets or [])
         pushable = {}
         for env_name, info in images.items():

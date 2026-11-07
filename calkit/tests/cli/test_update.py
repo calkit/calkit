@@ -518,7 +518,7 @@ def test_update_docker_env_registry(tmp_dir):
     assert result.exit_code == 0, result.output
     env = calkit.load_calkit_info()["environments"]["main"]
     assert env["registry"] is None
-    assert calkit.docker.resolve_registry_prefix(env) is None
+    assert calkit.environments.docker.resolve_registry_prefix(env) is None
     with open("calkit.yaml") as f:
         assert "registry: none" not in f.read()
     # Nothing to update is a mistake worth reporting, not a no-op

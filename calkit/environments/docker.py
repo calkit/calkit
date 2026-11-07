@@ -13,6 +13,76 @@ from pathlib import Path
 
 import calkit
 
+MINIFORGE_LAYER_TXT = r"""
+# Install Miniforge
+ARG MINIFORGE_NAME=Miniforge3
+ARG MINIFORGE_VERSION=26.7.2-0
+ARG TARGETPLATFORM
+
+ENV CONDA_DIR=/opt/conda
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+ENV PATH=${CONDA_DIR}/bin:${PATH}
+
+# 1. Install just enough for conda to work
+# 2. Keep $HOME clean (no .wget-hsts file), since HSTS isn't useful in this context
+# 3. Install miniforge from GitHub releases
+# 4. Apply some cleanup tips from https://jcrist.github.io/conda-docker-tips.html
+#    Particularly, we remove pyc and a files. The default install has no js, we can skip that
+# 5. Activate base by default when running as any *non-root* user as well
+#    Good security practice requires running most workloads as non-root
+#    This makes sure any non-root users created also have base activated
+#    for their interactive shells.
+# 6. Activate base by default when running as root as well
+#    The root user is already created, so won't pick up changes to /etc/skel
+RUN apt-get update > /dev/null && \
+    apt-get install --no-install-recommends --yes \
+        wget bzip2 ca-certificates \
+        git \
+        tini \
+        > /dev/null && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    wget --no-hsts --quiet https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/${MINIFORGE_NAME}-${MINIFORGE_VERSION}-Linux-$(uname -m).sh -O /tmp/miniforge.sh && \
+    /bin/bash /tmp/miniforge.sh -b -p ${CONDA_DIR} && \
+    rm /tmp/miniforge.sh && \
+    conda clean --tarballs --index-cache --packages --yes && \
+    find ${CONDA_DIR} -follow -type f -name '*.a' -delete && \
+    find ${CONDA_DIR} -follow -type f -name '*.pyc' -delete && \
+    conda clean --force-pkgs-dirs --all --yes  && \
+    echo ". ${CONDA_DIR}/etc/profile.d/conda.sh && conda activate base" >> /etc/skel/.bashrc && \
+    echo ". ${CONDA_DIR}/etc/profile.d/conda.sh && conda activate base" >> ~/.bashrc
+""".strip()
+
+# foamPy ships only an sdist whose setup.py imports numpy, so it needs the
+# surrounding environment rather than an isolated build one
+FOAMPY_LAYER_TEXT = r"""
+RUN pip install --no-cache-dir numpy pandas matplotlib h5py \
+    && pip install --no-cache-dir scipy \
+    && pip install --no-cache-dir --no-build-isolation foampy
+""".strip()
+
+UV_LAYER_TEXT = """
+COPY --from=ghcr.io/astral-sh/uv:0.12.11 /uv /uvx /bin/
+"""
+
+JULIA_LAYER_TEXT = """
+# Install Julia
+# Ensure base image is a bookworm distribution
+COPY --from=julia:1.11.9-bookworm /usr/local/julia /usr/local/julia
+ENV JULIA_PATH=/usr/local/julia \
+    PATH=$PATH:/usr/local/julia/bin \
+    JULIA_GPG=3673DF529D9049477F76B37566E3C7DC03D6E495 \
+    JULIA_VERSION=1.11.9
+"""
+
+LAYERS = {
+    "mambaforge": MINIFORGE_LAYER_TXT,
+    "miniforge": MINIFORGE_LAYER_TXT,
+    "foampy": FOAMPY_LAYER_TEXT,
+    "uv": UV_LAYER_TEXT,
+    "julia": JULIA_LAYER_TEXT,
+}
+
 
 def check_image(
     tag: str,
@@ -129,7 +199,7 @@ def check_image(
     # out-of-date with the local image: the image it identifies was built
     # from a different Dockerfile or dependencies, or is a different image
     # altogether, so it must not be pulled in place of the one asked for
-    if lock is not None and not ck_docker.lock_matches_spec(
+    if lock is not None and not lock_matches_spec(
         lock,
         dockerfile_md5=dockerfile_md5,
         deps_md5s=deps_md5s,
@@ -153,10 +223,10 @@ def check_image(
     # from a Dockerfile goes to the project's registry; one named directly
     # already lives somewhere it can be pulled back from.
     remote_ref = None
-    registry_prefix = ck_docker.resolve_registry_prefix(
+    registry_prefix = resolve_registry_prefix(
         {"registry": registry, "path": fpath}
     )
-    if registry_prefix is None and ck_docker.registry_is_auto(registry):
+    if registry_prefix is None and registry_is_auto(registry):
         warn(
             "Could not work out a registry for this project; name one "
             "explicitly, e.g., 'ghcr.io/someone/some-project', or set "
@@ -184,11 +254,11 @@ def check_image(
         identity is not None
         and lock is not None
         and lock_is_current_arch
-        and ck_docker.lock_matches_image(lock, identity)
+        and lock_matches_image(lock, identity)
     )
 
     digest_refs = (
-        ck_docker.get_lock_digest_refs(lock, digest_source_ref)
+        get_lock_digest_refs(lock, digest_source_ref)
         if lock is not None
         else []
     )
@@ -221,7 +291,7 @@ def check_image(
                 identity = ck_docker.inspect_image_for_lock(tag)
                 if identity is None:
                     continue
-                if lock_is_current_arch and not ck_docker.lock_matches_image(
+                if lock_is_current_arch and not lock_matches_image(
                     lock, identity
                 ):
                     warn(
@@ -262,7 +332,7 @@ def check_image(
                     release_name, entry
                 ) and ck_docker.tag_image(image_id, tag):
                     identity = ck_docker.inspect_image_for_lock(tag)
-                    if identity is not None and ck_docker.lock_matches_image(
+                    if identity is not None and lock_matches_image(
                         lock, identity
                     ):
                         obtained = True
@@ -389,7 +459,7 @@ def check_image(
             remote_digests = ck_docker.keep_only_repo_digests(
                 identity, remote_ref
             )["RepoDigests"]
-        elif lock is not None and ck_docker.lock_matches_image(lock, identity):
+        elif lock is not None and lock_matches_image(lock, identity):
             # Still the same image an earlier run verified, so what it
             # recorded stands and the lock doesn't churn. A lock written
             # before digests were taken from the build recorded none, and
@@ -438,9 +508,9 @@ def check_image(
     # platform the same image and its own layers within it.
     remote_source_ref = None
     if identity["RepoDigests"]:
-        remote_source_ref = ck_docker.get_lock_digest_refs(
-            identity, digest_source_ref
-        )[0]
+        remote_source_ref = get_lock_digest_refs(identity, digest_source_ref)[
+            0
+        ]
     elif fpath is None:
         remote_source_ref = tag
     # Run configuration doesn't affect which image we need, but does affect
@@ -466,7 +536,7 @@ def check_image(
             arch_lock_fpath = lock_fpath
         else:
             arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
-        arch_lock = ck_docker.build_lock(
+        arch_lock = build_lock(
             identity=arch_identity,
             dockerfile_md5=dockerfile_md5,
             deps_md5s=deps_md5s,
@@ -500,7 +570,7 @@ def check_image(
         )
         if (
             existing is not None
-            and ck_docker.lock_matches_spec(
+            and lock_matches_spec(
                 existing,
                 dockerfile_md5=dockerfile_md5,
                 deps_md5s=deps_md5s,
@@ -620,7 +690,6 @@ def check(
     """Check an environment defined in calkit.yaml, getting or building its
     image and locking it.
     """
-    from calkit import docker as ck_docker
     from calkit.cli import raise_error
     from calkit.environments import get_env_input_paths, get_env_lock_fpath
 
@@ -649,7 +718,7 @@ def check(
         args=env.get("args", []),
         build_platforms=env.get("build_platforms", []),
         registry=env.get("registry"),
-        lock_archs=ck_docker.get_lock_archs(env),
+        lock_archs=get_lock_archs(env),
         quiet=not verbose,
         rebuild=rebuild,
         env_name=env_name,
@@ -777,3 +846,235 @@ def run(
             "Failed to run in Docker environment: command exited with "
             f"status {returncode}"
         )
+
+
+def lock_matches_spec(
+    lock: dict,
+    dockerfile_md5: str | None,
+    deps_md5s: dict[str, str],
+    image: str | None = None,
+) -> bool:
+    """Return True if a lock file describes the current environment spec.
+
+    A lock that doesn't match is stale rather than merely out-of-date with
+    the local image: its recorded digest identifies an image built from
+    different inputs, so it can't be used to pull.
+
+    What a built image is called isn't part of this. A lock belongs to the
+    environment whose directory it sits in, the name comes from calkit.yaml,
+    and the digest names the content, so renaming an image would only rerun
+    every stage in it for software that didn't change. For an environment
+    named after an existing image, though, ``image`` is the spec, so a lock
+    for a different one is stale. Locks written before it was recorded don't
+    say, and are taken as matching.
+    """
+    if lock.get("DockerfileMD5") != dockerfile_md5:
+        return False
+    if (lock.get("DepsMD5s") or {}) != (deps_md5s or {}):
+        return False
+    if image is not None and lock.get("Image", image) != image:
+        return False
+    return True
+
+
+def lock_matches_image(lock: dict, image_info: dict) -> bool:
+    """Return True if an image's content is what a lock file records."""
+    locked = (lock.get("RootFS") or {}).get("Layers")
+    actual = (image_info.get("RootFS") or {}).get("Layers")
+    return bool(locked) and locked == actual
+
+
+def get_lock_digest_refs(
+    lock: dict, remote_ref: str | None = None
+) -> list[str]:
+    """Return references that pull the image a lock records, best first.
+
+    A lock records the digest alone, since a digest names the image's
+    content while a repository only says where a copy of it lives. The repo
+    to pull from comes from ``remote_ref``, worked out from the environment
+    definition at the time of asking, so an environment that changes which
+    image it uses can't resolve a digest left over from the old one. Locks
+    written before digests were stored bare name their repo outright and
+    are still honored.
+    """
+    from calkit import docker as ck_docker
+
+    refs = []
+    remote_repo = (
+        ck_docker.get_repo_from_ref(remote_ref)
+        if remote_ref is not None
+        else None
+    )
+    for digest in lock.get("RepoDigests") or []:
+        if "@" in digest:
+            refs.append(digest)
+        elif remote_repo is not None and ":" in digest:
+            refs.append(f"{remote_repo}@{digest}")
+    if remote_repo is None:
+        return refs
+    # A digest only names this environment's image if it came from this
+    # environment's repository. One recorded against another repository is
+    # left over from an image the project no longer uses, and pulling it
+    # would quietly go on building with the old image however the
+    # environment was changed.
+    return [
+        r
+        for r in refs
+        if _same_repo(ck_docker.get_repo_from_ref(r), remote_repo)
+    ]
+
+
+def build_lock(
+    identity: dict,
+    dockerfile_md5: str | None,
+    deps_md5s: dict[str, str],
+    run_config: dict,
+    image: str | None = None,
+) -> dict:
+    """Assemble a lock file's contents for one platform.
+
+    ``image`` is recorded for an environment named after an existing image,
+    since that name is its spec.
+
+    Key order is fixed so that a lock written for a platform from a registry
+    matches byte-for-byte the one that platform would write for itself.
+    """
+    from calkit import docker as ck_docker
+
+    lock = {key: identity.get(key) for key in ck_docker.LOCK_INSPECT_KEYS}
+    # Normalize here rather than at each call site, so that a lock carried
+    # over from an earlier run, in whatever form that run wrote it, comes
+    # out in the same form as one written from scratch
+    lock["RepoDigests"] = ck_docker.get_content_digests(lock)
+    lock["DockerfileMD5"] = dockerfile_md5
+    lock["DepsMD5s"] = deps_md5s
+    if image is not None:
+        lock["Image"] = image
+    lock.update(run_config)
+    return lock
+
+
+# Values of an environment's ``registry`` that name the GitHub Container
+# Registry without saying which namespace, leaving that to be worked out
+# from the project's Git remote. ``ghcr.io`` is the documented one, since a
+# registry Calkit runs itself someday would have as much claim to 'auto'
+AUTO_REGISTRY_VALUES = ["ghcr.io", "ghcr", "github", "auto", "true"]
+
+
+def registry_is_auto(registry: str | None) -> bool:
+    """Return True if a ``registry`` value asks Calkit to work one out."""
+    if registry is None:
+        return False
+    return str(registry).strip().lower() in AUTO_REGISTRY_VALUES
+
+
+def resolve_registry_prefix(env: dict, wdir: str | None = None) -> str | None:
+    """Return the registry prefix used for an environment's images.
+
+    Registries are opt-in, since pushing an image publishes it somewhere the
+    project doesn't necessarily control, so images are kept local when
+    ``registry`` is unset or null. ``ghcr.io`` on its own resolves to the
+    GitHub Container Registry namespace beside the project's repo, which is
+    the one namespace we can name on the user's behalf. The strings a shell
+    has to use in place of null are read as null too, since ``--registry
+    none`` is the only way to say it on the command line.
+    """
+    registry = env.get("registry")
+    if registry is None or registry is False:
+        return None
+    registry = str(registry).strip()
+    if registry.lower() in ["none", "false", ""]:
+        return None
+    if registry.lower() in AUTO_REGISTRY_VALUES:
+        return get_default_registry_prefix(wdir=wdir)
+    return registry
+
+
+def _same_repo(a: str, b: str) -> bool:
+    """Whether two repositories are the same one written two ways.
+
+    Docker reports what it pulled in full, e.g., ``docker.io/library/foo``,
+    while a project names it as ``foo``.
+    """
+
+    def canonical(repo: str) -> str:
+        for prefix in ("docker.io/library/", "docker.io/", "index."):
+            if repo.startswith(prefix):
+                repo = repo[len(prefix) :]
+        if repo.startswith("docker.io/"):
+            repo = repo[len("docker.io/") :]
+        return repo
+
+    return canonical(a) == canonical(b)
+
+
+def get_default_registry_prefix(wdir: str | None = None) -> str | None:
+    """Return the default registry prefix for a project's images.
+
+    Images are namespaced under the project's GitHub repo in the GitHub
+    Container Registry, e.g., ``ghcr.io/someone/some-project``. Returns None
+    if the project has no GitHub remote, since there's then no namespace we
+    can claim on the user's behalf.
+    """
+    try:
+        url = calkit.git.get_repo(wdir).remote().url
+    except Exception:
+        return None
+    if "github.com" not in url:
+        return None
+    path = url.split("github.com")[-1].lstrip(":/").removesuffix(".git")
+    parts = [p for p in path.split("/") if p]
+    if len(parts) != 2:
+        return None
+    # Registry paths must be lowercase, whereas GitHub owner and repo names
+    # are case-insensitive but case-preserving
+    return "ghcr.io/" + "/".join(parts).lower()
+
+
+def get_lock_archs(env: dict) -> list[str]:
+    """Return the architectures an environment should be locked for.
+
+    Both of the architectures in common use are locked whether or not this
+    machine runs them, so that moving a project between them doesn't
+    invalidate every stage in the environment.
+    """
+    from calkit import docker as ck_docker
+    from calkit.environments import DEFAULT_DOCKER_LOCK_ARCHS
+
+    archs = list(DEFAULT_DOCKER_LOCK_ARCHS)
+    for platform in env.get("build_platforms") or []:
+        arch = ck_docker.platform_to_arch_name(platform)
+        if arch is not None and arch not in archs:
+            archs.append(arch)
+    return archs
+
+
+def get_pushable_images(wdir: str | None = None) -> dict[str, dict]:
+    """Return the images a project builds that belong in a registry.
+
+    Only environments built from the project's own Dockerfile are included:
+    an environment named after an image someone else publishes already lives
+    somewhere it can be pulled back from.
+    """
+    from calkit import docker as ck_docker
+
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    resp = {}
+    for env_name, env in (ck_info.get("environments") or {}).items():
+        if not isinstance(env, dict) or env.get("kind") != "docker":
+            continue
+        if not env.get("path"):
+            continue
+        try:
+            image = get_image_name(env_name, env, wdir=wdir)
+        except ValueError:
+            continue
+        prefix = resolve_registry_prefix(env, wdir=wdir)
+        if prefix is None:
+            continue
+        resp[env_name] = dict(
+            env=env,
+            image=image,
+            remote_ref=ck_docker.get_remote_image_ref(image, prefix),
+        )
+    return resp

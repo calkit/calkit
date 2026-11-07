@@ -37,6 +37,8 @@ You don't need to have used Calkit before, and you won't need a terminal.
 - An account on [calkit.io](https://calkit.io), which you can make with
   your GitHub account.
 - The [Calkit browser extension](../browser-ext/index.md), signed in.
+- To have an AI agent write an analysis, a [Claude](https://claude.ai)
+  account. <!-- TODO: needs human review -->
 - An Overleaf Git token, which lets Calkit read and update your Overleaf
   project. The extension asks for one the first time it needs it. See
   [Overleaf integration](../overleaf.md#generating-and-storing-an-overleaf-token)
@@ -201,20 +203,35 @@ button on one of their cards. -->
 
 ## Add a second analysis
 
-Papers grow. Say you now want to know how the rate depends on temperature,
-from a new script, `arrhenius.py`, that reads the rate constants
-`fit_rates.py` saved, plots their logarithm against inverse temperature,
-and fits a line to get the activation energy.
+<!-- TODO: needs human review -->
 
-On calkit.io, go to the project's **Pipeline** page and add a stage from
-`arrhenius.py`, uploading the script. Calkit finds what the script reads and
-writes, i.e., `results/rates.json`, the Arrhenius plot, and a results file
-with the activation energy, and lists them as the stage's inputs and
-outputs. Since it reads what the first script writes, it runs after it, and
-reruns whenever the rate constants change. Click **Run** to make them.
+Papers grow. Say you now want to know how the rate depends on temperature:
+plot the logarithm of each rate constant against inverse temperature, and
+fit a line to get the activation energy.
 
-Back on Overleaf, put the cursor where the figure goes, right-click, and
-choose **Insert from Calkit**. Pick the Arrhenius plot, and Calkit inserts a
+You can have an AI agent write that analysis. In the Calkit sidebar on
+Overleaf, click **Ask Claude** and say what you want, e.g.:
+
+> Plot ln k against 1/T from the rate constants fit_rates.py saves, fit a
+> line, and save the activation energy in kJ/mol.
+
+Claude writes a script, `arrhenius.py`, and adds it to the pipeline, after
+`fit_rates.py`, since it reads the rate constants that script saves. Then
+the pipeline runs it on GitHub, separately from Claude, so what you see next
+was made by running that code on that data, not drawn or typed in by the
+agent. Keep writing while it runs.
+
+When it's done, the sidebar shows what Claude proposes: the plot, the
+activation energy, and the script, with what you asked for. Ask for changes
+the same way, e.g., "label the axes with units," or click **Accept** to add
+it to the project.
+
+<!-- Screenshot: img/overleaf-paper/ask-claude.png
+The proposal in the sidebar: the Arrhenius plot, the activation energy, the
+script, and Accept. -->
+
+Now put the cursor where the figure goes, right-click, and choose
+**Insert from Calkit**. Pick the Arrhenius plot, and Calkit inserts a
 `\ckfigure` for it and syncs it into the paper. Do the same in the text for
 the activation energy, which inserts a `\ckvalue`.
 
@@ -223,7 +240,15 @@ The "Insert from Calkit" picker listing the new figure and value. -->
 
 Things you insert this way are accounted for from the start, so there's
 nothing to define, and they stay current with **Run and sync** like
-everything else.
+everything else. Their cards show the agent's work: the plot's card leads
+to `arrhenius.py`, marked as written with Claude, and from there to the rate
+constants and the data they came from. If Claude got something wrong, it's
+in code you or a coauthor can read, not hidden in a picture.
+
+If you already have the script, add it yourself instead: on calkit.io, go
+to the project's **Pipeline** page and add a stage from `arrhenius.py`,
+uploading the script. Calkit finds what it reads and writes, and runs it
+after `fit_rates.py`.
 
 ## Do it with your own paper
 

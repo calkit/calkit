@@ -1127,17 +1127,18 @@ def update_environment(
             "--lock",
             "--relock",
             help=(
-                "Record this machine's properties in a system "
-                "environment's lock file, replacing the machine it is "
-                "locked to. Invalidates every stage that depends on it."
+                "Rebuild the environment from its spec and lock it again, "
+                "taking the newest versions the spec allows, or for a "
+                "system environment, lock it to this machine. Reruns every "
+                "stage that depends on it."
             ),
         ),
     ] = False,
 ) -> None:
     """Update an environment.
 
-    Currently supports adding packages to Julia and Nix (flake) envs, and
-    re-locking a system environment to this machine.
+    Supports relocking any environment, and adding packages to Julia and
+    Nix (flake) envs.
     """
     from calkit.cli.main import run_in_env
 
@@ -1157,11 +1158,8 @@ def update_environment(
         env = found
         kind = env.get("kind")
         if kind not in ("system", calkit.environments.SWITCH_KIND):
-            raise_error(
-                f"Environment '{env_name}' is not a system or switch "
-                "environment, so it has no machine to lock; its lock file is "
-                "derived from its spec"
-            )
+            calkit.environments.relock(env_name=env_name, env=env)
+            return
         # A switch's lock describes the machine its pick runs on
         machine_name, machine_env = env_name, env
         if kind == calkit.environments.SWITCH_KIND:
@@ -1235,7 +1233,7 @@ def update_environment(
     if add_packages is None:
         raise_error(
             "No updates specified. Use --add to specify packages to add, or "
-            "--lock to re-lock a system environment to this machine."
+            "--lock to relock the environment."
         )
     env = found
     assert isinstance(add_packages, list)

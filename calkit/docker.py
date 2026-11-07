@@ -987,6 +987,7 @@ def lock_matches_spec(
     lock: dict,
     dockerfile_md5: str | None,
     deps_md5s: dict[str, str],
+    image: str | None = None,
 ) -> bool:
     """Return True if a lock file describes the current environment spec.
 
@@ -994,16 +995,19 @@ def lock_matches_spec(
     the local image: its recorded digest identifies an image built from
     different inputs, so it can't be used to pull.
 
-    What the image is called isn't part of this. A lock belongs to the
+    What a built image is called isn't part of this. A lock belongs to the
     environment whose directory it sits in, the name comes from calkit.yaml,
     and the digest names the content, so renaming an image would only rerun
-    every stage in it for software that didn't change. A digest left over
-    from a different image can't resolve either, since the repo it's asked
-    for comes from the current definition.
+    every stage in it for software that didn't change. For an environment
+    named after an existing image, though, ``image`` is the spec, so a lock
+    for a different one is stale. Locks written before it was recorded don't
+    say, and are taken as matching.
     """
     if lock.get("DockerfileMD5") != dockerfile_md5:
         return False
     if (lock.get("DepsMD5s") or {}) != (deps_md5s or {}):
+        return False
+    if image is not None and lock.get("Image", image) != image:
         return False
     return True
 
@@ -1052,8 +1056,12 @@ def build_lock(
     dockerfile_md5: str | None,
     deps_md5s: dict[str, str],
     run_config: dict,
+    image: str | None = None,
 ) -> dict:
     """Assemble a lock file's contents for one platform.
+
+    ``image`` is recorded for an environment named after an existing image,
+    since that name is its spec.
 
     Key order is fixed so that a lock written for a platform from a registry
     matches byte-for-byte the one that platform would write for itself.
@@ -1065,6 +1073,8 @@ def build_lock(
     lock["RepoDigests"] = get_content_digests(lock)
     lock["DockerfileMD5"] = dockerfile_md5
     lock["DepsMD5s"] = deps_md5s
+    if image is not None:
+        lock["Image"] = image
     lock.update(run_config)
     return lock
 

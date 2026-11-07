@@ -47,7 +47,6 @@ from calkit.cli import (
 from calkit.cli.check import (
     check_app,
     check_conda_env,
-    check_docker_env,
     check_environment,
     check_matlab_env,
     check_venv,
@@ -4502,7 +4501,9 @@ def run_in_env(
                 f"{command_mode}; Use 'shell' or 'entrypoint'"
             )
         if not no_check:
-            check_docker_env(
+            from calkit.environments import docker as env_docker
+
+            env_docker.check_env(
                 tag=image_name,
                 fpath=env.get("path"),
                 lock_fpath=get_env_lock_fpath(
@@ -4520,6 +4521,7 @@ def run_in_env(
                 registry=env.get("registry"),
                 lock_archs=calkit.docker.get_lock_archs(env),
                 quiet=not verbose,
+                env_name=env_name,
             )
             save_env_check_cache()
         docker_cmd = [

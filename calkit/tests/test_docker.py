@@ -175,6 +175,23 @@ def test_lock_matching():
         deps_md5s={"reqs.txt": "def"},
     )
     assert not lock_matches_spec(lock, dockerfile_md5="abc", deps_md5s={})
+    # For an environment named after an image, the image is the spec, but a
+    # lock written before that was recorded doesn't say, so it still matches
+    image_lock: dict = {
+        "DockerfileMD5": None,
+        "DepsMD5s": {},
+        "Image": "alpine:3",
+    }
+    assert lock_matches_spec(
+        image_lock, dockerfile_md5=None, deps_md5s={}, image="alpine:3"
+    )
+    assert not lock_matches_spec(
+        image_lock, dockerfile_md5=None, deps_md5s={}, image="ubuntu:24.04"
+    )
+    del image_lock["Image"]
+    assert lock_matches_spec(
+        image_lock, dockerfile_md5=None, deps_md5s={}, image="ubuntu:24.04"
+    )
     assert lock_matches_image(
         lock, {"RootFS": {"Layers": ["sha256:a", "sha256:b"]}}
     )
@@ -271,6 +288,16 @@ def test_build_lock():
         run_config={"WorkDir": "/work"},
     )
     assert list(lock) == list(other)
+    # Only an environment named after an image records it
+    assert "Image" not in lock
+    named = build_lock(
+        identity=identity,
+        dockerfile_md5=None,
+        deps_md5s={},
+        run_config={},
+        image="alpine:3",
+    )
+    assert named["Image"] == "alpine:3"
 
 
 def test_resolve_registry_prefix(tmp_dir):

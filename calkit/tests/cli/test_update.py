@@ -565,10 +565,14 @@ def test_update_latex_image(tmp_dir, monkeypatch):
     with open(lock_fpath, "w") as f:
         json.dump({"RepoDigests": ["sha256:old"]}, f)
     relocked = []
+    forced = []
     monkeypatch.setattr(
         calkit.cli.check,
         "check_environment",
-        lambda env_name, verbose=False: relocked.append(env_name),
+        lambda env_name, force=False, **kwargs: (
+            relocked.append(env_name),
+            forced.append(force),
+        ),
     )
     # Environments on Calkit's or TeX Live's image move to the pinned one and
     # are relocked, with stale locks removed so the old image isn't pulled
@@ -591,6 +595,12 @@ def test_update_latex_image(tmp_dir, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "No LaTeX environments to update" in result.output
     assert relocked == []
+    # Relocking a Docker env forces a rebuild, as 'update env --lock' does
+    forced.clear()
+    result = runner.invoke(update_app, ["docker-env", "-n", "tex", "--relock"])
+    assert result.exit_code == 0, result.output
+    assert relocked == ["tex"]
+    assert forced == [True]
 
 
 def test_update_imported_from_detects_the_kind(tmp_dir):

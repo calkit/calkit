@@ -553,7 +553,7 @@ def check_image(
                     os.remove(arch_lock_fpath)
 
 
-def get_image(env_name: str, env: dict) -> str:
+def get_image_name(env_name: str, env: dict) -> str:
     """Name the image an environment runs in."""
     from calkit import docker as ck_docker
     from calkit.cli import raise_error
@@ -604,7 +604,7 @@ def check(
         env_name, as_posix=False
     )
     check_image(
-        tag=get_image(env_name, env),
+        tag=get_image_name(env_name, env),
         fpath=env.get("path"),
         lock_fpath=get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
@@ -716,7 +716,7 @@ def run(
         docker_wdir,
         "-v",
         f"{os.getcwd()}:{docker_wdir_mount}",
-        get_image(env_name, env),
+        get_image_name(env_name, env),
     ]
     if command_mode == "shell":
         shell_cmd = _to_shell_cmd(cmd)

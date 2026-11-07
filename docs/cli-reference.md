@@ -3231,12 +3231,12 @@ calkit update docker-env [OPTIONS]
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                                                                                                                                          |
-| -------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n` | str     | yes      |         | Environment name.                                                                                                                                                    |
-| `--image`      | str     | no       |         | Docker image name/tag.                                                                                                                                               |
-| `--registry`   | str     | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
-| `--lock`       | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
+| Option               | Type    | Required | Default | Description                                                                                                                                                          |
+| -------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`       | str     | yes      |         | Environment name.                                                                                                                                                    |
+| `--image`            | str     | no       |         | Docker image name/tag.                                                                                                                                               |
+| `--registry`         | str     | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
+| `--lock`, `--relock` | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
 
 <a id="subcommand-update-latex-image"></a>
 

@@ -553,24 +553,47 @@ def check_image(
                     os.remove(arch_lock_fpath)
 
 
-def get_image_name(env_name: str, env: dict) -> str:
-    """Name the image an environment runs in."""
-    from calkit import docker as ck_docker
-    from calkit.cli import raise_error
+def get_image_name(env_name: str, env: dict, wdir: str | None = None) -> str:
+    """Name the image an environment runs in.
 
-    image = ck_docker.get_image_name(env, env_name)
-    if image is None:
-        if not env.get("path"):
-            raise_error(
-                f"Environment '{env_name}' must define an image, since "
-                "it has no Dockerfile to build one from"
-            )
-        raise_error(
-            f"Cannot work out what to call the image for environment "
-            f"'{env_name}': set 'image' on it, or set 'owner' and "
-            "'name' in calkit.yaml"
+    An environment that builds from a Dockerfile doesn't have to be told
+    what to call its image: the project and environment it belongs to name
+    it unambiguously, by the same convention its Jupyter kernel is named
+    by. One defined purely by an image has to name it, since it's someone
+    else's.
+
+    A project with nothing to be named after, i.e., no ``owner`` or
+    ``name`` in ``calkit.yaml`` and no Git remote to read them from, can't
+    name its images either. The directory a project happens to sit in is
+    not a name---moving or renaming it would rename the image, and every
+    image built by every project called ``analysis`` would collide---so
+    this is for the project to say rather than for Calkit to guess.
+
+    Raises ValueError, saying why, if there's no name.
+    """
+    image: str | None = env.get("image")
+    if image:
+        return image
+    if not env.get("path"):
+        raise ValueError(
+            f"Environment '{env_name}' must define an image, since it has "
+            "no Dockerfile to build one from"
         )
-    return image
+    project: str | None
+    try:
+        project = calkit.detect_project_name(wdir=wdir)
+    except ValueError:
+        # A project that isn't published anywhere yet still names itself if
+        # calkit.yaml says what it's called
+        project = calkit.load_calkit_info(wdir=wdir).get("name")
+        if not project:
+            raise ValueError(
+                "Cannot work out what to call the image for environment "
+                f"'{env_name}': set 'image' on it, or set 'owner' and "
+                "'name' in calkit.yaml"
+            )
+    # Repository names must be lowercase, unlike tags
+    return f"{project}.{env_name}".lower()
 
 
 def get_lock_fpaths(
@@ -598,13 +621,18 @@ def check(
     image and locking it.
     """
     from calkit import docker as ck_docker
+    from calkit.cli import raise_error
     from calkit.environments import get_env_input_paths, get_env_lock_fpath
 
+    try:
+        image = get_image_name(env_name, env)
+    except ValueError as e:
+        raise_error(str(e))
     *alt_lock_fpaths, legacy_lock_fpath = get_lock_fpaths(
         env_name, as_posix=False
     )
     check_image(
-        tag=get_image_name(env_name, env),
+        tag=image,
         fpath=env.get("path"),
         lock_fpath=get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
@@ -654,6 +682,10 @@ def run(
             "Invalid Docker environment 'command_mode': "
             f"{command_mode}; Use 'shell' or 'entrypoint'"
         )
+    try:
+        image = get_image_name(env_name, env)
+    except ValueError as e:
+        raise_error(str(e))
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
     if wdir is not None:
@@ -716,7 +748,7 @@ def run(
         docker_wdir,
         "-v",
         f"{os.getcwd()}:{docker_wdir_mount}",
-        get_image_name(env_name, env),
+        image,
     ]
     if command_mode == "shell":
         shell_cmd = _to_shell_cmd(cmd)

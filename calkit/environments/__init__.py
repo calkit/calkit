@@ -2065,9 +2065,13 @@ def check_cache(
     # hashes changing, and the pipeline can't run in an image that isn't
     # there, so its absence has to invalidate the check
     if env.get("kind") == "docker":
-        from calkit.docker import get_image_name, image_exists
+        from calkit.docker import image_exists
+        from calkit.environments import docker as env_docker
 
-        image = get_image_name(env, env_name, wdir=wdir)
+        try:
+            image = env_docker.get_image_name(env_name, env, wdir=wdir)
+        except ValueError:
+            image = None
         if image and not image_exists(image):
             return False
     # Check if this environment is up-to-date

@@ -1474,44 +1474,6 @@ def push_image_with_login(
     return success, output
 
 
-def get_image_name(
-    env: dict, env_name: str, wdir: str | None = None
-) -> str | None:
-    """Return the name of the image an environment uses.
-
-    An environment that builds from a Dockerfile doesn't have to be told
-    what to call its image: the project and environment it belongs to name
-    it unambiguously, by the same convention its Jupyter kernel is named
-    by. One defined purely by an image has to name it, since it's someone
-    else's, so there's nothing to work out and None comes back.
-
-    None also comes back for a project with nothing to be named after: no
-    ``owner`` or ``name`` in ``calkit.yaml`` and no Git remote to read them
-    from. The directory a project happens to sit in is not a name---moving
-    or renaming it would rename the image, and every image built by every
-    project called ``analysis`` would collide---so this is for the project
-    to say rather than for Calkit to guess.
-    """
-    import calkit
-
-    image: str | None = env.get("image")
-    if image:
-        return image
-    if not env.get("path"):
-        return None
-    project: str | None
-    try:
-        project = calkit.detect_project_name(wdir=wdir)
-    except ValueError:
-        # A project that isn't published anywhere yet still names itself if
-        # calkit.yaml says what it's called
-        project = calkit.load_calkit_info(wdir=wdir).get("name")
-        if not project:
-            return None
-    # Repository names must be lowercase, unlike tags
-    return f"{project}.{env_name}".lower()
-
-
 def get_pushable_images(wdir: str | None = None) -> dict[str, dict]:
     """Return the images a project builds that belong in a registry.
 
@@ -1520,6 +1482,7 @@ def get_pushable_images(wdir: str | None = None) -> dict[str, dict]:
     somewhere it can be pulled back from.
     """
     import calkit
+    from calkit.environments import docker as env_docker
 
     ck_info = calkit.load_calkit_info(wdir=wdir)
     resp = {}
@@ -1528,8 +1491,9 @@ def get_pushable_images(wdir: str | None = None) -> dict[str, dict]:
             continue
         if not env.get("path"):
             continue
-        image = get_image_name(env, env_name, wdir=wdir)
-        if not image:
+        try:
+            image = env_docker.get_image_name(env_name, env, wdir=wdir)
+        except ValueError:
             continue
         prefix = resolve_registry_prefix(env, wdir=wdir)
         if prefix is None:

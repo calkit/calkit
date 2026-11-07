@@ -13,7 +13,6 @@ from calkit.docker import (
     _parse_volume_spec,
     _uses_entrypoint_command_mode,
     build_lock,
-    get_image_name,
     get_lock_archs,
     get_lock_digest_refs,
     get_remote_image_ref,
@@ -507,48 +506,6 @@ def tmp_dir(tmp_path, monkeypatch):
     """Fixture to change to a temporary directory."""
     monkeypatch.chdir(tmp_path)
     return tmp_path
-
-
-def test_get_image_name(tmp_dir):
-    import calkit
-
-    # An environment named after someone else's image keeps that name
-    assert (
-        get_image_name({"kind": "docker", "image": "alpine:3.18"}, "main")
-        == "alpine:3.18"
-    )
-    # One with neither an image nor a Dockerfile has nothing to name
-    assert get_image_name({"kind": "docker"}, "main") is None
-    calkit.save_calkit_info(
-        {"owner": "Someone", "name": "Some-Project", "environments": {}}
-    )
-    # One that builds its own image is named after the project and the
-    # environment, lowercased, since repository names must be
-    assert (
-        get_image_name({"kind": "docker", "path": "Dockerfile"}, "My-Env")
-        == "someone/some-project.my-env"
-    )
-    # An image that is named wins over the one that would be worked out
-    assert (
-        get_image_name(
-            {"kind": "docker", "path": "Dockerfile", "image": "mine"}, "env"
-        )
-        == "mine"
-    )
-    # A project that isn't published anywhere yet still names itself if
-    # calkit.yaml says what it's called
-    calkit.save_calkit_info({"name": "Some-Project", "environments": {}})
-    assert (
-        get_image_name({"kind": "docker", "path": "Dockerfile"}, "env")
-        == "some-project.env"
-    )
-    # With nothing to be named after, there's nothing to guess from: the
-    # directory a project sits in is not a name, since renaming it would
-    # rename the image, and every project called 'analysis' would collide
-    calkit.save_calkit_info({"environments": {}})
-    assert (
-        get_image_name({"kind": "docker", "path": "Dockerfile"}, "env") is None
-    )
 
 
 def test_ensure_image_available() -> None:

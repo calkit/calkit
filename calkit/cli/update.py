@@ -1158,7 +1158,9 @@ def update_environment(
         env = found
         kind = env.get("kind")
         if kind not in ("system", calkit.environments.SWITCH_KIND):
-            _relock_env(env_name=env_name, env=env)
+            from calkit.environments.core import relock
+
+            relock(env_name=env_name, env=env)
             return
         # A switch's lock describes the machine its pick runs on
         machine_name, machine_env = env_name, env
@@ -1330,81 +1332,6 @@ def update_environment(
             "julia and nix environments"
         )
     typer.echo(f"Updated environment '{env_name}'")
-
-
-def _relock_env(env_name: str, env: dict) -> None:
-    """Rebuild an environment from its spec and write a fresh lock.
-
-    Tools with an upgrade command of their own run it. Otherwise the locks
-    are removed and the environment is rebuilt from scratch, since a check
-    with a lock in place reproduces the lock rather than the spec.
-    """
-    import subprocess
-
-    from calkit.cli.check import check_environment
-    from calkit.environments import (
-        get_all_conda_lock_fpaths,
-        get_all_docker_lock_fpaths,
-        get_all_venv_lock_fpaths,
-        get_env_lock_fpath,
-    )
-
-    kind = env.get("kind")
-    spec_path = env.get("path") or ""
-    env_dir = os.path.dirname(spec_path) or "."
-    if kind in ("slurm", "pbs"):
-        typer.echo(
-            f"Environment '{env_name}' is locked to its configuration in "
-            "calkit.yaml, so there is nothing to relock"
-        )
-        return
-    upgrade_cmd = None
-    if kind == "uv":
-        upgrade_cmd = ["uv", "lock", "--upgrade"]
-    elif kind == "pixi":
-        upgrade_cmd = ["pixi", "update"]
-    elif kind == "nix":
-        upgrade_cmd = [
-            "nix",
-            "--extra-experimental-features",
-            "nix-command flakes",
-            "flake",
-            "update",
-        ]
-    if upgrade_cmd is not None:
-        typer.echo(f"Running: {' '.join(upgrade_cmd)}")
-        if subprocess.run(upgrade_cmd, cwd=env_dir).returncode != 0:
-            raise_error(f"Failed to relock environment '{env_name}'")
-        typer.echo(f"Checking environment '{env_name}'")
-        check_environment(env_name=env_name, verbose=True)
-        return
-    # Every lock goes, including other platforms' and legacy ones, since a
-    # check falls back to any of them
-    lock_fpaths = []
-    if kind == "docker":
-        lock_fpaths = get_all_docker_lock_fpaths(env_name, as_posix=False)
-    elif kind == "conda":
-        lock_fpaths = get_all_conda_lock_fpaths(env_name, as_posix=False)
-    elif kind in ("venv", "uv-venv"):
-        lock_fpaths = get_all_venv_lock_fpaths(env_name, as_posix=False)
-    elif kind == "renv":
-        renv_dir = env_dir if spec_path.endswith("DESCRIPTION") else spec_path
-        lock_fpaths = [os.path.join(renv_dir or ".", "renv.lock")]
-    for legacy in (False, True):
-        try:
-            fpath = get_env_lock_fpath(
-                env=env, env_name=env_name, as_posix=False, legacy=legacy
-            )
-        except ValueError as e:
-            raise_error(f"Environment '{env_name}': {e}")
-        if fpath is not None:
-            lock_fpaths.append(fpath)
-    for fpath in dict.fromkeys(lock_fpaths):
-        if os.path.isfile(fpath):
-            typer.echo(f"Removing lock file: {fpath}")
-            os.remove(fpath)
-    typer.echo(f"Relocking environment '{env_name}'")
-    check_environment(env_name=env_name, verbose=True, force=True)
 
 
 @update_app.command(name="stage")

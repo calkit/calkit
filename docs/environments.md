@@ -114,21 +114,21 @@ All project environments can be checked at once with:
 calkit check envs
 ```
 
-<!-- TODO: needs human review -->
-
 ## Specs, locks, and when environments change
 
-Each environment has two records in the project:
+Each environment has two descriptors in the project:
 
-- The **spec** is what you write: a `requirements.txt`, `environment.yml`,
-  `pyproject.toml`, or Dockerfile, or the name of a Docker image.
-  It says what you asked for, often loosely, e.g., `pandas>=2` or
+- The **spec** is where the dependencies are declared:
+  a `requirements.txt`, `environment.yml`,
+  `pyproject.toml`, Dockerfile, or the name of a Docker image.
+  It says what you asked for, sometimes loosely, e.g., `pandas>=2` or
   `texlive/texlive:latest`.
 - The **lock** is what Calkit or the environment manager writes after
   building the environment: the exact package versions, or for Docker, the
   image's digest and layers.
-  It says what you got, and it's committed with the project,
-  so anyone running it can get the same thing.
+  It describes the environment precisely,
+  and it's committed with the project,
+  so it can be reproduced elsewhere.
 
 Stages depend on the lock, not the spec.
 A stage reruns when its environment's lock changes,
@@ -151,35 +151,22 @@ A check does one of four things:
 3. **Build it from the spec and write a new lock**, if the spec changed or
    there's no lock yet.
    Stages using the environment rerun.
-4. **Fail**, if the lock still matches the spec but what it names can't be
-   had, e.g., a package version deleted from its index, or a Docker image
-   that was never pushed or is private.
+4. **Fail**, if the lock still matches the spec but it's not possible
+   to create, e.g., a package version deleted from its index,
+   or a Docker image that was never pushed or is private.
    The environment and its lock are left alone,
    since building from the spec would give a different environment,
    and rerunning stages in it isn't something to do without being asked.
 
 A newer release of something the spec allows,
 e.g., a new `latest` image or a newer `pandas`,
-doesn't change an environment by itself.
-To take it, or to get past a failed check,
-relock the environment, which builds it from the spec again:
+doesn't get applied to a locked environment without explicit instruction.
+To update, or to get past a failed check,
+relock the environment, which resolves and rebuilds it from the spec:
 
 ```sh
 calkit update env --name {env-name} --lock
 ```
-
-This works the same way for every kind of environment.
-Where the environment manager has an upgrade command of its own,
-e.g., `uv lock --upgrade` or `pixi update`, Calkit runs it;
-otherwise Calkit removes the environment's lock files,
-rebuilds it from scratch, and locks the result.
-If relocking fails, e.g., because the image can't be built,
-the old lock files are put back.
-
-This is the same model as uv, Pixi, npm, and Cargo:
-their lock changes when you change the spec or ask for an upgrade,
-and an install that can't get what the lock names fails rather than
-resolving something else.
 
 ## Inspecting environment paths
 
@@ -519,8 +506,6 @@ Whenever an environment is checked, e.g., as part of `calkit run`,
 Calkit works from that record rather than assuming a rebuild will do,
 since building the same Dockerfile again produces a different image once
 the packages it installs have moved on.
-
-<!-- TODO: needs human review (step 3) -->
 
 If the image named in `calkit.yaml` is already in the local Docker image
 store and its layers match the lock, there's nothing to do.

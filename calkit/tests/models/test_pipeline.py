@@ -19,6 +19,7 @@ from calkit.models.pipeline import (
     MatlabCommandStage,
     MatlabScriptStage,
     Pipeline,
+    PowerPointExportStage,
     PythonScriptStage,
     QuartoStage,
     ShellScriptStage,
@@ -159,6 +160,24 @@ def test_appexportstage():
     assert s.to_dvc()["cmd"] == (
         "calkit export gimp figures/src/photo.xcf -o paper/photo.tif"
     )
+    slide = PowerPointExportStage(
+        source_path="figures/src/lab setup.pptx", outputs=["paper/setup.pdf"]
+    )
+    assert slide.to_dvc()["cmd"] == (
+        "calkit export powerpoint 'figures/src/lab setup.pptx' "
+        "-o paper/setup.pdf"
+    )
+    slide = PowerPointExportStage(
+        source_path="setup.pptx",
+        outputs=["setup.png"],
+        slide=3,
+        dpi=150,
+        trim=False,
+    )
+    assert slide.to_dvc()["cmd"] == (
+        "calkit export powerpoint setup.pptx -o setup.png --slide 3 "
+        "--dpi 150 --no-trim"
+    )
     # What an app doesn't export from, or to, is refused, as is a stage
     # with other than one output
     for model, bad, error in [
@@ -167,6 +186,12 @@ def test_appexportstage():
         (InkscapeExportStage, dict(outputs=[]), "exactly one output"),
         (GimpExportStage, dict(source_path="a.svg"), "from an XCF"),
         (GimpExportStage, dict(source_path="a.xcf", dpi=72), "dpi"),
+        (PowerPointExportStage, dict(source_path="a.key"), "PowerPoint file"),
+        (
+            PowerPointExportStage,
+            dict(source_path="a.pptx", slide=0),
+            "greater than or equal to 1",
+        ),
     ]:
         with pytest.raises(ValidationError, match=error):
             model(**{"source_path": "a.svg", "outputs": ["a.png"], **bad})

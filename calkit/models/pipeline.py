@@ -319,6 +319,7 @@ class Stage(Model):
         "manual-step",
         "inkscape-export",
         "gimp-export",
+        "powerpoint-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -2466,6 +2467,47 @@ class GimpExportStage(AppExportStage):
         )
 
 
+class PowerPointExportStage(AppExportStage):
+    """A figure LibreOffice exports from a slide in a PowerPoint file,
+    e.g., a PDF or PNG, cropped to what's drawn on it.
+    """
+
+    kind: Literal["powerpoint-export"] = "powerpoint-export"
+    source_path: RelativeChildPathString = Field(
+        description="The PowerPoint file to export from."
+    )
+    slide: int = Field(
+        default=1, ge=1, description="The slide to export, from 1."
+    )
+    dpi: int | None = Field(
+        default=None, description="Resolution of an exported PNG."
+    )
+    trim: bool = Field(
+        default=True, description="Crop to what's drawn on the slide."
+    )
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "PowerPointExportStage":
+        from calkit.export import POWERPOINT
+
+        POWERPOINT.check(self.source_path, self.output_path)
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            f"calkit export powerpoint {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(self.output_path)}"
+        )
+        if self.slide != 1:
+            cmd += f" --slide {self.slide}"
+        if self.dpi is not None:
+            cmd += f" --dpi {self.dpi}"
+        if not self.trim:
+            cmd += " --no-trim"
+        return cmd
+
+
 class MarimoHtmlWasmStage(Stage):
     """A stage that exports a marimo notebook to a WebAssembly app.
 
@@ -2877,6 +2919,7 @@ class Pipeline(Model):
                 | ManualStepStage
                 | InkscapeExportStage
                 | GimpExportStage
+                | PowerPointExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

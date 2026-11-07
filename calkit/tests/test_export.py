@@ -13,15 +13,31 @@ from calkit.models.pipeline import (
 def test_export_stage():
     # Every app that exports has its own stage kind
     kinds = [e.kind for e in calkit.export.exporters()]
-    assert kinds == ["inkscape-export", "gimp-export"]
+    assert kinds == ["inkscape-export", "gimp-export", "powerpoint-export"]
     for source, output, app, kind in [
         # An app that can, does it as the pipeline runs
         ("figs/setup.svg", "paper/setup.png", None, "inkscape-export"),
         ("figs/setup.svg", "paper/setup.pdf", "inkscape", "inkscape-export"),
         ("figs/photo.xcf", "paper/photo.png", "GIMP", "gimp-export"),
+        ("figs/setup.pptx", "paper/setup.pdf", None, "powerpoint-export"),
+        # including when it's named for the app the source is made in
+        (
+            "figs/setup.pptx",
+            "paper/setup.png",
+            "PowerPoint",
+            "powerpoint-export",
+        ),
+        (
+            "figs/setup.ppt",
+            "paper/setup.png",
+            "LibreOffice",
+            "powerpoint-export",
+        ),
         # One that can't is a manual step
         ("figs/photo.psd", "paper/photo.png", "Photoshop", "manual-step"),
         ("figs/setup.svg", "paper/setup.jpg", None, "manual-step"),
+        ("figs/setup.pptx", "paper/setup.svg", "PowerPoint", "manual-step"),
+        ("figs/setup.key", "paper/setup.pdf", "Keynote", "manual-step"),
         # and so is one the person exports with another app
         ("figs/setup.svg", "paper/setup.png", "Illustrator", "manual-step"),
         ("figs/notes", "paper/notes.png", None, "manual-step"),

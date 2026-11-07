@@ -173,6 +173,8 @@ Where the environment manager has an upgrade command of its own,
 e.g., `uv lock --upgrade` or `pixi update`, Calkit runs it;
 otherwise Calkit removes the environment's lock files,
 rebuilds it from scratch, and locks the result.
+If relocking fails, e.g., because the image can't be built,
+the old lock files are put back.
 
 This is the same model as uv, Pixi, npm, and Cargo:
 their lock changes when you change the spec or ask for an upgrade,

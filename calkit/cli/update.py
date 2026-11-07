@@ -898,6 +898,7 @@ def update_docker_env(
         bool,
         typer.Option(
             "--lock",
+            "--relock",
             help=(
                 "Rebuild or repull the image and write fresh lock files for "
                 "every architecture."
@@ -906,11 +907,6 @@ def update_docker_env(
     ] = False,
 ) -> None:
     """Update a docker environment."""
-    from calkit.environments import (
-        get_all_docker_lock_fpaths,
-        get_env_lock_fpath,
-    )
-
     ck_info, env = _load_env(env_name)
     if env.get("kind") != "docker":
         raise_error(f"Environment '{env_name}' is not a docker environment")
@@ -930,24 +926,8 @@ def update_docker_env(
     if image is not None or registry is not None:
         calkit.save_calkit_info(ck_info)
         typer.echo(f"Updated docker environment '{env_name}'")
-    if not lock:
-        return
-    # Relocking throws away the existing lock files so the image is fetched or
-    # rebuilt from the environment's spec, which is the only way to pick up an
-    # image whose tag has been moved out from under a recorded digest
-    for lock_fpath in get_all_docker_lock_fpaths(env_name=env_name):
-        if os.path.isfile(lock_fpath):
-            typer.echo(f"Removing lock file: {lock_fpath}")
-            os.remove(lock_fpath)
-    legacy_lock_fpath = get_env_lock_fpath(
-        env=env, env_name=env_name, as_posix=False, legacy=True
-    )
-    if legacy_lock_fpath is not None and os.path.isfile(legacy_lock_fpath):
-        os.remove(legacy_lock_fpath)
-    from calkit.cli.check import check_environment
-
-    typer.echo(f"Relocking docker environment '{env_name}'")
-    check_environment(env_name=env_name, verbose=True)
+    if lock:
+        calkit.environments.relock(env_name=env_name, env=env)
 
 
 @update_app.command(name="latex-image")

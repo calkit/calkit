@@ -1844,7 +1844,7 @@ def test_check_env_locks_every_venv_platform(tmp_dir):
     assert recorded == calkit.environments.env_spec_hash("requirements.txt")
     # A matching lock with no record, e.g., from before records were kept, is
     # adopted without relocking other platforms
-    here = calkit.environments._conda_venv_platform() + ".txt"
+    here = calkit.environments.core._conda_venv_platform() + ".txt"
     sibling = os.path.join(lock_dir, next(f for f in locks if f != here))
     os.remove(sibling)
     os.remove(calkit.environments.ENV_SPEC_HASHES_FPATH)

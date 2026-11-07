@@ -6,7 +6,6 @@ import csv
 import json
 import logging
 import os
-import posixpath
 import shlex
 import shutil
 import signal
@@ -2075,11 +2074,13 @@ def push(
         else:
             warn("No DVC remotes configured; skipping DVC push")
     if "docker" in selected:
+        from calkit.environments import docker as env_docker
+
         # Everything that can be settled locally is settled before the
         # network: a project with no image to publish must not reach a
         # registry at all, since that means a round-trip, and credentials
         # asked for or replaced, on behalf of a push that was never on
-        images = calkit.docker.get_pushable_images()
+        images = env_docker.get_pushable_images()
         asked_for_docker = "docker" in (targets or [])
         pushable = {}
         for env_name, info in images.items():
@@ -4413,12 +4414,6 @@ def run_in_env(
             raise_error(f"Invalid --env-var '{item}'; write it as KEY=VALUE")
         extra_env_vars[key] = value
         os.environ[key] = value
-    docker_wdir = env.get("wdir", "/work")
-    docker_wdir_mount = docker_wdir
-    if wdir is not None:
-        docker_wdir = posixpath.join(docker_wdir, wdir)
-    shell = env.get("shell", "sh")
-    platform = env.get("platform")
 
     def _with_system_env_setup(shell_cmd: str) -> list[str] | None:
         """Chain the setup commands before a stage's command.
@@ -4482,135 +4477,19 @@ def run_in_env(
             )
         no_check = True
     if env["kind"] == "docker":
-        image_name = calkit.docker.get_image_name(env, env_name)
-        if image_name is None:
-            if not env.get("path"):
-                raise_error(
-                    f"Environment '{env_name}' must define an image, since "
-                    "it has no Dockerfile to build one from"
-                )
-            raise_error(
-                f"Cannot work out what to call the image for environment "
-                f"'{env_name}': set 'image' on it, or set 'owner' and "
-                "'name' in calkit.yaml"
-            )
-        command_mode = env.get("command_mode", "shell")
-        if command_mode not in ["shell", "entrypoint"]:
-            raise_error(
-                "Invalid Docker environment 'command_mode': "
-                f"{command_mode}; Use 'shell' or 'entrypoint'"
-            )
-        if not no_check:
-            from calkit.environments import docker as env_docker
+        from calkit.environments import docker as env_docker
 
-            env_docker.check_env(
-                tag=image_name,
-                fpath=env.get("path"),
-                lock_fpath=get_env_lock_fpath(
-                    env=env, env_name=env_name, as_posix=False
-                ),
-                platform=env.get("platform"),
-                deps=calkit.environments.get_env_input_paths(env, env_name),
-                env_vars=env.get("env_vars", []),
-                ports=env.get("ports", []),
-                gpus=env.get("gpus"),
-                user=env.get("user"),
-                wdir=env.get("wdir"),
-                args=env.get("args", []),
-                build_platforms=env.get("build_platforms", []),
-                registry=env.get("registry"),
-                lock_archs=calkit.docker.get_lock_archs(env),
-                quiet=not verbose,
-                env_name=env_name,
-            )
+        if not no_check:
+            env_docker.check(env_name, env, verbose=verbose)
             save_env_check_cache()
-        docker_cmd = [
-            "docker",
-            "run",
-        ]
-        if platform:
-            docker_cmd += ["--platform", platform]
-        env_vars = env.get("env_vars", {})
-        if "env-vars" in env:
-            warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
-            env_vars.update(env["env-vars"])
-        # Add project-level env vars (non-secret)
-        env_vars.update(ck_info.get("env_vars", {}))
-        # Also add any project-level environmental variable dependencies
-        project_env_vars = calkit.get_env_var_dep_names()
-        if project_env_vars:
-            env_vars.update({k: f"${k}" for k in project_env_vars})
-        if env_vars:
-            for key, value in env_vars.items():
-                if isinstance(value, str):
-                    value = os.path.expandvars(value)
-                docker_cmd += ["-e", f"{key}={value}"]
-        # A container inherits nothing from here, so what --env-var asked
-        # for has to be handed to it
-        for key, value in extra_env_vars.items():
-            docker_cmd += ["-e", f"{key}={value}"]
-        if (gpus := env.get("gpus")) is not None:
-            docker_cmd += ["--gpus", gpus]
-        if ports := env.get("ports"):
-            for port in ports:
-                docker_cmd += ["-p", port]
-        docker_user = env.get("user")
-        if docker_user is None:
-            try:
-                uid = os.getuid()
-                gid = os.getgid()
-                docker_user = f"{uid}:{gid}"
-            except AttributeError:
-                # We're probably on Windows, so there is no UID to map
-                pass
-        if docker_user is not None:
-            docker_cmd += ["--user", docker_user]
-        docker_cmd += env.get("args", [])
-        docker_cmd += [
-            # A pipeline stage is nobody's terminal session: asking for a
-            # TTY there puts the user's terminal into raw mode for the
-            # duration, and the container's own line discipline stops
-            # translating newlines, so everything the stage prints
-            # staircases down the screen. DVC sets DVC_STAGE for the
-            # commands it runs, which is how a stage is told apart from
-            # someone running 'calkit xenv' themselves
-            "-it"
-            if sys.stdin.isatty() and not os.getenv("DVC_STAGE")
-            else "-i",
-            "--rm",
-            "-w",
-            docker_wdir,
-            "-v",
-            f"{os.getcwd()}:{docker_wdir_mount}",
-            image_name,
-        ]
-        if command_mode == "shell":
-            shell_cmd = _to_shell_cmd(cmd)
-            docker_cmd += [shell, "-c", shell_cmd]
-        else:
-            if not cmd:
-                raise_error(
-                    "No command provided for Docker environment in "
-                    "'entrypoint' command mode"
-                )
-            docker_cmd += cmd
-        if verbose:
-            typer.echo(f"Running command: {docker_cmd}")
-        try:
-            subprocess.check_call(docker_cmd, cwd=wdir)
-        except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            # Docker exits 125 when it couldn't run the container at all,
-            # which is most often because Docker itself isn't running
-            if isinstance(e, FileNotFoundError) or e.returncode == 125:
-                try:
-                    calkit.docker.ensure_ready()
-                except calkit.docker.DockerNotReadyError as ready_error:
-                    raise_error(str(ready_error))
-            returncode = getattr(e, "returncode", None)
-            raise_error(
-                "Failed to run in Docker environment: command exited with "
-                f"status {returncode}"
-            )
+        env_docker.run(
+            env_name,
+            env,
+            cmd,
+            wdir=wdir,
+            env_vars=extra_env_vars,
+            verbose=verbose,
+        )
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)

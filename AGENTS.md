@@ -78,6 +78,10 @@ write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
 
+Name functions for what they return,
+e.g., `get_image_name` rather than `get_image`,
+which could just as well return an image.
+
 No spaces on either side of en or em dashes used for ranges or pauses in prose,
 respectively.
 

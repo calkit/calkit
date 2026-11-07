@@ -22,10 +22,20 @@ if ! uv tool install --upgrade calkit-python --python=3.14; then
     exit 1
 fi
 
-# Completion is installed per command name, so the `ck` alias gets it too
+# uv's tool directory may not be on this process's PATH yet, and on Git Bash
+# it's a Windows path, whose drive letter's colon would split PATH
+bin_dir="$(uv tool dir --bin)"
+if command -v cygpath >/dev/null 2>&1; then bin_dir="$(cygpath -u "$bin_dir")"; fi
+PATH="$bin_dir:$PATH"
+export PATH
+
+# Completion is installed per command name, so the `ck` alias gets it too.
+# Typer installs it for the shell it's run from, which would be sh when this
+# script is piped to it, so it's run from the user's own shell instead, with a
+# command after it so that shell can't exec it and drop out of the way.
 echo "Installing shell completion"
 for cmd in calkit ck; do
-    if ! $cmd --install-completion; then
+    if ! "${SHELL:-sh}" -c "$cmd --install-completion && true"; then
         echo "⚠️ Failed to install shell completion for '$cmd'; run '$cmd --install-completion' manually"
     else
         echo "✅ Shell completion installed for '$cmd'"

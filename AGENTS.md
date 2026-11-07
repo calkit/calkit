@@ -41,6 +41,14 @@ preceded by a `<!-- prettier-ignore -->` comment. Otherwise Prettier reformats
 the block and strips the 4-space indentation of the admonition body, which
 breaks rendering.
 
+`calkit run` and `calkit status` preprocess the pipeline before asking DVC:
+they check environments and clean notebooks, and compiling a LaTeX stage for
+them maps its document's components into `_calkit/`, since each generates
+dependencies the compiled DVC pipeline reads.
+This runs on every call, so only very fast work belongs there, e.g.,
+skipping unchanged files by size and timestamp rather than reading them.
+Anything slow belongs in a stage.
+
 Agents should never make commits to Git unless asked to.
 
 Tests belong in the test module named after the module the exercised code
@@ -70,6 +78,10 @@ write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
 
+Name functions for what they return,
+e.g., `get_image_name` rather than `get_image`,
+which could just as well return an image.
+
 No spaces on either side of en or em dashes used for ranges or pauses in prose,
 respectively.
 
@@ -78,7 +90,11 @@ low cohesion architecture.
 
 Don't be verbose in comments. One sentence is usually fine, if anything at all.
 
-Agents should typically not be writing prose for human consumption.
-If some is needed, notify
-the human developer and ask them to write in a given file at a specified
-line and make a commit.
+Agents may make minor corrections to prose for human consumption,
+e.g., fixing a sentence a change made inaccurate, without changing what it
+argues.
+Major writing, e.g., a new section or explanation, needs the human
+developer's approval first.
+Flag any new prose an agent writes as needing human attention:
+put a `<!-- TODO: needs human review -->` comment above it in Markdown,
+and call it out in the PR description.

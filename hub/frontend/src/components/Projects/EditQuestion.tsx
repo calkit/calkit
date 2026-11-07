@@ -29,7 +29,6 @@ import { FaPlus, FaTrash } from "react-icons/fa"
 import type { AxiosError } from "axios"
 import { ProjectsService, type QuestionPublic } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
-import DeleteAlert from "../Common/DeleteAlert"
 import {
   useProjectFigures,
   useProjectPublications,
@@ -38,6 +37,7 @@ import {
 } from "../../hooks/useProject"
 import { handleError } from "../../lib/errors"
 import { submitOnCmdEnter } from "../../lib/keyboard"
+import DeleteAlert from "../Common/DeleteAlert"
 
 interface EditQuestionProps {
   question: QuestionPublic | null
@@ -73,6 +73,7 @@ interface EvidenceRow {
 interface EditQuestionForm {
   question: string
   hypothesis: string
+  approach: string
   answer: string
   evidence: EvidenceRow[]
 }
@@ -148,7 +149,13 @@ const EditQuestion = ({
     formState: { errors, isSubmitting },
   } = useForm<EditQuestionForm>({
     mode: "onBlur",
-    defaultValues: { question: "", hypothesis: "", answer: "", evidence: [] },
+    defaultValues: {
+      question: "",
+      hypothesis: "",
+      approach: "",
+      answer: "",
+      evidence: [],
+    },
   })
   const { fields, append, remove } = useFieldArray({
     control,
@@ -162,6 +169,7 @@ const EditQuestion = ({
     reset({
       question: question.question,
       hypothesis: question.hypothesis ?? "",
+      approach: question.approach ?? "",
       answer: question.answer ?? "",
       evidence: (question.evidence ?? []).map((ev) => ({
         selection: rowToSelection(ev.kind, ev.path),
@@ -187,6 +195,7 @@ const EditQuestion = ({
         questionPut: {
           question: data.question,
           hypothesis: data.hypothesis,
+          approach: data.approach,
           answer: data.answer,
           evidence: data.evidence.flatMap((row) => {
             const parsed = parseSelection(row.selection)
@@ -286,6 +295,14 @@ const EditQuestion = ({
               id="hypothesis"
               {...register("hypothesis")}
               placeholder="What you expect the answer to be"
+            />
+          </FormControl>
+          <FormControl mb={4}>
+            <FormLabel htmlFor="approach">Approach</FormLabel>
+            <Textarea
+              id="approach"
+              {...register("approach")}
+              placeholder="How the question is answered, in one sentence"
             />
           </FormControl>
           <FormControl mb={4}>

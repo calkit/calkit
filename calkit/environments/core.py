@@ -1,4 +1,4 @@
-"""Functionality related to environments."""
+"""What environments of every kind share."""
 
 import fnmatch
 import functools
@@ -537,27 +537,6 @@ def get_docker_arch() -> str:
         return "riscv64"
     # Fallback
     return mach
-
-
-def get_all_docker_lock_fpaths(
-    env_name: str,
-    wdir: str | None = None,
-    as_posix: bool = True,
-) -> list[str]:
-    """Return docker environment lock file paths for every supported
-    architecture.
-
-    This intentionally excludes legacy (pre-arch) lock file locations;
-    legacy handling is performed separately.
-    """
-    env_lock_dir = get_env_lock_dir(wdir=wdir)
-    docker_dir = os.path.join(env_lock_dir, env_name)
-    fpaths = [
-        os.path.join(docker_dir, arch + ".json") for arch in DOCKER_ARCHS
-    ]
-    if as_posix:
-        fpaths = [Path(p).as_posix() for p in fpaths]
-    return fpaths
 
 
 def get_all_conda_lock_fpaths(
@@ -2084,9 +2063,13 @@ def check_cache(
     # hashes changing, and the pipeline can't run in an image that isn't
     # there, so its absence has to invalidate the check
     if env.get("kind") == "docker":
-        from calkit.docker import get_image_name, image_exists
+        from calkit.docker import image_exists
+        from calkit.environments import docker as env_docker
 
-        image = get_image_name(env, env_name, wdir=wdir)
+        try:
+            image = env_docker.get_image_name(env_name, env, wdir=wdir)
+        except ValueError:
+            image = None
         if image and not image_exists(image):
             return False
     # Check if this environment is up-to-date
@@ -2236,31 +2219,61 @@ def check_all_in_pipeline(
 
     @contextmanager
     def silenced() -> Iterator[None]:
-        # Tools write to the terminal directly, so this is done at the file
-        # descriptor level as well as Python's
+        # Tools write to the terminal directly, so this is done where they
+        # inherit it from as well as Python's. Nobody can see a prompt here,
+        # so input is from devnull, which answers one rather than hangs.
         if not quiet:
             yield
             return
         sys.stdout.flush()
         sys.stderr.flush()
-        saved = [os.dup(1), os.dup(2)]
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        try:
-            os.dup2(devnull, 1)
-            os.dup2(devnull, 2)
-            with (
-                open(os.devnull, "w") as null,
-                redirect_stdout(null),
-                redirect_stderr(null),
-            ):
-                yield
-        finally:
-            sys.stdout.flush()
-            sys.stderr.flush()
-            os.dup2(saved[0], 1)
-            os.dup2(saved[1], 2)
-            for fd in [*saved, devnull]:
-                os.close(fd)
+        saved_stdin = sys.stdin
+        with (
+            open(os.devnull, "r+") as null,
+            redirect_stdout(null),
+            redirect_stderr(null),
+        ):
+            sys.stdin = null
+            try:
+                if sys.platform == "win32":
+                    # Replacing descriptors 0-2 would close the console
+                    # handles Click uses, so only the standard handles that
+                    # subprocesses inherit are swapped
+                    import ctypes
+                    import msvcrt
+                    from ctypes import wintypes
+
+                    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+                    kernel32.GetStdHandle.restype = wintypes.HANDLE
+                    kernel32.SetStdHandle.argtypes = [
+                        wintypes.DWORD,
+                        wintypes.HANDLE,
+                    ]
+                    kernel32.SetStdHandle.restype = wintypes.BOOL
+                    # STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
+                    std_ids = [-10, -11, -12]
+                    null_handle = msvcrt.get_osfhandle(null.fileno())
+                    saved = [kernel32.GetStdHandle(i) for i in std_ids]
+                    try:
+                        for i in std_ids:
+                            kernel32.SetStdHandle(i, null_handle)
+                        yield
+                    finally:
+                        for i, h in zip(std_ids, saved):
+                            kernel32.SetStdHandle(i, h)
+                else:
+                    saved = [os.dup(fd) for fd in (0, 1, 2)]
+                    try:
+                        for fd in (0, 1, 2):
+                            os.dup2(null.fileno(), fd)
+                        yield
+                    finally:
+                        for fd, saved_fd in enumerate(saved):
+                            os.dup2(saved_fd, fd)
+                            os.close(saved_fd)
+            finally:
+                sys.stdin = saved_stdin
 
     # TODO: ``check_environment`` should be able to take a wdir argument
     if wdir is not None:
@@ -3901,3 +3914,108 @@ def detect_env_for_stage(
         dependencies=dependencies,
         created_from_dependencies=True,
     )
+
+
+def relock(env_name: str, env: dict) -> None:
+    """Rebuild an environment from its spec and write a fresh lock.
+
+    Tools with an upgrade command of their own run it. Otherwise the locks
+    are removed and the environment is rebuilt from scratch, since a check
+    with a lock in place reproduces the lock rather than the spec. If any
+    of it fails, the old locks are put back, so a failed relock leaves the
+    environment pinned where it was.
+    """
+    import typer
+
+    from calkit.cli import raise_error
+    from calkit.cli.check import check_environment
+
+    kind = env.get("kind")
+    spec_path = env.get("path") or ""
+    env_dir = os.path.dirname(spec_path) or "."
+    if kind in ("slurm", "pbs"):
+        typer.echo(
+            f"Environment '{env_name}' is locked to its configuration in "
+            "calkit.yaml, so there is nothing to relock"
+        )
+        return
+    upgrade_cmd = None
+    if kind == "uv":
+        upgrade_cmd = ["uv", "lock", "--upgrade"]
+    elif kind == "pixi":
+        # Named, since a directory can hold more than one manifest
+        upgrade_cmd = ["pixi", "update"]
+        if spec_path:
+            upgrade_cmd += ["--manifest-path", os.path.abspath(spec_path)]
+    elif kind == "nix":
+        upgrade_cmd = [
+            "nix",
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "flake",
+            "update",
+        ]
+    # Every lock, including other platforms' and legacy ones, since a check
+    # falls back to any of them
+    lock_fpaths = []
+    if kind == "docker":
+        from calkit.environments import docker as env_docker
+
+        lock_fpaths = env_docker.get_lock_fpaths(env_name, as_posix=False)
+    elif kind == "conda":
+        lock_fpaths = get_all_conda_lock_fpaths(env_name, as_posix=False)
+    elif kind in ("venv", "uv-venv"):
+        lock_fpaths = get_all_venv_lock_fpaths(env_name, as_posix=False)
+    elif kind == "renv":
+        renv_dir = env_dir if spec_path.endswith("DESCRIPTION") else spec_path
+        lock_fpaths = [os.path.join(renv_dir or ".", "renv.lock")]
+    elif kind == "julia":
+        # Julia falls back to this when there's no manifest for its version
+        lock_fpaths = [os.path.join(env_dir, "Manifest.toml")]
+    for legacy in (False, True):
+        try:
+            fpath = get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False, legacy=legacy
+            )
+        except ValueError as e:
+            raise_error(f"Environment '{env_name}': {e}")
+        if fpath is not None:
+            lock_fpaths.append(fpath)
+    lock_fpaths = list(dict.fromkeys(lock_fpaths))
+    old_locks: dict[str, bytes | None] = {}
+    for fpath in lock_fpaths:
+        if os.path.isfile(fpath):
+            with open(fpath, "rb") as f:
+                old_locks[fpath] = f.read()
+        else:
+            old_locks[fpath] = None
+    try:
+        if upgrade_cmd is not None:
+            typer.echo(f"Running: {' '.join(upgrade_cmd)}")
+            if subprocess.run(upgrade_cmd, cwd=env_dir).returncode != 0:
+                raise_error(f"Failed to relock environment '{env_name}'")
+            typer.echo(f"Checking environment '{env_name}'")
+            check_environment(env_name=env_name, verbose=True)
+            return
+        for fpath, content in old_locks.items():
+            if content is not None:
+                typer.echo(f"Removing lock file: {fpath}")
+                os.remove(fpath)
+        typer.echo(f"Relocking environment '{env_name}'")
+        check_environment(env_name=env_name, verbose=True, force=True)
+    except BaseException:
+        # Including an exit from raise_error or Ctrl-C partway through
+        for fpath, content in old_locks.items():
+            if content is None:
+                if os.path.isfile(fpath):
+                    os.remove(fpath)
+                continue
+            os.makedirs(os.path.dirname(fpath) or ".", exist_ok=True)
+            with open(fpath, "wb") as f:
+                f.write(content)
+        typer.echo(
+            f"Relocking environment '{env_name}' failed, so its old locks "
+            "were put back",
+            err=True,
+        )
+        raise

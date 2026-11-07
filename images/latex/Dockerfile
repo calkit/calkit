@@ -48,6 +48,9 @@ RUN fmtutil-sys --all
 # sectsty and cite are what Calkit's own paper templates ask for, which
 # is what someone starting a project gets before they have asked for
 # anything.
+# makeindex builds indexes, e.g., the Caltech thesis template's, and is
+# a compiled tool, so like biber it can't be fetched on demand; without
+# it latexmk stops before running biber. About 50 kB.
 # latexdiff is here because `calkit latex diff` needs it; perl above is
 # what makes that possible. tex4ht and make4ht are for `calkit latex
 # to-docx --engine libreoffice`, which converts the source to ODT with
@@ -59,6 +62,11 @@ RUN fmtutil-sys --all
 # mnras ask for. Without it TeX generates bitmaps at run time, which
 # needs a writable texmf-var and produces worse PDFs; texmf-var is made
 # writable below anyway, for whatever else wants to generate a font.
+# dvipng, type1cm and underscore are for Matplotlib's text.usetex,
+# which runs latex and dvipng itself, so nothing fetches what's missing
+# on demand, and dvipng is a compiled tool anyway. With them, a Docker
+# environment built on this image can render plot labels with LaTeX.
+# About 1 MB together.
 # The last four are asked for by documents rather than by any class:
 # units, cross-references and algorithm listings. About 110 kB together.
 RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
@@ -66,6 +74,7 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
     until [ "$i" -gt 3 ]; do \
         tlmgr update --self && \
         tlmgr install biber \
+            makeindex \
             latexmk \
             latexdiff \
             tex4ht \
@@ -119,6 +128,9 @@ RUN tlmgr option repository "https://mirror.ctan.org/systems/texlive/tlnet" && \
             cm-super \
             sectsty \
             cite \
+            dvipng \
+            type1cm \
+            underscore \
             siunitx \
             cleveref \
             algorithms \

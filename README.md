@@ -134,6 +134,16 @@ which is a critical feature to have when using generative AI.
 
 ## Features
 
+- [Research questions and answers](https://docs.calkit.org/questions) as the front door to a
+  project.
+  Each answer cites its evidence, with numbers read from results files
+  rather than typed in, and leads back through the pipeline to the code and
+  data behind it.
+  Answers whose evidence has changed are flagged,
+  and people can sign off on answers, with sign-offs that lapse when the
+  evidence moves,
+  so a project can be checked a little at a time as the work goes,
+  rather than all at once at the end.
 - A simplified [version control](https://docs.calkit.org/version-control)
   interface that unifies Git and DVC (Data Version Control),
   so everything can be kept in the same project repository.
@@ -236,6 +246,9 @@ it upgrades itself in the background,
 so your next command runs on the new version
 and starts by telling you which version that is.
 Otherwise, it tells you a new version is available.
+While [Windows Smart App Control](#windows-smart-app-control) is on,
+it only tells you,
+since Smart App Control could block files an upgrade brings in.
 
 To be told about new versions but not upgrade automatically, run:
 
@@ -344,6 +357,58 @@ Download the executable from the latest
 
 ![Calkit Assistant](https://github.com/calkit/calkit/blob/main/assistant/resources/screenshot.png?raw=true)
 
+### Windows Smart App Control
+
+Smart App Control is a Windows 11 security feature
+that blocks programs and libraries it can't verify,
+either by a trusted signature
+or by Microsoft's cloud-based reputation service.
+Many of the files Calkit and Python environments rely on aren't signed,
+e.g., the `calkit.exe` launcher uv creates,
+the Python interpreters uv downloads,
+and compiled modules in packages like pandas or h5py,
+so Smart App Control may block them.
+Since its decisions come from a cloud service,
+a file that ran yesterday can be blocked today.
+
+Signs that Smart App Control blocked something include:
+
+- A "Part of this app has been blocked" notification from Windows Security,
+  e.g., when VS Code starts Calkit.
+- uv reporting that querying Python failed with exit status `0xc0e90002`.
+- Python failing to import a compiled module with
+  `An Application Control policy has blocked this file`.
+
+Calkit links here when it sees one of these,
+or when an environment fails to build while Smart App Control is on.
+To see whether it's on, open Windows Security
+and go to **App & browser control** > **Smart App Control settings**.
+It only blocks files when set to **On**, not in **Evaluation** mode.
+
+To get Calkit running again,
+uninstall and reinstall it,
+since `uv tool install --reinstall` can fail on the blocked Python
+before it gets to reinstalling it:
+
+```sh
+uv tool uninstall calkit-python
+uv tool install calkit-python
+```
+
+To rebuild a project environment with a blocked file, run:
+
+```sh
+calkit check env -n {environment name} --force
+```
+
+If blocks keep coming back,
+turn Smart App Control off in the same settings page.
+Depending on your version of Windows,
+you may not be able to turn it back on without resetting Windows.
+On a computer your organization manages,
+an App Control policy set by your IT department can cause the same errors,
+so ask them to allow the files instead.
+
 <!-- END INCLUDE -->
 
 ## Quickstart
@@ -409,20 +474,24 @@ and `{r2}` is read from one of those files rather than typed in by hand.
 We can see the rendered answer with:
 
 ```sh
-calkit list questions
+calkit show question 1
 ```
 
-```
-1. question: How does the system respond to increasing $x$?
-    hypothesis: The value of $y$ increases linearly with $x$.
-    answer: $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
-    evidence:
-      - kind: figure
-        path: figures/x-vs-y.png
-      - kind: value
-        path: results/summary.json
-        key: r_squared_quadratic
-        name: r2
+```markdown
+## 1. How does the system respond to increasing $x$?
+
+`H A - -`
+
+**Hypothesis:** The value of $y$ increases linearly with $x$.
+
+**Stages:** `collect-data`, `analyze`
+
+**Answer:** $y$ increases quadratically with $x$, not linearly ($R^2 = 0.985$ for the quadratic fit).
+
+### Evidence
+
+- Figure `figures/x-vs-y.png`
+- Value `results/summary.json` as `r2` at `r_squared_quadratic` = 0.985
 ```
 
 The evidence files are produced by the pipeline,

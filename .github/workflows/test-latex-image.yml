@@ -54,13 +54,14 @@ jobs:
       - name: Smoke test image
         run: |
           set -euxo pipefail
-          # Both tools have to be on PATH, not merely installed: tlmgr
+          # The tools have to be on PATH, not merely installed: tlmgr
           # doesn't symlink scripts it installs after setup, which once
           # shipped an image whose latexdiff was invisible
           docker run --rm calkit/latex:pr sh -c '
             set -eux
             latexmk --version
             latexdiff --version
+            command -v makeindex
             pandoc --version
           '
           # As a non-root user, which is how Calkit runs it so output
@@ -70,6 +71,7 @@ jobs:
             set -eux
             latexmk --version
             latexdiff --version
+            command -v makeindex
             pandoc --version
           '
           # A document that needs the curated set and the packages papers
@@ -153,6 +155,43 @@ jobs:
             kpsewhich lipsum.sty
           '
           test -n "$(find "$cache" -name lipsum.sty -print -quit)"
+      # What Matplotlib's text.usetex runs for each label, with the source
+      # it generates, so a Docker environment that adds Python to this
+      # image can plot with LaTeX labels: latex to DVI, then dvipng for
+      # raster output and dvips for PostScript. Nothing fetches packages
+      # on demand here, since Matplotlib calls latex itself.
+      - name: Render a Matplotlib usetex label
+        run: |
+          set -euxo pipefail
+          work="$(mktemp -d)"
+          cat > "$work/file.tex" <<'EOF'
+          \RequirePackage{fix-cm}
+          \documentclass{article}
+          \newcommand{\mathdefault}[1]{#1}
+          \IfFileExists{type1ec.sty}{}{\PackageError{matplotlib-support}{Missing cm-super package, required by Matplotlib}{}}
+          \usepackage{type1cm}
+          \usepackage[utf8]{inputenc}
+          \DeclareUnicodeCharacter{2212}{\ensuremath{-}}
+          \usepackage[papersize=72in, margin=1in]{geometry}
+          \makeatletter\@ifpackageloaded{underscore}{}{\usepackage[strings]{underscore}}\makeatother
+          \makeatletter\@ifpackageloaded{textcomp}{}{\usepackage{textcomp}}\makeatother
+          \pagestyle{empty}
+          \begin{document}
+          \fontsize{10}{12.5}%
+          \hbox{}%
+          {\rmfamily $\frac{\omega^2 h}{g}$ added_mass}%
+          \end{document}
+          EOF
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "$work":/work -w /work calkit/latex:pr sh -c '
+            set -eux
+            latex -interaction=nonstopmode -halt-on-error \
+              -no-shell-escape file.tex
+            dvipng -bg Transparent -D 100 -T tight -o file.png file.dvi
+            dvips -E -o file.ps file.dvi
+          '
+          test -s "$work/file.png"
+          test -s "$work/file.ps"
       # What `calkit latex to-docx --engine libreoffice` runs: TeX4ht
       # converting a paper with math and a PDF figure to ODT, which needs
       # luaxml, Ghostscript and zip besides TeX4ht itself, as the user.

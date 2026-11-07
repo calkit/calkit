@@ -528,7 +528,7 @@ def execute_notebook(
         kernelspec["name"] = kernel_name
         kernelspec["display_name"] = display_name
         kernelspec["language"] = language.lower()
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(nb_json, f, indent=1)
     except Exception as e:
         if verbose:
@@ -678,7 +678,7 @@ def execute_notebook(
                 and "execution_count" in exec_cell
             ):
                 orig_cell["execution_count"] = exec_cell["execution_count"]
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(original_nb, f, indent=1)
     for to_fmt in to:
         if to_fmt != "notebook":

@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 import dvc.repo
 import git
 import pytest
+import typer
 import yaml
 from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
@@ -24,6 +25,7 @@ from git.exc import InvalidGitRepositoryError
 import calkit
 import calkit.cli.main
 import calkit.schema
+import calkit.windows
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     STAGE_OUTPUT_END,
@@ -2737,6 +2739,20 @@ def test_run_captures_stage_logs_failure(tmp_dir):
     assert res.returncode != 0
     log_content = _read_only_log(os.path.join(".calkit", "local", "logs"))
     assert "FAIL_OUT_MARKER" in log_content
+    # An ordinary failure isn't blamed on Windows App Control
+    assert "Smart App Control" not in res.stderr
+    # One that Windows App Control caused is explained
+    with open("stage_fail.py", "w") as f:
+        f.write(
+            "import sys\n"
+            "print('ImportError: DLL load failed while importing _sqlite3: "
+            "An Application Control policy has blocked this file.')\n"
+            "sys.exit(1)\n"
+        )
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Windows blocked a file from running" in res.stderr
+    assert calkit.windows.SMART_APP_CONTROL_DOCS_URL in res.stderr
 
 
 def test_run_log_flag_copies_stage_logs(tmp_dir):
@@ -3766,3 +3782,335 @@ def test_stash(tmp_dir):
         subprocess.check_output(["dvc", "status", "--json"], text=True)
     )
     assert "my-stage" in status
+
+
+def test_merge(tmp_dir):
+    def write(path: str, text: str) -> None:
+        with open(path, "w") as f:
+            f.write(text + "\n")
+
+    def commit(message: str) -> None:
+        subprocess.check_call(["calkit", "run"])
+        subprocess.check_call(["git", "add", "-A"])
+        subprocess.check_call(["git", "commit", "-qm", message])
+
+    def merge(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "merge", *args],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "a": {
+                "kind": "shell-command",
+                "command": "cat a1.in a2.in > a.txt",
+                "environment": "_system",
+                "inputs": ["a1.in", "a2.in"],
+                "outputs": [{"path": "a.txt", "storage": "git"}],
+            }
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    write("a1.in", "1")
+    write("a2.in", "2")
+    commit("Base")
+    subprocess.check_call(["git", "checkout", "-qb", "other"])
+    write("a2.in", "2 theirs")
+    commit("Theirs")
+    subprocess.check_call(["git", "checkout", "-q", "-"])
+    write("a1.in", "1 ours")
+    commit("Ours")
+    head = git.Repo().head.commit.hexsha
+    # A squash merge is resolved the same way, then committed once
+    assert merge("other", "--squash").returncode != 0
+    assert merge("--abort").returncode == 0
+    assert not os.path.exists(os.path.join(".git", "SQUASH_MSG"))
+    res = merge("other", "--squash", "--prefer", "theirs", "-m", "Squash")
+    assert res.returncode == 0, res.stdout + res.stderr
+    squashed = git.Repo().head.commit
+    assert len(squashed.parents) == 1
+    assert str(squashed.message).strip() == "Squash"
+    with open("a.txt") as f:
+        assert f.read() == "1\n2 theirs\n"
+    subprocess.check_call(["git", "reset", "-q", "--hard", head])
+    # The inputs merge, but the stage ran on both sides, so it needs a choice
+    assert merge().returncode != 0
+    res = merge("other")
+    assert res.returncode != 0
+    assert "Stage 'a' changed on both sides" in res.stdout + res.stderr
+    # Which can be made after aborting and starting over
+    assert merge("--abort").returncode == 0
+    assert git.Repo().head.commit.hexsha == head
+    assert not os.path.exists(os.path.join(".git", "MERGE_HEAD"))
+    assert merge("other").returncode != 0
+    res = merge("--continue", "--theirs", "a")
+    assert res.returncode == 0, res.stdout + res.stderr
+    commit_ = git.Repo().head.commit
+    assert len(commit_.parents) == 2
+    with open("a.txt") as f:
+        assert f.read() == "1\n2 theirs\n"
+    subprocess.check_call(["calkit", "check", "stage-runs"])
+    # It ran with neither side's inputs, so it reruns
+    status = calkit.pipeline.get_status(
+        check_environments=False, clean_notebooks=False
+    )
+    assert [n.split("@")[0] for n in status.stale_stage_names] == ["a"]
+
+
+def test_manual_step(tmp_dir, monkeypatch, capsys):
+    from calkit.cli.main.core import manual_step
+
+    # Status says what a manual stage needs when it's out of date
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "export": {
+                            "kind": "manual-step",
+                            "message": "Export fig.png",
+                            "outputs": ["fig.png"],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    out = subprocess.run(
+        ["calkit", "status"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    ).stdout
+    assert "is a manual step: Export fig.png" in out
+    # With nobody to do it, it says so rather than waiting
+    out = subprocess.run(
+        ["calkit", "manual-step", "-m", "Export fig.png"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode != 0
+    assert "Needs a manual step" in out.stdout + out.stderr
+    assert "Export fig.png" in out.stdout + out.stderr
+    # With someone there, the step isn't done until every output exists
+    # and has changed, or they say keep it as is
+    with open("fig.png", "w") as f:
+        f.write("v1")
+    monkeypatch.setattr(sys, "stdin", Mock(isatty=lambda: True))
+    answers = []
+
+    def answer() -> str:
+        answers.append(capsys.readouterr().out)
+        if len(answers) == 2:
+            with open("new.png", "w") as f:
+                f.write("v1")
+        elif len(answers) == 3:
+            return "n"
+        elif len(answers) == 4:
+            with open("fig.png", "w") as f:
+                f.write("v2")
+        return ""
+
+    monkeypatch.setattr("builtins.input", answer)
+    manual_step(
+        message="Export fig.png and new.png",
+        outputs=["fig.png", "new.png"],
+    )
+    # Every prompt is a whole line, so it shows under 'calkit run'
+    assert answers[0].endswith(
+        "Export fig.png and new.png. Press Enter when done.\n"
+    )
+    assert answers[1].startswith("Not there yet: new.png\n")
+    assert answers[2].endswith("Unchanged: fig.png. Keep as is? [y/N]\n")
+    assert len(answers) == 4
+    assert capsys.readouterr().out.rstrip().endswith("Done")
+    # Input ending says nobody's there too, as an empty stdin on Windows
+    # passes for a terminal
+
+    def no_input() -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", no_input)
+    with pytest.raises(typer.Exit):
+        manual_step(message="Export fig.png", outputs=["fig.png"])
+    assert "nobody here to do it" in capsys.readouterr().err
+    # A long message is wrapped to fit a terminal
+    message = "In Photoshop, export paper/deficit_new.png from " + "x/" * 30
+    monkeypatch.setattr("builtins.input", lambda: "")
+    manual_step(message=message + ".")
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) > 2
+    assert all(len(line) <= 80 for line in lines)
+    assert " ".join(lines[:-1]).endswith("x/. Press Enter when done.")
+    # A file is opened with the app named, never the default for its type,
+    # and a missing app still leaves the step to do
+    with pytest.raises(typer.Exit):
+        manual_step(message="Export fig.png", open_path="fig.png")
+    assert "Name the app" in capsys.readouterr().err
+    with pytest.raises(typer.Exit):
+        manual_step(message="Export x.png", app="GIMP", open_path="x.xcf")
+    assert "x.xcf doesn't exist" in capsys.readouterr().err
+    launched = []
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kw: launched.append(args) or Mock(returncode=0),
+    )
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda args, **kw: launched.append(args)
+    )
+    for platform_name, which, expected in [
+        ("darwin", None, ["open", "-a", "Inkscape", "fig.png"]),
+        ("linux", "/usr/bin/inkscape", ["/usr/bin/inkscape", "fig.png"]),
+        ("win32", None, None),
+    ]:
+        monkeypatch.setattr(sys, "platform", platform_name)
+        monkeypatch.setattr(
+            shutil,
+            "which",
+            lambda name: which if name == "inkscape" else None,
+        )
+        launched.clear()
+        manual_step(
+            message="Export fig.png", app="Inkscape", open_path="fig.png"
+        )
+        assert launched == ([] if expected is None else [expected])
+        out = capsys.readouterr().out
+        assert ("Can't find Inkscape" in out) == (expected is None)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Fake app is a script")
+def test_run_records_app_version(tmp_dir):
+    # An app a stage runs from the system has its version recorded, since
+    # no environment pins it
+    bin_dir = os.path.abspath("bin")
+    os.makedirs(bin_dir)
+    fake = os.path.join(bin_dir, "inkscape")
+    with open(fake, "w") as f:
+        f.write(
+            f"#!{sys.executable}\n"
+            "import pathlib, sys\n"
+            "if sys.argv[1] == '--version':\n"
+            "    print('Inkscape 1.3.2 (091e20e, 2023-11-25)')\n"
+            "    sys.exit()\n"
+            "out = [a for a in sys.argv if a.startswith('--export-filename=')]\n"
+            "pathlib.Path(out[0].split('=', 1)[1]).write_text('png')\n"
+        )
+    os.chmod(fake, 0o755)
+    env = {**os.environ, "PATH": bin_dir + os.pathsep + os.environ["PATH"]}
+    subprocess.check_call(["calkit", "init"])
+    with open("setup.svg", "w") as f:
+        f.write("<svg/>")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "export-setup": {
+                            "kind": "inkscape-export",
+                            "source_path": "setup.svg",
+                            "outputs": ["setup.png"],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run"], env=env)
+    with open(STAGE_RUNS_FPATH) as f:
+        system = json.load(f)["export-setup"]["system"]
+    assert system["inkscape_version"] == "1.3.2"
+    assert system["os"] == platform.system()
+
+
+def test_clone(monkeypatch):
+    from typer.testing import CliRunner
+
+    cloned = []
+    hubs = []
+
+    def check_call(cmd, *args, **kwargs):
+        # Stop at the clone, which is all that depends on the protocol
+        if cmd[:2] == ["git", "clone"]:
+            cloned.append(cmd[2])
+            raise subprocess.CalledProcessError(1, cmd)
+        raise AssertionError(cmd)
+
+    def get(path):
+        hubs.append(os.environ.get("CALKIT_HUB"))
+        return {"git_repo_url": "https://github.com/me/proj"}
+
+    def clone(*args, ssh_set_up=True):
+        cloned.clear()
+        hubs.clear()
+        monkeypatch.delenv("CALKIT_HUB", raising=False)
+        monkeypatch.setattr(calkit.github, "can_use_ssh", lambda: ssh_set_up)
+        result = CliRunner().invoke(calkit.cli.main.app, ["clone", *args])
+        assert result.exit_code != 0
+        return result
+
+    def clone_url(*args, **kwargs):
+        clone(*args, **kwargs)
+        return cloned[0]
+
+    # Clone sets CALKIT_HUB, so have it restored after the test
+    monkeypatch.setenv("CALKIT_HUB", "")
+    monkeypatch.setattr("subprocess.check_call", check_call)
+    monkeypatch.setattr(calkit.hub, "get", get)
+    # SSH where it's set up for GitHub, by a project's name or its URL
+    assert clone_url("me/proj") == "git@github.com:me/proj.git"
+    assert (
+        clone_url("https://github.com/me/proj.git")
+        == "git@github.com:me/proj.git"
+    )
+    assert clone_url("github.com/me/proj") == "git@github.com:me/proj"
+    # Otherwise HTTPS, which is also what's asked for wins
+    assert (
+        clone_url("me/proj", ssh_set_up=False)
+        == "https://github.com/me/proj.git"
+    )
+    assert clone_url("me/proj", "--https") == "https://github.com/me/proj.git"
+    assert (
+        clone_url("git@github.com:me/proj.git", "--https")
+        == "https://github.com/me/proj.git"
+    )
+    # An SSH URL is kept without --https, even where SSH isn't set up
+    assert (
+        clone_url("git@github.com:me/proj.git", ssh_set_up=False)
+        == "git@github.com:me/proj.git"
+    )
+    assert (
+        clone_url("me/proj", "--ssh", ssh_set_up=False)
+        == "git@github.com:me/proj.git"
+    )
+    # Another host's URL is left as given
+    assert (
+        clone_url("https://gitlab.com/me/proj.git")
+        == "https://gitlab.com/me/proj.git"
+    )
+    # A project is looked up on the default hub, the one it names, or the
+    # one given, and localhost is the development hub
+    for args, hub in [
+        (["me/proj"], None),
+        (["calkit.example.edu/me/proj"], "https://calkit.example.edu"),
+        (
+            ["me/proj", "--hub", "calkit.example.edu"],
+            "https://calkit.example.edu",
+        ),
+        (["localhost/me/proj"], "http://localhost:5173"),
+        (["localhost:5173/me/proj"], "http://localhost:5173"),
+    ]:
+        clone(*args)
+        assert hubs == [hub], args
+    # Two different hubs, or a name that isn't one, is an error
+    result = clone("a.edu/me/proj", "--hub", "b.edu")
+    assert "doesn't match" in result.output and not hubs
+    result = clone("a/b/c/d")
+    assert "HUB/OWNER/NAME" in result.output and not hubs

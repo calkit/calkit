@@ -26,37 +26,39 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import {
-  FaArrowLeft,
-  FaCheck,
-  FaChevronLeft,
-  FaChevronRight,
-  FaRegSquare,
-} from "react-icons/fa"
+import { FaArrowLeft, FaChevronLeft, FaChevronRight } from "react-icons/fa"
 import { FaExternalLinkAlt, FaRegFileAlt } from "react-icons/fa"
 import { FiGrid } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
 import { TiFlowMerge } from "react-icons/ti"
 
 import { ProjectsService } from "../../client"
-import { encodeBase64Utf8 } from "../../lib/strings"
-import type { QuestionEvidence, QuestionPublic } from "../../client"
+import type {
+  QuestionEvidence,
+  QuestionPublic,
+  QuestionSignOff,
+} from "../../client"
 import useAuth from "../../hooks/useAuth"
 import {
   useProjectPublications,
   useProjectTables,
 } from "../../hooks/useProject"
+import { encodeBase64Utf8 } from "../../lib/strings"
 import CommentsPanel, {
   projectCommentToPanelComment,
 } from "../Common/CommentsPanel"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
+import SandboxedHtml from "../Common/SandboxedHtml"
 import Tooltip from "../Common/Tooltip"
 import FigureView, { PlotlyThumbnail } from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
-import SandboxedHtml from "../Common/SandboxedHtml"
 import PublicationView from "../Publications/PublicationView"
 import TableView from "../Tables/TableView"
+import QuestionStatusLetters, {
+  isEvidenceMissing,
+  isEvidenceStale,
+} from "./QuestionStatus"
 
 const IMG_MIME: Record<string, string> = {
   png: "image/png",
@@ -76,60 +78,6 @@ const IMG_MIME: Record<string, string> = {
  */
 const evidenceRefOf = (evidence: QuestionEvidence, gitRef?: string) =>
   evidence.git_ref ?? gitRef
-
-/** Whether what an evidence item cites can be taken at face value.
- *
- * An answer resting on an artifact that isn't there, or that the pipeline
- * considers out of date, is worth flagging: what the reader is looking at
- * isn't what the project would produce now, if it's there to look at at
- * all. The backend works out which of the ways that can happen applies.
- */
-export const isEvidenceStale = (evidence: QuestionEvidence) =>
-  evidence.stale_reason != null
-
-/** Whether the cited artifact resolves to nothing at all. */
-export const isEvidenceMissing = (evidence: QuestionEvidence) =>
-  evidence.stale_reason === "missing"
-
-/** The one mark a question gets in a list, worst first.
- *
- * No answer, then an answer with nothing behind it, then evidence that can't
- * be found at all, then evidence that has merely drifted -- staleness that
- * only shows once a question is open is staleness nobody sees. All four are
- * icons of the same size, so they land on one line down the list.
- */
-export const questionMark = (question: QuestionPublic) =>
-  !question.answer
-    ? {
-        icon: FaRegSquare,
-        color: "red.400",
-        label: "Not yet answered",
-      }
-    : !question.evidence?.length
-      ? {
-          icon: FaRegSquare,
-          color: "orange.300",
-          label: "Answered, but nothing is linked to back it up",
-        }
-      : question.evidence.some(isEvidenceMissing)
-        ? {
-            icon: FaCheck,
-            color: "red.400",
-            label:
-              "Answered, but some of its evidence can't be found -- it may never have been pushed, or it cites a Git ref that doesn't exist.",
-          }
-        : question.evidence.some(isEvidenceStale)
-          ? {
-              icon: FaCheck,
-              color: "orange.300",
-              label:
-                "Answered, but some of its evidence is out of date with respect to the pipeline, or comes from a frozen stage without a Git ref pinning it.",
-            }
-          : {
-              icon: FaCheck,
-              color: "green.400",
-              label: "Answered, and every piece of its evidence is up to date",
-            }
 
 const STALE_MARKS: Record<
   string,
@@ -187,6 +135,64 @@ function StaleBadge({ evidence }: { evidence: QuestionEvidence }) {
         {mark.badge}
       </Badge>
     </Tooltip>
+  )
+}
+
+/** Who signed off on a question one way, and whether it still holds. */
+function SignOffs({
+  title,
+  signOffs,
+}: {
+  title: string
+  signOffs: QuestionSignOff[]
+}) {
+  const subtleColor = useColorModeValue("gray.600", "gray.400")
+  return (
+    <Box mb={4}>
+      <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
+        {title}
+      </Text>
+      {signOffs.length ? (
+        signOffs.map((s) => (
+          <Box key={`${s.by}:${s.date}`} mt={1} fontSize="sm">
+            <Flex align="center" gap={2} wrap="wrap">
+              <Text as="span" fontWeight="semibold">
+                {s.by}
+              </Text>
+              {s.date ? (
+                <Text as="span" color={subtleColor}>
+                  {s.date}
+                </Text>
+              ) : null}
+              {s.with_ai?.length ? (
+                <Text as="span" color={subtleColor}>
+                  with {s.with_ai.join(", ")}
+                </Text>
+              ) : null}
+              {s.status === "stale" ? (
+                <Badge colorScheme="orange" fontSize="2xs">
+                  Stale
+                </Badge>
+              ) : null}
+            </Flex>
+            {s.notes ? (
+              <Box color={subtleColor}>
+                <Markdown foldedProse>{s.notes}</Markdown>
+              </Box>
+            ) : null}
+            {s.status === "stale" && s.message ? (
+              <Text fontSize="xs" color={subtleColor}>
+                Changed since: {s.message}
+              </Text>
+            ) : null}
+          </Box>
+        ))
+      ) : (
+        <Text fontSize="sm" color={subtleColor} mt={1}>
+          None yet.
+        </Text>
+      )}
+    </Box>
   )
 }
 
@@ -933,6 +939,7 @@ function QuestionModal({
                   </Markdown>
                 </Heading>
               </Box>
+              {question ? <QuestionStatusLetters question={question} /> : null}
             </Flex>
           )}
         </ModalHeader>
@@ -994,6 +1001,16 @@ function QuestionModal({
                     </Box>
                   </Box>
                 ) : null}
+                {question?.approach ? (
+                  <Box mb={4}>
+                    <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
+                      Approach
+                    </Text>
+                    <Box mt={1}>
+                      <Markdown foldedProse>{question.approach}</Markdown>
+                    </Box>
+                  </Box>
+                ) : null}
                 {question?.answer ? (
                   <Box mb={4}>
                     <Text fontSize="xs" fontWeight="bold" color={subtleColor}>
@@ -1008,6 +1025,18 @@ function QuestionModal({
                     Not yet answered.
                   </Text>
                 )}
+                {question ? (
+                  <SimpleGrid columns={{ base: 1, md: 2 }} spacingX={6}>
+                    <SignOffs
+                      title="Verifications"
+                      signOffs={question.verifications ?? []}
+                    />
+                    <SignOffs
+                      title="Validations"
+                      signOffs={question.validations ?? []}
+                    />
+                  </SimpleGrid>
+                ) : null}
                 {question ? (
                   // Set off from the answer rather than running on from it:
                   // what the project concluded and what people are saying
@@ -1097,7 +1126,6 @@ export function QuestionsModal({
           {questions.length ? (
             <Accordion allowMultiple>
               {questions.map((question) => {
-                const mark = questionMark(question)
                 const evidence = question.evidence ?? []
                 return (
                   <AccordionItem key={question.id}>
@@ -1107,11 +1135,7 @@ export function QuestionsModal({
                           {`${question.number}. ${question.question}`}
                         </Markdown>
                       </Box>
-                      <Tooltip label={mark.label}>
-                        <Flex mx={2} flexShrink={0} align="center">
-                          <Icon as={mark.icon} color={mark.color} />
-                        </Flex>
-                      </Tooltip>
+                      <QuestionStatusLetters question={question} mx={2} />
                       <AccordionIcon />
                     </AccordionButton>
                     <AccordionPanel px={2} pb={4}>
@@ -1128,6 +1152,20 @@ export function QuestionsModal({
                             <Markdown foldedProse>
                               {question.hypothesis}
                             </Markdown>
+                          </Box>
+                        </Box>
+                      ) : null}
+                      {question.approach ? (
+                        <Box mb={3}>
+                          <Text
+                            fontSize="xs"
+                            fontWeight="bold"
+                            color={subtleColor}
+                          >
+                            Approach
+                          </Text>
+                          <Box mt={1}>
+                            <Markdown foldedProse>{question.approach}</Markdown>
                           </Box>
                         </Box>
                       ) : null}

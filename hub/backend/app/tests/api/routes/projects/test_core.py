@@ -1,16 +1,20 @@
 """Tests for app.api.routes.projects.core endpoints."""
 
 import base64
+import json
+import os
 import uuid
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
+import git
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, delete, select
 
 import app.index
+from app import projects as projects_module
 from app import users, zotero
 from app.api.routes.projects.core import (
     _normalize_artifact_file_path,
@@ -19,8 +23,15 @@ from app.api.routes.projects.core import (
 )
 from app.config import settings
 from app.core import ryaml
-from app.models import Project, UserCreate
-from app.models.core import Account, ContentsItem, UserProjectAccess
+from app.models import OverleafLink, Project, UserCreate
+from app.models.core import (
+    ROLE_IDS,
+    Account,
+    ContentsItem,
+    UserProjectAccess,
+)
+from app.pipeline import PipelineAtRef
+from app.pipeline import StageStatus as PipelineStageStatus
 from app.projects import CkInfoAndOuts
 from app.tests import authentication_token_from_email, create_random_user
 
@@ -1371,7 +1382,11 @@ def test_get_project_results_autodetects_and_reads_ref(
 ) -> None:
     """Results under a results-style dir are auto-detected, and declared
     results plus the tree are read at the requested ref."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000002")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000002",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     detected_paths = [
         "results/summary.json",
         "results/data.csv",
@@ -1425,6 +1440,22 @@ def test_get_project_results_autodetects_and_reads_ref(
             ".get_ck_info_and_dvc_outs_from_tree",
             return_value=CkInfoAndOuts({}, {}, {}, {}),
         ),
+        # The stage that writes a result, and whether it's out of date
+        patch(
+            "app.api.routes.projects.core.pipeline_at_ref",
+            return_value=PipelineAtRef(
+                dvc_yaml={},
+                dvc_lock={
+                    "stages": {
+                        "summarize": {
+                            "outs": [{"path": "results/summary.json"}]
+                        }
+                    }
+                },
+                statuses={"summarize": PipelineStageStatus(status="stale")},
+                frozen=set(),
+            ),
+        ),
     ):
         response = client.get(
             "/projects/test-owner/test-project/results?ref=some-branch"
@@ -1445,6 +1476,10 @@ def test_get_project_results_autodetects_and_reads_ref(
     assert titles["results/data.csv"] == "Data"
     assert mock_get_repo.call_args.kwargs["ref"] == "some-branch"
     assert mock_ck_for_ref.call_args.kwargs["ref"] == "some-branch"
+    by_path = {res["path"]: res for res in body}
+    assert by_path["results/summary.json"]["stage"] == "summarize"
+    assert by_path["results/summary.json"]["stage_status"]["status"] == "stale"
+    assert by_path["results/data.csv"]["stage_status"] is None
 
 
 def test_get_project_questions_without_an_index(
@@ -1506,6 +1541,97 @@ def test_get_project_questions_without_an_index(
         indexed = client.get(f"{base}/questions", headers=headers).json()
     by_number = {q.number: str(q.id) for q in project.questions}
     assert [q["id"] for q in indexed] == [by_number[n] for n in (1, 2, 3)]
+
+
+def test_get_project_questions_checks_sign_offs(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    import git
+
+    project, headers = _make_owner_with_project(db, client)
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    repo = git.Repo.init(tmp_path)
+    with repo.config_writer() as config:
+        config.set_value("user", "name", "t")
+        config.set_value("user", "email", "t@t")
+    ada = {"name": "Ada", "email": "ada@example.org"}
+    question = {
+        "question": "Does it work?",
+        "approach": "Run it.",
+        "answer": "Yes.",
+        "verifications": [
+            {"by": ada, "date": "2026-10-04", "notes": "Read run.py."}
+        ],
+        "validations": [
+            {"by": {**ada, "with_ai": "Claude Opus 5"}, "date": "2026-10-04"}
+        ],
+    }
+
+    def commit(message: str) -> str:
+        with open(tmp_path / "calkit.yaml", "w") as f:
+            ryaml.dump({"questions": [question]}, f)
+        repo.git.add("calkit.yaml")
+        repo.git.commit("-m", message)
+        return repo.head.commit.hexsha
+
+    signed = commit("Sign off")
+    question["answer"] = "Mostly."
+    commit("Edit the answer")
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        r = client.get(f"{base}/questions", headers=headers)
+        assert r.status_code == 200, r.text
+        now = r.json()[0]
+        r = client.get(
+            f"{base}/questions", params={"ref": signed}, headers=headers
+        )
+        assert r.status_code == 200, r.text
+        then = r.json()[0]
+    # Editing the answer makes the validation stale, but not the
+    # verification, since the approach and stages didn't change
+    assert now["approach"] == "Run it."
+    assert [s["status"] for s in now["verifications"]] == ["current"]
+    assert now["verifications"][0]["by"] == "Ada"
+    assert now["verifications"][0]["notes"] == "Read run.py."
+    assert [s["status"] for s in now["validations"]] == ["stale"]
+    assert "question was edited" in now["validations"][0]["message"]
+    assert now["validations"][0]["with_ai"] == ["Claude Opus 5"]
+    # At the ref it was signed off at, it's current
+    assert [s["status"] for s in then["validations"]] == ["current"]
+    # Evidence on a branch is rechecked when the branch moves, though the
+    # project's own commit hasn't
+    (tmp_path / "result.json").write_text('{"r": 1}')
+    repo.git.add("result.json")
+    question["evidence"] = [
+        {
+            "kind": "value",
+            "path": "result.json",
+            "key": "r",
+            "git_ref": "published",
+        }
+    ]
+    question["validations"] = [{"by": ada, "date": "2026-10-05"}]
+    with repo.git.custom_environment(
+        GIT_COMMITTER_DATE="2099-01-01T00:00:00+00:00"
+    ):
+        commit("Cite the published result")
+    repo.git.branch("published")
+    statuses = []
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        for moved in [False, True]:
+            if moved:
+                main = repo.active_branch.name
+                repo.git.checkout("-q", "published")
+                (tmp_path / "result.json").write_text('{"r": 2}')
+                repo.git.add("result.json")
+                with repo.git.custom_environment(
+                    GIT_COMMITTER_DATE="2099-01-02T00:00:00+00:00"
+                ):
+                    repo.git.commit("-m", "Publish again")
+                repo.git.checkout("-q", main)
+            r = client.get(f"{base}/questions", headers=headers)
+            assert r.status_code == 200, r.text
+            statuses.append(r.json()[0]["validations"][0]["status"])
+    assert statuses == ["current", "stale"]
 
 
 def test_render_template() -> None:
@@ -1775,6 +1901,20 @@ def test_apply_question_update_builds_object() -> None:
         existing, QuestionPut(answer="maybe"), rendered_answer="no"
     )
     assert isinstance(out, dict) and out["answer"] == "maybe"
+    # The approach is kept when not sent, so an older client can't clear
+    # it, set when sent, and cleared when sent empty; sign-offs are kept
+    signed = {
+        "question": "q?",
+        "approach": "Run it.",
+        "validations": [{"by": {"name": "Ada"}, "date": "2026-10-04"}],
+    }
+    out = _apply_question_update(signed, QuestionPut())
+    assert isinstance(out, dict) and out["approach"] == "Run it."
+    assert out["validations"] == signed["validations"]
+    out = _apply_question_update(signed, QuestionPut(approach="Fit it."))
+    assert isinstance(out, dict) and out["approach"] == "Fit it."
+    out = _apply_question_update(signed, QuestionPut(approach=""))
+    assert isinstance(out, dict) and "approach" not in out
 
 
 def test_apply_question_update_figure_evidence_drops_key() -> None:
@@ -5119,6 +5259,7 @@ def test_post_project_dataset_provenance(
                 return_value=existing_path,
             ),
             patch("builtins.open", new_callable=lambda: _fake_open),
+            patch("pathlib.Path.write_text"),
             patch("app.api.routes.projects.core.mixpanel.track"),
         ):
             resp = client.post(url, headers=headers, json=body)
@@ -5538,3 +5679,329 @@ def test_push_dvc_cache_to_storage(tmp_path) -> None:
             == 0
         )
     fs.assert_not_called()
+
+
+def _set_identity(repo: git.Repo) -> None:
+    """Give the repo a committer, which the test container lacks."""
+    repo.git.config(["user.email", "test@example.com"])
+    repo.git.config(["user.name", "Calkit Test"])
+
+
+def _make_overleaf_repo(
+    tmp_path, ck_info: dict, sync_info: dict | None = None
+):
+    """Build a Git repo standing in for a project's clone."""
+    repo_dir = tmp_path / uuid.uuid4().hex[:8]
+    os.makedirs(repo_dir)
+    repo = git.Repo.init(path=repo_dir)
+    _set_identity(repo)
+    with open(repo_dir / "calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if sync_info is not None:
+        os.makedirs(repo_dir / ".calkit", exist_ok=True)
+        with open(repo_dir / ".calkit" / "overleaf-sync.json", "w") as f:
+            json.dump(sync_info, f)
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Initial commit"])
+    return repo
+
+
+def test_record_overleaf_links_and_lookup(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    _, other_headers = _make_owner_with_project(db, client)
+    repo = _make_overleaf_repo(
+        tmp_path,
+        ck_info={
+            "overleaf_sync": {
+                "paper": {"url": "https://www.overleaf.com/project/ol111"},
+                "poster": {"url": "https://www.overleaf.com/project/ol222"},
+            }
+        },
+    )
+    links = projects_module.record_overleaf_links(
+        session=db, project=project, repo=repo
+    )
+    assert {link.path for link in links} == {"paper", "poster"}
+    assert {link.overleaf_project_id for link in links} == {"ol111", "ol222"}
+    # Re-recording is idempotent, and a link removed from calkit.yaml is
+    # dropped from the index rather than lingering
+    repo2 = _make_overleaf_repo(
+        tmp_path,
+        ck_info={
+            "overleaf_sync": {
+                "paper": {"url": "https://www.overleaf.com/project/ol333"}
+            }
+        },
+    )
+    links = projects_module.record_overleaf_links(
+        session=db, project=project, repo=repo2
+    )
+    assert len(links) == 1
+    assert links[0].path == "paper"
+    assert links[0].overleaf_project_id == "ol333"
+    stored = db.exec(
+        select(OverleafLink).where(OverleafLink.project_id == project.id)
+    ).all()
+    assert len(stored) == 1
+    # The owner can resolve the Overleaf project back to their project,
+    # straight from the index
+    resp = client.get(
+        "/user/overleaf-syncs/ol333",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()["links"]
+    assert len(data) == 1
+    assert data[0]["project_name"] == project.name
+    assert data[0]["path"] == "paper"
+    assert data[0]["current_user_access"] == "owner"
+    # Where it's on GitHub, e.g., to open it in a Codespace
+    assert data[0]["github_repo_url"] == project.git_repo_url
+    # Any GitHub URL form project creation accepts gives the same repo
+    for url in [
+        "https://github.com/o/p",
+        "https://www.github.com/o/p.git",
+        "http://github.com/o/p/",
+    ]:
+        assert Project(git_repo_url=url).github_repo == "o/p"
+    assert Project(git_repo_url="https://gitlab.com/o/p").github_repo is None
+    # An unrelated user gets nothing back for the same private project
+    resp = client.get(
+        "/user/overleaf-syncs/ol333",
+        headers=other_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["links"] == []
+
+
+def test_get_projects_min_access_level_write(
+    client: TestClient, db: Session
+) -> None:
+    # A project the user owns, plus one owned by somebody else that they can
+    # only read
+    owned, headers = _make_owner_with_project(db, client)
+    others, _ = _make_owner_with_project(db, client)
+    others.is_public = True
+    db.add(others)
+    db.commit()
+    suffix = uuid.uuid4().hex[:8]
+    reader = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"reader-{suffix}@example.com",
+            password="readerpassword123",
+            account_name=f"reader{suffix}",
+            github_username=f"reader{suffix}",
+        ),
+    )
+    reader_headers = authentication_token_from_email(
+        client=client, email=reader.email, db=db
+    )
+
+    def _list(headers: dict[str, str], **params):
+        resp = client.get("/projects", params=params, headers=headers)
+        assert resp.status_code == 200
+        return {
+            f"{p['owner_account_name']}/{p['name']}"
+            for p in resp.json()["data"]
+        }
+
+    owned_spec = f"{owned.owner_account_name}/{owned.name}"
+    others_spec = f"{others.owner_account_name}/{others.name}"
+    # Reading lists the public project belonging to someone else; asking for
+    # write access drops it, since a reader can't write to it
+    assert others_spec in _list(reader_headers)
+    assert others_spec not in _list(reader_headers, min_access_level="write")
+    # An owner keeps their own project under either level
+    assert owned_spec in _list(headers)
+    assert owned_spec in _list(headers, min_access_level="write")
+    # A read-level grant isn't enough, but a write-level one is
+    db.add(
+        UserProjectAccess(
+            project_id=others.id, user_id=reader.id, role_id=ROLE_IDS["read"]
+        )
+    )
+    db.commit()
+    assert others_spec not in _list(reader_headers, min_access_level="write")
+    access = db.exec(
+        select(UserProjectAccess)
+        .where(UserProjectAccess.project_id == others.id)
+        .where(UserProjectAccess.user_id == reader.id)
+    ).one()
+    access.role_id = ROLE_IDS["write"]
+    db.add(access)
+    db.commit()
+    assert others_spec in _list(reader_headers, min_access_level="write")
+    # GitHub-derived access counts too, but only at write or better
+    access.role_id = None
+    access.github_access = "read"
+    db.add(access)
+    db.commit()
+    assert others_spec not in _list(reader_headers, min_access_level="write")
+    access.github_access = "admin"
+    db.add(access)
+    db.commit()
+    assert others_spec in _list(reader_headers, min_access_level="write")
+    # Anonymous callers can't ask for write access at all
+    resp = client.get("/projects", params={"min_access_level": "write"})
+    assert resp.status_code == 403
+
+
+def test_get_projects_filters_by_github_repo(
+    client: TestClient, db: Session
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    github_repo = project.git_repo_url.removeprefix("https://github.com/")
+    resp = client.get(
+        "/projects",
+        params={"github_repo": github_repo},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["data"][0]["name"] == project.name
+    # Matching is exact, so a repo whose name merely starts the same doesn't
+    # come back
+    resp = client.get(
+        "/projects",
+        params={"github_repo": f"{github_repo}-other"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["count"] == 0
+
+
+def test_post_reference_item_creates_missing_collection(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    repo_dir = tmp_path / uuid.uuid4().hex[:8]
+    os.makedirs(repo_dir)
+    repo = git.Repo.init(path=repo_dir)
+    _set_identity(repo)
+    with open(repo_dir / "calkit.yaml", "w") as f:
+        ryaml.dump({}, f)
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Initial commit"])
+    remote_dir = tmp_path / f"{uuid.uuid4().hex[:8]}-remote"
+    git.Repo.init(path=remote_dir, bare=True)
+    repo.git.remote(["add", "origin", str(remote_dir)])
+    repo.git.push(["-u", "origin", repo.active_branch.name])
+    url = (
+        f"/projects/{project.owner_account_name}/"
+        f"{project.name}/references/items"
+    )
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        resp = client.post(
+            url,
+            json={
+                "path": "references.bib",
+                "key": "thomas2026",
+                "type": "article",
+                "fields": {"title": "Reversing biodiversity decline"},
+            },
+            headers=headers,
+        )
+    assert resp.status_code == 200
+    # The first reference in a project creates the collection rather than
+    # failing because the .bib doesn't exist yet
+    bib_path = repo_dir / "references.bib"
+    assert bib_path.is_file()
+    assert "thomas2026" in bib_path.read_text()
+    ck_info = ryaml.load((repo_dir / "calkit.yaml").read_text())
+    assert ck_info["references"] == [{"path": "references.bib"}]
+    # A second reference lands in the collection that now exists, and
+    # doesn't re-declare it
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        resp = client.post(
+            url,
+            json={
+                "path": "references.bib",
+                "key": "smith2025",
+                "type": "article",
+                "fields": {"title": "Another paper"},
+            },
+            headers=headers,
+        )
+    assert resp.status_code == 200
+    assert "smith2025" in bib_path.read_text()
+    ck_info = ryaml.load((repo_dir / "calkit.yaml").read_text())
+    assert ck_info["references"] == [{"path": "references.bib"}]
+
+
+def test_get_user_overleaf_sync_scans_lazily(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    url = "/user/overleaf-syncs/54b68eff0ee71ad2767b704a"
+    ck_info = {
+        "overleaf_sync": {
+            "paper2": {
+                "url": "https://www.overleaf.com/project/54b68eff0ee71ad2767b704a"
+            },
+            "report": {
+                "url": "https://www.overleaf.com/project/699f2a0fb20a38960a52bc26"
+            },
+        }
+    }
+
+    def _lookup(**params):
+        # The scan reads calkit.yaml from GitHub rather than cloning, so a
+        # stubbed response stands in for the repo; other tests' projects
+        # indexed with the same link ask it for a permission, which is none
+        with (
+            patch(
+                "app.projects.requests.get",
+                return_value=SimpleNamespace(
+                    status_code=200,
+                    text=json.dumps(ck_info),
+                    json=lambda: {"permission": "none"},
+                ),
+            ),
+            patch(
+                "app.projects.app.users.get_github_token",
+                return_value="gh-token",
+            ),
+        ):
+            return client.get(url, params=params, headers=headers)
+
+    # Nothing is indexed yet, so the lookup finds it by reading the project
+    resp = _lookup()
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["projects_scanned"] == 1
+    assert [link["path"] for link in data["links"]] == ["paper2"]
+    assert data["links"][0]["project_name"] == project.name
+    # Both syncs declared in one calkit.yaml are indexed together, so the
+    # second Overleaf project resolves without reading anything again
+    resp = client.get(
+        "/user/overleaf-syncs/699f2a0fb20a38960a52bc26",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["projects_scanned"] == 0
+    assert [link["path"] for link in data["links"]] == ["report"]
+    # A second lookup is answered from the index, without scanning again
+    resp = _lookup()
+    assert resp.status_code == 200
+    assert resp.json()["projects_scanned"] == 0
+    # A project already scanned isn't re-read until the TTL lapses, so an
+    # Overleaf project nobody syncs with doesn't cost a scan per lookup
+    resp = client.get(
+        "/user/overleaf-syncs/nonexistent",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "links": [],
+        "projects_scanned": 0,
+        "projects_remaining": 0,
+    }
+    # refresh re-reads regardless, for a link that was only just added
+    resp = _lookup(refresh=True)
+    assert resp.status_code == 200
+    assert resp.json()["projects_scanned"] == 1

@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 import calkit
 import calkit.docker
+import calkit.environments.docker
 import calkit.resources
 from calkit.cli.update import update_app
 
@@ -28,9 +29,7 @@ def test_update_project_config(tmp_dir, monkeypatch):
     result = runner.invoke(update_app, ["devcontainer"])
     assert result.exit_code == 0
     with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
-        assert json.load(f) == calkit.resources.load_json(
-            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
-        )
+        assert f.read() == calkit.resources.make_devcontainer_spec({})
     result = runner.invoke(update_app, ["vscode-config"])
     assert result.exit_code == 0
     for fname in calkit.resources.VSCODE_FNAMES:
@@ -50,6 +49,16 @@ def test_update_project_config(tmp_dir, monkeypatch):
     assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
     assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
     assert not repo.git.status("--porcelain")
+    # A project with a Julia environment gets Julia installed too
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {"jl": {"kind": "julia", "julia": "1.11"}}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
+    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
+        assert json.load(f) == calkit.resources.load_json(
+            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
+        )
 
 
 def test_update_dataset(tmp_dir):
@@ -224,6 +233,37 @@ def test_update_github_actions(tmp_dir):
     with open(old_fpath) as f:
         assert f.read() == updated_txt
     assert not repo.git.status("--porcelain")
+    # A new workflow can run only when started, and stays that way when
+    # it's updated later without saying what runs it
+    os.remove(old_fpath)
+    on_demand_txt = calkit.resources.render_github_actions_workflow(
+        on=["workflow_dispatch"]
+    )
+    assert (
+        runner.invoke(
+            update_app, ["github-actions", "--on", "workflow_dispatch"]
+        ).exit_code
+        == 0
+    )
+    with open(out_fpath) as f:
+        assert f.read() == on_demand_txt
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    with open(out_fpath) as f:
+        assert f.read() == on_demand_txt
+    # A customized one can have what runs it changed too
+    with open(out_fpath, "w") as f:
+        f.write(custom_txt.replace("jobs:", "on: push\njobs:"))
+    assert (
+        runner.invoke(
+            update_app,
+            ["github-actions", "--on", "push", "--on", "workflow_dispatch"],
+        ).exit_code
+        == 0
+    )
+    with open(out_fpath) as f:
+        workflow = calkit.ryaml.load(f)
+    assert workflow["on"] == {"push": None, "workflow_dispatch": None}
+    assert workflow["jobs"]["main"]["steps"][-1] == {"run": "echo custom"}
 
 
 def test_update_uv_env(tmp_dir):
@@ -478,12 +518,89 @@ def test_update_docker_env_registry(tmp_dir):
     assert result.exit_code == 0, result.output
     env = calkit.load_calkit_info()["environments"]["main"]
     assert env["registry"] is None
-    assert calkit.docker.resolve_registry_prefix(env) is None
+    assert calkit.environments.docker.resolve_registry_prefix(env) is None
     with open("calkit.yaml") as f:
         assert "registry: none" not in f.read()
     # Nothing to update is a mistake worth reporting, not a no-op
     result = runner.invoke(update_app, ["docker-env", "-n", "main"])
     assert result.exit_code != 0
+
+
+def test_update_latex_image(tmp_dir, monkeypatch):
+    import calkit.cli.check
+    from calkit.latex import DEFAULT_LATEX_IMAGE
+
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "tex": {"kind": "docker", "image": "ghcr.io/calkit/latex"},
+        "old": {"kind": "docker", "image": "ghcr.io/calkit/latex:0.1.0"},
+        "full": {"kind": "docker", "image": "texlive/texlive:latest-full"},
+        "built": {
+            "kind": "docker",
+            "path": "Dockerfile",
+            "image": "texlive/texlive",
+        },
+        "other": {"kind": "docker", "image": "python:3.12"},
+        "py": {"kind": "uv", "path": "pyproject.toml"},
+        # An option defined in place is updated as 'switched.1'; a named one
+        # is updated as itself, or not at all
+        "switched": {
+            "kind": "switch",
+            "switch": [
+                {
+                    "when": [{"os_is": "linux"}],
+                    "use": {
+                        "kind": "docker",
+                        "image": "ghcr.io/calkit/latex:0.1.0",
+                    },
+                },
+                {"use": "other"},
+            ],
+        },
+    }
+    calkit.save_calkit_info(ck_info)
+    lock_fpath = calkit.environments.docker.get_lock_fpaths("tex")[0]
+    os.makedirs(os.path.dirname(lock_fpath))
+    with open(lock_fpath, "w") as f:
+        json.dump({"RepoDigests": ["sha256:old"]}, f)
+    relocked = []
+    forced = []
+    monkeypatch.setattr(
+        calkit.cli.check,
+        "check_environment",
+        lambda env_name, force=False, **kwargs: (
+            relocked.append(env_name),
+            forced.append(force),
+        ),
+    )
+    # Environments on Calkit's or TeX Live's image move to the pinned one and
+    # are relocked, with stale locks removed so the old image isn't pulled
+    # back by its digest
+    result = runner.invoke(update_app, ["latex-image"])
+    assert result.exit_code == 0, result.output
+    envs = calkit.load_calkit_info()["environments"]
+    for name in ["tex", "old", "full"]:
+        assert envs[name]["image"] == DEFAULT_LATEX_IMAGE
+    assert envs["switched"]["switch"][0]["use"]["image"] == DEFAULT_LATEX_IMAGE
+    assert envs["switched"]["switch"][1]["use"] == "other"
+    assert relocked == ["tex", "old", "full", "switched.1"]
+    assert not os.path.exists(lock_fpath)
+    # Others are left alone, including one built from a Dockerfile
+    assert envs["built"]["image"] == "texlive/texlive"
+    assert envs["other"]["image"] == "python:3.12"
+    # Once they're pinned there's nothing to do
+    relocked.clear()
+    result = runner.invoke(update_app, ["latex-image"])
+    assert result.exit_code == 0, result.output
+    assert "No LaTeX environments to update" in result.output
+    assert relocked == []
+    # Relocking a Docker env forces a rebuild, as 'update env --lock' does
+    forced.clear()
+    result = runner.invoke(update_app, ["docker-env", "-n", "tex", "--relock"])
+    assert result.exit_code == 0, result.output
+    assert relocked == ["tex"]
+    assert forced == [True]
 
 
 def test_update_imported_from_detects_the_kind(tmp_dir):
@@ -699,6 +816,7 @@ def test_update_env_lock(tmp_dir, monkeypatch):
             "path": "requirements.txt",
             "prefix": ".venv",
         },
+        "job": {"kind": "slurm", "host": "cluster.invalid"},
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -721,6 +839,28 @@ def test_update_env_lock(tmp_dir, monkeypatch):
     assert envs.read_system_env_lock(
         env_name="bench", env=env
     ) == envs.get_system_lock_data(["os", "cpu-count"])
+    # Any other kind is rebuilt from its spec, taking the newest versions it
+    # allows rather than the ones its lock pins
+    with open("requirements.txt", "w") as f:
+        f.write("six\n")
+    py_env = ck_info["environments"]["py"]
+    py_lock_fpath = envs.get_env_lock_fpath(
+        env=py_env, env_name="py", as_posix=False
+    )
+    assert py_lock_fpath is not None
+    os.makedirs(os.path.dirname(py_lock_fpath), exist_ok=True)
+    with open(py_lock_fpath, "w") as f:
+        f.write("six==1.15.0\n")
+    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
+    assert result.exit_code == 0, result.output
+    with open(py_lock_fpath) as f:
+        relocked = f.read()
+    assert "six==" in relocked
+    assert "six==1.15.0" not in relocked
+    # A scheduler env is locked to its config, so there's nothing to redo
+    result = runner.invoke(update_app, ["env", "-n", "job", "--lock"])
+    assert result.exit_code == 0, result.output
+    assert "nothing to relock" in result.output
     # A remote env is locked to the far end, not this machine
     monkeypatch.setattr(
         calkit.workspace,
@@ -740,8 +880,6 @@ def test_update_env_lock(tmp_dir, monkeypatch):
         assert json.load(f) == envs.get_system_lock_data(["os"])
     # Nothing to relock without machine properties or a machine
     result = runner.invoke(update_app, ["env", "-n", "plain", "--lock"])
-    assert result.exit_code != 0
-    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
     assert result.exit_code != 0
     result = runner.invoke(update_app, ["env", "-n", "nope", "--lock"])
     assert result.exit_code != 0
@@ -1004,3 +1142,96 @@ def test_update_comment(tmp_dir):
     ]:
         res = subprocess.run(["calkit", *args], capture_output=True)
         assert res.returncode != 0, args
+
+
+def test_update_question(tmp_dir):
+    from datetime import date
+
+    from calkit.models.core import ProjectInfo
+
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["git", "config", "user.name", "Ada"])
+    subprocess.check_call(["git", "config", "user.email", "ada@example.org"])
+    calkit.save_calkit_info(
+        {
+            "questions": [
+                "Does it work?",
+                {
+                    "question": "Why?",
+                    "name": "why",
+                    "hypothesis": "Because.",
+                    "answer": "Because.",
+                    "evidence": [],
+                },
+            ]
+        }
+    )
+    # Nothing to do, no such question, AI disclosed with no sign-off, or a
+    # sign-off with nothing to sign off on
+    for args in [
+        ["question", "1"],
+        ["question", "3", "--notes", "x"],
+        ["question", "nope", "--notes", "x"],
+        ["question", "1", "--with-ai", "Claude Opus 5"],
+        ["question", "1", "--verify", ""],
+        ["question", "1", "--approach", "Run it.", "--validate", ""],
+        ["question", "2", "--verify", ""],
+    ]:
+        result = runner.invoke(update_app, args)
+        assert result.exit_code != 0, args
+    # A plain question becomes an entry when a field is set
+    result = runner.invoke(
+        update_app, ["question", "1", "--approach", "Run it."]
+    )
+    assert result.exit_code == 0, result.output
+    questions = calkit.load_calkit_info()["questions"]
+    assert questions[0] == {"question": "Does it work?", "approach": "Run it."}
+    # By name, a new field goes where it would be written by hand, and
+    # sign-offs are recorded from Git's identity, covering this same update
+    result = runner.invoke(
+        update_app,
+        [
+            "question",
+            "why",
+            "--approach",
+            "Ask.",
+            "--verify",
+            "Read the code.",
+            "--validate",
+            "Read the answer.",
+            "--with-ai",
+            "Claude Opus 5",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    q = calkit.load_calkit_info()["questions"][1]
+    assert list(q) == [
+        "question",
+        "name",
+        "hypothesis",
+        "approach",
+        "answer",
+        "evidence",
+        "verifications",
+        "validations",
+    ]
+    ada = {"name": "Ada", "email": "ada@example.org"}
+    for field, notes in [
+        ("verifications", "Read the code."),
+        ("validations", "Read the answer."),
+    ]:
+        # With the time, so signing off again the same day is a new record
+        signed = q[field][0].pop("date")
+        assert signed.tzinfo is not None and signed.date() == date.today()
+        assert q[field] == [
+            {"by": {**ada, "with_ai": "Claude Opus 5"}, "notes": notes}
+        ]
+    # Signing off again replaces that person's sign-off of that kind only,
+    # and notes are optional
+    result = runner.invoke(update_app, ["question", "2", "--validate", ""])
+    assert result.exit_code == 0, result.output
+    q = calkit.load_calkit_info()["questions"][1]
+    assert q["validations"][0].pop("date") >= signed
+    assert q["validations"] == [{"by": ada}]
+    assert q["verifications"][0]["notes"] == "Read the code."
+    assert ProjectInfo.model_validate(calkit.load_calkit_info())

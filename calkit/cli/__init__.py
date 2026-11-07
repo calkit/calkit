@@ -19,6 +19,16 @@ def run() -> None:
     # otherwise print the *current* CLI's help instead of re-execing
     # under the requested version.
     _maybe_exec_with_version()
+    if sys.platform == "win32":
+        import io
+
+        from calkit.core import is_mintty
+
+        # mintty shows UTF-8, so emoji needn't be replaced, and output is
+        # line buffered as it would be to a terminal
+        for stream in (sys.stdout, sys.stderr):
+            if isinstance(stream, io.TextIOWrapper) and is_mintty(stream):
+                stream.reconfigure(encoding="utf-8", line_buffering=True)
     from .main import app
 
     # Completion lists commands, so needs them all

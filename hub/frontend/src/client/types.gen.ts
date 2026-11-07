@@ -410,6 +410,14 @@ export type ConnectedAccounts = {
    */
   overleaf: boolean
   /**
+   * Overleaf Token
+   */
+  overleaf_token?: boolean
+  /**
+   * Overleaf Session
+   */
+  overleaf_session?: boolean
+  /**
    * Google
    */
   google: boolean
@@ -1179,6 +1187,56 @@ export type ExistsResult = {
 }
 
 /**
+ * ExportStage
+ */
+export type ExportStage = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Exported By
+   */
+  exported_by?: string | null
+  /**
+   * Saved
+   */
+  saved?: boolean
+}
+
+/**
+ * ExportStagePost
+ */
+export type ExportStagePost = {
+  /**
+   * Source
+   */
+  source: string
+  /**
+   * Output
+   */
+  output: string
+  /**
+   * App
+   */
+  app?: string | null
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
  * ExternalReleasePost
  *
  * A release declared as published to an external venue.
@@ -1680,6 +1738,22 @@ export type FsOpResponse = {
    * Result
    */
   result?: FsListResult | ExistsResult | InfoResult | OperationResult | null
+}
+
+/**
+ * GitHubActionsRunOptions
+ */
+export type GitHubActionsRunOptions = {
+  /**
+   * Workflow
+   */
+  workflow?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: {
+    [key: string]: string
+  }
 }
 
 /**
@@ -2416,6 +2490,53 @@ export type LatexCommentsMove = {
 }
 
 /**
+ * LatexComponents
+ *
+ * What a document needs beside it for calkit.sty's commands, as
+ * ``calkit latex build`` would write it.
+ */
+export type LatexComponents = {
+  /**
+   * Loads Calkit
+   */
+  loads_calkit: boolean
+  /**
+   * Style
+   */
+  style?: string | null
+  /**
+   * Values
+   */
+  values?: string | null
+  /**
+   * Copies
+   */
+  copies?: Array<string>
+  /**
+   * Problems
+   */
+  problems?: Array<string>
+}
+
+/**
+ * LatexComponentsRequest
+ *
+ * A LaTeX document to bring calkit.sty's components in for.
+ */
+export type LatexComponentsRequest = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Sources
+   */
+  sources?: {
+    [key: string]: string
+  }
+}
+
+/**
  * MapPathEntry
  *
  * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
@@ -2712,6 +2833,16 @@ export type OperationResult = {
 }
 
 /**
+ * OrgMemberPatch
+ */
+export type OrgMemberPatch = {
+  /**
+   * Role
+   */
+  role: "read" | "write" | "admin" | "owner"
+}
+
+/**
  * OrgMemberPost
  */
 export type OrgMemberPost = {
@@ -2868,7 +2999,7 @@ export type OrgUserPublic = {
   /**
    * Github Name
    */
-  github_name: string
+  github_name: string | null
   /**
    * Role
    */
@@ -2891,6 +3022,12 @@ export type OrgsResponse = {
 
 /**
  * OverleafLinkPublic
+ *
+ * A folder of a Calkit project an Overleaf project syncs with, and what
+ * the current user can do with that project.
+ *
+ * ``github_repo_url`` is the project's repo on GitHub, in one canonical
+ * form, e.g., to open it in a Codespace, or none if it's elsewhere.
  */
 export type OverleafLinkPublic = {
   /**
@@ -2917,6 +3054,10 @@ export type OverleafLinkPublic = {
    * Current User Access
    */
   current_user_access: "read" | "write" | "admin" | "owner" | null
+  /**
+   * Github Repo Url
+   */
+  github_repo_url?: string | null
 }
 
 /**
@@ -2935,6 +3076,26 @@ export type OverleafLookup = {
    * Projects Remaining
    */
   projects_remaining: number
+}
+
+/**
+ * OverleafSessionPut
+ */
+export type OverleafSessionPut = {
+  /**
+   * Session
+   */
+  session: string
+}
+
+/**
+ * OverleafSessionResponse
+ */
+export type OverleafSessionResponse = {
+  /**
+   * Session
+   */
+  session: string
 }
 
 /**
@@ -3100,6 +3261,151 @@ export type PipelinePut = {
    * Message
    */
   message?: string | null
+}
+
+/**
+ * PipelineRun
+ *
+ * A run of the pipeline, wherever it ran.
+ */
+export type PipelineRun = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Location
+   */
+  location: "github-actions"
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Started
+   */
+  started?: string | null
+  /**
+   * Finished
+   */
+  finished?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Started By
+   */
+  started_by?: string | null
+  /**
+   * Github Workflow
+   */
+  github_workflow?: string | null
+  /**
+   * Github Run Id
+   */
+  github_run_id?: number | null
+}
+
+/**
+ * PipelineRunLogPart
+ *
+ * Part of a run's log, e.g., a GitHub Actions job's.
+ */
+export type PipelineRunLogPart = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+  /**
+   * Phases
+   */
+  phases?: Array<PipelineRunLogPhase>
+  /**
+   * Log
+   */
+  log?: string | null
+  /**
+   * Log Truncated
+   */
+  log_truncated?: boolean
+}
+
+/**
+ * PipelineRunLogPhase
+ */
+export type PipelineRunLogPhase = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+}
+
+/**
+ * PipelineRunLogs
+ */
+export type PipelineRunLogs = {
+  /**
+   * Parts
+   */
+  parts?: Array<PipelineRunLogPart>
+}
+
+/**
+ * PipelineRunPost
+ */
+export type PipelineRunPost = {
+  /**
+   * Location
+   */
+  location?: "github-actions"
+  github_actions?: GitHubActionsRunOptions
+}
+
+/**
+ * PipelineRuns
+ */
+export type PipelineRuns = {
+  /**
+   * Runs
+   */
+  runs?: Array<PipelineRun>
+  /**
+   * Total
+   */
+  total?: number
+  /**
+   * Github Workflow
+   */
+  github_workflow?: string | null
+  /**
+   * Can Start
+   */
+  can_start?: boolean
+  /**
+   * Cannot Start Reason
+   */
+  cannot_start_reason?: string | null
 }
 
 /**
@@ -4054,6 +4360,131 @@ export type ProjectsPublic = {
 }
 
 /**
+ * Provenance
+ *
+ * Where an artifact, or one value inside a results file, came from.
+ */
+export type Provenance = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Exists
+   */
+  exists?: boolean
+  /**
+   * Value
+   */
+  value?: unknown
+  /**
+   * Value Error
+   */
+  value_error?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Stage Kind
+   */
+  stage_kind?: string | null
+  /**
+   * Stage App
+   */
+  stage_app?: string | null
+  /**
+   * Source
+   */
+  source?: string | null
+  /**
+   * Command
+   */
+  command?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Input To Stages
+   */
+  input_to_stages?: Array<string>
+  stage_status?: StageStatus | null
+  /**
+   * Stale Reason
+   */
+  stale_reason?: "pipeline" | "frozen" | null
+  /**
+   * Copied From
+   */
+  copied_from?: string | null
+  /**
+   * Copy Stage
+   */
+  copy_stage?: string | null
+  /**
+   * Origin
+   */
+  origin?: string | null
+  /**
+   * Origin Url
+   */
+  origin_url?: string | null
+  /**
+   * Origin Path
+   */
+  origin_path?: string | null
+  /**
+   * Gaps
+   */
+  gaps?: Array<ProvenanceGap>
+}
+
+/**
+ * ProvenanceGap
+ *
+ * Something nothing records the origin of, and the chain to it.
+ */
+export type ProvenanceGap = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Steps
+   */
+  steps?: Array<ProvenanceStep>
+  /**
+   * Unchecked
+   */
+  unchecked?: boolean
+}
+
+/**
+ * ProvenanceStep
+ *
+ * A path on the way back from an artifact, and the stage producing it.
+ */
+export type ProvenanceStep = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Stage
+   */
+  stage?: string | null
+}
+
+/**
  * Publication
  *
  * A publication declared in calkit.yaml.
@@ -4132,7 +4563,7 @@ export type PublicationComponent = {
   /**
    * Via
    */
-  via?: "folder" | "input"
+  via?: "folder" | "input" | "included"
   /**
    * Stage
    */
@@ -4430,6 +4861,10 @@ export type QuestionPublic = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4437,6 +4872,14 @@ export type QuestionPublic = {
    * Evidence
    */
   evidence?: Array<QuestionEvidence>
+  /**
+   * Verifications
+   */
+  verifications?: Array<QuestionSignOff>
+  /**
+   * Validations
+   */
+  validations?: Array<QuestionSignOff>
 }
 
 /**
@@ -4452,6 +4895,10 @@ export type QuestionPut = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4459,6 +4906,44 @@ export type QuestionPut = {
    * Evidence
    */
   evidence?: Array<QuestionEvidencePost>
+}
+
+/**
+ * QuestionSignOff
+ *
+ * A verification or validation of a question, checked against history.
+ *
+ * A verification says the stages behind the evidence implement the
+ * approach; a validation says the approach suits the question and the
+ * evidence justifies the answer. Stale means what it vouches for changed
+ * after the commit that added it; unchecked means that commit couldn't be
+ * found.
+ */
+export type QuestionSignOff = {
+  /**
+   * By
+   */
+  by: string
+  /**
+   * Date
+   */
+  date?: string | null
+  /**
+   * Notes
+   */
+  notes?: string | null
+  /**
+   * With Ai
+   */
+  with_ai?: Array<string>
+  /**
+   * Status
+   */
+  status: "current" | "stale" | "unchecked"
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -5398,9 +5883,21 @@ export type ReproCheck = {
    */
   misc_needing_provenance?: Array<string>
   /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
+  /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
+  /**
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
+  /**
+   * Paths Outside Project
+   */
+  paths_outside_project?: Array<string>
   /**
    * N Dvc Remotes
    */
@@ -5489,6 +5986,41 @@ export type Result = {
    * Key
    */
   key?: string | null
+  stage_status?: StageStatus | null
+}
+
+/**
+ * ScriptData
+ *
+ * Data a script reads from outside the project, and its place in it.
+ */
+export type ScriptData = {
+  /**
+   * External
+   */
+  external: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Files
+   */
+  files?: Array<ScriptDataFile>
+}
+
+/**
+ * ScriptDataFile
+ */
+export type ScriptDataFile = {
+  /**
+   * Path
+   */
+  path?: string
+  /**
+   * Content
+   */
+  content: string
 }
 
 /**
@@ -5663,6 +6195,151 @@ export type SoftwareItem = {
    * Description
    */
   description?: string | null
+}
+
+/**
+ * StageFile
+ *
+ * A file a new stage needs, e.g., a script or the file a figure is
+ * exported from.
+ */
+export type StageFile = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Created By Me
+   */
+  created_by_me?: boolean
+}
+
+/**
+ * StageFromScriptOrNotebookPost
+ */
+export type StageFromScriptOrNotebookPost = {
+  /**
+   * Script Path
+   */
+  script_path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Shows
+   */
+  shows?: string | null
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Data
+   */
+  data?: Array<ScriptData>
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
+ * StageFromScriptOrNotebookResponse
+ */
+export type StageFromScriptOrNotebookResponse = {
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Stage Yaml
+   */
+  stage_yaml: string
+  /**
+   * Environment
+   */
+  environment: string
+  /**
+   * Environment Is New
+   */
+  environment_is_new: boolean
+  /**
+   * Environment Spec Path
+   */
+  environment_spec_path?: string | null
+  /**
+   * Environment Spec Content
+   */
+  environment_spec_content?: string | null
+  /**
+   * Dependencies
+   */
+  dependencies?: Array<string>
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Outputs
+   */
+  outputs?: Array<string>
+  /**
+   * Missing Inputs
+   */
+  missing_inputs?: Array<string>
+  /**
+   * External Inputs
+   */
+  external_inputs?: Array<string>
+  /**
+   * Rewritten
+   */
+  rewritten?: Array<string>
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Included In
+   */
+  included_in?: Array<string>
+  /**
+   * Saved
+   */
+  saved?: boolean
+  /**
+   * Git Repo Url
+   */
+  git_repo_url: string
+}
+
+/**
+ * StagePost
+ */
+export type StagePost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -6940,9 +7617,21 @@ export type ReproCheckWritable = {
    */
   misc_needing_provenance?: Array<string>
   /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
+  /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
+  /**
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
+  /**
+   * Paths Outside Project
+   */
+  paths_outside_project?: Array<string>
   /**
    * N Dvc Remotes
    */
@@ -8304,6 +8993,50 @@ export type PutUserOverleafTokenResponses = {
 
 export type PutUserOverleafTokenResponse =
   PutUserOverleafTokenResponses[keyof PutUserOverleafTokenResponses]
+
+export type GetUserOverleafSessionData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/overleaf-session"
+}
+
+export type GetUserOverleafSessionResponses = {
+  /**
+   * Successful Response
+   */
+  200: OverleafSessionResponse
+}
+
+export type GetUserOverleafSessionResponse =
+  GetUserOverleafSessionResponses[keyof GetUserOverleafSessionResponses]
+
+export type PutUserOverleafSessionData = {
+  body: OverleafSessionPut
+  path?: never
+  query?: never
+  url: "/user/overleaf-session"
+}
+
+export type PutUserOverleafSessionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutUserOverleafSessionError =
+  PutUserOverleafSessionErrors[keyof PutUserOverleafSessionErrors]
+
+export type PutUserOverleafSessionResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PutUserOverleafSessionResponse =
+  PutUserOverleafSessionResponses[keyof PutUserOverleafSessionResponses]
 
 export type PostUserGoogleAuthData = {
   body: AppApiRoutesUsersOAuthCodeExchange
@@ -10817,6 +11550,47 @@ export type GetProjectPublicationComponentsResponses = {
 
 export type GetProjectPublicationComponentsResponse =
   GetProjectPublicationComponentsResponses[keyof GetProjectPublicationComponentsResponses]
+
+export type PostProjectLatexComponentsData = {
+  body: LatexComponentsRequest
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/latex-components"
+}
+
+export type PostProjectLatexComponentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectLatexComponentsError =
+  PostProjectLatexComponentsErrors[keyof PostProjectLatexComponentsErrors]
+
+export type PostProjectLatexComponentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: LatexComponents
+}
+
+export type PostProjectLatexComponentsResponse =
+  PostProjectLatexComponentsResponses[keyof PostProjectLatexComponentsResponses]
 
 export type PostProjectMiscData = {
   body: MiscArtifactPost
@@ -13367,6 +14141,284 @@ export type PostProjectMapPathsResponses = {
 export type PostProjectMapPathsResponse =
   PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
 
+export type PostProjectStageFromScriptOrNotebookData = {
+  body: StageFromScriptOrNotebookPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook"
+}
+
+export type PostProjectStageFromScriptOrNotebookErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectStageFromScriptOrNotebookError =
+  PostProjectStageFromScriptOrNotebookErrors[keyof PostProjectStageFromScriptOrNotebookErrors]
+
+export type PostProjectStageFromScriptOrNotebookResponses = {
+  /**
+   * Successful Response
+   */
+  200: StageFromScriptOrNotebookResponse
+}
+
+export type PostProjectStageFromScriptOrNotebookResponse =
+  PostProjectStageFromScriptOrNotebookResponses[keyof PostProjectStageFromScriptOrNotebookResponses]
+
+export type PostProjectPipelineStageData = {
+  body: StagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages"
+}
+
+export type PostProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineStageError =
+  PostProjectPipelineStageErrors[keyof PostProjectPipelineStageErrors]
+
+export type PostProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PostProjectPipelineStageResponse =
+  PostProjectPipelineStageResponses[keyof PostProjectPipelineStageResponses]
+
+export type PostProjectPipelineExportStageData = {
+  body: ExportStagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/export"
+}
+
+export type PostProjectPipelineExportStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineExportStageError =
+  PostProjectPipelineExportStageErrors[keyof PostProjectPipelineExportStageErrors]
+
+export type PostProjectPipelineExportStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExportStage
+}
+
+export type PostProjectPipelineExportStageResponse =
+  PostProjectPipelineExportStageResponses[keyof PostProjectPipelineExportStageResponses]
+
+export type GetProjectPipelineRunsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+    /**
+     * Offset
+     */
+    offset?: number
+  }
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type GetProjectPipelineRunsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunsError =
+  GetProjectPipelineRunsErrors[keyof GetProjectPipelineRunsErrors]
+
+export type GetProjectPipelineRunsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRuns
+}
+
+export type GetProjectPipelineRunsResponse =
+  GetProjectPipelineRunsResponses[keyof GetProjectPipelineRunsResponses]
+
+export type PostProjectPipelineRunData = {
+  body: PipelineRunPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type PostProjectPipelineRunErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineRunError =
+  PostProjectPipelineRunErrors[keyof PostProjectPipelineRunErrors]
+
+export type PostProjectPipelineRunResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRun
+}
+
+export type PostProjectPipelineRunResponse =
+  PostProjectPipelineRunResponses[keyof PostProjectPipelineRunResponses]
+
+export type GetProjectPipelineRunLogsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Run Id
+     */
+    run_id: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs"
+}
+
+export type GetProjectPipelineRunLogsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunLogsError =
+  GetProjectPipelineRunLogsErrors[keyof GetProjectPipelineRunLogsErrors]
+
+export type GetProjectPipelineRunLogsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRunLogs
+}
+
+export type GetProjectPipelineRunLogsResponse =
+  GetProjectPipelineRunLogsResponses[keyof GetProjectPipelineRunLogsResponses]
+
+export type GetProjectProvenanceData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Key
+     */
+    key?: string | null
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/provenance"
+}
+
+export type GetProjectProvenanceErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectProvenanceError =
+  GetProjectProvenanceErrors[keyof GetProjectProvenanceErrors]
+
+export type GetProjectProvenanceResponses = {
+  /**
+   * Successful Response
+   */
+  200: Provenance
+}
+
+export type GetProjectProvenanceResponse =
+  GetProjectProvenanceResponses[keyof GetProjectProvenanceResponses]
+
 export type PostProjectFigureScriptData = {
   body: FigureScriptPost
   path: {
@@ -14686,6 +15738,78 @@ export type AddOrgMemberResponses = {
 
 export type AddOrgMemberResponse =
   AddOrgMemberResponses[keyof AddOrgMemberResponses]
+
+export type DeleteOrgMemberData = {
+  body?: never
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type DeleteOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteOrgMemberError =
+  DeleteOrgMemberErrors[keyof DeleteOrgMemberErrors]
+
+export type DeleteOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteOrgMemberResponse =
+  DeleteOrgMemberResponses[keyof DeleteOrgMemberResponses]
+
+export type UpdateOrgMemberData = {
+  body: OrgMemberPatch
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type UpdateOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type UpdateOrgMemberError =
+  UpdateOrgMemberErrors[keyof UpdateOrgMemberErrors]
+
+export type UpdateOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type UpdateOrgMemberResponse =
+  UpdateOrgMemberResponses[keyof UpdateOrgMemberResponses]
 
 export type PutOrgSubscriptionData = {
   body: OrgSubscriptionUpdate

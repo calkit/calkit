@@ -241,11 +241,16 @@ figures:
   - path: figures/cp-curve.png
     title: Power coefficient
     stage: plot-cp # Made by the pipeline; nothing more to record
-  - path: figures/schematic.png
+  - path: figures/schematic.svg
     title: Apparatus schematic
     created_by:
       email: me@myorg.edu
 ```
+
+A person can't be the origin of an exported format, i.e., PNG, GIF, WebP,
+BMP, PDF, or EPS, since something else wrote it, e.g., a script or an image
+editor saving from its own file.
+Add the stage that makes it, or record where it was imported from.
 
 A figure obtained from elsewhere takes the same `imported_from` forms a
 dataset does, and publications do too; `created_by` and `imported_from`
@@ -270,7 +275,7 @@ person who used it says so with `with_ai`:
 
 ```yaml
 figures:
-  - path: figures/schematic.png
+  - path: figures/schematic.svg
     created_by:
       email: me@myorg.edu
       with_ai: Claude Opus 5 # Can be a list too

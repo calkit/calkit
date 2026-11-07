@@ -25,11 +25,12 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "permissions": ["storage", "tabs", "scripting", "activeTab", "cookies"],
   "host_permissions": [
     "https://api.calkit.io/*",
     "https://api.staging.calkit.io/*",
     "http://api.localhost/*",
+    "https://www.overleaf.com/*",
     "https://storage.googleapis.com/*",
     "https://s3.amazonaws.com/*",
     "https://*.s3.amazonaws.com/*"
@@ -49,6 +50,15 @@
       ],
       "js": ["content/overleaf.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.overleaf.com/project/*",
+        "https://overleaf.com/project/*"
+      ],
+      "js": ["content/overleaf-editor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     },
     {
       "matches": [

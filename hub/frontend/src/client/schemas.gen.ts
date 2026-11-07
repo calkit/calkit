@@ -706,6 +706,16 @@ export const ConnectedAccountsSchema = {
       type: "boolean",
       title: "Overleaf",
     },
+    overleaf_token: {
+      type: "boolean",
+      title: "Overleaf Token",
+      default: false,
+    },
+    overleaf_session: {
+      type: "boolean",
+      title: "Overleaf Session",
+      default: false,
+    },
     google: {
       type: "boolean",
       title: "Google",
@@ -2096,6 +2106,79 @@ export const ExistsResultSchema = {
   title: "ExistsResult",
 } as const
 
+export const ExportStageSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    exported_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Exported By",
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "stage"],
+  title: "ExportStage",
+} as const
+
+export const ExportStagePostSchema = {
+  properties: {
+    source: {
+      type: "string",
+      title: "Source",
+    },
+    output: {
+      type: "string",
+      title: "Output",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: true,
+    },
+  },
+  type: "object",
+  required: ["source", "output"],
+  title: "ExportStagePost",
+} as const
+
 export const ExternalReleasePostSchema = {
   properties: {
     name: {
@@ -2957,6 +3040,32 @@ export const FsOpResponseSchema = {
   title: "FsOpResponse",
   description:
     "Response describing how to perform a file system operation\n(get/put/exists/list) for a given path within the project.",
+} as const
+
+export const GitHubActionsRunOptionsSchema = {
+  properties: {
+    workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Workflow",
+    },
+    inputs: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Inputs",
+      default: {},
+    },
+  },
+  type: "object",
+  title: "GitHubActionsRunOptions",
 } as const
 
 export const GitHubInstallationsSchema = {
@@ -4106,6 +4215,79 @@ export const LatexCommentsMoveSchema = {
   title: "LatexCommentsMove",
 } as const
 
+export const LatexComponentsSchema = {
+  properties: {
+    loads_calkit: {
+      type: "boolean",
+      title: "Loads Calkit",
+    },
+    style: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Style",
+    },
+    values: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Values",
+    },
+    copies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Copies",
+      default: [],
+    },
+    problems: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Problems",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["loads_calkit"],
+  title: "LatexComponents",
+  description:
+    "What a document needs beside it for calkit.sty's commands, as\n``calkit latex build`` would write it.",
+} as const
+
+export const LatexComponentsRequestSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    sources: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Sources",
+      default: {},
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "LatexComponentsRequest",
+  description: "A LaTeX document to bring calkit.sty's components in for.",
+} as const
+
 export const MapPathEntrySchema = {
   properties: {
     src: {
@@ -4624,6 +4806,19 @@ export const OperationResultSchema = {
   description: "Result for file operations like delete, move, copy.",
 } as const
 
+export const OrgMemberPatchSchema = {
+  properties: {
+    role: {
+      type: "string",
+      enum: ["read", "write", "admin", "owner"],
+      title: "Role",
+    },
+  },
+  type: "object",
+  required: ["role"],
+  title: "OrgMemberPatch",
+} as const
+
 export const OrgMemberPostSchema = {
   properties: {
     username: {
@@ -4866,7 +5061,14 @@ export const OrgUserPublicSchema = {
       title: "Name",
     },
     github_name: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Github Name",
     },
     role: {
@@ -4932,6 +5134,17 @@ export const OverleafLinkPublicSchema = {
       ],
       title: "Current User Access",
     },
+    github_repo_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Repo Url",
+    },
   },
   type: "object",
   required: [
@@ -4943,6 +5156,8 @@ export const OverleafLinkPublicSchema = {
     "current_user_access",
   ],
   title: "OverleafLinkPublic",
+  description:
+    "A folder of a Calkit project an Overleaf project syncs with, and what\nthe current user can do with that project.\n\n``github_repo_url`` is the project's repo on GitHub, in one canonical\nform, e.g., to open it in a Codespace, or none if it's elsewhere.",
 } as const
 
 export const OverleafLookupSchema = {
@@ -4966,6 +5181,30 @@ export const OverleafLookupSchema = {
   type: "object",
   required: ["links", "projects_scanned", "projects_remaining"],
   title: "OverleafLookup",
+} as const
+
+export const OverleafSessionPutSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionPut",
+} as const
+
+export const OverleafSessionResponseSchema = {
+  properties: {
+    session: {
+      type: "string",
+      title: "Session",
+    },
+  },
+  type: "object",
+  required: ["session"],
+  title: "OverleafSessionResponse",
 } as const
 
 export const OverleafSyncPostSchema = {
@@ -5236,6 +5475,262 @@ export const PipelinePutSchema = {
   type: "object",
   required: ["yaml"],
   title: "PipelinePut",
+} as const
+
+export const PipelineRunSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    started: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started",
+    },
+    finished: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Finished",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    started_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started By",
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    github_run_id: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Run Id",
+    },
+  },
+  type: "object",
+  required: ["id", "location", "status", "created"],
+  title: "PipelineRun",
+  description: "A run of the pipeline, wherever it ran.",
+} as const
+
+export const PipelineRunLogPartSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    phases: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPhase",
+      },
+      type: "array",
+      title: "Phases",
+      default: [],
+    },
+    log: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Log",
+    },
+    log_truncated: {
+      type: "boolean",
+      title: "Log Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPart",
+  description: "Part of a run's log, e.g., a GitHub Actions job's.",
+} as const
+
+export const PipelineRunLogPhaseSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPhase",
+} as const
+
+export const PipelineRunLogsSchema = {
+  properties: {
+    parts: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPart",
+      },
+      type: "array",
+      title: "Parts",
+      default: [],
+    },
+  },
+  type: "object",
+  title: "PipelineRunLogs",
+} as const
+
+export const PipelineRunPostSchema = {
+  properties: {
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+      default: "github-actions",
+    },
+    github_actions: {
+      $ref: "#/components/schemas/GitHubActionsRunOptions",
+    },
+  },
+  type: "object",
+  title: "PipelineRunPost",
+} as const
+
+export const PipelineRunsSchema = {
+  properties: {
+    runs: {
+      items: {
+        $ref: "#/components/schemas/PipelineRun",
+      },
+      type: "array",
+      title: "Runs",
+      default: [],
+    },
+    total: {
+      type: "integer",
+      title: "Total",
+      default: 0,
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    can_start: {
+      type: "boolean",
+      title: "Can Start",
+      default: false,
+    },
+    cannot_start_reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Cannot Start Reason",
+    },
+  },
+  type: "object",
+  title: "PipelineRuns",
 } as const
 
 export const PipelineStageSchema = {
@@ -7028,6 +7523,264 @@ export const ProjectsPublicSchema = {
   title: "ProjectsPublic",
 } as const
 
+export const ProvenanceSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    exists: {
+      type: "boolean",
+      title: "Exists",
+      default: false,
+    },
+    value: {
+      title: "Value",
+    },
+    value_error: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Value Error",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_kind: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Kind",
+    },
+    stage_app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage App",
+    },
+    source: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Source",
+    },
+    command: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Command",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+    },
+    input_to_stages: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Input To Stages",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    stale_reason: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["pipeline", "frozen"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stale Reason",
+    },
+    copied_from: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copied From",
+    },
+    copy_stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copy Stage",
+    },
+    origin: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin",
+    },
+    origin_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Url",
+    },
+    origin_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Path",
+    },
+    gaps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceGap",
+      },
+      type: "array",
+      title: "Gaps",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "Provenance",
+  description:
+    "Where an artifact, or one value inside a results file, came from.",
+} as const
+
+export const ProvenanceGapSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    steps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceStep",
+      },
+      type: "array",
+      title: "Steps",
+    },
+    unchecked: {
+      type: "boolean",
+      title: "Unchecked",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceGap",
+  description: "Something nothing records the origin of, and the chain to it.",
+} as const
+
+export const ProvenanceStepSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceStep",
+  description:
+    "A path on the way back from an artifact, and the stage producing it.",
+} as const
+
 export const PublicationSchema = {
   properties: {
     path: {
@@ -7185,7 +7938,7 @@ export const PublicationComponentSchema = {
     },
     via: {
       type: "string",
-      enum: ["folder", "input"],
+      enum: ["folder", "input", "included"],
       title: "Via",
       default: "folder",
     },
@@ -7801,6 +8554,17 @@ export const QuestionPublicSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7818,6 +8582,22 @@ export const QuestionPublicSchema = {
       },
       type: "array",
       title: "Evidence",
+      default: [],
+    },
+    verifications: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Verifications",
+      default: [],
+    },
+    validations: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Validations",
       default: [],
     },
   },
@@ -7850,6 +8630,17 @@ export const QuestionPutSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7872,6 +8663,66 @@ export const QuestionPutSchema = {
   },
   type: "object",
   title: "QuestionPut",
+} as const
+
+export const QuestionSignOffSchema = {
+  properties: {
+    by: {
+      type: "string",
+      title: "By",
+    },
+    date: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date",
+    },
+    notes: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Notes",
+    },
+    with_ai: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "With Ai",
+      default: [],
+    },
+    status: {
+      type: "string",
+      enum: ["current", "stale", "unchecked"],
+      title: "Status",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["by", "status"],
+  title: "QuestionSignOff",
+  description:
+    "A verification or validation of a question, checked against history.\n\nA verification says the stages behind the evidence implement the\napproach; a validation says the approach suits the question and the\nevidence justifies the answer. Stale means what it vouches for changed\nafter the commit that added it; unchecked means that commit couldn't be\nfound.",
 } as const
 
 export const ReferenceEntrySchema = {
@@ -9487,12 +10338,36 @@ export const ReproCheckSchema = {
       title: "Misc Needing Provenance",
       default: [],
     },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
       },
       type: "array",
       title: "Scripts Not In Pipeline",
+      default: [],
+    },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
       default: [],
     },
     n_dvc_remotes: {
@@ -9657,10 +10532,63 @@ export const ResultSchema = {
       ],
       title: "Key",
     },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
   },
   type: "object",
   required: ["path", "title"],
   title: "Result",
+} as const
+
+export const ScriptDataSchema = {
+  properties: {
+    external: {
+      type: "string",
+      title: "External",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/ScriptDataFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["external", "path"],
+  title: "ScriptData",
+  description:
+    "Data a script reads from outside the project, and its place in it.",
+} as const
+
+export const ScriptDataFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+      default: "",
+    },
+    content: {
+      type: "string",
+      title: "Content",
+    },
+  },
+  type: "object",
+  required: ["content"],
+  title: "ScriptDataFile",
 } as const
 
 export const SearchResultItemSchema = {
@@ -9947,6 +10875,265 @@ export const SoftwareItemSchema = {
   type: "object",
   required: ["title", "path"],
   title: "SoftwareItem",
+} as const
+
+export const StageFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    created_by_me: {
+      type: "boolean",
+      title: "Created By Me",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "StageFile",
+  description:
+    "A file a new stage needs, e.g., a script or the file a figure is\nexported from.",
+} as const
+
+export const StageFromScriptOrNotebookPostSchema = {
+  properties: {
+    script_path: {
+      type: "string",
+      title: "Script Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    shows: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Shows",
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    data: {
+      items: {
+        $ref: "#/components/schemas/ScriptData",
+      },
+      type: "array",
+      title: "Data",
+      default: [],
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["script_path"],
+  title: "StageFromScriptOrNotebookPost",
+} as const
+
+export const StageFromScriptOrNotebookResponseSchema = {
+  properties: {
+    stage_name: {
+      type: "string",
+      title: "Stage Name",
+    },
+    stage_yaml: {
+      type: "string",
+      title: "Stage Yaml",
+    },
+    environment: {
+      type: "string",
+      title: "Environment",
+    },
+    environment_is_new: {
+      type: "boolean",
+      title: "Environment Is New",
+    },
+    environment_spec_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Path",
+    },
+    environment_spec_content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Content",
+    },
+    dependencies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Dependencies",
+      default: [],
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+      default: [],
+    },
+    outputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Outputs",
+      default: [],
+    },
+    missing_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Missing Inputs",
+      default: [],
+    },
+    external_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "External Inputs",
+      default: [],
+    },
+    rewritten: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Rewritten",
+      default: [],
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    included_in: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Included In",
+      default: [],
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+    git_repo_url: {
+      type: "string",
+      title: "Git Repo Url",
+    },
+  },
+  type: "object",
+  required: [
+    "stage_name",
+    "stage_yaml",
+    "environment",
+    "environment_is_new",
+    "git_repo_url",
+  ],
+  title: "StageFromScriptOrNotebookResponse",
+} as const
+
+export const StagePostSchema = {
+  properties: {
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["stage"],
+  title: "StagePost",
 } as const
 
 export const StageStatusSchema = {
@@ -12058,12 +13245,36 @@ export const ReproCheckWritableSchema = {
       title: "Misc Needing Provenance",
       default: [],
     },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
       },
       type: "array",
       title: "Scripts Not In Pipeline",
+      default: [],
+    },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
       default: [],
     },
     n_dvc_remotes: {

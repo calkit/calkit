@@ -1,4 +1,4 @@
-"""Tests for ``calkit.environments``."""
+"""Tests for ``calkit.environments.core``."""
 
 import json
 import os
@@ -6,17 +6,22 @@ import platform
 import shutil
 import socket
 import subprocess
+import sys
 from datetime import timedelta
 from unittest import mock
 
 import pytest
+import typer
 
 import calkit
+import calkit.cli.check
 import calkit.environments
+import calkit.environments.core
 import calkit.latex
+from calkit.environments.core import relock
 
 
-def test_check_all_in_pipeline(tmp_dir):
+def test_check_all_in_pipeline(tmp_dir, capfd):
     ck_info: dict = {
         "environments": {
             "py1": {
@@ -209,6 +214,32 @@ def test_check_all_in_pipeline(tmp_dir):
     assert set(res) == {"py1", "far", "nope", "py3"}
     assert not res["nope"]["success"]
     assert not os.path.isdir(".venv2")
+
+    # Quiet discards what the checks and their tools print, and leaves the
+    # terminal's handles intact, since on Windows Click keeps its own. Nobody
+    # can answer a prompt there either, so they get no input.
+    def noisy_check(*args: object, **kwargs: object) -> None:
+        print("from python")
+        subprocess.run(["git", "--version"])
+        with pytest.raises(EOFError):
+            input("Continue? ")
+        assert subprocess.run([sys.executable, "-c", "input()"]).returncode
+
+    capfd.readouterr()
+    if sys.platform == "win32":
+        import msvcrt
+
+        stderr_handle = msvcrt.get_osfhandle(2)
+    with mock.patch(
+        "calkit.cli.check.check_environment", side_effect=noisy_check
+    ):
+        res = calkit.environments.check_all_in_pipeline(
+            skip_stages=["skipped"], force=True, quiet=True
+        )
+    assert res["py1"]["success"]
+    assert capfd.readouterr() == ("", "")
+    if sys.platform == "win32":
+        assert msvcrt.get_osfhandle(2) == stderr_handle
     assert calkit.environments.check_inner_env_there(
         ["calkit", "xenv", "-n", "py2", "--no-check", "--", "a", "--no-check"]
     ) == ["calkit", "xenv", "-n", "py2", "--", "a", "--no-check"]
@@ -1325,7 +1356,7 @@ def test_add_packages_to_nix_flake(tmp_dir):
 def test_system_env_lock(tmp_dir):
     from typing import get_args
 
-    import calkit.environments as envs
+    import calkit.environments.core as envs
     from calkit.models.core import SystemLockProperty
 
     # The literals offered in the schema and the table that resolves them
@@ -1442,7 +1473,7 @@ def test_system_env_lock(tmp_dir):
 
 
 def test_host_is_local_by_address(monkeypatch):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # A project commonly writes a machine down as an IP, which never
     # matches a hostname however the machine reports itself -- so running
@@ -1471,7 +1502,7 @@ def test_host_is_local_by_address(monkeypatch):
 
 
 def test_host_is_local():
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # An env with no host, or localhost, is this machine by definition
     assert envs.host_is_local(None)
@@ -1508,7 +1539,7 @@ def test_host_is_local():
 
 
 def test_host_is_local_by_mdns_name(monkeypatch):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # The name macOS shows the user as theirs -- in Sharing, and from
     # 'scutil --get LocalHostName' -- is an mDNS name, which is not in the
@@ -1557,7 +1588,7 @@ def test_machine_ids_match_ignores_how_the_id_was_written():
 
 
 def test_env_is_local_prefers_the_machine_id_over_the_name():
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     with mock.patch.object(calkit, "get_machine_id", return_value="abc-123"):
         # A machine ID is a stronger claim than a name, so it decides even
@@ -1589,7 +1620,7 @@ def test_env_is_local_prefers_the_machine_id_over_the_name():
 
 
 def test_env_is_local_expands_variables_in_the_machine_id(monkeypatch):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # A machine ID can be kept out of a shared calkit.yaml the same way a
     # host can, since it names one particular person's machine
@@ -1637,7 +1668,7 @@ def test_machine_id_can_be_overridden_in_config(monkeypatch):
 
 
 def test_machine_id_is_reported_and_lockable():
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # Pinning results to one machine is what 'hostname' was being used for,
     # badly: renaming the machine breaks that pin, and a machine elsewhere
@@ -1659,7 +1690,7 @@ def test_machine_id_is_reported_and_lockable():
 
 
 def test_declaring_a_machine_id_does_not_lock_it(tmp_dir):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # Naming a machine says where to run, which is a separate question from
     # whether results depend on it: moving a project to a new machine and
@@ -1682,7 +1713,7 @@ def test_declaring_a_machine_id_does_not_lock_it(tmp_dir):
 
 
 def test_locking_an_unreadable_machine_id_says_how_to_supply_one(tmp_dir):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # Recording null would claim a pin that isn't there, so this raises --
     # but this is the one lockable property a user can supply by hand, and
@@ -1698,7 +1729,7 @@ def test_locking_an_unreadable_machine_id_says_how_to_supply_one(tmp_dir):
 
 
 def test_system_lock_can_describe_another_machine(tmp_dir):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # What a stage's results depend on is the machine it runs on, so a lock
     # for a remote host is written from that host's properties rather than
@@ -1720,7 +1751,7 @@ def test_system_lock_can_describe_another_machine(tmp_dir):
 
 
 def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     env = {"kind": "system", "lock": ["cpu-count", "os"]}
     lock_fpath = envs.write_system_env_lock(env_name="bench", env=env)
@@ -1825,7 +1856,7 @@ def test_system_env_lock_survives_a_move_to_another_machine(tmp_dir):
 
 
 def test_lock_any_app_version(tmp_dir):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     assert envs.lock_app_names(
         ["os", "git-version", "jq-version", "cc-version-minor"]
@@ -1947,7 +1978,7 @@ def test_lock_any_app_version(tmp_dir):
 
 
 def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # The shell is a project setting, so changing it still updates the lock
     env = {"kind": "system", "lock": ["os"], "shell": "zsh"}
@@ -1963,7 +1994,7 @@ def test_system_env_lock_still_tracks_project_controlled_fields(tmp_dir):
 
 
 def test_system_env_checks_are_not_cached():
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     # Caching exists to skip rebuilding something expensive. Checking a
     # system env *is* reading the machine, so there is nothing to skip --
@@ -1979,7 +2010,7 @@ def test_get_env_input_paths(capsys):
     # An environment's files are read from 'inputs', with the older 'deps'
     # spelling still accepted so a project that predates the rename doesn't
     # have its files go silently untracked
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     assert envs.get_env_input_paths({}) == []
     assert envs.get_env_input_paths({"inputs": ["a.sh"]}) == ["a.sh"]
@@ -2006,7 +2037,7 @@ def test_env_inputs_must_be_inside_the_project():
     # editor -- same as every other RelativeChildPathString field.
     from pydantic import ValidationError
 
-    import calkit.environments as envs
+    import calkit.environments.core as envs
     from calkit.models.core import (
         DockerEnvironment,
         PBSEnvironment,
@@ -2044,7 +2075,7 @@ def test_env_inputs_must_be_inside_the_project():
 def test_env_spec_hashes(tmp_dir):
     import json
 
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     def write(fpath: str, text: str) -> None:
         with open(fpath, "w", newline="") as f:
@@ -2121,7 +2152,7 @@ def test_env_spec_hashes(tmp_dir):
 
 
 def test_cross_platform_venv_locks(tmp_dir, monkeypatch):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     assert set(envs.UV_PLATFORM_TARGETS) <= set(envs.CONDA_VENV_ARCHS)
     spec = "requirements.txt"
@@ -2189,7 +2220,7 @@ def test_cross_platform_venv_locks(tmp_dir, monkeypatch):
 
 
 def test_switch_env(tmp_dir, monkeypatch):
-    import calkit.environments as envs
+    import calkit.environments.core as envs
 
     def option(env: str, *when: dict) -> dict:
         return {"when": list(when), "use": env} if when else {"use": env}
@@ -2524,3 +2555,87 @@ def test_stage_calkit_files(tmp_dir):
     warn.assert_not_called()
     staged = repo.git.diff("--cached", "--name-only").split()
     assert staged == [".calkit/env-locks/py.json"]
+
+
+def test_relock(tmp_dir, monkeypatch):
+    seen = {}
+
+    def fake_check(env_name, verbose=False, force=False):
+        seen[env_name] = {
+            "force": force,
+            "exist": sorted(
+                p
+                for p in ["Manifest.toml", "Manifest-v1.11.toml"]
+                if os.path.isfile(p)
+            ),
+        }
+
+    monkeypatch.setattr(calkit.cli.check, "check_environment", fake_check)
+    # Julia removes the fallback manifest along with its versioned one
+    for fname in ["Project.toml", "Manifest.toml", "Manifest-v1.11.toml"]:
+        with open(fname, "w") as f:
+            f.write("old\n")
+    relock("jl", {"kind": "julia", "path": "Project.toml", "julia": "1.11"})
+    assert seen["jl"] == {"force": True, "exist": []}
+    # Pixi names the manifest it was given, not whichever it finds
+    ran = []
+
+    def fake_run(cmd, cwd=None):
+        ran.append((cmd, cwd))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(calkit.environments.core.subprocess, "run", fake_run)
+    os.makedirs("env")
+    relock("px", {"kind": "pixi", "path": "env/pyproject.toml"})
+    assert ran[-1] == (
+        [
+            "pixi",
+            "update",
+            "--manifest-path",
+            os.path.abspath("env/pyproject.toml"),
+        ],
+        "env",
+    )
+    assert seen["px"]["force"] is False
+    # A failed rebuild puts back every old lock and removes any it wrote
+    lock_dir = os.path.join(".calkit", "env-locks")
+    os.makedirs(os.path.join(lock_dir, "img"))
+    old_locks = {
+        os.path.join(lock_dir, "img", "arm64.json"): b'{"arch": "arm64"}',
+        os.path.join(lock_dir, "img.json"): b'{"legacy": true}',
+    }
+    for fpath, content in old_locks.items():
+        with open(fpath, "wb") as fb:
+            fb.write(content)
+    new_lock = os.path.join(lock_dir, "img", "amd64.json")
+
+    def failing_check(env_name, verbose=False, force=False):
+        assert not any(os.path.isfile(p) for p in old_locks)
+        with open(new_lock, "w") as f:
+            f.write("{}")
+        raise typer.Exit(1)
+
+    monkeypatch.setattr(calkit.cli.check, "check_environment", failing_check)
+    with pytest.raises(typer.Exit):
+        relock("img", {"kind": "docker", "image": "alpine:3.19"})
+    for fpath, content in old_locks.items():
+        with open(fpath, "rb") as fr:
+            assert fr.read() == content
+    assert not os.path.exists(new_lock)
+    # So does a failed upgrade command that rewrote the lock first
+    os.makedirs("uvenv")
+    with open(os.path.join("uvenv", "uv.lock"), "w") as f:
+        f.write("old\n")
+
+    def failing_upgrade(cmd, cwd=None):
+        with open(os.path.join(cwd, "uv.lock"), "w") as f:
+            f.write("new\n")
+        return subprocess.CompletedProcess(cmd, 1)
+
+    monkeypatch.setattr(
+        calkit.environments.core.subprocess, "run", failing_upgrade
+    )
+    with pytest.raises(typer.Exit):
+        relock("uv", {"kind": "uv", "path": "uvenv/pyproject.toml"})
+    with open(os.path.join("uvenv", "uv.lock")) as f:
+        assert f.read() == "old\n"

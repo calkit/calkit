@@ -661,6 +661,19 @@ def ensure_path_is_not_filtered(
 _warned_refs: set[str] = set()
 
 
+def read_at_ref(repo: git.Repo, ref: str, path: str) -> bytes | None:
+    """``path``'s contents at ``ref``, or None if Git doesn't hold it there.
+
+    Read from the object database rather than with ``git show``, which
+    strips a trailing newline, so the bytes hash to something the file
+    never had.
+    """
+    try:
+        return repo.commit(ref).tree[path].data_stream.read()
+    except Exception:
+        return None
+
+
 def resolve_ref(repo: git.Repo, ref: str) -> str | None:
     """Return the commit a revision points at, fetching if it isn't here.
 

@@ -15,11 +15,13 @@ from calkit.questions import (
     QuestionsStatus,
     check_question,
     check_questions,
+    check_sign_offs,
     expand_questions_stages,
     format_status,
     format_summary,
     latex_values,
     placeholders,
+    question_stages,
     render,
     render_question,
     resolve_key,
@@ -77,8 +79,9 @@ def test_render():
     assert problems and "cannot render" in problems[0]
 
 
-def _commit(msg: str) -> str:
+def _commit(msg: str, date: str | None = None) -> str:
     subprocess.check_call(["git", "add", "-A"])
+    dates = {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
     subprocess.check_call(
         ["git", "commit", "-q", "-m", msg],
         env={
@@ -87,6 +90,7 @@ def _commit(msg: str) -> str:
             "GIT_AUTHOR_EMAIL": "t@t",
             "GIT_COMMITTER_NAME": "t",
             "GIT_COMMITTER_EMAIL": "t@t",
+            **(dates if date else {}),
         },
     )
     return subprocess.check_output(
@@ -476,7 +480,7 @@ def test_check_questions(tmp_dir):
     report = format_status(status)
     # It still earns a block, since nothing else would say it
     assert "[ok] Do the top structures use the rectifier?" in report
-    assert "editing the question" in report
+    assert "editing the answer or validating it" in report
     assert (
         "Evidence that changed after the answer was written: 2 (worth a look)"
         in report
@@ -816,6 +820,388 @@ def test_check_questions_frozen_subproject(tmp_dir):
     )
     assert isinstance(rendered, dict)
     assert rendered["answer"] == "2."
+
+
+def test_sign_offs_and_stages(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results")
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 2.0}, f)
+    with open("results/plot.png", "w") as f:
+        f.write("png")
+    with open("fit.py", "w") as f:
+        f.write("fit()\n")
+    # Only what dvc.lock lists for the question's stages is followed
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "schema": "2.0",
+                "stages": {
+                    "fit": {
+                        "cmd": "python fit.py",
+                        "deps": [{"path": "fit.py"}],
+                    },
+                    "unrelated": {
+                        "cmd": "python other.py",
+                        "deps": [{"path": "other.py"}],
+                    },
+                },
+            },
+            f,
+        )
+    question = {
+        "question": "Does it work?",
+        "approach": "Fit it, then summarize the fit.",
+        "answer": "It does, by {r}x.",
+        "evidence": [
+            {"kind": "value", "path": "results/summary.json", "key": "r"},
+            {"kind": "figure", "path": "results/plot.png"},
+        ],
+    }
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "plot.py",
+                    "inputs": [{"from_stage_outputs": "summarize"}],
+                    "outputs": ["results/plot.png"],
+                },
+                "summarize": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "summarize.py",
+                    "inputs": ["summarize.py", "results/fit.json"],
+                    "outputs": [
+                        {"path": "results/summary.json", "storage": "git"}
+                    ],
+                },
+                "fit": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "fit.py",
+                    "outputs": ["results/fit.json"],
+                },
+                "unrelated": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "other.py",
+                    "outputs": ["results/other.json"],
+                },
+            }
+        },
+        "questions": [question],
+    }
+
+    def check(**kwargs):
+        return check_questions(wdir=".", check_pipeline=False, **kwargs)
+
+    def sign_off(date="2026-10-04"):
+        by = {"name": "Ada", "email": "ada@example.org"}
+        question["verifications"] = [{"by": by, "date": date}]
+        question["validations"] = [{"by": by, "date": date}]
+        _write_yaml(ck_info)
+        _commit(f"Sign off {date}")
+
+    # The stages behind the evidence, upstream first, followed through
+    # both input paths and from_stage_outputs
+    _write_yaml(ck_info)
+    status = check()
+    q = status.questions[0]
+    assert q.stages == ["fit", "summarize", "plot"]
+    assert q.approach and not q.hypothesis
+    assert (q.verification_status, q.validation_status) == ("none", "none")
+    lines = format_status(status).splitlines()
+    assert "Answers verified: 0/1" in lines
+    assert "Answers validated: 0/1" in lines
+    # Statuses are in the JSON the editor and hub read
+    dumped = q.model_dump(mode="json")
+    assert dumped["verification_status"] == "none"
+    assert dumped["validation_status"] == "none"
+    # Paths in a stage are relative to its wdir, and a LaTeX stage's PDF is
+    # its output without being listed
+    wdir_info = {
+        "pipeline": {
+            "stages": {
+                "collect": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "collect.py",
+                    "outputs": ["data/raw.csv"],
+                },
+                "fit": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "wdir": "analysis",
+                    "script_path": "fit.py",
+                    "inputs": ["../data/raw.csv"],
+                    "outputs": ["summary.json"],
+                },
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                    "inputs": ["analysis/summary.json"],
+                },
+            }
+        }
+    }
+    for path, expected in [
+        ("analysis/summary.json", ["collect", "fit"]),
+        ("paper/main.pdf", ["collect", "fit", "paper"]),
+        ("paper/main.tex", []),
+    ]:
+        q_dict = {"question": "Q?", "evidence": [{"path": path}]}
+        assert question_stages(q_dict, wdir_info) == expected, path
+    # A sign-off not yet committed covers the working tree
+    question["validations"] = [
+        {
+            "by": {"name": "Ada", "email": "ada@example.org"},
+            "date": "2026-10-04",
+        }
+    ]
+    _write_yaml(ck_info)
+    q = check().questions[0]
+    assert q.validation_status == "current"
+    assert "not yet committed" in (q.validations[0].message or "")
+    # Committed, each applies to that commit
+    sign_off()
+    status = check()
+    assert status.questions[0].validations[0].commit is not None
+    assert status.questions[0].verification_status == "current"
+    assert status.questions[0].validation_status == "current"
+    assert status.ok
+    # Evidence changing makes a validation stale, which fails the check,
+    # but not a verification, since no stage changed
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 3.0}, f)
+    _commit("Rerun")
+    status = check()
+    q = status.questions[0]
+    assert (q.verification_status, q.validation_status) == ("current", "stale")
+    assert "results/summary.json: r was 2 at" in (
+        q.validations[0].message or ""
+    )
+    assert not status.ok
+    assert [s.index for s in status.stale_validations] == [1]
+    assert not status.stale_verifications
+    report = format_status(status)
+    assert (
+        "1. [ok, verification current, validation stale] Does it work?"
+        in report
+    )
+    assert "validated by Ada on 2026-10-04 [stale]" in report
+    assert "verified by" not in report
+    assert (
+        "Answers validated: 1/1, stale since their question or evidence "
+        "changed: 1" in report
+    )
+    assert format_summary(status) == "1 question, 1 with a stale validation"
+    # The generic nudge gives way to the validation's own
+    assert "editing the answer or validating" not in (q.message or "")
+    # At a ref, as the hub reads it, the check is as of that commit, and
+    # ignores the working tree
+    import git
+
+    repo = git.Repo(".")
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 2.0}, f)
+    for ref, expected in [("HEAD~1", "current"), ("HEAD", "stale")]:
+        sha = repo.git.rev_parse(ref)
+        at_ref = calkit.questions._load_calkit_yaml_text(
+            repo.git.show(f"{sha}:calkit.yaml")
+        )
+        _, validations = check_sign_offs(
+            at_ref["questions"][0], at_ref, ".", repo, ref=sha
+        )
+        assert validations[0].status == expected, ref
+    assert check().questions[0].validation_status == "current"
+    repo.git.checkout("--", "results/summary.json")
+    # Each kind goes stale on its own changes, and notes go stale on neither
+    edits = [
+        ("notes", "Checked twice.", "current", "current", None),
+        ("answer", "It does.", "current", "stale", "question was edited"),
+        ("question", "Does it?", "current", "stale", "question was edited"),
+        ("approach", "Fit it.", "stale", "stale", "approach was edited"),
+    ]
+    for n, (field, value, verification, validation, reason) in enumerate(
+        edits, start=5
+    ):
+        sign_off(date=f"2026-10-0{n}")
+        question[field] = value
+        _write_yaml(ck_info)
+        _commit(f"Edit the {field}")
+        q = check().questions[0]
+        assert q.verification_status == verification, field
+        assert q.validation_status == validation, field
+        if reason:
+            messages = [
+                s.message or "" for s in q.verifications + q.validations
+            ]
+            assert any(reason in m for m in messages), (field, messages)
+    # Code a stage runs changing makes a verification stale, but not a
+    # validation, since the evidence didn't change; nor does code outside
+    # the question's stages
+    sign_off(date="2026-10-10")
+    for path in ["fit.py", "other.py"]:
+        with open(path, "w") as f:
+            f.write("changed()\n")
+    _commit("Refactor")
+    q = check().questions[0]
+    assert (q.verification_status, q.validation_status) == ("stale", "current")
+    assert "fit.py: changed in 1 commit(s)" in (
+        q.verifications[0].message or ""
+    )
+    assert "other.py" not in (q.verifications[0].message or "")
+    # So does redefining one of its stages
+    sign_off(date="2026-10-11")
+    ck_info["pipeline"]["stages"]["plot"]["script_path"] = "plot2.py"
+    _write_yaml(ck_info)
+    _commit("Redefine")
+    q = check().questions[0]
+    assert q.verification_status == "stale"
+    assert "stage plot was redefined" in (q.verifications[0].message or "")
+    # Identical sign-offs on two questions each find their own question,
+    # and evidence on a branch goes stale when the branch moves, but not
+    # evidence pinned to a commit
+    repo.git.branch("published")
+    pinned = repo.git.rev_parse("HEAD")
+    record = {
+        "by": {"name": "Ada", "email": "ada@example.org"},
+        "date": "2026-10-12",
+    }
+    question["validations"] = [record]
+    ck_info["questions"].append(
+        {
+            "question": "Is it published?",
+            "answer": "It is.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results/summary.json",
+                    "key": "r",
+                    "git_ref": "published",
+                },
+                {
+                    "kind": "figure",
+                    "path": "results/plot.png",
+                    "git_ref": pinned,
+                },
+            ],
+            "validations": [record],
+        }
+    )
+    _write_yaml(ck_info)
+    _commit("Sign off both", date="2099-01-01T00:00:00+00:00")
+    statuses = [q.validation_status for q in check().questions]
+    assert statuses == ["current", "current"]
+    with open("results/summary.json", "w") as f:
+        json.dump({"r": 4.0}, f)
+    with open("results/plot.png", "w") as f:
+        f.write("png2")
+    _commit("Publish", date="2099-01-02T00:00:00+00:00")
+    repo.git.branch("-f", "published", "HEAD")
+    q = check().questions[1]
+    assert q.validation_status == "stale"
+    message = q.validations[0].message or ""
+    assert "results/summary.json: r was 3 at" in message
+    assert "plot.png" not in message
+    ck_info["questions"].pop()
+    _write_yaml(ck_info)
+    # A stage's script counts even if it has never run, so dvc.lock has
+    # nothing for it
+    with open("summarize.py", "w") as f:
+        f.write("summarize()\n")
+    sign_off(date="2026-10-13")
+    with open("summarize.py", "w") as f:
+        f.write("summarize(again=True)\n")
+    _commit("Edit a stage that hasn't run")
+    q = check().questions[0]
+    assert q.verification_status == "stale"
+    assert "summarize.py: changed in 1 commit(s)" in (
+        q.verifications[0].message or ""
+    )
+    # A stage reading calkit.yaml, as questions-to-latex does, doesn't make
+    # a verification stale when someone else signs off in it
+    lock = calkit.ryaml.load(open("dvc.lock"))
+    lock["stages"]["fit"]["deps"].append({"path": "calkit.yaml"})
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    sign_off(date="2026-10-14")
+    question["verifications"].append(
+        {
+            "by": {"name": "Bob", "email": "bob@example.org"},
+            "date": "2026-10-14",
+        }
+    )
+    _write_yaml(ck_info)
+    _commit("Bob verifies")
+    q = check().questions[0]
+    assert [v.status for v in q.verifications] == ["current", "current"]
+    # One made on a branch is checked from where it was added, so a change
+    # on main it never saw counts, though main's commits are newer
+    main = repo.active_branch.name
+    repo.git.checkout("-q", "-b", "side")
+    sign_off(date="2026-10-15")
+    repo.git.checkout("-q", main)
+    with open("fit.py", "w") as f:
+        f.write("fit(differently=True)\n")
+    with open("calkit.yaml", "a") as f:
+        f.write("description: Changed on main.\n")
+    _commit("Change main", date="2099-02-01T00:00:00+00:00")
+    subprocess.check_call(
+        ["git", "merge", "-q", "--no-edit", "side"],
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+            "GIT_COMMITTER_DATE": "2099-02-02T00:00:00+00:00",
+        },
+    )
+    q = check().questions[0]
+    assert q.verification_status == "stale"
+    assert "fit.py: changed in 1 commit(s)" in (
+        q.verifications[0].message or ""
+    )
+    # dvc.lock's paths are relative to the stage's wdir
+    ck_info["pipeline"]["stages"]["fit"]["wdir"] = "analysis"
+    ck_info["pipeline"]["stages"]["fit"]["outputs"] = ["../results/fit.json"]
+    os.makedirs("analysis")
+    with open("analysis/fit.py", "w") as f:
+        f.write("fit()\n")
+    sign_off(date="2026-10-16")
+    with open("analysis/fit.py", "w") as f:
+        f.write("fit(in_analysis=True)\n")
+    _commit("Edit the stage in its wdir")
+    q = check().questions[0]
+    assert "fit" in q.stages
+    assert q.verification_status == "stale"
+    message = q.verifications[0].message or ""
+    assert "analysis/fit.py: changed in 1 commit(s)" in message
+    assert " fit.py" not in message
+    lock_text = (
+        "stages:\n  fit:\n    outs:\n    - path: out.txt\n      md5: abc\n"
+    )
+    for path, wdirs, expected in [
+        ("analysis/out.txt", {"fit": "analysis"}, "abc"),
+        ("out.txt", {"fit": "analysis"}, None),
+        ("out.txt", None, "abc"),
+    ]:
+        assert calkit.questions._lock_hash(lock_text, path, wdirs) == expected
+    # Without history, a sign-off can't be checked either way
+    q = check(check_history=False).questions[0]
+    assert q.verifications[0].status == "unchecked"
+    assert q.verification_status == "current"
+    # Sign-offs and the approach are part of the schema
+    assert ProjectInfo.model_validate(calkit.load_calkit_info())
+    for field in ["verifications", "validations"]:
+        with pytest.raises(ValueError):
+            Question.model_validate(
+                {"question": "Q?", field: [{"by": {"name": "Ada"}}]}
+            )
 
 
 def test_format_summary():

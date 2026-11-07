@@ -143,7 +143,9 @@ def run_device_flow() -> str:
                     raise DeviceLoginError(
                         f"Failed to save token in config: {e}"
                     ) from e
-                print("Logged in successfully ✅", flush=True)
+                from calkit.core import encode_safe
+
+                print(encode_safe("Logged in successfully ✅"), flush=True)
                 return access_token
             sleep_seconds = min(
                 interval, max(0.0, deadline - time.monotonic())

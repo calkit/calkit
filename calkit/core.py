@@ -138,6 +138,10 @@ class _ThreadLocalYAML(threading.local):
     """
 
     def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        """Replace this thread's ``YAML`` with a freshly configured one."""
         self.yaml = ruamel.yaml.YAML()
         self.yaml.indent(mapping=2, sequence=4, offset=2)
         self.yaml.preserve_quotes = True
@@ -194,14 +198,26 @@ class _ThreadLocalYAMLProxy:
         content. Rather than trying to tell the cases apart while
         emitting, the cleaned text is parsed back and only used if it
         still means the same thing.
+
+        A ``Path`` is only written once the dump has succeeded, so a
+        failure can't leave the file empty, as opening it with ``"w"``
+        first would.
         """
         import io
+        from pathlib import Path
 
         yaml = _yaml_local.yaml
-        if stream is None:
-            return yaml.dump(data, stream, **kwargs)
         buf = io.StringIO()
-        yaml.dump(data, buf, **kwargs)
+        try:
+            if stream is None:
+                return yaml.dump(data, stream, **kwargs)
+            yaml.dump(data, buf, **kwargs)
+        except BaseException:
+            # ruamel only clears the output it's dumping to on success, so
+            # after a failure every later dump on this thread would go to
+            # the old stream, e.g., leaving calkit.yaml empty
+            _yaml_local.reset()
+            raise
         text = buf.getvalue()
         if " \n" in text:
             cleaned = "".join(
@@ -212,7 +228,10 @@ class _ThreadLocalYAMLProxy:
                     text = cleaned
             except Exception:
                 pass
-        stream.write(text)
+        if isinstance(stream, Path):
+            stream.write_text(text, encoding="utf-8")
+        else:
+            stream.write(text)
         return None
 
 
@@ -776,6 +795,55 @@ def is_tty() -> bool:
         return sys.stdin.isatty() and sys.stdout.isatty()
     except (AttributeError, ValueError):
         return False
+
+
+def is_mintty(stream: Any) -> bool:
+    """True when a stream is a Git Bash or Cygwin (mintty) terminal.
+
+    mintty gives native programs a named pipe rather than a console, so
+    Python sees no terminal and picks the ANSI code page, even though
+    mintty shows UTF-8 and ANSI escapes. It's told apart by the pipe's
+    name, as Git for Windows does.
+    """
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class FileNameInfo(ctypes.Structure):
+        _fields_ = [
+            ("FileNameLength", wintypes.DWORD),
+            ("FileName", wintypes.WCHAR * 260),
+        ]
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetFileType.argtypes = [wintypes.HANDLE]
+    kernel32.GetFileInformationByHandleEx.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel32.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    # FILE_TYPE_PIPE
+    if kernel32.GetFileType(handle) != 3:
+        return False
+    info = FileNameInfo()
+    # FileNameInfo
+    if not kernel32.GetFileInformationByHandleEx(
+        handle, 2, ctypes.byref(info), ctypes.sizeof(info)
+    ):
+        return False
+    name = info.FileName[: info.FileNameLength // 2]
+    return (
+        re.match(r"\\(cygwin|msys)-[0-9a-f]+-pty\d+-(from|to)-master", name)
+        is not None
+    )
 
 
 def check_dep_exists(

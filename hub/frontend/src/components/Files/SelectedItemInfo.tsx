@@ -10,10 +10,11 @@ import {
   Icon,
   IconButton,
   Link,
+  Spinner,
   Text,
   useDisclosure,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { FaCodeBranch, FaLock, FaTimesCircle, FaUpload } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
@@ -35,6 +36,21 @@ const FIGURE_EXTS = new Set([
 ])
 const PUBLICATION_EXTS = new Set([".pdf", ".html"])
 const NOTEBOOK_EXTS = new Set([".ipynb"])
+// As the Results page detects them
+const RESULT_EXTS = new Set([
+  ".json",
+  ".csv",
+  ".tsv",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".parquet",
+  ".h5",
+  ".hdf5",
+  ".txt",
+  ".html",
+])
+const RESULT_DIRS = new Set(["results", "result"])
 
 // Path segments that hint at figure or publication directories
 const FIGURE_DIRS = new Set([
@@ -56,7 +72,9 @@ const PUBLICATION_DIRS = new Set([
   "article",
 ])
 
-export function inferKindFromPath(path: string): ArtifactKind | undefined {
+export type FileKind = ArtifactKind | "result"
+
+export function inferKindFromPath(path: string): FileKind | undefined {
   const lower = path.toLowerCase()
   const parts = lower.split("/")
   const ext = parts[parts.length - 1].includes(".")
@@ -72,6 +90,13 @@ export function inferKindFromPath(path: string): ArtifactKind | undefined {
   if (PUBLICATION_DIRS.has(parentDir) && PUBLICATION_EXTS.has(ext))
     return "publication"
   if (FIGURE_DIRS.has(parentDir) && FIGURE_EXTS.has(ext)) return "figure"
+  if (
+    RESULT_EXTS.has(ext) &&
+    !parts.some((p) => p.startsWith(".")) &&
+    (parts.slice(0, -1).some((p) => RESULT_DIRS.has(p)) ||
+      parts[parts.length - 1].replace(/\.[^.]*$/, "") === "results")
+  )
+    return "result"
 
   // Fall back to extension only; exclude .json since it's too ambiguous (configs, etc.)
   if (FIGURE_EXTS.has(ext) && ext !== ".json") return "figure"
@@ -183,11 +208,70 @@ function SelectedItemInfo({
   const fileInfoModal = useDisclosure()
   const uploadNewVersionModal = useDisclosure()
 
-  const artifactKind: ArtifactKind | undefined =
-    (selectedItem.calkit_object?.kind as ArtifactKind | undefined) ??
+  const declaredKind = selectedItem.calkit_object?.kind as string | undefined
+  const artifactKind: FileKind | undefined =
+    (declaredKind as FileKind | undefined) ??
     (selectedItem.type === "file"
       ? inferKindFromPath(selectedItem.path)
       : undefined)
+  // Shared with the figure viewer, which asks the same question
+  const provenanceQuery = useQuery({
+    queryKey: [
+      "projects",
+      ownerName,
+      projectName,
+      "provenance",
+      selectedItem.path,
+      gitRef,
+    ],
+    queryFn: () =>
+      ProjectsService.getProjectProvenance({
+        owner_name: ownerName,
+        project_name: projectName,
+        path: selectedItem.path,
+        ref: gitRef,
+      }).then((response) => response.data),
+    enabled: selectedItem.type === "file" || selectedItem.type === "dir",
+    retry: false,
+  })
+  const provenance = provenanceQuery.data
+  const stage = selectedItem.stage ?? provenance?.stage
+  const exportApp = provenance?.stage_app
+  const exportedFrom = exportApp ? provenance?.source : null
+  const manualStep =
+    provenance?.stage_kind === "manual-step" ? provenance.message : null
+  // Only something that needs one, e.g., data, not code, lacks an origin
+  const originMissing = Boolean(
+    provenance?.gaps?.some((gap) => gap.path === selectedItem.path),
+  )
+  const pipelineTo = `/${ownerName}/${projectName}/pipeline`
+  const filesTo = `/${ownerName}/${projectName}/files`
+  // Where it's shown as what it is, if there's a page for that
+  const artifactPage = (() => {
+    const path = selectedItem.path
+    if (declaredKind === "references item file") {
+      const refsPath = selectedItem.calkit_object?.references_path
+      return refsPath
+        ? { page: "references", search: { path: String(refsPath) } }
+        : null
+    }
+    // The results page lists what it detects, the rest only what's declared
+    if (!declaredKind && artifactKind !== "result") return null
+    const kind: string | undefined = artifactKind
+    switch (kind) {
+      case "figure":
+      case "publication":
+      case "notebook":
+      case "result":
+        return { page: `${kind}s`, search: { path } }
+      case "references":
+        return { page: "references", search: { path } }
+      case "dataset":
+        return { page: "datasets", search: { highlight: path } }
+      default:
+        return null
+    }
+  })()
 
   return (
     <Box w="100%" wordBreak="break-word" fontSize="sm">
@@ -195,20 +279,82 @@ function SelectedItemInfo({
       {selectedItem.type ? <Text>Type: {selectedItem.type}</Text> : ""}
       {selectedItem.size ? <Text>Size: {selectedItem.size}</Text> : ""}
       {selectedItem.storage ? <Text>Storage: {selectedItem.storage}</Text> : ""}
-      {selectedItem.stage ? (
+      {stage ? (
         <Text>
-          Pipeline stage:{" "}
+          Origin: stage{" "}
           <Link
             as={RouterLink}
-            to={`/${ownerName}/${projectName}/pipeline`}
-            search={{ stage: selectedItem.stage, ref: gitRef } as any}
+            to={pipelineTo}
+            search={{ stage, ref: gitRef } as any}
           >
-            <Code>{selectedItem.stage}</Code>
+            <Code>{stage}</Code>
           </Link>
+          {exportedFrom ? (
+            <>
+              , exported with {exportApp} from{" "}
+              <Link
+                as={RouterLink}
+                to={filesTo}
+                search={{ path: exportedFrom, ref: gitRef } as any}
+              >
+                <Code>{exportedFrom}</Code>
+              </Link>
+            </>
+          ) : null}
+          {manualStep ? `, a manual step: ${manualStep}` : null}
         </Text>
-      ) : (
-        ""
-      )}
+      ) : provenanceQuery.isLoading ? (
+        <Spinner size="xs" />
+      ) : provenance?.origin ? (
+        <Text>
+          Origin:{" "}
+          {provenance.origin_url ? (
+            <Link href={provenance.origin_url} isExternal>
+              {provenance.origin} <ExternalLinkIcon mb={0.5} />
+            </Link>
+          ) : (
+            provenance.origin
+          )}
+          {provenance.origin_path ? (
+            <>
+              {" "}
+              (recorded for{" "}
+              <Link
+                as={RouterLink}
+                to={filesTo}
+                search={{ path: provenance.origin_path, ref: gitRef } as any}
+              >
+                <Code>{provenance.origin_path}</Code>
+              </Link>
+              )
+            </>
+          ) : null}
+        </Text>
+      ) : originMissing ? (
+        <Text>
+          Origin:{" "}
+          <Text as="span" color="red.500">
+            Not defined
+          </Text>
+        </Text>
+      ) : null}
+      {provenance?.input_to_stages?.length ? (
+        <Text>
+          Input to:{" "}
+          {provenance.input_to_stages.map((name, i) => (
+            <span key={name}>
+              {i > 0 ? ", " : ""}
+              <Link
+                as={RouterLink}
+                to={pipelineTo}
+                search={{ stage: name, ref: gitRef } as any}
+              >
+                <Code>{name}</Code>
+              </Link>
+            </span>
+          ))}
+        </Text>
+      ) : null}
       {onEditFile ? (
         <Button
           size="sm"
@@ -300,15 +446,26 @@ function SelectedItemInfo({
       </HStack>
       <Text>
         Type:
-        {artifactKind ? (
+        {artifactKind && artifactPage ? (
+          <Link
+            as={RouterLink}
+            to={`/${ownerName}/${projectName}/${artifactPage.page}`}
+            search={{ ...artifactPage.search, ref: gitRef } as any}
+          >
+            <Badge
+              ml={1}
+              bgColor={declaredKind ? "green.500" : "gray.400"}
+              title={declaredKind ? undefined : "Auto-detected"}
+              cursor="pointer"
+            >
+              {artifactKind}
+            </Badge>
+          </Link>
+        ) : artifactKind ? (
           <Badge
             ml={1}
-            bgColor={
-              selectedItem.calkit_object?.kind ? "green.500" : "gray.400"
-            }
-            title={
-              selectedItem.calkit_object?.kind ? undefined : "Auto-detected"
-            }
+            bgColor={declaredKind ? "green.500" : "gray.400"}
+            title={declaredKind ? undefined : "Auto-detected"}
           >
             {artifactKind}
           </Badge>
@@ -331,14 +488,6 @@ function SelectedItemInfo({
       {selectedItem.calkit_object?.description ? (
         <Text mt={1}>
           Description: {String(selectedItem.calkit_object.description)}
-        </Text>
-      ) : (
-        ""
-      )}
-      {!selectedItem.stage && selectedItem.calkit_object?.stage ? (
-        <Text mt={1}>
-          Pipeline stage:{" "}
-          <Code>{String(selectedItem.calkit_object.stage)}</Code>
         </Text>
       ) : (
         ""

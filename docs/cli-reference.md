@@ -29,6 +29,7 @@
 | [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                            |
 | [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
 | [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
+| [`merge`](#top-command-merge)                    | Merge a branch, resolving dvc.lock and stage run records per stage.                                          |
 | [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                           |
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
@@ -43,13 +44,15 @@
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
+| [`open`](#command-group-open)                    | Open things.                                                                                                 |
+| [`export`](#command-group-export)                | Export data and artifacts from various applications.                                                         |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
+| [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
-| [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
 
 ## Top-level command details
@@ -87,19 +90,20 @@ calkit clone [OPTIONS] URL [LOCATION]
 
 Arguments:
 
-| Argument   | Type | Required | Default | Description                                          |
-| ---------- | ---- | -------- | ------- | ---------------------------------------------------- |
-| `url`      | str  | yes      |         | Repo URL.                                            |
-| `location` | str  | no       |         | Location to clone to (default will be ./{repo_name}) |
+| Argument   | Type | Required | Default | Description                                                                                                                   |
+| ---------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `url`      | str  | yes      |         | Project as OWNER/NAME, or HUB/OWNER/NAME for one on another hub, e.g., calkit.example.edu/someone/my-proj, or a Git repo URL. |
+| `location` | str  | no       |         | Location to clone to (default will be ./{repo_name})                                                                          |
 
 Options:
 
-| Option               | Type    | Required | Default | Description                                       |
-| -------------------- | ------- | -------- | ------- | ------------------------------------------------- |
-| `--ssh`              | boolean | no       | False   | Use SSH with Git.                                 |
-| `--no-config-remote` | boolean | no       | False   | Do not automatically configure Calkit DVC remote. |
-| `--no-dvc-pull`      | boolean | no       | False   | Do not pull DVC objects.                          |
-| `--no-recursive`     | boolean | no       | False   | Do not recursively clone submodules.              |
+| Option               | Type    | Required | Default | Description                                                                                            |
+| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--ssh`, `--https`   | boolean | no       |         | Use SSH or HTTPS with Git. Defaults to SSH for GitHub if it's set up, i.e., GitHub accepts a key here. |
+| `--hub`              | str     | no       |         | URL of the project's hub, e.g., https://calkit.example.edu. Defaults to calkit.io.                     |
+| `--no-config-remote` | boolean | no       | False   | Do not automatically configure Calkit DVC remote.                                                      |
+| `--no-dvc-pull`      | boolean | no       | False   | Do not pull DVC objects.                                                                               |
+| `--no-recursive`     | boolean | no       | False   | Do not recursively clone submodules.                                                                   |
 
 <a id="top-command-status-st"></a>
 
@@ -398,12 +402,15 @@ calkit manual-step [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description                     |
-| ----------------- | ------- | -------- | ------- | ------------------------------- |
-| `--message`, `-m` | str     | yes      |         | Message to display as a prompt. |
-| `--cmd`           | str     | no       |         | Command to run.                 |
-| `--show-stdout`   | boolean | no       | False   | Show stdout.                    |
-| `--show-stderr`   | boolean | no       | False   | Show stderr.                    |
+| Option            | Type    | Required | Default | Description                                                           |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------------------------- |
+| `--message`, `-m` | str     | yes      |         | Message to display as a prompt.                                       |
+| `--cmd`           | str     | no       |         | Command to run.                                                       |
+| `--app`           | str     | no       |         | App to open, e.g., 'Inkscape'.                                        |
+| `--open`          | str     | no       |         | File to open with the app.                                            |
+| `--output`, `-o`  | str     | no       |         | File the step writes, which must change for it to be considered done. |
+| `--show-stdout`   | boolean | no       | False   | Show stdout.                                                          |
+| `--show-stderr`   | boolean | no       | False   | Show stderr.                                                          |
 
 <a id="top-command-xenv-runenv"></a>
 
@@ -566,6 +573,40 @@ Arguments:
 | Argument | Type | Required | Default | Description  |
 | -------- | ---- | -------- | ------- | ------------ |
 | `name`   | str  | yes      |         | Branch name. |
+
+<a id="top-command-merge"></a>
+
+### `calkit merge`
+
+Merge a branch, resolving dvc.lock and stage run records per stage.
+
+A stage changed on both sides needs a choice: ours, theirs, or rerun, which also decides its run record and Git-tracked outputs. DVC-tracked outputs are checked out to match afterwards. Other conflicts are left to resolve before 'calkit merge --continue'.
+
+Usage:
+
+```text
+calkit merge [OPTIONS] [BRANCH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                     |
+| -------- | ---- | -------- | ------- | ----------------------------------------------- |
+| `branch` | str  | no       |         | Branch or commit to merge into the current one. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                  |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--continue`      | boolean | no       | False   | Finish a merge stopped by conflicts.                                         |
+| `--abort`         | boolean | no       | False   | Abort the merge in progress.                                                 |
+| `--squash`        | boolean | no       | False   | Combine the branch's changes into one commit.                                |
+| `--message`, `-m` | str     | no       |         | Commit message (default: Git's for the merge or squash).                     |
+| `--ours`, `-o`    | str     | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t`  | str     | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`   | str     | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`        | str     | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+| `--git-arg`       | str     | no       |         | Additional Git merge args.                                                   |
 
 <a id="top-command-stash"></a>
 
@@ -1928,7 +1969,8 @@ List Calkit objects.
 | [`datasets`](#subcommand-list-ls-datasets)                      | List datasets in the project.                                                                  |
 | [`results`](#subcommand-list-ls-results)                        | List results in the project.                                                                   |
 | [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.                                                             |
-| [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).                                                      |
+| [`tables\|tbls`](#subcommand-list-ls-tables-tbls)               | List tables in the project.                                                                    |
+| [`questions\|q`](#subcommand-list-ls-questions-q)               | List the project's questions (1-indexed).                                                      |
 | [`comments`](#subcommand-list-ls-comments)                      | List review comment threads in LaTeX and Markdown documents.                                   |
 | [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.                                                              |
 | [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
@@ -2007,6 +2049,8 @@ Options:
 
 List results in the project.
 
+Shown with the stage that writes each one, which is what 'calkit run' would use to bring it up to date.
+
 Usage:
 
 ```text
@@ -2019,6 +2063,7 @@ Options:
 | ----------------- | ------- | -------- | ------- | --------------------------------------------------------------- |
 | `--json`          | boolean | no       | False   | Output result as JSON.                                          |
 | `--declared-only` | boolean | no       | False   | Only list results declared in calkit.yaml; skip auto-detection. |
+| `--status`, `-s`  | boolean | no       | False   | Also say whether each result's stage is up to date.             |
 
 <a id="subcommand-list-ls-presentations-pres"></a>
 
@@ -2039,26 +2084,48 @@ Options:
 | `--json`          | boolean | no       | False   | Output result as JSON.                                                |
 | `--declared-only` | boolean | no       | False   | Only list presentations declared in calkit.yaml; skip auto-detection. |
 
-<a id="subcommand-list-ls-questions"></a>
+<a id="subcommand-list-ls-tables-tbls"></a>
 
-#### `calkit list|ls questions`
+#### `calkit list|ls tables|tbls`
 
-List the project's questions (1-indexed).
+List tables in the project.
 
-Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. Subprojects' questions are listed too, numbered within each, and in the JSON output each has a `project` key with the subproject's path.
+Tabular files are detected wherever they're kept, so a table that is also a dataset or a result is listed here too. Each is shown with the stage that writes it, if any, which is the one 'calkit run' would use to bring it up to date.
 
 Usage:
 
 ```text
-calkit list|ls questions [OPTIONS]
+calkit list|ls tables|tbls [OPTIONS]
 ```
 
 Options:
 
-| Option   | Type    | Required | Default | Description                                                                                    |
-| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
-| `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
+| Option            | Type    | Required | Default | Description                                                    |
+| ----------------- | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `--columns`       | boolean | no       | False   | Also read each table's column names from its header.           |
+| `--status`, `-s`  | boolean | no       | False   | Also say whether each table's stage is up to date.             |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                         |
+| `--declared-only` | boolean | no       | False   | Only list tables declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-questions-q"></a>
+
+#### `calkit list|ls questions|q`
+
+List the project's questions (1-indexed).
+
+Each has a row of letters: H if it has a hypothesis, A if it's answered, then V if it's verified and V if it's validated, colored as in the hub, with a dash for each it doesn't have yet. Evidence isn't checked against the pipeline here; 'calkit check questions' does that. Subprojects' questions are listed too, numbered within each. Use 'calkit show question' to see one in full.
+
+Usage:
+
+```text
+calkit list|ls questions|q [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-comments"></a>
 
@@ -2356,9 +2423,39 @@ Options:
 
 Show Calkit objects.
 
-| Command                                     | Description                           |
-| ------------------------------------------- | ------------------------------------- |
-| [`latex-diff`](#subcommand-show-latex-diff) | Open a LaTeX diff the pipeline keeps. |
+| Command                                      | Description                                                           |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| [`question\|q`](#subcommand-show-question-q) | Show a question in full as Markdown, with its evidence and sign-offs. |
+| [`latex-diff`](#subcommand-show-latex-diff)  | Open a LaTeX diff the pipeline keeps.                                 |
+| [`table\|tbl`](#subcommand-show-table-tbl)   | Show a table, or part of one.                                         |
+| [`result\|res`](#subcommand-show-result-res) | Show a result's keys and values.                                      |
+
+<a id="subcommand-show-question-q"></a>
+
+#### `calkit show question|q`
+
+Show a question in full as Markdown, with its evidence and sign-offs.
+
+Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. The pipeline stages behind its evidence are shown too, upstream first.
+
+Usage:
+
+```text
+calkit show question|q [OPTIONS] QUESTION
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                                                                              |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name; prefix a subproject's with its path, e.g., 'sub:1'. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description                                                                                    |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
+| `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
 
 <a id="subcommand-show-latex-diff"></a>
 
@@ -2385,6 +2482,71 @@ Options:
 | Option  | Type    | Required | Default | Description                                      |
 | ------- | ------- | -------- | ------- | ------------------------------------------------ |
 | `--run` | boolean | no       | False   | Build the diff first if it's stale or not built. |
+
+<a id="subcommand-show-table-tbl"></a>
+
+#### `calkit show table|tbl`
+
+Show a table, or part of one.
+
+With --status, says whether the stage that writes the table has been run since its inputs last changed. At a --git-ref that's reconstructed from the dvc.lock committed there, since there is nothing on disk at an old commit for DVC to hash, and what it couldn't check is reported rather than assumed current.
+
+Usage:
+
+```text
+calkit show table|tbl [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description        |
+| -------- | ---- | -------- | ------- | ------------------ |
+| `path`   | str  | yes      |         | Path to the table. |
+
+Options:
+
+| Option           | Type      | Required | Default | Description                                                                                                                                     |
+| ---------------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--column`, `-c` | str       | no       |         | Only show these columns, in this order. Can be a glob, e.g., `*_mod`, and can be given more than once.                                          |
+| `--filter`, `-f` | str       | no       |         | Only show rows matching COLUMN=VALUE, COLUMN~TEXT (contains, ignoring case), or COLUMN>NUMBER. Can be given more than once, and all must match. |
+| `--rows`, `-r`   | str       | no       |         | Only show these rows, 1-based, e.g., '1-20', '5,9', '40-'.                                                                                      |
+| `--head`, `-n`   | int range | no       |         | Only show the first N rows.                                                                                                                     |
+| `--tail`         | int range | no       |         | Only show the last N rows.                                                                                                                      |
+| `--git-ref`      | str       | no       |         | Show the table as of this Git branch, tag, or commit instead of the working tree.                                                               |
+| `--status`, `-s` | boolean   | no       | False   | Also say whether the table is up to date.                                                                                                       |
+| `--vscode`       | boolean   | no       | False   | Open the table in VS Code instead of printing it.                                                                                               |
+| `--engine`       | str       | no       |         | Dataframe engine for formats the standard library can't read, e.g., Parquet. Defaults to the configured one.                                    |
+
+<a id="subcommand-show-result-res"></a>
+
+#### `calkit show result|res`
+
+Show a result's keys and values.
+
+Keys are shown dotted, the way a question's value evidence names them, so what's printed is what an answer can cite. With --status, says whether the stage that writes the result has been run since its inputs last changed.
+
+Usage:
+
+```text
+calkit show result|res [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description         |
+| -------- | ---- | -------- | ------- | ------------------- |
+| `path`   | str  | yes      |         | Path to the result. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                     |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--key`, `-k`    | str     | no       |         | Only show these keys, dotted as a question's evidence writes them, e.g., `steady_state.saved_pct`. Can be given more than once. |
+| `--depth`, `-d`  | int     | no       |         | Stop flattening this many levels in and show the rest of each value as JSON.                                                    |
+| `--git-ref`      | str     | no       |         | Show the result as of this Git branch, tag, or commit instead of the working tree.                                              |
+| `--status`, `-s` | boolean | no       | False   | Also say whether the result is up to date.                                                                                      |
+| `--vscode`       | boolean | no       | False   | Open the result in VS Code instead of printing it.                                                                              |
+| `--json`         | boolean | no       | False   | Output result as JSON.                                                                                                          |
 
 <a id="command-group-describe-desc"></a>
 
@@ -2690,6 +2852,103 @@ Options:
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
 
+<a id="command-group-open"></a>
+
+### `calkit open`
+
+Open things.
+
+| Command                               | Description                                                  |
+| ------------------------------------- | ------------------------------------------------------------ |
+| [`project`](#subcommand-open-project) | Open a project on this machine in its editor, from anywhere. |
+
+<a id="subcommand-open-project"></a>
+
+#### `calkit open project`
+
+Open a project on this machine in its editor, from anywhere.
+
+Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor', or the one given with '--with'.
+
+Usage:
+
+```text
+calkit open project [OPTIONS] PROJECT
+```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description                                                                                                                               |
+| --------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `project` | str  | yes      |         | Project name, or owner and name, e.g., 'someone/my-proj', with its hub to clone from another, e.g., 'calkit.example.edu/someone/my-proj'. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                                                                            |
+| -------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--yes`, `-y`  | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here.                                                   |
+| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder. |
+
+<a id="command-group-export"></a>
+
+### `calkit export`
+
+Export data and artifacts from various applications.
+
+| Command                                   | Description                                 |
+| ----------------------------------------- | ------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                |
+| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file. |
+
+<a id="subcommand-export-inkscape"></a>
+
+#### `calkit export inkscape`
+
+Export a figure from an SVG.
+
+Usage:
+
+```text
+calkit export inkscape [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description         |
+| -------- | ---- | -------- | ------- | ------------------- |
+| `source` | str  | yes      |         | SVG to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                            |
+| ---------------- | ---- | -------- | ------- | -------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or PDF. |
+| `--dpi`          | int  | no       |         | Resolution of a PNG.                   |
+
+<a id="subcommand-export-gimp"></a>
+
+#### `calkit export gimp`
+
+Export a flattened figure from an XCF file.
+
+Usage:
+
+```text
+calkit export gimp [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `source` | str  | yes      |         | XCF file to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                             |
+| ---------------- | ---- | -------- | ------- | --------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
+
 <a id="command-group-update"></a>
 
 ### `calkit update`
@@ -2710,11 +2969,13 @@ Update objects.
 | [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                          |
 | [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                                |
 | [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                         |
+| [`latex-image`](#subcommand-update-latex-image)       | Point LaTeX environments at Calkit's pinned LaTeX image.                             |
 | [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                          |
 | [`env`](#subcommand-update-env)                       | Update an environment.                                                               |
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
+| [`question`](#subcommand-update-question)             | Update a question in calkit.yaml, or verify or validate it.                          |
 | [`path-storage`](#subcommand-update-path-storage)     | Move paths between Git and DVC storage without rerunning anything.                   |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
 | [`hub`](#subcommand-update-hub)                       | Connect this project to a Calkit hub.                                                |
@@ -2817,10 +3078,11 @@ calkit update github-actions [OPTIONS]
 
 Options:
 
-| Option        | Type    | Required | Default | Description                                                       |
-| ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
-| `--wdir`      | str     | no       |         | Working directory. By default will run current working directory. |
-| `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.        |
+| Option        | Type    | Required | Default | Description                                                                                                                   |
+| ------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--wdir`      | str     | no       |         | Working directory. By default will run current working directory.                                                             |
+| `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.                                                                    |
+| `--on`        | str     | no       |         | Event that runs the workflow, e.g., push or workflow_dispatch; repeat for more. An existing workflow's are kept if not given. |
 
 <a id="subcommand-update-notebook"></a>
 
@@ -2969,12 +3231,26 @@ calkit update docker-env [OPTIONS]
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                                                                                                                                          |
-| -------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n` | str     | yes      |         | Environment name.                                                                                                                                                    |
-| `--image`      | str     | no       |         | Docker image name/tag.                                                                                                                                               |
-| `--registry`   | str     | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
-| `--lock`       | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
+| Option               | Type    | Required | Default | Description                                                                                                                                                          |
+| -------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`       | str     | yes      |         | Environment name.                                                                                                                                                    |
+| `--image`            | str     | no       |         | Docker image name/tag.                                                                                                                                               |
+| `--registry`         | str     | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
+| `--lock`, `--relock` | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
+
+<a id="subcommand-update-latex-image"></a>
+
+#### `calkit update latex-image`
+
+Point LaTeX environments at Calkit's pinned LaTeX image.
+
+Updates Docker environments that use Calkit or TeX Live's LaTeX images, including ones a switch defines in place, then relocks them.
+
+Usage:
+
+```text
+calkit update latex-image
+```
 
 <a id="subcommand-update-slurm-env"></a>
 
@@ -3008,7 +3284,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
+Supports relocking any environment, and adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -3018,11 +3294,11 @@ calkit update env [OPTIONS]
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                                              |
-| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
-| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
-| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                                                                       |
+| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                                                                 |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                                                         |
+| `--lock`, `--relock`     | boolean | no       | False   | Rebuild the environment from its spec and lock it again, taking the newest versions the spec allows, or for a system environment, lock it to this machine. Reruns every stage that depends on it. |
 
 <a id="subcommand-update-environment"></a>
 
@@ -3030,7 +3306,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
+Supports relocking any environment, and adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -3040,11 +3316,11 @@ calkit update environment [OPTIONS]
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                                              |
-| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
-| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
-| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                                                                       |
+| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                                                                 |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                                                         |
+| `--lock`, `--relock`     | boolean | no       | False   | Rebuild the environment from its spec and lock it again, taking the newest versions the spec allows, or for a system environment, lock it to this machine. Reruns every stage that depends on it. |
 
 <a id="subcommand-update-stage"></a>
 
@@ -3102,6 +3378,38 @@ Options:
 | `--imported-from`     | str  | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
 | `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
 | `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
+
+<a id="subcommand-update-question"></a>
+
+#### `calkit update question`
+
+Update a question in calkit.yaml, or verify or validate it.
+
+A sign-off is recorded with your Git name and email and the time, replaces any earlier one of yours of the same kind, and applies to the question as updated by this command.
+
+Usage:
+
+```text
+calkit update question [OPTIONS] QUESTION
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                          |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name. |
+
+Options:
+
+| Option         | Type | Required | Default | Description                                                                                                                                               |
+| -------------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hypothesis` | str  | no       |         | New hypothesis.                                                                                                                                           |
+| `--approach`   | str  | no       |         | One sentence on how the question is answered.                                                                                                             |
+| `--answer`     | str  | no       |         | New answer. One that picks its wording from the evidence is written in calkit.yaml.                                                                       |
+| `--notes`      | str  | no       |         | New notes on the question.                                                                                                                                |
+| `--verify`     | str  | no       |         | Sign off that the pipeline stages behind the evidence implement the approach correctly, with what you checked, e.g., 'fit.py fits both models as stated.' |
+| `--validate`   | str  | no       |         | Sign off that the approach suits the question and the evidence justifies the answer, with what you checked, e.g., 'The linear fit's residuals curve.'     |
+| `--with-ai`    | str  | no       |         | A generative AI tool used in verifying or validating, e.g., 'Claude Opus 5'. Can be given more than once.                                                 |
 
 <a id="subcommand-update-path-storage"></a>
 
@@ -3639,22 +3947,70 @@ Options:
 | `--json`          | boolean | no       | False   | Output the report as JSON.                                                            |
 | `--no-pipeline`   | boolean | no       | False   | Skip asking DVC which stages are out of date, which is the slowest part of the check. |
 
+<a id="command-group-fix"></a>
+
+### `calkit fix`
+
+Fix things.
+
+| Command                                              | Description                                                     |
+| ---------------------------------------------------- | --------------------------------------------------------------- |
+| [`merge-conflicts`](#subcommand-fix-merge-conflicts) | Resolve merge conflicts in dvc.lock and stage run records.      |
+| [`storage`](#subcommand-fix-storage)                 | Move paths to where they're declared to be stored (Git or DVC). |
+
+<a id="subcommand-fix-merge-conflicts"></a>
+
+#### `calkit fix merge-conflicts`
+
+Resolve merge conflicts in dvc.lock and stage run records.
+
+Each stage is merged whole. A stage changed on one side takes that side, and one changed on both needs a choice, which also decides its run record and Git-tracked outputs. Stages are named as in 'calkit check stage-runs', e.g., 'sub/dvc.yaml:stage' for a subproject's.
+
+Usage:
+
+```text
+calkit fix merge-conflicts [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                  |
+| ---------------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--ours`, `-o`   | str  | no       |         | Keep our side of this stage (repeatable).                                    |
+| `--theirs`, `-t` | str  | no       |         | Keep their side of this stage (repeatable).                                  |
+| `--rerun`, `-r`  | str  | no       |         | Keep neither side of this stage, so it reruns (repeatable).                  |
+| `--prefer`       | str  | no       |         | Choice for every other stage changed on both sides (ours, theirs, or rerun). |
+
+<a id="subcommand-fix-storage"></a>
+
+#### `calkit fix storage`
+
+Move paths to where they're declared to be stored (Git or DVC).
+
+Same as 'calkit check storage --fix'.
+
+Usage:
+
+```text
+calkit fix storage
+```
+
 <a id="command-group-latex-tex"></a>
 
 ### `calkit latex|tex`
 
 Work with LaTeX.
 
-| Command                                                  | Description                                                   |
-| -------------------------------------------------------- | ------------------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                 |
-| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command. |
-| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.       |
-| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                 |
-| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.         |
-| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.            |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.    |
-| [`comments`](#subcommand-latex-tex-comments)             | Work with review comments in LaTeX or Markdown source.        |
+| Command                                                  | Description                                                       |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                     |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.     |
+| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.           |
+| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                     |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.             |
+| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                |
+| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3737,6 +4093,24 @@ Options:
 | `--pandoc-arg`        | str     | no       |         | Another argument for pandoc; can be given more than once.                                          |
 | `--no-check`          | boolean | no       | False   | Don't check the environment first.                                                                 |
 | `--verbose`, `-v`     | boolean | no       | False   | Print commands.                                                                                    |
+
+<a id="subcommand-latex-tex-map-components"></a>
+
+#### `calkit latex|tex map-components`
+
+Map in components a LaTeX document includes with `\ck*` commands.
+
+Usage:
+
+```text
+calkit latex|tex map-components TEX-FILE
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                            |
+| ---------- | ---- | -------- | ------- | -------------------------------------- |
+| `tex_file` | str  | yes      |         | The .tex file whose components to map. |
 
 <a id="subcommand-latex-tex-build"></a>
 
@@ -3841,14 +4215,14 @@ Arguments:
 
 Options:
 
-| Option           | Type    | Required | Default | Description                                                                                                                                                                                                                |
-| ---------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF.                                                                                                                                    |
-| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                                                                                                                                                               |
-| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                                                                                                                                                             |
-| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                                                                                                                                                              |
-| `--engine`       | str     | no       |         | What makes the Word copy: 'word', which imports the compiled PDF so the copy looks like it, or 'libreoffice', which converts the source with TeX4ht's make4ht and then LibreOffice. Defaults to Word where it's installed. |
-| `--log`, `-l`    | boolean | no       | False   | Also keep the export record in the project, under .calkit/latex/docx-exports, rather than only on this machine.                                                                                                            |
+| Option           | Type    | Required | Default | Description                                                                                                                                                                                                                                                                                                                          |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF.                                                                                                                                                                                                                                              |
+| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                                                                                                                                                                                                                                                                         |
+| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                                                                                                                                                                                                                                                                       |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                                                                                                                                                                                                                                                                        |
+| `--engine`       | str     | no       |         | What makes the Word copy: 'word', which imports the compiled PDF so the copy looks like it, 'libreoffice', which converts the source with TeX4ht's make4ht and then LibreOffice, or 'pandoc', experimental, which converts the source with Pandoc, with numbers and citations from the build. Defaults to Word where it's installed. |
+| `--log`, `-l`    | boolean | no       | False   | Also keep the export record in the project, under .calkit/latex/docx-exports, rather than only on this machine.                                                                                                                                                                                                                      |
 
 <a id="subcommand-latex-tex-merge-docx"></a>
 
@@ -3877,31 +4251,40 @@ Options:
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
 
-<a id="subcommand-latex-tex-comments"></a>
-
-#### `calkit latex|tex comments`
-
-Work with review comments in LaTeX or Markdown source.
-
-Usage:
-
-```text
-calkit latex|tex comments COMMAND [ARGS]...
-```
-
 <a id="command-group-overleaf-ol"></a>
 
 ### `calkit overleaf|ol`
 
 Interact with Overleaf.
 
-| Command                                           | Description                                                    |
-| ------------------------------------------------- | -------------------------------------------------------------- |
-| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                 |
-| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                    |
-| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project. |
-| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.       |
-| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.   |
+| Command                                           | Description                                                                   |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [`login`](#subcommand-overleaf-ol-login)          | Sign in with a browser session to sync without Overleaf Premium.              |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                                |
+| [`link`](#subcommand-overleaf-ol-link)            | Link a folder in the project to an Overleaf project, pushing its files there. |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                                   |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project.                |
+| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.                      |
+| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.                  |
+
+<a id="subcommand-overleaf-ol-login"></a>
+
+#### `calkit overleaf|ol login`
+
+Sign in with a browser session to sync without Overleaf Premium.
+
+Usage:
+
+```text
+calkit overleaf|ol login [OPTIONS]
+```
+
+Options:
+
+| Option      | Type    | Required | Default | Description                                                |
+| ----------- | ------- | -------- | ------- | ---------------------------------------------------------- |
+| `--session` | str     | no       |         | Value of the 'overleaf_session2' cookie from your browser. |
+| `--hub`     | boolean | no       | False   | Also save session to Calkit hub, so it can sync there.     |
 
 <a id="subcommand-overleaf-ol-import"></a>
 
@@ -3935,11 +4318,43 @@ Options:
 | `--overwrite`, `-f`   | boolean | no       | False   | Force adding the publication even if it already exists.                                                                    |
 | `--push-only`, `-P`   | boolean | no       | False   | Push local files to Overleaf without pulling. Useful when initializing a new Overleaf project from local files.            |
 
+<a id="subcommand-overleaf-ol-link"></a>
+
+#### `calkit overleaf|ol link`
+
+Link a folder in the project to an Overleaf project, pushing its files there.
+
+Like 'import --push-only', for a document that starts in the project.
+
+Usage:
+
+```text
+calkit overleaf|ol link [OPTIONS] FOLDER PROJECT-URL
+```
+
+Arguments:
+
+| Argument      | Type | Required | Default | Description                                                                    |
+| ------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------ |
+| `folder`      | str  | yes      |         | Folder in the project, e.g., 'paper'.                                          |
+| `project_url` | str  | yes      |         | Overleaf project URL, e.g., https://www.overleaf.com/project/6800005973cb2e35. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                    |
+| ------------------- | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `--title`, `-t`     | str     | no       |         | Title, if the publication isn't in calkit.yaml yet.            |
+| `--target`, `-T`    | str     | no       |         | Target TeX file in the folder.                                 |
+| `--push-path`, `-p` | str     | no       |         | Paths in the folder to only push to Overleaf, e.g., 'figures'. |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                 |
+
 <a id="subcommand-overleaf-ol-sync"></a>
 
 #### `calkit overleaf|ol sync`
 
 Sync folders with Overleaf.
+
+Local edits are committed first, and documents changed on either side are rebuilt and saved with the sync.
 
 Usage:
 
@@ -3955,17 +4370,19 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
-| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
-| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
-| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
-| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
-| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
-| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
-| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
-| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
-| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`       | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--no-push`         | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`         | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`     | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`      | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
+| `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |
 
 <a id="subcommand-overleaf-ol-status-st"></a>
 
@@ -4177,6 +4594,8 @@ Options:
 
 List scheduler jobs submitted via Calkit (across SLURM and PBS).
 
+Includes interactive jobs, e.g., Jupyter servers for notebooks.
+
 Usage:
 
 ```text
@@ -4226,60 +4645,6 @@ Options:
 | Option           | Type    | Required | Default | Description                         |
 | ---------------- | ------- | -------- | ------- | ----------------------------------- |
 | `--follow`, `-f` | boolean | no       | False   | Follow the log output like tail -f. |
-
-<a id="command-group-dev"></a>
-
-### `calkit dev`
-
-Developer tools.
-
-| Command                              | Description                                                     |
-| ------------------------------------ | --------------------------------------------------------------- |
-| [`python`](#subcommand-dev-python)   | Start an Python shell in Calkit's environment.                  |
-| [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment.                 |
-| [`upgrade`](#subcommand-dev-upgrade) | Update a dev (editable) install: pull the branch and reinstall. |
-
-<a id="subcommand-dev-python"></a>
-
-#### `calkit dev python`
-
-Start an Python shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev python [OPTIONS]
-```
-
-<a id="subcommand-dev-ipython"></a>
-
-#### `calkit dev ipython`
-
-Start an IPython shell in Calkit's environment.
-
-Usage:
-
-```text
-calkit dev ipython [OPTIONS]
-```
-
-<a id="subcommand-dev-upgrade"></a>
-
-#### `calkit dev upgrade`
-
-Update a dev (editable) install: pull the branch and reinstall.
-
-Usage:
-
-```text
-calkit dev upgrade [BRANCH]
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description                                                                                                                                    |
-| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `branch` | str  | no       |         | Branch to install from: the worktree that has it checked out, or else the install's own, if it has no changes. Defaults to the current branch. |
 
 <a id="command-group-sync"></a>
 
@@ -4386,6 +4751,8 @@ Options:
 
 Sync folders with Overleaf.
 
+Local edits are committed first, and documents changed on either side are rebuilt and saved with the sync.
+
 Usage:
 
 ```text
@@ -4400,14 +4767,16 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
-| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
-| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
-| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
-| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
-| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
-| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
-| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
-| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
-| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`       | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--no-push`         | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`         | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`     | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`      | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`     | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+| `--no-build`        | boolean | no       | False   | Only sync source files, without rebuilding documents changed on Overleaf.                                                                                                                                                                |
+| `--upstream`        | boolean | no       | False   | When rebuilding, also run stages the build depends on.                                                                                                                                                                                   |
+| `--no-pull`         | boolean | no       | False   | Don't pull new commits from the project remote first, e.g., from a sync on the hub.                                                                                                                                                      |

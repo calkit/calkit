@@ -24,7 +24,7 @@ export default defineConfig({
     target: "chrome114",
     lib: {
       entry: resolve(__dirname, `src/content/${entry}.ts`),
-      name: `calkit_${entry}`,
+      name: `calkit_${entry.replace(/-/g, "_")}`,
       formats: ["iife"],
       fileName: () => `${entry}.js`,
     },

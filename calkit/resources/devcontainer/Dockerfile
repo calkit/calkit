@@ -68,3 +68,8 @@ COPY scripts/check-envs.sh ${INIT_SCRIPTS_DIR}
 ARG CALKIT_VERSION=
 RUN uv pip install --system --no-cache-dir \
     "calkit-python${CALKIT_VERSION:+==${CALKIT_VERSION}}"
+
+# Login shells, e.g., the one VS Code reads its environment from in a
+# Codespace, reset PATH and then restore the base image's, which predates
+# conda, so restore ours instead
+RUN echo "export PATH=${PATH}:\$PATH" > /etc/profile.d/00-restore-env.sh

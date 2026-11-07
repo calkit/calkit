@@ -415,7 +415,9 @@ def check(command: str | None) -> None:
     current = calkit.__version__
     # Notices are for people, so are skipped when nobody's at a terminal,
     # and kept until somebody is
-    if sys.stderr.isatty():
+    from calkit.core import is_mintty
+
+    if sys.stderr.isatty() or is_mintty(sys.stderr):
         upgraded_from = state.get("upgraded_from")
         upgrading = now - state.get("upgrading", 0) < UPGRADE_GRACE_SECONDS
         latest = state.get("latest")
@@ -478,6 +480,13 @@ def check_in_background(pids: list[int]) -> None:
     if not is_newer(latest, current) or not can_auto_upgrade():
         return
     if config.read().auto_upgrade is not True:
+        return
+    # Every upgrade brings new unsigned files Smart App Control could block,
+    # so under it, users are only told about new versions and upgrade when
+    # they choose to
+    from calkit.windows import smart_app_control_on
+
+    if smart_app_control_on():
         return
     # Recorded before upgrading, since on Windows the upgrade outlives this
     # process; the next command learns how it went by its own version

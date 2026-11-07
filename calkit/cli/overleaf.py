@@ -5,8 +5,11 @@ from __future__ import annotations
 import filecmp
 import json
 import os
-import shutil
+import posixpath
+import subprocess
 import sys
+from contextlib import ExitStack
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,24 +44,11 @@ def _extract_title_from_tex(tex_file_path: str) -> str | None:
 
 
 def _get_overleaf_token(rejected: bool = False) -> str:
-    """Get the user's Overleaf token from config.
-
-    If not set, we'll try to get from the hub. If that fails, or Overleaf
-    ``rejected`` the one we have, we'll prompt the user to enter one.
+    """Get the user's Overleaf token from config, prompting for one if it
+    isn't set or Overleaf ``rejected`` it.
     """
     calkit_config = calkit.config.read()
     overleaf_token = None if rejected else calkit_config.overleaf_token
-    if not overleaf_token and not rejected:
-        # See if we can get it from the hub
-        if calkit_config.token is not None:
-            try:
-                typer.echo("Getting Overleaf token from the hub")
-                resp = calkit.hub.get("/user/overleaf-token")
-                overleaf_token = resp["access_token"]
-                calkit_config.overleaf_token = overleaf_token
-                calkit_config.write()
-            except Exception:
-                typer.echo("Failed to get Overleaf token from the hub")
     if not overleaf_token:
         if rejected:
             warn(
@@ -72,6 +62,8 @@ def _get_overleaf_token(rejected: bool = False) -> str:
             "A new one can be generated at:\n\n"
             "    https://www.overleaf.com/user/settings\n\n"
             "under the 'Git Integration' section.\n"
+            "Without Overleaf Premium, run 'calkit overleaf login' instead, "
+            "or connect from the Calkit browser extension on overleaf.com.\n"
         )
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise_error(
@@ -91,23 +83,176 @@ def _get_overleaf_token(rejected: bool = False) -> str:
     return overleaf_token
 
 
-def _get_pulled_overleaf_repo(
-    project_id: str, token: str
-) -> tuple[git.Repo, str]:
-    """Clone or pull an Overleaf project, asking for a new token whenever
-    Overleaf rejects the current one.
-
-    Returns the repo and the token that worked, so later projects use it too.
+def _get_overleaf_session_from_hub(stale: str | None = None) -> str | None:
+    """Get an Overleaf session saved to the hub, e.g., by the browser
+    extension, other than a ``stale`` one, and store it in config.
     """
+    try:
+        # Not signed in to the hub fails before any request, and
+        # allow_login=False keeps that from starting a sign-in
+        session = calkit.hub.get(
+            "/user/overleaf-session", allow_login=False, max_retries=2
+        )["session"]
+    except Exception:
+        return None
+    # Compared as the client sends it, without a cookie name or whitespace
+    if not session or calkit.overleaf.WebClient(session).session == stale:
+        return None
+    calkit_config = calkit.config.read()
+    calkit_config.overleaf_session = session
+    calkit_config.write()
+    return str(session)
+
+
+def _get_overleaf_auth() -> str | calkit.overleaf.WebClient:
+    """Get a Git token, or, if only a session is available, a web client
+    for syncing without Overleaf Premium.
+
+    Credentials in config come first, then a token saved to the hub, then a
+    session saved to the hub, before prompting for a token.
+    """
+    calkit_config = calkit.config.read()
+    if calkit_config.overleaf_token:
+        return calkit_config.overleaf_token
+    if calkit_config.overleaf_session:
+        return calkit.overleaf.WebClient(calkit_config.overleaf_session)
+    try:
+        token = calkit.hub.get(
+            "/user/overleaf-token", allow_login=False, max_retries=2
+        )["access_token"]
+    except Exception:
+        token = None
+    if token:
+        typer.echo("Using the Overleaf token saved to the hub")
+        calkit_config.overleaf_token = token
+        calkit_config.write()
+        return str(token)
+    session = _get_overleaf_session_from_hub()
+    if session:
+        typer.echo("Using the Overleaf session saved to the hub")
+        return calkit.overleaf.WebClient(session)
+    return _get_overleaf_token()
+
+
+def _get_pulled_overleaf_repo(
+    project_id: str, auth: str | calkit.overleaf.WebClient
+) -> tuple[git.Repo, str | calkit.overleaf.WebClient]:
+    """Clone or pull an Overleaf project, asking for new credentials
+    whenever Overleaf rejects the current ones.
+
+    Returns the repo and the credentials that worked, so later projects use
+    them too.
+    """
+
+    def get_new_session(stale: str, error: Exception) -> str:
+        """Get a new Overleaf session from the hub, or prompt for one, and
+        store it.
+        """
+        # A newer session on the hub, e.g., from the browser extension,
+        # means nothing failed as far as the user is concerned
+        session = _get_overleaf_session_from_hub(stale=stale)
+        if session:
+            return session
+        warn(str(error), prefix="")
+        typer.echo(calkit.overleaf.SESSION_HELP + "\n")
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise_error(
+                "Set one with 'calkit overleaf login --session' and try again"
+            )
+        session = typer.prompt(
+            "Enter Overleaf session cookie", hide_input=True
+        )
+        calkit_config = calkit.config.read()
+        calkit_config.overleaf_session = calkit.config.KeyringOptionalSecret(
+            session
+        )
+        calkit_config.write()
+        return str(session)
+
     while True:
         try:
-            repo = calkit.overleaf.get_repo(project_id, token)
-            calkit.overleaf.pull(repo)
-            return repo, token
-        except calkit.overleaf.AuthError:
-            token = _get_overleaf_token(rejected=True)
+            if isinstance(auth, calkit.overleaf.WebClient):
+                repo = calkit.overleaf.get_mirror(project_id)
+                calkit.overleaf.pull_mirror(repo, auth, project_id)
+            else:
+                repo = calkit.overleaf.get_repo(project_id, auth)
+                calkit.overleaf.pull(repo)
+            return repo, auth
+        except calkit.overleaf.AuthError as e:
+            if isinstance(auth, calkit.overleaf.WebClient):
+                auth = calkit.overleaf.WebClient(
+                    get_new_session(stale=auth.session, error=e)
+                )
+            else:
+                # A token stops working when Premium ends, but a browser
+                # session still does
+                session = (
+                    calkit.config.read().overleaf_session
+                    or _get_overleaf_session_from_hub()
+                )
+                if session:
+                    warn(
+                        "Overleaf rejected your Git token; "
+                        "using your browser session instead",
+                        prefix="",
+                    )
+                    # Forget the token, so later syncs go straight to the
+                    # session
+                    calkit_config = calkit.config.read()
+                    if calkit_config.overleaf_token == auth:
+                        calkit_config.overleaf_token = None
+                        calkit_config.write()
+                    auth = calkit.overleaf.WebClient(str(session))
+                else:
+                    auth = _get_overleaf_token(rejected=True)
         except Exception as e:
             raise_error(str(e))
+
+
+@overleaf_app.command(name="login")
+def login(
+    session: Annotated[
+        str | None,
+        typer.Option(
+            "--session",
+            help="Value of the 'overleaf_session2' cookie from your browser.",
+        ),
+    ] = None,
+    hub: Annotated[
+        bool,
+        typer.Option(
+            "--hub",
+            help="Also save session to Calkit hub, so it can sync there.",
+        ),
+    ] = False,
+) -> None:
+    """Sign in with a browser session to sync without Overleaf Premium."""
+    if session is None:
+        typer.echo(calkit.overleaf.SESSION_HELP + "\n")
+        session = str(
+            typer.prompt("Enter Overleaf session cookie", hide_input=True)
+        )
+    try:
+        calkit.overleaf.WebClient(session).csrf_token
+    except Exception as e:
+        raise_error(str(e))
+    calkit_config = calkit.config.read()
+    calkit_config.overleaf_session = calkit.config.KeyringOptionalSecret(
+        session
+    )
+    calkit_config.write()
+    typer.echo("Stored Overleaf session in Calkit config")
+    if hub:
+        try:
+            calkit.hub.put("/user/overleaf-session", json={"session": session})
+        except Exception as e:
+            raise_error(f"Failed to save Overleaf session to hub: {e}")
+        typer.echo("Saved Overleaf session to hub")
+    if calkit_config.overleaf_token:
+        warn(
+            "An Overleaf Git token is also set and will be used instead; "
+            "remove it with 'calkit config unset overleaf_token'"
+        )
 
 
 @overleaf_app.command(name="import")
@@ -199,8 +344,8 @@ def import_publication(
     from calkit.cli.main import ignore as git_ignore
     from calkit.cli.new import new_latex_stage
 
-    # First check that the user has an Overleaf token set
-    overleaf_token = _get_overleaf_token()
+    # First check that the user can access Overleaf
+    overleaf_auth = _get_overleaf_auth()
     if (
         not src_url.startswith("https://www.overleaf.com/project/")
         and calkit.config.get_env() != "test"
@@ -220,6 +365,8 @@ def import_publication(
     os.makedirs(dest_dir, exist_ok=True)
     ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
+    if dest_dir in (ck_info.get("overleaf_sync") or {}):
+        raise_error(f"'{dest_dir}' is already synced with Overleaf")
     # TODO: Don't allow the same Overleaf project ID in multiple publications
     repo = calkit.git.get_repo()
     # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
@@ -230,10 +377,11 @@ def import_publication(
     overleaf_project_dir = calkit.overleaf.get_project_dir(overleaf_project_id)
     if os.path.isdir(overleaf_project_dir):
         warn("This Overleaf project has already been cloned; removing")
-        shutil.rmtree(overleaf_project_dir)
+        calkit.overleaf.rmtree(overleaf_project_dir)
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
-    _get_pulled_overleaf_repo(overleaf_project_id, overleaf_token)
+    # Closed so Git's helper processes don't keep the folder open on Windows
+    _get_pulled_overleaf_repo(overleaf_project_id, overleaf_auth)[0].close()
     # Detect target path if not specified
     if target_path is None:
         ol_contents = os.listdir(
@@ -254,34 +402,36 @@ def import_publication(
             "please specify with --target"
         )
         return
-    # Try to extract title from the target LaTeX file if not provided
-    if not title:
-        target_tex_path = os.path.join(
-            dest_dir if push_only else overleaf_project_dir, target_path
-        )
-        extracted_title = _extract_title_from_tex(target_tex_path)
-        if extracted_title:
-            typer.echo(f"Detected title: {extracted_title}")
-            title = extracted_title
-    if not title:
-        raise_error(
-            "Title could not be detected from the LaTeX file; "
-            "please specify with --title"
-        )
     # Determine the PDF output path
-    pdf_path = target_path.removesuffix(".tex") + ".pdf"  # type: ignore
+    pdf_path = target_path.removesuffix(".tex") + ".pdf"
     typer.echo(f"Using PDF path: {pdf_path}")
     tex_path = pdf_path.removesuffix(".pdf") + ".tex"
     target_tex_path = Path(dest_dir, tex_path).as_posix()
     pub_path = Path(dest_dir, pdf_path).as_posix()
-    pub_paths = [pub.get("path") for pub in pubs]
-    if not overwrite and pub_path in pub_paths:
-        raise_error(
-            f"A publication already exists in this project at {pub_path}"
-        )
-    elif overwrite and pub_path in pub_paths:
+    # A publication already in the project is linked as it is, unless asked
+    # to replace it
+    existing_pub = next((p for p in pubs if p.get("path") == pub_path), None)
+    if existing_pub is not None and overwrite:
         # Note: This publication will go to the end of the list
         pubs = [p for p in pubs if p.get("path") != pub_path]
+        existing_pub = None
+    if existing_pub is not None:
+        typer.echo(f"Using the publication already at {pub_path}")
+    # Try to extract title from the target LaTeX file if not provided
+    if existing_pub is None and not title:
+        extracted_title = _extract_title_from_tex(
+            os.path.join(
+                dest_dir if push_only else overleaf_project_dir, target_path
+            )
+        )
+        if extracted_title:
+            typer.echo(f"Detected title: {extracted_title}")
+            title = extracted_title
+    if existing_pub is None and not title:
+        raise_error(
+            "Title could not be detected from the LaTeX file; "
+            "please specify with --title"
+        )
     # Check that we have a LaTeX environment
     typer.echo("Checking that this project has a LaTeX environment")
     envs = ck_info.get("environments", {})
@@ -311,14 +461,18 @@ def import_publication(
     pipeline = ck_info.get("pipeline", {})
     stages = pipeline.get("stages", {})
     stage_name = None
-    for stage_name_i, stage in stages.items():
-        if (
-            stage.get("kind") == "latex"
-            and stage.get("target_path") == target_tex_path
-        ):
-            stage_name = stage_name_i
-            typer.echo(f"Found build stage '{stage_name}' in pipeline")
-            break
+    if existing_pub is not None and existing_pub.get("stage") in stages:
+        stage_name = existing_pub["stage"]
+        typer.echo(f"Using the publication's build stage '{stage_name}'")
+    else:
+        for stage_name_i, stage in stages.items():
+            if (
+                stage.get("kind") == "latex"
+                and stage.get("target_path") == target_tex_path
+            ):
+                stage_name = stage_name_i
+                typer.echo(f"Found build stage '{stage_name}' in pipeline")
+                break
     if stage_name is None:
         # Create a new stage
         stage_name = calkit.to_kebab_case("build-" + dest_dir)
@@ -336,21 +490,24 @@ def import_publication(
             no_commit=True,
         )
         repo.git.add("calkit.yaml")
-    # Add to publications in calkit.yaml
-    typer.echo("Adding publication to calkit.yaml")
     ck_info = calkit.load_calkit_info()
-    new_pub = dict(
-        path=pub_path,
-        title=title,
-        description=description,
-        kind=kind,
-        stage=stage_name,
-    )
-    pubs.append(new_pub)
-    ck_info["publications"] = pubs
+    if existing_pub is None:
+        typer.echo("Adding publication to calkit.yaml")
+        pubs.append(
+            dict(
+                path=pub_path,
+                title=title,
+                description=description,
+                kind=kind,
+                stage=stage_name,
+            )
+        )
+        ck_info["publications"] = pubs
+    else:
+        for pub in ck_info.get("publications") or []:
+            if pub.get("path") == pub_path and not pub.get("stage"):
+                pub["stage"] = stage_name
     ol_sync = ck_info.get("overleaf_sync", {})
-    if dest_dir in ol_sync:
-        raise_error(f"'{dest_dir}' is already synced with Overleaf")
     ol_sync[dest_dir] = dict(url=src_url)
     if push_paths:
         ol_sync[dest_dir]["push_paths"] = push_paths
@@ -380,8 +537,93 @@ def import_publication(
     )
 
 
+@overleaf_app.command(name="link")
+def link_publication(
+    folder: Annotated[
+        str,
+        typer.Argument(help="Folder in the project, e.g., 'paper'."),
+    ],
+    project_url: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Overleaf project URL, e.g., "
+                "https://www.overleaf.com/project/6800005973cb2e35."
+            )
+        ),
+    ],
+    title: Annotated[
+        str | None,
+        typer.Option(
+            "--title",
+            "-t",
+            help="Title, if the publication isn't in calkit.yaml yet.",
+        ),
+    ] = None,
+    target_path: Annotated[
+        str | None,
+        typer.Option("--target", "-T", help="Target TeX file in the folder."),
+    ] = None,
+    push_paths: Annotated[
+        list[str],
+        typer.Option(
+            "--push-path",
+            "-p",
+            help="Paths in the folder to only push to Overleaf, e.g., 'figures'.",
+        ),
+    ] = [],
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit changes to repo."),
+    ] = False,
+) -> None:
+    """Link a folder in the project to an Overleaf project, pushing its files
+    there.
+
+    Like 'import --push-only', for a document that starts in the project.
+    """
+    import_publication(
+        src_url=project_url,
+        dest_dir=folder,
+        title=title,
+        target_path=target_path,
+        description=None,
+        kind=None,
+        push_paths=push_paths,
+        no_commit=no_commit,
+        overwrite=False,
+        push_only=True,
+    )
+
+
+def _get_document_stages(folders: list[str]) -> dict[str, str]:
+    """LaTeX stages that build a document in these folders, keyed to the
+    folder.
+    """
+    stages = (calkit.load_calkit_info().get("pipeline") or {}).get(
+        "stages"
+    ) or {}
+    return {
+        name: folder
+        for name, stage in stages.items()
+        if isinstance(stage, dict)
+        and stage.get("kind") == "latex"
+        and stage.get("target_path")
+        for folder in folders
+        if Path(
+            posixpath.normpath(
+                posixpath.join(
+                    stage.get("wdir") or ".", str(stage["target_path"])
+                )
+            )
+        ).is_relative_to(folder)
+    }
+
+
 def check_sync_readiness(
-    check_branch: bool = True, check_pipeline: bool = True
+    check_branch: bool = True,
+    check_pipeline: bool = True,
+    synced_folders: list[str] | None = None,
 ) -> dict:
     """Look for reasons this is a risky moment to sync with Overleaf.
 
@@ -392,11 +634,23 @@ def check_sync_readiness(
     pipeline, which can send figures or results that don't match the code
     that supposedly made them.
 
+    With ``synced_folders``, only out-of-date stages that feed what's sent
+    count: those the folders' document builds depend on, and those that
+    write into the folders. The builds themselves don't, since their PDFs
+    aren't sent, and are returned as ``stale_documents`` to rebuild after.
+
     Returns a dict with a ``branch`` message, a ``pipeline`` message, and
     the ``stale_stages`` behind the latter. Each message is None when that
     check passes or can't be run.
     """
-    res: dict = {"branch": None, "pipeline": None, "stale_stages": []}
+    import calkit.dvc
+
+    res: dict = {
+        "branch": None,
+        "pipeline": None,
+        "stale_stages": [],
+        "stale_documents": [],
+    }
     if check_branch:
         try:
             res["branch"] = calkit.git.check_branch_is_current(
@@ -424,11 +678,41 @@ def check_sync_readiness(
                 + ", ".join(status.failed_environment_checks)
             )
         elif status.is_stale:
-            res["stale_stages"] = status.stale_stage_names
-            res["pipeline"] = (
-                "Pipeline is not up-to-date; out-of-date stages: "
-                + ", ".join(status.stale_stage_names)
-            )
+            stale = status.stale_stage_names
+            if synced_folders is not None:
+                docs = _get_document_stages(synced_folders)
+                try:
+                    feeding: set[str] = set()
+                    for name in docs:
+                        feeding |= calkit.pipeline.get_upstream_stages(name)
+                    dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
+                    for name, stage in dvc_stages.items():
+                        stage_wdir = stage.get("wdir") or "."
+                        outs = calkit.dvc.out_paths_from_stage(stage)
+                        if any(
+                            Path(
+                                posixpath.normpath(
+                                    posixpath.join(stage_wdir, out)
+                                )
+                            ).is_relative_to(folder)
+                            for out in outs
+                            for folder in synced_folders
+                        ):
+                            feeding.add(name)
+                except Exception as e:
+                    # Then every out-of-date stage counts
+                    warn(f"Could not check which stages feed Overleaf: {e}")
+                else:
+                    res["stale_documents"] = [s for s in stale if s in docs]
+                    stale = [
+                        s for s in stale if s in feeding and s not in docs
+                    ]
+            res["stale_stages"] = stale
+            if stale:
+                res["pipeline"] = (
+                    "Pipeline is not up-to-date; out-of-date stages: "
+                    + ", ".join(stale)
+                )
     return res
 
 
@@ -462,10 +746,8 @@ def sync(
         typer.Option(
             "--auto-commit",
             "-a",
-            help=(
-                "Automatically commit changes to the project repo if a synced "
-                "folder has changes."
-            ),
+            help="Deprecated; local edits are now committed automatically.",
+            hidden=True,
         ),
     ] = False,
     no_push: Annotated[
@@ -537,11 +819,128 @@ def sync(
             ),
         ),
     ] = False,
+    no_build: Annotated[
+        bool,
+        typer.Option(
+            "--no-build",
+            help=(
+                "Only sync source files, without rebuilding documents "
+                "changed on Overleaf."
+            ),
+        ),
+    ] = False,
+    upstream: Annotated[
+        bool,
+        typer.Option(
+            "--upstream",
+            help="When rebuilding, also run stages the build depends on.",
+        ),
+    ] = False,
+    no_pull: Annotated[
+        bool,
+        typer.Option(
+            "--no-pull",
+            help=(
+                "Don't pull new commits from the project remote first, "
+                "e.g., from a sync on the hub."
+            ),
+        ),
+    ] = False,
 ):
-    """Sync folders with Overleaf."""
-    # Read all synced folders, fixing legacy schema if applicable
+    """Sync folders with Overleaf.
+
+    Local edits are committed first, and documents changed on either side
+    are rebuilt and saved with the sync.
+    """
+    import calkit.dvc
+    from calkit.cli.main.core import push as calkit_push
+    from calkit.cli.main.core import run as calkit_run
+
+    def get_dirty_files() -> dict[str, tuple[str | None, bool]]:
+        """Changed and untracked files, with a hash of their content and
+        whether they're untracked.
+        """
+        untracked: dict[str, bool] = {}
+        entries = iter(
+            repo.git.status(
+                "--porcelain", "-z", "--untracked-files=all"
+            ).split("\0")
+        )
+        for entry in entries:
+            if not entry:
+                continue
+            # A rename or copy is followed by the path it came from
+            if entry[0] in "RC":
+                next(entries, None)
+            untracked[entry[3:]] = entry.startswith("??")
+        existing = [
+            path
+            for path in untracked
+            if os.path.isfile(os.path.join(repo.working_dir, path))
+        ]
+        hashes = subprocess.run(
+            ["git", "hash-object", "--stdin-paths"],
+            input="\n".join(existing),
+            cwd=repo.working_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        content = dict(zip(existing, hashes))
+        return {path: (content.get(path), u) for path, u in untracked.items()}
+
+    repo = calkit.git.get_repo()
+    in_am_session = "in the middle of an am session" in repo.git.status()
+    # A sync on the hub or another machine pushes commits here, and syncing
+    # without them would apply the same Overleaf edits again. Pulled before
+    # reading the sync settings, since the new commits can change them.
+    if not no_pull and not resolve and not in_am_session:
+        import git
+
+        try:
+            tracking = repo.active_branch.tracking_branch()
+        except TypeError:
+            # Detached HEAD
+            tracking = None
+        fetched = False
+        if tracking is not None:
+            try:
+                repo.git.fetch(tracking.remote_name, tracking.remote_head)
+                fetched = True
+            except git.GitCommandError:
+                warn(
+                    f"Could not fetch {tracking.name}; "
+                    "syncing without any new commits there"
+                )
+        if tracking is not None and fetched:
+            behind = int(
+                repo.git.rev_list("--count", f"HEAD..{tracking.name}")
+            )
+            merge_head = os.path.join(repo.git_dir, "MERGE_HEAD")
+            if behind and os.path.exists(merge_head):
+                raise_error(
+                    f"There are new commits on {tracking.name}, but a merge "
+                    "is in progress; finish it, then sync again"
+                )
+            if behind:
+                typer.echo(
+                    f"Pulling {behind} new commit(s) from {tracking.name}"
+                )
+                try:
+                    repo.git.merge("--no-edit", tracking.name)
+                except git.GitCommandError as e:
+                    if os.path.exists(merge_head):
+                        repo.git.merge("--abort")
+                    raise_error(
+                        f"Could not pull new commits from {tracking.name}:\n"
+                        + str(e.stderr).strip()
+                        + "\nPull them yourself, then sync again"
+                    )
+    # Uncommitted edits to calkit.yaml aren't the sync's to touch or commit,
+    # so fixing the legacy schema waits until there are none
+    calkit_yaml_dirty = bool(repo.git.diff("HEAD", "--", "calkit.yaml"))
     overleaf_info = calkit.overleaf.get_sync_info(
-        fix_legacy=True, print_info=typer.echo
+        fix_legacy=not calkit_yaml_dirty, print_info=typer.echo
     )
     if not overleaf_info:
         raise_error("No Overleaf sync info found")
@@ -556,12 +955,16 @@ def sync(
         for path in paths:
             if path not in overleaf_sync_dirs:
                 raise_error(f"Path '{path}' is not synced with Overleaf")
+    synced_folders = [
+        f for f in overleaf_sync_dirs if paths is None or f in paths
+    ]
     # Check this is a sane state to sync from before touching either side.
     # Resolving a conflict is the middle of a sync that already passed these,
     # and the pipeline can't be current until it finishes.
     readiness = check_sync_readiness(
         check_branch=not any_branch and not resolve,
         check_pipeline=not allow_stale and not resolve,
+        synced_folders=synced_folders,
     )
     if readiness["branch"]:
         raise_error(
@@ -578,11 +981,8 @@ def sync(
             "Overleaf.\nRun 'calkit run' first, or use --allow-stale to sync "
             "anyway."
         )
-    # First check our config for an Overleaf token
-    overleaf_token = _get_overleaf_token()
-    repo = calkit.git.get_repo()
+    overleaf_auth = _get_overleaf_auth()
     conflict_fpath = calkit.overleaf.get_conflict_fpath()
-    in_am_session = "in the middle of an am session" in repo.git.status()
     # Check if we're in the middle of resolving a merge conflict
     if in_am_session and not resolve:
         raise_error(
@@ -598,11 +998,15 @@ def sync(
     # Keyed by synced folder, so a sync of multiple folders can be summarized
     # after the loop even if some are skipped
     results: dict[str, dict] = {}
+    edited_folders: set[str] = set()
     first = True
     for synced_folder, sync_data in overleaf_info.items():
         if not sync_data:
             continue
         if paths is not None and synced_folder not in paths:
+            continue
+        # Resolving a conflict only finishes the sync that hit it
+        if resolve and synced_folder != resolving_info["wdir"]:
             continue
         overleaf_project_id = sync_data.get("project_id")
         if not overleaf_project_id:
@@ -619,36 +1023,41 @@ def sync(
             f"Syncing {folder} with Overleaf project ID {overleaf_project_id}"
         )
         wdir = synced_folder
-        if resolve and wdir == resolving_info["wdir"]:
+        if resolve:
             repo.git.add(wdir)
             if repo.git.diff(["--staged", wdir]):
                 repo.git.commit(
                     [wdir, "-m", f"Resolve Overleaf merge conflict in {wdir}"]
                 )
             if in_am_session:
-                repo.git.am("--skip")
-        elif resolve:
-            continue
-        # If there are any uncommitted changes in the publication working
-        # directory, raise an error unless auto-commit is specified
+                with calkit.overleaf.staged_changes_set_aside(repo):
+                    repo.git.am("--skip")
+        # Local edits are saved first so they're what's synced and rebuilt
+        # from. Untracked files aren't sent to Overleaf, so they're left out.
         if repo.git.diff(wdir) or repo.index.diff("HEAD", wdir):
-            if auto_commit:
-                repo.git.add(wdir)
-                repo.git.commit(
-                    [wdir, "-m", f"Save {wdir} before syncing with Overleaf"]
-                )
-            else:
+            if no_commit:
                 raise_error(
                     f"Uncommitted changes found in {wdir}. "
-                    "Commit or stash them before syncing with Overleaf, "
-                    "or use --auto-commit/-a to automatically commit them."
+                    "Commit or stash them before syncing with --no-commit."
                 )
-        # Keep other processes from using the clone until we're done
-        with calkit.overleaf.lock(overleaf_project_id, typer.echo):
-            typer.echo("Pulling the latest version from Overleaf")
-            overleaf_repo, overleaf_token = _get_pulled_overleaf_repo(
-                overleaf_project_id, overleaf_token
+            typer.echo(f"Committing local edits in {wdir}")
+            repo.git.add("-u", "--", wdir)
+            repo.git.commit(
+                [wdir, "-m", f"Update {wdir} before Overleaf sync"]
             )
+            edited_folders.add(wdir)
+        # Keep other processes from using the clone until we're done
+        with (
+            calkit.overleaf.lock(overleaf_project_id, typer.echo),
+            ExitStack() as cleanup,
+        ):
+            typer.echo("Pulling the latest version from Overleaf")
+            overleaf_repo, overleaf_auth = _get_pulled_overleaf_repo(
+                overleaf_project_id, overleaf_auth
+            )
+            # Closed so Git's helper processes don't keep the folder open on
+            # Windows
+            cleanup.callback(overleaf_repo.close)
             # Reread the checkpoint in case a sync we waited on just moved it
             sync_data = calkit.overleaf.get_sync_info().get(
                 synced_folder, sync_data
@@ -657,14 +1066,12 @@ def sync(
                 last_sync_commit = resolving_info["last_overleaf_commit"]
             else:
                 last_sync_commit = sync_data.get("last_sync_commit")
-            commits_since = calkit.overleaf.get_commits_since_last_sync(
-                overleaf_repo=overleaf_repo,
-                last_sync_commit=last_sync_commit,
-            )
-            if commits_since:
-                typer.echo(
-                    f"There have been {len(commits_since)} changes on "
-                    "Overleaf since last sync"
+            push = None
+            if isinstance(overleaf_auth, calkit.overleaf.WebClient):
+                push = partial(
+                    calkit.overleaf.push_mirror,
+                    client=overleaf_auth,
+                    project_id=overleaf_project_id,
                 )
             try:
                 results[synced_folder] = calkit.overleaf.sync(
@@ -679,17 +1086,129 @@ def sync(
                     print_info=typer.echo,
                     push_only=push_only,
                     force=force,
+                    push=push,
+                    commit_calkit_yaml=not calkit_yaml_dirty,
                 )
             except Exception as e:
                 raise_error(str(e))
+    # Rebuild documents changed on Overleaf or locally so their outputs match
+    # the source, without running the stages they depend on unless asked
+    doc_stages = _get_document_stages(list(results))
+    to_build = {
+        folder
+        for folder, res in results.items()
+        if not push_only
+        and (
+            res.get("commits_since_last_sync") or res.get("committed_overleaf")
+        )
+    } | {
+        doc_stages[s] for s in readiness["stale_documents"] if s in doc_stages
+    }
+    build_stages = (
+        []
+        if no_build
+        else [name for name, f in doc_stages.items() if f in to_build]
+    )
+    built_folders = sorted({doc_stages[name] for name in build_stages})
+    built = False
+    push_dvc = False
+    if build_stages:
+        typer.echo("Rebuilding " + ", ".join(build_stages))
+        dirty_before = get_dirty_files()
+        try:
+            calkit_run(targets=build_stages, single_item=not upstream)
+        except Exception:
+            warn(
+                "Rebuilding failed, so only the synced source was saved; "
+                "fix the build and run 'calkit run' to rebuild"
+            )
+        else:
+            # Only what the build wrote is saved, leaving other work alone, and
+            # stray files next to the document, e.g., aux files no ignore rule
+            # covers
+            dvc_stages = calkit.dvc.read_pipeline(
+                wdir=str(repo.working_dir)
+            ).get("stages", {})
+            outs = {
+                posixpath.normpath(
+                    posixpath.join(
+                        (dvc_stages.get(name) or {}).get("wdir") or ".", p
+                    )
+                )
+                for name in build_stages
+                for p in calkit.dvc.out_paths_from_stage(
+                    dvc_stages.get(name) or {}
+                )
+            }
+            dirty_after = get_dirty_files()
+            changed = [
+                path
+                for path, state in dirty_after.items()
+                if dirty_before.get(path) != state
+                and not (
+                    state[1]
+                    and any(
+                        Path(path).is_relative_to(f) for f in built_folders
+                    )
+                    and path not in outs
+                    and os.path.basename(path) != ".gitignore"
+                )
+            ]
+            # A file with changes from before the build may hold work that
+            # isn't the build's, e.g., another stage's entry in dvc.lock.
+            # dvc.yaml is generated from calkit.yaml, so it's the build's
+            # whenever calkit.yaml is committed.
+            kept_out = sorted(
+                path
+                for path in changed
+                if path in dirty_before and path != "dvc.yaml"
+            )
+            to_save = [
+                path
+                for path in changed
+                if path not in kept_out and path != "dvc.yaml"
+            ]
+            if "dvc.yaml" in dirty_after and not calkit_yaml_dirty:
+                to_save.append("dvc.yaml")
+            if kept_out:
+                warn(
+                    "Left out of the rebuild commit, since they had "
+                    "uncommitted changes before it: " + ", ".join(kept_out)
+                )
+            if to_save:
+                repo.git.add("-A", "--", *to_save)
+            if to_save and repo.git.diff("--staged", "--", *to_save):
+                push_dvc = any(
+                    os.path.basename(p) == "dvc.lock" for p in to_save
+                )
+                if not no_commit:
+                    repo.git.commit(
+                        "-m",
+                        f"Rebuild {', '.join(built_folders)} after Overleaf "
+                        "sync",
+                        "--",
+                        *to_save,
+                    )
+                    built = True
     if results and not no_push and not no_commit:
         if not repo.remotes:
             raise_error("Project has no Git remotes defined")
-        if any(res.get("committed_project", True) for res in results.values()):
+        if (
+            built
+            or edited_folders
+            or any(
+                res.get("committed_project", True) for res in results.values()
+            )
+        ):
             # Push to the project remote
             typer.echo("Pushing changes to project Git remote")
             repo.git.push()
-    if any(res.get("map_paths_propagated") for res in results.values()):
+        # Built outputs DVC tracks are only recorded in Git by their hash
+        if built and push_dvc:
+            calkit_push(targets=["dvc"])
+    if any(res.get("map_paths_propagated") for res in results.values()) and (
+        not (built and upstream)
+    ):
         typer.echo(
             "Run 'calkit run' to rebuild from the updated source file(s)"
         )
@@ -751,8 +1270,7 @@ def get_status(
         for path in paths:
             if path not in overleaf_sync_dirs:
                 raise_error(f"Path '{path}' is not synced with Overleaf")
-    # First check our config for an Overleaf token
-    overleaf_token = _get_overleaf_token()
+    overleaf_auth = _get_overleaf_auth()
     first = True
     for path_in_project, sync_data in overleaf_info.items():
         if paths is not None and path_in_project not in paths:
@@ -774,19 +1292,30 @@ def get_status(
         )
         wdir = path_in_project
         # Keep other processes from using the clone until we're done
-        with calkit.overleaf.lock(overleaf_project_id, typer.echo):
+        with (
+            calkit.overleaf.lock(overleaf_project_id, typer.echo),
+            ExitStack() as cleanup,
+        ):
             overleaf_project_dir = calkit.overleaf.get_project_dir(
                 overleaf_project_id
             )
             typer.echo("Pulling the latest version from Overleaf")
-            overleaf_repo, overleaf_token = _get_pulled_overleaf_repo(
-                overleaf_project_id, overleaf_token
+            overleaf_repo, overleaf_auth = _get_pulled_overleaf_repo(
+                overleaf_project_id, overleaf_auth
             )
+            cleanup.callback(overleaf_repo.close)
             # Reread the checkpoint in case a sync we waited on just moved it
             sync_data = calkit.overleaf.get_sync_info().get(
                 path_in_project, sync_data
             )
-            last_sync_commit = sync_data.get("last_sync_commit")
+            last_sync_commit = calkit.overleaf.ensure_sync_base(
+                overleaf_repo,
+                main_repo=calkit.git.get_repo(),
+                path_in_project=path_in_project,
+                last_sync_commit=sync_data.get("last_sync_commit"),
+                print_info=typer.echo,
+                missing_ok=True,
+            )
             if last_sync_commit:
                 commits_since = calkit.overleaf.get_commits_since_last_sync(
                     overleaf_repo=overleaf_repo,
@@ -992,6 +1521,8 @@ def push_to_overleaf(
         allow_stale=True,
         any_branch=True,
         force=force,
+        # Pulling is part of preparing, or was skipped with --no-pull
+        no_pull=True,
     )
     calkit.echo("Overleaf is up-to-date with this project ✅")
 
@@ -1102,6 +1633,9 @@ def pull_from_overleaf(
         allow_stale=True,
         any_branch=True,
         force=force,
+        no_build=no_run,
+        # Pulling is part of preparing, or was skipped with --no-pull
+        no_pull=True,
     )
     # An Overleaf edit to a map-paths copy lands in the file it's copied
     # from, so the document is only rebuilt from it after a run

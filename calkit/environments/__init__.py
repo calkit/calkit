@@ -23,6 +23,8 @@ from sqlitedict import SqliteDict
 
 import calkit
 
+from .core import *  # noqa: F403, I001
+
 if TYPE_CHECKING:
     from calkit.models.core import SwitchOption
 

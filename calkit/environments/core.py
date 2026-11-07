@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import subprocess
 
+__all__ = ["relock"]
+
 
 def relock(env_name: str, env: dict) -> None:
     """Rebuild an environment from its spec and write a fresh lock.

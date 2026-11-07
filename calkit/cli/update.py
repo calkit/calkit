@@ -1150,9 +1150,7 @@ def update_environment(
         env = found
         kind = env.get("kind")
         if kind not in ("system", calkit.environments.SWITCH_KIND):
-            from calkit.environments.core import relock
-
-            relock(env_name=env_name, env=env)
+            calkit.environments.relock(env_name=env_name, env=env)
             return
         # A switch's lock describes the machine its pick runs on
         machine_name, machine_env = env_name, env

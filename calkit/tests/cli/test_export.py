@@ -1,12 +1,19 @@
+import os
+import pathlib
 import shlex
+import shutil
 import sys
 
 import pytest
 from typer.testing import CliRunner
 
 import calkit.cli.export
-from calkit.export import GIMP, INKSCAPE
-from calkit.models.pipeline import GimpExportStage, InkscapeExportStage
+from calkit.export import GIMP, INKSCAPE, POWERPOINT
+from calkit.models.pipeline import (
+    GimpExportStage,
+    InkscapeExportStage,
+    PowerPointExportStage,
+)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Fake apps are scripts")
@@ -102,6 +109,79 @@ def test_inkscape(tmp_path, monkeypatch):
     assert INKSCAPE.find_executable() is None
     with pytest.raises(ValueError, match="needs Inkscape installed"):
         calkit.cli.export.inkscape(str(source), str(out))
+
+
+@pytest.mark.skipif(
+    POWERPOINT.find_executable() is None, reason="Needs LibreOffice"
+)
+def test_powerpoint(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pypdfium2 as pdfium
+    from PIL import Image
+
+    from calkit.cli.main.core import app
+
+    def pdf_size(path: str) -> tuple[float, float]:
+        pdf = pdfium.PdfDocument(path)
+        try:
+            width, height = pdf[0].get_size()
+            return float(width), float(height)
+        finally:
+            pdf.close()
+
+    monkeypatch.chdir(tmp_path)
+    # A title, a hidden slide, a diagram off to one side, and a slide with
+    # a colored background, 960 by 540 points
+    shutil.copy(
+        os.path.join(
+            os.path.dirname(__file__), "..", "..", "..", "test", "slides.pptx"
+        ),
+        "slides.pptx",
+    )
+    # What it can export from and to
+    for src, output, error in [
+        ("a.key", "a.pdf", "from a PowerPoint file"),
+        ("slides.pptx", "a.svg", "not 'a.svg'"),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            calkit.cli.export.powerpoint(src, output)
+    with pytest.raises(ValueError, match="from 1"):
+        calkit.cli.export.powerpoint("slides.pptx", "a.pdf", slide=0)
+    with pytest.raises(ValueError, match="it has 4 slides"):
+        calkit.cli.export.powerpoint("slides.pptx", "a.pdf", slide=5)
+    assert not os.path.exists("a.pdf")
+    # The diagram, cropped to what's drawn, through the command its stage
+    # runs, the same each time it's exported
+    stage = PowerPointExportStage(
+        source_path="slides.pptx", outputs=["figs/setup.pdf"], slide=3
+    )
+    exported = []
+    for _ in range(2):
+        result = CliRunner().invoke(app, shlex.split(stage.dvc_cmd)[1:])
+        assert result.exit_code == 0, result.output
+        with open("figs/setup.pdf", "rb") as f:
+            exported.append(f.read())
+    assert exported[0] == exported[1]
+    width, height = pdf_size("figs/setup.pdf")
+    assert 400 < width < 460 and 100 < height < 130
+    # As a PNG, at 300 DPI unless asked
+    calkit.cli.export.powerpoint("slides.pptx", "setup.png", slide=3)
+    assert Image.open("setup.png").size == (
+        pytest.approx(width * 300 / 72, abs=2),
+        pytest.approx(height * 300 / 72, abs=2),
+    )
+    # Hidden slides count, and a whole slide is all background
+    calkit.cli.export.powerpoint("slides.pptx", "hidden.png", slide=2, dpi=72)
+    assert Image.open("hidden.png").size[0] < 960
+    calkit.cli.export.powerpoint(
+        "slides.pptx", "whole.png", slide=2, dpi=72, trim=False
+    )
+    assert Image.open("whole.png").size == (960, 540)
+    # It says what's missing when it isn't installed
+    monkeypatch.setattr(POWERPOINT, "executables", ["calkit-test-no-soffice"])
+    with pytest.raises(ValueError, match="needs LibreOffice installed"):
+        calkit.cli.export.powerpoint("slides.pptx", "a.pdf")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Fake app is a script")

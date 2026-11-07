@@ -28,6 +28,8 @@ class Exporter:
     export_exts: frozenset[str]
     # Its executable, by name on PATH, or where its installer puts it
     executables: list[str]
+    # The app the source is made in, when it's another, e.g., PowerPoint
+    source_app: str | None = None
 
     def find_executable(self) -> str | None:
         """Its executable here, if it's installed."""
@@ -104,10 +106,25 @@ GIMP = Exporter(
         r"C:\Program Files\GIMP 2\bin\gimp-console-2.10.exe",
     ],
 )
+POWERPOINT = Exporter(
+    name="libreoffice",
+    kind="powerpoint-export",
+    app="LibreOffice",
+    source_desc="a PowerPoint file",
+    source_exts=frozenset({".pptx", ".pptm", ".ppt"}),
+    export_exts=frozenset({".pdf", ".png"}),
+    executables=[
+        "soffice",
+        "libreoffice",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+    ],
+    source_app="PowerPoint",
+)
 
 
 def exporters() -> list[Exporter]:
-    return [INKSCAPE, GIMP]
+    return [INKSCAPE, GIMP, POWERPOINT]
 
 
 def exporter_for(
@@ -116,8 +133,9 @@ def exporter_for(
     """The app that can export ``output`` from ``source`` as the pipeline
     runs, if any.
 
-    One a person names has to be that app: an SVG exported with
-    Illustrator is a manual step, even though Inkscape could do it.
+    One a person names has to be that app, or the one the source is made
+    in: an SVG exported with Illustrator is a manual step, even though
+    Inkscape could do it, but a slide exported with PowerPoint isn't.
     """
     source_ext = os.path.splitext(source)[1].lower()
     output_ext = os.path.splitext(output)[1].lower()
@@ -126,7 +144,8 @@ def exporter_for(
         if (
             source_ext in exporter.source_exts
             and output_ext in exporter.export_exts
-            and named in ("", exporter.app.lower())
+            and named
+            in ("", exporter.app.lower(), (exporter.source_app or "").lower())
         ):
             return exporter
     return None

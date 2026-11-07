@@ -121,8 +121,9 @@ datasets:
 A PNG or PDF can't be created by a person, since an app or script exports
 it. If no script makes it, ask the person what they made it in, copy that
 file into the project, e.g., `figures/src/setup.svg`, and add a stage that
-exports it. Inkscape SVGs and GIMP files are exported as the pipeline runs;
-anything else is a manual step, which asks the person to export it again
+exports it. Inkscape SVGs, GIMP files, and PowerPoint slides are exported
+as the pipeline runs, a slide with LibreOffice, cropped to what's drawn on
+it; anything else is a manual step, which asks the person to export it again
 when its file changes:
 
 ```yaml
@@ -134,15 +135,21 @@ pipeline:
       outputs:
         - paper/setup.png
     export-diagram:
-      kind: manual-step
-      message: In PowerPoint, export paper/diagram.png from slide 2
-      open:
-        app: PowerPoint
-        path: figures/src/diagram.pptx
-      inputs:
-        - figures/src/diagram.pptx
+      kind: powerpoint-export
+      source_path: figures/src/diagram.pptx
+      slide: 2
       outputs:
-        - paper/diagram.png
+        - paper/diagram.pdf
+    export-photo:
+      kind: manual-step
+      message: In Photoshop, export paper/photo.png
+      open:
+        app: Photoshop
+        path: figures/src/photo.psd
+      inputs:
+        - figures/src/photo.psd
+      outputs:
+        - paper/photo.png
 ```
 
 ## 7. Run, save, and sync

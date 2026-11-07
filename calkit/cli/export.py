@@ -102,6 +102,135 @@ def gimp(source: str, output: str) -> None:
     )
 
 
+def powerpoint(
+    source: str,
+    output: str,
+    slide: int = 1,
+    dpi: int | None = None,
+    trim: bool = True,
+) -> None:
+    """Export a slide with LibreOffice to the format ``output``'s
+    extension names, cropped to what's drawn on it unless ``trim`` is
+    false, raising ``ValueError`` if it can't be.
+    """
+    import json
+    import re
+    import subprocess
+    import tempfile
+    import zipfile
+    from pathlib import Path
+
+    import pypdfium2 as pdfium
+
+    from calkit.export import POWERPOINT
+
+    def settle(pdf_path: str) -> None:
+        """Fix the dates and hashes that differ from run to run, keeping
+        their lengths so the file's offsets still hold.
+        """
+        with open(pdf_path, "rb") as f:
+            data = f.read()
+        # The document info's dates are optional
+        data = re.sub(
+            rb"/(?:CreationDate|ModDate)\s*\([^)]*\)",
+            lambda m: b" " * len(m[0]),
+            data,
+        )
+        data = re.sub(
+            rb"(?<=Date>)\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:[+-]\d\d:\d\d)?",
+            lambda m: b"1970-01-01T00:00:00" + b"+00:00"[: len(m[0]) - 19],
+            data,
+        )
+        data = re.sub(
+            rb"/ID\s*\[[^\]]*\]",
+            lambda m: re.sub(rb"[0-9A-Fa-f](?=[0-9A-Fa-f]*>)", b"0", m[0]),
+            data,
+        )
+        data = re.sub(
+            rb"(?<=/DocChecksum/)[0-9A-Fa-f]+",
+            lambda m: b"0" * len(m[0]),
+            data,
+        )
+        with open(pdf_path, "wb") as f:
+            f.write(data)
+
+    if slide < 1:
+        raise ValueError("Slides are numbered from 1")
+    exe = _prepare(POWERPOINT, source, output)
+    # Hidden slides are exported and counted, so numbers match PowerPoint's
+    options = {
+        "PageRange": {"type": "string", "value": str(slide)},
+        "ExportHiddenSlides": {"type": "boolean", "value": "true"},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        # A profile of its own, since a LibreOffice already open would take
+        # the job and exit without doing it
+        result = subprocess.run(
+            [
+                exe,
+                f"-env:UserInstallation={Path(tmp, 'profile').as_uri()}",
+                "--headless",
+                "--convert-to",
+                "pdf:impress_pdf_Export:" + json.dumps(options),
+                "--outdir",
+                tmp,
+                os.path.abspath(source),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        exported = os.path.join(tmp, Path(source).stem + ".pdf")
+        if not os.path.isfile(exported):
+            detail = (result.stderr or result.stdout or "").strip()
+            try:
+                with zipfile.ZipFile(source) as z:
+                    count = sum(
+                        bool(re.fullmatch(r"ppt/slides/slide\d+\.xml", n))
+                        for n in z.namelist()
+                    )
+                if slide > count:
+                    detail = f"it has {count} slide{'s' * (count != 1)}"
+            except (zipfile.BadZipFile, OSError):
+                pass
+            raise ValueError(
+                f"LibreOffice didn't export slide {slide} from '{source}'"
+                + (f": {detail.splitlines()[-1]}" if detail else "")
+            )
+        pdf = pdfium.PdfDocument(exported)
+        try:
+            page = pdf[0]
+            width, height = page.get_size()
+            # The slide's background covers the whole page
+            bounds = [
+                b
+                for b in (
+                    o.get_bounds() for o in page.get_objects(max_depth=1)
+                )
+                if not (
+                    b[0] <= 0.5
+                    and b[1] <= 0.5
+                    and b[2] >= width - 0.5
+                    and b[3] >= height - 0.5
+                )
+            ]
+            if trim and bounds:
+                box = (
+                    min(b[0] for b in bounds),
+                    min(b[1] for b in bounds),
+                    max(b[2] for b in bounds),
+                    max(b[3] for b in bounds),
+                )
+                page.set_mediabox(*box)
+                page.set_cropbox(*box)
+            if output.lower().endswith(".pdf"):
+                pdf.save(output)
+                settle(output)
+            else:
+                page.render(scale=(dpi or 300) / 72).to_pil().save(output)
+        finally:
+            pdf.close()
+
+
 @export_app.command(name="inkscape", help="Export a figure from an SVG.")
 def export_inkscape(
     source: Annotated[str, typer.Argument(help="SVG to export from.")],
@@ -135,5 +264,40 @@ def export_gimp(
 ) -> None:
     try:
         gimp(source, output)
+    except ValueError as e:
+        raise_error(str(e))
+
+
+@export_app.command(
+    name="powerpoint",
+    help="Export a slide from a PowerPoint file with LibreOffice.",
+)
+def export_powerpoint(
+    source: Annotated[
+        str, typer.Argument(help="PowerPoint file to export from.")
+    ],
+    output: Annotated[
+        str,
+        typer.Option(
+            "--output", "-o", help="File to export to, a PDF or PNG."
+        ),
+    ],
+    slide: Annotated[
+        int, typer.Option("--slide", help="Slide to export, from 1.")
+    ] = 1,
+    dpi: Annotated[
+        int | None,
+        typer.Option("--dpi", help="Resolution of a PNG (default 300)."),
+    ] = None,
+    trim: Annotated[
+        bool,
+        typer.Option(
+            "--trim/--no-trim",
+            help="Crop to what's drawn on the slide.",
+        ),
+    ] = True,
+) -> None:
+    try:
+        powerpoint(source, output, slide=slide, dpi=dpi, trim=trim)
     except ValueError as e:
         raise_error(str(e))

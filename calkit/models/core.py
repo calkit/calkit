@@ -606,6 +606,15 @@ PublicationKind = Literal[
 ]
 
 
+class PublicationReview(Model):
+    """A review of a publication, e.g., by a peer reviewer."""
+
+    path: str = Field(
+        description="Path to the review, a Markdown file whose comments are "
+        'numbered items under a heading containing "comments".'
+    )
+
+
 class Publication(_CalkitObject):
     """A publication the project produced, or one it builds upon.
 
@@ -631,6 +640,11 @@ class Publication(_CalkitObject):
     # was got from here, the same way a dataset does.
     imported_from: ImportedFromType | None = Field(
         default=None, description=_IMPORTED_FROM_DESCRIPTION
+    )
+    reviews: list[PublicationReview] = Field(
+        default_factory=list,
+        description="Reviews of this publication, whether written in this "
+        "project or received.",
     )
 
     @model_validator(mode="before")

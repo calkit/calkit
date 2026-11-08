@@ -946,16 +946,27 @@ def new_question(
 
 @new_app.command(name="comment")
 def new_comment(
-    path: Annotated[str, typer.Argument(help="File to comment in.")],
-    line: Annotated[
-        int,
-        typer.Option(
-            "--line",
-            "-l",
-            help="A line in, or just above, the paragraph to comment on.",
+    path: Annotated[
+        str,
+        typer.Argument(
+            help="File to comment in, or a PDF, whose comments go in its "
+            "review file."
         ),
     ],
     text: Annotated[str, typer.Option("--text", "-m", help="The comment.")],
+    line: Annotated[
+        int | None,
+        typer.Option(
+            "--line",
+            "-l",
+            help="A line in, or just above, the paragraph to comment on; for "
+            "a PDF, the line number printed in its margin, if any.",
+        ),
+    ] = None,
+    page: Annotated[
+        int | None,
+        typer.Option("--page", help="For a PDF, the page it's about."),
+    ] = None,
     highlight: Annotated[
         str | None,
         typer.Option(
@@ -981,7 +992,14 @@ def new_comment(
     ] = False,
 ) -> None:
     """Start a review comment thread above a paragraph of a LaTeX or
-    Markdown document, printing its ID."""
+    Markdown document, printing its ID.
+
+    A comment on a PDF is added to the publication's review file instead,
+    as a numbered item saying where it's about, e.g., Page 3, line 120
+    ("quoted text"), so it can be pasted into a journal's review form.
+    The review file is listed in calkit.yaml and made beside the PDF if
+    there isn't one.
+    """
     import json
 
     import calkit.latex
@@ -989,6 +1007,36 @@ def new_comment(
 
     if not os.path.isfile(path):
         raise_error(f"{path} does not exist")
+    if path.lower().endswith(".pdf"):
+        import calkit.reviews
+
+        review = calkit.reviews.ensure_review(path)
+        comment = calkit.reviews.ReviewComment(
+            text=text, page=page, line=line, quote=highlight or None
+        )
+        review_lines = (
+            pathlib.Path(review).read_text(encoding="utf-8").split("\n")
+        )
+        review_lines = calkit.reviews.add(review_lines, comment)
+        pathlib.Path(review).write_text(
+            "\n".join(review_lines), encoding="utf-8"
+        )
+        ordinal = next(
+            i
+            for i, c in enumerate(calkit.reviews.parse(review_lines), 1)
+            if c.lineno == comment.lineno
+        )
+        if as_json:
+            typer.echo(
+                json.dumps(
+                    calkit.reviews.to_dict(review, ordinal, comment), indent=2
+                )
+            )
+        else:
+            typer.echo(f"{review}:{comment.lineno}")
+        return
+    if line is None:
+        raise_error("--line is required, except for a PDF")
     lines = pathlib.Path(path).read_text(encoding="utf-8").split("\n")
     tc = calkit.latex.TexComment(
         [comment_entry(text, author, email)],

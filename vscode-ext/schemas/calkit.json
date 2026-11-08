@@ -7134,6 +7134,14 @@
           "title": "Path",
           "type": "string"
         },
+        "reviews": {
+          "description": "Reviews of this publication, whether written in this project or received.",
+          "items": {
+            "$ref": "#/$defs/PublicationReview"
+          },
+          "title": "Reviews",
+          "type": "array"
+        },
         "stage": {
           "anyOf": [
             {
@@ -7236,6 +7244,21 @@
         "path"
       ],
       "title": "PublicationEvidence",
+      "type": "object"
+    },
+    "PublicationReview": {
+      "description": "A review of a publication, e.g., by a peer reviewer.",
+      "properties": {
+        "path": {
+          "description": "Path to the review, a Markdown file whose comments are numbered items under a heading containing \"comments\".",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "PublicationReview",
       "type": "object"
     },
     "PythonScriptDiffFilter": {

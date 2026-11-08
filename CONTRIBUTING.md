@@ -83,7 +83,6 @@ This guide will help you get started.
   - No blank lines inside functions/methods
   - Type hints required for all functions
   - NumPy-style docstrings
-  <!-- TODO: needs human review -->
   - A subclass lives in the module of the class it extends, unless that
     class is written to be subclassed, e.g., `calkit.models.base.Model`,
     or comes from another package

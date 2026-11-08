@@ -88,8 +88,6 @@ respectively.
 Never create `helpers` or `utils` modules or packages--tight coupling and
 low cohesion architecture.
 
-<!-- TODO: needs human review -->
-
 Keep a subclass in the module of the class it extends,
 so a class's variants are found where it's defined.
 The only exceptions are classes written to be subclassed,

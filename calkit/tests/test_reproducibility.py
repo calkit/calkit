@@ -276,6 +276,16 @@ def test_check_reproducibility(tmp_dir):
         "script_path": "scripts/fit.py",
         "environment": "py",
     }
+    # One named relative to its working directory is found there
+    ck_info["pipeline"]["stages"]["wake"] = {
+        "kind": "python-script",
+        "wdir": "analysis",
+        "script_path": "wake.py",
+        "environment": "py",
+    }
+    os.makedirs("analysis", exist_ok=True)
+    with open("analysis/wake.py", "w") as f:
+        f.write('open("/Users/me/Box/wake.csv")\n')
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     with open("scripts/fit.py", "w") as f:
@@ -306,17 +316,18 @@ def test_check_reproducibility(tmp_dir):
         os.chdir(wdir)
     assert sorted(res.paths_outside_project) == [
         "analysis.ipynb reads ~/Desktop/notes.txt",
+        "analysis/wake.py reads /Users/me/Box/wake.csv",
         "scripts/fit.py reads /Users/me/Box/runs.csv",
         "scripts/fit.py writes ../shared/fit.csv",
     ]
-    assert "outside the project used by pipeline scripts: 3" in (
+    assert "outside the project used by pipeline scripts: 4" in (
         res.to_pretty()
     )
     assert "outside" in res.categories_with_detail
     rec = ReproCheck.model_validate(
         good | {"paths_outside_project": res.paths_outside_project}
     ).recommendation
-    assert "3 files outside the project" in rec  # type: ignore
+    assert "4 files outside the project" in rec  # type: ignore
 
 
 def test_check_call():

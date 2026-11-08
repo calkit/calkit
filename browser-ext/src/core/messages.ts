@@ -134,6 +134,15 @@ export type Request =
       shows?: string;
       /** Which of the script's outputs that is. */
       produces?: string;
+      /**
+       * Data it reads from outside the project, to read from the project
+       * instead, with any files uploaded, base64-encoded.
+       */
+      data?: {
+        external: string;
+        path: string;
+        files: { path: string; content: string }[];
+      }[];
       save?: boolean;
     }
   | {

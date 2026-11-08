@@ -5990,6 +5990,40 @@ export type Result = {
 }
 
 /**
+ * ScriptData
+ *
+ * Data a script reads from outside the project, and its place in it.
+ */
+export type ScriptData = {
+  /**
+   * External
+   */
+  external: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Files
+   */
+  files?: Array<ScriptDataFile>
+}
+
+/**
+ * ScriptDataFile
+ */
+export type ScriptDataFile = {
+  /**
+   * Path
+   */
+  path?: string
+  /**
+   * Content
+   */
+  content: string
+}
+
+/**
  * SearchResultItem
  */
 export type SearchResultItem = {
@@ -6205,6 +6239,10 @@ export type StageFromScriptOrNotebookPost = {
    */
   produces?: string | null
   /**
+   * Data
+   */
+  data?: Array<ScriptData>
+  /**
    * Save
    */
   save?: boolean
@@ -6258,6 +6296,10 @@ export type StageFromScriptOrNotebookResponse = {
    * External Inputs
    */
   external_inputs?: Array<string>
+  /**
+   * Rewritten
+   */
+  rewritten?: Array<string>
   /**
    * Produces
    */

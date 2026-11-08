@@ -149,6 +149,67 @@ def test_tolerate_lock_release_failures(tmp_dir, caplog):
         zc.lockfile._unlock_file = original
 
 
+def test_tolerate_purged_rwlock_entries(
+    tmp_dir: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    import sys
+
+    import dvc.rwlock
+
+    # Importing calkit.dvc installs the patch
+    import calkit.dvc  # noqa: F401
+
+    ours = {"pid": 1, "cmd": "dvc repro s@a"}
+    theirs = {"pid": 2, "cmd": "dvc repro s@b"}
+    lock = {
+        "write": {"a.txt": ours, "b.txt": theirs},
+        "read": {"dep.txt": [ours, theirs], "a.txt": [ours]},
+    }
+    # Releasing entries that are still there removes only ours
+    with caplog.at_level(logging.WARNING, logger="calkit.dvc"):
+        dvc.rwlock._release_write(lock, ours, ["a.txt"])
+        dvc.rwlock._release_read(lock, ours, ["dep.txt", "a.txt"])
+    assert lock == {"write": {"b.txt": theirs}, "read": {"dep.txt": [theirs]}}
+    assert not caplog.records
+    # Entries another process already removed are skipped with a warning
+    # rather than failing a bare assert
+    with caplog.at_level(logging.WARNING, logger="calkit.dvc"):
+        dvc.rwlock._release_write(lock, ours, ["a.txt"])
+        dvc.rwlock._release_read(lock, ours, ["dep.txt", "a.txt"])
+        dvc.rwlock._release_write({}, ours, ["a.txt"])
+        dvc.rwlock._release_read({}, ours, ["a.txt"])
+    assert lock == {"write": {"b.txt": theirs}, "read": {"dep.txt": [theirs]}}
+    assert len(caplog.records) == 4
+    assert "removed DVC's lock on 'a.txt'" in caplog.records[0].getMessage()
+    # A stage whose entries are purged mid-run, as a DVC process on another
+    # machine does since it can't see our PID, still succeeds and is recorded
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    with open("purge.py", "w") as f:
+        f.write(
+            "import json\n"
+            "with open('.dvc/tmp/rwlock', 'w') as f:\n"
+            "    json.dump({}, f)\n"
+            "with open('out.txt', 'w') as f:\n"
+            "    f.write('sup')\n"
+        )
+    py = sys.executable.replace("\\", "/")
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  purged:\n"
+            f"    cmd: '\"{py}\" purge.py'\n"
+            "    deps:\n"
+            "      - purge.py\n"
+            "    outs:\n"
+            "      - out.txt\n"
+        )
+    assert calkit.dvc.run_dvc_command(["repro"]) == 0
+    with open("dvc.lock") as f:
+        lock_file = calkit.ryaml.load(f)
+    assert lock_file["stages"]["purged"]["outs"][0]["path"] == "out.txt"
+
+
 def test_memoized_hashes(tmp_dir, monkeypatch):
     from dvc.output import Output
 

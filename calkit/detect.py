@@ -725,6 +725,56 @@ def _resolve_variable_in_call(
     return None
 
 
+def rewrite_paths(text: str, moves: dict[str, str]) -> tuple[str, list[str]]:
+    """Point the paths a script or notebook names at new ones, e.g., data
+    outside the project at its copy inside, returning the new text and the
+    old paths that were found.
+
+    A path is only found written out whole in one string, e.g.,
+    ``"/data/runs/"``, not put together from pieces, and anything after it
+    in the string is kept, e.g., a file in a moved folder. New paths can't
+    have quotes or backslashes, which each kind of string escapes
+    differently.
+    """
+
+    def relocate(match: re.Match, new: str, sep: str | None) -> str:
+        rest: str = match[1]
+        if sep is None:
+            return new + rest
+        # The rest of a Windows path gets slashes too, so it's found on
+        # Linux, but not a backslash escaping the closing quote
+        tail = "\\" if sep == "\\" and rest.endswith("\\") else ""
+        return new + rest[: len(rest) - len(tail)].replace(sep, "/") + tail
+
+    for new in moves.values():
+        if re.search(r"['\"\\]", new):
+            raise ValueError(f"{new} can't have quotes or backslashes")
+    found = []
+    # Longest first, so a file is moved as itself rather than with its folder
+    for old in sorted(moves, key=len, reverse=True):
+        count = 0
+        # As written, with Windows separators escaped or as slashes, and
+        # escaped again in a notebook's JSON
+        seps: dict[str, str | None] = {}
+        for written_sep in ("\\", "/", "\\" * 2, "\\" * 4):
+            seps.setdefault(
+                old.replace("\\", written_sep),
+                written_sep if "\\" in old else None,
+            )
+        for written, sep in seps.items():
+            text, n = re.subn(
+                r"(?<=['\"])"
+                + re.escape(written)
+                + r"(?=[/\\'\"])([^'\"\n]*)",
+                lambda m, new=moves[old], sep=sep: relocate(m, new, sep),
+                text,
+            )
+            count += n
+        if count:
+            found.append(old)
+    return text, found
+
+
 def filter_covered_inputs(
     detected: Iterable[str], existing: Iterable[str]
 ) -> list[str]:

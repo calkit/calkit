@@ -142,10 +142,10 @@ pipeline:
     export-diagram:
       kind: pptx-export
       source_path: figures/src/diagram.pptx
-      slides: 2
       environment: libreoffice
       outputs:
-        - paper/diagram.pdf
+        - path: paper/diagram.pdf
+          slide: 2
     export-photo:
       kind: manual-step
       message: In Photoshop, export paper/photo.png

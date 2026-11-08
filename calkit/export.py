@@ -277,7 +277,7 @@ def export_stage(source: str, output: str, app: str | None = None) -> dict:
         }
         # A figure from a deck is one slide, the first until someone says
         if exporter.kind == "pptx-export":
-            stage["slides"] = 1
+            stage["outputs"] = [{"path": output, "slide": 1}]
         return stage
     app = (app or "").strip()
     stage = {

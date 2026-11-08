@@ -163,14 +163,16 @@ def test_export_slides(
         )
     # What it can export from and to, and where
     cases: list[tuple[dict[str, Any], str]] = [
-        (dict(source="a.key", output="a.pdf"), "from a PowerPoint file"),
-        (dict(output="a.svg"), "not 'a.svg'"),
-        (dict(output="a.pdf", slides=[0]), "numbered from 1"),
-        (dict(output="a.pdf", slides=[8]), "has 7 slides"),
-        (dict(output="a.png", slides=[3, 5]), "Several slides go into one"),
-        (dict(output="a.pdf", env="nope"), "no environment named 'nope'"),
-        (dict(output="a.pdf", env="py"), "in a uv environment"),
-        (dict(output="a.pdf", env="plain"), "requires neither"),
+        (dict(source="a.key", outputs=[([1], "a.pdf")]), "a PowerPoint file"),
+        (dict(outputs=[([1], "a.svg")]), "not 'a.svg'"),
+        (dict(outputs=[]), "Say what to export"),
+        (dict(outputs=[([0], "a.pdf")]), "numbered from 1"),
+        (dict(outputs=[([8], "a.pdf")]), "has 7 slides"),
+        (dict(outputs=[([3, 5], "a.png")]), "'a.png' can show one slide"),
+        (dict(outputs=[(None, "a.png")]), "'a.png' can show one slide"),
+        (dict(outputs=[(None, "a.pdf")], env="nope"), "no environment named"),
+        (dict(outputs=[(None, "a.pdf")], env="py"), "in a uv environment"),
+        (dict(outputs=[(None, "a.pdf")], env="plain"), "requires neither"),
     ]
     for kwargs, error in cases:
         with pytest.raises(ValueError, match=error):
@@ -180,11 +182,12 @@ def test_export_slides(
     assert not os.path.exists("a.pdf")
     # The diagram, cropped to what's drawn, through the command its stage
     # runs, the same each time it's exported
-    stage = PptxExportStage(
-        source_path="slides.pptx",
-        outputs=["figs/setup.pdf"],
-        slides=3,
-        environment="lo",
+    stage = PptxExportStage.model_validate(
+        dict(
+            source_path="slides.pptx",
+            outputs=[{"path": "figs/setup.pdf", "slide": 3}],
+            environment="lo",
+        )
     )
     exported = []
     for _ in range(2):
@@ -200,39 +203,46 @@ def test_export_slides(
         "libreoffice_version": LIBREOFFICE.version()
     }
     # As a PNG, at 300 DPI unless asked
-    export("slides.pptx", "-o", "setup.png", "--slides", "3")
+    export("slides.pptx", "-o", "3=setup.png")
     assert Image.open("setup.png").size == (
         pytest.approx(width * 300 / 72, abs=2),
         pytest.approx(height * 300 / 72, abs=2),
     )
-    # A file per slide, each cropped to what's drawn on it: the whole photo
-    # under its label, the picture as cropped and the shape as far as the
-    # slide's edge, and the small shape without the slide's number
-    export("slides.pptx", "-o", "figs/s-{slide}.png", "--slides", "2,5-7")
-    export("slides.pptx", "-o", "figs/s-{slide}.png", "--slides", "2,5-7")
+    # A file per slide from one run, each cropped to what's drawn on it:
+    # the hidden slide, the whole photo under its label, the picture as
+    # cropped and the shape as far as the slide's edge, and the small shape
+    # without the slide's number, beside a PDF of two of them and the whole
+    # deck, uncropped
+    specs = [f"{n}=figs/s-{n}.png" for n in (2, 5, 6, 7)]
+    specs += ["7,3=two.pdf", "talk.pdf"]
+    export("slides.pptx", *[a for spec in specs for a in ("-o", spec)])
     sizes = {n: Image.open(f"figs/s-{n}.png").size for n in (2, 5, 6, 7)}
     assert sizes[2][0] < 300 * 960 / 72
     assert sizes[5] == (pytest.approx(4000, abs=1), 2250)
     assert sizes[6][0] == pytest.approx(660 * 300 / 72, abs=10)
     assert sizes[7][0] < 120 * 300 / 72 and sizes[7][1] < 120 * 300 / 72
-    # Every slide into one PDF, uncropped, hidden ones too, unless asked
-    export("slides.pptx", "-o", "talk.pdf")
+    assert pdf_sizes("two.pdf") == [(960.0, 540.0)] * 2
     assert pdf_sizes("talk.pdf") == [(960.0, 540.0)] * 7
-    export("slides.pptx", "-o", "talk.pdf", "--slides", "3,7", "--trim")
-    assert [w < 500 for w, _ in pdf_sizes("talk.pdf")] == [True, True]
-    export("slides.pptx", "-o", "whole.png", "--slides", "2", "--no-trim")
+    # unless asked otherwise
+    export("slides.pptx", "-o", "3,7=two.pdf", "--trim")
+    assert [w < 500 for w, _ in pdf_sizes("two.pdf")] == [True, True]
+    export("slides.pptx", "-o", "2=whole.png", "--no-trim")
     assert Image.open("whole.png").size == (pytest.approx(4000, abs=1), 2250)
     result = CliRunner().invoke(
-        app, ["export", "pptx", "slides.pptx", "-o", "a.pdf", "--slides", "x"]
+        app, ["export", "pptx", "slides.pptx", "-o", "4-=a.pdf"]
     )
     assert result.exit_code != 0 and "should list slides" in result.output
     # PowerPoint, when it's here, crops the same, and says its version
     if POWERPOINT.find_executable() is not None and sys.platform != "linux":
-        stage = PptxExportStage(
-            source_path="slides.pptx",
-            outputs=["ppt/s-{slide}.pdf"],
-            slides=[2, 3],
-            environment="ppt",
+        stage = PptxExportStage.model_validate(
+            dict(
+                source_path="slides.pptx",
+                outputs=[
+                    {"path": "ppt/s-2.pdf", "slide": 2},
+                    {"path": "ppt/s-3.pdf", "slide": 3},
+                ],
+                environment="ppt",
+            )
         )
         result = CliRunner().invoke(app, shlex.split(stage.dvc_cmd)[1:])
         assert result.exit_code == 0, result.output
@@ -254,7 +264,7 @@ def test_export_slides(
     ):
         with open("calkit.yaml", "a") as yaml_file:
             yaml_file.write(f"  img: {{kind: docker, image: '{image}'}}\n")
-        export("slides.pptx", "-o", "img.pdf", "--slides", "3", "-e", "img")
+        export("slides.pptx", "-o", "3=img.pdf", "-e", "img")
         [(w, h)] = pdf_sizes("img.pdf")
         assert w == pytest.approx(width, abs=2)
         assert not [p for p in os.listdir(".calkit") if p.startswith("tmp-")]
@@ -262,7 +272,7 @@ def test_export_slides(
     monkeypatch.setattr(LIBREOFFICE, "executables", ["calkit-test-no-soffice"])
     monkeypatch.setattr(POWERPOINT, "executables", ["calkit-test-no-ppt"])
     with pytest.raises(ValueError, match="needs LibreOffice or PowerPoint"):
-        calkit.cli.export.export_slides("slides.pptx", "a.pdf")
+        calkit.cli.export.export_slides("slides.pptx", [(None, "a.pdf")])
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Fake app is a script")

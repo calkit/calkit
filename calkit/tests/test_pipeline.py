@@ -4737,8 +4737,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     ck_info["pipeline"]["stages"]["slide"] = {
         "kind": "pptx-export",
         "source_path": "made/setup.pptx",
-        "outputs": ["made/setup.pdf"],
-        "slides": 1,
+        "outputs": [{"path": "made/setup.pdf", "slide": 1}],
     }
     monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
     monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])

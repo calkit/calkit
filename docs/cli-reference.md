@@ -2997,13 +2997,12 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                                                                  |
-| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
-| `--output`, `-o`      | str     | yes      |         | PDF or PNG to export to, with {slide} in its name for a file per slide.      |
-| `--slides`            | str     | no       |         | Slides to export, e.g., '3' or '2,4-6' (default all).                        |
-| `--dpi`               | int     | no       |         | Resolution of a PNG (default 300).                                           |
-| `--trim`, `--no-trim` | boolean | no       |         | Crop to what's drawn on each slide (default unless several go into one PDF). |
-| `--env`, `-e`         | str     | no       |         | Environment whose app exports them (default the system).                     |
+| Option                | Type    | Required | Default | Description                                                                                                                          |
+| --------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--output`, `-o`      | str     | yes      |         | File to export to, after the slides it shows, e.g., '3=figures/setup.png' or '2,4-6=talk.pdf'; a PDF without them shows every slide. |
+| `--dpi`               | int     | no       |         | Resolution of a PNG (default 300).                                                                                                   |
+| `--trim`, `--no-trim` | boolean | no       |         | Crop to what's drawn on each slide (default unless a PDF shows several).                                                             |
+| `--env`, `-e`         | str     | no       |         | Environment whose app exports them (default the system).                                                                             |
 
 <a id="command-group-update"></a>
 

@@ -6664,27 +6664,20 @@
           "title": "Name"
         },
         "outputs": {
-          "anyOf": [
-            {
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "$ref": "#/$defs/PathOutput"
-                  }
-                ]
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
           "default": [],
-          "description": "Paths this stage produces.",
-          "title": "Outputs"
+          "description": "Files to export, each with the slide it shows, e.g., {path: figures/setup.png, slide: 3}. A PDF without one shows every slide.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SlideOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
         },
         "requirements": {
           "default": [],
@@ -6755,25 +6748,6 @@
           "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
-        "slides": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "items": {
-                "type": "integer"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "The slide or slides to export, numbered from 1 and counting hidden ones; all of them if not given. Several go into one PDF, or a file each if the output has '{slide}' in its name.",
-          "title": "Slides"
-        },
         "slurm": {
           "anyOf": [
             {
@@ -6802,7 +6776,7 @@
             }
           ],
           "default": null,
-          "description": "Crop each slide to what's drawn on it, which it does unless several go into one PDF.",
+          "description": "Crop each slide to what's drawn on it, which it does unless a PDF shows several.",
           "title": "Trim"
         },
         "wdir": {
@@ -10601,6 +10575,65 @@
         "date"
       ],
       "title": "SignOff",
+      "type": "object"
+    },
+    "SlideOutput": {
+      "additionalProperties": false,
+      "description": "A file exported from slides, and which ones it shows.",
+      "properties": {
+        "delete_before_run": {
+          "default": true,
+          "description": "Delete this output before the stage runs.",
+          "title": "Delete Before Run",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "Path to the output file or directory.",
+          "title": "Path",
+          "type": "string"
+        },
+        "slide": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The slide it shows, numbered from 1 and counting hidden ones, or a list for a PDF of several; every slide if not given, which only a PDF can show.",
+          "title": "Slide"
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc",
+                "dvc-zip"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store this output. Use null to leave it untracked.",
+          "title": "Storage"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SlideOutput",
       "type": "object"
     },
     "SlurmEnvironment": {

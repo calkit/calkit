@@ -160,22 +160,25 @@ def test_appexportstage():
     assert s.to_dvc()["cmd"] == (
         "calkit export gimp figures/src/photo.xcf -o paper/photo.tif"
     )
-    slide = PptxExportStage(
-        source_path="figures/src/lab setup.pptx",
-        outputs=["paper/setup.pdf"],
-        slides=2,
+    slide = PptxExportStage.model_validate(
+        dict(
+            source_path="figures/src/lab setup.pptx",
+            outputs=[{"path": "paper/setup.pdf", "slide": 2}],
+        )
     )
     assert slide.to_dvc()["cmd"] == (
-        "calkit export pptx 'figures/src/lab setup.pptx' "
-        "-o paper/setup.pdf --slides 2"
+        "calkit export pptx 'figures/src/lab setup.pptx' -o 2=paper/setup.pdf"
     )
-    # A file per slide is an output each, and the environment says which
-    # app exports them
+    # A file per slide, each its own output, a PDF of several, and the
+    # environment that says which app exports them
     slides = PptxExportStage.model_validate(
         dict(
             source_path="setup.pptx",
-            outputs=[{"path": "figs/s-{slide}.png", "storage": "git"}],
-            slides=[5, 3, 3],
+            outputs=[
+                {"path": "figs/panel a.png", "slide": 5, "storage": "git"},
+                {"path": "figs/b.png", "slide": 3},
+                {"path": "figs/both.pdf", "slide": [7, 3, 7]},
+            ],
             dpi=150,
             trim=False,
             environment="libreoffice",
@@ -183,11 +186,14 @@ def test_appexportstage():
     )
     sd = slides.to_dvc()
     assert sd["cmd"] == (
-        "calkit export pptx setup.pptx -o 'figs/s-{slide}.png' "
-        "--slides 3,5 --dpi 150 --no-trim --env libreoffice"
+        "calkit export pptx setup.pptx -o '5=figs/panel a.png' "
+        "-o 3=figs/b.png -o 7,3=figs/both.pdf --dpi 150 --no-trim "
+        "--env libreoffice"
     )
     assert sd["outs"] == [
-        {f"figs/s-{n}.png": {"cache": False, "persist": False}} for n in (3, 5)
+        {"figs/panel a.png": {"cache": False, "persist": False}},
+        {"figs/b.png": {"cache": True, "persist": False}},
+        {"figs/both.pdf": {"cache": True, "persist": False}},
     ]
     # Every slide into one PDF
     deck = PptxExportStage(source_path="talk.pptx", outputs=["talk.pdf"])
@@ -203,18 +209,24 @@ def test_appexportstage():
         (PptxExportStage, dict(source_path="a.key"), "PowerPoint file"),
         (
             PptxExportStage,
-            dict(source_path="a.pptx", slides=0, outputs=["a.pdf"]),
+            dict(
+                source_path="a.pptx", outputs=[{"path": "a.pdf", "slide": 0}]
+            ),
             "numbered from 1",
         ),
         (
             PptxExportStage,
-            dict(source_path="a.pptx", slides=[1, 2]),
-            "Several slides go into one PDF",
+            dict(
+                source_path="a.pptx",
+                outputs=[{"path": "a.png", "slide": [1, 2]}],
+            ),
+            "'a.png' can show one slide",
         ),
+        (PptxExportStage, dict(source_path="a.pptx"), "can show one slide"),
         (
             PptxExportStage,
-            dict(source_path="a.pptx", outputs=["s-{slide}.png"]),
-            "needs the slides listed",
+            dict(source_path="a.pptx", outputs=[]),
+            "at least one output",
         ),
     ]:
         with pytest.raises(ValidationError, match=error):

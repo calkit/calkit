@@ -42,7 +42,11 @@ def test_export_stage():
     ]:
         stage = calkit.export.export_stage(source, output, app=app)
         assert stage["kind"] == kind, (source, output, app)
-        assert stage["outputs"] == [output]
+        # A deck's starts at its first slide
+        expected: list = [output]
+        if kind == "pptx-export":
+            expected = [{"path": output, "slide": 1}]
+        assert stage["outputs"] == expected
         # What it makes is a stage calkit.yaml can have
         Pipeline.model_validate({"stages": {"export": stage}})
     assert calkit.export.export_stage(

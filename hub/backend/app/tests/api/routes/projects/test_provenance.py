@@ -97,9 +97,10 @@ def test_get_project_provenance(client: TestClient) -> None:
                     f"export-slide-{env}": {
                         "kind": "pptx-export",
                         "source_path": "figs/slides.pptx",
-                        "slides": 1,
                         "environment": env,
-                        "outputs": [f"paper/slide-{env}.pdf"],
+                        "outputs": [
+                            {"path": f"paper/slide-{env}.pdf", "slide": 1}
+                        ],
                     }
                     for env in ["lo", "ppt", "_system"]
                 },

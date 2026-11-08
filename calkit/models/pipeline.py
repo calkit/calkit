@@ -2467,6 +2467,17 @@ class GimpExportStage(AppExportStage):
         )
 
 
+class SlideOutput(PathOutput):
+    """A file exported from slides, and which ones it shows."""
+
+    slide: int | list[int] | None = Field(
+        default=None,
+        description="The slide it shows, numbered from 1 and counting hidden "
+        "ones, or a list for a PDF of several; every slide if not given, "
+        "which only a PDF can show.",
+    )
+
+
 class PptxExportStage(AppExportStage):
     """Figures exported from slides in a PowerPoint file, e.g., PDFs or
     PNGs, each cropped to what's drawn on it.
@@ -2482,11 +2493,11 @@ class PptxExportStage(AppExportStage):
     source_path: RelativeChildPathString = Field(
         description="The PowerPoint file to export from."
     )
-    slides: int | list[int] | None = Field(
-        default=None,
-        description="The slide or slides to export, numbered from 1 and "
-        "counting hidden ones; all of them if not given. Several go into "
-        "one PDF, or a file each if the output has '{slide}' in its name.",
+    outputs: list[str | SlideOutput] = Field(  # type: ignore[assignment]
+        default=[],
+        description="Files to export, each with the slide it shows, e.g., "
+        "{path: figures/setup.png, slide: 3}. A PDF without one shows "
+        "every slide.",
     )
     dpi: int | None = Field(
         default=None, description="Resolution of an exported PNG."
@@ -2494,55 +2505,44 @@ class PptxExportStage(AppExportStage):
     trim: bool | None = Field(
         default=None,
         description="Crop each slide to what's drawn on it, which it does "
-        "unless several go into one PDF.",
+        "unless a PDF shows several.",
     )
 
     @property
-    def slide_numbers(self) -> list[int] | None:
-        if self.slides is None:
-            return None
-        if isinstance(self.slides, int):
-            return [self.slides]
-        return sorted(set(self.slides))
+    def slide_outputs(self) -> list[tuple[list[int] | None, str]]:
+        """Each output's slides, or ``None`` for every one, and its path."""
+        outs: list[tuple[list[int] | None, str]] = []
+        for out in self.outputs:
+            if isinstance(out, str) or out.slide is None:
+                outs.append((None, out if isinstance(out, str) else out.path))
+            else:
+                slides = (
+                    [out.slide] if isinstance(out.slide, int) else out.slide
+                )
+                outs.append((list(dict.fromkeys(slides)), out.path))
+        return outs
+
+    @model_validator(mode="after")
+    def _check_one_output(self) -> "PptxExportStage":
+        if not self.outputs:
+            raise ValueError("A slide export has at least one output")
+        return self
 
     @model_validator(mode="after")
     def _check_paths(self) -> "PptxExportStage":
         from calkit.export import LIBREOFFICE
 
-        numbers = self.slide_numbers
-        if numbers is not None and (not numbers or min(numbers) < 1):
-            raise ValueError("Slides are numbered from 1")
-        out = self.output_path
-        LIBREOFFICE.check(self.source_path, out.replace("{slide}", "1"))
-        if "{slide}" in out:
-            if numbers is None:
+        for slides, path in self.slide_outputs:
+            LIBREOFFICE.check(self.source_path, path)
+            if slides is not None and (not slides or min(slides) < 1):
+                raise ValueError("Slides are numbered from 1")
+            if (
+                slides is None or len(slides) != 1
+            ) and not path.lower().endswith(".pdf"):
                 raise ValueError(
-                    "A file per slide needs the slides listed, so the "
-                    "pipeline knows what it makes"
+                    f"'{path}' can show one slide, so give it a 'slide'"
                 )
-        elif (
-            numbers is None or len(numbers) > 1
-        ) and not out.lower().endswith(".pdf"):
-            raise ValueError(
-                "Several slides go into one PDF, or a file each with "
-                "{slide} in the output's name"
-            )
         return self
-
-    @property
-    def dvc_outs(self) -> list[str | dict]:
-        outs: list[str | dict] = []
-        for out in super().dvc_outs:
-            path = out if isinstance(out, str) else next(iter(out))
-            if "{slide}" not in path:
-                outs.append(out)
-                continue
-            for n in self.slide_numbers or []:
-                each = path.replace("{slide}", str(n))
-                outs.append(
-                    each if isinstance(out, str) else {each: out[path]}
-                )
-        return outs
 
     @property
     def dvc_cmd(self) -> str:
@@ -2556,12 +2556,14 @@ class PptxExportStage(AppExportStage):
                     f"provides, not '{self.environment}'"
                 )
             cmd = self.xenv_cmd + " "
-        cmd += (
-            f"calkit export pptx {shlex.quote(self.source_path)} "
-            f"-o {shlex.quote(self.output_path)}"
-        )
-        if self.slide_numbers is not None:
-            cmd += " --slides " + ",".join(str(n) for n in self.slide_numbers)
+        cmd += f"calkit export pptx {shlex.quote(self.source_path)}"
+        for slides, path in self.slide_outputs:
+            spec = (
+                path
+                if slides is None
+                else f"{','.join(map(str, slides))}={path}"
+            )
+            cmd += f" -o {shlex.quote(spec)}"
         if self.dpi is not None:
             cmd += f" --dpi {self.dpi}"
         if self.trim is not None:

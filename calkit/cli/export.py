@@ -106,19 +106,19 @@ def export_with_gimp(source: str, output: str) -> None:
 
 def export_slides(
     source: str,
-    output: str,
-    slides: list[int] | None = None,
+    outputs: list[tuple[list[int] | None, str]],
     dpi: int | None = None,
     trim: bool | None = None,
     env: str = "_system",
 ) -> None:
-    """Export slides to the format ``output``'s extension names, with the
-    app ``env`` provides, raising ``ValueError`` if they can't be.
+    """Export slides with the app ``env`` provides, raising ``ValueError``
+    if they can't be.
 
-    Every slide unless ``slides`` says which, numbered from 1 and counting
-    hidden ones. Several go into one PDF, or a file each if ``output`` has
-    ``{slide}`` in it. Each is cropped to what's drawn on it unless
-    ``trim`` is false, which it is by default for several in one PDF.
+    Each output is the slides it shows, numbered from 1 and counting hidden
+    ones, or every slide for ``None``, and the file, in the format its
+    extension names. A PNG shows one slide, and a PDF any number. Each is
+    cropped to what's drawn on it unless ``trim`` is false, which it is by
+    default for a PDF of several.
     """
     import json
     import re
@@ -283,9 +283,31 @@ def export_slides(
             os.replace(pdf + ".tmp", pdf)
         return pdfs
 
-    LIBREOFFICE.check(source, output.replace("{slide}", "1"))
+    if not outputs:
+        raise ValueError("Say what to export the slides to")
+    for _, out in outputs:
+        LIBREOFFICE.check(source, out)
     if not os.path.isfile(source):
         raise ValueError(f"'{source}' doesn't exist")
+    # Which slides each shows
+    pres = Presentation(source)
+    every = list(range(1, len(pres.slides) + 1))
+    shown: list[tuple[list[int], str]] = []
+    for wanted, out in outputs:
+        wanted = list(dict.fromkeys(wanted)) if wanted is not None else every
+        for n in wanted:
+            if n < 1:
+                raise ValueError("Slides are numbered from 1")
+            pres.slide(n)
+        if len(wanted) != 1 and not out.lower().endswith(".pdf"):
+            raise ValueError(
+                f"'{out}' can show one slide, so say which, e.g., '3={out}'"
+            )
+        shown.append((wanted, out))
+    numbers = sorted({n for wanted, _ in shown for n in wanted})
+    trims = [
+        trim if trim is not None else len(wanted) == 1 for wanted, _ in shown
+    ]
     exporter, docker_env = get_slide_exporter(
         env, ck_info=None if env == "_system" else calkit.load_calkit_info()
     )
@@ -295,24 +317,7 @@ def export_slides(
             f"Exporting '{source}' needs {exporter.app} installed"
         )
     exe: str = found
-    # Which slides, and where each goes
-    pres = Presentation(source)
-    numbers = sorted(set(slides or range(1, len(pres.slides) + 1)))
-    for n in numbers:
-        if n < 1:
-            raise ValueError("Slides are numbered from 1")
-        pres.slide(n)
-    each = "{slide}" in output
-    single_pdf = not each and output.lower().endswith(".pdf")
-    if not each and not single_pdf and len(numbers) > 1:
-        raise ValueError(
-            "Several slides go into one PDF, or a file each with {slide} "
-            "in the output's name, e.g., 'figures/slide-{slide}.png'"
-        )
-    if trim is None:
-        trim = each or len(numbers) == 1
-    outputs = [output.replace("{slide}", str(n)) for n in numbers]
-    for out in outputs:
+    for _, out in shown:
         os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
         # What was there is from before, so it can't pass for a new export
         if os.path.exists(out):
@@ -338,57 +343,58 @@ def export_slides(
         decks = [os.path.join(work, "slides.pptx")]
         pres.show_hidden_slides()
         pres.save(decks[0])
-        if trim:
+        if any(trims):
             for n in numbers:
                 pres.clear_slide(n)
             decks.append(os.path.join(work, "blank.pptx"))
             pres.save(decks[1])
         pdfs = export_pdfs(decks)
         pdf = pdfium.PdfDocument(pdfs[0])
-        blank = pdfium.PdfDocument(pdfs[1]) if trim else None
+        blank = pdfium.PdfDocument(pdfs[1]) if any(trims) else None
         try:
-            for i in range(len(numbers)):
+            # Each slide's page, its whole box, and what's drawn on it
+            page_of = {n: i for i, n in enumerate(numbers)}
+            boxes = {}
+            crops = {}
+            for n, i in page_of.items():
                 page = pdf[i]
-                if blank is not None:
-                    # Rendered finely enough to place the edge within a
-                    # quarter point
-                    scale = 4
-                    drawn = page.render(scale=scale).to_pil().convert("RGB")
-                    empty = blank[i].render(scale=scale).to_pil()
-                    box = (
-                        ImageChops.difference(drawn, empty.convert("RGB"))
-                        .convert("L")
-                        .point(lambda v: 255 if v > 16 else 0)
-                        .getbbox()
+                boxes[n] = tuple(page.get_cropbox())
+                crops[n] = boxes[n]
+                if blank is None:
+                    continue
+                # Rendered finely enough to place the edge within a quarter
+                # point
+                scale = 4
+                drawn = page.render(scale=scale).to_pil().convert("RGB")
+                empty = blank[i].render(scale=scale).to_pil().convert("RGB")
+                box = (
+                    ImageChops.difference(drawn, empty)
+                    .convert("L")
+                    .point(lambda v: 255 if v > 16 else 0)
+                    .getbbox()
+                )
+                if box is not None:
+                    left, _, _, top = boxes[n]
+                    crops[n] = (
+                        left + box[0] / scale,
+                        top - box[3] / scale,
+                        left + box[2] / scale,
+                        top - box[1] / scale,
                     )
-                    if box is not None:
-                        left, bottom, _, top = page.get_cropbox()
-                        crop = (
-                            left + box[0] / scale,
-                            top - box[3] / scale,
-                            left + box[2] / scale,
-                            top - box[1] / scale,
-                        )
-                        page.set_mediabox(*crop)
-                        page.set_cropbox(*crop)
-                if not single_pdf and not outputs[i].lower().endswith(".pdf"):
-                    page.render(scale=(dpi or 300) / 72).to_pil().save(
-                        outputs[i]
-                    )
-            # PDFs made fresh, so they carry nothing of the app's own
-            groups = (
-                [(outputs[0], list(range(len(numbers))))]
-                if single_pdf
-                else [
-                    (out, [i])
-                    for i, out in enumerate(outputs)
-                    if out.lower().endswith(".pdf")
-                ]
-            )
-            for out, pages in groups:
+            for (wanted, out), trimmed in zip(shown, trims):
+                for n in wanted:
+                    page = pdf[page_of[n]]
+                    box = crops[n] if trimmed else boxes[n]
+                    page.set_mediabox(*box)
+                    page.set_cropbox(*box)
+                if not out.lower().endswith(".pdf"):
+                    page = pdf[page_of[wanted[0]]]
+                    page.render(scale=(dpi or 300) / 72).to_pil().save(out)
+                    continue
+                # Made fresh, so it carries nothing of the app's own
                 doc = pdfium.PdfDocument.new()
                 try:
-                    doc.import_pages(pdf, pages)
+                    doc.import_pages(pdf, [page_of[n] for n in wanted])
                     doc.save(out)
                 finally:
                     doc.close()
@@ -446,24 +452,18 @@ def export_pptx(
     source: Annotated[
         str, typer.Argument(help="PowerPoint file to export from.")
     ],
-    output: Annotated[
-        str,
+    outputs: Annotated[
+        list[str],
         typer.Option(
             "--output",
             "-o",
             help=(
-                "PDF or PNG to export to, with {slide} in its name for a "
-                "file per slide."
+                "File to export to, after the slides it shows, e.g., "
+                "'3=figures/setup.png' or '2,4-6=talk.pdf'; a PDF without "
+                "them shows every slide."
             ),
         ),
     ],
-    slides: Annotated[
-        str | None,
-        typer.Option(
-            "--slides",
-            help="Slides to export, e.g., '3' or '2,4-6' (default all).",
-        ),
-    ] = None,
     dpi: Annotated[
         int | None,
         typer.Option("--dpi", help="Resolution of a PNG (default 300)."),
@@ -473,8 +473,8 @@ def export_pptx(
         typer.Option(
             "--trim/--no-trim",
             help=(
-                "Crop to what's drawn on each slide (default unless several "
-                "go into one PDF)."
+                "Crop to what's drawn on each slide (default unless a PDF "
+                "shows several)."
             ),
         ),
     ] = None,
@@ -489,22 +489,20 @@ def export_pptx(
 ) -> None:
     import re
 
-    numbers = None
-    if slides is not None:
+    parsed: list[tuple[list[int] | None, str]] = []
+    for spec in outputs:
+        m = re.fullmatch(r"([\d,\s-]+)=(.+)", spec)
+        if m is None:
+            parsed.append((None, spec))
+            continue
         numbers = []
-        for part in slides.split(","):
-            m = re.fullmatch(r"\s*(\d+)\s*(?:-\s*(\d+)\s*)?", part)
-            if m is None:
-                raise_error(f"'{slides}' should list slides, e.g., '2,4-6'")
-            numbers += list(range(int(m[1]), int(m[2] or m[1]) + 1))
+        for part in m[1].split(","):
+            r = re.fullmatch(r"\s*(\d+)\s*(?:-\s*(\d+)\s*)?", part)
+            if r is None:
+                raise_error(f"'{m[1]}' should list slides, e.g., '2,4-6'")
+            numbers += list(range(int(r[1]), int(r[2] or r[1]) + 1))
+        parsed.append((numbers, m[2]))
     try:
-        export_slides(
-            source,
-            output,
-            slides=numbers,
-            dpi=dpi,
-            trim=trim,
-            env=env or "_system",
-        )
+        export_slides(source, parsed, dpi=dpi, trim=trim, env=env or "_system")
     except ValueError as e:
         raise_error(str(e))

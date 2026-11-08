@@ -22,6 +22,22 @@ and everything you write stays in your project.
     and check the journal's reviewer guidelines before using an AI
     assistant on it: many don't allow it.
 
+Where the guidelines allow one,
+an AI assistant is useful for understanding the paper and for drudgery,
+but it can't stand in for your critical reading,
+which is what the editor asked you for.
+Read the paper yourself first, so your first impressions are your own.
+Then the assistant can explain an unfamiliar method,
+find where the paper describes something,
+set up and run the reproduction,
+and file your comments.
+Whether the methods are sound,
+the conclusions follow,
+and the paper should be published
+is yours to decide.
+The `/calkit:review-paper` skill in the
+[Calkit agent plugin](../ai-tools.md) works this way.
+
 ## Creating the project
 
 ```sh

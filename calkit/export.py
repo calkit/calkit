@@ -159,8 +159,10 @@ POWERPOINT = Exporter(
         r"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE",
     ],
 )
-# What a Docker environment for exporting slides runs
+# What a Docker environment for exporting slides runs, LibreOffice and
+# fonts pinned together, and the release a new one starts from
 LIBREOFFICE_IMAGE = "ghcr.io/calkit/libreoffice"
+LIBREOFFICE_IMAGE_VERSION = "0.1.0"
 
 
 def exporters() -> list[Exporter]:
@@ -210,6 +212,32 @@ def get_slide_exporter(
         f"{LIBREOFFICE_IMAGE} image, or a system environment that "
         "requires PowerPoint or LibreOffice"
     )
+
+
+def get_slide_environment(ck_info: dict) -> tuple[str, dict | None]:
+    """The environment a slide is exported in unless its stage says, and
+    what to add to the project for it, if it isn't there yet.
+
+    It's one running Calkit's LibreOffice image, so a slide exports the same
+    on any machine with Docker, GitHub's included.
+    """
+    envs = ck_info.get("environments") or {}
+    for name, env in envs.items():
+        image = str((env or {}).get("image") or "")
+        if (env or {}).get("kind") == "docker" and (
+            image == LIBREOFFICE_IMAGE
+            or image.startswith(
+                (LIBREOFFICE_IMAGE + ":", LIBREOFFICE_IMAGE + "@")
+            )
+        ):
+            return name, None
+    name, n = "libreoffice", 2
+    while name in envs:
+        name, n = f"libreoffice-{n}", n + 1
+    return name, {
+        "kind": "docker",
+        "image": f"{LIBREOFFICE_IMAGE}:{LIBREOFFICE_IMAGE_VERSION}",
+    }
 
 
 def get_slide_exporter_version(

@@ -101,3 +101,33 @@ def test_exporter_here(tmp_path, monkeypatch):
     assert inkscape.find_executable() is None
     assert inkscape.version() is None
     assert stage.run_properties() == {"inkscape_version": None}
+
+
+def test_get_slide_environment() -> None:
+    image = calkit.export.LIBREOFFICE_IMAGE
+    new = {"kind": "docker", "image": f"{image}:0.1.0"}
+    for envs, expected in [
+        # Added the first time
+        ({}, ("libreoffice", new)),
+        # and reused after, by whatever name, at whatever release
+        (
+            {"py": {"kind": "uv"}, "lo": {"kind": "docker", "image": image}},
+            ("lo", None),
+        ),
+        (
+            {"x": {"kind": "docker", "image": f"{image}@sha256:ab"}},
+            ("x", None),
+        ),
+        # without taking a name that's taken
+        (
+            {
+                "libreoffice": {"kind": "system"},
+                "libreoffice-2": {"kind": "docker", "image": "other"},
+            },
+            ("libreoffice-3", new),
+        ),
+    ]:
+        assert (
+            calkit.export.get_slide_environment({"environments": envs})
+            == expected
+        )

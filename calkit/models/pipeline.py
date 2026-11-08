@@ -35,6 +35,7 @@ from calkit.models.io import (
     PathInput,
     PathOutput,
     ScheduleInput,
+    SlideOutput,
 )
 from calkit.models.iteration import (
     ExpandedParametersType,
@@ -2465,17 +2466,6 @@ class GimpExportStage(AppExportStage):
             f"calkit export gimp {shlex.quote(self.source_path)} "
             f"-o {shlex.quote(self.output_path)}"
         )
-
-
-class SlideOutput(PathOutput):
-    """A file exported from slides, and which ones it shows."""
-
-    slide: int | list[int] | None = Field(
-        default=None,
-        description="The slide it shows, numbered from 1 and counting hidden "
-        "ones, or a list for a PDF of several; every slide if not given, "
-        "which only a PDF can show.",
-    )
 
 
 class PptxExportStage(AppExportStage):

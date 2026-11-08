@@ -24,6 +24,24 @@ IMAGE_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
 }
+# Placeholders a template puts on every slide, rather than what it shows
+TEMPLATE_PLACEHOLDERS = {"dt", "ftr", "sldNum"}
+
+
+def _tag(ns: str, name: str) -> str:
+    return f"{{{ns}}}{name}"
+
+
+def _rels_part(part: str) -> str:
+    folder, name = posixpath.split(part)
+    return posixpath.join(folder, "_rels", name + ".rels")
+
+
+def _target_part(part: str, target: str) -> str:
+    """The part a relationship from ``part`` points to."""
+    if target.startswith("/"):
+        return target.lstrip("/")
+    return posixpath.normpath(posixpath.join(posixpath.dirname(part), target))
 
 
 @dataclasses.dataclass
@@ -35,6 +53,99 @@ class Placement:
     # Its name in PowerPoint's selection pane, which can be left out when
     # it's the slide's only picture
     picture: str | None = None
+
+
+class Presentation:
+    """A .pptx package, edited in place and written back out."""
+
+    def __init__(self, path: str):
+        if os.path.splitext(path)[1].lower() not in (".pptx", ".pptm"):
+            raise ValueError(f"'{path}' isn't a PowerPoint file")
+        self.path = path
+        with zipfile.ZipFile(path) as z:
+            self.parts = {n: z.read(n) for n in z.namelist()}
+        self._xml: dict[str, ET.Element] = {}
+        main = next(
+            _target_part("", r.get("Target", ""))
+            for r in ET.fromstring(self.parts["_rels/.rels"])
+            if r.get("Type", "").endswith("/officeDocument")
+        )
+        main_rels = {
+            r.get("Id"): _target_part(main, r.get("Target", ""))
+            for r in ET.fromstring(self.parts[_rels_part(main)])
+        }
+        # The slides' parts in order, as the presentation lists them
+        self.slides = [
+            main_rels[s.get(_tag(R, "id"), "")]
+            for s in ET.fromstring(self.parts[main]).iter(_tag(P, "sldId"))
+        ]
+
+    def xml(self, part: str) -> ET.Element:
+        """A part's XML, parsed once, so changes to it are saved."""
+        from calkit.docx import _parse
+
+        if part not in self._xml:
+            self._xml[part] = _parse(self.parts[part])
+        return self._xml[part]
+
+    def slide(self, number: int) -> str:
+        """The part of a slide, numbered from 1."""
+        if not 1 <= number <= len(self.slides):
+            raise ValueError(
+                f"'{self.path}' has {len(self.slides)} "
+                f"slide{'s' * (len(self.slides) != 1)}, "
+                f"so there's no slide {number}"
+            )
+        return self.slides[number - 1]
+
+    def show_hidden_slides(self) -> None:
+        """Unhide every slide, so an export has a page for each."""
+        for part in self.slides:
+            self.xml(part).attrib.pop("show", None)
+
+    def clear_slide(self, number: int) -> None:
+        """Remove what's drawn on a slide, leaving its background and what
+        its template puts on every slide, e.g., its number.
+        """
+        tree = self.xml(self.slide(number)).find(
+            f"{_tag(P, 'cSld')}/{_tag(P, 'spTree')}"
+        )
+        if tree is None:
+            return
+        for shape in list(tree):
+            if shape.tag in (_tag(P, "nvGrpSpPr"), _tag(P, "grpSpPr")):
+                continue
+            ph = shape.find(f".//{_tag(P, 'nvPr')}/{_tag(P, 'ph')}")
+            if ph is not None and ph.get("type") in TEMPLATE_PLACEHOLDERS:
+                continue
+            tree.remove(shape)
+
+    def save(self, path: str | None = None) -> None:
+        """Write it, beside the output first and then moved into place, so
+        a failure leaves what was there.
+        """
+        from calkit.docx import _dump
+
+        for part, root in self._xml.items():
+            self.parts[part] = _dump(root, self.parts[part])
+        self._xml = {}
+        output = path or self.path
+        folder = os.path.dirname(os.path.abspath(output))
+        os.makedirs(folder, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=folder, suffix=".pptx")
+        os.close(fd)
+        try:
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+                for name, data in self.parts.items():
+                    # Undated, so the same content makes the same file
+                    info = zipfile.ZipInfo(name)
+                    info.create_system = 3
+                    info.external_attr = 0o600 << 16
+                    z.writestr(info, data, zipfile.ZIP_DEFLATED)
+            os.replace(tmp, output)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
 
 def update_figures(
@@ -51,26 +162,6 @@ def update_figures(
     A PDF figure becomes a PNG at ``dpi``.
     """
     from PIL import Image
-
-    from calkit.docx import _dump, _parse
-
-    def tag(ns: str, name: str) -> str:
-        return f"{{{ns}}}{name}"
-
-    def rels_part(part: str) -> str:
-        folder, name = posixpath.split(part)
-        return posixpath.join(folder, "_rels", name + ".rels")
-
-    def rels_source(rels: str) -> str:
-        folder, name = posixpath.split(rels)
-        return posixpath.join(posixpath.dirname(folder), name[: -len(".rels")])
-
-    def target_part(part: str, target: str) -> str:
-        if target.startswith("/"):
-            return target.lstrip("/")
-        return posixpath.normpath(
-            posixpath.join(posixpath.dirname(part), target)
-        )
 
     def figure_image(path: str) -> tuple[bytes, str, tuple[int, int]]:
         """The figure's bytes as a picture, their extension, and its size."""
@@ -97,43 +188,16 @@ def update_figures(
         with Image.open(io.BytesIO(data)) as image:
             return data, ext, image.size
 
-    if os.path.splitext(source)[1].lower() not in (".pptx", ".pptm"):
-        raise ValueError(f"'{source}' isn't a PowerPoint file")
-    with zipfile.ZipFile(source) as z:
-        parts = {n: z.read(n) for n in z.namelist()}
-    # The slides in order, as the presentation lists them
-    main = next(
-        target_part("", r.get("Target", ""))
-        for r in ET.fromstring(parts["_rels/.rels"])
-        if r.get("Type", "").endswith("/officeDocument")
-    )
-    main_rels = {
-        r.get("Id"): target_part(main, r.get("Target", ""))
-        for r in ET.fromstring(parts[rels_part(main)])
-    }
-    slides = [
-        main_rels[s.get(tag(R, "id"), "")]
-        for s in ET.fromstring(parts[main]).iter(tag(P, "sldId"))
-    ]
-    content_types = _parse(parts["[Content_Types].xml"])
-    edited: dict[str, ET.Element] = {}
+    pres = Presentation(source)
+    content_types = pres.xml("[Content_Types].xml")
     unlinked: set[str] = set()
     for placement in placements:
-        if not 1 <= placement.slide <= len(slides):
-            raise ValueError(
-                f"'{source}' has {len(slides)} slides, "
-                f"so there's no slide {placement.slide}"
-            )
-        slide = slides[placement.slide - 1]
-        rels = rels_part(slide)
-        for part in (slide, rels):
-            if part not in edited:
-                edited[part] = _parse(parts[part])
-        root, rels_root = edited[slide], edited[rels]
+        slide = pres.slide(placement.slide)
+        root, rels_root = pres.xml(slide), pres.xml(_rels_part(slide))
         # Which picture it replaces
-        pictures = list(root.iter(tag(P, "pic")))
+        pictures = list(root.iter(_tag(P, "pic")))
         names = [
-            pic.find(f"{tag(P, 'nvPicPr')}/{tag(P, 'cNvPr')}")
+            pic.find(f"{_tag(P, 'nvPicPr')}/{_tag(P, 'cNvPr')}")
             for pic in pictures
         ]
         matches = [
@@ -154,8 +218,8 @@ def update_figures(
                 f"'{placement.picture}'"
             )
         pic = matches[0]
-        blip_fill = pic.find(tag(P, "blipFill"))
-        blip = None if blip_fill is None else blip_fill.find(tag(A, "blip"))
+        blip_fill = pic.find(_tag(P, "blipFill"))
+        blip = None if blip_fill is None else blip_fill.find(_tag(A, "blip"))
         if blip_fill is None or blip is None:
             raise ValueError(
                 f"Picture '{placement.picture}' on slide {placement.slide} "
@@ -168,13 +232,13 @@ def update_figures(
             "media",
             f"calkit-{hashlib.sha256(data).hexdigest()[:16]}{ext}",
         )
-        parts[media] = data
+        pres.parts[media] = data
         if not any(
             d.get("Extension", "").lower() == ext[1:]
-            for d in content_types.iter(tag(CT, "Default"))
+            for d in content_types.iter(_tag(CT, "Default"))
         ):
             default = ET.Element(
-                tag(CT, "Default"),
+                _tag(CT, "Default"),
                 {"Extension": ext[1:], "ContentType": IMAGE_TYPES[ext]},
             )
             content_types.insert(0, default)
@@ -183,7 +247,7 @@ def update_figures(
                 r.get("Id")
                 for r in rels_root
                 if r.get("Type") == IMAGE_REL
-                and target_part(slide, r.get("Target", "")) == media
+                and _target_part(slide, r.get("Target", "")) == media
             ),
             None,
         )
@@ -196,7 +260,7 @@ def update_figures(
             )
             ET.SubElement(
                 rels_root,
-                tag(PKG_REL, "Relationship"),
+                _tag(PKG_REL, "Relationship"),
                 {
                     "Id": rel_id,
                     "Type": IMAGE_REL,
@@ -205,31 +269,33 @@ def update_figures(
                     ),
                 },
             )
-        blip.set(tag(R, "embed"), rel_id)
+        blip.set(_tag(R, "embed"), rel_id)
         # Neither an SVG of the old figure nor a crop made for it applies
-        ext_list = blip.find(tag(A, "extLst"))
+        ext_list = blip.find(_tag(A, "extLst"))
         if ext_list is not None:
             for e in list(ext_list):
                 if e.get("uri") == SVG_BLIP_URI:
                     ext_list.remove(e)
             if not len(ext_list):
                 blip.remove(ext_list)
-        src_rect = blip_fill.find(tag(A, "srcRect"))
+        src_rect = blip_fill.find(_tag(A, "srcRect"))
         if src_rect is not None:
             blip_fill.remove(src_rect)
         # Its height from its width, through any groups stretching it
-        size = pic.find(f"{tag(P, 'spPr')}/{tag(A, 'xfrm')}/{tag(A, 'ext')}")
+        size = pic.find(
+            f"{_tag(P, 'spPr')}/{_tag(A, 'xfrm')}/{_tag(A, 'ext')}"
+        )
         if size is not None:
             parents = {c: p for p in root.iter() for c in p}
             scale_x = scale_y = 1.0
             el = pic
             while el in parents:
                 el = parents[el]
-                if el.tag != tag(P, "grpSp"):
+                if el.tag != _tag(P, "grpSp"):
                     continue
-                xfrm = el.find(f"{tag(P, 'grpSpPr')}/{tag(A, 'xfrm')}")
-                ext_el = None if xfrm is None else xfrm.find(tag(A, "ext"))
-                ch_ext = None if xfrm is None else xfrm.find(tag(A, "chExt"))
+                xfrm = el.find(f"{_tag(P, 'grpSpPr')}/{_tag(A, 'xfrm')}")
+                ext_el = None if xfrm is None else xfrm.find(_tag(A, "ext"))
+                ch_ext = None if xfrm is None else xfrm.find(_tag(A, "chExt"))
                 if ext_el is None or ch_ext is None:
                     continue
                 ch_cx, ch_cy = (
@@ -260,39 +326,21 @@ def update_figures(
         }
         for r in list(rels_root):
             if r.get("Type") == IMAGE_REL and r.get("Id") not in used:
-                unlinked.add(target_part(slide, r.get("Target", "")))
+                unlinked.add(_target_part(slide, r.get("Target", "")))
                 rels_root.remove(r)
-    for part, root in edited.items():
-        parts[part] = _dump(root, parts[part])
-    parts["[Content_Types].xml"] = _dump(
-        content_types, parts["[Content_Types].xml"]
-    )
     # Drop the images nothing shows anymore
-    linked = {
-        target_part(rels_source(name), r.get("Target", ""))
-        for name, data in parts.items()
-        if name.endswith(".rels")
-        for r in ET.fromstring(data)
-        if r.get("TargetMode") != "External"
-    }
+    linked = set()
+    for name in pres.parts:
+        if not name.endswith(".rels"):
+            continue
+        folder, base = posixpath.split(name)
+        source_part = posixpath.join(
+            posixpath.dirname(folder), base[: -len(".rels")]
+        )
+        rels = pres._xml.get(name)
+        for r in rels if rels is not None else ET.fromstring(pres.parts[name]):
+            if r.get("TargetMode") != "External":
+                linked.add(_target_part(source_part, r.get("Target", "")))
     for part in unlinked - linked:
-        parts.pop(part, None)
-    # Written beside the output and moved into place, so a failure leaves
-    # what was there
-    output = output or source
-    folder = os.path.dirname(os.path.abspath(output))
-    os.makedirs(folder, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=folder, suffix=".pptx")
-    os.close(fd)
-    try:
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
-            for name, data in parts.items():
-                # Undated, so the same content makes the same file
-                info = zipfile.ZipInfo(name)
-                info.create_system = 3
-                info.external_attr = 0o600 << 16
-                z.writestr(info, data, zipfile.ZIP_DEFLATED)
-        os.replace(tmp, output)
-    finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        pres.parts.pop(part, None)
+    pres.save(output)

@@ -200,3 +200,44 @@ def test_update_figures(tmp_path: Path) -> None:
             assert len(pdf) == 3
         finally:
             pdf.close()
+
+
+def test_presentation(tmp_path: Path) -> None:
+    from calkit.pptx import Presentation
+
+    with pytest.raises(ValueError, match="isn't a PowerPoint file"):
+        Presentation(str(tmp_path / "deck.key"))
+    pres = Presentation(FIXTURE)
+    assert pres.slides == [f"ppt/slides/slide{n}.xml" for n in (1, 2, 3)]
+    with pytest.raises(
+        ValueError, match="has 3 slides, so there's no slide 4"
+    ):
+        pres.slide(4)
+    # A hidden slide, and a slide number beside slide 2's pictures
+    pres.xml(pres.slide(1)).set("show", "0")
+    tree = pres.xml(pres.slide(2)).find(f"{{{P}}}cSld/{{{P}}}spTree")
+    assert tree is not None
+    number = ET.SubElement(tree, f"{{{P}}}sp")
+    nv = ET.SubElement(number, f"{{{P}}}nvSpPr")
+    ET.SubElement(
+        ET.SubElement(nv, f"{{{P}}}nvPr"), f"{{{P}}}ph", type="sldNum"
+    )
+    pres.save(str(tmp_path / "hidden.pptx"))
+    # Unhidden, and cleared down to what the template puts on every slide
+    pres = Presentation(str(tmp_path / "hidden.pptx"))
+    assert pres.xml(pres.slide(1)).get("show") == "0"
+    pres.show_hidden_slides()
+    pres.clear_slide(2)
+    pres.clear_slide(3)
+    pres.save(str(tmp_path / "cleared.pptx"))
+    pres = Presentation(str(tmp_path / "cleared.pptx"))
+    assert pres.xml(pres.slide(1)).get("show") is None
+    for n, kept in [
+        (2, ["nvGrpSpPr", "grpSpPr", "sp"]),
+        (3, ["nvGrpSpPr", "grpSpPr"]),
+    ]:
+        tree = pres.xml(pres.slide(n)).find(f"{{{P}}}cSld/{{{P}}}spTree")
+        assert tree is not None
+        assert [el.tag.split("}")[1] for el in tree] == kept
+    # while the slides not cleared keep what's on them
+    assert len(list(pres.xml(pres.slide(1)).iter(f"{{{P}}}pic"))) == 1

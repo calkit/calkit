@@ -2797,10 +2797,11 @@ Options:
 
 Work with Microsoft Office.
 
-| Command                                                           | Description                                   |
-| ----------------------------------------------------------------- | --------------------------------------------- |
-| [`excel-chart-to-image`](#subcommand-office-excel-chart-to-image) | Extract a chart from Excel and save to image. |
-| [`word-to-pdf`](#subcommand-office-word-to-pdf)                   | Convert a Word document to PDF.               |
+| Command                                                           | Description                                            |
+| ----------------------------------------------------------------- | ------------------------------------------------------ |
+| [`excel-chart-to-image`](#subcommand-office-excel-chart-to-image) | Extract a chart from Excel and save to image.          |
+| [`word-to-pdf`](#subcommand-office-word-to-pdf)                   | Convert a Word document to PDF.                        |
+| [`update-pptx-figures`](#subcommand-office-update-pptx-figures)   | Put figures in place of pictures in a PowerPoint file. |
 
 <a id="subcommand-office-excel-chart-to-image"></a>
 
@@ -2851,6 +2852,32 @@ Options:
 | Option           | Type | Required | Default | Description                                                                          |
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
+
+<a id="subcommand-office-update-pptx-figures"></a>
+
+#### `calkit office update-pptx-figures`
+
+Put figures in place of pictures in a PowerPoint file.
+
+Usage:
+
+```text
+calkit office update-pptx-figures [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                |
+| -------- | ---- | -------- | ------- | -------------------------- |
+| `source` | str  | yes      |         | PowerPoint file to update. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                                                                                   |
+| ---------------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--figure`, `-f` | str  | yes      |         | Slide, picture name in the selection pane, and figure, e.g., '3:Plot=figures/plot.png', or '3=figures/plot.png' for the slide's only picture. |
+| `--output`, `-o` | str  | no       |         | File to write (default: update in place).                                                                                                     |
+| `--dpi`          | int  | no       | 300     | Resolution of a PDF figure.                                                                                                                   |
 
 <a id="command-group-open"></a>
 

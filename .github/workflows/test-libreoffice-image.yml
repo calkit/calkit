@@ -59,3 +59,35 @@ jobs:
           test -O "$work/out/doc.docx"
           # The equation came through as Word math
           unzip -p "$work/out/doc.docx" word/document.xml | grep -q "<m:oMath"
+          # A slide made in PowerPoint's format exports alone, with Carlito
+          # standing in for Calibri, since they match letter for letter
+          cat > "$work/slides.fodp" <<'EOF2'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.presentation">
+           <office:automatic-styles>
+            <style:style style:name="T" style:family="text"><style:text-properties style:font-name="Calibri" fo:font-family="Calibri"/></style:style>
+           </office:automatic-styles>
+           <office:body><office:presentation>
+            <draw:page draw:name="one"/>
+            <draw:page draw:name="two">
+             <draw:frame svg:x="2cm" svg:y="2cm" svg:width="10cm" svg:height="2cm"><draw:text-box><text:p><text:span text:style-name="T">Smoke test</text:span></text:p></draw:text-box></draw:frame>
+            </draw:page>
+           </office:presentation></office:body>
+          </office:document>
+          EOF2
+          lo() {
+            docker run --rm \
+              --user "$(id -u):$(id -g)" \
+              -v "$work":/work \
+              calkit/libreoffice:pr \
+              soffice -env:UserInstallation=file:///work/profile --headless \
+                "$@"
+          }
+          lo --convert-to "pptx:Impress Office Open XML" --outdir /work/pptx \
+            /work/slides.fodp
+          lo --convert-to \
+            'pdf:impress_pdf_Export:{"PageRange":{"type":"string","value":"2"}}' \
+            --outdir /work/out /work/pptx/slides.pptx
+          test -O "$work/out/slides.pdf"
+          test "$(grep -ac '/Type */Page[^s]' "$work/out/slides.pdf")" = 1
+          grep -aq '/BaseFont */[A-Z]*+Carlito' "$work/out/slides.pdf"

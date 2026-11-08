@@ -1,5 +1,5 @@
-# Headless LibreOffice at one exact release, so a document converts the same
-# way on every machine
+# Headless LibreOffice at one exact release, so a document or slide converts
+# the same way on every machine
 FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
 
 ARG LIBREOFFICE_VERSION=26.8.1.1
@@ -13,6 +13,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         ca-certificates curl fontconfig fonts-dejavu-core fonts-liberation \
+        fonts-crosextra-carlito fonts-crosextra-caladea \
         libcairo2 libcups2 libdbus-1-3 libglib2.0-0t64 libnss3 libsm6 \
         libx11-xcb1 libxinerama1; \
     case "$TARGETARCH" in \
@@ -25,13 +26,13 @@ RUN set -eux; \
     echo "$sha  /tmp/lo.tar.gz" | sha256sum -c -; \
     mkdir /tmp/lo; \
     tar xzf /tmp/lo.tar.gz -C /tmp/lo --strip-components=2; \
-    # Only what converting text documents needs: Writer, and Math for
-    # equations, without Calc, Impress, Draw, or Base
+    # Only what converting documents and slides needs: Writer, Math for
+    # equations, and Impress, without Calc or Base
     cd /tmp/lo; \
     dpkg -i "libreoffice${LIBREOFFICE_VERSION%.*.*}"_*.deb \
         *-ure_*.deb *-core_*.deb \
         *-images_*.deb *-ooofonts_*.deb *-graphicfilter_*.deb \
-        *-en-us_*.deb *-writer_*.deb *-math_*.deb; \
+        *-en-us_*.deb *-writer_*.deb *-math_*.deb *-impress_*.deb; \
     cd /; \
     ln -s "$(ls -d /opt/libreoffice*)/program/soffice" /usr/local/bin/soffice; \
     apt-get purge -y --auto-remove curl; \

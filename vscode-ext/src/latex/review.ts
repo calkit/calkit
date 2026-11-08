@@ -813,8 +813,6 @@ function buildHtml(
     border-radius: 9px; font-size: 11px; line-height: 18px; text-align: center;
     color: var(--vscode-badge-foreground, #fff); background: var(--vscode-badge-background, #4d4d4d); }
   .badge[hidden] { display: none; }
-  .textLayer .highlight { --highlight-bg-color: var(--vscode-editor-findMatchHighlightBackground, rgb(180 0 170 / 0.25));
-    --highlight-selected-bg-color: var(--vscode-editor-findMatchBackground, rgb(0 100 0 / 0.25)); }
   #find input { width: 200px; font: inherit; padding: 3px 6px; outline: none;
     color: var(--vscode-input-foreground); background: var(--vscode-input-background);
     border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; }

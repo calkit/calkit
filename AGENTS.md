@@ -88,6 +88,14 @@ respectively.
 Never create `helpers` or `utils` modules or packages--tight coupling and
 low cohesion architecture.
 
+<!-- TODO: needs human review -->
+
+Keep a subclass in the module of the class it extends,
+so a class's variants are found where it's defined.
+The only exceptions are classes written to be subclassed,
+e.g., `calkit.models.base.Model` and `calkit.cli.core.OptionalValueCommand`,
+and classes from other packages, e.g., pydantic's `BaseModel`.
+
 Don't be verbose in comments. One sentence is usually fine, if anything at all.
 
 Agents may make minor corrections to prose for human consumption,

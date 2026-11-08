@@ -319,7 +319,7 @@ class Stage(Model):
         "manual-step",
         "inkscape-export",
         "gimp-export",
-        "powerpoint-export",
+        "pptx-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -2467,45 +2467,128 @@ class GimpExportStage(AppExportStage):
         )
 
 
-class PowerPointExportStage(AppExportStage):
-    """A figure LibreOffice exports from a slide in a PowerPoint file,
-    e.g., a PDF or PNG, cropped to what's drawn on it.
+class PptxExportStage(AppExportStage):
+    """Figures exported from slides in a PowerPoint file, e.g., PDFs or
+    PNGs, each cropped to what's drawn on it.
+
+    Its environment says which app exports them: LibreOffice in a Docker
+    environment, e.g., one with the ``ghcr.io/calkit/libreoffice`` image,
+    or the app a system environment requires, PowerPoint or LibreOffice.
+    ``_system`` takes whichever is installed, so it can export differently
+    from machine to machine.
     """
 
-    kind: Literal["powerpoint-export"] = "powerpoint-export"
+    kind: Literal["pptx-export"] = "pptx-export"
     source_path: RelativeChildPathString = Field(
         description="The PowerPoint file to export from."
     )
-    slide: int = Field(
-        default=1, ge=1, description="The slide to export, from 1."
+    slides: int | list[int] | None = Field(
+        default=None,
+        description="The slide or slides to export, numbered from 1 and "
+        "counting hidden ones; all of them if not given. Several go into "
+        "one PDF, or a file each if the output has '{slide}' in its name.",
     )
     dpi: int | None = Field(
         default=None, description="Resolution of an exported PNG."
     )
-    trim: bool = Field(
-        default=True, description="Crop to what's drawn on the slide."
+    trim: bool | None = Field(
+        default=None,
+        description="Crop each slide to what's drawn on it, which it does "
+        "unless several go into one PDF.",
     )
 
-    @model_validator(mode="after")
-    def _check_paths(self) -> "PowerPointExportStage":
-        from calkit.export import POWERPOINT
+    @property
+    def slide_numbers(self) -> list[int] | None:
+        if self.slides is None:
+            return None
+        if isinstance(self.slides, int):
+            return [self.slides]
+        return sorted(set(self.slides))
 
-        POWERPOINT.check(self.source_path, self.output_path)
+    @model_validator(mode="after")
+    def _check_paths(self) -> "PptxExportStage":
+        from calkit.export import LIBREOFFICE
+
+        numbers = self.slide_numbers
+        if numbers is not None and (not numbers or min(numbers) < 1):
+            raise ValueError("Slides are numbered from 1")
+        out = self.output_path
+        LIBREOFFICE.check(self.source_path, out.replace("{slide}", "1"))
+        if "{slide}" in out:
+            if numbers is None:
+                raise ValueError(
+                    "A file per slide needs the slides listed, so the "
+                    "pipeline knows what it makes"
+                )
+        elif (
+            numbers is None or len(numbers) > 1
+        ) and not out.lower().endswith(".pdf"):
+            raise ValueError(
+                "Several slides go into one PDF, or a file each with "
+                "{slide} in the output's name"
+            )
         return self
 
     @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs: list[str | dict] = []
+        for out in super().dvc_outs:
+            path = out if isinstance(out, str) else next(iter(out))
+            if "{slide}" not in path:
+                outs.append(out)
+                continue
+            for n in self.slide_numbers or []:
+                each = path.replace("{slide}", str(n))
+                outs.append(
+                    each if isinstance(out, str) else {each: out[path]}
+                )
+        return outs
+
+    @property
     def dvc_cmd(self) -> str:
-        cmd = (
-            f"calkit export powerpoint {shlex.quote(self.source_path)} "
+        cmd = ""
+        # A system environment can be another machine, so the command runs
+        # there; any other is where the app runs, which the command reads
+        if self._system_env is not None:
+            if self.inner_environment != self.outer_environment:
+                raise ValueError(
+                    "Slides are exported by the app one environment "
+                    f"provides, not '{self.environment}'"
+                )
+            cmd = self.xenv_cmd + " "
+        cmd += (
+            f"calkit export pptx {shlex.quote(self.source_path)} "
             f"-o {shlex.quote(self.output_path)}"
         )
-        if self.slide != 1:
-            cmd += f" --slide {self.slide}"
+        if self.slide_numbers is not None:
+            cmd += " --slides " + ",".join(str(n) for n in self.slide_numbers)
         if self.dpi is not None:
             cmd += f" --dpi {self.dpi}"
-        if not self.trim:
-            cmd += " --no-trim"
+        if self.trim is not None:
+            cmd += " --trim" if self.trim else " --no-trim"
+        if self.environment != "_system":
+            cmd += f" --env {shlex.quote(self.environment)}"
         return cmd
+
+    def run_properties(self) -> dict[str, Any]:
+        # Which app exported it, and its version, from the environment
+        import calkit
+        from calkit.export import (
+            get_slide_exporter,
+            get_slide_exporter_version,
+        )
+
+        exporter, docker_env = get_slide_exporter(
+            self.environment,
+            ck_info=None
+            if self.environment == "_system"
+            else calkit.load_calkit_info(),
+        )
+        return {
+            f"{exporter.name}_version": get_slide_exporter_version(
+                exporter, docker_env
+            )
+        }
 
 
 class MarimoHtmlWasmStage(Stage):
@@ -2919,7 +3002,7 @@ class Pipeline(Model):
                 | ManualStepStage
                 | InkscapeExportStage
                 | GimpExportStage
-                | PowerPointExportStage
+                | PptxExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

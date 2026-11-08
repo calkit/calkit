@@ -2922,11 +2922,11 @@ Options:
 
 Export data and artifacts from various applications.
 
-| Command                                       | Description                                             |
-| --------------------------------------------- | ------------------------------------------------------- |
-| [`inkscape`](#subcommand-export-inkscape)     | Export a figure from an SVG.                            |
-| [`gimp`](#subcommand-export-gimp)             | Export a flattened figure from an XCF file.             |
-| [`powerpoint`](#subcommand-export-powerpoint) | Export a slide from a PowerPoint file with LibreOffice. |
+| Command                                   | Description                                         |
+| ----------------------------------------- | --------------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                        |
+| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file.         |
+| [`pptx`](#subcommand-export-pptx)         | Export slides from a PowerPoint file to PDF or PNG. |
 
 <a id="subcommand-export-inkscape"></a>
 
@@ -2977,16 +2977,16 @@ Options:
 | ---------------- | ---- | -------- | ------- | --------------------------------------- |
 | `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
 
-<a id="subcommand-export-powerpoint"></a>
+<a id="subcommand-export-pptx"></a>
 
-#### `calkit export powerpoint`
+#### `calkit export pptx`
 
-Export a slide from a PowerPoint file with LibreOffice.
+Export slides from a PowerPoint file to PDF or PNG.
 
 Usage:
 
 ```text
-calkit export powerpoint [OPTIONS] SOURCE
+calkit export pptx [OPTIONS] SOURCE
 ```
 
 Arguments:
@@ -2997,12 +2997,13 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                        |
-| --------------------- | ------- | -------- | ------- | ---------------------------------- |
-| `--output`, `-o`      | str     | yes      |         | File to export to, a PDF or PNG.   |
-| `--slide`             | int     | no       | 1       | Slide to export, from 1.           |
-| `--dpi`               | int     | no       |         | Resolution of a PNG (default 300). |
-| `--trim`, `--no-trim` | boolean | no       | True    | Crop to what's drawn on the slide. |
+| Option                | Type    | Required | Default | Description                                                                  |
+| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--output`, `-o`      | str     | yes      |         | PDF or PNG to export to, with {slide} in its name for a file per slide.      |
+| `--slides`            | str     | no       |         | Slides to export, e.g., '3' or '2,4-6' (default all).                        |
+| `--dpi`               | int     | no       |         | Resolution of a PNG (default 300).                                           |
+| `--trim`, `--no-trim` | boolean | no       |         | Crop to what's drawn on each slide (default unless several go into one PDF). |
+| `--env`, `-e`         | str     | no       |         | Environment whose app exports them (default the system).                     |
 
 <a id="command-group-update"></a>
 

@@ -122,11 +122,16 @@ A PNG or PDF can't be created by a person, since an app or script exports
 it. If no script makes it, ask the person what they made it in, copy that
 file into the project, e.g., `figures/src/setup.svg`, and add a stage that
 exports it. Inkscape SVGs, GIMP files, and PowerPoint slides are exported
-as the pipeline runs, a slide with LibreOffice, cropped to what's drawn on
-it; anything else is a manual step, which asks the person to export it again
-when its file changes:
+as the pipeline runs, a slide cropped to what's drawn on it by the app its
+environment provides, e.g., LibreOffice in Calkit's image, which also runs
+on GitHub; anything else is a manual step, which asks the person to export it
+again when its file changes:
 
 ```yaml
+environments:
+  libreoffice:
+    kind: docker
+    image: ghcr.io/calkit/libreoffice:0.1.0
 pipeline:
   stages:
     export-setup:
@@ -135,9 +140,10 @@ pipeline:
       outputs:
         - paper/setup.png
     export-diagram:
-      kind: powerpoint-export
+      kind: pptx-export
       source_path: figures/src/diagram.pptx
-      slide: 2
+      slides: 2
+      environment: libreoffice
       outputs:
         - paper/diagram.pdf
     export-photo:

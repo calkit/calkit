@@ -19,7 +19,7 @@ from calkit.models.pipeline import (
     MatlabCommandStage,
     MatlabScriptStage,
     Pipeline,
-    PowerPointExportStage,
+    PptxExportStage,
     PythonScriptStage,
     QuartoStage,
     ShellScriptStage,
@@ -160,24 +160,38 @@ def test_appexportstage():
     assert s.to_dvc()["cmd"] == (
         "calkit export gimp figures/src/photo.xcf -o paper/photo.tif"
     )
-    slide = PowerPointExportStage(
-        source_path="figures/src/lab setup.pptx", outputs=["paper/setup.pdf"]
+    slide = PptxExportStage(
+        source_path="figures/src/lab setup.pptx",
+        outputs=["paper/setup.pdf"],
+        slides=2,
     )
     assert slide.to_dvc()["cmd"] == (
-        "calkit export powerpoint 'figures/src/lab setup.pptx' "
-        "-o paper/setup.pdf"
+        "calkit export pptx 'figures/src/lab setup.pptx' "
+        "-o paper/setup.pdf --slides 2"
     )
-    slide = PowerPointExportStage(
-        source_path="setup.pptx",
-        outputs=["setup.png"],
-        slide=3,
-        dpi=150,
-        trim=False,
+    # A file per slide is an output each, and the environment says which
+    # app exports them
+    slides = PptxExportStage.model_validate(
+        dict(
+            source_path="setup.pptx",
+            outputs=[{"path": "figs/s-{slide}.png", "storage": "git"}],
+            slides=[5, 3, 3],
+            dpi=150,
+            trim=False,
+            environment="libreoffice",
+        )
     )
-    assert slide.to_dvc()["cmd"] == (
-        "calkit export powerpoint setup.pptx -o setup.png --slide 3 "
-        "--dpi 150 --no-trim"
+    sd = slides.to_dvc()
+    assert sd["cmd"] == (
+        "calkit export pptx setup.pptx -o 'figs/s-{slide}.png' "
+        "--slides 3,5 --dpi 150 --no-trim --env libreoffice"
     )
+    assert sd["outs"] == [
+        {f"figs/s-{n}.png": {"cache": False, "persist": False}} for n in (3, 5)
+    ]
+    # Every slide into one PDF
+    deck = PptxExportStage(source_path="talk.pptx", outputs=["talk.pdf"])
+    assert deck.to_dvc()["cmd"] == "calkit export pptx talk.pptx -o talk.pdf"
     # What an app doesn't export from, or to, is refused, as is a stage
     # with other than one output
     for model, bad, error in [
@@ -186,11 +200,21 @@ def test_appexportstage():
         (InkscapeExportStage, dict(outputs=[]), "exactly one output"),
         (GimpExportStage, dict(source_path="a.svg"), "from an XCF"),
         (GimpExportStage, dict(source_path="a.xcf", dpi=72), "dpi"),
-        (PowerPointExportStage, dict(source_path="a.key"), "PowerPoint file"),
+        (PptxExportStage, dict(source_path="a.key"), "PowerPoint file"),
         (
-            PowerPointExportStage,
-            dict(source_path="a.pptx", slide=0),
-            "greater than or equal to 1",
+            PptxExportStage,
+            dict(source_path="a.pptx", slides=0, outputs=["a.pdf"]),
+            "numbered from 1",
+        ),
+        (
+            PptxExportStage,
+            dict(source_path="a.pptx", slides=[1, 2]),
+            "Several slides go into one PDF",
+        ),
+        (
+            PptxExportStage,
+            dict(source_path="a.pptx", outputs=["s-{slide}.png"]),
+            "needs the slides listed",
         ),
     ]:
         with pytest.raises(ValidationError, match=error):

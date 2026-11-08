@@ -328,14 +328,20 @@ def get_project_provenance(
     source = None
     if ck_stage is not None:
         out.stage_kind = ck_stage.get("kind")
-        out.stage_app = next(
-            (
-                e.app
-                for e in calkit.export.exporters()
-                if e.kind == out.stage_kind
-            ),
-            None,
-        )
+        apps = [
+            e for e in calkit.export.exporters() if e.kind == out.stage_kind
+        ]
+        out.stage_app = apps[0].app if len(apps) == 1 else None
+        # Slides are exported by whichever app the environment provides,
+        # which for the system's own depends on the machine
+        env_name = ck_stage.get("environment") or "_system"
+        if len(apps) > 1 and env_name != "_system":
+            try:
+                out.stage_app = calkit.export.get_slide_exporter(
+                    env_name, ck_info=ck_info
+                )[0].app
+            except ValueError:
+                pass
         if out.stage_kind == "manual-step":
             out.message = ck_stage.get("message")
         wdir = ck_stage.get("wdir") or ""

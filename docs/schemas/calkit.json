@@ -6370,7 +6370,7 @@
                 "markdown": "#/$defs/MarkdownStage",
                 "matlab-command": "#/$defs/MatlabCommandStage",
                 "matlab-script": "#/$defs/MatlabScriptStage",
-                "powerpoint-export": "#/$defs/PowerPointExportStage",
+                "pptx-export": "#/$defs/PptxExportStage",
                 "procedure": "#/$defs/ProcedureStage",
                 "python-script": "#/$defs/PythonScriptStage",
                 "quarto": "#/$defs/QuartoStage",
@@ -6433,7 +6433,7 @@
                 "$ref": "#/$defs/GimpExportStage"
               },
               {
-                "$ref": "#/$defs/PowerPointExportStage"
+                "$ref": "#/$defs/PptxExportStage"
               },
               {
                 "$ref": "#/$defs/JupyterNotebookStage"
@@ -6538,9 +6538,9 @@
       "title": "PixiEnvironment",
       "type": "object"
     },
-    "PowerPointExportStage": {
+    "PptxExportStage": {
       "additionalProperties": false,
-      "description": "A figure LibreOffice exports from a slide in a PowerPoint file,\ne.g., a PDF or PNG, cropped to what's drawn on it.",
+      "description": "Figures exported from slides in a PowerPoint file, e.g., PDFs or\nPNGs, each cropped to what's drawn on it.\n\nIts environment says which app exports them: LibreOffice in a Docker\nenvironment, e.g., one with the ``ghcr.io/calkit/libreoffice`` image,\nor the app a system environment requires, PowerPoint or LibreOffice.\n``_system`` takes whichever is installed, so it can export differently\nfrom machine to machine.",
       "properties": {
         "always_run": {
           "default": false,
@@ -6645,8 +6645,8 @@
           "title": "Iterate Over"
         },
         "kind": {
-          "const": "powerpoint-export",
-          "default": "powerpoint-export",
+          "const": "pptx-export",
+          "default": "pptx-export",
           "title": "Kind",
           "type": "string"
         },
@@ -6755,12 +6755,24 @@
           "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
-        "slide": {
-          "default": 1,
-          "description": "The slide to export, from 1.",
-          "minimum": 1,
-          "title": "Slide",
-          "type": "integer"
+        "slides": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The slide or slides to export, numbered from 1 and counting hidden ones; all of them if not given. Several go into one PDF, or a file each if the output has '{slide}' in its name.",
+          "title": "Slides"
         },
         "slurm": {
           "anyOf": [
@@ -6781,10 +6793,17 @@
           "type": "string"
         },
         "trim": {
-          "default": true,
-          "description": "Crop to what's drawn on the slide.",
-          "title": "Trim",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Crop each slide to what's drawn on it, which it does unless several go into one PDF.",
+          "title": "Trim"
         },
         "wdir": {
           "anyOf": [
@@ -6803,7 +6822,7 @@
       "required": [
         "source_path"
       ],
-      "title": "PowerPointExportStage",
+      "title": "PptxExportStage",
       "type": "object"
     },
     "Presentation": {

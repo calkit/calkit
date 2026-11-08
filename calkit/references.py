@@ -11,7 +11,8 @@ the same mistake wearing a real DOI.
 Keys are read from a document and the files it inputs rather than from
 the compiled PDF, since that is where a key is written and where it has
 to be fixed, so a PDF is checked by reading the source it is built from.
-A bibliography can also be checked on its own, every entry in it. Each is resolved against the
+A bibliography can also be checked on its own, every entry in it, and so
+can the reference list printed in a PDF with no source. Each is resolved against the
 bibliographies the document names, or the collections ``calkit.yaml``
 declares when it names none, and each entry is then looked for in
 Crossref, OpenAlex, and arXiv, by identifier when it has one and by title
@@ -167,6 +168,28 @@ _MD_SKIP_RE = re.compile(
 )
 _MD_FENCE_RE = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})")
 
+# A PDF's reference list: its heading, what ends it, and how its entries
+# start, numbered, e.g., [1] or 1., or else author first, e.g., Smith, J.
+_PDF_REFS_HEADING_RE = re.compile(
+    r"^(?:\d+\.?\s+)?(?:references(?: cited)?|bibliography|literature cited|"
+    r"works cited|reference list)$",
+    re.I,
+)
+_PDF_REFS_END_RE = re.compile(
+    r"^(?:[A-Z]\.?\s+)?(?:appendix|appendices|supplementary|supporting "
+    r"information)\b",
+    re.I,
+)
+_PDF_NUMBERED_RE = re.compile(r"^(?:\[(\d+)\]|(\d+)\.)\s*(.*)$")
+_PDF_AUTHOR_START_RE = re.compile(
+    r"^(?:(?:van|von|de|der|den|di|da|du|del|la|le)\s+)*"
+    r"[A-Z][^\s,.;:]*(?:[ -][A-Z][^\s,.;:]*)?,\s+[A-Z]"
+)
+_DOI_RE = re.compile(r"\b10\.\d{4,9}/\S+")
+_LINK_RE = re.compile(r"https?://\S+|\b10\.\d{4,9}/\S+")
+# A year, not one end of a page range, e.g., 1843-1862
+_YEAR_RE = re.compile(r"(?<![\d–-])(?:1[5-9]|20)\d{2}[a-z]?(?![\d–-])")
+
 
 class Found(BaseModel):
     """A work a service returned for an entry, and how well it fits.
@@ -182,6 +205,10 @@ class Found(BaseModel):
     title: str | None = None
     year: int | None = None
     first_author: str | None = None
+    # Other forms the record gives, e.g., with its subtitle, or its print
+    # year when it was online first
+    alt_titles: list[str] = []
+    alt_years: list[int] = []
     title_similarity: float | None = None
     title_matches: bool | None = None
     year_matches: bool | None = None
@@ -258,6 +285,12 @@ class Reference(BaseModel):
     doi: str | None = Field(default=None, exclude=True)
     arxiv: str | None = Field(default=None, exclude=True)
     url: str | None = Field(default=None, exclude=True)
+    citation: str | None = Field(
+        default=None,
+        exclude=True,
+        description="The entry as a PDF's reference list prints it, where "
+        "there's no collection to read its fields from.",
+    )
     doi_registered: bool | None = Field(
         default=None,
         exclude=True,
@@ -723,6 +756,56 @@ def _fill_from_entry(reference: Reference, entry: dict) -> None:
     reference.url = url.group().rstrip(".,;") if url else None
 
 
+def _fill_from_citation(reference: Reference, citation: str) -> None:
+    """Read the fields the check needs out of a citation as printed.
+
+    There's no reliable way to cut a title out of a printed citation, so
+    none is: :func:`compare` instead finds the stretch of the citation
+    most like the title of each record it's compared with.
+    """
+    reference.citation = citation
+    doi = _DOI_RE.search(citation)
+    if doi:
+        value = doi.group().rstrip(".,;")
+        # A DOI can contain brackets, e.g., (ABC), but not end in an
+        # unmatched one, e.g., from (https://doi.org/...)
+        for open_, close in (("(", ")"), ("[", "]"), ("<", ">")):
+            while value.endswith(close) and value.count(open_) < value.count(
+                close
+            ):
+                value = value[:-1].rstrip(".,;")
+        reference.doi = normalize_doi(value)
+    arxiv = re.search(r"arXiv:\s*(\d{4}\.\d{4,5})", citation, re.I)
+    if arxiv:
+        reference.arxiv = arxiv.group(1)
+    rest = _LINK_RE.sub(" ", citation)
+    years = [(m.start(), m.group()[:4]) for m in _YEAR_RE.finditer(rest)]
+    # A year in parentheses is the author-year styles' publication year
+    bracketed = [y for i, y in years if i > 0 and rest[i - 1] == "("]
+    year = (bracketed or [y for _, y in years] or [""])[0]
+    reference.year = int(year) if year else None
+    first = re.split(r"[,;]|\s+and\s+|\s+&\s+", rest, maxsplit=1)[0]
+    reference.first_author = first_author_surname(first)
+    url = re.search(r"https?://\S+", citation)
+    reference.url = url.group().rstrip(".,;") if url else None
+    lowered = citation.lower()
+    reference.venue = next((v for v in THIN_VENUES if v in lowered), None)
+
+
+def citation_title(citation: str, title: str) -> str:
+    """The stretch of a citation most like a title, both normalized."""
+    words = citation.split()
+    n = len(title.split())
+    best, score = "", -1.0
+    for size in range(max(1, n - 2), n + 3):
+        for start in range(max(1, len(words) - size + 1)):
+            window = " ".join(words[start : start + size])
+            ratio = similarity(window, title)
+            if ratio > score:
+                best, score = window, ratio
+    return best
+
+
 def compare(reference: Reference, found: Found) -> Found:
     """Score a candidate against an entry, filling its match fields.
 
@@ -739,8 +822,30 @@ def compare(reference: Reference, found: Found) -> Found:
         The candidate with its comparison fields set. A field neither
         record can settle is left None rather than False.
     """
-    ours = normalize_title(reference.title)
+
+    # A printed citation has no title field, so its title is the stretch
+    # of it most like the record's
+    def ours_for(theirs: str) -> str:
+        if reference.title or not reference.citation:
+            return normalize_title(reference.title)
+        return citation_title(normalize_title(reference.citation), theirs)
+
+    # Compare against whichever of the record's titles and years is closest
+    if found.alt_titles:
+        found.title = max(
+            [found.title or "", *found.alt_titles],
+            key=lambda t: similarity(
+                ours_for(normalize_title(t)), normalize_title(t)
+            ),
+        )
+    want = reference.year
+    if found.alt_years and want is not None:
+        found.year = min(
+            [y for y in [found.year, *found.alt_years] if y is not None],
+            key=lambda y: abs(y - want),
+        )
     theirs = normalize_title(found.title)
+    ours = ours_for(theirs)
     found.title_similarity = round(similarity(ours, theirs), 4)
     if len(ours) < MIN_TITLE_CHARS or len(theirs) < MIN_TITLE_CHARS:
         found.title_matches = None
@@ -906,7 +1011,7 @@ def classify(reference: Reference) -> None:
         return
     # Nothing was found, which means different things depending on what
     # there was to look for.
-    if not reference.title and not reference.doi:
+    if not reference.title and not reference.doi and not reference.citation:
         reference.status = "not-checkable"
         reference.notes.append("no title or identifier to look up")
     elif reference.url and not reference.doi and not reference.arxiv:
@@ -1039,6 +1144,105 @@ def source_document(path: str, wdir: str | Path | None = None) -> str:
     )
 
 
+def pdf_references(path: str | Path) -> dict[str, str]:
+    """The reference list printed in a PDF, read from its text.
+
+    For a PDF with no source to read, e.g., a manuscript sent for review.
+    The list is what follows the last heading like "References", up to an
+    appendix, if any. Lines repeating on most pages, e.g., running
+    headers, are dropped first. Entries are split on their numbers, which
+    must run 1, 2, 3, so a line starting with, e.g., a volume number
+    doesn't start one, or else on lines starting with a surname and
+    initial after one ending a sentence.
+
+    Parameters
+    ----------
+    path : str or Path
+        The PDF.
+
+    Returns
+    -------
+    dict
+        Each entry's number, as printed or by position, and its text with
+        lines joined, in order. Empty if no reference list was found.
+    """
+    from collections import Counter
+
+    import pypdfium2 as pdfium
+
+    # Running headers and footers differ only in their numbers
+    def shape(line: str) -> str:
+        return re.sub(r"\d+", "#", line)
+
+    pdf = pdfium.PdfDocument(str(path))
+    try:
+        pages = [
+            [
+                line.strip()
+                # pdfium marks a hyphen ending a line as \ufffe, joining
+                # the lines, but it's printed, e.g., in a DOI
+                for line in re.split(
+                    r"\r\n|\r|\n",
+                    page.get_textpage()
+                    .get_text_range()
+                    .replace("\ufffe", "-"),
+                )
+                if line.strip()
+            ]
+            for page in pdf
+        ]
+    finally:
+        pdf.close()
+
+    seen = Counter(shape(line) for page in pages for line in set(page))
+    running = {k for k, n in seen.items() if n >= 3 and n >= len(pages) / 2}
+    lines = [
+        line for page in pages for line in page if shape(line) not in running
+    ]
+    headings = [
+        i for i, line in enumerate(lines) if _PDF_REFS_HEADING_RE.match(line)
+    ]
+    if not headings:
+        return {}
+    body = lines[headings[-1] + 1 :]
+    end = next(
+        (i for i, line in enumerate(body) if _PDF_REFS_END_RE.match(line)),
+        len(body),
+    )
+    body = body[:end]
+    # Numbered first, since its labels are unambiguous
+    labels: list[str] = []
+    entries: list[list[str]] = []
+    for line in body:
+        m = _PDF_NUMBERED_RE.match(line)
+        if m and int(m.group(1) or m.group(2)) == len(entries) + 1:
+            labels.append(str(len(entries) + 1))
+            entries.append([m.group(3)])
+        elif entries:
+            entries[-1].append(line)
+    if not entries:
+        for line in body:
+            if _PDF_AUTHOR_START_RE.match(line) and (
+                not entries or entries[-1][-1].endswith(".")
+            ):
+                labels.append(str(len(entries) + 1))
+                entries.append([line])
+            elif entries:
+                entries[-1].append(line)
+    out = {}
+    for label, parts in zip(labels, entries):
+        text = ""
+        for part in parts:
+            # A line broken at a hyphen, e.g., in a DOI, or inside a link
+            # is rejoined without a space
+            joined = text.endswith("-") or re.search(
+                r"(?:https?://|\b10\.\d{4,9}/)\S*[^\s.,;]$", text
+            )
+            text = f"{text}{part}" if joined or not text else f"{text} {part}"
+        out[label] = text
+    return out
+
+
 def check_references(
     path: str,
     wdir: str | Path | None = None,
@@ -1083,19 +1287,35 @@ def check_references(
             else None
         )
 
-    document = source_document(path, wdir=wdir)
+    try:
+        document = source_document(path, wdir=wdir)
+    except FileNotFoundError:
+        # A PDF with no source, e.g., one sent for review, is checked
+        # against the reference list printed in it
+        if not (Path(wdir or ".") / path).is_file():
+            raise
+        document = path
     if not (Path(wdir or ".") / document).is_file():
         raise FileNotFoundError(f"No such file: {document}")
     lookup = Lookup(wdir=wdir, offline=offline, refresh=refresh)
+    printed: dict[str, str] = {}
+    cited: dict[str, list[str]] = {}
+    inline: dict[str, str] = {}
+    if document.lower().endswith(".pdf"):
+        printed = pdf_references(Path(wdir or ".") / document)
+        if not printed:
+            raise ValueError(
+                f"No source builds {document}, and no reference list was "
+                "found in it"
+            )
+        names = sources = [document]
+        collections = {}
     # A bibliography is checked whole, as if each entry were cited
-    if document.lower().endswith(".bib"):
+    elif document.lower().endswith(".bib"):
         names = [document]
         sources = [document]
         collections = load_collections(wdir=wdir, paths=names)
-        cited: dict[str, list[str]] = {
-            key: [] for key in collections.get(document, {})
-        }
-        inline: dict[str, str] = {}
+        cited = {key: [] for key in collections.get(document, {})}
     else:
         lines = flatten(document, read=read)
         # The bibliographies the document names are the ones its citations
@@ -1117,6 +1337,12 @@ def check_references(
     check = DocumentCheck(
         path=document, sources=sources, collections=names, offline=offline
     )
+    for label, citation in printed.items():
+        reference = Reference(key=label, collection=document)
+        _fill_from_citation(reference, citation)
+        verify(reference, lookup)
+        classify(reference)
+        check.references[label] = reference
     for key, locations in cited.items():
         defining = [n for n, entries in collections.items() if key in entries]
         # Quarto and pandoc-crossref write a cross-reference like a
@@ -1181,11 +1407,19 @@ def verify(reference: Reference, lookup: Lookup) -> None:
     if by_id is not None:
         compare(reference, by_id)
     by_title: list[Found] = []
-    if reference.title and (by_id is None or not _agrees(by_id)):
-        for hit in (
-            lookup.crossref_title(reference.title),
-            lookup.openalex_title(reference.title),
-        ):
+    if (reference.title or reference.citation) and (
+        by_id is None or not _agrees(by_id)
+    ):
+        # Crossref takes a whole citation as a query, and OpenAlex doesn't
+        hits = (
+            [
+                lookup.crossref_title(reference.title),
+                lookup.openalex_title(reference.title),
+            ]
+            if reference.title
+            else [lookup.crossref_title(reference.citation or "", True)]
+        )
+        for hit in hits:
             # A search always returns its nearest neighbor, so only a hit
             # with the same title is the work; one that merely resembles it
             # is a failed search, worth pointing at but not accusing with
@@ -1241,24 +1475,42 @@ def _rank(found: Found) -> tuple[int, float]:
 
 def _from_crossref(item: dict, source: str = "crossref") -> Found:
     """A ``Found`` from a Crossref work record."""
+
+    def year_of(field: str) -> int | None:
+        parts = (item.get(field) or {}).get("date-parts") or [[None]]
+        year = parts[0][0] if parts and parts[0] else None
+        return year if isinstance(year, int) else None
+
+    # Titles can carry JATS markup, e.g., <i>L</i>, over several lines
+    def clean(value: str) -> str:
+        return " ".join(re.sub(r"<[^>]+>", " ", value).split())
+
     titles = item.get("title") or []
     authors = item.get("author") or []
-    issued = (item.get("issued") or {}).get("date-parts") or [[None]]
-    year = issued[0][0] if issued and issued[0] else None
     surname = None
     if authors:
         surname = authors[0].get("family") or authors[0].get("name")
-    # Titles can carry JATS markup, e.g., <i>L</i>, over several lines
-    title = (
-        " ".join(re.sub(r"<[^>]+>", " ", titles[0]).split()) if titles else ""
-    )
+    title = clean(titles[0]) if titles else ""
+    # A subtitle is sometimes the title's second half and sometimes a short
+    # title, so it's an alternative rather than always appended
+    alt_titles = [
+        f"{title}: {clean(sub)}" for sub in item.get("subtitle") or []
+    ]
+    year = year_of("issued")
+    alt_years = [
+        y
+        for y in (year_of("published-print"), year_of("published-online"))
+        if y is not None and y != year
+    ]
     return Found(
         source=source,
         id=item.get("DOI"),
         doi=item.get("DOI"),
         title=title or None,
-        year=int(year) if isinstance(year, int) else None,
+        year=year,
         first_author=surname,
+        alt_titles=alt_titles if title else [],
+        alt_years=list(dict.fromkeys(alt_years)),
     )
 
 
@@ -1298,6 +1550,7 @@ class Lookup:
     ) -> None:
         import json
 
+        self.wdir = wdir
         self.path = Path(wdir or ".") / CACHE_PATH
         self.offline = offline
         # Refreshing asks again for what this run needs, keeping the rest
@@ -1316,10 +1569,12 @@ class Lookup:
         """Write the cache, so the next run needs no network."""
         import json
 
+        from calkit.core import ensure_local_dir
+
         if not self.asked:
             return
-
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Made via ensure_local_dir so it's ignored by Git
+        ensure_local_dir(str(self.wdir) if self.wdir else None)
         self.path.write_text(json.dumps(self.cache, indent=2, sort_keys=True))
 
     def get_text(self, url: str) -> str | None:
@@ -1451,20 +1706,26 @@ class Lookup:
             return True
         return False if code == 100 else None
 
-    def crossref_title(self, title: str) -> Found | None:
-        """Crossref's closest bibliographic match for a title."""
+    def crossref_title(
+        self, title: str, citation: bool = False
+    ) -> Found | None:
+        """Crossref's closest bibliographic match for a title, or for a
+        whole citation as printed."""
         import urllib.parse
 
         query = urllib.parse.urlencode(
             {
                 "query.bibliographic": title,
                 "rows": "3",
-                "select": "DOI,title,author,issued",
+                "select": "DOI,title,subtitle,author,issued,published-print,"
+                "published-online",
             }
         )
         payload = self.get_json(f"https://api.crossref.org/works?{query}")
         items = (payload or {}).get("message", {}).get("items") or []
-        return self._closest(title, [_from_crossref(item) for item in items])
+        return self._closest(
+            title, [_from_crossref(item) for item in items], citation
+        )
 
     def openalex_title(self, title: str) -> Found | None:
         """OpenAlex's closest title match."""
@@ -1509,13 +1770,18 @@ class Lookup:
         )
 
     @staticmethod
-    def _closest(title: str, candidates: list[Found]) -> Found | None:
-        """The candidate whose title is nearest the one searched for."""
+    def _closest(
+        title: str, candidates: list[Found], citation: bool = False
+    ) -> Found | None:
+        """The candidate whose title is nearest the one searched for, or
+        nearest a stretch of the citation searched for."""
         best, score = None, 0.0
         for candidate in candidates:
-            ratio = similarity(
-                normalize_title(title), normalize_title(candidate.title)
-            )
+            theirs = normalize_title(candidate.title)
+            ours = normalize_title(title)
+            if citation:
+                ours = citation_title(ours, theirs)
+            ratio = similarity(ours, theirs)
             if ratio > score:
                 best, score = candidate, ratio
         return best
@@ -1574,7 +1840,9 @@ def write_report(
     )
 
 
-def format_check(document: DocumentCheck, verbose: bool = False) -> str:
+def format_check(
+    document: DocumentCheck, verbose: bool = False, width: int | None = None
+) -> str:
     """Render a document's check as text, worst first.
 
     Parameters
@@ -1583,13 +1851,32 @@ def format_check(document: DocumentCheck, verbose: bool = False) -> str:
         The check to render.
     verbose : bool, optional
         List every reference, not only the ones needing attention.
+    width : int, optional
+        Columns to wrap at, defaulting to the terminal's, up to 88.
 
     Returns
     -------
     str
         The report.
     """
+    import shutil
+    import textwrap
+
     from calkit.core import check_or_x
+
+    if width is None:
+        width = max(40, min(88, shutil.get_terminal_size().columns))
+
+    # URLs and DOIs are never broken, so they stay clickable
+    def wrap(text: str, indent: str, hanging: str = "") -> list[str]:
+        return textwrap.wrap(
+            text,
+            width=width,
+            initial_indent=indent,
+            subsequent_indent=indent + hanging,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
 
     references = list(document.references.values())
     if not references:
@@ -1597,31 +1884,44 @@ def format_check(document: DocumentCheck, verbose: bool = False) -> str:
     counts = ", ".join(
         f"{n} {status}" for status, n in document.n_by_status.items()
     )
-    lines = [f"{document.path}: {document.n_cited} references ({counts})"]
+    lines = wrap(
+        f"{document.path}: {document.n_cited} references ({counts})", ""
+    )
     shown = references if verbose else document.suspect
     order = {s: i for i, s in enumerate(SUSPECT)}
+    rule = "─" * width
     for reference in sorted(
         shown, key=lambda r: order.get(r.status, len(order))
     ):
-        lines.append(f"  {reference.status}: {reference.key}")
+        mark = check_or_x(reference.status not in BLOCKING)
+        if reference.status in ("not-found", "unchecked", "not-checkable"):
+            mark = "⚠️"
+        lines += ["", rule, f"{reference.key}: {reference.status} {mark}"]
+        if reference.citation:
+            lines += wrap(reference.citation, "  ")
         if reference.cited_at:
-            lines.append(f"    cited at {reference.cited_at[0]}")
-        for note in reference.notes:
-            lines.append(f"    {note}")
+            lines += wrap(f"cited at {', '.join(reference.cited_at)}", "  ")
+        notes = list(reference.notes)
         evidence = reference.evidence
-        if evidence is None:
-            continue
-        where = evidence.url or evidence.source
-        if evidence.differs:
-            says = ", ".join(
-                f"{name} {value!r}" for name, value in evidence.differs.items()
-            )
-            lines.append(f"    the record at {where} says {says}")
-        else:
-            lines.append(
-                f"    found by {evidence.matched_by} at {where}, "
-                f"agreeing on {', '.join(evidence.agrees_on) or 'nothing'}"
-            )
+        if evidence is not None:
+            where = evidence.url or evidence.source
+            if evidence.differs:
+                says = ", ".join(
+                    f"{name} {value!r}"
+                    for name, value in evidence.differs.items()
+                )
+                notes.append(f"the record at {where} says {says}")
+            else:
+                notes.append(
+                    f"found by {evidence.matched_by} at {where}, agreeing on "
+                    f"{', '.join(evidence.agrees_on) or 'nothing'}"
+                )
+        if notes:
+            lines.append("")
+        for note in notes:
+            lines += wrap(f"- {note}", "  ", "  ")
+    if shown:
+        lines += ["", rule]
     lines.append("")
 
     def n(*statuses: str) -> int:
@@ -1630,10 +1930,14 @@ def format_check(document: DocumentCheck, verbose: bool = False) -> str:
     missing = n("missing-from-bib")
     bad_doi = n("doi-not-registered")
     mismatch = n("mismatch")
+    lines.append(f"References checked: {len(references)}")
+    # A PDF's printed list defines every entry it has
+    if not document.path.lower().endswith(".pdf"):
+        lines.append(
+            f"Defined in a bibliography: {len(references) - missing}/"
+            f"{len(references)} {check_or_x(not missing)}"
+        )
     lines += [
-        f"References checked: {len(references)}",
-        f"Defined in a bibliography: {len(references) - missing}/"
-        f"{len(references)} {check_or_x(not missing)}",
         f"With a DOI that isn't registered: {bad_doi} {check_or_x(not bad_doi)}",
         f"Contradicting the record found for them: {mismatch} "
         f"{check_or_x(not mismatch)}",

@@ -293,6 +293,11 @@ def test_handle_responses_map_to_an_answer(
     refreshed.cache = {"https://kept.example": "old", "https://a.example": "x"}
     assert refreshed.get_text("https://a.example") is None
     assert refreshed.cache["https://kept.example"] == "old"
+    # The cache is saved where Git ignores it
+    refreshed.asked.add("https://kept.example")
+    refreshed.save()
+    assert (tmp_dir / ".calkit" / "local" / ".gitignore").read_text() == "*\n"
+    assert (tmp_dir / refs.CACHE_PATH).is_file()
 
 
 def test_comparison_forgives_only_what_it_should(tmp_dir: Path) -> None:
@@ -491,6 +496,46 @@ def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
         ),
     )
     assert refs.compare(little, found).title_matches is True
+    # A subtitle can be the title's second half or a short title, and an
+    # issue can be printed years after the work went online
+    split = refs._from_crossref(
+        {
+            "title": ["Graph Sparsity"],
+            "subtitle": ["Methods for Very Large Networks"],
+            "issued": {"date-parts": [[2015, 8, 10]]},
+        }
+    )
+    online_first = refs._from_crossref(
+        {
+            "title": ["A parametric model of flow around obstacles"],
+            "subtitle": ["Flow model for obstacles"],
+            "issued": {"date-parts": [[2014, 12, 22]]},
+            "published-print": {"date-parts": [[2016, 1]]},
+            "published-online": {"date-parts": [[2014, 12, 22]]},
+        }
+    )
+    assert online_first.alt_years == [2016]
+    for found, title, year in [
+        (
+            split,
+            "Graph sparsity: Methods for very large networks",
+            2015,
+        ),
+        (online_first, "A parametric model of flow around obstacles", 2016),
+        (online_first, "A parametric model of flow around obstacles", 2014),
+    ]:
+        compared = refs.compare(
+            refs.Reference(key="k", title=title, year=year), found.model_copy()
+        )
+        assert compared.title_matches is True
+        assert compared.year_matches is True
+    # Neither of a record's years saves an entry a decade off
+    assert (
+        refs.compare(
+            refs.Reference(key="k", year=2026), online_first.model_copy()
+        ).year_matches
+        is False
+    )
 
 
 def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
@@ -778,6 +823,171 @@ def test_compact_drops_only_what_says_nothing(tmp_dir: Path) -> None:
     ) == {"a": 1, "e": False, "f": 0, "g": ""}
     assert refs.compact({"a": {"b": None, "c": 2}}) == {"a": {"c": 2}}
     assert refs.compact([{"a": None}, {"b": 1}]) == [{}, {"b": 1}]
+
+
+def test_a_pdf_with_no_source_is_checked_against_its_list(
+    tmp_dir: Path,
+) -> None:
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as raw
+
+    def make_pdf(path: Path, pages: list[list[str]]) -> None:
+        pdf = pdfium.PdfDocument.new()
+        for lines in pages:
+            page = pdf.new_page(612, 792)
+            for i, line in enumerate(lines):
+                obj = raw.FPDFPageObj_NewTextObj(pdf.raw, b"Helvetica", 10.0)
+                buf = ctypes.create_string_buffer(
+                    (line + "\x00").encode("utf-16-le")
+                )
+                raw.FPDFText_SetText(
+                    obj, ctypes.cast(buf, ctypes.POINTER(raw.FPDF_WCHAR))
+                )
+                raw.FPDFPageObj_Transform(obj, 1, 0, 0, 1, 50, 740 - 14 * i)
+                raw.FPDFPage_InsertObject(page.raw, obj)
+            raw.FPDFPage_GenerateContent(page.raw)
+        pdf.save(str(path))
+        pdf.close()
+
+    # A running header is dropped, an entry continues across a page and a
+    # DOI broken at its hyphen, a line starting with a number doesn't start
+    # an entry unless it's the next one, and an appendix ends the list
+    (tmp_dir / "paper").mkdir()
+    pdf = tmp_dir / "paper" / "review.pdf"
+    make_pdf(
+        pdf,
+        [
+            ["Journal 2026, 1 of 3", "Introduction", "As shown in [1]."],
+            [
+                "Journal 2026, 2 of 3",
+                "References",
+                "1. Vega, A.; Bloom, L. A Study of Something Real. Journal",
+                "2020, 7, 1-2. https://doi.org/10.1000/9999-",
+                "1111/22/3/444555.",
+                "2. Okafor, C. Nested Braces, and a Comma, in One Title.",
+            ],
+            [
+                "Journal 2026, 3 of 3",
+                "3 Not a label. Proceedings of Machine Learning Research 2021.",
+                "3. Rossi, G. Something Posted First. arXiv:1901.00001.",
+                "Appendix A",
+                "4. Not a reference.",
+            ],
+        ],
+    )
+    printed = refs.pdf_references(pdf)
+    assert list(printed) == ["1", "2", "3"]
+    assert printed["1"] == (
+        "Vega, A.; Bloom, L. A Study of Something Real. Journal 2020, 7, "
+        "1-2. https://doi.org/10.1000/9999-1111/22/3/444555."
+    )
+    assert "Journal 2026" not in " ".join(printed.values())
+    assert printed["2"].endswith("Machine Learning Research 2021.")
+    # Fields are read from the text, with no title cut out of it
+    reference = refs.Reference(key="1")
+    refs._fill_from_citation(reference, printed["1"])
+    assert reference.doi == "10.1000/9999-1111/22/3/444555"
+    assert (reference.year, reference.first_author) == (2020, "Vega")
+    assert reference.title is None
+    for citation, doi, year, author in [
+        (
+            "Ortega, A. Survey. Journal of Things 1999, 2, 1-24. https://doi.org/"
+            "10.1000/(ABC)1234-5678(199901/03)2:1<1::XY-Z12>3.0.CO;2-9.",
+            "10.1000/(ABC)1234-5678(199901/03)2:1<1::XY-Z12>3.0.CO;2-9",
+            1999,
+            "Ortega",
+        ),
+        (
+            "Jones, B. (2014). A title from 2016. Journal "
+            "(https://doi.org/10.1000/x).",
+            "10.1000/x",
+            2014,
+            "Jones",
+        ),
+        (
+            "N. O. Lindqvist, A. Ortega, and B. Lee, A title, J. Things, "
+            "vol. 10, pp. 1843–1862, 2025.",
+            None,
+            2025,
+            "Lindqvist",
+        ),
+    ]:
+        reference = refs.Reference(key="k")
+        refs._fill_from_citation(reference, citation)
+        assert (reference.doi, reference.year, reference.first_author) == (
+            doi,
+            year,
+            author,
+        )
+    reference = refs.Reference(key="3")
+    refs._fill_from_citation(reference, printed["3"])
+    assert reference.arxiv == "1901.00001"
+    # The title compared is the stretch of the citation most like the
+    # record's, so another work's title doesn't match
+    reference = refs.Reference(key="1")
+    refs._fill_from_citation(reference, printed["1"])
+
+    def found(title: str) -> refs.Found:
+        return refs.Found(
+            source="crossref-doi", title=title, year=2020, first_author="Vega"
+        )
+
+    assert refs.compare(
+        reference, found("A study of something real")
+    ).title_matches
+    assert (
+        refs.compare(
+            reference, found("Soil chemistry of an unrelated site")
+        ).title_matches
+        is False
+    )
+    # A list with no numbers is split where a line starts with a surname
+    # after one ending a sentence
+    unnumbered = tmp_dir / "unnumbered.pdf"
+    make_pdf(
+        unnumbered,
+        [
+            [
+                "Bibliography",
+                "van Dam, J. A first work that runs onto a",
+                "Second line, which isn't an entry. Journal 2001.",
+                "Smith, J. Another work. Journal 2002.",
+            ]
+        ],
+    )
+    assert list(refs.pdf_references(unnumbered).values()) == [
+        "van Dam, J. A first work that runs onto a Second line, which isn't "
+        "an entry. Journal 2001.",
+        "Smith, J. Another work. Journal 2002.",
+    ]
+    # The check reads the PDF's list where nothing builds it, and a PDF
+    # with no list is an error rather than an empty report
+    (tmp_dir / "calkit.yaml").write_text("name: review\n")
+    document = refs.check_references("paper/review.pdf", offline=True)
+    assert document.path == "paper/review.pdf"
+    assert document.sources == ["paper/review.pdf"]
+    assert list(document.references) == ["1", "2", "3"]
+    assert all(
+        r.collection == "paper/review.pdf" and r.status == "unchecked"
+        for r in document.references.values()
+    )
+    assert "citation" not in document.references["1"].model_dump()
+    # Each reference is set off by a rule and wrapped, never inside a link
+    text = refs.format_check(document, verbose=True, width=40)
+    assert text.count("─" * 40) == 4
+    assert "  Vega, A.; Bloom, L. A Study of" in text
+    assert "https://doi.org/10.1000/9999-1111/22/3/444555." in text
+    listed = text.split("References checked")[0]
+    assert all(
+        len(line) <= 40 or "https://" in line for line in listed.splitlines()
+    )
+    assert "Defined in a bibliography" not in text
+    make_pdf(tmp_dir / "paper" / "empty.pdf", [["No list here."]])
+    with pytest.raises(ValueError, match="no reference list"):
+        refs.check_references("paper/empty.pdf", offline=True)
+    assert refs.document_inputs("paper/review.pdf") == ["paper/review.pdf"]
 
 
 def test_markdown_citations_are_found(tmp_dir: Path) -> None:

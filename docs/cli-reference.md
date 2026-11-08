@@ -3954,7 +3954,7 @@ Options:
 
 Check that the references a document cites are real.
 
-Reads citation keys from the document and the files it inputs, or, for a PDF, from the .tex or Markdown file it's built from, then resolves each against the bibliographies the document names, or the collections calkit.yaml declares if it names none. A .bib file has each of its entries checked instead. Each entry is looked up in Crossref, DataCite, OpenAlex, and arXiv. Reports, worst first: a key defined in no bibliography, so the citation cannot resolve; a DOI that isn't registered; an entry whose identifier resolves to a different work than it describes; and an entry no service has, which is what a fabricated citation looks like, though a venue that registers no DOIs looks the same and is named as such.
+Reads citation keys from the document and the files it inputs, or, for a PDF, from the .tex or Markdown file it's built from, then resolves each against the bibliographies the document names, or the collections calkit.yaml declares if it names none. A .bib file has each of its entries checked instead, and so does the reference list printed in a PDF with no source, e.g., a manuscript sent for review. Each entry is looked up in Crossref, DataCite, OpenAlex, and arXiv. Reports, worst first: a key defined in no bibliography, so the citation cannot resolve; a DOI that isn't registered; an entry whose identifier resolves to a different work than it describes; and an entry no service has, which is what a fabricated citation looks like, though a venue that registers no DOIs looks the same and is named as such.
 
 Answers are cached, so a rerun needs no network. A references-check pipeline stage runs this with --output, so its report is an output that goes stale when the document or a bibliography changes.
 
@@ -3968,9 +3968,9 @@ calkit check references|refs [OPTIONS] PATH
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                                                                                                 |
-| -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
-| `path`   | str  | yes      |         | What to check: a .tex or Markdown document, a PDF one builds, or a .bib file, whose every entry is checked. |
+| Argument | Type | Required | Default | Description                                                                                                                                                     |
+| -------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`   | str  | yes      |         | What to check: a .tex or Markdown document, a PDF (via its source, or its printed reference list if it has none), or a .bib file, whose every entry is checked. |
 
 Options:
 

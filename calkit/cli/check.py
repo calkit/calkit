@@ -2065,8 +2065,9 @@ def check_references(
     path: Annotated[
         str,
         typer.Argument(
-            help="What to check: a .tex or Markdown document, a PDF one "
-            "builds, or a .bib file, whose every entry is checked.",
+            help="What to check: a .tex or Markdown document, a PDF (via "
+            "its source, or its printed reference list if it has none), or "
+            "a .bib file, whose every entry is checked.",
         ),
     ],
     wdir: Annotated[
@@ -2114,7 +2115,8 @@ def check_references(
     for a PDF, from the .tex or Markdown file it's built from, then
     resolves each against the bibliographies the document names, or the
     collections calkit.yaml declares if it names none. A .bib file has
-    each of its entries checked instead.
+    each of its entries checked instead, and so does the reference list
+    printed in a PDF with no source, e.g., a manuscript sent for review.
     Each entry is looked up in Crossref, DataCite, OpenAlex, and arXiv.
     Reports, worst first: a key defined in no bibliography, so the citation
     cannot resolve; a DOI that isn't registered; an entry whose identifier
@@ -2138,7 +2140,7 @@ def check_references(
         check = _check_references(
             path, wdir=wdir, offline=offline, refresh=refresh
         )
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         raise_error(str(e))
     if output is not None:
         write_report(check, output, wdir=wdir)

@@ -158,6 +158,15 @@ pipeline:
 
 The target can also be a PDF, whose source is read, or a `.bib` file,
 whose every entry is checked.
+
+<!-- TODO: needs human review -->
+
+A PDF with no source, e.g., a manuscript you're reviewing, is checked
+against the reference list printed at its end.
+Each entry's DOI, year, and first author are read from its text, and its
+title is compared with the stretch of the text most like each record's.
+`--verbose` prints each entry as it was read, so you can see what was
+checked.
 Its inputs are that document, the `.tex` files it inputs, and the
 bibliographies it names, or `calkit.yaml` and its collections if it names
 none, and its output is that document's report, by default under

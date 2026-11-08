@@ -14,6 +14,7 @@ import {
   normalizeSelection,
   paragraphLines,
   parseSynctex,
+  reviewPath,
   synctexForward,
   synctexInputFile,
   synctexReverse,
@@ -33,6 +34,8 @@ const VIEW_KEY = "calkit.pdfReview.view";
 export interface PdfReviewDeps {
   getWorkspaceRoot: () => string | undefined;
   getStages: () => Record<string, unknown>;
+  // The project's publications, which can list reviews of a PDF
+  getPublications: () => unknown[];
   getNonce: () => string;
   // Offer to upgrade the CLI, saying why
   promptUpgrade: (message: string) => void;
@@ -70,7 +73,9 @@ interface Viewer {
 
 // A PDF viewer for LaTeX and Markdown documents that shows the comment
 // threads in their source, following the Calkit comment schema, and goes
-// between the PDF and source with SyncTeX, or by text without it.
+// between the PDF and source with SyncTeX, or by text without it. A PDF
+// with no source, e.g., a manuscript to peer review, has its comments kept
+// in its review file instead, as numbered items saying where they're about.
 export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   private viewers = new Set<Viewer>();
   // Upgrading is offered once, not on every refresh of the comments
@@ -186,10 +191,10 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   // Show the comments in viewers whose source wasn't known until the
-  // project's config was read
+  // project's config was read, or whose review file it may have changed
   stagesChanged(): void {
     for (const v of this.viewers) {
-      if (v.ready && v.tex === undefined && this.source(v) !== undefined) {
+      if (v.ready && v.tex === undefined) {
         void this.sendThreads(v);
       }
     }
@@ -253,7 +258,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       return stdout;
     } catch (err) {
       const stderr = String((err as { stderr?: string }).stderr ?? "");
-      if (/No such command/.test(stderr)) {
+      if (/No such (command|option)/.test(stderr)) {
         if (!this.offeredUpgrade) {
           this.offeredUpgrade = true;
           this.deps.promptUpgrade(`${TOO_OLD} Upgrade it to use them here.`);
@@ -389,19 +394,17 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     });
   }
 
+  // Where comments on a PDF with no source go, if it's listed yet
+  private review(v: Viewer): string | undefined {
+    return reviewPath(this.deps.getPublications(), v.pdf);
+  }
+
   private async sendThreads(v: Viewer): Promise<void> {
     const tex = this.source(v);
-    if (!tex) {
-      void v.panel.webview.postMessage({
-        type: "status",
-        text: "No source found for this PDF, so no comments to show.",
-      });
-      return;
-    }
     let threads: TexThread[];
     try {
       threads = JSON.parse(
-        await this.calkit(["list", "comments"], tex, ["--json"]),
+        await this.calkit(["list", "comments"], tex ?? v.pdf, ["--json"]),
       );
     } catch (err) {
       void v.panel.webview.postMessage({
@@ -414,7 +417,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     const views: ThreadView[] = threads.map((t) => {
       const key = t.id ?? `${t.path}:${t.line}`;
       const tag = s ? synctexTag(s, t.path) : undefined;
-      if (!s || tag === undefined) {
+      if (!s || tag === undefined || t.review) {
         return { ...t, key };
       }
       const { toBefore } = this.lines(v, t.path);
@@ -432,6 +435,9 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
       threads: views,
       synctex: s !== undefined,
       stale: v.stale ?? [],
+      // Null where comments go in the source, else the review file, or ""
+      // if it isn't made yet
+      review: tex ? null : this.review(v) ?? "",
     });
   }
 
@@ -441,14 +447,15 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
     command: string[],
     file: string,
     args: string[] = [],
+    edited = file,
   ): Promise<string> {
-    const abs = path.join(this.root(), file);
+    const abs = path.join(this.root(), edited);
     const open = vscode.workspace.textDocuments.find(
       (d) => d.uri.fsPath === abs && d.isDirty,
     );
     if (open) {
       const choice = await vscode.window.showWarningMessage(
-        `${file} has unsaved changes. Save it before changing comments?`,
+        `${edited} has unsaved changes. Save it before changing comments?`,
         "Save",
       );
       if (choice !== "Save" || !(await open.save())) {
@@ -609,6 +616,22 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         return;
       }
       case "add": {
+        if (msg.review) {
+          // Where it's about goes in the review file with it
+          const args = ["-m", String(msg.text)];
+          if (typeof msg.page === "number") {
+            args.push("--page", String(msg.page));
+          }
+          if (typeof msg.pdfLine === "number") {
+            args.push("--line", String(msg.pdfLine));
+          }
+          if (typeof msg.highlight === "string" && msg.highlight) {
+            args.push("--highlight", msg.highlight);
+          }
+          const review = this.review(v);
+          await this.edit(["new", "comment"], v.pdf, args, review ?? v.pdf);
+          break;
+        }
         const args = ["--line", String(msg.line), "-m", String(msg.text)];
         if (typeof msg.highlight === "string" && msg.highlight) {
           args.push(
@@ -636,12 +659,24 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         break;
       case "delete": {
         const choice = await vscode.window.showWarningMessage(
-          "Delete this comment thread and its replies?",
+          msg.review
+            ? "Delete this comment from the review?"
+            : "Delete this comment thread and its replies?",
           { modal: true },
           "Delete",
         );
         if (choice !== "Delete") {
           return;
+        }
+        if (msg.review) {
+          // Numbered in the review, so it's found through the PDF
+          await this.edit(
+            ["delete", "comment"],
+            v.pdf,
+            ["--id", String(msg.id)],
+            String(msg.file),
+          );
+          break;
         }
         await this.edit(["delete", "comment"], String(msg.file), ref());
         break;
@@ -799,6 +834,8 @@ function buildHtml(
   #select-actions button:not(.primary):hover {
     background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25)); }
   .empty { opacity: 0.7; padding: 4px; }
+  .review-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px; margin-bottom: 6px; opacity: 0.85; }
+  .review-bar a { cursor: pointer; text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -872,6 +909,9 @@ let pdfDoc = null;
 let threads = [];
 let selected = null;
 let composer = null;
+// Null when comments go in the source, else the review file they go in,
+// or "" when it isn't made yet
+let review = null;
 const textCache = new Map();
 const pending = new Map();
 let reqCounter = 0;
@@ -939,6 +979,42 @@ async function lineText(n, y0, y1 = y0) {
   const a = near(y0), b = near(y1);
   if (!a) return "";
   return items.filter((it) => it.top >= a.top - 1 && it.top <= b.top + 1).map((it) => it.str).join(" ");
+}
+// A manuscript's line numbers down a page's margin, if it has them
+async function marginNumbers(n) {
+  const items = await pageText(n);
+  const width = pageView(n).viewport.viewBox[2];
+  const nums = items.filter((it) => /^\\d{1,5}$/.test(it.str.trim()) && (it.x < width * 0.15 || it.x > width * 0.85));
+  // A run of them, not, e.g., a page number
+  return nums.length >= 5 ? nums : [];
+}
+// The margin line number beside a height on a page, measured to the middle
+// of a line of text
+async function lineNumberAt(n, y) {
+  const mid = (it) => it.top - it.height / 3;
+  const near = (await marginNumbers(n)).reduce((a, it) => (!a || Math.abs(mid(it) - y) < Math.abs(mid(a) - y) ? it : a), null);
+  return near && Math.abs(mid(near) - y) < near.height * 1.5 ? Number(near.str.trim()) : null;
+}
+// Where a review comment is about, from its page, line number, and quote,
+// as the line it's on
+async function placeReview(t) {
+  if (!t.page || t.page > pdfDoc.numPages) return null;
+  const items = await pageText(t.page);
+  const shown = items.filter((x) => x.str.trim());
+  if (!shown.length) return null;
+  const numbered = t.pdf_line ? (await marginNumbers(t.page)).find((it) => Number(it.str.trim()) === t.pdf_line) : null;
+  let line = numbered ?? null;
+  if (t.highlight) {
+    const hits = findText(items, t.highlight.text);
+    const dist = (r) => (line ? Math.abs(items[r.start.item].top - line.top) : 0);
+    const hit = hits.reduce((a, r) => (!a || dist(r) < dist(a) ? r : a), null);
+    if (hit) line = items[hit.start.item];
+  }
+  line ??= shown.reduce((a, it) => (it.top < a.top ? it : a));
+  const left = Math.min(...shown.map((x) => x.x));
+  const right = Math.max(...shown.map((x) => x.x + x.width));
+  const rect = { page: t.page, x: left, y: line.top - line.height, width: right - left, height: line.height * 1.25 };
+  return { start: rect, end: rect };
 }
 // Where a paragraph is in the PDF from its text alone, for when there's no
 // SyncTeX: runs of its words, from its start and end, that are found
@@ -1054,6 +1130,12 @@ async function draw() {
   const pins = new Map();
   for (const t of threads) {
     if (!visible(t)) continue;
+    if (!t.start && t.review && t.page) {
+      const place = await placeReview(t);
+      if (gen !== drawGen) return;
+      if (place) Object.assign(t, place);
+      else if (!t.unplaced) { t.unplaced = true; renderPanel(); }
+    }
     if (!t.start && t.anchor) {
       const place = await findParagraph(t.anchor.text);
       if (gen !== drawGen) return;
@@ -1073,8 +1155,9 @@ async function draw() {
     const k = pins.get(key) ?? 0;
     pins.set(key, k + 1);
     const pin = addEl(startLayer, "ck-pin", { left: x0 + 6 + k * 22, top: y0 - 2 }, t);
-    pin.textContent = String(t.messages.length);
-    pin.title = t.messages[0]?.author + ": " + t.messages[0]?.text;
+    // A review's comments are numbered, and threads count their messages
+    pin.textContent = t.review ? String(t.id) : String(t.messages.length);
+    pin.title = (t.review ? "" : t.messages[0]?.author + ": ") + t.messages[0]?.text;
     if (t.highlight) {
       const last = t.end ?? t.start;
       const found = await occurrences(t.highlight.text, t.start, {
@@ -1092,8 +1175,15 @@ async function draw() {
 function renderPanel() {
   const shown = threads.filter(visible);
   const parts = [];
+  if (review !== null) {
+    parts.push('<div class="review-bar"><span>Comments go in ' +
+      (review ? '<a data-act="open-review" title="Open the review file">' + esc(review) + "</a>" : "a review file beside this PDF") +
+      '</span><button data-act="general">General comment</button></div>');
+  }
   if (composer) {
-    parts.push('<div class="thread composer" data-key="__new"><div class="quote">' + esc(composer.text) + '</div>' +
+    const where = composer.review ? reviewWhere(composer.page, composer.pdfLine) : "";
+    parts.push('<div class="thread composer" data-key="__new">' + (where ? '<div class="meta">' + esc(where) + "</div>" : "") +
+      (composer.text ? '<div class="quote">' + esc(composer.text) + "</div>" : "") +
       '<textarea id="new-text" placeholder="Add a comment"></textarea>' +
       '<div class="actions"><button class="primary" data-act="save-new">Comment</button><button data-act="cancel-new">Cancel</button></div></div>');
   }
@@ -1103,6 +1193,16 @@ function renderPanel() {
       (hidden ? " " + hidden + " resolved hidden." : "") + "</div>");
   }
   for (const t of shown) {
+    if (t.review) {
+      parts.push('<div class="thread' + (selected === t.key ? " selected" : "") + '" data-key="' + esc(t.key) + '">' +
+        '<div class="meta"><span>' + esc(t.id + ". " + reviewWhere(t.page, t.pdf_line, t.pdf_end_line)) + "</span>" +
+        (t.unplaced ? '<span title="Its page or text was not found in the PDF">Not placed</span>' : "") + "</div>" +
+        (t.highlight ? '<div class="quote">' + esc(t.highlight.text) + "</div>" : "") +
+        '<div class="msg"><div class="text">' + esc(t.messages[0]?.text) + "</div></div>" +
+        '<div class="actions"><button data-act="source" title="Edit it in the review file">Edit</button>' +
+        '<button data-act="delete">Delete</button></div></div>');
+      continue;
+    }
     const msgs = t.messages.map((m) => '<div class="msg"><span class="who">' + esc(m.author) + '</span>' +
       (m.date ? '<span class="when">' + esc(m.date) + '</span>' : "") + '<div class="text">' + esc(m.text) + "</div></div>").join("");
     parts.push('<div class="thread' + (t.resolved ? " resolved" : "") + (selected === t.key ? " selected" : "") + '" data-key="' + esc(t.key) + '">' +
@@ -1125,6 +1225,12 @@ function renderPanel() {
     if (key === focused) el.focus();
   }
   if (composer && !focused) panel.querySelector("#new-text")?.focus();
+}
+// Where a review comment is about, as the review file writes it
+function reviewWhere(page, line, endLine) {
+  if (!page) return "General";
+  const lines = line ? (endLine && endLine !== line ? ", lines " + line + "-" + endLine : ", line " + line) : "";
+  return "Page " + page + lines;
 }
 function select(key, scroll) {
   selected = key;
@@ -1149,15 +1255,21 @@ function reveal(rect) {
   setTimeout(() => el.remove(), 1700);
 }
 panel.addEventListener("click", (e) => {
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  if (act === "open-review") { vscode.postMessage({ type: "openSource", file: review, line: 1 }); return; }
+  if (act === "general") { composer = { text: "", occ: 0, review: true }; renderPanel(); return; }
   const card = e.target.closest(".thread");
   if (!card) return;
-  const act = e.target.closest("[data-act]")?.dataset.act;
   if (card.dataset.key === "__new") {
     if (act === "cancel-new") { composer = null; renderPanel(); }
     if (act === "save-new") {
       const text = panel.querySelector("#new-text").value.trim();
-      if (!text || !composer.file) return;
-      vscode.postMessage({ type: "add", file: composer.file, line: composer.line, text, highlight: composer.text, occ: composer.occ });
+      if (!text || (!composer.file && !composer.review)) return;
+      if (composer.review) {
+        vscode.postMessage({ type: "add", review: true, page: composer.page, pdfLine: composer.pdfLine, text, highlight: composer.text });
+      } else {
+        vscode.postMessage({ type: "add", file: composer.file, line: composer.line, text, highlight: composer.text, occ: composer.occ });
+      }
       composer = null;
       setStatus("Saving comment\\u2026");
       renderPanel();
@@ -1174,7 +1286,7 @@ panel.addEventListener("click", (e) => {
   } else if (act === "resolve") {
     vscode.postMessage({ type: "resolve", ...target, resolved: !t.resolved });
   } else if (act === "delete") {
-    vscode.postMessage({ type: "delete", ...target });
+    vscode.postMessage({ type: "delete", ...target, review: !!t.review });
   } else if (act === "source") {
     vscode.postMessage({ type: "openSource", file: t.path, line: t.line });
   } else if (act === "issue") {
@@ -1266,6 +1378,15 @@ document.getElementById("select-comment").addEventListener("click", async () => 
   const sel = await selection();
   if (!sel) return;
   const { text, page: n, at, item: selItem, offset: selOffset, context } = sel;
+  // A review comment says where it's about rather than going in the source
+  if (review !== null) {
+    composer = { text, occ: 0, review: true, page: n, pdfLine: await lineNumberAt(n, at.y) };
+    state.showComments = true;
+    state.showPanel = true;
+    applyState();
+    renderPanel();
+    return;
+  }
   const reqId = ++reqCounter;
   const located = new Promise((resolve) => pending.set(reqId, resolve));
   vscode.postMessage({ type: "locate", reqId, page: n, x: at.x, y: at.y, context });
@@ -1467,6 +1588,7 @@ window.addEventListener("message", (e) => {
   if (msg.type === "load") void load(msg.url);
   else if (msg.type === "threads") {
     threads = msg.threads;
+    review = msg.review ?? null;
     const open = threads.filter((t) => !t.resolved).length;
     const count = document.getElementById("comment-count");
     count.textContent = String(open);

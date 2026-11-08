@@ -443,6 +443,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const pdfReview = new PdfReviewProvider(context, {
     getWorkspaceRoot,
     getStages: () => currentCalkitConfig?.pipeline?.stages ?? {},
+    getPublications: () => currentCalkitConfig?.publications ?? [],
     getNonce,
     promptUpgrade: (message) =>
       void promptCalkitInstallOrUpgrade({

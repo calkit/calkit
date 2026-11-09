@@ -98,6 +98,11 @@ This gives you these action skills:
   update automatically
 - **`/calkit:check-questions`**: reviews whether the project's answers still
   follow from their evidence
+- **`/calkit:review-paper`**: helps peer review a manuscript, checking its
+  references, trying to reproduce its results, and filing your comments,
+  while leaving the judgment to you. See
+  [peer reviewing a paper](tutorials/peer-review.md).
+  <!-- TODO: needs human review -->
 - **`/calkit:resolve-merge-conflicts`**: resolves merge conflicts, choosing
   for each pipeline stage which run's results to keep. See
   [merging branches](version-control.md#merging-branches).

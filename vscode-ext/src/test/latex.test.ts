@@ -13,6 +13,7 @@ import {
   paragraphLines,
   parseSynctex,
   pipelineLatexDiffs,
+  reviewPath,
   synctexForward,
   synctexInputFile,
   synctexReverse,
@@ -275,6 +276,20 @@ test("lineMap follows lines across comments added and removed", () => {
   assert.equal(same.toAfter(4), 4);
   assert.equal(same.toBefore(7), 7);
   assert.equal(lineMap([], ["x"]).toBefore(1), 0);
+});
+
+test("reviewPath finds the review file a PDF's publication lists", () => {
+  const pubs = [
+    "not an object",
+    { path: "paper/other.pdf", reviews: [{ path: "wrong.md" }] },
+    {
+      path: "paper/./manuscript.pdf",
+      reviews: [{ title: "no path" }, { path: "paper/review.md" }],
+    },
+  ];
+  assert.equal(reviewPath(pubs, "paper/manuscript.pdf"), "paper/review.md");
+  assert.equal(reviewPath(pubs, "paper/none.pdf"), undefined);
+  assert.equal(reviewPath([{ path: "a.pdf" }], "a.pdf"), undefined);
 });
 
 test("functions injected into the webview are self-contained", () => {

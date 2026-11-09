@@ -2356,3 +2356,65 @@ def test_new_comment(tmp_dir):
     ]:
         res = subprocess.run(["calkit", *args], capture_output=True)
         assert res.returncode != 0, args
+    # A comment on a PDF goes in its review file, made and listed if it's
+    # not, and is listed and deleted through the PDF
+    os.makedirs("paper")
+    with open("paper/manuscript.pdf", "wb") as f:
+        f.write(b"%PDF")
+    with open("calkit.yaml", "w") as f:
+        f.write("name: review\n")
+    assert (
+        ck(
+            "new",
+            "comment",
+            "paper/manuscript.pdf",
+            "--section",
+            "major",
+            "-m",
+            "The data isn't available.",
+        )
+        == "paper/review.md:3"
+    )
+    added = json.loads(
+        ck(
+            "new",
+            "comment",
+            "paper/manuscript.pdf",
+            "--page",
+            "3",
+            "-l",
+            "120",
+            "--highlight",
+            "Reynolds number",
+            "-m",
+            "Which length is it based on?",
+            "--section",
+            "minor",
+            "--json",
+        )
+    )
+    assert (added["id"], added["page"], added["pdf_line"]) == ("2", 3, 120)
+    assert (added["number"], added["section"]) == (1, "Minor comments")
+    with open("paper/review.md") as f:
+        assert f.read() == (
+            "## Major comments\n\n1. The data isn't available.\n\n"
+            "## Minor comments\n\n"
+            '1. Page 3, line 120 ("Reynolds number"): Which length is it based on?\n'
+        )
+    listed = json.loads(
+        ck("list", "comments", "paper/manuscript.pdf", "--json")
+    )
+    assert [c["id"] for c in listed] == ["1", "2"]
+    ck("delete", "comment", "paper/manuscript.pdf", "--id", "1")
+    with open("paper/review.md") as f:
+        assert f.read() == (
+            "## Major comments\n\n## Minor comments\n\n"
+            '1. Page 3, line 120 ("Reynolds number"): Which length is it based on?\n'
+        )
+    with open("calkit.yaml") as f:
+        assert "    reviews:\n      - path: paper/review.md" in f.read()
+    res = subprocess.run(
+        ["calkit", "delete", "comment", "paper/manuscript.pdf", "--id", "x"],
+        capture_output=True,
+    )
+    assert res.returncode != 0

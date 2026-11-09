@@ -334,6 +334,7 @@ when `doi` is set, and reads the same on the hub and in the CLI.
 | `kind`          | Literal['journal-article', 'conference-paper', 'proposal', 'report', 'blog', 'book', 'thesis', 'phd-thesis'] \| None | no       | null    |                                                                                                     |
 | `doi`           | str \| None                                                                                                          | no       | null    | This publication's own DOI, once it has one. Setting it is what marks the publication as published. |
 | `imported_from` | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| _ImportedFromDescription \| None | no       | null    | Where this came from, if imported.                                                                  |
+| `reviews`       | list[PublicationReview]                                                                                              | no       |         | Reviews of this publication, whether written in this project or received.                           |
 
 #### `Presentation`
 
@@ -629,6 +630,14 @@ address to fetch.
 | ------------- | ------------ | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `description` | str          | yes      |         | Where it came from, in words, for an origin that can be stated but not resolved, e.g. 'Emailed by someone@example.com' or 'Provided by Acme, Inc.' |
 | `date`        | date \| None | no       | null    | When the data was received.                                                                                                                        |
+
+#### `PublicationReview`
+
+A review of a publication, e.g., by a peer reviewer.
+
+| Parameter | Type | Required | Default | Description                                                                                                  |
+| --------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `path`    | str  | yes      |         | Path to the review, a Markdown file whose comments are numbered items under a heading containing "comments". |
 
 #### `FormulaParams`
 

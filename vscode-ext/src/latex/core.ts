@@ -163,7 +163,30 @@ export function documentStageSource(
   return stageDocuments(stages).find((d) => d.pdf === pdfFile)?.source;
 }
 
-// A comment thread as `calkit list comments --json` reports it.
+// The review file the publication at `pdfFile` lists first, if any, where
+// comments on a PDF with no source go, as `calkit new comment` keeps them.
+export function reviewPath(
+  publications: unknown[],
+  pdfFile: string,
+): string | undefined {
+  const want = path.posix.normalize(pdfFile);
+  for (const pub of publications) {
+    const p = pub as { path?: unknown; reviews?: unknown };
+    if (typeof p?.path !== "string" || path.posix.normalize(p.path) !== want) {
+      continue;
+    }
+    for (const r of Array.isArray(p.reviews) ? p.reviews : []) {
+      if (typeof r?.path === "string" && r.path) {
+        return r.path;
+      }
+    }
+  }
+  return undefined;
+}
+
+// A comment thread as `calkit list comments --json` reports it. A comment
+// in a review file has `review` set, says where in the PDF it's about, and
+// has no replies or resolved state.
 export interface TexThread {
   id: string | null;
   path: string;
@@ -179,6 +202,13 @@ export interface TexThread {
     date: string | null;
     text: string;
   }[];
+  review?: boolean;
+  // A review comment's number in its section, and the section's heading
+  number?: number;
+  section?: string | null;
+  page?: number | null;
+  pdf_line?: number | null;
+  pdf_end_line?: number | null;
 }
 
 // A region of a PDF page in points from its top-left corner, as SyncTeX

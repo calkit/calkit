@@ -8,6 +8,7 @@ import re
 import typer
 from typing_extensions import Annotated
 
+import calkit
 from calkit.cli import AliasGroup, raise_error, warn
 
 link_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
@@ -151,7 +152,7 @@ def install(
             )
         except Exception as e:
             raise_error(f"Failed to link {ssh}: {explain(e)}")
-        typer.echo(f"✅ Linked machine '{remote['name']}' on {ssh}")
+        calkit.echo(f"✅ Linked machine '{remote['name']}' on {ssh}")
         return
     cfg = hub_link.load_config()
     # One whose key the hub refused can't connect, so it's revoked, in case
@@ -177,7 +178,7 @@ def install(
             cfg = hub_link.register()
         except Exception as e:
             raise_error(f"Failed to register this machine: {explain(e)}")
-        typer.echo(f"✅ Registered machine '{cfg['name']}'")
+        calkit.echo(f"✅ Registered machine '{cfg['name']}'")
     else:
         typer.echo(f"Machine '{cfg['name']}' is already registered")
     # Whatever ran it before is replaced, e.g., a service when switching to
@@ -194,7 +195,7 @@ def install(
             hub_link.install_cron()
         except NotImplementedError as e:
             raise_error(str(e))
-        typer.echo(
+        calkit.echo(
             "✅ Installed the hub link in cron mode. It checks in every "
             "5 minutes and connects when you open a workspace from the hub."
         )
@@ -205,7 +206,7 @@ def install(
         raise_error(str(e))
     from calkit.hub import get_hub_url
 
-    typer.echo(
+    calkit.echo(
         "✅ Linked this machine. Its workspaces will show at "
         f"{get_hub_url()}/workspaces."
     )

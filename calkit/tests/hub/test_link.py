@@ -2018,9 +2018,9 @@ def test_workspace_actions(tmp_path, monkeypatch):
         local, "logs", later.strftime("%Y-%m-%dT%H-%M-%S") + ".log"
     )
     with open(later_log, "w") as f:
-        f.write("later\n")
+        f.write("later")
     run_log = hub_link.get_run_log(wdir)
-    assert run_log["log"] == "later\n" and run_log["run"] is None
+    assert run_log["log"] == "later" and run_log["run"] is None
     os.remove(later_log)
     # A run whose wrapper ended without recording how is lost, as is one
     # whose process ID another process got since

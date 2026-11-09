@@ -15,7 +15,7 @@ import {
   ModalOverlay,
 } from "@chakra-ui/react"
 import { useMutation } from "@tanstack/react-query"
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import useCustomToast from "../../hooks/useCustomToast"
@@ -59,11 +59,18 @@ const SaveFiles = ({
     defaultValues: { paths: [], commit_message: "", push: true },
   })
   // Everything selected on opening, and once the status loads if it opens
-  // first, e.g., from a link
+  // first, e.g., from a link, but not as it refreshes while open, which
+  // would undo the user's choices
+  const initialized = useRef(false)
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      initialized.current = false
+      return
+    }
+    if (initialized.current) return
     const paths = pathsKey ? pathsKey.split("\n") : []
     reset({ paths, commit_message: `Update ${paths.join(", ")}`, push: true })
+    initialized.current = paths.length > 0
   }, [isOpen, pathsKey, reset])
   const mutation = useMutation({
     mutationFn: (data: CommitPost) => {

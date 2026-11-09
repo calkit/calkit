@@ -71,6 +71,7 @@ export default function SecondFactorPrompt({
             size="sm"
             maxW="140px"
             placeholder="123456"
+            aria-label="Authenticator code"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             onKeyDown={(e) => {

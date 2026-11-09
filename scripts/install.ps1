@@ -30,6 +30,12 @@ Write-Host "Installing Calkit"
 uv tool install --upgrade calkit-python --python=3.14
 if ($LASTEXITCODE -ne 0) { throw "Failed to install Calkit; please check your uv installation" }
 
+# uv's tool directory, which UV_TOOL_BIN_DIR can move, may not be on this
+# process's PATH yet, and a command that isn't found doesn't set
+# $LASTEXITCODE, so this checks Calkit is there
+$env:Path = "$(uv tool dir --bin);$env:Path"
+if (-not (Get-Command calkit -ErrorAction SilentlyContinue)) { throw "Calkit was installed but isn't on PATH; please check your uv installation" }
+
 # Shell completion goes in the PowerShell profile, which only runs if the
 # execution policy lets local scripts run. Typer's --install-completion sets
 # it to Unrestricted every time, which is looser than needed and errors under

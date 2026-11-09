@@ -1,7 +1,7 @@
 """Add machines, two-factor auth, and sign-in sessions
 
 Revision ID: ff043cba2b65
-Revises: e6b898df78ed
+Revises: 06716a686a81
 Create Date: 2026-10-20 18:57:56.555985
 
 """
@@ -12,7 +12,7 @@ import sqlmodel.sql.sqltypes
 
 # revision identifiers, used by Alembic.
 revision = 'ff043cba2b65'
-down_revision = 'e6b898df78ed'
+down_revision = '06716a686a81'
 branch_labels = None
 depends_on = None
 

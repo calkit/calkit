@@ -203,6 +203,9 @@ export interface TexThread {
     text: string;
   }[];
   review?: boolean;
+  // A review comment's number in its section, and the section's heading
+  number?: number;
+  section?: string | null;
   page?: number | null;
   pdf_line?: number | null;
   pdf_end_line?: number | null;

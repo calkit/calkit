@@ -973,6 +973,14 @@ def new_comment(
             "--highlight", help="Rendered text in the paragraph it's about."
         ),
     ] = None,
+    section: Annotated[
+        str | None,
+        typer.Option(
+            "--section",
+            help="For a PDF, the review's comments section to add it to "
+            "(e.g., major or minor), made if missing; defaults to the last.",
+        ),
+    ] = None,
     occ: Annotated[
         int,
         typer.Option(
@@ -996,7 +1004,8 @@ def new_comment(
 
     A comment on a PDF is added to the publication's review file instead,
     as a numbered item saying where it's about, e.g., Page 3, line 120
-    ("quoted text"), so it can be pasted into a journal's review form.
+    ("quoted text"), in a section like Major comments, so it can be pasted
+    into a journal's review form.
     The review file is listed in calkit.yaml and made beside the PDF if
     there isn't one.
     """
@@ -1017,7 +1026,7 @@ def new_comment(
         review_lines = (
             pathlib.Path(review).read_text(encoding="utf-8").split("\n")
         )
-        review_lines = calkit.reviews.add(review_lines, comment)
+        review_lines = calkit.reviews.add(review_lines, comment, section)
         pathlib.Path(review).write_text(
             "\n".join(review_lines), encoding="utf-8"
         )

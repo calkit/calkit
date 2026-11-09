@@ -153,18 +153,22 @@ wording.
    wording they've approved:
 
    ```sh
-   calkit new comment paper/manuscript.pdf --page 4 --line 212 \
-     --highlight "within 2%" \
+   calkit new comment paper/manuscript.pdf --section major --page 4 \
+     --line 212 --highlight "within 2%" \
      -m "Rerunning the authors' code gives 3.4% (results/reproduction.json)."
-   calkit new comment paper/manuscript.pdf \
+   calkit new comment paper/manuscript.pdf --section major \
      -m "The data needed to reproduce the main results isn't available."
    ```
 
    `--page`, `--line` (the manuscript's printed line number, if it has
    them), and `--highlight` (text quoted from that spot) are written into
    the comment, so the authors can find it, and the VS Code PDF viewer
-   shows it there. A comment without them is general. The user will add
-   most of their own comments straight from the PDF in VS Code.
+   shows it there. A comment without them is general. `--section` (major
+   or minor, as the user decides) puts it under `## Major comments` or
+   `## Minor comments`, each numbered from 1. The review starts with a
+   `## Summary and assessment` section, which is the user's to write. The
+   user will add most of their own comments straight from the PDF in VS
+   Code.
 
 5. **Hand it over.** Tell the user what was checked, what reproduced, and
    what didn't. Point them to the review file to finish and paste into the

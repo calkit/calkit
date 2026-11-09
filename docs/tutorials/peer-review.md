@@ -110,7 +110,8 @@ reproduce it.
 
 In VS Code, open the PDF with **Open With... > Calkit PDF Review**.
 Select text and click **Comment** to add a comment about it,
-or click **General comment** for one about the paper as a whole.
+or click **General comment** for one that isn't about a particular spot.
+Choose whether it's a major or minor comment as you add it.
 Comments go in `paper/review.md`,
 which is created beside the PDF the first time you add one,
 and listed with it in `calkit.yaml`:
@@ -126,29 +127,38 @@ Each comment is a numbered item saying where it's about,
 so the authors can find it:
 
 ```markdown
-## Comments
+## Summary and assessment
+
+## Major comments
 
 1. Page 4, line 212 ("within 2%"): Rerunning the authors' code gives 3.4%.
 2. The data needed to reproduce Figure 5 isn't available.
+
+## Minor comments
+
+1. Page 2, line 48 ("principle"): Typo.
 ```
 
 The page and quoted text come from your selection,
 and the line number from the margin if the manuscript has line numbers.
 Clicking a comment in the viewer shows where it is in the PDF,
-and **Edit** opens it in the review file.
+and **Edit** opens it in the review file, beside the PDF.
 
 You can also add comments from the command line:
 
 ```sh
-calkit new comment paper/manuscript.pdf --page 4 --line 212 \
-    --highlight "within 2%" -m "Rerunning the authors' code gives 3.4%."
+calkit new comment paper/manuscript.pdf --section major --page 4 \
+    --line 212 --highlight "within 2%" \
+    -m "Rerunning the authors' code gives 3.4%."
 ```
 
-Write your summary and recommendation at the top of `paper/review.md`,
-above the comments.
-You can split comments into sections whose headings contain "comments",
-e.g., `## Major comments` and `## Minor comments`;
-new ones are added to the last section.
+Write your summary and assessment of the paper in the section at the top,
+which isn't numbered.
+Clicking the review file's name in the viewer opens it there,
+beside the PDF.
+Any section whose heading contains "comments" holds numbered comments,
+so you can add others,
+e.g., `## Comments on the figures`.
 
 ## Submitting the review
 

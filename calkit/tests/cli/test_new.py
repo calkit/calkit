@@ -2364,8 +2364,16 @@ def test_new_comment(tmp_dir):
     with open("calkit.yaml", "w") as f:
         f.write("name: review\n")
     assert (
-        ck("new", "comment", "paper/manuscript.pdf", "-m", "Overall, good.")
-        == "paper/review.md:3"
+        ck(
+            "new",
+            "comment",
+            "paper/manuscript.pdf",
+            "--section",
+            "major",
+            "-m",
+            "The data isn't available.",
+        )
+        == "paper/review.md:5"
     )
     added = json.loads(
         ck(
@@ -2380,14 +2388,19 @@ def test_new_comment(tmp_dir):
             "Reynolds number",
             "-m",
             "Which length is it based on?",
+            "--section",
+            "minor",
             "--json",
         )
     )
     assert (added["id"], added["page"], added["pdf_line"]) == ("2", 3, 120)
+    assert (added["number"], added["section"]) == (1, "Minor comments")
     with open("paper/review.md") as f:
         assert f.read() == (
-            "## Comments\n\n1. Overall, good.\n\n"
-            '2. Page 3, line 120 ("Reynolds number"): Which length is it based on?\n'
+            "## Summary and assessment\n\n"
+            "## Major comments\n\n1. The data isn't available.\n\n"
+            "## Minor comments\n\n"
+            '1. Page 3, line 120 ("Reynolds number"): Which length is it based on?\n'
         )
     listed = json.loads(
         ck("list", "comments", "paper/manuscript.pdf", "--json")
@@ -2396,7 +2409,8 @@ def test_new_comment(tmp_dir):
     ck("delete", "comment", "paper/manuscript.pdf", "--id", "1")
     with open("paper/review.md") as f:
         assert f.read() == (
-            "## Comments\n\n"
+            "## Summary and assessment\n\n## Major comments\n\n"
+            "## Minor comments\n\n"
             '1. Page 3, line 120 ("Reynolds number"): Which length is it based on?\n'
         )
     with open("calkit.yaml") as f:

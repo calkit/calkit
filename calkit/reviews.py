@@ -3,11 +3,17 @@
 A reviewer usually has only a PDF to comment on, with no source to put
 comments in, and has to paste the review into a form. So each comment is a
 numbered item in a Markdown review file, in a section whose heading says
-"comments", e.g., ``## Comments`` or ``## Minor comments``. Where it's about
-is written into the item, so the authors can find it and a PDF viewer can
-highlight it again::
+"comments", e.g., ``## Major comments`` or ``## Minor comments``, each
+numbered from 1. Where it's about is written into the item, so the authors
+can find it and a PDF viewer can highlight it again::
+
+    ## Major comments
 
     1. Page 3, line 120 ("Reynolds number"): Which length is it based on?
+    2. The data behind Figure 4 isn't available.
+
+A new review file starts with a section for the summary and assessment,
+which isn't numbered.
 
 A publication lists its reviews in ``calkit.yaml``, whether the project is
 the reviewer's or the authors'::
@@ -26,6 +32,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+SUMMARY_HEADING = "Summary and assessment"
 _ITEM_RE = re.compile(r"^(\d+)\.\s+(.*)$")
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*#*\s*$")
 # Where an item is about, e.g., Page 3, lines 120-122 ("some text"):
@@ -46,6 +53,8 @@ class ReviewComment:
     end_line: int | None = None
     quote: str | None = None
     number: int = 0
+    # The heading of the comments section it's in
+    section: str | None = None
     # Where the item is in the review file, 1-based, and how many lines
     lineno: int = 0
     nlines: int = 0
@@ -77,10 +86,19 @@ def is_comments_heading(title: str) -> bool:
     return "comment" in title.lower()
 
 
+def section_title(name: str) -> str:
+    """A comments section's heading, e.g., "Major comments" for "major"."""
+    title = " ".join(name.split())
+    if not is_comments_heading(title):
+        title += " comments"
+    return title[0].upper() + title[1:]
+
+
 def parse(lines: list[str]) -> list[ReviewComment]:
     """The numbered items in a review file's comments sections."""
     out: list[ReviewComment] = []
     in_comments = False
+    section: str | None = None
     current: list[str] | None = None
     start = 0
     indent = 0
@@ -99,7 +117,9 @@ def parse(lines: list[str]) -> list[ReviewComment]:
             for part in current[1:]
         ]
         body = "\n".join([item.group(2)] + rest).rstrip()
-        comment = ReviewComment(text=body, number=int(item.group(1)))
+        comment = ReviewComment(
+            text=body, number=int(item.group(1)), section=section
+        )
         where = _WHERE_RE.match(body)
         if where:
             comment.page = int(where.group(1))
@@ -119,6 +139,7 @@ def parse(lines: list[str]) -> list[ReviewComment]:
         if heading:
             finish(i)
             in_comments = is_comments_heading(heading.group(1))
+            section = heading.group(1)
             continue
         if not in_comments:
             continue
@@ -159,36 +180,77 @@ def renumber(lines: list[str]) -> list[str]:
     return out
 
 
-def add(lines: list[str], comment: ReviewComment) -> list[str]:
-    """Append a comment to the last comments section, making one if
-    there's none, and return the new lines."""
+def add(
+    lines: list[str], comment: ReviewComment, section: str | None = None
+) -> list[str]:
+    """Append a comment to a comments section and return the new lines.
+
+    Parameters
+    ----------
+    lines : list[str]
+        The review file's lines.
+    comment : ReviewComment
+        The comment, whose number and position are filled in.
+    section : str, optional
+        The section to add it to, e.g., "major" for ``## Major comments``,
+        which is made if it isn't there. Defaults to the last comments
+        section, or a new ``## Comments`` one.
+    """
     out = list(lines)
     while out and not out[-1].strip():
         out.pop()
-    sections = [
-        i
+    headings = [
+        (i, h.group(1))
         for i, line in enumerate(out)
         if (h := _HEADING_RE.match(line)) and is_comments_heading(h.group(1))
     ]
-    if not sections:
-        out += ([""] if out else []) + ["## Comments"]
-        sections = [len(out) - 1]
-    section = sections[-1]
+    title = section_title(section or "Comments")
+    if section is None:
+        at = headings[-1][0] if headings else None
+    else:
+        at = next((i for i, t in headings if t.lower() == title.lower()), None)
+    if at is None:
+        # A new section goes after the others, but major before minor
+        level = out[headings[-1][0]].split()[0] if headings else "##"
+        at = len(out)
+        if headings:
+            last = headings[-1][0]
+            at = next(
+                (
+                    i
+                    for i in range(last + 1, len(out))
+                    if _HEADING_RE.match(out[i])
+                ),
+                len(out),
+            )
+        if title.lower().startswith("major"):
+            at = next(
+                (i for i, t in headings if t.lower().startswith("minor")), at
+            )
+        while at > 0 and not out[at - 1].strip():
+            at -= 1
+        out[at:at] = ([""] if at else []) + [f"{level} {title}"]
+        at += 1 if at else 0
     # The section runs to the next heading, less its trailing blank lines
     end = next(
-        (i for i in range(section + 1, len(out)) if _HEADING_RE.match(out[i])),
+        (i for i in range(at + 1, len(out)) if _HEADING_RE.match(out[i])),
         len(out),
     )
-    at = end
-    while at > section + 1 and not out[at - 1].strip():
-        at -= 1
-    del out[at:end]
-    comment.number = 1 + sum(
-        1 for c in parse(out) if section < c.lineno - 1 < at
-    )
+    stop = end
+    while stop > at + 1 and not out[stop - 1].strip():
+        stop -= 1
+    del out[stop:end]
+    items = [c for c in parse(out) if at < c.lineno - 1 < stop]
+    comment.number = len(items) + 1
+    heading = _HEADING_RE.match(out[at])
+    assert heading is not None
+    comment.section = heading.group(1)
     rendered = comment.render()
-    out[at:at] = [""] + rendered + ([""] if at < len(out) else [])
-    comment.lineno = at + 2
+    # Items follow one another, with a blank line after anything else
+    tight = bool(items) and items[-1].lineno - 1 + items[-1].nlines == stop
+    pad = [] if tight else [""]
+    out[stop:stop] = pad + rendered + ([""] if stop < len(out) else [])
+    comment.lineno = stop + len(pad) + 1
     comment.nlines = len(rendered)
     return out + [""]
 
@@ -203,11 +265,10 @@ def delete(lines: list[str], number: int) -> list[str]:
         )
     comment = comments[number - 1]
     start, end = comment.lineno - 1, comment.lineno - 1 + comment.nlines
-    # Take one blank line with it, so the list stays evenly spaced
-    if end < len(lines) and not lines[end].strip():
-        end += 1
-    elif start > 0 and not lines[start - 1].strip():
-        start -= 1
+    # Between blank lines, take one with it, so the spacing stays even
+    if start > 0 and not lines[start - 1].strip():
+        if end < len(lines) and not lines[end].strip():
+            end += 1
     return renumber(lines[:start] + lines[end:])
 
 
@@ -216,6 +277,8 @@ def to_dict(path: str, ordinal: int, comment: ReviewComment) -> dict[str, Any]:
     where in the PDF it's about."""
     return {
         "id": str(ordinal),
+        "number": comment.number,
+        "section": comment.section,
         "path": path,
         "line": comment.lineno,
         "nlines": comment.nlines,
@@ -252,7 +315,8 @@ def review_path(pdf: str, ck_info: dict) -> str | None:
 
 def ensure_review(pdf: str, wdir: str | None = None) -> str:
     """The review file for a PDF, listing it in ``calkit.yaml`` and making
-    it beside the PDF if it isn't yet.
+    it beside the PDF if it isn't yet, starting with a section for the
+    summary and assessment, above the numbered comments.
 
     Parameters
     ----------
@@ -292,5 +356,5 @@ def ensure_review(pdf: str, wdir: str | None = None) -> str:
     if not os.path.isfile(full):
         os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
         with open(full, "w", encoding="utf-8") as f:
-            f.write("## Comments\n")
+            f.write(f"## {SUMMARY_HEADING}\n")
     return path

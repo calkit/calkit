@@ -628,6 +628,9 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
           if (typeof msg.highlight === "string" && msg.highlight) {
             args.push("--highlight", msg.highlight);
           }
+          if (typeof msg.section === "string" && msg.section) {
+            args.push("--section", msg.section);
+          }
           const review = this.review(v);
           await this.edit(["new", "comment"], v.pdf, args, review ?? v.pdf);
           break;
@@ -682,7 +685,13 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         break;
       }
       case "openSource":
-        await this.openSource(v, String(msg.file), Number(msg.line));
+        await this.openSource(
+          v,
+          String(msg.file),
+          Number(msg.line),
+          undefined,
+          msg.where === "side" ? "side" : "here",
+        );
         return;
       case "state": {
         const st = (msg.state ?? {}) as Record<string, unknown>;
@@ -695,6 +704,7 @@ export class PdfReviewProvider implements vscode.CustomReadonlyEditorProvider {
         await this.context.workspaceState.update(`${VIEW_KEY}:${v.pdf}`, {
           scale: st.scale,
           scrollTop: st.scrollTop,
+          reviewSection: st.reviewSection,
         });
         return;
       }
@@ -834,6 +844,10 @@ function buildHtml(
   .empty { opacity: 0.7; padding: 4px; }
   .review-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px; margin-bottom: 6px; opacity: 0.85; }
   .review-bar a { cursor: pointer; text-decoration: underline; }
+  .section-head { font-weight: 600; margin: 8px 0 4px; opacity: 0.85; }
+  .section-pick { margin-top: 6px; gap: 6px; }
+  .section-pick select { font: inherit; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background);
+    border: 1px solid var(--vscode-dropdown-border, transparent); }
 </style>
 </head>
 <body>
@@ -1154,8 +1168,9 @@ async function draw() {
     pins.set(key, k + 1);
     const pin = addEl(startLayer, "ck-pin", { left: x0 + 6 + k * 22, top: y0 - 2 }, t);
     // A review's comments are numbered, and threads count their messages
-    pin.textContent = t.review ? String(t.id) : String(t.messages.length);
-    pin.title = (t.review ? "" : t.messages[0]?.author + ": ") + t.messages[0]?.text;
+    pin.textContent = t.review ? String(t.number ?? t.id) : String(t.messages.length);
+    pin.title = (t.review ? (t.section ? t.section + " " : "") + (t.number ?? t.id) + ": " : t.messages[0]?.author + ": ") +
+      t.messages[0]?.text;
     if (t.highlight) {
       const last = t.end ?? t.start;
       const found = await occurrences(t.highlight.text, t.start, {
@@ -1175,7 +1190,8 @@ function renderPanel() {
   const parts = [];
   if (review !== null) {
     parts.push('<div class="review-bar"><span>Comments go in ' +
-      (review ? '<a data-act="open-review" title="Open the review file">' + esc(review) + "</a>" : "a review file beside this PDF") +
+      (review ? '<a data-act="open-review" title="Open the review file beside the PDF, at its summary">' + esc(review) + "</a>" :
+        "a review file beside this PDF") +
       '</span><button data-act="general">General comment</button></div>');
   }
   if (composer) {
@@ -1183,6 +1199,9 @@ function renderPanel() {
     parts.push('<div class="thread composer" data-key="__new">' + (where ? '<div class="meta">' + esc(where) + "</div>" : "") +
       (composer.text ? '<div class="quote">' + esc(composer.text) + "</div>" : "") +
       '<textarea id="new-text" placeholder="Add a comment"></textarea>' +
+      (composer.review ? '<label class="section-pick">Add to <select id="new-section">' +
+        reviewSections().map((x) => '<option' + (x === pickedSection() ? " selected" : "") + ">" + esc(x) + "</option>").join("") +
+        "</select></label>" : "") +
       '<div class="actions"><button class="primary" data-act="save-new">Comment</button><button data-act="cancel-new">Cancel</button></div></div>');
   }
   if (!shown.length && !composer) {
@@ -1190,10 +1209,15 @@ function renderPanel() {
     parts.push('<div class="empty">No ' + (hidden ? "open " : "") + "comments. Select text in the PDF to add one." +
       (hidden ? " " + hidden + " resolved hidden." : "") + "</div>");
   }
+  let heading;
   for (const t of shown) {
     if (t.review) {
+      if (t.section && t.section !== heading) {
+        heading = t.section;
+        parts.push('<div class="section-head">' + esc(heading) + "</div>");
+      }
       parts.push('<div class="thread' + (selected === t.key ? " selected" : "") + '" data-key="' + esc(t.key) + '">' +
-        '<div class="meta"><span>' + esc(t.id + ". " + reviewWhere(t.page, t.pdf_line, t.pdf_end_line)) + "</span>" +
+        '<div class="meta"><span>' + esc((t.number ?? t.id) + ". " + reviewWhere(t.page, t.pdf_line, t.pdf_end_line)) + "</span>" +
         (t.unplaced ? '<span title="Its page or text was not found in the PDF">Not placed</span>' : "") + "</div>" +
         (t.highlight ? '<div class="quote">' + esc(t.highlight.text) + "</div>" : "") +
         '<div class="msg"><div class="text">' + esc(t.messages[0]?.text) + "</div></div>" +
@@ -1223,6 +1247,20 @@ function renderPanel() {
     if (key === focused) el.focus();
   }
   if (composer && !focused) panel.querySelector("#new-text")?.focus();
+}
+// The review's comments sections, plus major and minor ones to start
+function reviewSections() {
+  const found = [...new Set(threads.filter((t) => t.review && t.section).map((t) => t.section))];
+  for (const x of ["Major comments", "Minor comments"]) {
+    if (!found.some((f) => f.toLowerCase() === x.toLowerCase())) found.push(x);
+  }
+  return found;
+}
+// The section last added to, else the review's last, else major
+function pickedSection() {
+  const sections = reviewSections();
+  if (sections.includes(state.reviewSection)) return state.reviewSection;
+  return threads.filter((t) => t.review && t.section).at(-1)?.section ?? "Major comments";
 }
 // Where a review comment is about, as the review file writes it
 function reviewWhere(page, line, endLine) {
@@ -1254,7 +1292,7 @@ function reveal(rect) {
 }
 panel.addEventListener("click", (e) => {
   const act = e.target.closest("[data-act]")?.dataset.act;
-  if (act === "open-review") { vscode.postMessage({ type: "openSource", file: review, line: 1 }); return; }
+  if (act === "open-review") { vscode.postMessage({ type: "openSource", file: review, line: 1, where: "side" }); return; }
   if (act === "general") { composer = { text: "", occ: 0, review: true }; renderPanel(); return; }
   const card = e.target.closest(".thread");
   if (!card) return;
@@ -1264,7 +1302,9 @@ panel.addEventListener("click", (e) => {
       const text = panel.querySelector("#new-text").value.trim();
       if (!text || (!composer.file && !composer.review)) return;
       if (composer.review) {
-        vscode.postMessage({ type: "add", review: true, page: composer.page, pdfLine: composer.pdfLine, text, highlight: composer.text });
+        const section = panel.querySelector("#new-section")?.value;
+        if (section) { state.reviewSection = section; save(); }
+        vscode.postMessage({ type: "add", review: true, page: composer.page, pdfLine: composer.pdfLine, text, highlight: composer.text, section });
       } else {
         vscode.postMessage({ type: "add", file: composer.file, line: composer.line, text, highlight: composer.text, occ: composer.occ });
       }
@@ -1286,7 +1326,7 @@ panel.addEventListener("click", (e) => {
   } else if (act === "delete") {
     vscode.postMessage({ type: "delete", ...target, review: !!t.review });
   } else if (act === "source") {
-    vscode.postMessage({ type: "openSource", file: t.path, line: t.line });
+    vscode.postMessage({ type: "openSource", file: t.path, line: t.line, where: t.review ? "side" : "here" });
   } else if (act === "issue") {
     vscode.postMessage({ type: "openIssue", url: t.issue });
   }

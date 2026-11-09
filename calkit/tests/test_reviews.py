@@ -44,6 +44,12 @@ lazily onto a third,
     comments = reviews.parse(text.split("\n"))
     assert [c.number for c in comments] == [1, 2, 10, 1]
     first, second, third, fourth = comments
+    assert [c.section for c in comments] == [
+        "Major comments",
+        "Major comments",
+        "Major comments",
+        "Minor comments",
+    ]
     assert (first.page, first.line, first.quote, first.text) == (
         3,
         120,
@@ -72,19 +78,53 @@ lazily onto a third,
             comment.quote,
         )
         assert again.text == comment.text
-    # Adding goes at the end of the last comments section, numbered after
-    # its items, with a blank line on either side
+    # Adding goes right after the last comments section's items, numbered
+    # after them
     lines = reviews.add(
         text.split("\n"), reviews.ReviewComment(text="New.", page=7)
     )
     added = reviews.parse(lines)[-1]
-    assert (added.number, added.page, added.text) == (2, 7, "New.")
+    assert (added.number, added.page, added.section) == (
+        2,
+        7,
+        "Minor comments",
+    )
     assert lines[added.lineno - 2 : added.lineno + 2] == [
-        "",
+        '1. Page 2 ("a "quoted" word"): Typo.',
         "2. Page 7: New.",
         "",
         "## Other",
     ]
+    # Or to a named section, matched whatever its case, and numbered by
+    # position
+    lines = reviews.add(
+        text.split("\n"), reviews.ReviewComment(text="Big."), "MAJOR"
+    )
+    assert [(c.section, c.number) for c in reviews.parse(lines)][3] == (
+        "Major comments",
+        4,
+    )
+    # A missing section is made after the others, but major before minor
+    lines = ["## Summary and assessment", "", "Good."]
+    for section, body in [
+        ("minor", "Typo."),
+        ("major", "Missing data."),
+        ("Comments on the figures", "Why?"),
+        ("major", "No baseline."),
+        (None, "And this."),
+    ]:
+        lines = reviews.add(lines, reviews.ReviewComment(text=body), section)
+    assert "\n".join(lines) == (
+        "## Summary and assessment\n\nGood.\n\n"
+        "## Major comments\n\n1. Missing data.\n2. No baseline.\n\n"
+        "## Minor comments\n\n1. Typo.\n\n"
+        "## Comments on the figures\n\n1. Why?\n2. And this.\n"
+    )
+    # Deleting from a list without blank lines leaves none behind
+    lines = reviews.delete(lines, 1)
+    assert "## Major comments\n\n1. No baseline.\n\n## Minor" in (
+        "\n".join(lines)
+    )
     # Deleting counts across sections and renumbers what's left
     lines = reviews.delete(text.split("\n"), 1)
     assert [c.number for c in reviews.parse(lines)] == [1, 2, 1]
@@ -102,6 +142,7 @@ lazily onto a third,
     ] == ["A summary.", "", "## Comments"]
     # As JSON, a comment looks like a thread, plus where in the PDF
     out = reviews.to_dict("paper/review.md", 1, first)
+    assert (out["number"], out["section"]) == (1, "Major comments")
     assert out["highlight"] == {"text": "Reynolds number", "occ": 0}
     assert (out["page"], out["pdf_line"], out["review"]) == (3, 120, True)
     assert out["messages"][0]["text"] == "Which length is it based on?"
@@ -111,10 +152,12 @@ def test_a_publication_lists_its_review(tmp_dir: Path) -> None:
     (tmp_dir / "paper").mkdir()
     (tmp_dir / "paper" / "manuscript.pdf").write_bytes(b"%PDF")
     (tmp_dir / "calkit.yaml").write_text("name: review\n")
-    # A review is made beside the PDF and listed under its publication,
-    # which is added if it isn't there
+    # A review is made beside the PDF, starting with its summary, and listed
+    # under its publication, which is added if it isn't there
     assert reviews.ensure_review("paper/manuscript.pdf") == "paper/review.md"
-    assert (tmp_dir / "paper" / "review.md").read_text() == "## Comments\n"
+    assert (tmp_dir / "paper" / "review.md").read_text() == (
+        "## Summary and assessment\n"
+    )
     ck_info = calkit.load_calkit_info()
     assert ck_info["publications"] == [
         {

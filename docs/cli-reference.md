@@ -1053,7 +1053,7 @@ Options:
 
 Start a review comment thread above a paragraph of a LaTeX or Markdown document, printing its ID.
 
-A comment on a PDF is added to the publication's review file instead, as a numbered item saying where it's about, e.g., Page 3, line 120 ("quoted text"), so it can be pasted into a journal's review form. The review file is listed in calkit.yaml and made beside the PDF if there isn't one.
+A comment on a PDF is added to the publication's review file instead, as a numbered item saying where it's about, e.g., Page 3, line 120 ("quoted text"), in a section like Major comments, so it can be pasted into a journal's review form. The review file is listed in calkit.yaml and made beside the PDF if there isn't one.
 
 Usage:
 
@@ -1069,16 +1069,17 @@ Arguments:
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                                                                                      |
-| -------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `--text`, `-m` | str     | yes      |         | The comment.                                                                                                     |
-| `--line`, `-l` | int     | no       |         | A line in, or just above, the paragraph to comment on; for a PDF, the line number printed in its margin, if any. |
-| `--page`       | int     | no       |         | For a PDF, the page it's about.                                                                                  |
-| `--highlight`  | str     | no       |         | Rendered text in the paragraph it's about.                                                                       |
-| `--occ`        | int     | no       | 0       | Which occurrence of the highlight text, from 0.                                                                  |
-| `--author`     | str     | no       |         | Defaults to Git's user.name.                                                                                     |
-| `--email`      | str     | no       |         | Defaults to Git's user.email.                                                                                    |
-| `--json`       | boolean | no       | False   | Output the thread as JSON.                                                                                       |
+| Option         | Type    | Required | Default | Description                                                                                                          |
+| -------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `--text`, `-m` | str     | yes      |         | The comment.                                                                                                         |
+| `--line`, `-l` | int     | no       |         | A line in, or just above, the paragraph to comment on; for a PDF, the line number printed in its margin, if any.     |
+| `--page`       | int     | no       |         | For a PDF, the page it's about.                                                                                      |
+| `--highlight`  | str     | no       |         | Rendered text in the paragraph it's about.                                                                           |
+| `--section`    | str     | no       |         | For a PDF, the review's comments section to add it to (e.g., major or minor), made if missing; defaults to the last. |
+| `--occ`        | int     | no       | 0       | Which occurrence of the highlight text, from 0.                                                                      |
+| `--author`     | str     | no       |         | Defaults to Git's user.name.                                                                                         |
+| `--email`      | str     | no       |         | Defaults to Git's user.email.                                                                                        |
+| `--json`       | boolean | no       | False   | Output the thread as JSON.                                                                                           |
 
 <a id="subcommand-new-create-notebook-nb"></a>
 

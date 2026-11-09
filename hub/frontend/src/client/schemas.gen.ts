@@ -194,7 +194,7 @@ export const Body_login_login_access_tokenSchema = {
       anyOf: [
         {
           type: "string",
-          pattern: "password",
+          pattern: "^password$",
         },
         {
           type: "null",
@@ -208,6 +208,7 @@ export const Body_login_login_access_tokenSchema = {
     },
     password: {
       type: "string",
+      format: "password",
       title: "Password",
     },
     scope: {
@@ -235,6 +236,7 @@ export const Body_login_login_access_tokenSchema = {
           type: "null",
         },
       ],
+      format: "password",
       title: "Client Secret",
     },
   },

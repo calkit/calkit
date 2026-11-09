@@ -216,19 +216,17 @@ def test_machines(
     # Check in with workspaces from two projects, the first time of which
     # says the link started
     project = f"someone/proj-{uuid.uuid4().hex[:6]}"
+    workspaces = [
+        {"path": "/home/me/calkit/a", "project": project.upper()},
+        {"path": "/home/me/calkit/b", "project": "someone/other"},
+        {"path": "/home/me/calkit/c", "project": project},
+        {"path": "/home/me/misc"},
+    ]
     with patch.object(mixpanel, "machine_came_online") as came_online:
         r = client.post(
             "/machines/check-in",
             headers=op_headers,
-            json={
-                "calkit_version": "1.2.3",
-                "workspaces": [
-                    {"path": "/home/me/calkit/a", "project": project.upper()},
-                    {"path": "/home/me/calkit/b", "project": "someone/other"},
-                    {"path": "/home/me/calkit/c", "project": project},
-                    {"path": "/home/me/misc"},
-                ],
-            },
+            json={"calkit_version": "1.2.3", "workspaces": workspaces},
         )
         assert r.status_code == 200, r.text
         check_in = r.json()
@@ -239,7 +237,7 @@ def test_machines(
                 r = client.post(
                     "/machines/check-in",
                     headers=op_headers,
-                    json={"usage": usage},
+                    json={"usage": usage, "workspaces": workspaces},
                 )
                 assert r.status_code == 200, r.text
             assert used.call_count == 0
@@ -251,7 +249,8 @@ def test_machines(
                         "workspace.run": 2,
                         "agent.claude": 1,
                         "sessions.open": 0,
-                    }
+                    },
+                    "workspaces": workspaces,
                 },
             )
             assert r.status_code == 200, r.text

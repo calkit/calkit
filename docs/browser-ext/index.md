@@ -33,8 +33,6 @@ and select "Sign in."
     See [Overleaf integration](../overleaf.md#connecting-to-overleaf)
     for more.
 
-<!-- TODO: needs human review -->
-
 **Get a token from Overleaf** opens your Overleaf account settings,
 where you click **Generate token**.
 The extension saves the token to your Calkit account

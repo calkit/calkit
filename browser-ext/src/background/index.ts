@@ -1,5 +1,10 @@
 import { ApiError, NotSignedInError, request } from "../core/api";
-import { getAuthState, signIn, signOut } from "../core/auth";
+import {
+  announceAuthChange,
+  getAuthState,
+  signIn,
+  signOut,
+} from "../core/auth";
 import { hubUrlFromCalkitYaml } from "../core/calkit-yaml";
 import {
   isLoopbackHost,
@@ -50,6 +55,15 @@ function projectPath(owner: string, project: string): string {
 // users without Overleaf Premium, whose Git integration needs a token
 const OVERLEAF_URL = "https://www.overleaf.com";
 const OVERLEAF_SESSION_COOKIE = "overleaf_session2";
+const OVERLEAF_GIT_SETTINGS = `${OVERLEAF_URL}/user/settings#git-integration`;
+// Settings tabs opened to get a Git token, mapped to the tab that asked, kept
+// in session storage since the service worker can stop between messages
+const TOKEN_TABS_KEY = "overleafTokenTabs";
+
+async function getTokenTabs(): Promise<Record<string, number>> {
+  const stored = await chrome.storage.session.get(TOKEN_TABS_KEY);
+  return (stored[TOKEN_TABS_KEY] as Record<string, number>) ?? {};
+}
 
 const MAX_PREVIEW_BYTES = 2_000_000;
 const MAX_VIEWER_BYTES = 25_000_000;
@@ -131,7 +145,10 @@ function hubFor(message: { hubUrl?: string }): Hub | undefined {
   return message.hubUrl ? resolveHubByWebUrl(message.hubUrl) : undefined;
 }
 
-async function handle(message: Request): Promise<unknown> {
+async function handle(
+  message: Request,
+  sender: chrome.runtime.MessageSender,
+): Promise<unknown> {
   switch (message.type) {
     case "auth.state":
       return getAuthState(hubFor(message));
@@ -354,11 +371,57 @@ async function handle(message: Request): Promise<unknown> {
         `${projectPath(message.owner, message.project)}/overleaf-syncs`,
         { method: "POST", body: { path: message.path } },
       );
-    case "overleaf.setToken":
-      return request<{ message: string }>("/user/overleaf-token", {
+    case "overleaf.setToken": {
+      const saved = await request<{ message: string }>("/user/overleaf-token", {
         method: "PUT",
         body: { token: message.token },
       });
+      // So panels in other tabs stop asking for one
+      void announceAuthChange();
+      return saved;
+    }
+    case "overleaf.openTokenSettings": {
+      const opener = sender.tab;
+      const tab = await chrome.tabs.create({
+        url: OVERLEAF_GIT_SETTINGS,
+        openerTabId: opener?.id,
+        index: opener ? opener.index + 1 : undefined,
+      });
+      if (tab.id !== undefined && opener?.id !== undefined) {
+        const tabs = await getTokenTabs();
+        tabs[tab.id] = opener.id;
+        await chrome.storage.session.set({ [TOKEN_TABS_KEY]: tabs });
+      }
+      return null;
+    }
+    case "overleaf.tokenTab": {
+      const tabs = await getTokenTabs();
+      return {
+        requested: sender.tab?.id !== undefined && sender.tab.id in tabs,
+      };
+    }
+    case "overleaf.returnFromTokenTab": {
+      // Back to the project that asked, closing the settings tab it opened
+      const tabs = await getTokenTabs();
+      const tabId = sender.tab?.id;
+      if (tabId === undefined || !(tabId in tabs)) {
+        return { returned: false };
+      }
+      const openerId = tabs[tabId];
+      delete tabs[tabId];
+      await chrome.storage.session.set({ [TOKEN_TABS_KEY]: tabs });
+      try {
+        const opener = await chrome.tabs.update(openerId, { active: true });
+        if (opener?.windowId !== undefined) {
+          await chrome.windows.update(opener.windowId, { focused: true });
+        }
+      } catch {
+        // The project tab was closed meanwhile, so stay here
+        return { returned: false };
+      }
+      await chrome.tabs.remove(tabId);
+      return { returned: true };
+    }
     case "overleaf.connectSession": {
       // Read here, since Overleaf keeps the cookie from page scripts, and
       // only when the user asks, so it's never held otherwise
@@ -369,10 +432,12 @@ async function handle(message: Request): Promise<unknown> {
       if (!cookie) {
         throw new Error("Sign in to Overleaf first");
       }
-      return request<{ message: string }>("/user/overleaf-session", {
-        method: "PUT",
-        body: { session: cookie.value },
-      });
+      const saved = await request<{ message: string }>(
+        "/user/overleaf-session",
+        { method: "PUT", body: { session: cookie.value } },
+      );
+      void announceAuthChange();
+      return saved;
     }
     case "overleaf.import":
       return request<{ path: string; title: string }>(
@@ -439,7 +504,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) {
     return false;
   }
-  handle(message as Request)
+  handle(message as Request, sender)
     .then((data) => sendResponse({ ok: true, data } as Envelope<unknown>))
     .catch((e: unknown) => {
       const error = e instanceof Error ? e.message : String(e);

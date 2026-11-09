@@ -78,11 +78,21 @@ write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
 
+Name functions for what they return,
+e.g., `get_image_name` rather than `get_image`,
+which could just as well return an image.
+
 No spaces on either side of en or em dashes used for ranges or pauses in prose,
 respectively.
 
 Never create `helpers` or `utils` modules or packages--tight coupling and
 low cohesion architecture.
+
+Keep a subclass in the module of the class it extends,
+so a class's variants are found where it's defined.
+The only exceptions are classes written to be subclassed,
+e.g., `calkit.models.base.Model` and `calkit.cli.core.OptionalValueCommand`,
+and classes from other packages, e.g., pydantic's `BaseModel`.
 
 Don't be verbose in comments. One sentence is usually fine, if anything at all.
 

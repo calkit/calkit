@@ -1208,7 +1208,7 @@ def new_docker_env(
 ):
     """Create a new Docker environment."""
     from calkit.cli.check import check_environment
-    from calkit.docker import LAYERS
+    from calkit.environments.docker import LAYERS
 
     if base is not None and path is None:
         path = "Dockerfile"

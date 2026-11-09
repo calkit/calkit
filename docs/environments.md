@@ -114,6 +114,60 @@ All project environments can be checked at once with:
 calkit check envs
 ```
 
+## Specs, locks, and when environments change
+
+Each environment has two descriptors in the project:
+
+- The **spec** is where the dependencies are declared:
+  a `requirements.txt`, `environment.yml`,
+  `pyproject.toml`, Dockerfile, or the name of a Docker image.
+  It says what you asked for, sometimes loosely, e.g., `pandas>=2` or
+  `texlive/texlive:latest`.
+- The **lock** is what Calkit or the environment manager writes after
+  building the environment: the exact package versions, or for Docker, the
+  image's digest and layers.
+  It describes the environment precisely,
+  and it's committed with the project,
+  so it can be reproduced elsewhere.
+
+Stages depend on the lock, not the spec.
+A stage reruns when its environment's lock changes,
+and doesn't when nothing in the lock changed.
+
+An environment is checked before anything runs in it,
+i.e., by `calkit run`, `calkit status`, `calkit xenv`, and
+`calkit check env(s)`.
+A check does one of four things:
+
+1. **Nothing**, if the environment on this machine matches its lock.
+2. **Recreate it from the lock**, if the spec hasn't changed but the
+   environment is missing here or doesn't match, e.g., on a fresh clone, or
+   after a `docker system prune`.
+   Calkit installs the locked versions, or fetches the locked image
+   (see [How images are fetched](#how-images-are-fetched)),
+   which can mean downloading.
+   The result is identical to what the lock describes,
+   so the lock doesn't change and no stage reruns.
+3. **Build it from the spec and write a new lock**, if the spec changed or
+   there's no lock yet.
+   Stages using the environment rerun.
+4. **Fail**, if the lock still matches the spec but it's not possible
+   to create, e.g., a package version deleted from its index,
+   or a Docker image that was never pushed or is private.
+   The environment and its lock are left alone,
+   since building from the spec would give a different environment,
+   and rerunning stages in it isn't something to do without being asked.
+
+A newer release of something the spec allows,
+e.g., a new `latest` image or a newer `pandas`,
+doesn't get applied to a locked environment without explicit instruction.
+To update, or to get past a failed check,
+relock the environment, which resolves and rebuilds it from the spec:
+
+```sh
+calkit update env --name {env-name} --lock
+```
+
 ## Inspecting environment paths
 
 To see where an environment's specification and lock file live, use:
@@ -471,10 +525,15 @@ Otherwise Calkit tries, in order:
    loads it into Docker, and checks its layers again. This is what keeps an
    old version of a project reproducible after a registry has dropped the
    image, or after the account that published it is gone.
-3. **Build it**, for an environment with a Dockerfile, or **pull it by
-   tag** for one named after an existing image. Only at this point does the
-   environment get an image that isn't the one the lock describes, and the
-   lock is rewritten to record what was actually built.
+3. **Fail**, if the lock names a digest and neither of those worked.
+   Building again or pulling the tag would give an image that isn't the one
+   the lock describes, so the check stops and leaves the lock alone.
+   The error says what to do: log in or make the image public, push it
+   from the machine that built it, or relock with
+   `calkit update env --name {env-name} --lock`.
+   Only a lock that names no digest, i.e., for an environment with no
+   `registry`, or an image store that records no digest, is rebuilt here,
+   and rewritten to record what was built.
 
 The effect is that deleting an image locally costs a download rather than a
 rebuild, and doesn't invalidate any stage that used it, since the lock file

@@ -76,6 +76,7 @@ minutes, once the relay token it can no longer refresh expires.
   sessions' and running actions' credentials came from, browser or not
   (`channel_sessions`, the grants' `sid`s), and its `public_key`, which
   the hub keeps the first time it's sent and never replaces.
+  <!-- TODO: needs human review -->
   With `usage`, it counts the requests browsers made since its last
   check-in, by kind, e.g., `workspace.run` or `sessions.open`, leaving
   out ones the hub's pages poll or send with every keystroke, and
@@ -475,6 +476,9 @@ can't be read, e.g., opencode's.
 `ok` and the end of its `output`; meanwhile the browser follows it with
 `workspace.run_log`, which returns the latest run's log `name`, named by
 when it started, and the end of the `log`, however that run was started.
+
+<!-- TODO: needs human review -->
+
 A run outlives the link, e.g., if it crashes, since it runs in its own
 session under a wrapper that records its process, and then its exit code,
 in the link's folder, with its output beside it; the systemd unit has

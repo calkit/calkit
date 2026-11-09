@@ -18,6 +18,7 @@ from app.config import settings
 from app.core import utcnow
 from app.models import (
     ROLE_IDS,
+    Machine,
     Project,
     RefreshToken,
     User,
@@ -276,7 +277,46 @@ def test_get_hub_stats(
     add_project(user.account.id, parent_project_id=worked_on.id)
     add_project(other.account.id)
     add_project(superuser.account.id)
+    # Machines count when linked, by their users, and by when they last
+    # checked in and were connected to from the browser
+    for owner, seen, used, active in [
+        (user, now, now, True),
+        (user, now - timedelta(days=10), None, True),
+        (other, now - timedelta(days=10), now - timedelta(days=10), True),
+        (other, now, now, False),
+        (superuser, now, now, True),
+    ]:
+        db.add(
+            Machine(
+                user_id=owner.id,
+                name=f"m-{random_lower_string()[:8]}",
+                selector=random_lower_string()[:32],
+                hashed_verifier="x" * 64,
+                last_seen=seen,
+                last_used=used,
+                is_active=active,
+            )
+        )
+    db.commit()
     after = client.get("/stats", headers=headers).json()
+    machines = {
+        k: (
+            {n: after["machines"][k][n] - before["machines"][k][n] for n in v}
+            if isinstance(v, dict)
+            else v - before["machines"][k]
+        )
+        for k, v in after["machines"].items()
+    }
+    assert machines == {
+        "linked": 3,
+        "users": 2,
+        "users_online": {"last_day": 1, "last_7_days": 1, "last_30_days": 2},
+        "users_connected": {
+            "last_day": 1,
+            "last_7_days": 1,
+            "last_30_days": 2,
+        },
+    }
     assert superuser.account.name in after["excluded_accounts"]
     assert after["users"]["total"] - before["users"]["total"] == 2
     assert after["users"]["verified"] - before["users"]["verified"] == 1

@@ -33,6 +33,11 @@ and select "Sign in."
     See [Overleaf integration](../overleaf.md#connecting-to-overleaf)
     for more.
 
+**Get a token from Overleaf** opens your Overleaf account settings,
+where you click **Generate token**.
+The extension saves the token to your Calkit account
+and takes you back to your project, with nothing to copy and paste.
+
 **Connect with Overleaf login** sends the session your browser is signed in to
 Overleaf with to your Calkit account, so the hub can sync for you.
 If you later sign out of Overleaf, that session stops working,

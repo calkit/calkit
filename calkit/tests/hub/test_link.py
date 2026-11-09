@@ -1,6 +1,7 @@
 """Tests for ``calkit.hub_link``."""
 
 import asyncio
+import datetime
 import json
 import os
 import shlex
@@ -8,6 +9,8 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -1429,6 +1432,7 @@ def test_service_files(tmp_path, monkeypatch):
     assert f"ExecStart={expected}" in unit
     assert "WorkingDirectory=/\n" in unit
     assert "Restart=on-failure" in unit
+    assert "KillMode=process\n" in unit
     assert "WantedBy=default.target" in unit
     # What systemd would expand in a path is escaped
     with monkeypatch.context() as m:
@@ -1810,7 +1814,11 @@ def test_workspace_actions(tmp_path, monkeypatch):
         logs = os.path.join(wdir, ".calkit", "logs")
         os.makedirs(logs)
         os.symlink(outside, os.path.join(logs, "9999-zz.log"))
-        assert hub_link.get_run_log(wdir) == {"name": None, "log": None}
+        assert hub_link.get_run_log(wdir) == {
+            "name": None,
+            "log": None,
+            "run": None,
+        }
         shutil.rmtree(os.path.join(wdir, ".calkit"))
         os.remove(outside)
     # The machine's credentials never go in a commit, even when a repo's
@@ -1933,6 +1941,9 @@ def test_workspace_actions(tmp_path, monkeypatch):
     result = hub_link.run_pipeline(wdir)
     assert result["ok"] is False
     assert result["output"]
+    run = hub_link.get_run_log(wdir)["run"]
+    assert run["state"] == "failed" and run["exit_code"] != 0
+    assert run["ended"] >= run["started"]
     # Single stages can be run, and their names can't be options
     result = hub_link.run_pipeline(wdir, stages=["plot"])
     assert result["ok"] is False and "plot" in result["output"]
@@ -1971,6 +1982,76 @@ def test_workspace_actions(tmp_path, monkeypatch):
         )
         result = hub_link.run_pipeline(wdir)
     assert result["ok"] and result["output"].endswith("END")
+    # A run that never got to logging shows its output instead of an
+    # older run's log
+    run_log = hub_link.get_run_log(wdir)
+    assert run_log["name"] is None and run_log["log"] is None
+    assert run_log["run"]["state"] == "done"
+    assert run_log["run"]["output"].endswith("END")
+    assert len(run_log["run"]["output"]) == 20_000
+    # A later run's log, e.g., from a terminal, doesn't show this one's
+    # outcome
+    later = datetime.datetime.fromtimestamp(
+        run_log["run"]["ended"] + 5, tz=datetime.timezone.utc
+    )
+    later_log = os.path.join(
+        local, "logs", later.strftime("%Y-%m-%dT%H-%M-%S") + ".log"
+    )
+    with open(later_log, "w") as f:
+        f.write("later\n")
+    run_log = hub_link.get_run_log(wdir)
+    assert run_log["log"] == "later\n" and run_log["run"] is None
+    os.remove(later_log)
+    # A run whose wrapper ended without recording how is lost, as is one
+    # whose process ID another process got since
+    record = hub_link._run_record_path(wdir)
+    with open(record) as f:
+        saved = f.read()
+    gone = subprocess.Popen([sys.executable, "-c", ""])
+    gone.wait()
+    for pid in [gone.pid, os.getpid()]:
+        with open(record, "w") as f:
+            json.dump({"pid": pid, "started": time.time()}, f)
+        assert hub_link.get_run_record(wdir)["state"] == "lost"
+    with open(record, "w") as f:
+        f.write(saved)
+    # A run outlives the link, which, restarted, sees it running, won't
+    # start another, and can stop it with everything it started
+    if sys.platform != "win32":
+        with monkeypatch.context() as m:
+            m.setattr(
+                hub_link,
+                "CALKIT_COMMAND",
+                [
+                    sys.executable,
+                    "-c",
+                    "import subprocess, sys; print('going', flush=True); "
+                    "subprocess.run(['sleep', '30']); sys.exit(3)",
+                ],
+            )
+            results: list[dict] = []
+            runner = threading.Thread(
+                target=lambda: results.append(hub_link.run_pipeline(wdir))
+            )
+            runner.start()
+            for _ in range(200):
+                run = hub_link.get_run_record(wdir)
+                if run is not None and "going" in hub_link._run_output(wdir):
+                    break
+                time.sleep(0.05)
+            assert run is not None and run["state"] == "running"
+            # As if the link had restarted
+            proc = hub_link._runs.pop(wdir)
+            with pytest.raises(ValueError, match="in progress"):
+                hub_link.run_pipeline(wdir)
+            hub_link.stop_run(wdir)
+            runner.join(timeout=20)
+            assert not runner.is_alive()
+        assert proc.returncode == 0
+        assert results[0]["ok"] is False
+        assert "going" in results[0]["output"]
+        run = hub_link.get_run_record(wdir)
+        assert run["state"] == "failed" and run["exit_code"] != 0
     # Stopping needs a run in progress, and a run the hub started stops
     # with everything it started
     with pytest.raises(ValueError):

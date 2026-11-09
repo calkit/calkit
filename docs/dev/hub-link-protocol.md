@@ -467,7 +467,19 @@ can't be read, e.g., opencode's.
 `ok` and the end of its `output`; meanwhile the browser follows it with
 `workspace.run_log`, which returns the latest run's log `name`, named by
 when it started, and the end of the `log`, however that run was started.
-`workspace.stop` interrupts the run in progress, as Ctrl+C would.
+A run outlives the link, e.g., if it crashes, since it runs in its own
+session under a wrapper that records its process, and then its exit code,
+in the link's folder, with its output beside it; the systemd unit has
+`KillMode=process` so stopping the link leaves it be.
+`workspace.run_log` also returns that record as `run`, with its `state`
+(`running`, `done`, `failed`, or `lost`, i.e., ended without recording
+how), `started`, `ended`, `exit_code`, and, once it's over, the end of its
+`output`, or null when there's no record or a later run's log is newer.
+A run that ended before logging, e.g., because the pipeline doesn't
+compile, has no `log`, rather than an earlier run's.
+`workspace.run` refuses to start a run while the record's is going.
+`workspace.stop` interrupts the run in progress, as Ctrl+C would, the
+hub's with everything it started, even from before the link restarted.
 `workspace.new` runs `calkit new workspace` to make another workspace for
 the project on `branch`, a Git worktree sharing the main checkout's DVC
 cache, named after it and beside it if it's in `~/calkit` or `~/dev`,

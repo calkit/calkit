@@ -341,6 +341,20 @@ export default function WorkspacePanel({
   })
   const runLogRef = useRef<HTMLPreElement>(null)
   const runLog: string | null = runLogQuery.data?.log ?? null
+  // How the hub's latest run went, known even if the link restarted
+  // during it
+  const lastRun: {
+    state: "running" | "done" | "failed" | "lost"
+    started: number
+    exit_code: number | null
+    output?: string
+  } | null = runLogQuery.data?.run ?? null
+  const lastRunOutcome =
+    lastRun?.state === "failed"
+      ? `: failed${lastRun.exit_code === null ? "" : ` (exit code ${lastRun.exit_code})`}`
+      : lastRun?.state === "lost"
+        ? ": ended unexpectedly"
+        : ""
   // Logs are named by when the run started, e.g., 2026-10-10T14-02-59-...
   const runLogStarted = (runLogQuery.data?.name ?? "").match(
     /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})/,
@@ -959,17 +973,23 @@ export default function WorkspacePanel({
               </PanelSection>
             )}
           </SimpleGrid>
-          {(runLog || running || runMutation.isPending) && (
+          {(runLog || lastRun || running || runMutation.isPending) && (
             <Box mt={3}>
               <PanelSection
                 title={
                   running || runMutation.isPending
                     ? "Run in progress"
-                    : runLogStarted
-                      ? `Last run, ${new Date(
-                          `${runLogStarted[1]}T${runLogStarted[2]}:${runLogStarted[3]}:${runLogStarted[4]}Z`,
-                        ).toLocaleString()}`
-                      : "Last run"
+                    : `${
+                        runLogStarted
+                          ? `Last run, ${new Date(
+                              `${runLogStarted[1]}T${runLogStarted[2]}:${runLogStarted[3]}:${runLogStarted[4]}Z`,
+                            ).toLocaleString()}`
+                          : lastRun
+                            ? `Last run, ${new Date(
+                                lastRun.started * 1000,
+                              ).toLocaleString()}`
+                            : "Last run"
+                      }${lastRunOutcome}`
                 }
                 actions={
                   editable &&
@@ -1027,7 +1047,7 @@ export default function WorkspacePanel({
                       output instead */}
                   {runMutation.data && !runMutation.data.ok && !running
                     ? runMutation.data.output
-                    : runLog ?? "Starting"}
+                    : runLog ?? lastRun?.output ?? "Starting"}
                 </Box>
               </PanelSection>
             </Box>

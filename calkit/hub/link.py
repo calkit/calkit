@@ -2164,6 +2164,87 @@ def add_stage(
 
 # Runs the hub started, by workspace, so they can be stopped
 _runs: dict[str, subprocess.Popen] = {}
+# Runs a command and records its process and then how it ended, so a run
+# outlives the link, which learns how it went from the record. It runs from
+# the workspace, so the repo's files can't stand in for the modules it
+# imports. Ctrl+C is for the run, which it waits out.
+_RUN_WRAPPER = """\
+import sys
+sys.path[0] or sys.path.pop(0)
+import json, os, signal, subprocess, time
+record, *cmd = sys.argv[1:]
+def write(info):
+    with open(record + ".tmp", "w") as f:
+        json.dump(info, f)
+    os.replace(record + ".tmp", record)
+info = {"pid": os.getpid(), "started": time.time()}
+write(info)
+signal.signal(signal.SIGINT, lambda *args: None)
+try:
+    code = subprocess.call(cmd)
+except OSError:
+    code = 127
+write(info | {"exit_code": code, "ended": time.time()})
+"""
+
+
+def _run_record_path(wdir: str) -> str:
+    """Where the record of the latest run the hub started in a workspace
+    goes, with its output beside it, in the link's own folder, since a repo
+    can commit links in its own.
+    """
+    import hashlib
+
+    key = hashlib.sha256(os.path.realpath(wdir).encode()).hexdigest()[:16]
+    return os.path.join(link_dir(), "runs", f"{key}.json")
+
+
+def get_run_record(wdir: str) -> dict | None:
+    """The record of the latest run the hub started in a workspace, if any,
+    with its ``state``: ``running``, ``done``, ``failed``, or ``lost``,
+    i.e., ended without recording how, e.g., killed or the machine
+    restarted.
+    """
+    import psutil
+
+    fpath = _run_record_path(wdir)
+    try:
+        with open(fpath) as f:
+            info = json.load(f)
+        started = float(info["started"])
+        pid = int(info["pid"])
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+    if "exit_code" in info:
+        state = "done" if info["exit_code"] == 0 else "failed"
+    else:
+        # The wrapper itself, not a process that got its ID since
+        try:
+            alive = fpath in psutil.Process(pid).cmdline()
+        except psutil.Error:
+            alive = False
+        state = "running" if alive else "lost"
+    return {
+        "state": state,
+        "pid": pid,
+        "started": started,
+        "ended": info.get("ended"),
+        "exit_code": info.get("exit_code"),
+    }
+
+
+def _run_output(wdir: str) -> str:
+    """The end of the latest hub-started run's output."""
+    fpath = _run_record_path(wdir)[: -len(".json")] + ".out"
+    try:
+        with open(fpath, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 200_000))
+            output = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+    # Only the end is sent, kept well under the relay's message limit
+    return output[-50_000:]
 
 
 def run_pipeline(wdir: str, stages: list[str] | None = None) -> dict:
@@ -2172,37 +2253,51 @@ def run_pipeline(wdir: str, stages: list[str] | None = None) -> dict:
 
     The hub follows it meanwhile through its log, as it does runs started
     any other way.
+    The run outlives the link, e.g., if it crashes, and the hub learns
+    how it went from ``get_run_log``.
     """
     # Stage names become arguments, so they can't be options
     for stage in stages or []:
         if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@:/-]*", str(stage)):
             raise ValueError(f"Invalid stage name '{stage}'")
-    proc = subprocess.Popen(
-        [*CALKIT_COMMAND, "run", *(stages or [])],
-        cwd=wdir,
-        env=no_prompt_env(wdir),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        # Stages can print anything, and a decoding error would leave the
-        # run blocked on a pipe nobody reads
-        errors="replace",
-        # Its own process group, so stopping it reaches its stages too
-        start_new_session=sys.platform != "win32",
-    )
+    # One from before the link restarted may still be going
+    record = get_run_record(wdir)
+    if record is not None and record["state"] == "running":
+        raise ValueError("A run is already in progress")
+    fpath = _run_record_path(wdir)
+    os.makedirs(os.path.dirname(fpath), mode=0o700, exist_ok=True)
+    if os.path.lexists(fpath):
+        os.remove(fpath)
+    # Output goes to a file rather than a pipe, which would break, and with
+    # it the run, if the link went away
+    with open(fpath[: -len(".json")] + ".out", "wb") as out:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                _RUN_WRAPPER,
+                fpath,
+                *CALKIT_COMMAND,
+                "run",
+                *(stages or []),
+            ],
+            cwd=wdir,
+            env=no_prompt_env(wdir),
+            stdin=subprocess.DEVNULL,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            # Its own process group, so stopping it reaches its stages too,
+            # and a link that stops doesn't take it along
+            start_new_session=sys.platform != "win32",
+        )
     _runs[wdir] = proc
-    # Only the end is kept, however much it prints, which is all that's
-    # sent, kept well under the relay's message limit
-    output = ""
     try:
-        assert proc.stdout is not None
-        while chunk := proc.stdout.read(65536):
-            output = (output + chunk)[-50_000:]
         proc.wait()
     finally:
         _runs.pop(wdir, None)
-    return {"ok": proc.returncode == 0, "output": output}
+    record = get_run_record(wdir)
+    ok = record is not None and record["state"] == "done"
+    return {"ok": ok, "output": _run_output(wdir)}
 
 
 def stop_run(wdir: str) -> dict:
@@ -2213,23 +2308,36 @@ def stop_run(wdir: str) -> dict:
 
     import psutil
 
+    # The hub's runs, including one from before the link restarted, stop
+    # with everything they started
     proc = _runs.get(wdir)
-    if proc is not None:
-        pids = [proc.pid]
-    else:
-        pids = [
-            p["pid"]
-            for p in calkit.dvc.get_running_pipeline_processes(wdir)
-            if p.get("pid")
-        ]
+    group = proc.pid if proc is not None else None
+    if group is None:
+        record = get_run_record(wdir)
+        if record is not None and record["state"] == "running":
+            group = record["pid"]
+    if group is not None:
+        try:
+            if sys.platform == "win32":
+                # The wrapper waits out the run to record how it ended
+                for child in psutil.Process(group).children(recursive=True):
+                    child.terminate()
+            else:
+                os.killpg(group, signal.SIGINT)
+        except (OSError, psutil.Error):
+            pass
+        return {}
+    pids = [
+        p["pid"]
+        for p in calkit.dvc.get_running_pipeline_processes(wdir)
+        if p.get("pid")
+    ]
     if not pids:
         raise ValueError("No run is in progress")
     for pid in pids:
         try:
             if sys.platform == "win32":
                 psutil.Process(pid).terminate()
-            elif proc is not None:
-                os.killpg(pid, signal.SIGINT)
             else:
                 os.kill(pid, signal.SIGINT)
         except (OSError, psutil.Error):
@@ -2238,24 +2346,57 @@ def stop_run(wdir: str) -> dict:
 
 
 def get_run_log(wdir: str) -> dict:
-    """The latest run's log, as far as it has got, for following a run."""
+    """The latest run's log, as far as it has got, for following a run,
+    with how it went if the hub started it.
+    """
+    from datetime import datetime, timezone
+
     from calkit.cli.main.core import _get_latest_run_log_path
 
+    run = get_run_record(wdir)
     fpath = _get_latest_run_log_path(wdir)
-    if fpath is None:
-        return {"name": None, "log": None}
-    # Only the end, since a log can be large
-    try:
-        with open(
-            fpath, "rb", opener=lambda p, f: os.open(p, f | NOFOLLOW)
-        ) as f:
-            f.seek(0, os.SEEK_END)
-            f.seek(max(0, f.tell() - 200_000))
-            log = f.read().decode("utf-8", errors="replace")
-    except OSError:
-        return {"name": None, "log": None}
+    # Logs are named by when they started, in UTC, e.g., 2026-10-10T14-02-59
+    match = re.match(
+        r"(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})",
+        os.path.basename(fpath or ""),
+    )
+    if run is not None and match is not None:
+        logged = (
+            datetime.fromisoformat("{}:{}:{}".format(*match.groups()))
+            .replace(tzinfo=timezone.utc)
+            .timestamp()
+        )
+        try:
+            written = os.lstat(str(fpath)).st_mtime
+        except OSError:
+            written = logged
+        if written < run["started"]:
+            # An earlier run's, since the hub's run never got to logging,
+            # e.g., the pipeline didn't compile, so its output says why
+            fpath = None
+        elif run["state"] != "running" and logged > (
+            run["ended"] or run["started"] + 60
+        ):
+            # A later run, e.g., from a terminal, since one that was lost
+            # would have started logging within a minute
+            run = None
+    if run is not None and run["state"] != "running":
+        run["output"] = _run_output(wdir)[-20_000:]
+    log = None
+    if fpath is not None:
+        # Only the end, since a log can be large
+        try:
+            with open(
+                fpath, "rb", opener=lambda p, f: os.open(p, f | NOFOLLOW)
+            ) as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 200_000))
+                log = f.read().decode("utf-8", errors="replace")[-50_000:]
+        except OSError:
+            fpath = None
     # Named by when it started
-    return {"name": os.path.basename(fpath), "log": log[-50_000:]}
+    name = None if fpath is None else os.path.basename(fpath)
+    return {"name": name, "log": log, "run": run}
 
 
 def _check_repo_url(git_repo_url: Any) -> None:
@@ -4275,6 +4416,8 @@ def _systemd_unit() -> str:
         "[Service]\n"
         f"ExecStart={command}\n"
         "WorkingDirectory=/\n"
+        # Runs the hub started outlive the link, e.g., if it crashes
+        "KillMode=process\n"
         "Restart=on-failure\n"
         "RestartSec=10\n"
         "\n"

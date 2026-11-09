@@ -2507,6 +2507,9 @@ def to_docx(
     bare = Path(output).with_suffix(".bare.docx").as_posix()
     if engine == "word":
         typer.echo("Converting the PDF with Word")
+        typer.echo(
+            "If calkit gets stuck at this step, you may need to minimize all your windows and confirm a dialog box from Word."
+        )
         try:
             calkit.docx.pdf_to_docx(pdf_path, bare)
         except RuntimeError as e:
@@ -2748,10 +2751,15 @@ def to_docx(
         Path(bare).write_bytes(pandoc_docx)
     else:
         raise_error("--engine must be 'word', 'libreoffice', or 'pandoc'")
-    try:
-        doc = calkit.docx.Document(bare)
-    finally:
-        os.remove(bare)
+    if os.path.exists(bare):
+        try:
+            doc = calkit.docx.Document(bare)
+        finally:
+            os.remove(bare)
+    else:
+        raise FileNotFoundError(
+            f"Bare PDF to DOCX conversion (before tables/etc) failed. No file {bare}"
+        )
     doc.path = output
     lines = calkit.latex.flatten(source)
     blks = calkit.latex.blocks(lines)

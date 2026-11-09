@@ -1465,7 +1465,7 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                     "Word could not convert the PDF: "
                     + res.stderr.strip().split(": ", 1)[-1]
                 )
-        elif sys.platform == "win32":
+        elif sys.platform == "win32":  # standard Windows
             import win32com.client  # type: ignore[import-not-found]
 
             # Reuse a running Word rather than quitting one the user has open
@@ -1492,13 +1492,182 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                     doc.Close(False)
                 if started:
                     word.Quit()
-        else:
-            raise RuntimeError(
-                "Converting PDF to Word requires Word on macOS or Windows"
+                    return True
+        else:  # Linux
+            # check for WSL
+            res = subprocess.run(
+                ["uname", "-r"], capture_output=True, text=True
             )
+            username = res.stdout
+            if "microsoft" in username.lower():  # WSL detected
+                print("WSL detected")
+                POWERSHELL_SCRIPT = """
+
+$PdfPath = $env:PDF_PATH
+$OutputPath = $env:OUTPUT_PATH
+
+Write-Host "PDF path: $PdfPath"
+Write-Host "Output path: $OutputPath"
+
+$word = $null
+$doc = $null
+$started = $false
+$ErrorActionPreference = 'Stop'
+
+Write-Host "Connecting to Word..."
+try {
+    $registryPath = "HKCU:\Software\Microsoft\Office\16.0\Word\Options"
+
+    New-Item -Path $registryPath -Force | Out-Null
+
+    New-ItemProperty `
+        -Path $registryPath `
+        -Name "DisableConvertPdfWarning" `
+        -PropertyType DWord `
+        -Value 1 `
+        -Force
+    Get-ItemPropertyValue `
+        -Path $registryPath `
+        -Name "DisableConvertPdfWarning"
+    try {
+        $word = [System.Runtime.InteropServices.Marshal]::GetActiveObject(
+            "Word.Application"
+        )
+    }
+    catch {
+        $word = New-Object -ComObject Word.Application
+        $started = $true
+    }
+
+    $word.DisplayAlerts = 0
+    $word.Visible = $false
+    $word.ScreenUpdating = $false
+
+    # Suppress the PDF conversion confirmation where supported.
+    $word.Options.ConfirmConversions = $false
+    $word.Options.DoNotPromptForConvert = $true
+
+    try {
+        # Copy PDF to Windows temp
+        $LocalPdfPath = Join-Path $env:TEMP "word-conversion-test.pdf"
+        Copy-Item -LiteralPath $PdfPath -Destination $LocalPdfPath -Force
+        $file = Get-Item -LiteralPath $LocalPdfPath
+
+        # Open PDF (ConfirmConversions = False).
+        $missing = [Type]::Missing
+        # fixme: hangs on the line below until user clicks on word dialog to confirm!
+        $doc = $word.Documents.Open(
+            $LocalPdfPath,
+            $false,          # ConfirmConversions
+            $false,          # ReadOnly
+            $false,          # AddToRecentFiles
+            $missing,        # PasswordDocument
+            $missing,        # PasswordTemplate
+            $false,          # Revert
+            $missing,        # WritePasswordDocument
+            $missing,        # WritePasswordTemplate
+            0,               # Format
+            $missing,        # Encoding
+            $true            # Visible
+        )
+        Write-Host "Opened doc"
+
+        # wdNoProtection = -1
+        if ($doc.ProtectionType -ne -1) {
+            Write-Host "Unprotecting"
+            $doc.Unprotect()
+        }
+
+        $doc.Final = $false
+        $doc.ReadOnlyRecommended = $false
+
+        # wdFormatXMLDocument = 12
+        $doc.SaveAs2($OutputPath, 12)
+    }
+    finally {
+        if ($null -ne $doc) {
+            $doc.Close($false)
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($doc) |
+                Out-Null
+        }
+    }
+
+    # Match the original behavior: only quit Word if we started it.
+    if ($started) {
+        $word.Quit()
+    }
+
+    exit 0
+}
+catch {
+    Write-Host "POWERSHELL WORD ERROR OCCURRED:"
+    Write-Host $_.Exception.Message
+    Write-Host $_.ScriptStackTrace
+    Write-Host $_.InvocationInfo.PositionMessage
+    exit 1
+}
+finally {
+    if ($null -ne $word) {
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) |
+            Out-Null
+    }
+}
+"""
+
+                def wsl_to_windows_path(path_in: str) -> str:
+                    path_out = subprocess.check_output(
+                        ["wslpath", "-w", str(path_in)],
+                        text=True,
+                    )
+                    return path_out.strip()
+
+                try:
+                    env = os.environ.copy()
+                    # Pass the original WSL paths (not wslpath-converted paths).
+                    env["PDF_PATH"] = str(pdf_path)
+                    env["OUTPUT_PATH"] = str(tmp_path)
+
+                    # Tell WSL to propagate these variables and convert their paths.
+                    wslenv = env.get("WSLENV", "")
+                    env["WSLENV"] = ":".join(
+                        filter(
+                            None,
+                            [
+                                wslenv,
+                                "PDF_PATH/p",
+                                "OUTPUT_PATH/p",
+                            ],
+                        )
+                    )
+                    subprocess.run(
+                        [
+                            "powershell.exe",
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command",
+                            "-",
+                        ],
+                        text=True,
+                        capture_output=True,
+                        check=True,
+                        input=POWERSHELL_SCRIPT.replace("\n", "\r\n")
+                        + "\r\n",  # windows line endings
+                        env=env,
+                    )
+                except subprocess.CalledProcessError as e:
+                    raise RuntimeError("Converting PDF to Word failed." + e)
+            else:
+                raise RuntimeError(
+                    "Converting PDF to Word requires Word on macOS or Windows"
+                )
     finally:
         os.remove(light_path)
-    os.replace(tmp_path, docx_path)
+    try:
+        os.replace(tmp_path, docx_path)
+    except FileNotFoundError:
+        print(f"tmp_path exists: {os.path.exists(tmp_path)}")
+        print(f"docx_path exists: {os.path.exists(docx_path)}")
 
 
 def pdf_to_png(pdf_path: str, png_path: str, dpi: int = 200) -> bool:

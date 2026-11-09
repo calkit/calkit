@@ -235,7 +235,7 @@ stages:
       size: 57430
   latex-word-round-trip:
     cmd: calkit xenv -n dev --no-check -- python 
-      scripts/latex-word-round-trip.py --engine=libreoffice
+      scripts/latex-word-round-trip.py --engine=word
     deps:
     - path: .python-version
       hash: md5
@@ -243,12 +243,12 @@ stages:
       size: 5
     - path: calkit/cli/latex.py
       hash: md5
-      md5: f89154fcfb34e9166acd0f211ecfbf54
-      size: 185412
+      md5: 28426474677870a4dd542f0fa4462a5b
+      size: 185753
     - path: calkit/docx.py
       hash: md5
-      md5: b0a7560528427af7eb2c5ff896b82301
-      size: 97341
+      md5: 1054d32730d37757e94a29de0019839f
+      size: 102800
     - path: calkit/latex.py
       hash: md5
       md5: f5a05595989fd2b337ce10910e594b18
@@ -284,8 +284,8 @@ stages:
     outs:
     - path: results/latex-word-round-trip.json
       hash: md5
-      md5: e9eb3bb4e2c11d9cd7c2282804b4afba
-      size: 311
+      md5: a28372bdf70e2ceb2ca83d89d90a40a9
+      size: 304
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: 570c437a70ca9bc83a398cc7d69b364c
@@ -296,8 +296,8 @@ stages:
       size: 173888
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 8867d6f2f2723fef5cb528e3942b9adb
-      size: 37025
+      md5: 4941340ab3c251d2daf6933a13c206a7
+      size: 29476
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py

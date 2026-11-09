@@ -131,7 +131,10 @@ pipeline:
       kind: python-script
       script_path: scripts/latex-word-round-trip.py
       args:
-        - --engine=libreoffice
+        - --engine=word
+      # requirements:
+      #   - name: libreoffice
+      #     check_command: which("soffice") || which("libreoffice")
       environment: dev
       description: >-
         Export the LaTeX/Word example to Word and merge it back, with no

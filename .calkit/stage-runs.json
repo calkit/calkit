@@ -94,22 +94,22 @@
     }
   },
   "latex-word-round-trip": {
-    "start_time": "2026-11-06T17:15:27.104000",
-    "end_time": "2026-11-06T17:15:58.064000",
+    "start_time": "2026-11-09T21:13:44.053000",
+    "end_time": "2026-11-09T21:14:07.601000",
     "environment": "dev",
-    "git_rev": "cbe19ba5818b4827cfb17812e772c94cb4980fab",
-    "git_dirty": false,
-    "dvc_lock_hash": "sha256:6a504672871968191f84b83b3f572ef20e884ab3ec744a2a81e4cf61b91a8e68",
-    "calkit_version": "0.50.7.dev325+gcbe19ba5",
-    "calkit_git_rev": "cbe19ba5818b4827cfb17812e772c94cb4980fab",
+    "git_rev": "c4156ab641479a9c4124ad78d0627e3fc0e8016a",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:aed5bc57d1ff91ddca2feeda5bc008eb218d7eb6948e5d271733117b291d187c",
+    "calkit_version": "0.50.8.dev1+gc4156ab6.d20261109",
+    "calkit_git_rev": "c4156ab641479a9c4124ad78d0627e3fc0e8016a",
     "system": {
-      "machine_id": "9f36db4618f640e48f14ba85b8b8ec79",
+      "machine_id": "88e1f2357b8f477a9b0205b33b10ecdc",
       "os": "Linux",
-      "os_version": "7.0.0-1019-azure",
+      "os_version": "6.18.33.2-microsoft-standard-WSL2",
       "machine": "x86_64",
       "processor": "",
-      "cpu_count": 4,
-      "memory_gb": 15.6
+      "cpu_count": 20,
+      "memory_gb": 31.2
     }
   },
   "latex-word-round-trip-figure": {

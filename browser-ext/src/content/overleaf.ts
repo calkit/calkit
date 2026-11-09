@@ -51,8 +51,6 @@ import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
 const PANEL_ID = "calkit-overleaf-panel";
 const LAUNCHER_ID = "calkit-overleaf-launcher";
 const TOKEN_PANEL_ID = "calkit-overleaf-token-panel";
-const OVERLEAF_GIT_SETTINGS =
-  "https://www.overleaf.com/user/settings#git-integration";
 const OVERLEAF_TOKEN_RE = /\bolp_[A-Za-z0-9]{20,}\b/;
 
 let panel: Panel | null = null;
@@ -2422,7 +2420,23 @@ function renderTokenForm(
   const input = textInput({ placeholder: "olp_..." });
   input.type = "password";
   const message = el("div", { class: "small" });
-  const save = el("button", { class: "action", text: "Save token" });
+  const get = el("button", {
+    class: "action",
+    text: "Get a token from Overleaf",
+  });
+  get.addEventListener("click", async () => {
+    try {
+      await send({ type: "overleaf.openTokenSettings" });
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  const save = el("button", {
+    class: "action secondary",
+    text: "Save token",
+  });
   save.addEventListener("click", async () => {
     const token = input.value.trim();
     if (!token.startsWith("olp_")) {
@@ -2450,15 +2464,14 @@ function renderTokenForm(
         : "Calkit needs an Overleaf Git token to read this project.",
     }),
     el("div", { class: "dim small", style: { marginTop: "6px" } }, [
-      document.createTextNode("Generate one under Git Integration in "),
-      el("a", {
-        text: "your Overleaf account settings",
-        href: OVERLEAF_GIT_SETTINGS,
-        attrs: { target: "_blank" },
-      }),
       document.createTextNode(
-        ". Calkit offers to save it from there, or paste it here.",
+        "Opens your Overleaf settings, where you click Generate token. " +
+          "Calkit saves it and brings you back here.",
       ),
+    ]),
+    el("div", { class: "actions" }, [get]),
+    el("div", { class: "dim small", style: { marginTop: "12px" } }, [
+      document.createTextNode("Or paste one you have:"),
     ]),
     input,
     el("div", { class: "actions" }, [
@@ -2492,65 +2505,121 @@ function renderOverleafFailure(e: unknown, reload: () => void): HTMLElement {
 }
 
 /**
- * Offer to save an Overleaf Git token to Calkit as soon as Overleaf shows
- * one, which it only does once, right after it's generated.
+ * Save an Overleaf Git token to Calkit as soon as Overleaf shows one, which
+ * it only does once, right after it's generated.
  *
- * Only ever on the user's click: the token is read from the page they're
- * looking at, and nothing is sent until they say so.
+ * In a tab the Calkit panel opened for this, the user already asked for the
+ * token to be saved, so it is, and they go back to their project. Anywhere
+ * else it's only offered: nothing is read or sent until they click.
  */
-function watchForNewToken(): void {
+async function watchForNewToken(): Promise<void> {
   if (tokenWatcher) {
+    return;
+  }
+  // Set now so a second sync doesn't start another while this one asks
+  const placeholder = new MutationObserver(() => undefined);
+  tokenWatcher = placeholder;
+  const { requested } = await send({ type: "overleaf.tokenTab" }).catch(() => ({
+    requested: false,
+  }));
+  if (tokenWatcher !== placeholder) {
+    // Torn down meanwhile
     return;
   }
   const texts = (): string[] => [
     ...Array.from(document.querySelectorAll("input"), (input) => input.value),
     document.body.innerText,
   ];
-  // Only whether one is showing until the user asks to save it, so the
-  // token itself is never held before then
+  const message = el("div", { class: "small" });
+  const save = async (tokenPanel: Panel): Promise<void> => {
+    const token = texts()
+      .map((text) => text.match(OVERLEAF_TOKEN_RE)?.[0])
+      .find(Boolean);
+    if (!token) {
+      clear(message).append(errorMessage("The token is no longer on the page"));
+      return;
+    }
+    clear(message).append(loading("Saving"));
+    try {
+      await send({ type: "overleaf.setToken", token });
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+      return;
+    }
+    clear(tokenPanel.body).append(
+      el("div", {
+        class: "small",
+        text: "Saved. Your Overleaf projects can sync with Calkit now.",
+      }),
+    );
+    if (requested) {
+      await send({ type: "overleaf.returnFromTokenTab" }).catch(
+        () => undefined,
+      );
+    }
+  };
+  // Point at the button that makes one, which Overleaf labels by whether
+  // the account has a token already
+  let pointed = false;
+  const pointAtGenerate = (): void => {
+    const button = Array.from(document.querySelectorAll("button")).find((b) =>
+      /^\s*(generate token|add another token)\s*$/i.test(b.textContent ?? ""),
+    );
+    if (!button) {
+      return;
+    }
+    pointed = true;
+    button.scrollIntoView({ block: "center" });
+    button.style.outline = "3px solid #f0ad4e";
+    button.style.outlineOffset = "2px";
+  };
+  const guide = requested
+    ? mountPanel({ id: TOKEN_PANEL_ID, title: "Calkit" })
+    : null;
+  if (guide) {
+    guide.body.append(
+      el("div", {
+        class: "small",
+        text:
+          "Click Generate token under Git integration. Calkit saves the " +
+          "token and takes you back to your project.",
+      }),
+      message,
+    );
+    pointAtGenerate();
+  }
+  // Only whether one is showing until it's saved, so the token itself is
+  // never held before then
   let showing = false;
   tokenWatcher = new MutationObserver(() => {
+    if (requested && !pointed) {
+      pointAtGenerate();
+    }
     const visible = texts().some((text) => OVERLEAF_TOKEN_RE.test(text));
     if (visible === showing) {
       return;
     }
     showing = visible;
+    if (guide) {
+      if (visible) {
+        void save(guide);
+      }
+      return;
+    }
     if (!visible) {
       document.getElementById(TOKEN_PANEL_ID)?.remove();
       return;
     }
     const tokenPanel = mountPanel({ id: TOKEN_PANEL_ID, title: "Calkit" });
-    const message = el("div", { class: "small" });
-    const save = el("button", { class: "action", text: "Save to Calkit" });
-    save.addEventListener("click", async () => {
-      const token = texts()
-        .map((text) => text.match(OVERLEAF_TOKEN_RE)?.[0])
-        .find(Boolean);
-      if (!token) {
-        clear(message).append(
-          errorMessage("The token is no longer on the page"),
-        );
-        return;
-      }
-      save.disabled = true;
-      clear(message).append(loading("Saving"));
-      try {
-        await send({ type: "overleaf.setToken", token });
-        clear(tokenPanel.body).append(
-          el("div", {
-            class: "small",
-            text:
-              "Saved. Go back to your Overleaf project and press Check " +
-              "again in the Calkit panel.",
-          }),
-        );
-      } catch (e) {
-        save.disabled = false;
-        clear(message).append(
-          errorMessage(e instanceof Error ? e.message : String(e)),
-        );
-      }
+    const button = el("button", { class: "action", text: "Save to Calkit" });
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      await save(tokenPanel);
+      button.disabled = false;
     });
+    clear(message);
     tokenPanel.body.append(
       el("div", {
         class: "small",
@@ -2558,7 +2627,7 @@ function watchForNewToken(): void {
           "Save this Overleaf Git token to Calkit, so it can check and " +
           "sync your Overleaf projects?",
       }),
-      el("div", { class: "actions" }, [save]),
+      el("div", { class: "actions" }, [button]),
       message,
     );
   });
@@ -3657,7 +3726,7 @@ function teardown(): void {
 
 function sync(): void {
   if (new URL(window.location.href).pathname.startsWith("/user/settings")) {
-    watchForNewToken();
+    void watchForNewToken();
     return;
   }
   const overleafProjectId = getOverleafProjectId(window.location.href);

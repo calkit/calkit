@@ -11,7 +11,7 @@ Install:
 Also install the Graphviz system application (i.e. via conda) and ensure `neato` is on PATH.
 
 Run:
-    python generate_version_control_diagram.py
+    python generate-version-control-diagram.py
 
 """
 
@@ -90,7 +90,7 @@ CONNECTIONS = [
     ("DOCKER.WORKSPACE", "DOCKER.STAGED", "calkit check envs"),
 ]
 
-OUTPUT_NAME = "docs/img/version_control_command_flowchart"
+OUTPUT_NAME = "docs/img/version-control-command-flowchart"
 OUTPUT_FORMAT = "svg"
 
 
@@ -106,7 +106,6 @@ def get_edges():
     target_col_types, target_row_types = map(
         list, zip(*tuple(map(split_fcn, target_types)))
     )
-
     source_rows = [str(ROW_LABELS.index(t) + 1) for t in source_row_types]
     target_rows = [str(ROW_LABELS.index(t) + 1) for t in target_row_types]
     source_cols = [
@@ -119,7 +118,6 @@ def get_edges():
     ]
     sources = [c + r for r, c in zip(source_rows, source_cols)]
     targets = [c + r for r, c in zip(target_rows, target_cols)]
-
     ports = [get_port(int(s[1]), int(t[1])) for s, t in zip(sources, targets)]
     source_ports, target_ports = zip(*ports)
     edges = zip(sources, source_ports, targets, target_ports, labels)
@@ -133,12 +131,10 @@ def get_port(source_node, target_node):
         dir = "up"
     else:
         raise ValueError("nodes cannot be at the same level")
-
     if abs(source_node - target_node) == 1:
         direct = True
     else:
         direct = False
-
     if dir == "down" and direct:
         source_port = "s"
         target_port = "n"
@@ -153,7 +149,6 @@ def get_port(source_node, target_node):
         target_port = "sw"
     else:
         raise ValueError("invalid combination of direction and directness")
-
     return source_port, target_port
 
 
@@ -208,7 +203,6 @@ def node_label(column: int, row: int) -> str:
 
 def make_diagram() -> Digraph:
     graph = Digraph("fixed_grid", engine="neato", format=OUTPUT_FORMAT)
-
     # -n2 tells neato to retain the supplied node positions and calculate
     # routes for edges that do not already have explicit edge positions.
     graph.graph_attr.update(
@@ -219,7 +213,6 @@ def make_diagram() -> Digraph:
         margin=".05",
         pad="1",
     )
-
     graph.node_attr.update(
         shape="box",
         fixedsize="true",
@@ -229,7 +222,6 @@ def make_diagram() -> Digraph:
         fontsize="11",
         fontname="Arial",
     )
-
     graph.edge_attr.update(
         color="black",
         penwidth="1",
@@ -238,7 +230,6 @@ def make_diagram() -> Digraph:
         fontsize="11",
         fontname="Courier",  # monospace font for code commands
     )
-
     # Coordinates are the centers of the rectangles, in points, because
     # neato's -n/-n2 mode expects point coordinates.
     for col in range(COLS):
@@ -248,7 +239,6 @@ def make_diagram() -> Digraph:
             x = col * COLUMN_SPACING
             y = (ROWS - 1 - row) * ROW_SPACING
             graph.node(name, label=label, pos=f"{x},{y}!")
-
     # Connect named compass ports. neato computes the spline routing.
     for source, source_port, target, target_port, label in get_edges():
         graph.edge(
@@ -256,7 +246,6 @@ def make_diagram() -> Digraph:
             f"{target}:{target_port}",
             label=label,
         )
-
     return graph
 
 
@@ -299,49 +288,38 @@ def make_text(
 
 if __name__ == "__main__":
     diagram = make_diagram()
-
     # neato_no_op=2 invokes neato -n2:
     # preserve the given node positions and route edges automatically.
     svg_data = diagram.pipe(
         format=OUTPUT_FORMAT,
         neato_no_op=2,
     )
-
     # Parse SVG
     root = ET.fromstring(svg_data)
-
     # SVG namespace
     ns = "http://www.w3.org/2000/svg"
     ns_dict = {"svg": ns}
-
     # Get coords of A1 top left, since svg origin doesn't line up with graph nodes.
     # X increases to the right, Y increases down (not up).
     graph = root.find(".//svg:g[@class='graph']", ns_dict)
     transform = graph.get("transform")
     translate_str = transform.split("translate(", 1)[1].split(")", 1)[0]
     translate = tuple(map(float, translate_str.split(" ")))
-
     for node in root.findall(".//svg:g[@class='node']", ns_dict):
         title = node.find("svg:title", ns_dict)
-
         if title is not None and title.text == node_name(0, 0):
             polygon = node.find("svg:polygon", ns_dict)
             points = polygon.get("points")
-
             coords = [tuple(map(float, p.split(","))) for p in points.split()]
-
             xs = [p[0] + translate[0] for p in coords]
             ys = [p[1] + translate[1] for p in coords]
-
             A1_topleft_x = min(xs)
             A1_topleft_y = min(ys)
-
     # Calculate coordinates for rectangle outline
     rect_topleft_xs = [A1_topleft_x - X_RECT_MARGIN for _ in range(ROWS)]
     rect_topleft_ys = [
         A1_topleft_y - Y_RECT_MARGIN + row * ROW_SPACING for row in range(ROWS)
     ]
-
     # Create rectangles
     rects = [
         make_rect(rect_x, rect_y, row_color)
@@ -349,7 +327,6 @@ if __name__ == "__main__":
             rect_topleft_xs, rect_topleft_ys, ROW_COLORS
         )
     ]
-
     # Calculate coordinates for row and col header text
     col_text_xs = [
         A1_topleft_x + BOX_WIDTH * DPI / 2 + col * COLUMN_SPACING
@@ -361,7 +338,6 @@ if __name__ == "__main__":
         A1_topleft_y + BOX_HEIGHT * DPI / 2 + row * ROW_SPACING
         for row in range(ROWS)
     ]
-
     row_texts = [
         make_text(row_x, row_y, txt, row_color)
         for row_x, row_y, txt, row_color in zip(
@@ -372,10 +348,8 @@ if __name__ == "__main__":
         make_text(col_x, col_y, txt, "black")
         for col_x, col_y, txt in zip(col_text_xs, col_text_ys, COL_LABELS)
     ]
-
     # Insert as last SVG elements (foreground)
     root.extend(rects + row_texts + col_texts)
-
     # Save
     output_path = f"{OUTPUT_NAME}.{OUTPUT_FORMAT}"
     ET.register_namespace("", ns)

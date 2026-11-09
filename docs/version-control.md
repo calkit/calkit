@@ -350,7 +350,7 @@ area are ready to save. Changes in the cache are saved locally. Changes in the
 remote are saved to the cloud. Commands that move a changeset between storage
 locations are shown with arrows.
 
-![Grid-aligned flowchart showing the remote, cache, staged, and workspace storage locations for Git, DVC, and Docker, and the commands to transition file changes between locations using both the native systems and Calkit](img/version_control_command_flowchart.svg "Version Control Commands")
+![Grid-aligned flowchart showing the remote, cache, staged, and workspace storage locations for Git, DVC, and Docker, and the commands to transition file changes between locations using both the native systems and Calkit](img/version-control-command-flowchart.svg "Version Control Commands")
 
 Calkit commands combine the version control operations across platforms and
 should be sufficient for everyday use, but occasionally scenarios arise where

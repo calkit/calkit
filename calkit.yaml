@@ -99,6 +99,7 @@ questions:
 requirements:
   - docker
   - uv
+  - pixi
   - kind: setup
     name: GitHub CLI logged in
     # Not 'gh auth status', which calls the API, so fails when rate limited
@@ -124,7 +125,10 @@ environments:
     kind: docker
     image: ghcr.io/calkit/latex:0.1.6
     description: Calkit's TeX Live image via Docker.
-
+  graphviz-env:
+    kind: pixi
+    path: docs/dev/pixi.toml
+    description: graphviz binary executable and python package
 pipeline:
   stages:
     latex-word-round-trip:
@@ -288,6 +292,13 @@ pipeline:
       kind: markdown
       target_path: images/latex/README.md
       environment: dev
+    version-control-diagram-docs:
+      kind: python-script
+      environment: graphviz-env
+      script_path: scripts/generate-version-control-diagram.py
+      outputs:
+        - path: docs/img/version-control-command-flowchart.svg
+          storage: git
 
 figures:
   - path: docs/img/latex-word-round-trip.png

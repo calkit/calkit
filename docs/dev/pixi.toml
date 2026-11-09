@@ -1,0 +1,13 @@
+[workspace]
+name = "graphviz-env"
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
+
+# binary from conda-forge
+[environments.graphviz-env.dependencies]
+python = "3.*"
+graphviz = { version = "*", channel = "conda-forge" }
+
+# python package from pypi
+[environments.graphviz-env.pypi-dependencies]
+graphviz = "*"

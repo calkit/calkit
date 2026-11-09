@@ -31,3 +31,6 @@ CLAUDE.md
 # <<< calkit markdown derived files <<<
 
 docs/one-pager/texgyreheros-regular.otf
+# pixi environments
+.pixi/*
+!.pixi/config.toml

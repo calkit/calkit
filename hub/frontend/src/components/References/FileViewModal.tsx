@@ -14,6 +14,7 @@ import {
 import type { ReferenceEntry } from "../../client"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
 import SandboxedHtml from "../Common/SandboxedHtml"
+import { safeHref } from "../../lib/strings"
 
 interface FileViewProps {
   isOpen: boolean
@@ -38,7 +39,7 @@ function Attachment({ path, url }: { path: string; url: string }) {
   return (
     <Text fontSize="sm">
       This attachment can't be previewed.{" "}
-      <Link href={url} isExternal color="blue.500">
+      <Link href={safeHref(url)} isExternal color="blue.500">
         Open it
       </Link>
     </Text>

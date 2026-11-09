@@ -37,7 +37,7 @@ import AddMember from "../../../components/Orgs/AddMember"
 import useAuth from "../../../hooks/useAuth"
 import useCustomToast from "../../../hooks/useCustomToast"
 import { handleError } from "../../../lib/errors"
-import { capitalizeFirstLetter } from "../../../lib/strings"
+import { capitalizeFirstLetter, safeHref } from "../../../lib/strings"
 
 export const Route = createFileRoute("/_layout/$accountName/")({
   component: AccountPage,
@@ -239,7 +239,7 @@ function ProjectsTable() {
                     </Link>
                   </Td>
                   <Td isTruncated maxWidth="150px">
-                    <Link href={project.git_repo_url} isExternal>
+                    <Link href={safeHref(project.git_repo_url)} isExternal>
                       <ExternalLinkIcon mx="2px" /> {project.git_repo_url}
                     </Link>
                   </Td>

@@ -12,8 +12,7 @@ can find it and a PDF viewer can highlight it again::
     1. Page 3, line 120 ("Reynolds number"): Which length is it based on?
     2. The data behind Figure 4 isn't available.
 
-A new review file starts with a section for the summary and assessment,
-which isn't numbered.
+The summary and assessment go above the comments sections, unnumbered.
 
 A publication lists its reviews in ``calkit.yaml``, whether the project is
 the reviewer's or the authors'::
@@ -32,7 +31,6 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-SUMMARY_HEADING = "Summary and assessment"
 _ITEM_RE = re.compile(r"^(\d+)\.\s+(.*)$")
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*#*\s*$")
 # Where an item is about, e.g., Page 3, lines 120-122 ("some text"):
@@ -315,8 +313,7 @@ def review_path(pdf: str, ck_info: dict) -> str | None:
 
 def ensure_review(pdf: str, wdir: str | None = None) -> str:
     """The review file for a PDF, listing it in ``calkit.yaml`` and making
-    it beside the PDF if it isn't yet, starting with a section for the
-    summary and assessment, above the numbered comments.
+    it beside the PDF if it isn't yet.
 
     Parameters
     ----------
@@ -356,5 +353,5 @@ def ensure_review(pdf: str, wdir: str | None = None) -> str:
     if not os.path.isfile(full):
         os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
         with open(full, "w", encoding="utf-8") as f:
-            f.write(f"## {SUMMARY_HEADING}\n")
+            f.write("")
     return path

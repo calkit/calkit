@@ -2373,7 +2373,7 @@ def test_new_comment(tmp_dir):
             "-m",
             "The data isn't available.",
         )
-        == "paper/review.md:5"
+        == "paper/review.md:3"
     )
     added = json.loads(
         ck(
@@ -2397,7 +2397,6 @@ def test_new_comment(tmp_dir):
     assert (added["number"], added["section"]) == (1, "Minor comments")
     with open("paper/review.md") as f:
         assert f.read() == (
-            "## Summary and assessment\n\n"
             "## Major comments\n\n1. The data isn't available.\n\n"
             "## Minor comments\n\n"
             '1. Page 3, line 120 ("Reynolds number"): Which length is it based on?\n'
@@ -2409,8 +2408,7 @@ def test_new_comment(tmp_dir):
     ck("delete", "comment", "paper/manuscript.pdf", "--id", "1")
     with open("paper/review.md") as f:
         assert f.read() == (
-            "## Summary and assessment\n\n## Major comments\n\n"
-            "## Minor comments\n\n"
+            "## Major comments\n\n## Minor comments\n\n"
             '1. Page 3, line 120 ("Reynolds number"): Which length is it based on?\n'
         )
     with open("calkit.yaml") as f:

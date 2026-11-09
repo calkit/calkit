@@ -105,7 +105,7 @@ lazily onto a third,
         4,
     )
     # A missing section is made after the others, but major before minor
-    lines = ["## Summary and assessment", "", "Good."]
+    lines = ["A summary and assessment."]
     for section, body in [
         ("minor", "Typo."),
         ("major", "Missing data."),
@@ -115,7 +115,7 @@ lazily onto a third,
     ]:
         lines = reviews.add(lines, reviews.ReviewComment(text=body), section)
     assert "\n".join(lines) == (
-        "## Summary and assessment\n\nGood.\n\n"
+        "A summary and assessment.\n\n"
         "## Major comments\n\n1. Missing data.\n2. No baseline.\n\n"
         "## Minor comments\n\n1. Typo.\n\n"
         "## Comments on the figures\n\n1. Why?\n2. And this.\n"
@@ -152,12 +152,10 @@ def test_a_publication_lists_its_review(tmp_dir: Path) -> None:
     (tmp_dir / "paper").mkdir()
     (tmp_dir / "paper" / "manuscript.pdf").write_bytes(b"%PDF")
     (tmp_dir / "calkit.yaml").write_text("name: review\n")
-    # A review is made beside the PDF, starting with its summary, and listed
-    # under its publication, which is added if it isn't there
+    # A review is made beside the PDF and listed under its publication,
+    # which is added if it isn't there
     assert reviews.ensure_review("paper/manuscript.pdf") == "paper/review.md"
-    assert (tmp_dir / "paper" / "review.md").read_text() == (
-        "## Summary and assessment\n"
-    )
+    assert (tmp_dir / "paper" / "review.md").read_text() == ""
     ck_info = calkit.load_calkit_info()
     assert ck_info["publications"] == [
         {

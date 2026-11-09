@@ -127,7 +127,7 @@ Each comment is a numbered item saying where it's about,
 so the authors can find it:
 
 ```markdown
-## Summary and assessment
+The paper presents ...
 
 ## Major comments
 
@@ -152,8 +152,8 @@ calkit new comment paper/manuscript.pdf --section major --page 4 \
     -m "Rerunning the authors' code gives 3.4%."
 ```
 
-Write your summary and assessment of the paper in the section at the top,
-which isn't numbered.
+Write your summary and assessment of the paper at the top,
+above the comments.
 Clicking the review file's name in the viewer opens it there,
 beside the PDF.
 Any section whose heading contains "comments" holds numbered comments,

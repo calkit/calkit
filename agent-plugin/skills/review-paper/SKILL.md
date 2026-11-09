@@ -165,10 +165,9 @@ wording.
    the comment, so the authors can find it, and the VS Code PDF viewer
    shows it there. A comment without them is general. `--section` (major
    or minor, as the user decides) puts it under `## Major comments` or
-   `## Minor comments`, each numbered from 1. The review starts with a
-   `## Summary and assessment` section, which is the user's to write. The
-   user will add most of their own comments straight from the PDF in VS
-   Code.
+   `## Minor comments`, each numbered from 1. The summary and assessment
+   go above them, and are the user's to write. The user will add most of
+   their own comments straight from the PDF in VS Code.
 
 5. **Hand it over.** Tell the user what was checked, what reproduced, and
    what didn't. Point them to the review file to finish and paste into the

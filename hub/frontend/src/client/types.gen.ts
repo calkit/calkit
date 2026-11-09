@@ -395,6 +395,12 @@ export type CheckIn = {
    */
   channel_sessions?: Array<string>
   public_key?: PublicKey | null
+  /**
+   * Usage
+   */
+  usage?: {
+    [key: string]: unknown | number
+  }
 }
 
 /**
@@ -2284,6 +2290,7 @@ export type HttpRequestAccess = {
 export type HubStats = {
   users: UserStats
   projects: ProjectStats
+  machines?: MachineStats | null
   /**
    * Excluded Accounts
    */
@@ -2949,6 +2956,28 @@ export type MachineRegistered = {
    * Grant Public Key
    */
   grant_public_key: string
+}
+
+/**
+ * MachineStats
+ */
+export type MachineStats = {
+  /**
+   * Linked
+   */
+  linked: number
+  /**
+   * Users
+   */
+  users: number
+  /**
+   * Users with a linked machine that checked in
+   */
+  users_online: ActiveCounts
+  /**
+   * Users who connected to one of their machines from the browser, so last_30_days is the feature's MAU
+   */
+  users_connected: ActiveCounts
 }
 
 /**

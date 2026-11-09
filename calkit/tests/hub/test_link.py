@@ -177,6 +177,7 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
     # the first time, for browsers to check replies with
     assert posted[0]["public_key"] == hub_link.get_link_public_jwk()
     assert posted[1]["public_key"] == posted[0]["public_key"]
+    assert posted[0]["usage"] == {}
     # Past what the hub takes, it's told of ones in use first, then the
     # latest
     keys = iter(["key2"])
@@ -345,12 +346,18 @@ def test_config_and_workspaces(tmp_path, monkeypatch):
         {"name": "box", "token": "ckm_x", "workspaces": [elsewhere]}
     )
     reported = []
+    sent_usage = []
     monkeypatch.setattr(
         hub_link,
         "check_in",
-        lambda cfg, workspaces, *args: reported.append(workspaces) or {},
+        lambda cfg, workspaces, *args: (
+            reported.append(workspaces) or sent_usage.append(args[-1]) or {}
+        ),
     )
+    # Counted requests go with it, and only those since go with the next
+    op.usage.update({"workspace.run": 2})
     asyncio.run(op.check_in())
+    assert sent_usage == [{"workspace.run": 2}] and not op.usage
     assert os.path.realpath(elsewhere) in [w["path"] for w in reported[0]]
     assert op.cfg["workspaces"] == [elsewhere]
 
@@ -967,6 +974,19 @@ async def test_sessions(tmp_path, monkeypatch):
         },
     )
     await wait_for(lambda: "HI-42-none" in output("a"))
+    # Requests are counted by kind for the hub, and sessions for agents by
+    # which, but not keystrokes, or what anything ran
+    message(
+        "a",
+        {
+            "type": "sessions.open",
+            "id": 31,
+            "workspace": "/",
+            "command": "/usr/bin/claude --resume",
+        },
+    )
+    await wait_for(lambda: reply(31))
+    assert op.usage == {"sessions.open": 3, "agent.claude": 1}
     # Input the terminal can't take at once, e.g., a long paste, all arrives
     paste = ("true " + "x" * 64 + "\n") * 300 + "echo PASTED-$((2*3))\n"
     message("a", {"type": "sessions.input", "session": sid, "data": paste})
@@ -1223,7 +1243,7 @@ async def test_sessions(tmp_path, monkeypatch):
     assert (await ask(github_req))["token"].startswith("ghs_")
     reported: list[list[str]] = []
 
-    def logged_out(cfg, workspaces, mode, connected, restart, sessions):
+    def logged_out(cfg, workspaces, mode, connected, restart, sessions, _):
         reported.append(sessions)
         return {"ended_sessions": ["sign-in-1"]}
 
@@ -1277,7 +1297,7 @@ async def test_sessions(tmp_path, monkeypatch):
     open_channel("d", sid="sign-in-2")
     checked_in: list[list[str]] = []
 
-    def fake_check_in(cfg, workspaces, mode, connected, restart, sessions):
+    def fake_check_in(cfg, workspaces, mode, connected, restart, sessions, _):
         checked_in.append(sessions)
         return {"ended_sessions": ["sign-in-2"], "relay_token": "tok2"}
 
@@ -2936,7 +2956,9 @@ def test_restarts(tmp_path, monkeypatch):
     assert not op.restart_pending()
     reported: list[bool] = []
 
-    def check_in(cfg, workspaces, mode, connected, pending, sessions) -> dict:
+    def check_in(
+        cfg, workspaces, mode, connected, pending, sessions, usage
+    ) -> dict:
         reported.append(pending)
         return {"restart": True}
 

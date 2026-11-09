@@ -762,6 +762,7 @@ export type {
   MachineOut,
   MachinePost,
   MachineRegistered,
+  MachineStats,
   MapPathEntry,
   MapPathsPost,
   MarkAllNotificationsReadData,

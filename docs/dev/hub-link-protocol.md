@@ -76,6 +76,14 @@ minutes, once the relay token it can no longer refresh expires.
   sessions' and running actions' credentials came from, browser or not
   (`channel_sessions`, the grants' `sid`s), and its `public_key`, which
   the hub keeps the first time it's sent and never replaces.
+  With `usage`, it counts the requests browsers made since its last
+  check-in, by kind, e.g., `workspace.run` or `sessions.open`, leaving
+  out ones the hub's pages poll or send with every keystroke, and
+  sessions opened to run an agent, by tool, e.g., `agent.claude`, never
+  what they asked for or where.
+  The hub passes these on to its usage analytics, with the machine's
+  `platform` and `mode`, only for owners who allowed usage information,
+  as it does when a machine is linked, first checks in, or is revoked.
   A different one gets 409, after which the link doesn't connect and
   `calkit hub link install` registers it again.
   It returns the relay URL, a machine relay token, `grant_public_key`,

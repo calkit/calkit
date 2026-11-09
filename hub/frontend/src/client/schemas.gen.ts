@@ -194,7 +194,7 @@ export const Body_login_login_access_tokenSchema = {
       anyOf: [
         {
           type: "string",
-          pattern: "^password$",
+          pattern: "password",
         },
         {
           type: "null",
@@ -208,7 +208,6 @@ export const Body_login_login_access_tokenSchema = {
     },
     password: {
       type: "string",
-      format: "password",
       title: "Password",
     },
     scope: {
@@ -236,7 +235,6 @@ export const Body_login_login_access_tokenSchema = {
           type: "null",
         },
       ],
-      format: "password",
       title: "Client Secret",
     },
   },
@@ -730,6 +728,22 @@ export const CheckInSchema = {
           type: "null",
         },
       ],
+    },
+    usage: {
+      patternProperties: {
+        "^[a-z][a-z_]*\\.[a-z_]+$": {
+          type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
+        },
+      },
+      propertyNames: {
+        maxLength: 40,
+      },
+      type: "object",
+      maxProperties: 50,
+      title: "Usage",
+      default: {},
     },
   },
   type: "object",
@@ -3873,6 +3887,16 @@ export const HubStatsSchema = {
     projects: {
       $ref: "#/components/schemas/ProjectStats",
     },
+    machines: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/MachineStats",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
     excluded_accounts: {
       items: {
         type: "string",
@@ -5041,6 +5065,31 @@ export const MachineRegisteredSchema = {
   ],
   title: "MachineRegistered",
   description: "A newly registered machine, with the token only returned here.",
+} as const
+
+export const MachineStatsSchema = {
+  properties: {
+    linked: {
+      type: "integer",
+      title: "Linked",
+    },
+    users: {
+      type: "integer",
+      title: "Users",
+    },
+    users_online: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description: "Users with a linked machine that checked in",
+    },
+    users_connected: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Users who connected to one of their machines from the browser, so last_30_days is the feature's MAU",
+    },
+  },
+  type: "object",
+  required: ["linked", "users", "users_online", "users_connected"],
+  title: "MachineStats",
 } as const
 
 export const MapPathEntrySchema = {

@@ -688,6 +688,8 @@ class Machine(MachinePublic, table=True):
     )
     # When its owner asked for a CLI token to be issued to it
     cli_token_requested_at: datetime | None = Field(default=None)
+    # When a browser last connected to it, for counting who uses machines
+    last_used: datetime | None = Field(default=None)
     # Relationships
     user: User = Relationship(back_populates="machines")
     workspaces: list["MachineWorkspace"] = Relationship(

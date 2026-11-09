@@ -16,7 +16,7 @@ from httpx import Response
 from sqlmodel import Session, select
 from starlette.websockets import WebSocketDisconnect
 
-from app import users
+from app import mixpanel, users
 from app.config import settings
 from app.core import utcnow
 from app.models import (
@@ -148,7 +148,10 @@ def test_machines(
     # Names default to the slugified hostname, suffixed until unique, and the
     # owner hears about each one registered, so one they didn't expect
     # stands out
-    with patch("app.api.routes.machines.send_email") as send:
+    with (
+        patch("app.api.routes.machines.send_email") as send,
+        patch.object(mixpanel, "user_linked_machine") as linked,
+    ):
         r = client.post(
             "/machines",
             headers=normal_user_token_headers,
@@ -160,6 +163,10 @@ def test_machines(
         )
     assert r.status_code == 200, r.text
     op = r.json()
+    # Linking counts toward who uses machines, by platform and how many
+    # each user has linked
+    assert linked.call_args.kwargs["platform"] == "linux"
+    assert linked.call_args.kwargs["n_machines"] >= 1
     assert send.call_args.kwargs["email_to"] == user.email
     assert op["name"] in send.call_args.kwargs["subject"]
     assert "m-123" in send.call_args.kwargs["html_content"]
@@ -206,23 +213,67 @@ def test_machines(
         "/machines/check-in", headers=normal_user_token_headers, json={}
     )
     assert r.status_code == 403
-    # Check in with workspaces from two projects
+    # Check in with workspaces from two projects, the first time of which
+    # says the link started
     project = f"someone/proj-{uuid.uuid4().hex[:6]}"
-    r = client.post(
-        "/machines/check-in",
-        headers=op_headers,
-        json={
-            "calkit_version": "1.2.3",
-            "workspaces": [
-                {"path": "/home/me/calkit/a", "project": project.upper()},
-                {"path": "/home/me/calkit/b", "project": "someone/other"},
-                {"path": "/home/me/calkit/c", "project": project},
-                {"path": "/home/me/misc"},
-            ],
-        },
-    )
-    assert r.status_code == 200, r.text
-    check_in = r.json()
+    with patch.object(mixpanel, "machine_came_online") as came_online:
+        r = client.post(
+            "/machines/check-in",
+            headers=op_headers,
+            json={
+                "calkit_version": "1.2.3",
+                "workspaces": [
+                    {"path": "/home/me/calkit/a", "project": project.upper()},
+                    {"path": "/home/me/calkit/b", "project": "someone/other"},
+                    {"path": "/home/me/calkit/c", "project": project},
+                    {"path": "/home/me/misc"},
+                ],
+            },
+        )
+        assert r.status_code == 200, r.text
+        check_in = r.json()
+        assert came_online.call_count == 1
+        # Usage is counts of request kinds, sent on when any are made
+        with patch.object(mixpanel, "user_used_machine") as used:
+            for usage in [{}, {"workspace.run": 0}]:
+                r = client.post(
+                    "/machines/check-in",
+                    headers=op_headers,
+                    json={"usage": usage},
+                )
+                assert r.status_code == 200, r.text
+            assert used.call_count == 0
+            r = client.post(
+                "/machines/check-in",
+                headers=op_headers,
+                json={
+                    "usage": {
+                        "workspace.run": 2,
+                        "agent.claude": 1,
+                        "sessions.open": 0,
+                    }
+                },
+            )
+            assert r.status_code == 200, r.text
+            assert used.call_args.kwargs["usage"] == {
+                "workspace.run": 2,
+                "agent.claude": 1,
+            }
+            assert used.call_args.kwargs["platform"] == "linux"
+        assert came_online.call_count == 1
+    # Usage can't carry anything but counts of names like those
+    for bad in [
+        {"Workspace.run": 1},
+        {"run": 1},
+        {"/home/me/x.y": 1},
+        {"workspace.run": -1},
+        {"workspace.run": "a"},
+        {f"a.k{'x' * n}": 1 for n in range(51)},
+    ]:
+        r = client.post(
+            "/machines/check-in", headers=op_headers, json={"usage": bad}
+        )
+        assert r.status_code == 422, bad
     # Numbers that don't fit are refused, as are too many workspaces
     for bad in [
         [{"path": "/x", "ahead": -1}],
@@ -512,6 +563,10 @@ def test_machines(
     r = relay_token(normal_user_token_headers, second_factor)
     assert r.status_code == 200, r.text
     assert r.json()["machine_public_key"] == machine_jwk
+    # Which is when it was last used, for counting who uses machines
+    db.refresh(machine)
+    assert machine.last_used is not None
+    assert utcnow() - machine.last_used < timedelta(minutes=1)
     payload = jwt.decode(
         r.json()["token"], settings.RELAY_SECRET_KEY, algorithms=["HS256"]
     )
@@ -1070,12 +1125,16 @@ def test_machines(
     # the owner
     r = client.delete(f"/machines/{op['id']}", headers=pat_headers)
     assert r.status_code == 403
-    with patch("app.api.routes.machines.send_email") as send:
+    with (
+        patch("app.api.routes.machines.send_email") as send,
+        patch.object(mixpanel, "user_unlinked_machine") as unlinked,
+    ):
         r = client.delete(
             f"/machines/{op['id']}", headers=normal_user_token_headers
         )
     assert r.status_code == 200
     assert send.call_args.kwargs["email_to"] == user.email
+    assert unlinked.call_args.kwargs["days_linked"] == 0
     assert "revoked" in send.call_args.kwargs["subject"]
     r = client.post("/machines/check-in", headers=op_headers, json={})
     assert r.status_code == 403

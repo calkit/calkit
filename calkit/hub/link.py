@@ -26,7 +26,7 @@ import subprocess
 import sys
 import uuid
 import warnings
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -967,6 +967,7 @@ def check_in(
     connected: bool = True,
     restart_pending: bool = False,
     channel_sessions: list[str] | None = None,
+    usage: dict[str, int] | None = None,
 ) -> dict:
     from requests.exceptions import HTTPError
 
@@ -1004,6 +1005,7 @@ def check_in(
                 connected=connected,
                 restart_pending=restart_pending,
                 channel_sessions=channel_sessions or [],
+                usage=usage or {},
                 # Kept by the hub the first time, e.g., for one installed
                 # over SSH, and never replaced
                 public_key=get_link_public_jwk(),
@@ -2833,6 +2835,23 @@ CREDENTIAL_ACTIONS = {
     "workspaces.clone",
     "machine.check",
 }
+# Requests the hub counts, by kind, never with what they asked for, to see
+# how machines are used, leaving out ones the hub's pages poll or that come
+# with every keystroke
+COUNTED_REQUESTS = {
+    "sessions.open",
+    "sessions.attach",
+    "workspace.pull",
+    "workspace.push",
+    "workspace.save",
+    "workspace.ignore",
+    "workspace.run",
+    "workspace.stop",
+    "workspace.new",
+    "workspace.discard",
+    "workspace.add_stage",
+    "workspaces.clone",
+}
 # Ones quick and harmless enough to not wait on what else is going on there,
 # e.g., the rest of the status, which can take a while for a large pipeline
 LOCK_FREE_ACTIONS = {
@@ -2920,6 +2939,8 @@ class HubLink:
         # One Git or DVC operation at a time per workspace, and which
         self.workspace_locks: dict[str, asyncio.Lock] = {}
         self.workspace_actions: dict[str, str] = {}
+        # Counted requests since the last check-in, by kind
+        self.usage: Counter[str] = Counter()
         # Workspaces this link holds the lock for, against other hubs'
         self.claimed: set[str] = set()
         self.connected_check_in: asyncio.Task | None = None
@@ -3561,6 +3582,14 @@ class HubLink:
                     {"type": "error", "id": req_id, "error": "Invalid type"},
                 )
             return
+        if msg_type in COUNTED_REQUESTS:
+            self.usage[msg_type] += 1
+        # And sessions started to run an agent, by which
+        command = msg.get("command") if msg_type == "sessions.open" else None
+        if isinstance(command, str) and command.split():
+            tool = os.path.basename(command.split()[0])
+            if tool in AGENT_TOOLS:
+                self.usage[f"agent.{tool}"] += 1
         if msg_type in WORKSPACE_ACTIONS or msg_type in MACHINE_ACTIONS:
             asyncio.get_running_loop().create_task(self.run_action(ch, msg))
             return
@@ -3783,6 +3812,7 @@ class HubLink:
         grant_key = self.cfg.get("grant_public_key")
         # Whether browsers can reach it now, so the hub doesn't show it
         # online while it's reconnecting
+        usage = dict(self.usage)
         resp = await asyncio.to_thread(
             check_in,
             self.cfg,
@@ -3797,7 +3827,11 @@ class HubLink:
                 {auth.session_id for auth in self.channels.values()}
                 | {c.auth.session_id for c in self.credential_channels}
             )[:MAX_CHANNEL_SESSIONS],
+            usage,
         )
+        # Requests made while it was checking in go with the next
+        self.usage.subtract(usage)
+        self.usage = +self.usage
         self.last_check_in = time.monotonic()
         self.check_in_interval = resp.get("check_in_interval", 60)
         # Grants checked with the old key can't be trusted with the new one

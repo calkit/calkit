@@ -39,6 +39,7 @@ def upgrade():
     sa.Column('hashed_verifier', sqlmodel.sql.sqltypes.AutoString(length=64), nullable=False),
     sa.Column('public_key', sa.JSON(), nullable=True),
     sa.Column('cli_token_requested_at', sa.DateTime(), nullable=True),
+    sa.Column('last_used', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['user_id'], ['user.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )

@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import col, func, select
 
 import app.projects
-from app import github, users
+from app import github, mixpanel, users
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
@@ -337,6 +337,14 @@ def post_machine(
     session.commit()
     session.refresh(machine)
     _send_machine_email(machine, current_user, "linked")
+    n_machines = session.exec(
+        select(func.count())
+        .select_from(Machine)
+        .where(Machine.user_id == current_user.id)
+    ).one()
+    mixpanel.user_linked_machine(
+        current_user, platform=machine.platform, n_machines=n_machines
+    )
     return MachineRegistered.model_validate(
         _out(machine),
         update=dict(
@@ -401,6 +409,11 @@ def _revoke(session: SessionDep, machine: Machine) -> MachineOut:
     session.commit()
     session.refresh(machine)
     _send_machine_email(machine, machine.user, "unlinked")
+    mixpanel.user_unlinked_machine(
+        machine.user,
+        platform=machine.platform,
+        days_linked=(utcnow() - machine.created).days,
+    )
     return _out(machine)
 
 
@@ -500,6 +513,15 @@ class CheckIn(BaseModel):
     # Its own key, which is stored if the hub has none yet, and otherwise
     # has to match
     public_key: PublicKey | None = None
+    # How many of each kind of request browsers made since the last
+    # check-in, e.g., "workspace.run", and agents started in sessions, e.g.,
+    # "agent.claude", for counting how machines are used
+    usage: dict[
+        Annotated[
+            str, Field(pattern=r"^[a-z][a-z_]*\.[a-z_]+$", max_length=40)
+        ],
+        Annotated[int, Field(ge=0, le=MAX_INT)],
+    ] = Field(default={}, max_length=50)
 
 
 class CheckInResp(BaseModel):
@@ -626,6 +648,7 @@ def post_machine_check_in(
             machine.public_key = key
         elif machine.public_key != key:
             raise HTTPException(409, "Machine key doesn't match")
+    first_check_in = machine.last_seen is None
     machine.last_seen = utcnow()
     update_workspaces(session, machine, req.workspaces)
     if req.calkit_version is not None:
@@ -643,6 +666,18 @@ def post_machine_check_in(
     session.add(machine)
     session.commit()
     session.refresh(machine)
+    if first_check_in:
+        mixpanel.machine_came_online(
+            machine.user, platform=machine.platform, mode=machine.mode
+        )
+    usage = {k: v for k, v in req.usage.items() if v > 0}
+    if usage:
+        mixpanel.user_used_machine(
+            machine.user,
+            platform=machine.platform,
+            mode=machine.mode,
+            usage=usage,
+        )
     return CheckInResp(
         machine_id=machine.id,
         name=machine.name,
@@ -760,6 +795,9 @@ def post_machine_relay_token(
     )
     if machine.public_key is None:
         raise HTTPException(409, "Machine hasn't sent its key yet")
+    machine.last_used = utcnow()
+    session.add(machine)
+    session.commit()
     grant, grant_id = create_machine_grant(
         machine.id,
         signed_in.user.id,

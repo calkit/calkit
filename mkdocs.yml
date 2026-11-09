@@ -124,3 +124,6 @@ extra:
   analytics:
     provider: google
     property: G-B87E6N95DH
+
+hooks:
+  - scripts/mkdocs-hooks.py

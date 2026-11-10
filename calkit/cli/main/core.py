@@ -62,7 +62,6 @@ from calkit.cli.fix import (
     TheirsOpt,
     fix_app,
 )
-from calkit.cli.google import google_app
 from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
@@ -108,9 +107,6 @@ app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
-app.add_typer(
-    google_app, name="google", help="Work with Google files, e.g., Slides."
-)
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
     scheduler_app,
@@ -1893,8 +1889,21 @@ def _warn_on_hub_mismatch() -> None:
         )
 
 
+# What ``calkit pull`` can bring in, in the order it does
+PULL_TARGETS = ["git", "dvc", "google"]
+
+
 @app.command(name="pull")
 def pull(
+    targets: Annotated[
+        Optional[list[str]],
+        typer.Argument(
+            help=(
+                "What to pull: 'git', 'dvc', 'google' (whether Google Slides "
+                "presentations were edited), or 'all'. Defaults to all."
+            ),
+        ),
+    ] = None,
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
     no_dvc: Annotated[
         bool, typer.Option("--no-dvc", help="Do not pull from DVC.")
@@ -1925,14 +1934,32 @@ def pull(
         ),
     ] = False,
 ) -> None:
-    """Pull with both Git and DVC."""
+    """Pull with Git and DVC, and check whether Google Slides presentations
+    were edited.
+    """
+    selected = set(PULL_TARGETS)
+    if targets:
+        selected = set()
+        for target in targets:
+            if target == "all":
+                selected.update(PULL_TARGETS)
+            elif target in PULL_TARGETS:
+                selected.add(target)
+            else:
+                raise_error(
+                    f"Invalid target to pull: '{target}'; choose from "
+                    + ", ".join(PULL_TARGETS + ["all"])
+                )
+    for target, excluded in [("dvc", no_dvc), ("git", no_git)]:
+        if excluded:
+            selected.discard(target)
     _warn_on_hub_mismatch()
     if force:
         if "-f" not in git_args and "--force" not in git_args:
             git_args.append("-f")
         if "-f" not in dvc_args and "--force" not in dvc_args:
             dvc_args.append("-f")
-    if not no_git:
+    if "git" in selected:
         typer.echo("Git pulling")
         # So Git merges dvc.lock and stage run records stage by stage
         calkit.merge.configure_driver()
@@ -1952,7 +1979,7 @@ def pull(
                     "conflicts in dvc.lock and stage run records"
                 )
             raise_error("Git pull failed")
-    if not no_dvc:
+    if "dvc" in selected:
         typer.echo("DVC pulling")
         if not no_check_auth:
             # Check that our dvc remotes all have our DVC token set for them
@@ -1997,20 +2024,26 @@ def pull(
 
     # Presentations edited in Google Slides since they were exported
     ck_info = calkit.load_calkit_info()
-    if _has_google_slides_stages(ck_info):
+    if "google" in selected and _has_google_slides_stages(ck_info):
         from calkit.cli.google import record_edit_times
 
         typer.echo("Checking Google Slides")
         try:
             edited = record_edit_times(ck_info)
         except Exception as e:
-            warn(f"Failed to check whether Google Slides were edited: {e}")
+            # Only a failure of what was asked for by name fails the pull
+            msg = f"Failed to check whether Google Slides were edited: {e}"
+            if targets and "google" in targets:
+                raise_error(msg)
+            warn(msg)
         else:
-            if edited:
-                typer.echo(
-                    "Edited in Google Slides, so out of date: "
-                    + ", ".join(edited)
-                )
+            typer.echo(
+                "Edited in Google Slides, so out of date: " + ", ".join(edited)
+                if edited
+                else "No Google Slides presentations were edited"
+            )
+    elif targets and "google" in targets:
+        typer.echo("The project exports no Google Slides presentations")
 
 
 def _has_google_slides_stages(ck_info: dict) -> bool:

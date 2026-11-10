@@ -7,12 +7,13 @@ import pytest
 from typer.testing import CliRunner
 
 import calkit
+from calkit.cli.export import export_app
 from calkit.cli.google import (
     get_hub_response,
-    google_app,
     record_edit_times,
 )
 from calkit.cli.import_ import import_app
+from calkit.cli.main import app
 from calkit.cli.new import new_app
 
 runner = CliRunner()
@@ -83,7 +84,7 @@ def test_google_slides(tmp_dir, monkeypatch):
     assert ck_info["pipeline"]["stages"]["export-poster"] == {
         "kind": "google-slides-export",
         "presentation_url": url,
-        "figures": ["figures/rates.png"],
+        "inputs": ["figures/rates.png"],
         "outputs": ["poster/poster.pdf", "poster/poster.pptx"],
     }
     edit_time_path = f".calkit/google/{pid}.json"
@@ -137,9 +138,9 @@ def test_google_slides(tmp_dir, monkeypatch):
     assert stages["export-talk"]["outputs"] == ["talk.pdf"]
     # Exporting puts the figures in first, then records that edit
     res = runner.invoke(
-        google_app,
+        export_app,
         [
-            "export-slides",
+            "google-slides",
             url,
             "-o",
             "poster/poster.pdf",
@@ -162,7 +163,7 @@ def test_google_slides(tmp_dir, monkeypatch):
     # of it reruns
     mtime = os.path.getmtime("poster/poster.pdf")
     res = runner.invoke(
-        google_app, ["export-slides", url, "-o", "poster/poster.pdf"]
+        export_app, ["google-slides", url, "-o", "poster/poster.pdf"]
     )
     assert res.exit_code == 0, res.output
     assert "poster/poster.pdf is unchanged, so it was kept" in res.output
@@ -178,7 +179,7 @@ def test_google_slides(tmp_dir, monkeypatch):
 
     monkeypatch.setattr(calkit.hub, "get", hub_get_edited)
     res = runner.invoke(
-        google_app, ["export-slides", url, "-o", "poster/poster.pdf"]
+        export_app, ["google-slides", url, "-o", "poster/poster.pdf"]
     )
     assert res.exit_code == 0, res.output
     with open(edit_time_path) as f:
@@ -229,13 +230,15 @@ def test_google_slides(tmp_dir, monkeypatch):
     ]
     with open(f"sub/.calkit/google/{pid}.json") as f:
         assert json.load(f) == {"modified_time": "t6"}
-    res = runner.invoke(google_app, ["pull"])
+    res = runner.invoke(app, ["pull", "google"])
+    assert res.exit_code == 0, res.output
+    assert "Git pulling" not in res.output
     assert "No Google Slides presentations were edited" in res.output
     # Figures Slides can't show are refused before anything is sent
     n_posted = len(posted)
     res = runner.invoke(
-        google_app,
-        ["export-slides", url, "-o", "p.pdf", "--figure", "figures/rates.pdf"],
+        export_app,
+        ["google-slides", url, "-o", "p.pdf", "--figure", "figures/rates.pdf"],
     )
     assert res.exit_code != 0
     assert "PNG, JPEG, or GIF" in res.output
@@ -395,14 +398,14 @@ def test_google_slide_figures(tmp_dir, monkeypatch):
     assert "no slide 'missing'" in res.output
     # Exporting tags the slide, and crops it to what's drawn, plus a margin
     args = [
-        "export-slides",
+        "google-slides",
         url,
         "--slide",
         "figures/setup.pdf=s2",
         "--slide",
         "figures/setup.png=s2",
     ]
-    res = runner.invoke(google_app, args)
+    res = runner.invoke(export_app, args)
     assert res.exit_code == 0, res.output
     assert tagged[-1] == {
         "figures/setup.pdf": "s2",
@@ -415,15 +418,15 @@ def test_google_slide_figures(tmp_dir, monkeypatch):
     # A slide deleted since is reported, pointing at one tagged for it
     slides[1]["id"] = "copied"
     slides[1]["notes"] = "calkit:figures/setup.pdf\n"
-    res = runner.invoke(google_app, args)
+    res = runner.invoke(export_app, args)
     assert res.exit_code != 0
     assert "is 'copied'" in res.output
-    res = runner.invoke(google_app, ["export-slides", url, "--slide", "bad"])
+    res = runner.invoke(export_app, ["google-slides", url, "--slide", "bad"])
     assert res.exit_code != 0
     assert "its figure's path and its ID" in res.output
     # Nothing drawn on the slide can't make a figure
     res = runner.invoke(
-        google_app, ["export-slides", url, "--slide", "figures/t.pdf=title"]
+        export_app, ["google-slides", url, "--slide", "figures/t.pdf=title"]
     )
     assert res.exit_code != 0
     assert "Nothing is drawn" in res.output

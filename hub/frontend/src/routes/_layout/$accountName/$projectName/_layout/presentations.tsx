@@ -200,6 +200,9 @@ function NewGoogleSlides({
   const [path, setPath] = useState("")
   const [pathEdited, setPathEdited] = useState(false)
   const [kind, setKind] = useState<"slides" | "poster">("slides")
+  // Linked from here once made, since opening a window after the request
+  // returns, rather than on a click, gets blocked as a pop-up
+  const [created, setCreated] = useState<Presentation | null>(null)
   const connectedAccountsQuery = useQuery({
     queryFn: () =>
       UsersService.getUserConnectedAccounts().then((response) => response.data),
@@ -213,6 +216,7 @@ function NewGoogleSlides({
     setPath("")
     setPathEdited(false)
     setKind("slides")
+    setCreated(null)
     onClose()
   }
   const mutation = useMutation({
@@ -222,13 +226,8 @@ function NewGoogleSlides({
         project_name: projectName,
         googleSlidesPresentationPost: { title, path, kind },
       }).then((response) => response.data),
-    onSuccess: () => {
-      showToast(
-        "Success!",
-        "Presentation created. Open it in Google Slides to start editing.",
-        "success",
-      )
-      close()
+    onSuccess: (data) => {
+      setCreated(data)
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
@@ -257,74 +256,103 @@ function NewGoogleSlides({
       >
         <ModalHeader>New Google Slides presentation</ModalHeader>
         <ModalCloseButton />
-        <ModalBody>
-          {connectedAccountsQuery.isSuccess && !googleConnected && (
-            <Alert status="warning" mb={4} borderRadius="md" fontSize="sm">
-              <AlertIcon />
+        {created ? (
+          <>
+            <ModalBody>
               <Text>
-                Connect Google Drive in{" "}
-                <Link
-                  as={RouterLink}
-                  to="/settings"
-                  search={{ tab: "connected-accounts" } as any}
-                  textDecoration="underline"
-                >
-                  your settings
-                </Link>{" "}
-                first.
+                Created <b>{created.title}</b>. The pipeline exports it to{" "}
+                <Code>{created.path}</Code>.
               </Text>
-            </Alert>
-          )}
-          <FormControl isRequired>
-            <FormLabel>Title</FormLabel>
-            <Input
-              value={title}
-              autoComplete="off"
-              placeholder="My poster"
-              onChange={(e) => {
-                setTitle(e.target.value)
-                if (!pathEdited) setPath(getDefaultPath(e.target.value))
-              }}
-            />
-          </FormControl>
-          <FormControl mt={4}>
-            <FormLabel>Kind</FormLabel>
-            <Select
-              value={kind}
-              onChange={(e) => setKind(e.target.value as "slides" | "poster")}
-            >
-              <option value="slides">Slides</option>
-              <option value="poster">Poster</option>
-            </Select>
-          </FormControl>
-          <FormControl mt={4} isRequired>
-            <FormLabel>PDF path</FormLabel>
-            <Input
-              value={path}
-              autoComplete="off"
-              placeholder="presentations/my-poster.pdf"
-              onChange={(e) => {
-                setPath(e.target.value)
-                setPathEdited(true)
-              }}
-            />
-            <FormHelperText>
-              Where the pipeline exports it in the project, with a PowerPoint
-              copy beside it.
-            </FormHelperText>
-          </FormControl>
-        </ModalBody>
-        <ModalFooter gap={3}>
-          <Button
-            variant="primary"
-            type="submit"
-            isLoading={mutation.isPending}
-            isDisabled={!googleConnected || !title || !path}
-          >
-            Create
-          </Button>
-          <Button onClick={close}>Cancel</Button>
-        </ModalFooter>
+            </ModalBody>
+            <ModalFooter gap={3}>
+              <Button
+                as="a"
+                href={safeHref(created.edit_url)}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="primary"
+                leftIcon={<FiExternalLink />}
+                onClick={close}
+              >
+                Open in Google Slides
+              </Button>
+              <Button onClick={close}>Done</Button>
+            </ModalFooter>
+          </>
+        ) : (
+          <>
+            <ModalBody>
+              {connectedAccountsQuery.isSuccess && !googleConnected && (
+                <Alert status="warning" mb={4} borderRadius="md" fontSize="sm">
+                  <AlertIcon />
+                  <Text>
+                    Connect Google Drive in{" "}
+                    <Link
+                      as={RouterLink}
+                      to="/settings"
+                      search={{ tab: "connected-accounts" } as any}
+                      textDecoration="underline"
+                    >
+                      your settings
+                    </Link>{" "}
+                    first.
+                  </Text>
+                </Alert>
+              )}
+              <FormControl isRequired>
+                <FormLabel>Title</FormLabel>
+                <Input
+                  value={title}
+                  autoComplete="off"
+                  placeholder="My poster"
+                  onChange={(e) => {
+                    setTitle(e.target.value)
+                    if (!pathEdited) setPath(getDefaultPath(e.target.value))
+                  }}
+                />
+              </FormControl>
+              <FormControl mt={4}>
+                <FormLabel>Kind</FormLabel>
+                <Select
+                  value={kind}
+                  onChange={(e) =>
+                    setKind(e.target.value as "slides" | "poster")
+                  }
+                >
+                  <option value="slides">Slides</option>
+                  <option value="poster">Poster</option>
+                </Select>
+              </FormControl>
+              <FormControl mt={4} isRequired>
+                <FormLabel>PDF path</FormLabel>
+                <Input
+                  value={path}
+                  autoComplete="off"
+                  placeholder="presentations/my-poster.pdf"
+                  onChange={(e) => {
+                    setPath(e.target.value)
+                    setPathEdited(true)
+                  }}
+                />
+                <FormHelperText>
+                  Where the pipeline exports it in the project, with a
+                  PowerPoint copy beside it.
+                </FormHelperText>
+              </FormControl>
+            </ModalBody>
+            <ModalFooter gap={3}>
+              <Button
+                variant="primary"
+                type="submit"
+                isLoading={mutation.isPending}
+                isDisabled={!googleConnected || !title || !path}
+              >
+                Create
+              </Button>
+              <Button onClick={close}>Cancel</Button>
+            </ModalFooter>
+          </>
+        )}
       </ModalContent>
     </Modal>
   )

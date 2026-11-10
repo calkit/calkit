@@ -736,8 +736,9 @@ def new_figure(
     if google_slide is not None:
         from calkit.cli.google_slides import add_slide_figure
 
-        stage_name = add_slide_figure(ck_info, google_slide, path, stage_name)
-    if stage_name is not None:
+        # The figure's stage is found from its outputs
+        add_slide_figure(ck_info, google_slide, path, stage_name)
+    elif stage_name is not None:
         obj["stage"] = stage_name
     if created_by is not None:
         obj["created_by"] = created_by

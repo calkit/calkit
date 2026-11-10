@@ -1875,7 +1875,11 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
         if not isinstance(stage, dict):
             continue
         wdir = stage.get("wdir") or ""
-        for out in stage.get("outputs") or []:
+        # Figures exported from Google Slides are outputs too
+        slides = stage.get("slides")
+        for out in list(stage.get("outputs") or []) + list(
+            slides if isinstance(slides, dict) else []
+        ):
             out_path = out.get("path") if isinstance(out, dict) else out
             if out_path and target == posixpath.normpath(
                 posixpath.join(wdir, Path(out_path).as_posix())

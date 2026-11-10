@@ -246,8 +246,12 @@ def test_google_slide_figures(tmp_dir, monkeypatch):
     assert ck_info["figures"][0] == {
         "path": "figures/setup.pdf",
         "title": "Setup",
-        "stage": "export-diagrams",
     }
+    # Its stage is found from the slides the stage exports
+    assert (
+        calkit.pipeline.get_stage_for_output("figures/setup.pdf", ck_info)
+        == "export-diagrams"
+    )
     repo = calkit.git.get_repo()
     assert not repo.git.status("--porcelain", ".calkit/google-slides")
     res = runner.invoke(

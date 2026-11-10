@@ -3402,6 +3402,12 @@
           "title": "Always Run",
           "type": "boolean"
         },
+        "arxiv": {
+          "default": false,
+          "description": "Whether to export into a .zip file ready to upload to ArXiv",
+          "title": "Arxiv",
+          "type": "boolean"
+        },
         "aux_dir": {
           "anyOf": [
             {
@@ -3563,12 +3569,6 @@
           "default": "latex",
           "title": "Kind",
           "type": "string"
-        },
-        "latex2arxiv": {
-          "default": false,
-          "description": "Whether to export into a .zip file ready to upload to ArXiv",
-          "title": "Latex2Arxiv",
-          "type": "boolean"
         },
         "latexdiff_args": {
           "default": [],

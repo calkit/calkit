@@ -4162,15 +4162,21 @@ Options:
 Usage:
 
 ```text
-calkit latex|tex to-arxiv TARGET-FOLDER TEX-FILE
+calkit latex|tex to-arxiv [OPTIONS] TEX-FILE
 ```
 
 Arguments:
 
-| Argument        | Type | Required | Default | Description                                |
-| --------------- | ---- | -------- | ------- | ------------------------------------------ |
-| `target_folder` | str  | yes      |         | The folder to include in the arxiv upload. |
-| `tex_file`      | str  | yes      |         | The main .tex file for the arxiv upload.   |
+| Argument   | Type | Required | Default | Description                              |
+| ---------- | ---- | -------- | ------- | ---------------------------------------- |
+| `tex_file` | str  | yes      |         | The main .tex file for the arxiv upload. |
+
+Options:
+
+| Option            | Type | Required | Default | Description                                                                                      |
+| ----------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `--target-folder` | str  | yes      |         | The folder to include in the arxiv upload. Defaults to the folder containing the main .tex file. |
+| `--output-dir`    | str  | no       |         | Directory to write the arxiv zip into. Defaults to `target_folder/<tex_file>-for-arxiv.zip`.     |
 
 <a id="subcommand-latex-tex-to-docx"></a>
 

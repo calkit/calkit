@@ -1270,7 +1270,7 @@ class LatexStage(Stage):
         "it's built, e.g., to drop changes that don't change the rendered "
         "text.",
     )
-    latex2arxiv: bool = Field(
+    arxiv: bool = Field(
         default=False,
         description="Whether to export into a .zip file ready to upload to ArXiv",
     )
@@ -1420,22 +1420,21 @@ class LatexStage(Stage):
 
     def to_arxiv_stages(self, deps, desc) -> dict[str, dict]:
         stages: dict[str, dict] = {}
-        if self.latex2arxiv:
+        if self.arxiv:
             # Convert the document to arXiv format
-            arxiv_name = f"{self.name}_to_arxiv"
+            arxiv_name = f"{self.name}-for-arxiv"
             parent_path = Path(self.target_path).parent
             stem_path = Path(self.target_path).stem
             path_to_stem = (parent_path / stem_path).as_posix()
-            arxiv_dir = f"{path_to_stem}_arxiv.zip"
+            arxiv_dir = f"{path_to_stem}-for-arxiv.zip"
             arxiv_stage: dict = {
-                "cmd": f"calkit latex to-arxiv {shlex.quote(parent_path.as_posix())} {shlex.quote(stem_path)}",
+                "cmd": f"calkit latex to-arxiv {shlex.quote(stem_path)}",
                 "deps": deps,
                 "outs": [arxiv_dir],
                 "desc": desc,
             }
             if self.wdir is not None:
                 arxiv_stage["wdir"] = self.wdir
-
             stages[arxiv_name] = arxiv_stage
         return stages
 
@@ -1451,10 +1450,8 @@ class LatexStage(Stage):
         )
         stages: dict[str, dict] = {}
         deps = self.dvc_deps + (extra_inputs or [])
-
         diff_stages = self.latex_diff_stages(deps, desc, revision_key)
         arxiv_stages = self.to_arxiv_stages(deps, desc)
-
         stages = dict(diff_stages, **arxiv_stages)
         return stages
 

@@ -1994,18 +1994,38 @@ def _build_diff(
 
 @latex_app.command(name="to-arxiv")
 def to_arxiv(
-    target_folder: Annotated[
-        str, typer.Argument(help="The folder to include in the arxiv upload.")
-    ],
     tex_file: Annotated[
         str, typer.Argument(help="The main .tex file for the arxiv upload.")
     ],
+    target_folder: Annotated[
+        str,
+        typer.Option(
+            "--target-folder",
+            help=(
+                "The folder to include in the arxiv upload. Defaults to the folder containing the main .tex file."
+            ),
+        ),
+    ],
+    output_dir: Annotated[
+        str | None,
+        typer.Option(
+            "--output-dir",
+            help=(
+                "Directory to write the arxiv zip into. Defaults to `target_folder/<tex_file>-for-arxiv.zip`."
+            ),
+        ),
+    ] = None,
 ) -> None:
+    if target_folder is None:
+        target_folder = Path(tex_file).parent or Path(".")
+    if output_dir is None:
+        output_dir = (
+            target_folder / Path(tex_file).stem
+        ).as_posix() + "-for-arxiv.zip"
     import sysconfig
 
     scripts_dir = Path(sysconfig.get_path("scripts"))
     cli_path = scripts_dir / "latex2arxiv"
-    output_folder = (Path(target_folder) / tex_file).as_posix() + "_arxiv.zip"
     # latex2arxiv requires .gls files at root, so copy them
     moved = []
     for gls_file in target_folder.glob("*.gls"):
@@ -2013,7 +2033,13 @@ def to_arxiv(
         gls_file.copy(moved[-1])
     try:
         subprocess.run(
-            [cli_path.as_posix(), target_folder, output_dir, "--main", tex_file],
+            [
+                cli_path.as_posix(),
+                target_folder.as_posix(),
+                output_dir,
+                "--main",
+                tex_file,
+            ],
             check=True,
         )
     finally:

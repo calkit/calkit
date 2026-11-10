@@ -1,7 +1,6 @@
 """Routes for users."""
 
 import logging
-import posixpath
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -26,7 +25,7 @@ from sqlmodel import Field, col, func, or_, select
 import app.projects
 import app.stripe
 import calkit.google
-from app import mixpanel, storage, users, zotero
+from app import mixpanel, users, zotero
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
@@ -53,6 +52,8 @@ from app.messaging import (
 from app.models import (
     Account,
     DiscountCode,
+    GoogleFigurePut,
+    GooglePresentation,
     Message,
     OnboardingFlagPost,
     OnboardingFlags,
@@ -1140,21 +1141,8 @@ def get_user_overleaf_session(
     )
 
 
-class GooglePresentation(BaseModel):
-    id: str
-    title: str | None
-    url: str
-    modified_time: str
-
-
 class GooglePresentationPost(BaseModel):
     title: str
-
-
-class GoogleFigurePut(BaseModel):
-    replaced: int
-    added: bool
-    modified_time: str
 
 
 @router.post("/user/google/presentations")
@@ -1199,32 +1187,10 @@ def post_user_google_presentation_figure(
     """Put the latest version of a project figure in a Google Slides
     presentation, replacing the images tagged with its path.
     """
-    try:
-        mime_type = calkit.google.get_figure_mime_type(path)
-    except ValueError as e:
-        raise HTTPException(422, str(e))
     client = users.get_google_slides_client(session=session, user=current_user)
-    # Slides copies an image from a URL it can fetch, so the figure is put
-    # in object storage just long enough for that
-    fs = storage.get_object_fs()
-    fpath = (
-        f"{storage.get_storage_root()}/{storage.GOOGLE_SLIDES_FIGURES_DIR}/"
-        f"{uuid.uuid4().hex}/{posixpath.basename(path)}"
+    resp = users.put_google_slides_figure(
+        client, presentation_id, path, file.file.read()
     )
-    storage.write_object(fpath, file.file.read(), mime_type, fs=fs)
-    try:
-        url = storage.get_object_url(fpath, expires=600, fs=fs)
-        resp = client.put_figure(presentation_id, path, url)
-    except calkit.google.GoogleError as e:
-        # Google can't fetch from object storage on a developer's machine
-        if settings.ENVIRONMENT == "local":
-            e.args = (
-                f"{e} Google can't reach a local hub's object storage, so "
-                "try this on staging.",
-            )
-        users.raise_google_error(e)
-    finally:
-        fs.rm(fpath)
     return GoogleFigurePut.model_validate(resp)
 
 

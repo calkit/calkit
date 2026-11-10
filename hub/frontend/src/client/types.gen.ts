@@ -4635,6 +4635,10 @@ export type ProjectPatch = {
    * Is Public
    */
   is_public?: boolean | null
+  /**
+   * Share Google Files
+   */
+  share_google_files?: boolean
 }
 
 /**

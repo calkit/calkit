@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, and_, or_, select
 
 import app.users
+import calkit.google
 from app.config import settings
 from calkit.notebooks import (
     MARIMO_DETECT_N_BYTES,
@@ -65,6 +66,7 @@ from app.models import (
     Org,
     OverleafLink,
     Project,
+    ProjectGoogleFile,
     Publication,
     User,
     UserOrgMembership,
@@ -1640,3 +1642,156 @@ def get_notebook_from_repo(
     if not notebook.get("output_format") and item.content and not item.url:
         notebook["output_format"] = "notebook"
     return Notebook.model_validate(notebook)
+
+
+def get_project_google_client(
+    session: Session, project: Project, file_id: str, user: User | None
+) -> calkit.google.Client:
+    """A Google client that reaches a file linked to a project, through the
+    Google account of whoever linked it, or, if nobody has, the user's own.
+    """
+    link = session.get(ProjectGoogleFile, (project.id, file_id))
+    if link is None:
+        if user is None:
+            raise HTTPException(404, "That file isn't linked to the project")
+        return app.users.get_google_slides_client(session=session, user=user)
+    try:
+        return app.users.get_google_slides_client(
+            session=session, user=link.user
+        )
+    except HTTPException:
+        raise HTTPException(
+            403,
+            "The project reaches this file through the Google account of "
+            "whoever linked it, which isn't connected to Calkit anymore. "
+            "They can connect it again, or someone else can link the file "
+            "with theirs.",
+        )
+
+
+def get_project_users(session: Session, project: Project) -> list[User]:
+    """Everyone with access to a project: its owner, if a user, and those
+    granted access in Calkit or on GitHub.
+    """
+    users = [project.owner] if isinstance(project.owner, User) else []
+    accesses = session.exec(
+        select(UserProjectAccess)
+        .where(UserProjectAccess.project_id == project.id)
+        .where(
+            or_(
+                UserProjectAccess.role_id != None,  # noqa: E711
+                UserProjectAccess.github_access != None,  # noqa: E711
+            )
+        )
+    ).all()
+    for access in accesses:
+        user = session.get(User, access.user_id)
+        if user is not None and user not in users:
+            users.append(user)
+    return users
+
+
+def share_project_google_files(
+    session: Session,
+    project: Project,
+    users: list[User],
+    file_ids: list[str] | None = None,
+) -> None:
+    """Let users edit the Google files linked to a project, or only those in
+    ``file_ids``, in Google, through the account of whoever linked each.
+
+    Failures are logged rather than raised, since a file someone can't
+    share, e.g., one shared with them, shouldn't stop anything else.
+    """
+    links = session.exec(
+        select(ProjectGoogleFile).where(
+            ProjectGoogleFile.project_id == project.id
+        )
+    ).all()
+    for link in links:
+        if file_ids is not None and link.file_id not in file_ids:
+            continue
+        others = [u for u in users if u.id != link.user_id]
+        if not others:
+            continue
+        try:
+            client = app.users.get_google_slides_client(
+                session=session, user=link.user
+            )
+        except HTTPException as e:
+            logger.warning(f"Can't share Google file {link.file_id}: {e}")
+            continue
+        for user in others:
+            # The address Google verified at sign-in is the Google account,
+            # and otherwise the Calkit one may be
+            credential = app.users.get_external_credential(
+                session=session, user=user, provider="google"
+            )
+            email = (
+                credential.provider_account_id
+                if credential is not None and credential.provider_account_id
+                else user.email
+            )
+            try:
+                client.share_file(link.file_id, email)
+            except calkit.google.GoogleError as e:
+                logger.warning(
+                    f"Failed to share Google file {link.file_id} with "
+                    f"{user.email}: {e}"
+                )
+
+
+def set_project_google_files_public(
+    session: Session, project: Project, is_public: bool
+) -> None:
+    """Let anyone with its link view each Google file linked to a project,
+    or stop that, logging what fails.
+    """
+    links = session.exec(
+        select(ProjectGoogleFile).where(
+            ProjectGoogleFile.project_id == project.id
+        )
+    ).all()
+    for link in links:
+        try:
+            client = app.users.get_google_slides_client(
+                session=session, user=link.user
+            )
+            if is_public:
+                client.share_file(link.file_id)
+            else:
+                client.unshare_file(link.file_id)
+        except (HTTPException, calkit.google.GoogleError) as e:
+            logger.warning(
+                f"Failed to change who can view Google file {link.file_id}: "
+                f"{e}"
+            )
+
+
+def link_project_google_file(
+    session: Session, project: Project, file_id: str, user: User
+) -> None:
+    """Record that a project reaches a Google file through ``user``'s
+    Google account, unless it already reaches it through someone else's
+    that's still connected, and share it with the project's users.
+    """
+    link = session.get(ProjectGoogleFile, (project.id, file_id))
+    if link is None:
+        session.add(
+            ProjectGoogleFile(
+                project_id=project.id, file_id=file_id, user_id=user.id
+            )
+        )
+    elif link.user_id != user.id:
+        try:
+            app.users.get_google_slides_client(session=session, user=link.user)
+        except HTTPException:
+            link.user_id = user.id
+            session.add(link)
+    session.commit()
+    share_project_google_files(
+        session=session,
+        project=project,
+        users=get_project_users(session=session, project=project),
+        file_ids=[file_id],
+    )

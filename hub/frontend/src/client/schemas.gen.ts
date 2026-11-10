@@ -7939,6 +7939,11 @@ export const ProjectPatchSchema = {
       ],
       title: "Is Public",
     },
+    share_google_files: {
+      type: "boolean",
+      title: "Share Google Files",
+      default: false,
+    },
   },
   type: "object",
   title: "ProjectPatch",

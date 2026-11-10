@@ -10,7 +10,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import AliasGroup, raise_error
+from calkit.cli import AliasGroup, raise_error, warn
 
 google_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -58,6 +58,71 @@ def get_hub_response(kind: str, path: str, **kwargs: Any) -> Any:
     return request(path, **kwargs)
 
 
+def get_presentation_response(
+    kind: str,
+    presentation_id: str,
+    suffix: str = "",
+    wdir: str | None = None,
+    connect: bool = True,
+    **kwargs: Any,
+) -> Any:
+    """Return the hub's response to a request about a Google Slides
+    presentation, e.g., ``suffix="/export"``, made of the project's route,
+    which reaches it through the Google account of whoever linked it to the
+    project, or otherwise of the user's own.
+
+    The user's own route is for a project the hub doesn't know, or a
+    presentation nobody linked to it, and ``connect`` offers to connect
+    their Google account there if it isn't.
+    """
+    import requests
+
+    try:
+        project = calkit.detect_project_name(wdir=wdir)
+    except Exception:
+        project = None
+    request = getattr(calkit.hub, kind)
+    if project is not None:
+        try:
+            return request(
+                f"/projects/{project}/google/presentations/"
+                f"{presentation_id}{suffix}",
+                **kwargs,
+            )
+        except requests.HTTPError as e:
+            if e.response is None or e.response.status_code not in (403, 404):
+                raise
+    path = f"/user/google/presentations/{presentation_id}{suffix}"
+    if connect:
+        return get_hub_response(kind, path, **kwargs)
+    return request(path, **kwargs)
+
+
+def link_presentation(presentation_id: str) -> None:
+    """Link a Google Slides presentation to the project on the hub, so
+    everyone with access to the project reaches it through the user's
+    Google account, and it's shared with them in Google.
+
+    A project the hub doesn't know is left alone.
+    """
+    import requests
+
+    try:
+        project = calkit.detect_project_name()
+    except Exception:
+        return
+    try:
+        calkit.hub.post(
+            f"/projects/{project}/google/presentations/{presentation_id}"
+        )
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return
+        warn(f"Failed to link the presentation to {project} on the hub: {e}")
+    except Exception as e:
+        warn(f"Failed to link the presentation to {project} on the hub: {e}")
+
+
 def record_edit_times(ck_info: dict, quick: bool = False) -> list[str]:
     """Record when each Google Slides presentation the pipeline, or a
     subproject's, exports was last edited, asking the hub, and return the
@@ -79,9 +144,12 @@ def record_edit_times(ck_info: dict, quick: bool = False) -> list[str]:
         write_edit_time,
     )
 
-    def get_modified_time(presentation_id: str) -> str:
-        info = calkit.hub.get(
-            f"/user/google/presentations/{presentation_id}",
+    def get_modified_time(presentation_id: str, wdir: str) -> str:
+        info = get_presentation_response(
+            "get",
+            presentation_id,
+            wdir=wdir,
+            connect=False,
             allow_login=False,
             max_retries=0 if quick else 2,
             timeout=(2, 5) if quick else (10, 120),
@@ -107,8 +175,10 @@ def record_edit_times(ck_info: dict, quick: bool = False) -> list[str]:
             ).append(label)
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {
-            presentation_id: pool.submit(get_modified_time, presentation_id)
-            for presentation_id in exporters
+            presentation_id: pool.submit(
+                get_modified_time, presentation_id, next(iter(wdirs))
+            )
+            for presentation_id, wdirs in exporters.items()
         }
     edited = []
     failures = []
@@ -170,6 +240,7 @@ def add_slides_presentation(
     typer.echo(
         f"Added {info['url']} as {path}, exported by stage '{stage_name}'"
     )
+    link_presentation(info["id"])
     if not no_commit:
         repo = calkit.git.get_repo()
         repo.git.add(["calkit.yaml", edit_time_path])
@@ -210,9 +281,11 @@ def export_slides(
     """Put figures into a Google Slides presentation, then export it."""
     import calkit.google
 
-    def ask_hub(kind: str, path: str, action: str, **kwargs: Any) -> Any:
+    def ask_hub(kind: str, suffix: str, action: str, **kwargs: Any) -> Any:
         try:
-            return get_hub_response(kind, path, **kwargs)
+            return get_presentation_response(
+                kind, presentation_id, suffix, **kwargs
+            )
         except Exception as e:
             raise_error(f"Failed to {action}: {e}")
 
@@ -226,7 +299,6 @@ def export_slides(
         ]
     except ValueError as e:
         raise_error(str(e))
-    api_path = f"/user/google/presentations/{presentation_id}"
     for figure, mime_type in zip(figures, figure_mime_types):
         if not os.path.isfile(figure):
             raise_error(f"Figure {figure} does not exist")
@@ -234,7 +306,7 @@ def export_slides(
             content = f.read()
         resp = ask_hub(
             "post",
-            f"{api_path}/figures",
+            "/figures",
             f"put {figure} in the presentation",
             params={"path": figure},
             files={"file": (posixpath.basename(figure), content, mime_type)},
@@ -248,12 +320,12 @@ def export_slides(
             typer.echo(f"Updated {figure} in {resp['replaced']} place(s)")
     # Taken before exporting, since putting the figures in edited it, and
     # so an edit made while exporting is seen as one next time
-    info = ask_hub("get", api_path, "check when it was last edited")
+    info = ask_hub("get", "", "check when it was last edited")
     for path, mime_type in zip(outputs, mime_types):
         typer.echo(f"Exporting {path}")
         resp = ask_hub(
             "get",
-            f"{api_path}/export",
+            "/export",
             f"export {path}",
             params={"format": posixpath.splitext(path)[1][1:].lower()},
             as_json=False,

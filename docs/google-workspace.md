@@ -30,6 +30,11 @@ Calkit opens that page for you and carries on once it's connected.
 Calkit can only see the presentations it creates,
 not the rest of your Google Drive.
 
+Google asks which of your accounts to connect.
+A work or school account's administrator may not allow apps like Calkit,
+in which case Google says so; connect a personal account instead.
+Only one Google account can be connected at a time.
+
 ## Creating a presentation
 
 On the hub, open the project's **Presentations** page,

@@ -52,9 +52,10 @@ function ConnectedAccounts() {
 
   const handleConnectGoogle = () => {
     mixpanel.track("Clicked connect Google Drive")
-    // Google Drive API scope
+    // Google Drive API scope, asking which account, since someone may be
+    // signed in to a work account whose admin doesn't allow Calkit
     const scope = "https://www.googleapis.com/auth/drive.file"
-    location.href = `${getGoogleAuthUrl()}?client_id=${googleClientId}&state=${createGoogleOAuthState()}&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&include_granted_scopes=true&response_type=code&redirect_uri=${encodeURIComponent(getGoogleRedirectUri())}`
+    location.href = `${getGoogleAuthUrl()}?client_id=${googleClientId}&state=${createGoogleOAuthState()}&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent%20select_account&include_granted_scopes=true&response_type=code&redirect_uri=${encodeURIComponent(getGoogleRedirectUri())}`
   }
   // Zotero uses OAuth 1.0a, whose requests must be signed with our client
   // secret, so the backend has to hand us the authorization URL.

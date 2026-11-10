@@ -67,42 +67,22 @@ def add_presentation(
     """
     import calkit.google_slides
     from calkit.core import ryaml
-    from calkit.models.pipeline import GoogleSlidesExportStage
 
-    if kind is not None and kind not in ["slides", "poster"]:
-        raise_error("Presentation kind must be either 'slides' or 'poster'")
-    if not path.lower().endswith(".pdf"):
-        raise_error(f"The exported presentation must be a PDF, not {path}")
     if stage_name is None:
-        stage_name = (
-            "export-" + posixpath.splitext(posixpath.basename(path))[0]
-        )
-    outputs = [path]
-    if pptx:
-        outputs.append(path[:-4] + ".pptx")
-    try:
-        stage = GoogleSlidesExportStage(
-            presentation_url=info["url"],
-            figures=figures,
-            outputs=outputs,  # type: ignore[arg-type]
-        )
-    except Exception as e:
-        raise_error(f"Invalid stage specification: {e}")
+        stage_name = calkit.google_slides.get_default_stage_name(path)
     ck_info = calkit.load_calkit_info()
-    presentations = ck_info.get("presentations") or []
-    if any(p.get("path") == path for p in presentations):
-        raise_error(f"Presentation at path {path} already exists")
-    stages = ck_info.setdefault("pipeline", {}).setdefault("stages", {})
-    if stage_name in stages:
-        raise_error(f"Stage '{stage_name}' already exists; pass --stage")
-    presentation = {"path": path}
-    if info.get("title"):
-        presentation["title"] = info["title"]
-    if kind is not None:
-        presentation["kind"] = kind
-    presentation["stage"] = stage_name
-    ck_info["presentations"] = presentations + [presentation]
-    stages[stage_name] = stage.to_ck_dict()
+    try:
+        calkit.google_slides.add_presentation(
+            ck_info,
+            info,
+            path=path,
+            kind=kind,
+            stage_name=stage_name,
+            figures=figures,
+            pptx=pptx,
+        )
+    except ValueError as e:
+        raise_error(str(e))
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     edit_time_path = calkit.google_slides.get_edit_time_path(info["id"])

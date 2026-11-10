@@ -88,6 +88,68 @@ def write_edit_time(path: str, modified_time: str) -> bool:
     return True
 
 
+def get_default_stage_name(path: str) -> str:
+    """The name of the stage exporting a presentation to ``path``, unless
+    another is given, e.g., 'export-poster' for 'poster/poster.pdf'.
+    """
+    return "export-" + posixpath.splitext(posixpath.basename(path))[0]
+
+
+def add_presentation(
+    ck_info: dict,
+    info: dict,
+    path: str,
+    kind: str | None = None,
+    stage_name: str | None = None,
+    figures: list[str] = [],
+    pptx: bool = True,
+) -> None:
+    """Add a Google Slides presentation to a project's ``ck_info``, with the
+    stage that exports it to ``path``, given what the hub says about it,
+    e.g., its URL.
+
+    Raises ``ValueError`` if it can't be added, e.g., if something is
+    already at ``path``.
+    """
+    from calkit.models.pipeline import GoogleSlidesExportStage
+
+    if kind is not None and kind not in ["slides", "poster"]:
+        raise ValueError(
+            "Presentation kind must be either 'slides' or 'poster'"
+        )
+    if not path.lower().endswith(".pdf"):
+        raise ValueError(
+            f"The exported presentation must be a PDF, not {path}"
+        )
+    if stage_name is None:
+        stage_name = get_default_stage_name(path)
+    outputs = [path]
+    if pptx:
+        outputs.append(path[:-4] + ".pptx")
+    try:
+        stage = GoogleSlidesExportStage(
+            presentation_url=info["url"],
+            figures=figures,
+            outputs=outputs,  # type: ignore[arg-type]
+        )
+    except Exception as e:
+        raise ValueError(f"Invalid stage specification: {e}")
+    presentations = ck_info.get("presentations") or []
+    if any(p.get("path") == path for p in presentations):
+        raise ValueError(f"Presentation at path {path} already exists")
+    stages = ck_info.setdefault("pipeline", {}).setdefault("stages", {})
+    if stage_name in stages:
+        raise ValueError(f"Stage '{stage_name}' already exists")
+    presentation = {"path": path}
+    if info.get("title"):
+        presentation["title"] = info["title"]
+    if kind is not None:
+        presentation["kind"] = kind
+    presentation["stage"] = stage_name
+    ck_info["presentations"] = presentations + [presentation]
+    stages[stage_name] = stage.to_ck_dict()
+
+
 def get_figure_tag(path: str) -> str:
     return FIGURE_TAG_PREFIX + posixpath.normpath(path.replace("\\", "/"))
 

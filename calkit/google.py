@@ -315,11 +315,16 @@ def get_slide_export(
                 out.save(buf)
             finally:
                 out.close()
-            # pdfium gives each save a random ID, so the same slide would
-            # export to a new file every time. It's in the trailer, after
-            # every offset the file records, and only encrypted PDFs need
-            # one.
-            data = buf.getvalue()
+            # pdfium gives each save a random ID, and its creation time, so
+            # the same slide would export to a new file every time. The ID
+            # is in the trailer, after every offset the file records, and
+            # only encrypted PDFs need one. The time is before some, so it's
+            # replaced with one as long.
+            data = re.sub(
+                rb"(/CreationDate\(D:)\d{14}",
+                rb"\g<1>20000101000000",
+                buf.getvalue(),
+            )
             at = data.rfind(b"trailer")
             return data[:at] + re.sub(
                 rb"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]",

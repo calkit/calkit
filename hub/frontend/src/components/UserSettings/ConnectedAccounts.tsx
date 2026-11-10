@@ -53,7 +53,7 @@ function ConnectedAccounts() {
     mixpanel.track("Clicked connect Google Drive")
     // Google Drive API scope
     const scope = "https://www.googleapis.com/auth/drive.file"
-    location.href = `${getGoogleAuthUrl()}?client_id=${googleClientId}&state=${createGoogleOAuthState()}&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&response_type=code&redirect_uri=${encodeURIComponent(getGoogleRedirectUri())}`
+    location.href = `${getGoogleAuthUrl()}?client_id=${googleClientId}&state=${createGoogleOAuthState()}&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&include_granted_scopes=true&response_type=code&redirect_uri=${encodeURIComponent(getGoogleRedirectUri())}`
   }
   // Zotero uses OAuth 1.0a, whose requests must be signed with our client
   // secret, so the backend has to hand us the authorization URL.

@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app import mixpanel, users
+from app import mixpanel, storage, users
 from app.config import settings
 from app.models import User, UserCreate
 from app.security import verify_password
@@ -2190,7 +2190,7 @@ def test_end_other_sessions(
 
 
 def test_user_google_presentations(
-    client: TestClient, normal_user_token_headers: dict[str, str]
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
     import calkit.google_slides as gs
 
@@ -2216,8 +2216,11 @@ def test_user_google_presentations(
                 raise gs.GoogleError("Not found", 404)
             return info
 
-        def put_figure(self, presentation_id, path, content):
-            calls.append(("figure", path, content))
+        def put_figure(self, presentation_id, path, url):
+            # Held in object storage only while Slides copies it
+            fs = storage.get_object_fs()
+            held = fs.find(figures_dir)
+            calls.append(("figure", path, [fs.cat(p) for p in held], url))
             return {"replaced": 2, "added": False, "modified_time": "t2"}
 
         def export_presentation(self, presentation_id, mime_type):
@@ -2225,22 +2228,40 @@ def test_user_google_presentations(
                 raise gs.GoogleError("Google is down", 503)
             return b"%PDF"
 
+    figures_dir = (
+        f"{storage.get_storage_root()}/{storage.GOOGLE_SLIDES_FIGURES_DIR}"
+    )
     base = "/user/google/presentations"
-    # Without Google connected, the user is told how to connect it
-    with patch(
-        "app.api.routes.users.users.get_google_token",
-        side_effect=HTTPException(401, "User needs to authenticate"),
-    ):
-        r = client.get(f"{base}/{pid}", headers=normal_user_token_headers)
+    r = client.get("/user", headers=normal_user_token_headers)
+    user = db.get(User, uuid.UUID(r.json()["id"]))
+    assert user
+
+    def save_google_token(scope):
+        resp = {"access_token": "google-token", "expires_in": 3600}
+        if scope is not None:
+            resp["scope"] = scope
+        users.save_google_token(session=db, user=user, google_resp=resp)
+
+    def google_connected():
+        r = client.get(
+            "/user/connected-accounts", headers=normal_user_token_headers
+        )
+        return r.json()["google"]
+
+    # Signing in with Google alone can't reach Drive, so the user is told
+    # how to connect it
+    save_google_token("openid email profile")
+    assert not google_connected()
+    r = client.get(f"{base}/{pid}", headers=normal_user_token_headers)
     assert r.status_code == 401
     assert "Connect Google Drive" in r.json()["detail"]
-    with (
-        patch(
-            "app.api.routes.users.users.get_google_token",
-            return_value="google-token",
-        ),
-        patch("app.api.routes.users.calkit.google_slides.Client", Client),
-    ):
+    # Connecting Drive gives a token with both, which a later save that
+    # doesn't list its scopes, e.g., a refresh, keeps
+    save_google_token(f"openid email {users.GOOGLE_DRIVE_SCOPE}")
+    assert google_connected()
+    save_google_token(None)
+    assert google_connected()
+    with patch("app.api.routes.users.calkit.google_slides.Client", Client):
         r = client.post(
             base, headers=normal_user_token_headers, json={"title": "Poster"}
         )
@@ -2263,7 +2284,10 @@ def test_user_google_presentations(
             "added": False,
             "modified_time": "t2",
         }
-        assert calls[-1] == ("figure", "figures/rates.png", b"png")
+        _, path, held, url = calls[-1]
+        assert (path, held) == ("figures/rates.png", [b"png"])
+        assert "rates.png" in url and "Signature" in url
+        assert not storage.get_object_fs().find(figures_dir)
         # A figure Slides can't show is refused before reaching Google
         r = client.post(
             f"{base}/{pid}/figures",

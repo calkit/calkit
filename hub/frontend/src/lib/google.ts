@@ -50,6 +50,8 @@ export const startGoogleOAuth = (): void => {
     state: createGoogleOAuthState(),
     access_type: "offline",
     prompt: "consent",
+    // So the token also keeps what was granted before, e.g., Drive access
+    include_granted_scopes: "true",
   })
   location.href = `${getGoogleAuthUrl()}?${params.toString()}`
 }

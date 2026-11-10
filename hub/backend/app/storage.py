@@ -23,6 +23,8 @@ S3_MAX_PARTS = 10000  # S3 multipart upload limit
 # its own folder within the storage root so other kinds can be added
 # alongside it without touching every deployment's config
 DVC_DATA_DIR = "data"
+# Figures held only until Google Slides has copied them
+GOOGLE_SLIDES_FIGURES_DIR = "google-slides-figures"
 STORAGE_USAGE_CACHE_TTL_SECONDS = 300
 STORAGE_USAGE_CACHE_MAXSIZE = 2048
 
@@ -266,6 +268,21 @@ def _generate_multipart_urls(
         "complete_url": complete_url,
         "abort_url": abort_url,
     }
+
+
+def write_object(
+    fpath: str,
+    content: bytes,
+    content_type: str,
+    fs: s3fs.S3FileSystem | gcsfs.GCSFileSystem | None = None,
+) -> None:
+    """Write an object with the content type it's served with."""
+    if fs is None:
+        fs = get_object_fs()
+    if isinstance(fs, s3fs.S3FileSystem):
+        fs.pipe_file(fpath, content, ContentType=content_type)
+    else:
+        fs.pipe_file(fpath, content, content_type=content_type)
 
 
 def get_object_url(

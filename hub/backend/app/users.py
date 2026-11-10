@@ -1002,6 +1002,11 @@ def get_overleaf_auth(session: Session, user: User) -> str | WebClient:
         raise HTTPException(401, "Overleaf token not found")
 
 
+# What Google Drive and Slides access needs, for files the hub creates or
+# the user opens with it
+GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
+
 def get_google_token(session: Session, user: User) -> str:
     """Get a user's decrypted Google access token, automatically refreshing if
     necessary.
@@ -1114,6 +1119,12 @@ def save_google_token(
             pass
     if verified_email is None and existing_cred is not None:
         verified_email = existing_cred.provider_account_id
+    # Every Google authorization asks for the scopes granted before too, so
+    # one token holds them all, and a response that doesn't list its scopes
+    # keeps the ones recorded
+    scopes = google_resp.get("scope")
+    if scopes is None and existing_cred is not None:
+        scopes = existing_cred.scopes
     payload = json.dumps(
         {
             "access_token": google_resp["access_token"],
@@ -1126,9 +1137,22 @@ def save_google_token(
         provider="google",
         secret_payload=payload,
         credential_type="oauth2",
+        scopes=scopes,
         provider_account_id=verified_email,
         expires=expires,
     )
+
+
+def get_google_scopes(session: Session, user: User) -> set[str]:
+    """The scopes a user has granted the hub's Google token, e.g.,
+    ``GOOGLE_DRIVE_SCOPE``, which signing in with Google alone doesn't.
+    """
+    credential = get_external_credential(
+        session=session, user=user, provider="google", label="default"
+    )
+    if credential is None or not credential.scopes:
+        return set()
+    return set(credential.scopes.split())
 
 
 def save_zotero_request_token(

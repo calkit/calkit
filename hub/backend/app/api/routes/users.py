@@ -1,6 +1,7 @@
 """Routes for users."""
 
 import logging
+import posixpath
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -25,7 +26,7 @@ from sqlmodel import Field, col, func, or_, select
 import app.projects
 import app.stripe
 import calkit.google_slides
-from app import mixpanel, users, zotero
+from app import mixpanel, storage, users, zotero
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
@@ -953,10 +954,14 @@ def get_user_connected_accounts(
         zenodo_connected = True
     except HTTPException:
         pass
+    # Signing in with Google gives a token too, but only for signing in, so
+    # Google counts as connected once it can reach Drive
     google_connected = False
     try:
         users.get_google_token(session=session, user=current_user)
-        google_connected = True
+        google_connected = users.GOOGLE_DRIVE_SCOPE in users.get_google_scopes(
+            session=session, user=current_user
+        )
     except HTTPException:
         pass
     # Overleaf doesn't have refresh logic, just check if credential exists
@@ -1159,6 +1164,10 @@ def _get_google_slides_client(
         token = users.get_google_token(session=session, user=user)
     except HTTPException:
         raise HTTPException(401, calkit.google_slides.CONNECT_ADVICE)
+    if users.GOOGLE_DRIVE_SCOPE not in users.get_google_scopes(
+        session=session, user=user
+    ):
+        raise HTTPException(401, calkit.google_slides.CONNECT_ADVICE)
     return calkit.google_slides.Client(token)
 
 
@@ -1211,14 +1220,25 @@ def post_user_google_presentation_figure(
     presentation, replacing the images tagged with its path.
     """
     try:
-        calkit.google_slides.get_figure_mime_type(path)
+        mime_type = calkit.google_slides.get_figure_mime_type(path)
     except ValueError as e:
         raise HTTPException(422, str(e))
     client = _get_google_slides_client(session=session, user=current_user)
+    # Slides copies an image from a URL it can fetch, so the figure is put
+    # in object storage just long enough for that
+    fs = storage.get_object_fs()
+    fpath = (
+        f"{storage.get_storage_root()}/{storage.GOOGLE_SLIDES_FIGURES_DIR}/"
+        f"{uuid.uuid4().hex}/{posixpath.basename(path)}"
+    )
+    storage.write_object(fpath, file.file.read(), mime_type, fs=fs)
     try:
-        resp = client.put_figure(presentation_id, path, file.file.read())
+        url = storage.get_object_url(fpath, expires=600, fs=fs)
+        resp = client.put_figure(presentation_id, path, url)
     except calkit.google_slides.GoogleError as e:
         _raise_google_error(e)
+    finally:
+        fs.rm(fpath)
     return GoogleFigurePut.model_validate(resp)
 
 

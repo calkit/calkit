@@ -36,9 +36,6 @@ class FakeHttp:
     def post(self, url, **kwargs):
         return self._respond("post", url, **kwargs)
 
-    def delete(self, url, **kwargs):
-        return self._respond("delete", url, **kwargs)
-
 
 def test_paths_and_ids(tmp_path):
     pid = "1AbCdEfGhIjKlMnOpQrStUvWxYz_-012"
@@ -123,10 +120,7 @@ def test_client():
         ("get", file_url): info,
         ("post", gs.DRIVE_API_URL): info,
         ("get", slides_url): deck,
-        ("post", gs.DRIVE_UPLOAD_URL): FakeResponse(body={"id": "tmp"}),
-        ("post", f"{gs.DRIVE_API_URL}/tmp/permissions"): FakeResponse(),
         ("post", f"{slides_url}:batchUpdate"): batch_update,
-        ("delete", f"{gs.DRIVE_API_URL}/tmp"): FakeResponse(),
     }
     client = gs.Client("token")
     client.http = FakeHttp(routes)  # type: ignore[assignment]
@@ -138,16 +132,20 @@ def test_client():
     }
     assert client.get_presentation_info(pid) == expected
     assert client.create_presentation("Poster") == expected
-    # A tagged image is replaced where it is, and the shared copy deleted
-    resp = client.put_figure(pid, "figures/a.png", b"png")
+    # A tagged image is replaced where it is
+    resp = client.put_figure(pid, "figures/a.png", "https://signed/a.png")
     assert resp == {"replaced": 1, "added": False, "modified_time": "t1"}
-    assert [list(r) for r in batches[-1]] == [["replaceImage"]]
-    assert batches[-1][0]["replaceImage"]["imageObjectId"] == "img1"
-    assert ("delete", f"{gs.DRIVE_API_URL}/tmp", {"timeout": 30}) in (
-        client.http.calls
-    )
+    assert batches[-1] == [
+        {
+            "replaceImage": {
+                "imageObjectId": "img1",
+                "url": "https://signed/a.png",
+                "imageReplaceMethod": "CENTER_INSIDE",
+            }
+        }
+    ]
     # A figure shown nowhere yet is added to the first slide, tagged
-    resp = client.put_figure(pid, "figures/c.gif", b"gif")
+    resp = client.put_figure(pid, "figures/c.gif", "https://signed/c.gif")
     assert resp["added"] and resp["replaced"] == 0
     create, alt_text = batches[-1]
     assert create["createImage"]["elementProperties"] == {"pageObjectId": "s1"}
@@ -155,14 +153,12 @@ def test_client():
         "objectId": create["createImage"]["objectId"],
         "title": "calkit:figures/c.gif",
     }
-    # The shared copy is deleted even when Slides refuses it
+    # What Slides says is wrong with an image is passed on
     routes[("post", f"{slides_url}:batchUpdate")] = FakeResponse(
         400, {"error": {"message": "Bad image"}}
     )
-    client.http.calls.clear()
     with pytest.raises(gs.GoogleError, match="Bad image"):
-        client.put_figure(pid, "figures/a.png", b"png")
-    assert client.http.calls[-1][:2] == ("delete", f"{gs.DRIVE_API_URL}/tmp")
+        client.put_figure(pid, "figures/a.png", "https://signed/a.png")
     # Too big for the export API, so the file's export link is used
     export_url = f"{file_url}/export"
     routes[("get", export_url)] = FakeResponse(

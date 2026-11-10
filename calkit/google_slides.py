@@ -15,7 +15,6 @@ import uuid
 from typing import Any
 
 DRIVE_API_URL = "https://www.googleapis.com/drive/v3/files"
-DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 SLIDES_API_URL = "https://slides.googleapis.com/v1/presentations"
 PRESENTATION_MIME_TYPE = "application/vnd.google-apps.presentation"
 EXPORT_MIME_TYPES = {
@@ -25,7 +24,7 @@ EXPORT_MIME_TYPES = {
         "presentationml.presentation"
     ),
 }
-# What Slides can show, since it fetches and copies the image itself
+# What Slides can show
 FIGURE_MIME_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -223,19 +222,16 @@ class Client:
         return content
 
     def put_figure(
-        self,
-        presentation_id: str,
-        figure_path: str,
-        content: bytes,
+        self, presentation_id: str, figure_path: str, image_url: str
     ) -> dict:
         """Replace every image tagged as showing a figure with its latest
-        version, keeping each one's place and size, or, if none is, add it
-        to the first slide, tagged, for someone to move into place.
+        version, fetched by Slides from ``image_url``, keeping each one's
+        place and size, or, if none is, add it to the first slide, tagged,
+        for someone to move into place.
 
         Returns how many images were replaced, whether one was added, and
         when the presentation was then last edited.
         """
-        mime_type = get_figure_mime_type(figure_path)
         tag = get_figure_tag(figure_path)
 
         def get_tagged_ids(elements: list[dict]) -> list[str]:
@@ -263,74 +259,43 @@ class Client:
             raise GoogleError(
                 "The presentation has no slides to put the figure on", 422
             )
-        # Slides copies an image from a URL it can fetch, so the figure is
-        # shared from Drive just long enough for that
-        metadata = {
-            "name": f"calkit-{uuid.uuid4().hex}-{posixpath.basename(figure_path)}"
-        }
-        resp = self.http.post(
-            DRIVE_UPLOAD_URL,
-            params={"uploadType": "multipart", "fields": "id"},
-            files={
-                "metadata": (
-                    None,
-                    json.dumps(metadata),
-                    "application/json; charset=UTF-8",
-                ),
-                "file": (posixpath.basename(figure_path), content, mime_type),
-            },
-            timeout=300,
-        )
-        self._check(resp, "upload the figure")
-        file_id = resp.json()["id"]
-        try:
-            resp = self.http.post(
-                f"{DRIVE_API_URL}/{file_id}/permissions",
-                json={"role": "reader", "type": "anyone"},
-                timeout=30,
-            )
-            self._check(resp, "share the figure with Google Slides")
-            url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            batch: list[dict[str, Any]]
-            if image_ids:
-                batch = [
-                    {
-                        "replaceImage": {
-                            "imageObjectId": image_id,
-                            "url": url,
-                            "imageReplaceMethod": "CENTER_INSIDE",
-                        }
+        batch: list[dict[str, Any]]
+        if image_ids:
+            batch = [
+                {
+                    "replaceImage": {
+                        "imageObjectId": image_id,
+                        "url": image_url,
+                        "imageReplaceMethod": "CENTER_INSIDE",
                     }
-                    for image_id in image_ids
-                ]
-            else:
-                object_id = f"calkit_{uuid.uuid4().hex}"
-                batch = [
-                    {
-                        "createImage": {
-                            "objectId": object_id,
-                            "url": url,
-                            "elementProperties": {
-                                "pageObjectId": slides[0]["objectId"]
-                            },
-                        }
-                    },
-                    {
-                        "updatePageElementAltText": {
-                            "objectId": object_id,
-                            "title": tag,
-                        }
-                    },
-                ]
-            resp = self.http.post(
-                f"{SLIDES_API_URL}/{presentation_id}:batchUpdate",
-                json={"requests": batch},
-                timeout=120,
-            )
-            self._check(resp, "put the figure in the presentation")
-        finally:
-            # Slides keeps its own copy, so the shared one can go
-            self.http.delete(f"{DRIVE_API_URL}/{file_id}", timeout=30)
+                }
+                for image_id in image_ids
+            ]
+        else:
+            object_id = f"calkit_{uuid.uuid4().hex}"
+            batch = [
+                {
+                    "createImage": {
+                        "objectId": object_id,
+                        "url": image_url,
+                        "elementProperties": {
+                            "pageObjectId": slides[0]["objectId"]
+                        },
+                    }
+                },
+                {
+                    "updatePageElementAltText": {
+                        "objectId": object_id,
+                        "title": tag,
+                    }
+                },
+            ]
+        resp = self.http.post(
+            f"{SLIDES_API_URL}/{presentation_id}:batchUpdate",
+            json={"requests": batch},
+            timeout=120,
+        )
+        self._check(resp, "put the figure in the presentation")
         info = self.get_presentation_info(presentation_id)
         return {
             "replaced": len(image_ids),

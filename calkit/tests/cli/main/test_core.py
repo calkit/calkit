@@ -1307,9 +1307,11 @@ def test_status(tmp_dir):
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    # The token's variable is named for the environment, e.g., in tests
+    token_var = "CALKIT" + calkit.config.get_env_suffix(sep="_") + "_TOKEN"
     env = os.environ | {
         "CALKIT_HUB_API_BASE_URL": "http://127.0.0.1:9",
-        "CALKIT_TOKEN": "not-a-token",
+        token_var: "not-a-token",
     }
     res = subprocess.run(
         ["calkit", "status", "-c", "pipeline", "--json"],

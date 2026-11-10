@@ -134,3 +134,30 @@ calkit pull google
 
 If you're offline, `calkit status` warns that it couldn't check,
 and shows everything else as usual.
+
+## Working with collaborators
+
+A presentation belongs to whoever created it in Google Drive,
+but everyone with access to the project can use it.
+
+- Each collaborator is given edit access to the presentation in Google
+  Drive, when it's added to the project and when they join the project,
+  so they can open it in Google Slides.
+  It's shared with the email of the Google account they signed in to
+  Calkit with, or otherwise their Calkit email.
+- Running the pipeline goes through the Google account of whoever added the
+  presentation to the project, so collaborators can export it and put
+  figures in it without connecting their own Google account.
+  If that person disconnects Google from Calkit,
+  the project can't reach the presentation until they connect it again.
+
+## Making a project public
+
+Making a project public doesn't change who can see its presentations in
+Google Slides; anyone can see the exported PDFs in the project.
+To also let anyone with a presentation's link view it,
+check **Also let anyone with the link view its Google Slides
+presentations** when making the project public.
+That includes its speaker notes and skipped slides,
+which aren't in the exported PDF.
+Making the project private again stops that.

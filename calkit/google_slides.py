@@ -145,7 +145,6 @@ def add_presentation(
         presentation["title"] = info["title"]
     if kind is not None:
         presentation["kind"] = kind
-    presentation["stage"] = stage_name
     ck_info["presentations"] = presentations + [presentation]
     stages[stage_name] = stage.to_ck_dict()
 

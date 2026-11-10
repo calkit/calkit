@@ -910,13 +910,13 @@ def check_reproducibility(
         artifacts = ck_info.get(artifact_type, [])
         res[f"n_{artifact_type}"] = len(artifacts)
         res[f"n_{artifact_type}_no_import_or_stage"] = len(
-            [a for a in artifacts if not has_provenance(a)]
+            [a for a in artifacts if not has_provenance(a, ck_info)]
         )
     res["misc_needing_provenance"] = [
         a["path"]
         for a in ck_info.get("misc", [])
         if a.get("path")
-        and not has_provenance(a)
+        and not has_provenance(a, ck_info)
         and posixpath.splitext(a["path"])[1].lower()
         in MISC_EXTENSIONS_NEEDING_PROVENANCE
     ]

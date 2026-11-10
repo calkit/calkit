@@ -109,10 +109,12 @@ def test_googleslidesexportstage():
         outputs=["poster/poster.pdf", "poster/poster.pptx"],
     )
     sd = s.to_dvc()
-    # Only the images among its inputs are put in it
+    # Only the images among its inputs are put in it, and the rest may hold
+    # values or tables it shows
     assert sd["cmd"] == (
         f"calkit export google-slides {url} -o poster/poster.pdf "
-        "-o poster/poster.pptx --figure figures/rates.png"
+        "-o poster/poster.pptx --figure figures/rates.png "
+        "--input data/rates.csv"
     )
     # Editing the presentation or an input puts it out of date
     assert sd["deps"] == [
@@ -120,16 +122,19 @@ def test_googleslidesexportstage():
         "data/rates.csv",
         ".calkit/google/1AbCdEfGhIjKlMnOpQrStUv.json",
     ]
-    # Outputs are kept while it runs, so an unchanged export can be kept
+    # Outputs are kept while it runs, so an unchanged export can be kept,
+    # and what it shows is recorded in Git
+    components_path = ".calkit/google/1AbCdEfGhIjKlMnOpQrStUv-components.json"
     assert sd["outs"] == [
         {"poster/poster.pdf": {"persist": True}},
         {"poster/poster.pptx": {"persist": True}},
+        {components_path: {"cache": False, "persist": True}},
     ]
     s2 = GoogleSlidesExportStage(
         presentation_url=url,
         outputs=[{"path": "poster.pdf", "storage": "git"}],
     )
-    assert s2.dvc_outs == [{"poster.pdf": {"cache": False, "persist": True}}]
+    assert s2.dvc_outs[0] == {"poster.pdf": {"cache": False, "persist": True}}
     assert s.to_ck_dict() == {
         "kind": "google-slides-export",
         "name": "export-poster",
@@ -143,7 +148,10 @@ def test_googleslidesexportstage():
     )
     edit_time_path = "../.calkit/google/1AbCdEfGhIjKlMnOpQrStUv.json"
     assert s.dvc_deps == [edit_time_path]
-    assert s.dvc_cmd.endswith(f"--edit-time-path {edit_time_path}")
+    assert s.dvc_cmd.endswith(
+        f"--edit-time-path {edit_time_path} --components-path "
+        "../.calkit/google/1AbCdEfGhIjKlMnOpQrStUv-components.json"
+    )
     # Slides exported as figures are outputs too, and all are kept while it
     # runs, so an unchanged export can be left alone
     s = GoogleSlidesExportStage(
@@ -156,6 +164,7 @@ def test_googleslidesexportstage():
     assert sd["outs"] == [
         {"figures/setup.pdf": {"persist": True}},
         {"figures/setup.png": {"persist": True}},
+        {components_path: {"cache": False, "persist": True}},
     ]
     assert sd["cmd"].endswith(
         "--figure figures/rates.png --slide figures/setup.pdf=g2c3_0_12 "

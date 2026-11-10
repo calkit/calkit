@@ -1268,31 +1268,46 @@ def test_google_slides_presentations(
     pid = "1AbCdEfGhIjKlMnOpQrStUv"
     url = gs.get_slides_presentation_url(pid)
     # A presentation exported from Google Slides says where it's edited,
-    # its stage found from the pipeline's outputs
-    response, _, _, _ = _get_declared_at_ref(
-        client,
-        "presentations",
-        "presentations",
-        [
-            {"path": "poster.pdf"},
-            {"path": "slides/talk.pdf"},
-        ],
-        extra={
-            "pipeline": {
-                "stages": {
-                    "export-poster": {
-                        "kind": "google-slides-export",
-                        "presentation_url": url,
-                        "outputs": ["poster.pdf"],
+    # its stage found from the pipeline's outputs, and what it shows
+    shown = [{"kind": "value", "path": "results/wake.json", "key": "u"}]
+    with patch(
+        "app.api.routes.projects.core._get_google_slides_components",
+        return_value=shown,
+    ):
+        response, _, _, _ = _get_declared_at_ref(
+            client,
+            "presentations",
+            "presentations",
+            [
+                {"path": "poster.pdf"},
+                {"path": "slides/talk.pdf"},
+            ],
+            extra={
+                "pipeline": {
+                    "stages": {
+                        "export-poster": {
+                            "kind": "google-slides-export",
+                            "presentation_url": url,
+                            "outputs": ["poster.pdf"],
+                        }
                     }
                 }
-            }
-        },
-    )
+            },
+        )
     assert response.status_code == 200, response.text
     pres = {p["path"]: p for p in response.json()}
     assert pres["poster.pdf"]["stage"] == "export-poster"
     assert pres["poster.pdf"]["edit_url"] == url
+    assert pres["poster.pdf"]["components"] == [
+        {
+            "kind": "value",
+            "path": "results/wake.json",
+            "key": "u",
+            "format": None,
+            "slide_id": None,
+        }
+    ]
+    assert pres["slides/talk.pdf"]["components"] == []
     assert pres["slides/talk.pdf"]["edit_url"] is None
     # Creating one adds it and its stage to the project, and commits
     repo = git.Repo.init(tmp_path)
@@ -1355,6 +1370,15 @@ def test_google_slides_presentations(
         repo.head.commit.message.strip()
         == "Add presentation poster/poster.pdf"
     )
+    # What it shows is read from what its export recorded, if anything
+    from app.api.routes.projects.core import _get_google_slides_components
+
+    assert _get_google_slides_components(repo, None, url) == []
+    components_path = tmp_path / gs.get_components_path(pid)
+    components_path.write_text(json.dumps(shown))
+    repo.git.add(str(components_path))
+    repo.git.commit(["-m", "Export"])
+    assert _get_google_slides_components(repo, None, url) == shown
     assert not repo.is_dirty(untracked_files=True)
     # One that can't be added is refused before it's created in Drive
     for path in ["taken.pdf", "poster/poster.png"]:

@@ -6609,6 +6609,24 @@ def post_project_misc(
     return MiscArtifact.model_validate(entry)
 
 
+def _get_google_slides_components(
+    repo: git.Repo, ref: str | None, presentation_url: str
+) -> list[dict]:
+    """The project figures, values, and tables a Google Slides presentation
+    shows, as its last export recorded them, if it's been exported.
+    """
+    try:
+        path = calkit.google.get_components_path(
+            calkit.google.get_slides_presentation_id(presentation_url)
+        )
+        commit = repo.commit(ref) if ref else repo.head.commit
+        blob = commit.tree / path
+        components = json.loads(blob.data_stream.read())  # type: ignore[union-attr]
+    except (KeyError, ValueError):
+        return []
+    return [c for c in components if isinstance(c, dict)]
+
+
 @router.get("/projects/{owner_name}/{project_name}/presentations")
 def get_project_presentations(
     owner_name: str,
@@ -6792,6 +6810,9 @@ def get_project_presentations(
                 and ck_stage.get("kind") == "google-slides-export"
             ):
                 pres["edit_url"] = ck_stage.get("presentation_url")
+                pres["components"] = _get_google_slides_components(
+                    repo, ref, str(ck_stage.get("presentation_url"))
+                )
         if "path" in pres:
             try:
                 item = app.projects.get_contents_from_tree(

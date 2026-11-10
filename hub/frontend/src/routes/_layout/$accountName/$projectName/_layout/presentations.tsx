@@ -141,6 +141,39 @@ function PresInfo({ presentation }: PresInfoProps) {
           </Text>
         )}
       </Text>
+      {presentation.components && presentation.components.length > 0 && (
+        <Box mt={2}>
+          <Text fontSize="sm" fontWeight="semibold">
+            Shows:
+          </Text>
+          {/* Each project figure, value, and table in it, from its last
+          export */}
+          {presentation.components.map((c, i) => (
+            <Text
+              key={`${c.kind}-${c.path}-${c.key ?? ""}-${i}`}
+              fontSize="sm"
+              color="gray.500"
+              noOfLines={1}
+            >
+              <Badge mr={1} fontSize="2xs">
+                {c.kind}
+              </Badge>
+              <Link
+                as={RouterLink}
+                to="../files"
+                search={{ path: c.path } as any}
+              >
+                {c.path}
+              </Link>
+              {c.key && (
+                <Code ml={1} fontSize="xs">
+                  {c.key}
+                </Code>
+              )}
+            </Text>
+          ))}
+        </Box>
+      )}
       {presentation.edit_url && (
         <Box mt={3}>
           <Button

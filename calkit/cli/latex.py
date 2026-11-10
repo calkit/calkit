@@ -2006,11 +2006,21 @@ def to_arxiv(
     scripts_dir = Path(sysconfig.get_path("scripts"))
     cli_path = scripts_dir / "latex2arxiv"
     output_folder = (Path(target_folder) / tex_file).as_posix() + "_arxiv.zip"
-
-    subprocess.run(
-        [cli_path.as_posix(), target_folder, output_folder, "--main", tex_file],
-        check=True,
-    )
+    # latex2arxiv requires .gls files at root, so copy them
+    moved = []
+    for gls_file in target_folder.glob("*.gls"):
+        moved.append(target_folder / gls_file.name)
+        gls_file.copy(moved[-1])
+    try:
+        subprocess.run(
+            [cli_path.as_posix(), target_folder, output_dir, "--main", tex_file],
+            check=True,
+        )
+    finally:
+        # Clean up the copied .gls files
+        for gls_file in moved:
+            if gls_file.exists():
+                gls_file.remove()
 
 
 @latex_app.command(name="to-docx")

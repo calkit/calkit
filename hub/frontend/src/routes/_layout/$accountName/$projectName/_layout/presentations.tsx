@@ -143,8 +143,9 @@ function PresInfo({ presentation }: PresInfoProps) {
         <Box mt={3}>
           <Button
             as="a"
-            href={safeHref(presentation.edit_url)}
+            // SWC 1.12 renames target to edit_url if it follows href
             target="_blank"
+            href={safeHref(presentation.edit_url)}
             rel="noopener noreferrer"
             size="sm"
             leftIcon={<FiExternalLink />}
@@ -267,8 +268,9 @@ function NewGoogleSlides({
             <ModalFooter gap={3}>
               <Button
                 as="a"
-                href={safeHref(created.edit_url)}
+                // SWC 1.12 renames target to edit_url if it follows href
                 target="_blank"
+                href={safeHref(created.edit_url)}
                 rel="noopener noreferrer"
                 variant="primary"
                 leftIcon={<FiExternalLink />}
@@ -419,8 +421,9 @@ function PresCard({ presentation, onClick }: PresCardProps) {
           {presentation.edit_url && (
             <IconButton
               as="a"
-              href={safeHref(presentation.edit_url)}
+              // SWC 1.12 renames target to edit_url if it follows href
               target="_blank"
+              href={safeHref(presentation.edit_url)}
               rel="noopener noreferrer"
               aria-label="Open in Google Slides"
               title="Open in Google Slides"

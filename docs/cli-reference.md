@@ -2904,10 +2904,11 @@ Arguments:
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                                                                            |
-| -------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `--yes`, `-y`  | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here.                                                   |
-| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder. |
+| Option         | Type    | Required | Default | Description                                                                                                                         |
+| -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `--yes`, `-y`  | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here.                                                                                |
+| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder.                              |
+| `--hub`        | str     | no       |         | Hub to clone it from if it isn't here, e.g., https://calkit.example.edu, or localhost for a development hub. Defaults to calkit.io. |
 
 <a id="command-group-export"></a>
 

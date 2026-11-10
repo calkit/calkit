@@ -1,4 +1,5 @@
 import {
+  Box,
   Button,
   Container,
   HStack,
@@ -54,7 +55,7 @@ function ConnectedAccounts() {
     mixpanel.track("Clicked connect Google Drive")
     // Google Drive API scope, asking which account, since someone may be
     // signed in to a work account whose admin doesn't allow Calkit
-    const scope = "https://www.googleapis.com/auth/drive.file"
+    const scope = "openid email https://www.googleapis.com/auth/drive.file"
     location.href = `${getGoogleAuthUrl()}?client_id=${googleClientId}&state=${createGoogleOAuthState()}&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent%20select_account&include_granted_scopes=true&response_type=code&redirect_uri=${encodeURIComponent(getGoogleRedirectUri())}`
   }
   // Zotero uses OAuth 1.0a, whose requests must be signed with our client
@@ -123,6 +124,25 @@ function ConnectedAccounts() {
     },
   })
 
+  const disconnectGoogleMutation = useMutation({
+    mutationFn: (account: string | null) =>
+      UsersService.deleteUserExternalCredential({
+        provider: "google",
+        account,
+      }).then((response) => response.data),
+    onSuccess: () => {
+      mixpanel.track("Disconnected account", { provider: "google" })
+      showToast("Success!", "Google account disconnected.", "success")
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "connected-accounts"],
+      })
+    },
+  })
   const disconnectAccountMutation = useMutation({
     mutationFn: (provider: string) => {
       return UsersService.deleteUserExternalCredential({ provider }).then(
@@ -324,25 +344,36 @@ function ConnectedAccounts() {
             )}
           </HStack>
           <HStack mt={4}>
-            <Text>Google:</Text>
-            {connectedAccountsQuery.data?.google ? (
-              <>
-                <Icon as={FaCheck} color="green.500" />
-                <IconButton
-                  aria-label="Disconnect Google"
-                  icon={<FaTrash />}
-                  size="xs"
-                  variant="ghost"
-                  colorScheme="red"
-                  onClick={() => disconnectAccountMutation.mutate("google")}
-                  isLoading={disconnectAccountMutation.isPending}
-                />
-              </>
-            ) : (
+            <Text alignSelf="start">Google:</Text>
+            <Box>
+              {/* Each account connected, and one connected before Calkit
+              recorded which, which has no email */}
+              {(connectedAccountsQuery.data?.google_accounts?.length
+                ? connectedAccountsQuery.data.google_accounts
+                : connectedAccountsQuery.data?.google
+                  ? [null]
+                  : []
+              ).map((account) => (
+                <HStack key={account ?? "unknown"}>
+                  {account && <Text>{account}</Text>}
+                  <Icon as={FaCheck} color="green.500" />
+                  <IconButton
+                    aria-label={`Disconnect ${account ?? "Google"}`}
+                    icon={<FaTrash />}
+                    size="xs"
+                    variant="ghost"
+                    colorScheme="red"
+                    onClick={() => disconnectGoogleMutation.mutate(account)}
+                    isLoading={disconnectGoogleMutation.isPending}
+                  />
+                </HStack>
+              ))}
               <Button variant="primary" size="xs" onClick={handleConnectGoogle}>
-                Connect
+                {connectedAccountsQuery.data?.google
+                  ? "Connect another"
+                  : "Connect"}
               </Button>
-            )}
+            </Box>
           </HStack>
           <HStack mt={4}>
             <Text>Zotero:</Text>

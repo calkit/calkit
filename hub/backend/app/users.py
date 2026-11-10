@@ -1008,19 +1008,41 @@ def get_overleaf_auth(session: Session, user: User) -> str | WebClient:
 GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 
 
-def get_google_token(session: Session, user: User) -> str:
-    """Get a user's decrypted Google access token, automatically refreshing if
+def get_google_credentials(
+    session: Session, user: User, drive_only: bool = True
+) -> list[UserExternalCredential]:
+    """The credentials of a user's Google accounts, the first connected
+    first, and with ``drive_only``, only those that can reach Drive, which
+    signing in with Google alone can't.
+
+    Each Google account's is labeled with its email, but one connected
+    before that was recorded is labeled 'default'.
+    """
+    credentials = session.exec(
+        select(UserExternalCredential).where(
+            UserExternalCredential.user_id == user.id,
+            UserExternalCredential.provider == "google",
+        )
+    ).all()
+    if drive_only:
+        credentials = [
+            c
+            for c in credentials
+            if GOOGLE_DRIVE_SCOPE in (c.scopes or "").split()
+        ]
+    return sorted(
+        credentials,
+        key=lambda c: ((c.metadata_json or {}).get("connected", ""), c.label),
+    )
+
+
+def get_google_token(
+    session: Session, credential: UserExternalCredential
+) -> str:
+    """Get a Google account's decrypted access token, refreshing it if
     necessary.
     """
-    credential = get_external_credential(
-        session=session,
-        user=user,
-        provider="google",
-        label="default",
-    )
-    if credential is None:
-        raise HTTPException(401, "User needs to authenticate with Google")
-    # Check if refresh needed
+    user = credential.user
     needs_refresh = (
         credential.expires is not None
         and (utcnow() + timedelta(minutes=5)) >= credential.expires
@@ -1067,18 +1089,13 @@ def get_google_token(session: Session, user: User) -> str:
         google_resp = resp.json()
         # Preserve existing refresh_token if Google doesn't return a new one
         if "refresh_token" not in google_resp:
-            tokens = json.loads(decrypt_secret(credential.secret_payload))
             google_resp["refresh_token"] = tokens.get("refresh_token")
-        save_google_token(session=session, user=user, google_resp=google_resp)
-        # Re-fetch the updated credential
-        credential = get_external_credential(
+        credential = save_google_token(
             session=session,
             user=user,
-            provider="google",
-            label="default",
+            google_resp=google_resp,
+            label=credential.label,
         )
-        if credential is None:
-            raise HTTPException(500, "Failed to save Google token")
     tokens = json.loads(decrypt_secret(credential.secret_payload))
     return tokens["access_token"]
 
@@ -1088,25 +1105,40 @@ def save_google_token(
     user: User,
     google_resp: dict[str, Any],
     verified_email: str | None = None,
-) -> None:
-    """Save Google OAuth token to UserExternalCredential table.
+    label: str = "default",
+) -> UserExternalCredential:
+    """Save a Google account's OAuth token, and return its credential.
 
-    Preserves existing refresh_token when Google doesn't return a new one
-    (Google often omits refresh_token on subsequent authorizations).
+    ``verified_email`` is the address Google reported as verified, which
+    identifies the account: its credential is labeled with it, and it
+    can't be connected to two Calkit users, nor be another user's email.
+    A token saved without it, e.g., a refresh, goes to the credential
+    ``label`` names.
 
-    ``verified_email`` is the address Google reported as verified, when the
-    caller fetched the profile and checked it. It's kept on the credential
-    as what this account has proven about its email, and is carried over
-    rather than cleared when a later save doesn't know it.
+    Preserves the refresh token and scopes already recorded when Google
+    doesn't send them again, which it often doesn't.
     """
     now = utcnow()
     # Google's expires_in is in seconds
     expires = now + timedelta(seconds=int(google_resp["expires_in"]))
+    if verified_email is not None:
+        label = verified_email.lower()
+        taken = session.exec(
+            select(UserExternalCredential).where(
+                UserExternalCredential.provider == "google",
+                UserExternalCredential.label == label,
+                UserExternalCredential.user_id != user.id,
+            )
+        ).first()
+        owner = get_user_by_email(session=session, email=verified_email)
+        if taken is not None or (owner is not None and owner.id != user.id):
+            raise HTTPException(
+                409,
+                f"The Google account {verified_email} belongs to another "
+                "Calkit account",
+            )
     existing_cred = get_external_credential(
-        session=session,
-        user=user,
-        provider="google",
-        label="default",
+        session=session, user=user, provider="google", label=label
     )
     # Preserve existing refresh_token if not provided in response
     refresh_token = google_resp.get("refresh_token")
@@ -1126,52 +1158,104 @@ def save_google_token(
     scopes = google_resp.get("scope")
     if scopes is None and existing_cred is not None:
         scopes = existing_cred.scopes
+    metadata = dict(existing_cred.metadata_json or {}) if existing_cred else {}
+    metadata.setdefault("connected", now.isoformat())
     payload = json.dumps(
         {
             "access_token": google_resp["access_token"],
             "refresh_token": refresh_token,
         }
     )
-    save_external_credential(
+    credential = save_external_credential(
         session=session,
         user=user,
         provider="google",
         secret_payload=payload,
         credential_type="oauth2",
+        label=label,
         scopes=scopes,
         provider_account_id=verified_email,
+        metadata_json=metadata,
         expires=expires,
     )
-
-
-def get_google_scopes(session: Session, user: User) -> set[str]:
-    """The scopes a user has granted the hub's Google token, e.g.,
-    ``GOOGLE_DRIVE_SCOPE``, which signing in with Google alone doesn't.
-    """
-    credential = get_external_credential(
-        session=session, user=user, provider="google", label="default"
-    )
-    if credential is None or not credential.scopes:
-        return set()
-    return set(credential.scopes.split())
+    # A credential from before accounts were told apart is this one, or
+    # one that can't be told from it
+    if label != "default":
+        legacy = get_external_credential(
+            session=session, user=user, provider="google", label="default"
+        )
+        if legacy is not None:
+            session.delete(legacy)
+            session.commit()
+    return credential
 
 
 def get_google_slides_client(
-    session: Session, user: User
+    session: Session, user: User, account: str | None = None
 ) -> calkit.google.Client:
-    """A client for the user's Google Slides, which needs Drive connected,
-    not just signing in with Google.
+    """A client for Google Slides through one of the user's Google
+    accounts that can reach Drive, the one whose email is ``account``, or
+    otherwise the first connected.
 
     Not being connected is a 403, since the CLI takes a 401 to mean its own
     login expired.
     """
-    try:
-        token = get_google_token(session=session, user=user)
-    except HTTPException:
+    credentials = get_google_credentials(session=session, user=user)
+    if account is not None:
+        credentials = [c for c in credentials if c.label == account.lower()]
+    for credential in credentials:
+        try:
+            token = get_google_token(session=session, credential=credential)
+        except HTTPException:
+            continue
+        return calkit.google.Client(
+            token, account=credential.provider_account_id
+        )
+    if account is not None:
+        raise HTTPException(
+            403,
+            f"The Google account {account} isn't connected to Calkit. "
+            + calkit.google.CONNECT_ADVICE,
+        )
+    raise HTTPException(403, calkit.google.CONNECT_ADVICE)
+
+
+def get_google_file_client(
+    session: Session, user: User, file_id: str, account: str | None = None
+) -> calkit.google.Client:
+    """A client for a Google Drive file, e.g., a Slides presentation,
+    through the user's Google account ``account``, or otherwise the first
+    of theirs that can open it.
+
+    Calkit can only open files a Google account created or opened with it,
+    so which of someone's accounts that is matters.
+    """
+    if account is not None:
+        return get_google_slides_client(
+            session=session, user=user, account=account
+        )
+    clients = []
+    for credential in get_google_credentials(session=session, user=user):
+        try:
+            token = get_google_token(session=session, credential=credential)
+        except HTTPException:
+            continue
+        clients.append(
+            calkit.google.Client(token, account=credential.provider_account_id)
+        )
+    if not clients:
         raise HTTPException(403, calkit.google.CONNECT_ADVICE)
-    if GOOGLE_DRIVE_SCOPE not in get_google_scopes(session=session, user=user):
-        raise HTTPException(403, calkit.google.CONNECT_ADVICE)
-    return calkit.google.Client(token)
+    if len(clients) == 1:
+        return clients[0]
+    for client in clients:
+        try:
+            client.get_presentation_info(file_id)
+        except calkit.google.GoogleError as e:
+            if e.status_code in (403, 404):
+                continue
+            raise_google_error(e)
+        return client
+    raise HTTPException(404, calkit.google.NOT_FOUND_ADVICE)
 
 
 def put_google_slides_figure(

@@ -549,6 +549,59 @@ def test_login_with_google_creates_github_less_user(
     assert user.email_verified is True
 
 
+def test_login_with_google_connected_account(
+    client: TestClient, db: Session
+) -> None:
+    # Someone connected a work Google account to their personal Calkit
+    # account, whose email hasn't been verified
+    email = f"me-{uuid.uuid4().hex[:8]}@example.com"
+    work_email = f"me-{uuid.uuid4().hex[:8]}@caltech.edu"
+    user = users.create_user(
+        session=db, user_create=UserCreate(email=email, password="pw-12345678")
+    )
+    hashed_password = user.hashed_password
+    users.save_google_token(
+        session=db,
+        user=user,
+        google_resp={"access_token": "ya29.work", "expires_in": 3600},
+        verified_email=work_email,
+    )
+    # Signing in with it signs in as them, without vouching for their own
+    # email or resetting how else they sign in
+    with (
+        patch(
+            "app.api.routes.login.requests.post",
+            return_value=_FakeGoogleResp(
+                200, {"access_token": "ya29.fake", "refresh_token": "r"}
+            ),
+        ),
+        patch(
+            "app.api.routes.login.requests.get",
+            return_value=_FakeGoogleResp(
+                200, {"email": work_email, "email_verified": True}
+            ),
+        ),
+        patch("app.api.routes.login.users.save_google_token"),
+    ):
+        r = client.post(
+            "/login/google",
+            json={
+                "code": "auth-code",
+                "redirect_uri": "http://localhost:5173/auth/google",
+            },
+        )
+    assert r.status_code == 200, r.text
+    me = client.get(
+        "/user",
+        headers={"Authorization": f"Bearer {r.json()['access_token']}"},
+    )
+    assert me.json()["email"] == email
+    db.refresh(user)
+    assert user.email_verified is False
+    assert user.hashed_password == hashed_password
+    assert users.get_user_by_email(session=db, email=work_email) is None
+
+
 def test_login_with_google_recovers_unverified_account(
     client: TestClient, db: Session
 ) -> None:

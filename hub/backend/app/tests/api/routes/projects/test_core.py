@@ -1305,6 +1305,8 @@ def test_google_slides_presentations(
     linked = []
 
     class Client:
+        account = "me@gmail.com"
+
         def create_presentation(self, title):
             created.append(title)
             return {
@@ -1338,7 +1340,10 @@ def test_google_slides_presentations(
                 headers=normal_user_token_headers,
                 json={"title": "My poster", "path": path, "kind": "poster"},
             )
-        linked.extend(c.kwargs["file_id"] for c in link.call_args_list)
+        linked.extend(
+            (c.kwargs["file_id"], c.kwargs["account"])
+            for c in link.call_args_list
+        )
         return r, push_and_expire
 
     r, push_and_expire = post("poster/poster.pdf")
@@ -1362,14 +1367,15 @@ def test_google_slides_presentations(
         == "Add presentation poster/poster.pdf"
     )
     assert not repo.is_dirty(untracked_files=True)
-    # It's linked to the project, so collaborators reach it
-    assert linked == [pid]
+    # It's linked to the project, through the Google account it was created
+    # with, so collaborators reach it
+    assert linked == [(pid, "me@gmail.com")]
     # One that can't be added is refused before it's created in Drive
     for path in ["taken.pdf", "poster/poster.png"]:
         r, _ = post(path)
         assert r.status_code == 422, r.text
     assert created == ["My poster"]
-    assert linked == [pid]
+    assert linked == [(pid, "me@gmail.com")]
 
 
 def test_project_google_presentations(client: TestClient, db: Session) -> None:
@@ -1393,6 +1399,7 @@ def test_project_google_presentations(client: TestClient, db: Session) -> None:
     class FakeClient:
         def __init__(self):
             self.calls = []
+            self.account = None
 
         def get_presentation_info(self, presentation_id):
             self.calls.append(("info", presentation_id))
@@ -1416,12 +1423,12 @@ def test_project_google_presentations(client: TestClient, db: Session) -> None:
     # Only the owner has connected Google so far
     clients = {owner.id: FakeClient()}
 
-    def get_client(session, user):
+    def get_client(session, user, file_id=None, account=None):
         if user.id not in clients:
             raise HTTPException(403, gs.CONNECT_ADVICE)
         return clients[user.id]
 
-    with patch("app.users.get_google_slides_client", side_effect=get_client):
+    with patch("app.users.get_google_file_client", side_effect=get_client):
         # Linking it records whose Google account reaches it, and shares it
         # with the project's collaborators in Google, without emailing them
         r = client.post(

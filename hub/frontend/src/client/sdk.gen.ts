@@ -2500,13 +2500,16 @@ export class UsersService {
   /**
    * Delete User External Credential
    *
-   * Disconnect an external account by deleting its credential.
+   * Disconnect an external account by deleting its credential, or for
+   * Google, the account whose email is ``account``, or otherwise all of
+   * them.
    */
   public static deleteUserExternalCredential<
     ThrowOnError extends boolean = true,
   >(
     parameters: {
       provider: string
+      account?: string | null
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -2516,7 +2519,14 @@ export class UsersService {
   > {
     const params = buildClientParams(
       [parameters],
-      [{ args: [{ in: "path", key: "provider" }] }],
+      [
+        {
+          args: [
+            { in: "path", key: "provider" },
+            { in: "query", key: "account" },
+          ],
+        },
+      ],
     )
     return (options?.client ?? client).delete<
       DeleteUserExternalCredentialResponses,

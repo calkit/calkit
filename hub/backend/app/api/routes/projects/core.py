@@ -6827,6 +6827,9 @@ class GoogleSlidesPresentationPost(BaseModel):
     title: str
     path: str
     kind: PresentationKind | None = None
+    # Which of the user's Google accounts to create it with, by email,
+    # otherwise the first connected
+    account: str | None = None
 
 
 @router.post(
@@ -6867,7 +6870,9 @@ def post_project_google_slides_presentation(
         )
     except ValueError as e:
         raise HTTPException(422, str(e))
-    client = users.get_google_slides_client(session=session, user=current_user)
+    client = users.get_google_slides_client(
+        session=session, user=current_user, account=req.account
+    )
     try:
         info = client.create_presentation(req.title)
     except calkit.google.GoogleError as e:
@@ -6885,7 +6890,11 @@ def post_project_google_slides_presentation(
     push_and_expire(project, repo)
     mixpanel.user_created_google_slides_presentation(current_user)
     app.projects.link_project_google_file(
-        session=session, project=project, file_id=info["id"], user=current_user
+        session=session,
+        project=project,
+        file_id=info["id"],
+        user=current_user,
+        account=client.account,
     )
     return Presentation(
         path=path,
@@ -6952,7 +6961,9 @@ def post_project_google_presentation(
         current_user=current_user,
         min_access_level="write",
     )
-    client = users.get_google_slides_client(session=session, user=current_user)
+    client = users.get_google_file_client(
+        session=session, user=current_user, file_id=presentation_id
+    )
     try:
         info = client.get_presentation_info(presentation_id)
     except calkit.google.GoogleError as e:
@@ -6962,6 +6973,7 @@ def post_project_google_presentation(
         project=project,
         file_id=presentation_id,
         user=current_user,
+        account=client.account,
     )
     return GooglePresentation.model_validate(info)
 

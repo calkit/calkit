@@ -38,6 +38,7 @@ from app.models import (
     Token,
     User,
     UserCreate,
+    UserExternalCredential,
     UserPublic,
     UserToken,
 )
@@ -603,7 +604,20 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
         raise HTTPException(400, "A verified Google email is required")
     full_name = profile.get("name")
     users.check_email_allowed(email)
-    user = users.get_user_by_email(session=session, email=email)
+    # A Google account someone connected signs in as them, even when it
+    # isn't their email
+    connected = session.exec(
+        select(UserExternalCredential).where(
+            UserExternalCredential.provider == "google",
+            UserExternalCredential.label == email.lower(),
+        )
+    ).first()
+    user = (
+        connected.user
+        if connected is not None
+        else users.get_user_by_email(session=session, email=email)
+    )
+    is_own_email = user is not None and user.email.lower() == email.lower()
     is_new = user is None
     if user is None:
         logger.info("Creating new GitHub-less user via Google")
@@ -630,7 +644,7 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
                     account_name=f"{email.split('@')[0]}-{secrets.token_hex(3)}",
                 ),
             )
-    else:
+    elif is_own_email:
         logger.info(f"Found existing user with email: {user.email}")
         # GitHub vouches for addresses it verified, e.g., for accounts made
         # through it before emails were checked, but not one a squatter
@@ -687,7 +701,10 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
         google_resp=google_resp,
         verified_email=email,
     )
-    users.mark_email_verified(session=session, user=user)
+    # Google vouches for the user's own email, not for one of their other
+    # Google accounts'
+    if is_new or is_own_email:
+        users.mark_email_verified(session=session, user=user)
     mixpanel.user_logged_in(user, provider="google", first=first_login)
     access_token, raw_refresh, refresh_db = _make_tokens(
         user.id, description="Google login", interactive=True

@@ -1654,10 +1654,15 @@ def get_project_google_client(
     if link is None:
         if user is None:
             raise HTTPException(404, "That file isn't linked to the project")
-        return app.users.get_google_slides_client(session=session, user=user)
+        return app.users.get_google_file_client(
+            session=session, user=user, file_id=file_id
+        )
     try:
-        return app.users.get_google_slides_client(
-            session=session, user=link.user
+        return app.users.get_google_file_client(
+            session=session,
+            user=link.user,
+            file_id=file_id,
+            account=link.google_account,
         )
     except HTTPException:
         raise HTTPException(
@@ -1715,30 +1720,33 @@ def share_project_google_files(
         if not others:
             continue
         try:
-            client = app.users.get_google_slides_client(
-                session=session, user=link.user
+            client = app.users.get_google_file_client(
+                session=session,
+                user=link.user,
+                file_id=link.file_id,
+                account=link.google_account,
             )
         except HTTPException as e:
             logger.warning(f"Can't share Google file {link.file_id}: {e}")
             continue
         for user in others:
-            # The address Google verified at sign-in is the Google account,
-            # and otherwise the Calkit one may be
-            credential = app.users.get_external_credential(
-                session=session, user=user, provider="google"
-            )
-            email = (
-                credential.provider_account_id
-                if credential is not None and credential.provider_account_id
-                else user.email
-            )
-            try:
-                client.share_file(link.file_id, email)
-            except calkit.google.GoogleError as e:
-                logger.warning(
-                    f"Failed to share Google file {link.file_id} with "
-                    f"{user.email}: {e}"
+            # Each Google account they've connected, so whichever they use
+            # can open it, or otherwise their Calkit email, which may be one
+            emails = [
+                c.provider_account_id
+                for c in app.users.get_google_credentials(
+                    session=session, user=user, drive_only=False
                 )
+                if c.provider_account_id
+            ] or [user.email]
+            for email in emails:
+                try:
+                    client.share_file(link.file_id, email)
+                except calkit.google.GoogleError as e:
+                    logger.warning(
+                        f"Failed to share Google file {link.file_id} with "
+                        f"{email}: {e}"
+                    )
 
 
 def set_project_google_files_public(
@@ -1754,8 +1762,11 @@ def set_project_google_files_public(
     ).all()
     for link in links:
         try:
-            client = app.users.get_google_slides_client(
-                session=session, user=link.user
+            client = app.users.get_google_file_client(
+                session=session,
+                user=link.user,
+                file_id=link.file_id,
+                account=link.google_account,
             )
             if is_public:
                 client.share_file(link.file_id)
@@ -1769,24 +1780,47 @@ def set_project_google_files_public(
 
 
 def link_project_google_file(
-    session: Session, project: Project, file_id: str, user: User
+    session: Session,
+    project: Project,
+    file_id: str,
+    user: User,
+    account: str | None = None,
 ) -> None:
     """Record that a project reaches a Google file through ``user``'s
-    Google account, unless it already reaches it through someone else's
-    that's still connected, and share it with the project's users.
+    Google account ``account``, or otherwise whichever of theirs can open
+    it, unless it already reaches it through someone else's that's still
+    connected, and share it with the project's users.
+
+    Raises an ``HTTPException`` if none of the user's accounts can open it.
     """
+    if account is None:
+        account = app.users.get_google_file_client(
+            session=session, user=user, file_id=file_id
+        ).account
     link = session.get(ProjectGoogleFile, (project.id, file_id))
     if link is None:
         session.add(
             ProjectGoogleFile(
-                project_id=project.id, file_id=file_id, user_id=user.id
+                project_id=project.id,
+                file_id=file_id,
+                user_id=user.id,
+                google_account=account,
             )
         )
-    elif link.user_id != user.id:
+    elif link.user_id == user.id:
+        link.google_account = account
+        session.add(link)
+    else:
         try:
-            app.users.get_google_slides_client(session=session, user=link.user)
+            app.users.get_google_file_client(
+                session=session,
+                user=link.user,
+                file_id=file_id,
+                account=link.google_account,
+            )
         except HTTPException:
             link.user_id = user.id
+            link.google_account = account
             session.add(link)
     session.commit()
     share_project_google_files(

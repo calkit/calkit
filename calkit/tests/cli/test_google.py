@@ -71,9 +71,16 @@ def test_google_slides(tmp_dir, monkeypatch):
             "poster",
             "--figure",
             "figures/rates.png",
+            "--google-account",
+            "me@caltech.edu",
         ],
     )
     assert res.exit_code == 0, res.output
+    # It's created with the Google account asked for
+    assert posted[0][1]["json"] == {
+        "title": "My poster",
+        "account": "me@caltech.edu",
+    }
     ck_info = calkit.load_calkit_info()
     assert ck_info["presentations"] == [
         {

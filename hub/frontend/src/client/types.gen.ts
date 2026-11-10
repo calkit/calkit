@@ -575,6 +575,10 @@ export type ConnectedAccounts = {
    */
   google: boolean
   /**
+   * Google Accounts
+   */
+  google_accounts?: Array<string>
+  /**
    * Zotero
    */
   zotero: boolean
@@ -2268,6 +2272,10 @@ export type GooglePresentationPost = {
    * Title
    */
   title: string
+  /**
+   * Account
+   */
+  account?: string | null
 }
 
 /**
@@ -2286,6 +2294,10 @@ export type GoogleSlidesPresentationPost = {
    * Kind
    */
   kind?: "slides" | "poster" | null
+  /**
+   * Account
+   */
+  account?: string | null
 }
 
 /**
@@ -10202,7 +10214,12 @@ export type DeleteUserExternalCredentialData = {
      */
     provider: string
   }
-  query?: never
+  query?: {
+    /**
+     * Account
+     */
+    account?: string | null
+  }
   url: "/user/external-credentials/{provider}"
 }
 

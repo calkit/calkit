@@ -960,6 +960,16 @@ def new_google_slides(
             "--no-pptx", help="Don't keep a PowerPoint copy in the project."
         ),
     ] = False,
+    google_account: Annotated[
+        str | None,
+        typer.Option(
+            "--google-account",
+            help=(
+                "Email of the Google account to create it with, if more than "
+                "one is connected. Defaults to the first connected."
+            ),
+        ),
+    ] = None,
     no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
 ) -> None:
     """Create a Google Slides presentation and add it to the project, with a
@@ -989,7 +999,9 @@ def new_google_slides(
         raise_error(str(e))
     try:
         info = get_hub_response(
-            "post", "/user/google/presentations", json={"title": title}
+            "post",
+            "/user/google/presentations",
+            json={"title": title, "account": google_account},
         )
     except Exception as e:
         raise_error(f"Failed to create the presentation: {e}")

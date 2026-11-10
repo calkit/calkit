@@ -167,6 +167,17 @@ class UserExternalCredential(SQLModel, table=True):
             "user_id",
             "provider",
         ),
+        # A Google account's credential is labeled with its email, and it
+        # can belong to only one user
+        sqlalchemy.Index(
+            "uq_userexternalcredential_google_account",
+            "provider",
+            "label",
+            unique=True,
+            postgresql_where=sqlalchemy.text(
+                "provider = 'google' AND label != 'default'"
+            ),
+        ),
     )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     user_id: uuid.UUID = Field(foreign_key="user.id")
@@ -283,11 +294,11 @@ class User(UserBase, table=True):
         """
         if self.email_verified_at is not None:
             return True
-        cred = self.get_external_credential("google")
-        return (
-            cred is not None
+        return any(
+            cred.provider == "google"
             and cred.provider_account_id is not None
             and cred.provider_account_id.lower() == self.email.lower()
+            for cred in self.external_credentials
         )
 
     @computed_field  # type: ignore[prop-decorator]
@@ -1699,6 +1710,9 @@ class ProjectGoogleFile(SQLModel, table=True):
     project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
     file_id: str = Field(primary_key=True, max_length=255)
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE")
+    # Which of the user's Google accounts reaches it, by email, since they
+    # can connect more than one
+    google_account: str | None = Field(default=None, max_length=255)
     created: datetime = Field(default_factory=utcnow)
     # Relationships
     project: Project = Relationship(back_populates="google_files")

@@ -1037,15 +1037,16 @@ calkit new|create google-slides [OPTIONS]
 
 Options:
 
-| Option        | Type    | Required | Default | Description                                                                  |
-| ------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
-| `--title`     | str     | yes      |         | Its title.                                                                   |
-| `--path`      | str     | yes      |         | PDF to export it to, e.g., 'poster/poster.pdf'.                              |
-| `--kind`      | str     | no       |         | Kind of presentation, either 'slides' or 'poster'.                           |
-| `--stage`     | str     | no       |         | Name of the stage that exports it. Defaults to 'export-' and the PDF's name. |
-| `--figure`    | str     | no       |         | Project figure to put in it, a PNG, JPEG, or GIF.                            |
-| `--no-pptx`   | boolean | no       | False   | Don't keep a PowerPoint copy in the project.                                 |
-| `--no-commit` | boolean | no       | False   |                                                                              |
+| Option             | Type    | Required | Default | Description                                                                                                    |
+| ------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--title`          | str     | yes      |         | Its title.                                                                                                     |
+| `--path`           | str     | yes      |         | PDF to export it to, e.g., 'poster/poster.pdf'.                                                                |
+| `--kind`           | str     | no       |         | Kind of presentation, either 'slides' or 'poster'.                                                             |
+| `--stage`          | str     | no       |         | Name of the stage that exports it. Defaults to 'export-' and the PDF's name.                                   |
+| `--figure`         | str     | no       |         | Project figure to put in it, a PNG, JPEG, or GIF.                                                              |
+| `--no-pptx`        | boolean | no       | False   | Don't keep a PowerPoint copy in the project.                                                                   |
+| `--google-account` | str     | no       |         | Email of the Google account to create it with, if more than one is connected. Defaults to the first connected. |
+| `--no-commit`      | boolean | no       | False   |                                                                                                                |
 
 <a id="subcommand-new-create-question"></a>
 

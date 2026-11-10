@@ -240,7 +240,13 @@ function NewGoogleSlides({
     },
   })
   return (
-    <Modal isOpen={isOpen} onClose={close} size="md" isCentered>
+    <Modal
+      isOpen={isOpen}
+      onClose={close}
+      size="md"
+      isCentered
+      motionPreset="none"
+    >
       <ModalOverlay />
       <ModalContent
         as="form"
@@ -584,6 +590,7 @@ function Presentations() {
         isOpen={!!selectedPres}
         onClose={() => setSelectedPath(undefined)}
         size="full"
+        motionPreset="none"
       >
         <ModalOverlay />
         <ModalContent>

@@ -62,7 +62,7 @@ from calkit.cli.fix import (
     TheirsOpt,
     fix_app,
 )
-from calkit.cli.google_slides import google_slides_app
+from calkit.cli.google import google_app
 from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
@@ -109,7 +109,7 @@ app.add_typer(fix_app, name="fix", help="Fix things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(
-    google_slides_app, name="google-slides", help="Work with Google Slides."
+    google_app, name="google", help="Work with Google files, e.g., Slides."
 )
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
@@ -755,24 +755,15 @@ def get_status(
             step("Syncing zip files")
             calkit.dvc.zip.sync_all(direction="to-zip")
             if _has_google_slides_stages(ck_info):
-                import requests
-
-                from calkit.cli.google_slides import record_edit_times
+                from calkit.cli.google import record_edit_times
 
                 step("Checking Google Slides")
                 try:
                     record_edit_times(ck_info, quick=True)
                 except Exception as e:
-                    reason = (
-                        "couldn't reach the hub"
-                        if isinstance(
-                            e, (requests.ConnectionError, requests.Timeout)
-                        )
-                        else str(e)
-                    )
                     warn(
-                        f"Failed to check Google Slides for edits ({reason}), "
-                        "so edited presentations may not show as out of date",
+                        f"Failed to check Google Slides for edits ({e}), so "
+                        "edited presentations may not show as out of date",
                         err=as_json,
                     )
             pipeline_status = calkit.pipeline.get_status(
@@ -2007,7 +1998,7 @@ def pull(
     # Presentations edited in Google Slides since they were exported
     ck_info = calkit.load_calkit_info()
     if _has_google_slides_stages(ck_info):
-        from calkit.cli.google_slides import record_edit_times
+        from calkit.cli.google import record_edit_times
 
         typer.echo("Checking Google Slides")
         try:
@@ -2023,10 +2014,10 @@ def pull(
 
 
 def _has_google_slides_stages(ck_info: dict) -> bool:
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     return any(
         isinstance(s, dict) and s.get("kind") == "google-slides-export"
-        for s in stages.values()
+        for _, info in calkit.iter_projects(ck_info=ck_info)
+        for s in ((info.get("pipeline") or {}).get("stages") or {}).values()
     )
 
 
@@ -3493,7 +3484,7 @@ def run(
         # Each Google Slides presentation's last edit, so one edited since
         # it was exported reruns. Asking takes too long for every status.
         if _has_google_slides_stages(ck_info):
-            from calkit.cli.google_slides import record_edit_times
+            from calkit.cli.google import record_edit_times
 
             step("Checking Google Slides", "📽️")
             try:

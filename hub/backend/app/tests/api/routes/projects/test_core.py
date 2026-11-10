@@ -1263,10 +1263,10 @@ def test_google_slides_presentations(
     normal_user_token_headers: dict[str, str],
     tmp_path,
 ) -> None:
-    import calkit.google_slides as gs
+    import calkit.google as gs
 
     pid = "1AbCdEfGhIjKlMnOpQrStUv"
-    url = gs.get_presentation_url(pid)
+    url = gs.get_slides_presentation_url(pid)
     # A presentation exported from Google Slides says where it's edited,
     # its stage found from the pipeline's outputs
     response, _, _, _ = _get_declared_at_ref(

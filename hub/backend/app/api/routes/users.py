@@ -25,7 +25,7 @@ from sqlmodel import Field, col, func, or_, select
 
 import app.projects
 import app.stripe
-import calkit.google_slides
+import calkit.google
 from app import mixpanel, storage, users, zotero
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
@@ -1167,7 +1167,7 @@ def post_user_google_presentation(
     client = users.get_google_slides_client(session=session, user=current_user)
     try:
         info = client.create_presentation(req.title)
-    except calkit.google_slides.GoogleError as e:
+    except calkit.google.GoogleError as e:
         users.raise_google_error(e)
     mixpanel.user_created_google_slides_presentation(current_user)
     return GooglePresentation.model_validate(info)
@@ -1183,7 +1183,7 @@ def get_user_google_presentation(
     client = users.get_google_slides_client(session=session, user=current_user)
     try:
         info = client.get_presentation_info(presentation_id)
-    except calkit.google_slides.GoogleError as e:
+    except calkit.google.GoogleError as e:
         users.raise_google_error(e)
     return GooglePresentation.model_validate(info)
 
@@ -1200,7 +1200,7 @@ def post_user_google_presentation_figure(
     presentation, replacing the images tagged with its path.
     """
     try:
-        mime_type = calkit.google_slides.get_figure_mime_type(path)
+        mime_type = calkit.google.get_figure_mime_type(path)
     except ValueError as e:
         raise HTTPException(422, str(e))
     client = users.get_google_slides_client(session=session, user=current_user)
@@ -1215,7 +1215,7 @@ def post_user_google_presentation_figure(
     try:
         url = storage.get_object_url(fpath, expires=600, fs=fs)
         resp = client.put_figure(presentation_id, path, url)
-    except calkit.google_slides.GoogleError as e:
+    except calkit.google.GoogleError as e:
         # Google can't fetch from object storage on a developer's machine
         if settings.ENVIRONMENT == "local":
             e.args = (
@@ -1259,7 +1259,7 @@ def get_user_google_presentation_slides(
     client = users.get_google_slides_client(session=session, user=current_user)
     try:
         slides = client.get_slides(presentation_id)
-    except calkit.google_slides.GoogleError as e:
+    except calkit.google.GoogleError as e:
         users.raise_google_error(e)
     return GoogleSlides.model_validate(slides)
 
@@ -1277,7 +1277,7 @@ def post_user_google_presentation_slide_tags(
     client = users.get_google_slides_client(session=session, user=current_user)
     try:
         tagged = client.tag_slides(presentation_id, req.tags)
-    except calkit.google_slides.GoogleError as e:
+    except calkit.google.GoogleError as e:
         users.raise_google_error(e)
     return GoogleSlideTagsResponse(tagged=tagged)
 
@@ -1290,11 +1290,11 @@ def get_user_google_presentation_export(
     current_user: CurrentUser,
 ) -> Response:
     """Export a Google Slides presentation as a PDF or PowerPoint file."""
-    mime_type = calkit.google_slides.get_export_mime_type(f"x.{format}")
+    mime_type = calkit.google.get_slides_export_mime_type(f"x.{format}")
     client = users.get_google_slides_client(session=session, user=current_user)
     try:
         content = client.export_presentation(presentation_id, mime_type)
-    except calkit.google_slides.GoogleError as e:
+    except calkit.google.GoogleError as e:
         users.raise_google_error(e)
     return Response(content=content, media_type=mime_type)
 

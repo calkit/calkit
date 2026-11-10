@@ -60,7 +60,7 @@ import calkit
 import calkit.core
 import calkit.detect
 import calkit.environments
-import calkit.google_slides
+import calkit.google
 import calkit.latex
 import calkit.pipeline
 import calkit.provenance
@@ -6850,10 +6850,10 @@ def post_project_google_slides_presentation(
     stand_in = {
         "id": "x" * 20,
         "title": req.title,
-        "url": calkit.google_slides.get_presentation_url("x" * 20),
+        "url": calkit.google.get_slides_presentation_url("x" * 20),
     }
     try:
-        calkit.google_slides.add_presentation(
+        calkit.google.add_slides_presentation(
             deepcopy(ck_info), stand_in, path=path, kind=req.kind
         )
     except ValueError as e:
@@ -6861,14 +6861,14 @@ def post_project_google_slides_presentation(
     client = users.get_google_slides_client(session=session, user=current_user)
     try:
         info = client.create_presentation(req.title)
-    except calkit.google_slides.GoogleError as e:
+    except calkit.google.GoogleError as e:
         users.raise_google_error(e)
-    calkit.google_slides.add_presentation(
+    calkit.google.add_slides_presentation(
         ck_info, info, path=path, kind=req.kind
     )
     ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
-    edit_time_path = calkit.google_slides.get_edit_time_path(info["id"])
-    calkit.google_slides.write_edit_time(
+    edit_time_path = calkit.google.get_edit_time_path(info["id"])
+    calkit.google.write_edit_time(
         os.path.join(repo.working_dir, edit_time_path), info["modified_time"]
     )
     repo.git.add(["calkit.yaml", edit_time_path])
@@ -6879,7 +6879,7 @@ def post_project_google_slides_presentation(
         path=path,
         title=req.title,
         kind=req.kind,
-        stage=calkit.google_slides.get_default_stage_name(path),
+        stage=calkit.google.get_default_slides_stage_name(path),
         edit_url=info["url"],
     )
 

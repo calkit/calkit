@@ -734,7 +734,7 @@ def new_figure(
     if description is not None:
         obj["description"] = description
     if google_slide is not None:
-        from calkit.cli.google_slides import add_slide_figure
+        from calkit.cli.google import add_slide_figure
 
         # The figure's stage is found from its outputs
         add_slide_figure(ck_info, google_slide, path, stage_name)
@@ -787,7 +787,7 @@ def new_figure(
         if cmd:
             repo.git.add("dvc.yaml")
         if google_slide is not None:
-            repo.git.add(".calkit/google-slides")
+            repo.git.add(".calkit/google")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Add figure {path}"])
 
@@ -987,15 +987,35 @@ def new_google_slides(
     """Create a Google Slides presentation and add it to the project, with a
     stage that exports it.
     """
-    from calkit.cli.google_slides import add_presentation, get_hub_response
+    import calkit.google
+    from calkit.cli.google import add_slides_presentation, get_hub_response
 
+    # Checked before it's created, so one that can't be added isn't left
+    # behind in Drive
+    stand_in = {
+        "id": "x" * 20,
+        "title": title,
+        "url": calkit.google.get_slides_presentation_url("x" * 20),
+    }
+    try:
+        calkit.google.add_slides_presentation(
+            calkit.load_calkit_info(),
+            stand_in,
+            path=path,
+            kind=kind,
+            stage_name=stage_name,
+            figures=figures,
+            pptx=not no_pptx,
+        )
+    except ValueError as e:
+        raise_error(str(e))
     try:
         info = get_hub_response(
             "post", "/user/google/presentations", json={"title": title}
         )
     except Exception as e:
         raise_error(f"Failed to create the presentation: {e}")
-    add_presentation(
+    add_slides_presentation(
         info,
         path=path,
         kind=kind,

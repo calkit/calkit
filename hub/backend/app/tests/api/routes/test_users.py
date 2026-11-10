@@ -2192,13 +2192,13 @@ def test_end_other_sessions(
 def test_user_google_presentations(
     client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
-    import calkit.google_slides as gs
+    import calkit.google as gs
 
     pid = "1AbCdEfGhIjKlMnOpQrStUv"
     info = {
         "id": pid,
         "title": "Poster",
-        "url": gs.get_presentation_url(pid),
+        "url": gs.get_slides_presentation_url(pid),
         "modified_time": "2026-11-09T00:00:00.000Z",
     }
     calls = []
@@ -2242,7 +2242,7 @@ def test_user_google_presentations(
             return len(tags)
 
         def export_presentation(self, presentation_id, mime_type):
-            if mime_type == gs.EXPORT_MIME_TYPES[".pptx"]:
+            if mime_type == gs.SLIDES_EXPORT_MIME_TYPES[".pptx"]:
                 raise gs.GoogleError("Google is down", 503)
             return b"%PDF"
 
@@ -2279,7 +2279,7 @@ def test_user_google_presentations(
     assert google_connected()
     save_google_token(None)
     assert google_connected()
-    with patch("app.api.routes.users.calkit.google_slides.Client", Client):
+    with patch("app.api.routes.users.calkit.google.Client", Client):
         r = client.post(
             base, headers=normal_user_token_headers, json={"title": "Poster"}
         )

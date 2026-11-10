@@ -14,6 +14,8 @@ import {
   IconButton,
   Input,
   Link,
+  LinkBox,
+  LinkOverlay,
   Menu,
   MenuButton,
   MenuItem,
@@ -40,7 +42,7 @@ import {
   useSearch,
 } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FaPlus } from "react-icons/fa"
 import { FiDownload, FiExternalLink, FiMonitor } from "react-icons/fi"
 import { z } from "zod"
@@ -375,21 +377,45 @@ function PresCard({ presentation, onClick }: PresCardProps) {
     : presentation.url
       ? String(presentation.url)
       : null
+  // Previews are rendered at their own size once scrolled near, since a
+  // poster rendered in full takes a lot of memory
+  const previewRef = useRef<HTMLDivElement>(null)
+  const [previewWidth, setPreviewWidth] = useState<number>()
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el || !isPdf || !src) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setPreviewWidth(el.clientWidth)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: "200px" },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [isPdf, src])
   return (
-    <Box
+    <LinkBox
       borderWidth={1}
       borderColor={borderColor}
       borderRadius="lg"
       overflow="hidden"
       bg={bg}
-      cursor="pointer"
       _hover={{ bg: hoverBg, shadow: "md" }}
-      onClick={onClick}
+      sx={{
+        "&:has(.chakra-linkbox__overlay:focus-visible)": {
+          boxShadow: "outline",
+        },
+      }}
       transition="all 0.15s"
     >
-      <Box height="160px" overflow="hidden" bg="gray.50">
+      <Box ref={previewRef} height="160px" overflow="hidden" bg="gray.50">
         {isPdf && src ? (
-          <PdfCanvas src={src} maxPages={1} />
+          previewWidth !== undefined && (
+            <PdfCanvas src={src} maxPages={1} renderWidth={previewWidth} />
+          )
         ) : (
           <Flex
             height="100%"
@@ -410,9 +436,19 @@ function PresCard({ presentation, onClick }: PresCardProps) {
       </Box>
       <Box p={3}>
         <Flex align="center" gap={2}>
-          <Text fontWeight="semibold" fontSize="sm" noOfLines={1} flex={1}>
-            {presentation.title}
-          </Text>
+          <LinkOverlay
+            as="button"
+            type="button"
+            onClick={onClick}
+            textAlign="left"
+            flex={1}
+            minW={0}
+            _focusVisible={{ outline: "none" }}
+          >
+            <Text fontWeight="semibold" fontSize="sm" noOfLines={1}>
+              {presentation.title}
+            </Text>
+          </LinkOverlay>
           {presentation.kind && (
             <Badge fontSize="xs" flexShrink={0}>
               {presentation.kind}
@@ -438,7 +474,7 @@ function PresCard({ presentation, onClick }: PresCardProps) {
           {presentation.path}
         </Text>
       </Box>
-    </Box>
+    </LinkBox>
   )
 }
 

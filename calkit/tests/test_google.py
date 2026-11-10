@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-import calkit.google_slides as gs
+import calkit.google as gs
 
 
 class FakeResponse:
@@ -40,23 +40,25 @@ class FakeHttp:
 def test_paths_and_ids(tmp_path):
     pid = "1AbCdEfGhIjKlMnOpQrStUvWxYz_-012"
     assert (
-        gs.get_presentation_id(
+        gs.get_slides_presentation_id(
             f"https://docs.google.com/presentation/d/{pid}/edit#slide=id.p"
         )
         == pid
     )
-    assert gs.get_presentation_id(pid) == pid
+    assert gs.get_slides_presentation_id(pid) == pid
     with pytest.raises(ValueError):
-        gs.get_presentation_id("https://docs.google.com/document/d/x/edit")
-    assert gs.get_presentation_url(pid).endswith(f"/d/{pid}/edit")
-    assert gs.get_edit_time_path(pid) == f".calkit/google-slides/{pid}.json"
+        gs.get_slides_presentation_id(
+            "https://docs.google.com/document/d/x/edit"
+        )
+    assert gs.get_slides_presentation_url(pid).endswith(f"/d/{pid}/edit")
+    assert gs.get_edit_time_path(pid) == f".calkit/google/{pid}.json"
     assert gs.get_figure_tag("figures/./a.png") == "calkit:figures/a.png"
     assert gs.get_figure_mime_type("a.JPG") == "image/jpeg"
     with pytest.raises(ValueError, match="PNG, JPEG, or GIF"):
         gs.get_figure_mime_type("a.pdf")
-    assert gs.get_export_mime_type("p.pdf") == "application/pdf"
+    assert gs.get_slides_export_mime_type("p.pdf") == "application/pdf"
     with pytest.raises(ValueError, match=".pdf or .pptx"):
-        gs.get_export_mime_type("p.png")
+        gs.get_slides_export_mime_type("p.png")
     # Writing the same edit time again changes nothing, so DVC sees no
     # change either
     path = str(tmp_path / "sub" / "edit.json")
@@ -127,7 +129,7 @@ def test_client():
     expected = {
         "id": pid,
         "title": "Poster",
-        "url": gs.get_presentation_url(pid),
+        "url": gs.get_slides_presentation_url(pid),
         "modified_time": "t1",
     }
     assert client.get_presentation_info(pid) == expected
@@ -243,7 +245,7 @@ def test_slide_figures(tmp_path):
     import pypdfium2 as pdfium
 
     pid = "1AbCdEfGhIjKlMnOpQrStUv"
-    url = gs.get_presentation_url(pid)
+    url = gs.get_slides_presentation_url(pid)
     assert gs.get_slide_id(f"{url}#slide=id.g2c3a1b9_0_12") == "g2c3a1b9_0_12"
     assert gs.get_slide_id(f"{url}?usp=sharing#slide=id.p") == "p"
     assert gs.get_slide_id(url) is None

@@ -17,7 +17,7 @@ from typing import Any
 DRIVE_API_URL = "https://www.googleapis.com/drive/v3/files"
 SLIDES_API_URL = "https://slides.googleapis.com/v1/presentations"
 PRESENTATION_MIME_TYPE = "application/vnd.google-apps.presentation"
-EXPORT_MIME_TYPES = {
+SLIDES_EXPORT_MIME_TYPES = {
     ".pdf": "application/pdf",
     ".pptx": (
         "application/vnd.openxmlformats-officedocument."
@@ -55,7 +55,7 @@ class GoogleError(RuntimeError):
         self.status_code = status_code
 
 
-def get_presentation_id(url: str) -> str:
+def get_slides_presentation_id(url: str) -> str:
     """The ID of a presentation, from its URL or the ID itself."""
     url = url.strip()
     match = re.search(r"/presentation/d/([A-Za-z0-9_-]+)", url)
@@ -66,7 +66,7 @@ def get_presentation_id(url: str) -> str:
     raise ValueError(f"Not a Google Slides URL: {url}")
 
 
-def get_presentation_url(presentation_id: str) -> str:
+def get_slides_presentation_url(presentation_id: str) -> str:
     return f"https://docs.google.com/presentation/d/{presentation_id}/edit"
 
 
@@ -74,7 +74,7 @@ def get_edit_time_path(presentation_id: str) -> str:
     """Where the time a presentation was last edited is recorded, relative
     to the project, which a stage exporting it depends on.
     """
-    return f".calkit/google-slides/{presentation_id}.json"
+    return f".calkit/google/{presentation_id}.json"
 
 
 def write_edit_time(path: str, modified_time: str) -> bool:
@@ -92,14 +92,14 @@ def write_edit_time(path: str, modified_time: str) -> bool:
     return True
 
 
-def get_default_stage_name(path: str) -> str:
+def get_default_slides_stage_name(path: str) -> str:
     """The name of the stage exporting a presentation to ``path``, unless
     another is given, e.g., 'export-poster' for 'poster/poster.pdf'.
     """
     return "export-" + posixpath.splitext(posixpath.basename(path))[0]
 
 
-def add_presentation(
+def add_slides_presentation(
     ck_info: dict,
     info: dict,
     path: str,
@@ -116,6 +116,7 @@ def add_presentation(
     already at ``path``.
     """
     from calkit.models.pipeline import GoogleSlidesExportStage
+    from calkit.pipeline import get_stage_for_output
 
     if kind is not None and kind not in ["slides", "poster"]:
         raise ValueError(
@@ -126,7 +127,7 @@ def add_presentation(
             f"The exported presentation must be a PDF, not {path}"
         )
     if stage_name is None:
-        stage_name = get_default_stage_name(path)
+        stage_name = get_default_slides_stage_name(path)
     outputs = [path]
     if pptx:
         outputs.append(path[:-4] + ".pptx")
@@ -144,6 +145,10 @@ def add_presentation(
     stages = ck_info.setdefault("pipeline", {}).setdefault("stages", {})
     if stage_name in stages:
         raise ValueError(f"Stage '{stage_name}' already exists")
+    for out in outputs:
+        other = get_stage_for_output(out, ck_info)
+        if other is not None:
+            raise ValueError(f"{out} is already an output of stage '{other}'")
     presentation = {"path": path}
     if info.get("title"):
         presentation["title"] = info["title"]
@@ -167,13 +172,13 @@ def get_figure_mime_type(path: str) -> str:
     return FIGURE_MIME_TYPES[ext]
 
 
-def get_export_mime_type(path: str) -> str:
+def get_slides_export_mime_type(path: str) -> str:
     ext = posixpath.splitext(path)[1].lower()
-    if ext not in EXPORT_MIME_TYPES:
+    if ext not in SLIDES_EXPORT_MIME_TYPES:
         raise ValueError(
             f"Google Slides can't export {path}; outputs must be .pdf or .pptx"
         )
-    return EXPORT_MIME_TYPES[ext]
+    return SLIDES_EXPORT_MIME_TYPES[ext]
 
 
 def get_slide_id(url: str) -> str | None:
@@ -207,7 +212,7 @@ def get_slides_stage_name(
         if (
             isinstance(stage, dict)
             and stage.get("kind") == "google-slides-export"
-            and get_presentation_id(stage.get("presentation_url", ""))
+            and get_slides_presentation_id(stage.get("presentation_url", ""))
             == presentation_id
         ):
             return str(name)
@@ -236,7 +241,8 @@ def add_slide_figure(
     stage = dict(stages.get(stage_name) or {})
     if stage and (
         stage.get("kind") != "google-slides-export"
-        or get_presentation_id(stage.get("presentation_url", "")) != info["id"]
+        or get_slides_presentation_id(stage.get("presentation_url", ""))
+        != info["id"]
     ):
         raise ValueError(
             f"Stage '{stage_name}' doesn't export this presentation"
@@ -439,7 +445,7 @@ class Client:
         return {
             "id": file["id"],
             "title": file.get("name"),
-            "url": get_presentation_url(file["id"]),
+            "url": get_slides_presentation_url(file["id"]),
             "modified_time": file["modifiedTime"],
         }
 
@@ -458,7 +464,7 @@ class Client:
         return {
             "id": file["id"],
             "title": file.get("name"),
-            "url": get_presentation_url(file["id"]),
+            "url": get_slides_presentation_url(file["id"]),
             "modified_time": file["modifiedTime"],
         }
 

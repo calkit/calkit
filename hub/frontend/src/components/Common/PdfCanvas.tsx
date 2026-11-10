@@ -6,9 +6,9 @@
  * (e.g., in file-browser thumbnails or figure previews). For interactive
  * annotation (highlights, comments), use PdfAnnotator instead.
  */
-import { useEffect, useState } from "react"
 import { Box, Text } from "@chakra-ui/react"
 import * as pdfjsLib from "pdfjs-dist"
+import { useEffect, useState } from "react"
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -23,9 +23,20 @@ interface PdfCanvasProps {
   height?: string
   /** Maximum number of pages to render. Defaults to all pages. */
   maxPages?: number
+  /**
+   * Width in CSS pixels to rasterize pages at, e.g., for a thumbnail, rather
+   * than at twice their size, which is also the most this renders at.
+   */
+  renderWidth?: number
 }
 
-function PdfCanvas({ src, width = "100%", height, maxPages }: PdfCanvasProps) {
+function PdfCanvas({
+  src,
+  width = "100%",
+  height,
+  maxPages,
+  renderWidth,
+}: PdfCanvasProps) {
   const [pageUrls, setPageUrls] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -43,7 +54,14 @@ function PdfCanvas({ src, width = "100%", height, maxPages }: PdfCanvasProps) {
         const limit = maxPages ? Math.min(maxPages, pdf.numPages) : pdf.numPages
         for (let i = 1; i <= limit; i++) {
           const page = await pdf.getPage(i)
-          const viewport = page.getViewport({ scale: 2 })
+          const scale = renderWidth
+            ? Math.min(
+                (renderWidth * (window.devicePixelRatio || 1)) /
+                  page.getViewport({ scale: 1 }).width,
+                2,
+              )
+            : 2
+          const viewport = page.getViewport({ scale })
           const canvas = document.createElement("canvas")
           canvas.width = viewport.width
           canvas.height = viewport.height
@@ -69,7 +87,7 @@ function PdfCanvas({ src, width = "100%", height, maxPages }: PdfCanvasProps) {
     return () => {
       cancelled = true
     }
-  }, [src, maxPages])
+  }, [src, maxPages, renderWidth])
 
   if (loading) return <Text color="gray.500">Loading…</Text>
   if (error) return <Text color="gray.500">Could not render PDF.</Text>

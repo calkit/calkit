@@ -2008,12 +2008,18 @@ def to_arxiv(
     output_folder = (Path(target_folder) / tex_file).as_posix() + "_arxiv.zip"
     # latex2arxiv requires .gls files at root, so copy them
     moved = []
-    for gls_file in target_folder.glob("*.gls"):
+    for gls_file in Path(target_folder).glob("*.gls"):
         moved.append(target_folder / gls_file.name)
         gls_file.copy(moved[-1])
     try:
         subprocess.run(
-            [cli_path.as_posix(), target_folder, output_dir, "--main", tex_file],
+            [
+                cli_path.as_posix(),
+                target_folder,
+                output_folder,
+                "--main",
+                tex_file,
+            ],
             check=True,
         )
     finally:

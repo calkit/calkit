@@ -987,11 +987,11 @@ def new_google_slides(
     """Create a Google Slides presentation and add it to the project, with a
     stage that exports it.
     """
-    from calkit.cli.google_slides import add_presentation
+    from calkit.cli.google_slides import add_presentation, get_hub_response
 
     try:
-        info = calkit.hub.post(
-            "/user/google/presentations", json={"title": title}
+        info = get_hub_response(
+            "post", "/user/google/presentations", json={"title": title}
         )
     except Exception as e:
         raise_error(f"Failed to create the presentation: {e}")

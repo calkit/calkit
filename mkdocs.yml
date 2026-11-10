@@ -63,6 +63,7 @@ nav:
   - Adding compute resources: compute.md
   - LaTeX documents: latex.md
   - Overleaf integration: overleaf.md
+  - Google Workspace integration: google-workspace.md
   - Browser extension: browser-ext/index.md
   - Subprojects: subprojects.md
   - Examples: examples.md

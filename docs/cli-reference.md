@@ -16,7 +16,7 @@
 | [`add`](#top-command-add)                        | Add paths to the repo.                                                                                       |
 | [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                 |
 | [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
-| [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
+| [`pull`](#top-command-pull)                      | Pull with Git and DVC, and check whether Google Slides presentations were edited.                            |
 | [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                 |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
@@ -50,7 +50,6 @@
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
-| [`google`](#command-group-google)                | Work with Google files, e.g., Slides.                                                                        |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
@@ -252,13 +251,19 @@ Options:
 
 ### `calkit pull`
 
-Pull with both Git and DVC.
+Pull with Git and DVC, and check whether Google Slides presentations were edited.
 
 Usage:
 
 ```text
-calkit pull [OPTIONS]
+calkit pull [OPTIONS] [TARGETS...]
 ```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description                                                                                                        |
+| --------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
+| `targets` | str  | no       |         | What to pull: 'git', 'dvc', 'google' (whether Google Slides presentations were edited), or 'all'. Defaults to all. |
 
 Options:
 
@@ -2972,10 +2977,11 @@ Options:
 
 Export data and artifacts from various applications.
 
-| Command                                   | Description                                 |
-| ----------------------------------------- | ------------------------------------------- |
-| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                |
-| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file. |
+| Command                                             | Description                                                    |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape)           | Export a figure from an SVG.                                   |
+| [`gimp`](#subcommand-export-gimp)                   | Export a flattened figure from an XCF file.                    |
+| [`google-slides`](#subcommand-export-google-slides) | Put figures into a Google Slides presentation, then export it. |
 
 <a id="subcommand-export-inkscape"></a>
 
@@ -3025,6 +3031,32 @@ Options:
 | Option           | Type | Required | Default | Description                             |
 | ---------------- | ---- | -------- | ------- | --------------------------------------- |
 | `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
+
+<a id="subcommand-export-google-slides"></a>
+
+#### `calkit export google-slides`
+
+Put figures into a Google Slides presentation, then export it.
+
+Usage:
+
+```text
+calkit export google-slides [OPTIONS] URL
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                            |
+| -------- | ---- | -------- | ------- | -------------------------------------- |
+| `url`    | str  | yes      |         | URL of the Google Slides presentation. |
+
+Options:
+
+| Option             | Type | Required | Default | Description                                                                                             |
+| ------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`   | str  | yes      |         | File to export to, a .pdf or .pptx.                                                                     |
+| `--figure`         | str  | no       |         | Project figure to put in first, replacing the images tagged with its path, or added to the first slide. |
+| `--edit-time-path` | str  | no       |         | Where to record when the presentation was last edited.                                                  |
 
 <a id="command-group-update"></a>
 
@@ -4543,55 +4575,6 @@ Options:
 | `--any-branch`   | boolean | no       | False   | Pull even if the current branch is missing commits from the default branch.                                                                 |
 | `--force`, `-f`  | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                            |
 | `--verbose`      | boolean | no       | False   | Enable verbose output.                                                                                                                      |
-
-<a id="command-group-google"></a>
-
-### `calkit google`
-
-Work with Google files, e.g., Slides.
-
-| Command                                             | Description                                                                                                                 |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [`export-slides`](#subcommand-google-export-slides) | Put figures into a Google Slides presentation, then export it.                                                              |
-| [`pull`](#subcommand-google-pull)                   | Check whether the project's Google Slides presentations were edited, putting the stages that export them out of date if so. |
-
-<a id="subcommand-google-export-slides"></a>
-
-#### `calkit google export-slides`
-
-Put figures into a Google Slides presentation, then export it.
-
-Usage:
-
-```text
-calkit google export-slides [OPTIONS] URL
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description                            |
-| -------- | ---- | -------- | ------- | -------------------------------------- |
-| `url`    | str  | yes      |         | URL of the Google Slides presentation. |
-
-Options:
-
-| Option             | Type | Required | Default | Description                                                                                             |
-| ------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o`   | str  | yes      |         | File to export to, a .pdf or .pptx.                                                                     |
-| `--figure`         | str  | no       |         | Project figure to put in first, replacing the images tagged with its path, or added to the first slide. |
-| `--edit-time-path` | str  | no       |         | Where to record when the presentation was last edited.                                                  |
-
-<a id="subcommand-google-pull"></a>
-
-#### `calkit google pull`
-
-Check whether the project's Google Slides presentations were edited, putting the stages that export them out of date if so.
-
-Usage:
-
-```text
-calkit google pull
-```
 
 <a id="command-group-hub-cloud"></a>
 

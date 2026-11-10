@@ -105,18 +105,20 @@ def test_googleslidesexportstage():
     s = GoogleSlidesExportStage(
         name="export-poster",
         presentation_url=url,
-        figures=["figures/rates.png"],
+        inputs=["figures/rates.png", "data/rates.csv"],
         outputs=["poster/poster.pdf", "poster/poster.pptx"],
     )
     sd = s.to_dvc()
+    # Only the images among its inputs are put in it
     assert sd["cmd"] == (
-        f"calkit google export-slides {url} -o poster/poster.pdf "
+        f"calkit export google-slides {url} -o poster/poster.pdf "
         "-o poster/poster.pptx --figure figures/rates.png"
     )
-    # Editing the presentation or a figure puts it out of date
+    # Editing the presentation or an input puts it out of date
     assert sd["deps"] == [
-        ".calkit/google/1AbCdEfGhIjKlMnOpQrStUv.json",
         "figures/rates.png",
+        "data/rates.csv",
+        ".calkit/google/1AbCdEfGhIjKlMnOpQrStUv.json",
     ]
     # Outputs are kept while it runs, so an unchanged export can be kept
     assert sd["outs"] == [
@@ -132,7 +134,7 @@ def test_googleslidesexportstage():
         "kind": "google-slides-export",
         "name": "export-poster",
         "presentation_url": url,
-        "figures": ["figures/rates.png"],
+        "inputs": ["figures/rates.png", "data/rates.csv"],
         "outputs": ["poster/poster.pdf", "poster/poster.pptx"],
     }
     # Run from a wdir, it still records the edit under the project
@@ -146,10 +148,6 @@ def test_googleslidesexportstage():
         (dict(presentation_url="https://example.com"), "Google Slides URL"),
         (dict(presentation_url=url, outputs=[]), "needs an output"),
         (dict(presentation_url=url, outputs=["p.docx"]), ".pdf or .pptx"),
-        (
-            dict(presentation_url=url, figures=["f.svg"]),
-            "PNG, JPEG, or GIF",
-        ),
     ]:
         with pytest.raises(ValidationError, match=match):
             GoogleSlidesExportStage(**({"outputs": ["p.pdf"]} | kwargs))

@@ -127,10 +127,13 @@ def add_slides_presentation(
     outputs = [path]
     if pptx:
         outputs.append(path[:-4] + ".pptx")
+    # The figures are the stage's inputs, and must be images Slides can show
+    for figure in figures:
+        get_figure_mime_type(figure)
     try:
         stage = GoogleSlidesExportStage(
             presentation_url=info["url"],
-            figures=figures,
+            inputs=figures,  # type: ignore[arg-type]
             outputs=outputs,  # type: ignore[arg-type]
         )
     except Exception as e:

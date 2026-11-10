@@ -1161,19 +1161,25 @@ def get_google_slides_client(
 ) -> calkit.google_slides.Client:
     """A client for the user's Google Slides, which needs Drive connected,
     not just signing in with Google.
+
+    Not being connected is a 403, since the CLI takes a 401 to mean its own
+    login expired.
     """
     try:
         token = get_google_token(session=session, user=user)
     except HTTPException:
-        raise HTTPException(401, calkit.google_slides.CONNECT_ADVICE)
+        raise HTTPException(403, calkit.google_slides.CONNECT_ADVICE)
     if GOOGLE_DRIVE_SCOPE not in get_google_scopes(session=session, user=user):
-        raise HTTPException(401, calkit.google_slides.CONNECT_ADVICE)
+        raise HTTPException(403, calkit.google_slides.CONNECT_ADVICE)
     return calkit.google_slides.Client(token)
 
 
 def raise_google_error(e: calkit.google_slides.GoogleError) -> NoReturn:
-    # Google's own 5xx is the hub failing to reach something upstream
+    # Google's own 5xx is the hub failing to reach something upstream, and
+    # its 401 is the Google connection, not the user's login
     status_code = 502 if e.status_code >= 500 else e.status_code
+    if status_code == 401:
+        status_code = 403
     raise HTTPException(status_code, str(e))
 
 

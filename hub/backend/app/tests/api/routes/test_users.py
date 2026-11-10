@@ -2253,7 +2253,7 @@ def test_user_google_presentations(
     save_google_token("openid email profile")
     assert not google_connected()
     r = client.get(f"{base}/{pid}", headers=normal_user_token_headers)
-    assert r.status_code == 401
+    assert r.status_code == 403
     assert "Connect Google Drive" in r.json()["detail"]
     # Connecting Drive gives a token with both, which a later save that
     # doesn't list its scopes, e.g., a refresh, keeps

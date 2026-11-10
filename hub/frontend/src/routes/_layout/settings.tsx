@@ -47,10 +47,12 @@ const tabsConfig = [
 // `verify_2fa` the one that comes before setting up two-factor
 // authentication, so a reload or a shared link lands on the same step.
 // They're kept apart so only one code form is ever on the page.
+// `connect=google` starts connecting Google Drive, for the CLI to link to.
 const tabSearchSchema = z.object({
   tab: z.string().catch(""),
   verify: z.boolean().optional().catch(undefined),
   verify_2fa: z.boolean().optional().catch(undefined),
+  connect: z.enum(["google"]).optional().catch(undefined),
 })
 
 export const Route = createFileRoute("/_layout/settings")({

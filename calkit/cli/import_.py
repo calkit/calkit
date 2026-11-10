@@ -740,11 +740,13 @@ def import_google_slides(
     exports it.
     """
     import calkit.google_slides
-    from calkit.cli.google_slides import add_presentation
+    from calkit.cli.google_slides import add_presentation, get_hub_response
 
     try:
         presentation_id = calkit.google_slides.get_presentation_id(url)
-        info = calkit.hub.get(f"/user/google/presentations/{presentation_id}")
+        info = get_hub_response(
+            "get", f"/user/google/presentations/{presentation_id}"
+        )
     except Exception as e:
         raise_error(f"Failed to open the presentation: {e}")
     add_presentation(

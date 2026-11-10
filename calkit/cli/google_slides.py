@@ -15,6 +15,49 @@ from calkit.cli import AliasGroup, raise_error
 google_slides_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
+def get_hub_response(kind: str, path: str, **kwargs: Any) -> Any:
+    """Return the hub's response to a request that uses the user's Google
+    account, first connecting it in the browser if it isn't connected and
+    someone is here to.
+    """
+    import time
+    import webbrowser
+
+    import requests
+
+    from calkit.core import is_tty
+
+    request = getattr(calkit.hub, kind)
+    try:
+        return request(path, **kwargs)
+    except requests.HTTPError as e:
+        if (
+            e.response is None
+            or e.response.status_code != 403
+            or not is_tty()
+            or calkit.hub.get("/user/connected-accounts").get("google")
+        ):
+            raise
+    url = (
+        calkit.hub.get_hub_url().rstrip("/")
+        + "/settings?tab=connected-accounts&connect=google"
+    )
+    typer.echo("Connect your Google account to Calkit by opening this URL:")
+    typer.echo(url)
+    typer.echo("Waiting for it to be connected (Ctrl+C to stop)")
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+    deadline = time.monotonic() + 600
+    while not calkit.hub.get("/user/connected-accounts").get("google"):
+        if time.monotonic() > deadline:
+            raise RuntimeError("Google wasn't connected within 10 minutes")
+        time.sleep(2)
+    typer.echo("Google is connected")
+    return request(path, **kwargs)
+
+
 def record_edit_times(ck_info: dict, quick: bool = False) -> list[str]:
     """Record when each Google Slides presentation the pipeline exports was
     last edited, asking the hub, and return the stages an edit put out of
@@ -136,7 +179,7 @@ def export(
 
     def ask_hub(kind: str, path: str, action: str, **kwargs: Any) -> Any:
         try:
-            return getattr(calkit.hub, kind)(path, **kwargs)
+            return get_hub_response(kind, path, **kwargs)
         except Exception as e:
             raise_error(f"Failed to {action}: {e}")
 

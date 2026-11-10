@@ -2,10 +2,15 @@ import json
 import os
 import subprocess
 
+import pytest
 from typer.testing import CliRunner
 
 import calkit
-from calkit.cli.google_slides import google_slides_app, record_edit_times
+from calkit.cli.google_slides import (
+    get_hub_response,
+    google_slides_app,
+    record_edit_times,
+)
 from calkit.cli.import_ import import_app
 from calkit.cli.new import new_app
 
@@ -157,3 +162,48 @@ def test_google_slides(tmp_dir, monkeypatch):
     assert res.exit_code != 0
     assert "PNG, JPEG, or GIF" in res.output
     assert len(posted) == n_posted
+    # Without Google connected, someone at a terminal is sent to connect it,
+    # and the request is made again once they have
+    import time
+    import webbrowser
+
+    import requests
+
+    connected = [False, False, True]
+    opened = []
+
+    def hub_get_accounts(path, **kwargs):
+        assert path == "/user/connected-accounts"
+        return {"google": connected.pop(0) if len(connected) > 1 else True}
+
+    def hub_post_once(path, **kwargs):
+        if not opened:
+            resp = requests.Response()
+            resp.status_code = 403
+            raise requests.HTTPError(
+                "403: Connect Google Drive", response=resp
+            )
+        return {"ok": True}
+
+    monkeypatch.setattr(calkit.hub, "get", hub_get_accounts)
+    monkeypatch.setattr(calkit.hub, "post", hub_post_once)
+    monkeypatch.setattr(calkit.hub, "get_hub_url", lambda: "http://hub/")
+    monkeypatch.setattr(webbrowser, "open", opened.append)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    monkeypatch.setattr("calkit.core.is_tty", lambda: False)
+    with pytest.raises(requests.HTTPError):
+        get_hub_response("post", "/user/google/presentations")
+    assert not opened
+    monkeypatch.setattr("calkit.core.is_tty", lambda: True)
+    assert get_hub_response("post", "/user/google/presentations") == {
+        "ok": True
+    }
+    assert opened == [
+        "http://hub/settings?tab=connected-accounts&connect=google"
+    ]
+    assert not connected[:-1]
+    # A 403 with Google connected is some other refusal, so it's raised
+    opened.clear()
+    with pytest.raises(requests.HTTPError):
+        get_hub_response("post", "/user/google/presentations")
+    assert not opened

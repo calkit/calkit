@@ -2261,6 +2261,68 @@ export type GooglePresentationPost = {
 }
 
 /**
+ * GoogleSlide
+ */
+export type GoogleSlide = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Notes
+   */
+  notes: string
+  /**
+   * Notes Id
+   */
+  notes_id: string | null
+  /**
+   * Is Skipped
+   */
+  is_skipped: boolean
+  /**
+   * Bounds
+   */
+  bounds: Array<number> | null
+}
+
+/**
+ * GoogleSlideTagsPost
+ */
+export type GoogleSlideTagsPost = {
+  /**
+   * Tags
+   */
+  tags: {
+    [key: string]: string
+  }
+}
+
+/**
+ * GoogleSlideTagsResponse
+ */
+export type GoogleSlideTagsResponse = {
+  /**
+   * Tagged
+   */
+  tagged: number
+}
+
+/**
+ * GoogleSlides
+ */
+export type GoogleSlides = {
+  /**
+   * Page Size
+   */
+  page_size: Array<number>
+  /**
+   * Slides
+   */
+  slides: Array<GoogleSlide>
+}
+
+/**
  * GoogleSlidesPresentationPost
  */
 export type GoogleSlidesPresentationPost = {
@@ -10047,6 +10109,70 @@ export type PostUserGooglePresentationFigureResponses = {
 
 export type PostUserGooglePresentationFigureResponse =
   PostUserGooglePresentationFigureResponses[keyof PostUserGooglePresentationFigureResponses]
+
+export type GetUserGooglePresentationSlidesData = {
+  body?: never
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query?: never
+  url: "/user/google/presentations/{presentation_id}/slides"
+}
+
+export type GetUserGooglePresentationSlidesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserGooglePresentationSlidesError =
+  GetUserGooglePresentationSlidesErrors[keyof GetUserGooglePresentationSlidesErrors]
+
+export type GetUserGooglePresentationSlidesResponses = {
+  /**
+   * Successful Response
+   */
+  200: GoogleSlides
+}
+
+export type GetUserGooglePresentationSlidesResponse =
+  GetUserGooglePresentationSlidesResponses[keyof GetUserGooglePresentationSlidesResponses]
+
+export type PostUserGooglePresentationSlideTagsData = {
+  body: GoogleSlideTagsPost
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query?: never
+  url: "/user/google/presentations/{presentation_id}/slide-tags"
+}
+
+export type PostUserGooglePresentationSlideTagsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserGooglePresentationSlideTagsError =
+  PostUserGooglePresentationSlideTagsErrors[keyof PostUserGooglePresentationSlideTagsErrors]
+
+export type PostUserGooglePresentationSlideTagsResponses = {
+  /**
+   * Successful Response
+   */
+  200: GoogleSlideTagsResponse
+}
+
+export type PostUserGooglePresentationSlideTagsResponse =
+  PostUserGooglePresentationSlideTagsResponses[keyof PostUserGooglePresentationSlideTagsResponses]
 
 export type GetUserGooglePresentationExportData = {
   body?: never

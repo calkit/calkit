@@ -2469,7 +2469,8 @@ class GimpExportStage(AppExportStage):
 
 class GoogleSlidesExportStage(Stage):
     """A Google Slides presentation exported as a PDF, or as a PowerPoint
-    copy kept in the project, with the project's figures it shows put in
+    copy kept in the project, and its slides exported as figures, e.g., a
+    diagram drawn on one, with the project's figures it shows put in
     first.
 
     It goes out of date when a figure changes, or when the presentation is
@@ -2491,6 +2492,14 @@ class GoogleSlidesExportStage(Stage):
             "slide with that title."
         ),
     )
+    slides: dict[RelativeChildPathString, str] = Field(
+        default={},
+        description=(
+            "Figures exported from slides, each a PDF or PNG cropped to "
+            "what's drawn on its slide, by the ID of the slide, which is "
+            "the end of its URL after 'slide=id.'."
+        ),
+    )
     environment: str = "_system"
 
     @model_validator(mode="after")
@@ -2499,17 +2508,28 @@ class GoogleSlidesExportStage(Stage):
             get_export_mime_type,
             get_figure_mime_type,
             get_presentation_id,
+            get_slide_export_format,
         )
 
         get_presentation_id(self.presentation_url)
-        if not self.outputs:
+        if not self.outputs and not self.slides:
             raise ValueError(
-                "A Google Slides export needs an output, e.g., a PDF"
+                "A Google Slides export needs an output, e.g., a PDF, or a "
+                "slide to export"
             )
         for out in self.outputs:
             get_export_mime_type(out if isinstance(out, str) else out.path)
         for figure in self.figures:
             get_figure_mime_type(figure)
+        for path in self.slides:
+            get_slide_export_format(path)
+            # A figure put in can't also be one exported, or it would
+            # depend on itself
+            if path in self.figures:
+                raise ValueError(
+                    f"{path} can't be both put in the presentation and "
+                    "exported from it"
+                )
         return self
 
     @property
@@ -2532,6 +2552,19 @@ class GoogleSlidesExportStage(Stage):
         return deps
 
     @property
+    def dvc_outs(self) -> list[str | dict]:
+        # Kept while it runs, so an export identical to the last but for its
+        # date can be left alone, rather than rerunning what depends on it
+        outs: list[str | dict] = [
+            {out: dict(persist=True)} if isinstance(out, str) else out
+            for out in super().dvc_outs
+        ]
+        for path in self.slides:
+            if not any(isinstance(o, dict) and path in o for o in outs):
+                outs.append({path: dict(persist=True)})
+        return outs
+
+    @property
     def dvc_cmd(self) -> str:
         from calkit.google_slides import get_edit_time_path
 
@@ -2543,6 +2576,8 @@ class GoogleSlidesExportStage(Stage):
             cmd += f" -o {shlex.quote(path)}"
         for figure in self.figures:
             cmd += f" --figure {shlex.quote(figure)}"
+        for path, slide_id in self.slides.items():
+            cmd += f" --slide {shlex.quote(path + '=' + slide_id)}"
         # It runs in the wdir, but records the edit under the project
         if self.wdir is not None:
             edit_time_path = self.path_from_wdir(

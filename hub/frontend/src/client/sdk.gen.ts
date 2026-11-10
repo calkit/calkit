@@ -266,6 +266,8 @@ import type {
   GetUserGooglePresentationExportErrors,
   GetUserGooglePresentationExportResponses,
   GetUserGooglePresentationResponses,
+  GetUserGooglePresentationSlidesErrors,
+  GetUserGooglePresentationSlidesResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
   GetUserOverleafSessionResponses,
@@ -287,6 +289,7 @@ import type {
   GlobalSearchResponses,
   GooglePresentationPost,
   GoogleSlidesPresentationPost,
+  GoogleSlideTagsPost,
   ImportGithubReleasesErrors,
   ImportGithubReleasesResponses,
   IssuePatch,
@@ -477,6 +480,8 @@ import type {
   PostUserGooglePresentationFigureErrors,
   PostUserGooglePresentationFigureResponses,
   PostUserGooglePresentationResponses,
+  PostUserGooglePresentationSlideTagsErrors,
+  PostUserGooglePresentationSlideTagsResponses,
   PostUserSessionsEndOthersResponses,
   PostUserTokenErrors,
   PostUserTokenResponses,
@@ -2302,6 +2307,89 @@ export class UsersService {
       ...params,
       headers: {
         "Content-Type": null,
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Google Presentation Slides
+   *
+   * Get a Google Slides presentation's slides, in order, with what's
+   * drawn on each, for exporting them as figures.
+   */
+  public static getUserGooglePresentationSlides<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      presentation_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserGooglePresentationSlidesResponses,
+    GetUserGooglePresentationSlidesErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "presentation_id" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetUserGooglePresentationSlidesResponses,
+      GetUserGooglePresentationSlidesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/google/presentations/{presentation_id}/slides",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post User Google Presentation Slide Tags
+   *
+   * Say in slides' speaker notes which figures they're exported to,
+   * given slide IDs by figure path.
+   */
+  public static postUserGooglePresentationSlideTags<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      presentation_id: string
+      googleSlideTagsPost: GoogleSlideTagsPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserGooglePresentationSlideTagsResponses,
+    PostUserGooglePresentationSlideTagsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "presentation_id" },
+            { key: "googleSlideTagsPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostUserGooglePresentationSlideTagsResponses,
+      PostUserGooglePresentationSlideTagsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/google/presentations/{presentation_id}/slide-tags",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
         ...options?.headers,
         ...params.headers,
       },

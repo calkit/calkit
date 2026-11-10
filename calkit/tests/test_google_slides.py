@@ -235,3 +235,248 @@ def test_is_same_export():
     # Anything that can't be read counts as changed
     assert not gs.is_same_export(b"not a zip", b"not a zip!", "p.pptx")
     assert not gs.is_same_export(b"a", b"b", "p.png")
+
+
+def test_slide_figures(tmp_path):
+    import io
+
+    import pypdfium2 as pdfium
+
+    pid = "1AbCdEfGhIjKlMnOpQrStUv"
+    url = gs.get_presentation_url(pid)
+    assert gs.get_slide_id(f"{url}#slide=id.g2c3a1b9_0_12") == "g2c3a1b9_0_12"
+    assert gs.get_slide_id(f"{url}?usp=sharing#slide=id.p") == "p"
+    assert gs.get_slide_id(url) is None
+    assert gs.get_slide_export_format("figures/a.PNG") == "png"
+    with pytest.raises(ValueError, match=".pdf or .png"):
+        gs.get_slide_export_format("figures/a.svg")
+    # A presentation's figures go in the stage already exporting it
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "export-poster": {
+                    "kind": "google-slides-export",
+                    "presentation_url": url,
+                    "outputs": ["poster.pdf"],
+                },
+                "plot": {"kind": "python-script", "outputs": ["fig.pdf"]},
+            }
+        }
+    }
+    assert gs.get_slides_stage_name(ck_info, pid, "Poster") == "export-poster"
+    assert (
+        gs.get_slides_stage_name({}, pid, "My Diagrams!")
+        == "export-my-diagrams"
+    )
+    info = {"id": pid, "url": url}
+    gs.add_slide_figure(ck_info, info, "s1", "figures/a.pdf", "export-poster")
+    gs.add_slide_figure(ck_info, info, "s2", "figures/b.png", "new-stage")
+    stages = ck_info["pipeline"]["stages"]
+    assert stages["export-poster"]["slides"] == {"figures/a.pdf": "s1"}
+    assert stages["new-stage"] == {
+        "kind": "google-slides-export",
+        "presentation_url": url,
+        "slides": {"figures/b.png": "s2"},
+    }
+    for path, stage_name, match in [
+        ("fig.pdf", "export-poster", "Stage 'plot' already makes"),
+        ("figures/c.pdf", "plot", "doesn't export this presentation"),
+        ("figures/c.svg", "export-poster", ".pdf or .png"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            gs.add_slide_figure(ck_info, info, "s3", path, stage_name)
+    # A slide is cut out of the deck's PDF, cropped to what's drawn on it,
+    # with a margin for outlines, which is kept on the page
+    doc = pdfium.PdfDocument.new()
+    doc.new_page(720, 405)
+    doc.new_page(720, 405)
+    buf = io.BytesIO()
+    doc.save(buf)
+    deck_pdf = buf.getvalue()
+    bounds = [200.0, 100.0, 560.0, 220.0]
+    pdf = gs.get_slide_export(deck_pdf, 1, bounds, [720.0, 405.0], "a.pdf")
+    page = pdfium.PdfDocument(pdf)[0]
+    assert page.get_size() == pytest.approx((368, 128))
+    png = gs.get_slide_export(
+        deck_pdf, 0, bounds, [720.0, 405.0], "a.png", dpi=72, margin=0
+    )
+    from PIL import Image
+
+    assert Image.open(io.BytesIO(png)).size == (360, 120)
+    # The same slide exports to the same bytes, so nothing downstream reruns
+    assert (
+        gs.get_slide_export(deck_pdf, 1, bounds, [720.0, 405.0], "a.pdf")
+        == pdf
+    )
+    whole = gs.get_slide_export(
+        deck_pdf, 0, [0, 0, 720, 405], [720.0, 405.0], "a.pdf"
+    )
+    assert pdfium.PdfDocument(whole)[0].get_size() == pytest.approx((720, 405))
+
+
+def test_client_slides():
+    pid = "deck"
+    slides_url = f"{gs.SLIDES_API_URL}/{pid}"
+    emu = gs.EMU_PER_POINT
+
+    def size(w, h):
+        return {
+            "width": {"magnitude": w * emu, "unit": "EMU"},
+            "height": {"magnitude": h * emu, "unit": "EMU"},
+        }
+
+    def notes(text, notes_id):
+        content = [{"textRun": {"content": text}}] if text else []
+        return {
+            "notesPage": {
+                "notesProperties": {"speakerNotesObjectId": notes_id},
+                "pageElements": [
+                    {
+                        "objectId": notes_id,
+                        "shape": {"text": {"textElements": content}},
+                    }
+                ],
+            }
+        }
+
+    deck = {
+        "pageSize": size(720, 405),
+        "slides": [
+            {
+                # Only empty placeholders, so nothing is drawn
+                "objectId": "title",
+                "pageElements": [
+                    {
+                        "objectId": "t",
+                        "size": size(600, 100),
+                        "shape": {"placeholder": {"type": "TITLE"}},
+                    }
+                ],
+                "slideProperties": notes("", "n1"),
+            },
+            {
+                "objectId": "diagram",
+                "pageElements": [
+                    # A box in EMU, and a group moved by its own transform,
+                    # whose child is scaled, in points
+                    {
+                        "objectId": "box",
+                        "size": size(100, 50),
+                        "transform": {
+                            "scaleX": 1,
+                            "scaleY": 1,
+                            "translateX": 200 * emu,
+                            "translateY": 100 * emu,
+                            "unit": "EMU",
+                        },
+                        "shape": {"shapeType": "RECTANGLE"},
+                    },
+                    {
+                        "objectId": "group",
+                        "transform": {
+                            "scaleX": 1,
+                            "scaleY": 1,
+                            "translateX": 400,
+                            "translateY": 150,
+                            "unit": "PT",
+                        },
+                        "elementGroup": {
+                            "children": [
+                                {
+                                    "objectId": "child",
+                                    "size": {
+                                        "width": {
+                                            "magnitude": 50,
+                                            "unit": "PT",
+                                        },
+                                        "height": {
+                                            "magnitude": 20,
+                                            "unit": "PT",
+                                        },
+                                    },
+                                    "transform": {
+                                        "scaleX": 2,
+                                        "scaleY": 2,
+                                        "unit": "PT",
+                                    },
+                                }
+                            ]
+                        },
+                    },
+                    # Hanging off the slide's right edge
+                    {
+                        "objectId": "arrow",
+                        "size": size(100, 10),
+                        "transform": {
+                            "scaleX": 1,
+                            "scaleY": 1,
+                            "translateX": 680 * emu,
+                            "translateY": 120 * emu,
+                            "unit": "EMU",
+                        },
+                    },
+                ],
+                "slideProperties": notes("calkit:figures/a.pdf\n", "n2")
+                | {"isSkipped": True},
+            },
+        ],
+    }
+    batches = []
+
+    def batch_update(kwargs):
+        batches.append(kwargs["json"]["requests"])
+        return FakeResponse()
+
+    client = gs.Client("token")
+    client.http = FakeHttp(  # type: ignore[assignment]
+        {
+            ("get", slides_url): FakeResponse(body=deck),
+            ("post", f"{slides_url}:batchUpdate"): batch_update,
+        }
+    )
+    assert client.get_slides(pid) == {
+        "page_size": [720.0, 405.0],
+        "slides": [
+            {
+                "id": "title",
+                "notes": "",
+                "notes_id": "n1",
+                "is_skipped": False,
+                "bounds": None,
+            },
+            {
+                "id": "diagram",
+                "notes": "calkit:figures/a.pdf\n",
+                "notes_id": "n2",
+                "is_skipped": True,
+                "bounds": [200.0, 100.0, 720.0, 190.0],
+            },
+        ],
+    }
+    # Only the tags not already in a slide's notes are added
+    tags = {
+        "figures/a.pdf": "diagram",
+        "figures/a.png": "diagram",
+        "figures/b.pdf": "title",
+        "figures/c.pdf": "missing",
+    }
+    assert client.tag_slides(pid, tags) == 2
+    assert batches[-1] == [
+        {
+            "insertText": {
+                "objectId": "n2",
+                "insertionIndex": 0,
+                "text": "calkit:figures/a.png\n",
+            }
+        },
+        {
+            "insertText": {
+                "objectId": "n1",
+                "insertionIndex": 0,
+                "text": "calkit:figures/b.pdf\n",
+            }
+        },
+    ]
+    n_batches = len(batches)
+    assert client.tag_slides(pid, {"figures/a.pdf": "diagram"}) == 0
+    assert len(batches) == n_batches

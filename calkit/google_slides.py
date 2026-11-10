@@ -31,8 +31,12 @@ FIGURE_MIME_TYPES = {
     ".jpeg": "image/jpeg",
     ".gif": "image/gif",
 }
-# Put in an image's alt text title to say which project figure it shows
+# What a slide can be exported to as a figure
+SLIDE_EXPORT_FORMATS = {".pdf": "pdf", ".png": "png"}
+# Put in an image's alt text title to say which project figure it shows,
+# or in a slide's speaker notes to say which figure it's exported to
 FIGURE_TAG_PREFIX = "calkit:"
+EMU_PER_POINT = 12700
 CONNECT_ADVICE = (
     "Connect Google Drive in your Calkit account settings, under "
     "Connected accounts."
@@ -171,6 +175,158 @@ def get_export_mime_type(path: str) -> str:
             f"Google Slides can't export {path}; outputs must be .pdf or .pptx"
         )
     return EXPORT_MIME_TYPES[ext]
+
+
+def get_slide_id(url: str) -> str | None:
+    """The ID of the slide a presentation URL shows, e.g., 'g2c3a1b9_0_12'
+    for one ending '#slide=id.g2c3a1b9_0_12'.
+    """
+    match = re.search(r"[#&]slide=id\.([A-Za-z0-9_-]+)", url)
+    return match.group(1) if match is not None else None
+
+
+def get_slide_export_format(path: str) -> str:
+    """What a slide is exported to a figure as, from the figure's path."""
+    ext = posixpath.splitext(path)[1].lower()
+    if ext not in SLIDE_EXPORT_FORMATS:
+        raise ValueError(
+            f"A slide can't be exported to {path}; figures from slides must "
+            "be .pdf or .png"
+        )
+    return SLIDE_EXPORT_FORMATS[ext]
+
+
+def get_slides_stage_name(
+    ck_info: dict, presentation_id: str, title: str | None
+) -> str:
+    """The stage that exports figures from a presentation's slides: the one
+    already exporting it, if there is one, or else a new name from its
+    title.
+    """
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage in stages.items():
+        if (
+            isinstance(stage, dict)
+            and stage.get("kind") == "google-slides-export"
+            and get_presentation_id(stage.get("presentation_url", ""))
+            == presentation_id
+        ):
+            return str(name)
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")
+    return f"export-{slug or 'slides'}"
+
+
+def add_slide_figure(
+    ck_info: dict,
+    info: dict,
+    slide_id: str,
+    path: str,
+    stage_name: str,
+) -> None:
+    """Have ``stage_name`` export a slide to the figure at ``path``, adding
+    the stage if it doesn't exist yet, given what the hub says about the
+    presentation, e.g., its URL.
+
+    Raises ``ValueError`` if it can't, e.g., if another stage already makes
+    the figure.
+    """
+    from calkit.models.pipeline import GoogleSlidesExportStage
+
+    get_slide_export_format(path)
+    stages = ck_info.setdefault("pipeline", {}).setdefault("stages", {})
+    stage = dict(stages.get(stage_name) or {})
+    if stage and (
+        stage.get("kind") != "google-slides-export"
+        or get_presentation_id(stage.get("presentation_url", "")) != info["id"]
+    ):
+        raise ValueError(
+            f"Stage '{stage_name}' doesn't export this presentation"
+        )
+    for name, other in stages.items():
+        if name == stage_name or not isinstance(other, dict):
+            continue
+        outs = [
+            o if isinstance(o, str) else o.get("path")
+            for o in other.get("outputs") or []
+        ] + list((other.get("slides") or {}).keys())
+        if path in outs:
+            raise ValueError(f"Stage '{name}' already makes {path}")
+    if not stage:
+        stage = {
+            "kind": "google-slides-export",
+            "presentation_url": info["url"],
+        }
+    stage["slides"] = dict(stage.get("slides") or {}) | {path: slide_id}
+    try:
+        GoogleSlidesExportStage.model_validate(stage)
+    except Exception as e:
+        raise ValueError(f"Invalid stage specification: {e}")
+    stages[stage_name] = stage
+
+
+def get_slide_export(
+    deck_pdf: bytes,
+    index: int,
+    bounds: list[float],
+    page_size: list[float],
+    path: str,
+    dpi: int = 300,
+    margin: float = 4.0,
+) -> bytes:
+    """A figure made from one page of a presentation's PDF, cropped to what's
+    drawn on it, as a PDF or PNG, depending on ``path``.
+
+    ``bounds`` are what's drawn on the slide, in points from its top left,
+    as ``get_slides`` gives them, and ``page_size`` is the slide's size.
+    ``margin``, in points, keeps outlines, which straddle a shape's edge,
+    from being cut in half.
+    """
+    import io
+
+    import pypdfium2 as pdfium
+
+    fmt = get_slide_export_format(path)
+    src = pdfium.PdfDocument(deck_pdf)
+    page = src[index]
+    width, height = page.get_size()
+    # The PDF's points should be the slide's, but are scaled to be sure
+    sx, sy = width / page_size[0], height / page_size[1]
+    left = max(bounds[0] * sx - margin, 0)
+    right = min(bounds[2] * sx + margin, width)
+    bottom = max(height - bounds[3] * sy - margin, 0)
+    top = min(height - bounds[1] * sy + margin, height)
+    buf = io.BytesIO()
+    try:
+        if fmt == "pdf":
+            out = pdfium.PdfDocument.new()
+            try:
+                out.import_pages(src, [index])
+                out_page = out[0]
+                out_page.set_mediabox(left, bottom, right, top)
+                out_page.set_cropbox(left, bottom, right, top)
+                out.save(buf)
+            finally:
+                out.close()
+            # pdfium gives each save a random ID, so the same slide would
+            # export to a new file every time. It's in the trailer, after
+            # every offset the file records, and only encrypted PDFs need
+            # one.
+            data = buf.getvalue()
+            at = data.rfind(b"trailer")
+            return data[:at] + re.sub(
+                rb"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]",
+                b"",
+                data[at:],
+            )
+        else:
+            bitmap = page.render(
+                scale=dpi / 72,
+                crop=(left, bottom, width - right, height - top),
+            )
+            bitmap.to_pil().save(buf, format="PNG")
+    finally:
+        src.close()
+    return buf.getvalue()
 
 
 def is_same_export(old: bytes, new: bytes, path: str) -> bool:
@@ -413,3 +569,166 @@ class Client:
             "added": not image_ids,
             "modified_time": info["modified_time"],
         }
+
+    def get_slides(self, presentation_id: str) -> dict:
+        """The presentation's slides, in order, each with its ID, its speaker
+        notes, whether it's skipped, and the bounds of what's drawn on it,
+        in points from its top left, along with the size of a slide.
+        """
+
+        def get_points(dim: dict | None) -> float:
+            if not dim:
+                return 0.0
+            magnitude = float(dim.get("magnitude", 0))
+            return (
+                magnitude / EMU_PER_POINT
+                if dim.get("unit") == "EMU"
+                else magnitude
+            )
+
+        def get_matrix(transform: dict | None) -> list[float]:
+            # Omitted fields are zero, but an omitted transform is identity
+            if transform is None:
+                return [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+            unit = EMU_PER_POINT if transform.get("unit") == "EMU" else 1
+            return [
+                float(transform.get("scaleX", 0)),
+                float(transform.get("shearY", 0)),
+                float(transform.get("shearX", 0)),
+                float(transform.get("scaleY", 0)),
+                float(transform.get("translateX", 0)) / unit,
+                float(transform.get("translateY", 0)) / unit,
+            ]
+
+        def compose(outer: list[float], inner: list[float]) -> list[float]:
+            a, b, c, d, e, f = outer
+            a2, b2, c2, d2, e2, f2 = inner
+            return [
+                a * a2 + c * b2,
+                b * a2 + d * b2,
+                a * c2 + c * d2,
+                b * c2 + d * d2,
+                a * e2 + c * f2 + e,
+                b * e2 + d * f2 + f,
+            ]
+
+        def get_text(shape: dict) -> str:
+            return "".join(
+                t.get("textRun", {}).get("content", "")
+                for t in (shape.get("text") or {}).get("textElements", [])
+            )
+
+        def get_corners(
+            elements: list[dict], parent: list[float]
+        ) -> list[tuple[float, float]]:
+            corners = []
+            for element in elements:
+                matrix = compose(parent, get_matrix(element.get("transform")))
+                if "elementGroup" in element:
+                    corners += get_corners(
+                        element["elementGroup"].get("children", []), matrix
+                    )
+                    continue
+                shape = element.get("shape") or {}
+                # An empty placeholder, e.g., "Click to add title", isn't
+                # drawn
+                if "placeholder" in shape and not get_text(shape).strip():
+                    continue
+                size = element.get("size") or {}
+                w, h = (
+                    get_points(size.get("width")),
+                    get_points(size.get("height")),
+                )
+                a, b, c, d, e, f = matrix
+                for x, y in [(0, 0), (w, 0), (0, h), (w, h)]:
+                    corners.append((a * x + c * y + e, b * x + d * y + f))
+            return corners
+
+        resp = self.http.get(
+            f"{SLIDES_API_URL}/{presentation_id}",
+            params={
+                "fields": (
+                    "pageSize,slides(objectId,pageElements,slideProperties("
+                    "isSkipped,notesPage(notesProperties,pageElements)))"
+                )
+            },
+            timeout=60,
+        )
+        self._check(resp, "read the presentation")
+        deck = resp.json()
+        page_size = [
+            get_points(deck.get("pageSize", {}).get("width")),
+            get_points(deck.get("pageSize", {}).get("height")),
+        ]
+        slides = []
+        for slide in deck.get("slides", []):
+            props = slide.get("slideProperties") or {}
+            notes_page = props.get("notesPage") or {}
+            notes_id = (notes_page.get("notesProperties") or {}).get(
+                "speakerNotesObjectId"
+            )
+            notes = "".join(
+                get_text(e.get("shape") or {})
+                for e in notes_page.get("pageElements", [])
+                if e.get("objectId") == notes_id
+            )
+            corners = get_corners(
+                slide.get("pageElements", []), get_matrix(None)
+            )
+            bounds = None
+            if corners:
+                xs = [x for x, _ in corners]
+                ys = [y for _, y in corners]
+                # What hangs off the slide isn't exported
+                bounds = [
+                    max(min(xs), 0.0),
+                    max(min(ys), 0.0),
+                    min(max(xs), page_size[0]),
+                    min(max(ys), page_size[1]),
+                ]
+                if bounds[0] >= bounds[2] or bounds[1] >= bounds[3]:
+                    bounds = None
+            slides.append(
+                {
+                    "id": slide["objectId"],
+                    "notes": notes,
+                    "notes_id": notes_id,
+                    "is_skipped": bool(props.get("isSkipped")),
+                    "bounds": bounds,
+                }
+            )
+        return {"page_size": page_size, "slides": slides}
+
+    def tag_slides(self, presentation_id: str, tags: dict[str, str]) -> int:
+        """Say in each slide's speaker notes which figures it's exported to,
+        given slide IDs by figure path, unless they already do, returning
+        how many tags were added.
+        """
+        slides = {
+            s["id"]: s for s in self.get_slides(presentation_id)["slides"]
+        }
+        batch = []
+        for path, slide_id in tags.items():
+            slide = slides.get(slide_id)
+            tag = get_figure_tag(path)
+            if slide is None or slide["notes_id"] is None:
+                continue
+            if tag in slide["notes"].splitlines():
+                continue
+            batch.append(
+                {
+                    "insertText": {
+                        "objectId": slide["notes_id"],
+                        "insertionIndex": 0,
+                        "text": tag + "\n",
+                    }
+                }
+            )
+        if batch:
+            resp = self.http.post(
+                f"{SLIDES_API_URL}/{presentation_id}:batchUpdate",
+                json={"requests": batch},
+                timeout=120,
+            )
+            self._check(resp, "tag the slides")
+        return len(batch)

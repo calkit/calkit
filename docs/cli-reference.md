@@ -944,20 +944,21 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                               |
-| ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------- |
-| `--title`                | str     | yes      |         |                                                                                           |
-| `--description`          | str     | yes      |         |                                                                                           |
-| `--stage`                | str     | no       |         | Name of the pipeline stage that generates this figure.                                    |
-| `--cmd`                  | str     | no       |         | Command to add to the stage, if specified.                                                |
-| `--dep`                  | str     | no       |         | Path to stage dependency.                                                                 |
-| `--out`                  | str     | no       |         | Path to stage output. Figure path will be added automatically.                            |
-| `--deps-from-stage-outs` | str     | no       |         | Stage name from which to add outputs as dependencies.                                     |
-| `--created-by-email`     | str     | no       |         | Email of whoever made this figure, for one drawn by hand rather than produced by a stage. |
-| `--created-by-orcid`     | str     | no       |         | ORCID of whoever made this figure.                                                        |
-| `--created-with-ai`      | str     | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                   |
-| `--no-commit`            | boolean | no       | False   |                                                                                           |
-| `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing figure if one exists.                                                  |
+| Option                   | Type    | Required | Default | Description                                                                                             |
+| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--title`                | str     | yes      |         |                                                                                                         |
+| `--description`          | str     | no       |         |                                                                                                         |
+| `--stage`                | str     | no       |         | Name of the pipeline stage that generates this figure.                                                  |
+| `--cmd`                  | str     | no       |         | Command to add to the stage, if specified.                                                              |
+| `--dep`                  | str     | no       |         | Path to stage dependency.                                                                               |
+| `--out`                  | str     | no       |         | Path to stage output. Figure path will be added automatically.                                          |
+| `--deps-from-stage-outs` | str     | no       |         | Stage name from which to add outputs as dependencies.                                                   |
+| `--created-by-email`     | str     | no       |         | Email of whoever made this figure, for one drawn by hand rather than produced by a stage.               |
+| `--created-by-orcid`     | str     | no       |         | ORCID of whoever made this figure.                                                                      |
+| `--created-with-ai`      | str     | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                 |
+| `--google-slide`         | str     | no       |         | URL of a Google Slides slide to export the figure from, cropped to what's drawn on it, e.g., a diagram. |
+| `--no-commit`            | boolean | no       | False   |                                                                                                         |
+| `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing figure if one exists.                                                                |
 
 <a id="subcommand-new-create-result"></a>
 
@@ -4551,14 +4552,14 @@ Work with Google Slides.
 
 | Command                                      | Description                                                                                                                 |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [`export`](#subcommand-google-slides-export) | Put figures into a Google Slides presentation, then export it.                                                              |
+| [`export`](#subcommand-google-slides-export) | Put figures into a Google Slides presentation, then export it, and figures from its slides.                                 |
 | [`pull`](#subcommand-google-slides-pull)     | Check whether the project's Google Slides presentations were edited, putting the stages that export them out of date if so. |
 
 <a id="subcommand-google-slides-export"></a>
 
 #### `calkit google-slides export`
 
-Put figures into a Google Slides presentation, then export it.
+Put figures into a Google Slides presentation, then export it, and figures from its slides.
 
 Usage:
 
@@ -4574,11 +4575,12 @@ Arguments:
 
 Options:
 
-| Option             | Type | Required | Default | Description                                                                                             |
-| ------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o`   | str  | yes      |         | File to export to, a .pdf or .pptx.                                                                     |
-| `--figure`         | str  | no       |         | Project figure to put in first, replacing the images tagged with its path, or added to the first slide. |
-| `--edit-time-path` | str  | no       |         | Where to record when the presentation was last edited.                                                  |
+| Option             | Type | Required | Default | Description                                                                                                                            |
+| ------------------ | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`   | str  | no       |         | File to export to, a .pdf or .pptx.                                                                                                    |
+| `--figure`         | str  | no       |         | Project figure to put in first, replacing the images tagged with its path, or added to the first slide.                                |
+| `--slide`          | str  | no       |         | Figure to export from a slide, as its path and the slide's ID, e.g., 'figures/setup.pdf=g2c3a1b9_0_12', cropped to what's drawn on it. |
+| `--edit-time-path` | str  | no       |         | Where to record when the presentation was last edited.                                                                                 |
 
 <a id="subcommand-google-slides-pull"></a>
 

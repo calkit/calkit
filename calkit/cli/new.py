@@ -626,7 +626,7 @@ def new_project(
 def new_figure(
     path: str,
     title: Annotated[str, typer.Option("--title")],
-    description: Annotated[str, typer.Option("--description")],
+    description: Annotated[str | None, typer.Option("--description")] = None,
     stage_name: Annotated[
         str | None,
         typer.Option(
@@ -686,6 +686,16 @@ def new_figure(
             ),
         ),
     ] = [],
+    google_slide: Annotated[
+        str | None,
+        typer.Option(
+            "--google-slide",
+            help=(
+                "URL of a Google Slides slide to export the figure from, "
+                "cropped to what's drawn on it, e.g., a diagram."
+            ),
+        ),
+    ] = None,
     no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     overwrite: Annotated[
         bool,
@@ -706,6 +716,11 @@ def new_figure(
         raise_error(f"Figure at path {path} already exists")
     elif overwrite and path in paths:
         figures = [fig for fig in figures if fig.get("path") != path]
+    if google_slide is not None and (cmd or deps or outs or outs_from_stage):
+        raise_error(
+            "A figure from a slide is exported by the presentation's stage, "
+            "so it takes no command, inputs, or outputs"
+        )
     if cmd is not None and stage_name is None:
         raise_error("Stage name must be provided if command is specified")
     if (deps or outs or outs_from_stage) and not cmd:
@@ -718,6 +733,10 @@ def new_figure(
     obj: dict = dict(path=path, title=title)
     if description is not None:
         obj["description"] = description
+    if google_slide is not None:
+        from calkit.cli.google_slides import add_slide_figure
+
+        stage_name = add_slide_figure(ck_info, google_slide, path, stage_name)
     if stage_name is not None:
         obj["stage"] = stage_name
     if created_by is not None:
@@ -766,6 +785,8 @@ def new_figure(
         repo.git.add("calkit.yaml")
         if cmd:
             repo.git.add("dvc.yaml")
+        if google_slide is not None:
+            repo.git.add(".calkit/google-slides")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Add figure {path}"])
 

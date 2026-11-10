@@ -3819,6 +3819,100 @@ export const GooglePresentationPostSchema = {
   title: "GooglePresentationPost",
 } as const
 
+export const GoogleSlideSchema = {
+  properties: {
+    id: {
+      type: "string",
+      title: "Id",
+    },
+    notes: {
+      type: "string",
+      title: "Notes",
+    },
+    notes_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Notes Id",
+    },
+    is_skipped: {
+      type: "boolean",
+      title: "Is Skipped",
+    },
+    bounds: {
+      anyOf: [
+        {
+          items: {
+            type: "number",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Bounds",
+    },
+  },
+  type: "object",
+  required: ["id", "notes", "notes_id", "is_skipped", "bounds"],
+  title: "GoogleSlide",
+} as const
+
+export const GoogleSlideTagsPostSchema = {
+  properties: {
+    tags: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Tags",
+    },
+  },
+  type: "object",
+  required: ["tags"],
+  title: "GoogleSlideTagsPost",
+} as const
+
+export const GoogleSlideTagsResponseSchema = {
+  properties: {
+    tagged: {
+      type: "integer",
+      title: "Tagged",
+    },
+  },
+  type: "object",
+  required: ["tagged"],
+  title: "GoogleSlideTagsResponse",
+} as const
+
+export const GoogleSlidesSchema = {
+  properties: {
+    page_size: {
+      items: {
+        type: "number",
+      },
+      type: "array",
+      title: "Page Size",
+    },
+    slides: {
+      items: {
+        $ref: "#/components/schemas/GoogleSlide",
+      },
+      type: "array",
+      title: "Slides",
+    },
+  },
+  type: "object",
+  required: ["page_size", "slides"],
+  title: "GoogleSlides",
+} as const
+
 export const GoogleSlidesPresentationPostSchema = {
   properties: {
     title: {

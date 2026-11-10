@@ -232,11 +232,15 @@ def is_same_export(old: bytes, new: bytes, path: str) -> bool:
 class Client:
     """Google Drive and Slides, with a user's OAuth token, which needs
     only the ``drive.file`` scope.
+
+    ``account`` is the email of the Google account the token is for, when
+    known, since one person can connect more than one.
     """
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, account: str | None = None) -> None:
         import requests
 
+        self.account = account
         self.http = requests.Session()
         self.http.headers["Authorization"] = f"Bearer {token}"
 

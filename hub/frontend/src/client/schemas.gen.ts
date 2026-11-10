@@ -985,6 +985,14 @@ export const ConnectedAccountsSchema = {
       type: "boolean",
       title: "Google",
     },
+    google_accounts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Google Accounts",
+      default: [],
+    },
     zotero: {
       type: "boolean",
       title: "Zotero",
@@ -3826,6 +3834,17 @@ export const GooglePresentationPostSchema = {
       type: "string",
       title: "Title",
     },
+    account: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Account",
+    },
   },
   type: "object",
   required: ["title"],
@@ -3853,6 +3872,17 @@ export const GoogleSlidesPresentationPostSchema = {
         },
       ],
       title: "Kind",
+    },
+    account: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Account",
     },
   },
   type: "object",

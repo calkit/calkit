@@ -14,6 +14,7 @@ from app.config import settings
 from app.models import User, UserCreate
 from app.security import verify_password
 from app.tests import (
+    create_random_user,
     random_email,
     random_lower_string,
     user_authentication_headers,
@@ -2204,15 +2205,23 @@ def test_user_google_presentations(
     }
     calls = []
 
+    # Only the work account can open this one
+    work_pid = "2AbCdEfGhIjKlMnOpQrStUv"
+
     class Client:
-        def __init__(self, token):
+        def __init__(self, token, account=None):
+            self.token = token
+            self.account = account
             calls.append(("token", token))
 
         def create_presentation(self, title):
             calls.append(("create", title))
+            calls.append(("created with", self.token))
             return info
 
         def get_presentation_info(self, presentation_id):
+            if presentation_id == work_pid and self.token == "token-work":
+                return dict(info, id=work_pid)
             if presentation_id != pid:
                 raise gs.GoogleError("Not found", 404)
             return info
@@ -2328,3 +2337,89 @@ def test_user_google_presentations(
             params={"format": "docx"},
         )
         assert r.status_code == 422
+        # Someone can connect more than one Google account, e.g., a
+        # personal one and a work one, each labeled with its email, which
+        # replaces the one connected before accounts were told apart
+        for email, token in [
+            ("me@gmail.com", "token-personal"),
+            ("me@caltech.edu", "token-work"),
+        ]:
+            users.save_google_token(
+                session=db,
+                user=user,
+                google_resp={
+                    "access_token": token,
+                    "expires_in": 3600,
+                    "scope": f"openid email {users.GOOGLE_DRIVE_SCOPE}",
+                },
+                verified_email=email,
+            )
+        db.expire_all()
+        r = client.get(
+            "/user/connected-accounts", headers=normal_user_token_headers
+        )
+        assert r.json()["google"]
+        assert r.json()["google_accounts"] == [
+            "me@gmail.com",
+            "me@caltech.edu",
+        ]
+        assert [
+            c.label
+            for c in users.get_google_credentials(
+                session=db, user=user, drive_only=False
+            )
+        ] == ["me@gmail.com", "me@caltech.edu"]
+        # A file is reached through whichever of them can open it
+        r = client.get(f"{base}/{work_pid}", headers=normal_user_token_headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["id"] == work_pid
+        # One is created with the account asked for, or the first connected
+        for account, token in [
+            ("me@caltech.edu", "token-work"),
+            (None, "token-personal"),
+        ]:
+            r = client.post(
+                base,
+                headers=normal_user_token_headers,
+                json={"title": "Talk", "account": account},
+            )
+            assert r.status_code == 200, r.text
+            assert calls[-1] == ("created with", token)
+        r = client.post(
+            base,
+            headers=normal_user_token_headers,
+            json={"title": "Talk", "account": "someone@else.org"},
+        )
+        assert r.status_code == 403
+        assert "isn't connected" in r.json()["detail"]
+        # A Google account can't belong to two Calkit users, nor be another
+        # user's email
+        other = create_random_user(db)
+        with pytest.raises(HTTPException) as e:
+            users.save_google_token(
+                session=db,
+                user=other,
+                google_resp={"access_token": "x", "expires_in": 3600},
+                verified_email="Me@Gmail.com",
+            )
+        assert e.value.status_code == 409
+        with pytest.raises(HTTPException) as e:
+            users.save_google_token(
+                session=db,
+                user=user,
+                google_resp={"access_token": "x", "expires_in": 3600},
+                verified_email=other.email,
+            )
+        assert e.value.status_code == 409
+        # Disconnecting one leaves the other
+        r = client.delete(
+            "/user/external-credentials/google",
+            headers=normal_user_token_headers,
+            params={"account": "me@gmail.com"},
+        )
+        assert r.status_code == 200, r.text
+        db.expire_all()
+        r = client.get(
+            "/user/connected-accounts", headers=normal_user_token_headers
+        )
+        assert r.json()["google_accounts"] == ["me@caltech.edu"]

@@ -33,7 +33,12 @@ not the rest of your Google Drive.
 Google asks which of your accounts to connect.
 A work or school account's administrator may not allow apps like Calkit,
 in which case Google says so; connect a personal account instead.
-Only one Google account can be connected at a time.
+You can connect more than one Google account, e.g., a personal one and a
+work one, with **Connect another**,
+but each can be connected to only one Calkit account.
+Calkit uses whichever of them can open a presentation.
+With more than one connected, choose which to create a presentation with,
+or on the command line, use `--google-account` with its email.
 
 ## Creating a presentation
 

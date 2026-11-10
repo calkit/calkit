@@ -930,6 +930,9 @@ class ConnectedAccounts(BaseModel):
     overleaf_token: bool = False
     overleaf_session: bool = False
     google: bool
+    # The emails of the Google accounts connected, which is empty for one
+    # connected before Calkit recorded which it was
+    google_accounts: list[str] = []
     zotero: bool
     # Whether a Calkit CLI has ever authenticated as this user, which is the
     # only reliable way to know the CLI is installed: the local server it
@@ -956,15 +959,16 @@ def get_user_connected_accounts(
     except HTTPException:
         pass
     # Signing in with Google gives a token too, but only for signing in, so
-    # Google counts as connected once it can reach Drive
-    google_connected = False
-    try:
-        users.get_google_token(session=session, user=current_user)
-        google_connected = users.GOOGLE_DRIVE_SCOPE in users.get_google_scopes(
-            session=session, user=current_user
-        )
-    except HTTPException:
-        pass
+    # a Google account counts as connected once it can reach Drive
+    google_accounts = []
+    for credential in users.get_google_credentials(
+        session=session, user=current_user
+    ):
+        try:
+            users.get_google_token(session=session, credential=credential)
+        except HTTPException:
+            continue
+        google_accounts.append(credential.provider_account_id or "")
     # Overleaf doesn't have refresh logic, just check if credential exists
     overleaf_token = (
         current_user.get_external_credential(provider="overleaf") is not None
@@ -1009,7 +1013,8 @@ def get_user_connected_accounts(
         overleaf=overleaf_token or overleaf_session,
         overleaf_token=overleaf_token,
         overleaf_session=overleaf_session,
-        google=google_connected,
+        google=bool(google_accounts),
+        google_accounts=[a for a in google_accounts if a],
         zotero=zotero_cred is not None,
         cli=cli_connected,
     )
@@ -1143,6 +1148,9 @@ def get_user_overleaf_session(
 
 class GooglePresentationPost(BaseModel):
     title: str
+    # Which of the user's Google accounts to create it with, by email,
+    # otherwise the first connected
+    account: str | None = None
 
 
 @router.post("/user/google/presentations")
@@ -1152,7 +1160,9 @@ def post_user_google_presentation(
     current_user: CurrentUser,
 ) -> GooglePresentation:
     """Create a Google Slides presentation in the user's Google Drive."""
-    client = users.get_google_slides_client(session=session, user=current_user)
+    client = users.get_google_slides_client(
+        session=session, user=current_user, account=req.account
+    )
     try:
         info = client.create_presentation(req.title)
     except calkit.google.GoogleError as e:
@@ -1168,7 +1178,9 @@ def get_user_google_presentation(
     """Get a Google Slides presentation's title, and when it was last
     edited.
     """
-    client = users.get_google_slides_client(session=session, user=current_user)
+    client = users.get_google_file_client(
+        session=session, user=current_user, file_id=presentation_id
+    )
     try:
         info = client.get_presentation_info(presentation_id)
     except calkit.google.GoogleError as e:
@@ -1188,8 +1200,8 @@ def post_user_google_presentation_figure(
     presentation, replacing the images tagged with its path.
     """
     resp = users.put_google_slides_figure(
-        lambda: users.get_google_slides_client(
-            session=session, user=current_user
+        lambda: users.get_google_file_client(
+            session=session, user=current_user, file_id=presentation_id
         ),
         presentation_id,
         path,
@@ -1207,7 +1219,9 @@ def get_user_google_presentation_export(
 ) -> Response:
     """Export a Google Slides presentation as a PDF or PowerPoint file."""
     mime_type = calkit.google.get_slides_export_mime_type(f"x.{format}")
-    client = users.get_google_slides_client(session=session, user=current_user)
+    client = users.get_google_file_client(
+        session=session, user=current_user, file_id=presentation_id
+    )
     try:
         content = client.export_presentation(presentation_id, mime_type)
     except calkit.google.GoogleError as e:
@@ -1242,9 +1256,23 @@ def post_user_google_auth(
         logger.error(f"Google auth failed: {msg}")
         raise HTTPException(resp.status_code, msg)
     google_resp = resp.json()
+    # Which Google account it is, since someone can connect more than one
+    userinfo = requests.get(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        headers={"Authorization": f"Bearer {google_resp['access_token']}"},
+        timeout=15,
+    )
+    if userinfo.status_code != 200:
+        raise HTTPException(400, "Could not fetch your Google profile")
+    profile = userinfo.json()
+    if not profile.get("email") or not profile.get("email_verified"):
+        raise HTTPException(400, "A verified Google email is required")
     logger.info("Saving Google token")
     users.save_google_token(
-        session=session, user=current_user, google_resp=google_resp
+        session=session,
+        user=current_user,
+        google_resp=google_resp,
+        verified_email=profile["email"],
     )
     return Message(message="success")
 
@@ -1393,20 +1421,32 @@ def get_user_overleaf_token(
 
 @router.delete("/user/external-credentials/{provider}")
 def delete_user_external_credential(
-    session: SessionDep, current_user: CurrentUser, provider: str
+    session: SessionDep,
+    current_user: CurrentUser,
+    provider: str,
+    account: str | None = None,
 ) -> Message:
-    """Disconnect an external account by deleting its credential."""
+    """Disconnect an external account by deleting its credential, or for
+    Google, the account whose email is ``account``, or otherwise all of
+    them.
+    """
     if provider == "github":
         raise HTTPException(
             403, "Cannot disconnect GitHub as it is your login method"
         )
+    if provider == "google":
+        for credential in users.get_google_credentials(
+            session=session, user=current_user, drive_only=False
+        ):
+            if account is None or credential.label == account.lower():
+                session.delete(credential)
     credential = users.get_external_credential(
         session=session,
         user=current_user,
         provider=provider,
         label="default",
     )
-    if credential:
+    if credential and provider != "google":
         session.delete(credential)
     # Also delete legacy tokens if they exist
     if provider == "zenodo" and current_user.zenodo_token:

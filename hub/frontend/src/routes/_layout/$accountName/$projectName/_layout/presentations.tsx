@@ -203,6 +203,9 @@ function NewGoogleSlides({
   const [path, setPath] = useState("")
   const [pathEdited, setPathEdited] = useState(false)
   const [kind, setKind] = useState<"slides" | "poster">("slides")
+  // Which Google account to create it with, when more than one is
+  // connected, otherwise the first
+  const [account, setAccount] = useState("")
   // Linked from here once made, since opening a window after the request
   // returns, rather than on a click, gets blocked as a pop-up
   const [created, setCreated] = useState<Presentation | null>(null)
@@ -214,11 +217,13 @@ function NewGoogleSlides({
   })
   // Signing in with Google isn't enough, since it doesn't reach Drive
   const googleConnected = connectedAccountsQuery.data?.google ?? false
+  const googleAccounts = connectedAccountsQuery.data?.google_accounts ?? []
   const close = () => {
     setTitle("")
     setPath("")
     setPathEdited(false)
     setKind("slides")
+    setAccount("")
     setCreated(null)
     onClose()
   }
@@ -227,7 +232,12 @@ function NewGoogleSlides({
       ProjectsService.postProjectGoogleSlidesPresentation({
         owner_name: accountName,
         project_name: projectName,
-        googleSlidesPresentationPost: { title, path, kind },
+        googleSlidesPresentationPost: {
+          title,
+          path,
+          kind,
+          account: account || null,
+        },
       }).then((response) => response.data),
     onSuccess: (data) => {
       setCreated(data)
@@ -327,6 +337,21 @@ function NewGoogleSlides({
                   <option value="poster">Poster</option>
                 </Select>
               </FormControl>
+              {googleAccounts.length > 1 && (
+                <FormControl mt={4}>
+                  <FormLabel>Google account</FormLabel>
+                  <Select
+                    value={account || googleAccounts[0]}
+                    onChange={(e) => setAccount(e.target.value)}
+                  >
+                    {googleAccounts.map((a) => (
+                      <option key={a} value={a}>
+                        {a}
+                      </option>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
               <FormControl mt={4} isRequired>
                 <FormLabel>PDF path</FormLabel>
                 <Input

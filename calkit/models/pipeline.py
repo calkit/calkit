@@ -2469,10 +2469,15 @@ class GimpExportStage(AppExportStage):
 
 class GoogleSlidesExportStage(Stage):
     """A Google Slides presentation exported as a PDF, or as a PowerPoint
-    copy kept in the project, with the project's figures it shows put in
-    first.
+    copy kept in the project.
 
-    It goes out of date when a figure changes, or when the presentation is
+    The images among its inputs, i.e., PNG, JPEG, or GIF figures, are put
+    in first: each replaces the images whose alt text title is 'calkit:'
+    and its path, e.g., 'calkit:figures/rates.png', keeping their place and
+    size, or, if there are none, is added to the first slide with that
+    title.
+
+    It goes out of date when an input changes, or when the presentation is
     edited, which 'calkit status', 'calkit run', and 'calkit pull' check
     for.
     """
@@ -2481,22 +2486,11 @@ class GoogleSlidesExportStage(Stage):
     presentation_url: str = Field(
         description="URL of the Google Slides presentation."
     )
-    figures: list[RelativeChildPathString] = Field(
-        default=[],
-        description=(
-            "Project figures the presentation shows, each a PNG, JPEG, or "
-            "GIF. Each replaces the images whose alt text title is 'calkit:' "
-            "and its path, e.g., 'calkit:figures/rates.png', keeping their "
-            "place and size, or, if there are none, is added to the first "
-            "slide with that title."
-        ),
-    )
     environment: str = "_system"
 
     @model_validator(mode="after")
     def _check_paths(self) -> "GoogleSlidesExportStage":
         from calkit.google import (
-            get_figure_mime_type,
             get_slides_export_mime_type,
             get_slides_presentation_id,
         )
@@ -2510,9 +2504,18 @@ class GoogleSlidesExportStage(Stage):
             get_slides_export_mime_type(
                 out if isinstance(out, str) else out.path
             )
-        for figure in self.figures:
-            get_figure_mime_type(figure)
         return self
+
+    @property
+    def figure_paths(self) -> list[str]:
+        """The inputs put in the presentation, which are its images."""
+        from calkit.google import FIGURE_MIME_TYPES
+
+        return [
+            path
+            for path in self.input_paths
+            if posixpath.splitext(path)[1].lower() in FIGURE_MIME_TYPES
+        ]
 
     @property
     def presentation_id(self) -> str:
@@ -2528,9 +2531,8 @@ class GoogleSlidesExportStage(Stage):
         edit_time_path = self.path_from_wdir(
             get_edit_time_path(self.presentation_id)
         )
-        for path in [edit_time_path] + list(self.figures):
-            if path not in deps:
-                deps.append(path)
+        if edit_time_path not in deps:
+            deps.append(edit_time_path)
         return deps
 
     @property
@@ -2555,12 +2557,12 @@ class GoogleSlidesExportStage(Stage):
         from calkit.google import get_edit_time_path
 
         cmd = (
-            f"calkit google export-slides {shlex.quote(self.presentation_url)}"
+            f"calkit export google-slides {shlex.quote(self.presentation_url)}"
         )
         for out in self.outputs:
             path = out if isinstance(out, str) else out.path
             cmd += f" -o {shlex.quote(path)}"
-        for figure in self.figures:
+        for figure in self.figure_paths:
             cmd += f" --figure {shlex.quote(figure)}"
         # It runs in the wdir, but records the edit under the project
         if self.wdir is not None:

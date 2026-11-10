@@ -1891,7 +1891,7 @@
     },
     "GoogleSlidesExportStage": {
       "additionalProperties": false,
-      "description": "A Google Slides presentation exported as a PDF, or as a PowerPoint\ncopy kept in the project, with the project's figures it shows put in\nfirst.\n\nIt goes out of date when a figure changes, or when the presentation is\nedited, which 'calkit status', 'calkit run', and 'calkit pull' check\nfor.",
+      "description": "A Google Slides presentation exported as a PDF, or as a PowerPoint\ncopy kept in the project.\n\nThe images among its inputs, i.e., PNG, JPEG, or GIF figures, are put\nin first: each replaces the images whose alt text title is 'calkit:'\nand its path, e.g., 'calkit:figures/rates.png', keeping their place and\nsize, or, if there are none, is added to the first slide with that\ntitle.\n\nIt goes out of date when an input changes, or when the presentation is\nedited, which 'calkit status', 'calkit run', and 'calkit pull' check\nfor.",
       "properties": {
         "always_run": {
           "default": false,
@@ -1927,15 +1927,6 @@
           "default": "_system",
           "title": "Environment",
           "type": "string"
-        },
-        "figures": {
-          "default": [],
-          "description": "Project figures the presentation shows, each a PNG, JPEG, or GIF. Each replaces the images whose alt text title is 'calkit:' and its path, e.g., 'calkit:figures/rates.png', keeping their place and size, or, if there are none, is added to the first slide with that title.",
-          "items": {
-            "type": "string"
-          },
-          "title": "Figures",
-          "type": "array"
         },
         "frozen": {
           "default": false,

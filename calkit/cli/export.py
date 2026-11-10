@@ -5,7 +5,7 @@ from an Inkscape SVG.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import typer
 from typing_extensions import Annotated
@@ -137,3 +137,105 @@ def export_gimp(
         gimp(source, output)
     except ValueError as e:
         raise_error(str(e))
+
+
+@export_app.command(name="google-slides")
+def google_slides(
+    url: Annotated[
+        str, typer.Argument(help="URL of the Google Slides presentation.")
+    ],
+    outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--output", "-o", help="File to export to, a .pdf or .pptx."
+        ),
+    ],
+    figures: Annotated[
+        list[str],
+        typer.Option(
+            "--figure",
+            help=(
+                "Project figure to put in first, replacing the images "
+                "tagged with its path, or added to the first slide."
+            ),
+        ),
+    ] = [],
+    edit_time_path: Annotated[
+        str | None,
+        typer.Option(
+            "--edit-time-path",
+            help="Where to record when the presentation was last edited.",
+        ),
+    ] = None,
+) -> None:
+    """Put figures into a Google Slides presentation, then export it."""
+    import posixpath
+
+    import calkit.google
+    from calkit.cli.google import get_presentation_response
+
+    def ask_hub(kind: str, suffix: str, action: str, **kwargs: Any) -> Any:
+        try:
+            return get_presentation_response(
+                kind, presentation_id, suffix, **kwargs
+            )
+        except Exception as e:
+            raise_error(f"Failed to {action}: {e}")
+
+    try:
+        presentation_id = calkit.google.get_slides_presentation_id(url)
+        mime_types = [
+            calkit.google.get_slides_export_mime_type(p) for p in outputs
+        ]
+        figure_mime_types = [
+            calkit.google.get_figure_mime_type(p) for p in figures
+        ]
+    except ValueError as e:
+        raise_error(str(e))
+    for figure, mime_type in zip(figures, figure_mime_types):
+        if not os.path.isfile(figure):
+            raise_error(f"Figure {figure} does not exist")
+        with open(figure, "rb") as f:
+            content = f.read()
+        resp = ask_hub(
+            "post",
+            "/figures",
+            f"put {figure} in the presentation",
+            params={"path": figure},
+            files={"file": (posixpath.basename(figure), content, mime_type)},
+        )
+        if resp["added"]:
+            typer.echo(
+                f"Added {figure} to the first slide; move it into place in "
+                "Google Slides"
+            )
+        else:
+            typer.echo(f"Updated {figure} in {resp['replaced']} place(s)")
+    # Taken before exporting, since putting the figures in edited it, and
+    # so an edit made while exporting is seen as one next time
+    info = ask_hub("get", "", "check when it was last edited")
+    for path, mime_type in zip(outputs, mime_types):
+        typer.echo(f"Exporting {path}")
+        resp = ask_hub(
+            "get",
+            "/export",
+            f"export {path}",
+            params={"format": posixpath.splitext(path)[1][1:].lower()},
+            as_json=False,
+        )
+        # An unchanged presentation exports to a file that differs only in
+        # its date, which would rerun everything downstream of it
+        if os.path.isfile(path):
+            with open(path, "rb") as existing:
+                if calkit.google.is_same_export(
+                    existing.read(), resp.content, path
+                ):
+                    typer.echo(f"{path} is unchanged, so it was kept")
+                    continue
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "wb") as out:
+            out.write(resp.content)
+    calkit.google.write_edit_time(
+        edit_time_path or calkit.google.get_edit_time_path(presentation_id),
+        info["modified_time"],
+    )

@@ -14,7 +14,7 @@ from requests.exceptions import JSONDecodeError
 from sqlmodel import Session, col, func, select
 
 import app.stripe
-import calkit.google_slides
+import calkit.google
 from app import utcnow
 from app.config import settings
 from app.core import (
@@ -1158,7 +1158,7 @@ def get_google_scopes(session: Session, user: User) -> set[str]:
 
 def get_google_slides_client(
     session: Session, user: User
-) -> calkit.google_slides.Client:
+) -> calkit.google.Client:
     """A client for the user's Google Slides, which needs Drive connected,
     not just signing in with Google.
 
@@ -1168,13 +1168,13 @@ def get_google_slides_client(
     try:
         token = get_google_token(session=session, user=user)
     except HTTPException:
-        raise HTTPException(403, calkit.google_slides.CONNECT_ADVICE)
+        raise HTTPException(403, calkit.google.CONNECT_ADVICE)
     if GOOGLE_DRIVE_SCOPE not in get_google_scopes(session=session, user=user):
-        raise HTTPException(403, calkit.google_slides.CONNECT_ADVICE)
-    return calkit.google_slides.Client(token)
+        raise HTTPException(403, calkit.google.CONNECT_ADVICE)
+    return calkit.google.Client(token)
 
 
-def raise_google_error(e: calkit.google_slides.GoogleError) -> NoReturn:
+def raise_google_error(e: calkit.google.GoogleError) -> NoReturn:
     # Google's own 5xx is the hub failing to reach something upstream, and
     # its 401 is the Google connection, not the user's login
     status_code = 502 if e.status_code >= 500 else e.status_code

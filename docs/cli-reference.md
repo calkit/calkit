@@ -50,7 +50,7 @@
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
-| [`google-slides`](#command-group-google-slides)  | Work with Google Slides.                                                                                     |
+| [`google`](#command-group-google)                | Work with Google files, e.g., Slides.                                                                        |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
@@ -4544,27 +4544,27 @@ Options:
 | `--force`, `-f`  | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                            |
 | `--verbose`      | boolean | no       | False   | Enable verbose output.                                                                                                                      |
 
-<a id="command-group-google-slides"></a>
+<a id="command-group-google"></a>
 
-### `calkit google-slides`
+### `calkit google`
 
-Work with Google Slides.
+Work with Google files, e.g., Slides.
 
-| Command                                      | Description                                                                                                                 |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [`export`](#subcommand-google-slides-export) | Put figures into a Google Slides presentation, then export it.                                                              |
-| [`pull`](#subcommand-google-slides-pull)     | Check whether the project's Google Slides presentations were edited, putting the stages that export them out of date if so. |
+| Command                                             | Description                                                                                                                 |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [`export-slides`](#subcommand-google-export-slides) | Put figures into a Google Slides presentation, then export it.                                                              |
+| [`pull`](#subcommand-google-pull)                   | Check whether the project's Google Slides presentations were edited, putting the stages that export them out of date if so. |
 
-<a id="subcommand-google-slides-export"></a>
+<a id="subcommand-google-export-slides"></a>
 
-#### `calkit google-slides export`
+#### `calkit google export-slides`
 
 Put figures into a Google Slides presentation, then export it.
 
 Usage:
 
 ```text
-calkit google-slides export [OPTIONS] URL
+calkit google export-slides [OPTIONS] URL
 ```
 
 Arguments:
@@ -4581,16 +4581,16 @@ Options:
 | `--figure`         | str  | no       |         | Project figure to put in first, replacing the images tagged with its path, or added to the first slide. |
 | `--edit-time-path` | str  | no       |         | Where to record when the presentation was last edited.                                                  |
 
-<a id="subcommand-google-slides-pull"></a>
+<a id="subcommand-google-pull"></a>
 
-#### `calkit google-slides pull`
+#### `calkit google pull`
 
 Check whether the project's Google Slides presentations were edited, putting the stages that export them out of date if so.
 
 Usage:
 
 ```text
-calkit google-slides pull
+calkit google pull
 ```
 
 <a id="command-group-hub-cloud"></a>

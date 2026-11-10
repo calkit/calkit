@@ -110,14 +110,24 @@ def test_googleslidesexportstage():
     )
     sd = s.to_dvc()
     assert sd["cmd"] == (
-        f"calkit google-slides export {url} -o poster/poster.pdf "
+        f"calkit google export-slides {url} -o poster/poster.pdf "
         "-o poster/poster.pptx --figure figures/rates.png"
     )
     # Editing the presentation or a figure puts it out of date
     assert sd["deps"] == [
-        ".calkit/google-slides/1AbCdEfGhIjKlMnOpQrStUv.json",
+        ".calkit/google/1AbCdEfGhIjKlMnOpQrStUv.json",
         "figures/rates.png",
     ]
+    # Outputs are kept while it runs, so an unchanged export can be kept
+    assert sd["outs"] == [
+        {"poster/poster.pdf": {"persist": True}},
+        {"poster/poster.pptx": {"persist": True}},
+    ]
+    s2 = GoogleSlidesExportStage(
+        presentation_url=url,
+        outputs=[{"path": "poster.pdf", "storage": "git"}],
+    )
+    assert s2.dvc_outs == [{"poster.pdf": {"cache": False, "persist": True}}]
     assert s.to_ck_dict() == {
         "kind": "google-slides-export",
         "name": "export-poster",
@@ -129,7 +139,7 @@ def test_googleslidesexportstage():
     s = GoogleSlidesExportStage(
         presentation_url=url, outputs=["poster.pdf"], wdir="poster"
     )
-    edit_time_path = "../.calkit/google-slides/1AbCdEfGhIjKlMnOpQrStUv.json"
+    edit_time_path = "../.calkit/google/1AbCdEfGhIjKlMnOpQrStUv.json"
     assert s.dvc_deps == [edit_time_path]
     assert s.dvc_cmd.endswith(f"--edit-time-path {edit_time_path}")
     for kwargs, match in [

@@ -2495,32 +2495,34 @@ class GoogleSlidesExportStage(Stage):
 
     @model_validator(mode="after")
     def _check_paths(self) -> "GoogleSlidesExportStage":
-        from calkit.google_slides import (
-            get_export_mime_type,
+        from calkit.google import (
             get_figure_mime_type,
-            get_presentation_id,
+            get_slides_export_mime_type,
+            get_slides_presentation_id,
         )
 
-        get_presentation_id(self.presentation_url)
+        get_slides_presentation_id(self.presentation_url)
         if not self.outputs:
             raise ValueError(
                 "A Google Slides export needs an output, e.g., a PDF"
             )
         for out in self.outputs:
-            get_export_mime_type(out if isinstance(out, str) else out.path)
+            get_slides_export_mime_type(
+                out if isinstance(out, str) else out.path
+            )
         for figure in self.figures:
             get_figure_mime_type(figure)
         return self
 
     @property
     def presentation_id(self) -> str:
-        from calkit.google_slides import get_presentation_id
+        from calkit.google import get_slides_presentation_id
 
-        return get_presentation_id(self.presentation_url)
+        return get_slides_presentation_id(self.presentation_url)
 
     @property
     def dvc_deps(self) -> list[str]:
-        from calkit.google_slides import get_edit_time_path
+        from calkit.google import get_edit_time_path
 
         deps = super().dvc_deps
         edit_time_path = self.path_from_wdir(
@@ -2532,11 +2534,28 @@ class GoogleSlidesExportStage(Stage):
         return deps
 
     @property
+    def dvc_outs(self) -> list[str | dict]:
+        # Kept while it runs, so an export identical to the last but for its
+        # date can be left alone, rather than rerunning what depends on it
+        outs: list[str | dict] = []
+        for out in super().dvc_outs:
+            if isinstance(out, str):
+                outs.append({out: dict(persist=True)})
+            else:
+                outs.append(
+                    {
+                        path: dict(opts or {}, persist=True)
+                        for path, opts in out.items()
+                    }
+                )
+        return outs
+
+    @property
     def dvc_cmd(self) -> str:
-        from calkit.google_slides import get_edit_time_path
+        from calkit.google import get_edit_time_path
 
         cmd = (
-            f"calkit google-slides export {shlex.quote(self.presentation_url)}"
+            f"calkit google export-slides {shlex.quote(self.presentation_url)}"
         )
         for out in self.outputs:
             path = out if isinstance(out, str) else out.path

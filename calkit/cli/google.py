@@ -1,4 +1,4 @@
-"""CLI for working with Google Slides."""
+"""CLI for working with Google files, e.g., Slides."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing_extensions import Annotated
 import calkit
 from calkit.cli import AliasGroup, raise_error
 
-google_slides_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+google_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
 def get_hub_response(kind: str, path: str, **kwargs: Any) -> Any:
@@ -59,18 +59,23 @@ def get_hub_response(kind: str, path: str, **kwargs: Any) -> Any:
 
 
 def record_edit_times(ck_info: dict, quick: bool = False) -> list[str]:
-    """Record when each Google Slides presentation the pipeline exports was
-    last edited, asking the hub, and return the stages an edit put out of
-    date.
+    """Record when each Google Slides presentation the pipeline, or a
+    subproject's, exports was last edited, asking the hub, and return the
+    stages an edit put out of date, e.g., 'sub/dvc.yaml:export-poster' in a
+    subproject.
 
     ``quick`` makes one short attempt per presentation, for checks that must
-    not hold things up, e.g., in ``calkit status``.
+    not hold things up, e.g., in ``calkit status``. Times that could be
+    fetched are recorded even if others couldn't, which are then raised as
+    a ``RuntimeError``.
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    from calkit.google_slides import (
+    import requests
+
+    from calkit.google import (
         get_edit_time_path,
-        get_presentation_id,
+        get_slides_presentation_id,
         write_edit_time,
     )
 
@@ -83,24 +88,52 @@ def record_edit_times(ck_info: dict, quick: bool = False) -> list[str]:
         )
         return str(info["modified_time"])
 
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    ids = {
-        name: get_presentation_id(stage["presentation_url"])
-        for name, stage in stages.items()
-        if stage.get("kind") == "google-slides-export"
-    }
-    unique_ids = list(dict.fromkeys(ids.values()))
+    # Each presentation's exporting stages, by project directory
+    exporters: dict[str, dict[str, list[str]]] = {}
+    for wdir, info in calkit.iter_projects(ck_info=ck_info):
+        stages = (info.get("pipeline") or {}).get("stages") or {}
+        for name, stage in stages.items():
+            if not (
+                isinstance(stage, dict)
+                and stage.get("kind") == "google-slides-export"
+            ):
+                continue
+            presentation_id = get_slides_presentation_id(
+                stage["presentation_url"]
+            )
+            label = name if wdir == "." else f"{wdir}/dvc.yaml:{name}"
+            exporters.setdefault(presentation_id, {}).setdefault(
+                wdir, []
+            ).append(label)
     with ThreadPoolExecutor(max_workers=8) as pool:
-        modified_times = list(pool.map(get_modified_time, unique_ids))
-    edited_ids = {
-        presentation_id
-        for presentation_id, modified_time in zip(unique_ids, modified_times)
-        if write_edit_time(get_edit_time_path(presentation_id), modified_time)
-    }
-    return [name for name, pid in ids.items() if pid in edited_ids]
+        futures = {
+            presentation_id: pool.submit(get_modified_time, presentation_id)
+            for presentation_id in exporters
+        }
+    edited = []
+    failures = []
+    unreachable = False
+    for presentation_id, future in futures.items():
+        try:
+            modified_time = future.result()
+        except (requests.ConnectionError, requests.Timeout):
+            unreachable = True
+            continue
+        except Exception as e:
+            failures.append(f"{presentation_id}: {e}")
+            continue
+        for wdir, labels in exporters[presentation_id].items():
+            path = os.path.join(wdir, get_edit_time_path(presentation_id))
+            if write_edit_time(path, modified_time):
+                edited += labels
+    if unreachable:
+        raise RuntimeError("couldn't reach the hub")
+    if failures:
+        raise RuntimeError("; ".join(failures))
+    return edited
 
 
-def add_presentation(
+def add_slides_presentation(
     info: dict,
     path: str,
     kind: str | None,
@@ -112,14 +145,14 @@ def add_presentation(
     """Add a Google Slides presentation to the project, with the stage
     that exports it to ``path``, given what the hub said about it.
     """
-    import calkit.google_slides
+    import calkit.google
     from calkit.core import ryaml
 
     if stage_name is None:
-        stage_name = calkit.google_slides.get_default_stage_name(path)
+        stage_name = calkit.google.get_default_slides_stage_name(path)
     ck_info = calkit.load_calkit_info()
     try:
-        calkit.google_slides.add_presentation(
+        calkit.google.add_slides_presentation(
             ck_info,
             info,
             path=path,
@@ -132,8 +165,8 @@ def add_presentation(
         raise_error(str(e))
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
-    edit_time_path = calkit.google_slides.get_edit_time_path(info["id"])
-    calkit.google_slides.write_edit_time(edit_time_path, info["modified_time"])
+    edit_time_path = calkit.google.get_edit_time_path(info["id"])
+    calkit.google.write_edit_time(edit_time_path, info["modified_time"])
     typer.echo(
         f"Added {info['url']} as {path}, exported by stage '{stage_name}'"
     )
@@ -145,8 +178,8 @@ def add_presentation(
         )
 
 
-@google_slides_app.command(name="export")
-def export(
+@google_app.command(name="export-slides")
+def export_slides(
     url: Annotated[
         str, typer.Argument(help="URL of the Google Slides presentation.")
     ],
@@ -175,7 +208,7 @@ def export(
     ] = None,
 ) -> None:
     """Put figures into a Google Slides presentation, then export it."""
-    import calkit.google_slides
+    import calkit.google
 
     def ask_hub(kind: str, path: str, action: str, **kwargs: Any) -> Any:
         try:
@@ -184,12 +217,12 @@ def export(
             raise_error(f"Failed to {action}: {e}")
 
     try:
-        presentation_id = calkit.google_slides.get_presentation_id(url)
+        presentation_id = calkit.google.get_slides_presentation_id(url)
         mime_types = [
-            calkit.google_slides.get_export_mime_type(p) for p in outputs
+            calkit.google.get_slides_export_mime_type(p) for p in outputs
         ]
         figure_mime_types = [
-            calkit.google_slides.get_figure_mime_type(p) for p in figures
+            calkit.google.get_figure_mime_type(p) for p in figures
         ]
     except ValueError as e:
         raise_error(str(e))
@@ -213,6 +246,9 @@ def export(
             )
         else:
             typer.echo(f"Updated {figure} in {resp['replaced']} place(s)")
+    # Taken before exporting, since putting the figures in edited it, and
+    # so an edit made while exporting is seen as one next time
+    info = ask_hub("get", api_path, "check when it was last edited")
     for path, mime_type in zip(outputs, mime_types):
         typer.echo(f"Exporting {path}")
         resp = ask_hub(
@@ -226,7 +262,7 @@ def export(
         # its date, which would rerun everything downstream of it
         if os.path.isfile(path):
             with open(path, "rb") as existing:
-                if calkit.google_slides.is_same_export(
+                if calkit.google.is_same_export(
                     existing.read(), resp.content, path
                 ):
                     typer.echo(f"{path} is unchanged, so it was kept")
@@ -234,17 +270,13 @@ def export(
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "wb") as out:
             out.write(resp.content)
-    # Putting the figures in edited the presentation, which this export
-    # already accounts for
-    info = ask_hub("get", api_path, "check when it was last edited")
-    calkit.google_slides.write_edit_time(
-        edit_time_path
-        or calkit.google_slides.get_edit_time_path(presentation_id),
+    calkit.google.write_edit_time(
+        edit_time_path or calkit.google.get_edit_time_path(presentation_id),
         info["modified_time"],
     )
 
 
-@google_slides_app.command(name="pull")
+@google_app.command(name="pull")
 def pull() -> None:
     """Check whether the project's Google Slides presentations were edited,
     putting the stages that export them out of date if so.

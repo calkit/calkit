@@ -382,8 +382,8 @@ copy kept in the project, with the project's figures it shows put in
 first.
 
 It goes out of date when a figure changes, or when the presentation is
-edited, which 'calkit run' and 'calkit pull' check for, since asking
-Google takes too long for every 'calkit status'.
+edited, which 'calkit status', 'calkit run', and 'calkit pull' check
+for.
 
 | Kind-specific parameter | Type      | Required | Default    | Description                                                                                                                                                                                                                                                                    |
 | ----------------------- | --------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

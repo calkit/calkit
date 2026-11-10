@@ -186,3 +186,52 @@ def test_client():
     )
     with pytest.raises(gs.GoogleError, match="isn't a Google Slides"):
         client.get_presentation_info(pid)
+
+
+def test_is_same_export():
+    import io
+    import zipfile
+
+    def pdf(date, doc_id, text):
+        return (
+            b"%PDF-1.4\n1 0 obj << /Producer (Skia/PDF) "
+            b"/CreationDate (D:" + date + b") /ModDate <" + doc_id + b"> "
+            b">> endobj\n<x:xmpmeta><xmp:CreateDate>" + date + b"</xmp:"
+            b"CreateDate><xmpMM:DocumentID>uuid:" + doc_id + b"</xmpMM:"
+            b"DocumentID></x:xmpmeta>\nBT (" + text + b") Tj ET\ntrailer "
+            b"<< /ID [<" + doc_id + b"> <" + doc_id + b">] >>\n%%EOF"
+        )
+
+    def pptx(date, title, slide):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr(
+                "docProps/core.xml",
+                f'<dc:title>{title}</dc:title><dcterms:modified xsi:type="W3"'
+                f">{date}</dcterms:modified>",
+            )
+            z.writestr("ppt/slides/slide1.xml", slide)
+        return buf.getvalue()
+
+    old = pdf(b"20261109000000Z", b"AB12", b"Rates")
+    assert gs.is_same_export(old, old, "p.pdf")
+    # Only its dates and IDs differ
+    assert gs.is_same_export(
+        old, pdf(b"20261110120000Z", b"CD34", b"Rates"), "p.pdf"
+    )
+    assert not gs.is_same_export(
+        old, pdf(b"20261110120000Z", b"CD34", b"Arrhenius"), "p.pdf"
+    )
+    old = pptx("2026-11-09T00:00:00Z", "Poster", "<p>Rates</p>")
+    assert gs.is_same_export(
+        old, pptx("2026-11-10T12:00:00Z", "Poster", "<p>Rates</p>"), "p.pptx"
+    )
+    assert not gs.is_same_export(
+        old, pptx("2026-11-10T12:00:00Z", "Talk", "<p>Rates</p>"), "p.pptx"
+    )
+    assert not gs.is_same_export(
+        old, pptx("2026-11-09T00:00:00Z", "Poster", "<p>Arr</p>"), "p.pptx"
+    )
+    # Anything that can't be read counts as changed
+    assert not gs.is_same_export(b"not a zip", b"not a zip!", "p.pptx")
+    assert not gs.is_same_export(b"a", b"b", "p.png")

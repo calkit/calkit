@@ -184,6 +184,15 @@ def export(
             params={"format": posixpath.splitext(path)[1][1:].lower()},
             as_json=False,
         )
+        # An unchanged presentation exports to a file that differs only in
+        # its date, which would rerun everything downstream of it
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                if calkit.google_slides.is_same_export(
+                    f.read(), resp.content, path
+                ):
+                    typer.echo(f"{path} is unchanged, so it was kept")
+                    continue
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "wb") as f:
             f.write(resp.content)

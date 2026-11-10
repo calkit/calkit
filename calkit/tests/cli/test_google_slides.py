@@ -133,6 +133,15 @@ def test_google_slides(tmp_dir, monkeypatch):
         assert f.read() == "pptx of t2"
     with open(edit_time_path) as f:
         assert json.load(f) == {"modified_time": "t2"}
+    # Exporting what's already there keeps the file, so nothing downstream
+    # of it reruns
+    mtime = os.path.getmtime("poster/poster.pdf")
+    res = runner.invoke(
+        google_slides_app, ["export", url, "-o", "poster/poster.pdf"]
+    )
+    assert res.exit_code == 0, res.output
+    assert "poster/poster.pdf is unchanged, so it was kept" in res.output
+    assert os.path.getmtime("poster/poster.pdf") == mtime
     # Only a presentation edited since is reported
     ck_info = calkit.load_calkit_info()
     assert record_edit_times(ck_info) == []

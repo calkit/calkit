@@ -111,6 +111,55 @@ def get_export_mime_type(path: str) -> str:
     return EXPORT_MIME_TYPES[ext]
 
 
+def is_same_export(old: bytes, new: bytes, path: str) -> bool:
+    """Whether two exports of a presentation differ only in what an export
+    stamps on its own, e.g., the date, so keeping the old file avoids
+    rerunning everything downstream of it.
+
+    Anything that can't be read is taken as changed.
+    """
+    import io
+    import zipfile
+
+    def get_pdf_content(data: bytes) -> bytes:
+        for pattern in [
+            # Info dictionary dates, as literal or hex strings
+            rb"/(CreationDate|ModDate)\s*(\([^)]*\)|<[0-9A-Fa-f]*>)",
+            # The trailer ID, which is usually derived from the date
+            rb"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]",
+            # XMP metadata, when it isn't compressed
+            rb"<(xmp:CreateDate|xmp:ModifyDate|xmp:MetadataDate|"
+            rb"xmpMM:DocumentID|xmpMM:InstanceID)>[^<]*</\1>",
+        ]:
+            data = re.sub(pattern, b"", data)
+        return data
+
+    def get_pptx_content(data: bytes) -> dict[str, bytes] | None:
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                content = {name: z.read(name) for name in z.namelist()}
+        except (zipfile.BadZipFile, KeyError):
+            return None
+        # Its creation and modification times, but not, e.g., its title
+        if "docProps/core.xml" in content:
+            content["docProps/core.xml"] = re.sub(
+                rb"<(dcterms:created|dcterms:modified)\b[^>]*>[^<]*</\1>",
+                b"",
+                content["docProps/core.xml"],
+            )
+        return content
+
+    if old == new:
+        return True
+    ext = posixpath.splitext(path)[1].lower()
+    if ext == ".pdf":
+        return get_pdf_content(old) == get_pdf_content(new)
+    if ext == ".pptx":
+        old_content = get_pptx_content(old)
+        return old_content is not None and old_content == get_pptx_content(new)
+    return False
+
+
 class Client:
     """Google Drive and Slides, with a user's OAuth token, which needs
     only the ``drive.file`` scope.

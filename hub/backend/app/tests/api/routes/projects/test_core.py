@@ -1267,13 +1267,14 @@ def test_google_slides_presentations(
 
     pid = "1AbCdEfGhIjKlMnOpQrStUv"
     url = gs.get_presentation_url(pid)
-    # A presentation exported from Google Slides says where it's edited
+    # A presentation exported from Google Slides says where it's edited,
+    # its stage found from the pipeline's outputs
     response, _, _, _ = _get_declared_at_ref(
         client,
         "presentations",
         "presentations",
         [
-            {"path": "poster.pdf", "stage": "export-poster"},
+            {"path": "poster.pdf"},
             {"path": "slides/talk.pdf"},
         ],
         extra={
@@ -1290,6 +1291,7 @@ def test_google_slides_presentations(
     )
     assert response.status_code == 200, response.text
     pres = {p["path"]: p for p in response.json()}
+    assert pres["poster.pdf"]["stage"] == "export-poster"
     assert pres["poster.pdf"]["edit_url"] == url
     assert pres["slides/talk.pdf"]["edit_url"] is None
     # Creating one adds it and its stage to the project, and commits
@@ -1344,7 +1346,6 @@ def test_google_slides_presentations(
         "path": "poster/poster.pdf",
         "title": "My poster",
         "kind": "poster",
-        "stage": "export-poster",
     }
     assert ck_info["pipeline"]["stages"]["export-poster"][
         "presentation_url"

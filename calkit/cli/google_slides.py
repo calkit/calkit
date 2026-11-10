@@ -15,42 +15,46 @@ from calkit.cli import AliasGroup, raise_error
 google_slides_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
-def record_edit_times(ck_info: dict) -> list[str]:
+def record_edit_times(ck_info: dict, quick: bool = False) -> list[str]:
     """Record when each Google Slides presentation the pipeline exports was
     last edited, asking the hub, and return the stages an edit put out of
     date.
+
+    ``quick`` makes one short attempt per presentation, for checks that must
+    not hold things up, e.g., in ``calkit status``.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     from calkit.google_slides import (
         get_edit_time_path,
         get_presentation_id,
         write_edit_time,
     )
 
-    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
-    edited_ids = set()
-    checked_ids = set()
-    for stage in stages.values():
-        if stage.get("kind") != "google-slides-export":
-            continue
-        presentation_id = get_presentation_id(stage["presentation_url"])
-        if presentation_id in checked_ids:
-            continue
-        checked_ids.add(presentation_id)
+    def get_modified_time(presentation_id: str) -> str:
         info = calkit.hub.get(
             f"/user/google/presentations/{presentation_id}",
             allow_login=False,
-            max_retries=2,
+            max_retries=0 if quick else 2,
+            timeout=(2, 5) if quick else (10, 120),
         )
-        if write_edit_time(
-            get_edit_time_path(presentation_id), info["modified_time"]
-        ):
-            edited_ids.add(presentation_id)
-    return [
-        name
+        return str(info["modified_time"])
+
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    ids = {
+        name: get_presentation_id(stage["presentation_url"])
         for name, stage in stages.items()
         if stage.get("kind") == "google-slides-export"
-        and get_presentation_id(stage["presentation_url"]) in edited_ids
-    ]
+    }
+    unique_ids = list(dict.fromkeys(ids.values()))
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        modified_times = list(pool.map(get_modified_time, unique_ids))
+    edited_ids = {
+        presentation_id
+        for presentation_id, modified_time in zip(unique_ids, modified_times)
+        if write_edit_time(get_edit_time_path(presentation_id), modified_time)
+    }
+    return [name for name, pid in ids.items() if pid in edited_ids]
 
 
 def add_presentation(

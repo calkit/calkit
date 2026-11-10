@@ -1291,6 +1291,39 @@ def test_status(tmp_dir):
         subprocess.check_output(["calkit", "status", "-c", "dvc", "--json"])
     )
     assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
+    # Google Slides are checked for edits, but being offline only warns
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "export-poster": {
+                "kind": "google-slides-export",
+                "presentation_url": (
+                    "https://docs.google.com/presentation/d/"
+                    "1AbCdEfGhIjKlMnOpQrStUv/edit"
+                ),
+                "outputs": ["poster.pdf"],
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = os.environ | {
+        "CALKIT_HUB_API_BASE_URL": "http://127.0.0.1:9",
+        "CALKIT_TOKEN": "not-a-token",
+    }
+    res = subprocess.run(
+        ["calkit", "status", "-c", "pipeline", "--json"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    assert (
+        "export-poster"
+        in json.loads(res.stdout)["pipeline"]["stale_stage_names"]
+    )
+    assert "Failed to check Google Slides for edits" in res.stderr
+    assert "couldn't reach the hub" in res.stderr
 
 
 def test_save(tmp_dir):

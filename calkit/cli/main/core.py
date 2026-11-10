@@ -754,6 +754,27 @@ def get_status(
             # reporting status
             step("Syncing zip files")
             calkit.dvc.zip.sync_all(direction="to-zip")
+            if _has_google_slides_stages(ck_info):
+                import requests
+
+                from calkit.cli.google_slides import record_edit_times
+
+                step("Checking Google Slides")
+                try:
+                    record_edit_times(ck_info, quick=True)
+                except Exception as e:
+                    reason = (
+                        "couldn't reach the hub"
+                        if isinstance(
+                            e, (requests.ConnectionError, requests.Timeout)
+                        )
+                        else str(e)
+                    )
+                    warn(
+                        f"Failed to check Google Slides for edits ({reason}), "
+                        "so edited presentations may not show as out of date",
+                        err=as_json,
+                    )
             pipeline_status = calkit.pipeline.get_status(
                 ck_info=ck_info,
                 targets=targets,

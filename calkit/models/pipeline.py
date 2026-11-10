@@ -2474,8 +2474,8 @@ class GoogleSlidesExportStage(Stage):
     first.
 
     It goes out of date when a figure changes, or when the presentation is
-    edited, which 'calkit run' and 'calkit pull' check for, since asking
-    Google takes too long for every 'calkit status'.
+    edited, which 'calkit status', 'calkit run', and 'calkit pull' check
+    for.
     """
 
     kind: Literal["google-slides-export"] = "google-slides-export"

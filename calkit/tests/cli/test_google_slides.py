@@ -74,7 +74,6 @@ def test_google_slides(tmp_dir, monkeypatch):
             "path": "poster/poster.pdf",
             "title": "My poster",
             "kind": "poster",
-            "stage": "export-poster",
         }
     ]
     assert ck_info["pipeline"]["stages"]["export-poster"] == {

@@ -333,12 +333,14 @@ def how_to_define_origin(path: str) -> str:
     )
 
 
-def has_provenance(artifact: dict) -> bool:
+def has_provenance(artifact: dict, ck_info: dict | None = None) -> bool:
     """Return whether an artifact entry records where it came from.
 
-    A stage and an import are the stronger forms, but ``created_by`` counts
-    too: a dataset someone measured, or a schematic someone drew, is
-    accounted for even though there's nothing upstream to point at. It
+    A stage and an import are the stronger forms, where the stage is
+    either named on the entry or, given ``ck_info``, one whose outputs
+    include its path. ``created_by`` counts too: a dataset someone
+    measured, or a schematic someone drew, is accounted for even though
+    there's nothing upstream to point at. It
     doesn't for a format that's exported rather than made, e.g., a PNG.
     The field names in ``calkit.reproducibility.ReproCheck`` predate
     attribution and are kept so callers reading them keep working.
@@ -347,6 +349,11 @@ def has_provenance(artifact: dict) -> bool:
         return True
     if artifact.get("imported_from") is not None:
         return True
+    if ck_info is not None and artifact.get("path"):
+        from calkit.pipeline import get_stage_for_output
+
+        if get_stage_for_output(str(artifact["path"]), ck_info) is not None:
+            return True
     return artifact.get("created_by") is not None and can_be_created_by_person(
         str(artifact.get("path", ""))
     )

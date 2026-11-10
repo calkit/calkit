@@ -591,6 +591,12 @@ def test_has_provenance():
     )
     assert not has_provenance({"path": "figures/plot.pdf"})
     assert has_provenance({"path": "figures/plot.png", "stage": "plot"})
+    # Or the stage is found from the pipeline's outputs
+    ck_info = {
+        "pipeline": {"stages": {"plot": {"outputs": ["figures/a.pdf"]}}}
+    }
+    assert has_provenance({"path": "figures/a.pdf"}, ck_info)
+    assert not has_provenance({"path": "figures/b.pdf"}, ck_info)
     assert has_provenance(
         {"path": "figures/plot.png", "imported_from": {"doi": "10.1/x"}}
     )

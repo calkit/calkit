@@ -2009,7 +2009,7 @@ def to_arxiv(
     # latex2arxiv requires .gls files at root, so copy them
     moved = []
     for gls_file in Path(target_folder).glob("*.gls"):
-        moved.append(target_folder / gls_file.name)
+        moved.append(Path(target_folder) / gls_file.name)
         gls_file.copy(moved[-1])
     try:
         subprocess.run(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+from typing import Any
 
 import typer
 from typing_extensions import Annotated
@@ -149,6 +150,12 @@ def export(
     """Put figures into a Google Slides presentation, then export it."""
     import calkit.google_slides
 
+    def ask_hub(kind: str, path: str, action: str, **kwargs: Any) -> Any:
+        try:
+            return getattr(calkit.hub, kind)(path, **kwargs)
+        except Exception as e:
+            raise_error(f"Failed to {action}: {e}")
+
     try:
         presentation_id = calkit.google_slides.get_presentation_id(url)
         mime_types = [
@@ -165,8 +172,10 @@ def export(
             raise_error(f"Figure {figure} does not exist")
         with open(figure, "rb") as f:
             content = f.read()
-        resp = calkit.hub.post(
+        resp = ask_hub(
+            "post",
             f"{api_path}/figures",
+            f"put {figure} in the presentation",
             params={"path": figure},
             files={"file": (posixpath.basename(figure), content, mime_type)},
         )
@@ -179,26 +188,28 @@ def export(
             typer.echo(f"Updated {figure} in {resp['replaced']} place(s)")
     for path, mime_type in zip(outputs, mime_types):
         typer.echo(f"Exporting {path}")
-        resp = calkit.hub.get(
+        resp = ask_hub(
+            "get",
             f"{api_path}/export",
+            f"export {path}",
             params={"format": posixpath.splitext(path)[1][1:].lower()},
             as_json=False,
         )
         # An unchanged presentation exports to a file that differs only in
         # its date, which would rerun everything downstream of it
         if os.path.isfile(path):
-            with open(path, "rb") as f:
+            with open(path, "rb") as existing:
                 if calkit.google_slides.is_same_export(
-                    f.read(), resp.content, path
+                    existing.read(), resp.content, path
                 ):
                     typer.echo(f"{path} is unchanged, so it was kept")
                     continue
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "wb") as f:
-            f.write(resp.content)
+        with open(path, "wb") as out:
+            out.write(resp.content)
     # Putting the figures in edited the presentation, which this export
     # already accounts for
-    info = calkit.hub.get(api_path)
+    info = ask_hub("get", api_path, "check when it was last edited")
     calkit.google_slides.write_edit_time(
         edit_time_path
         or calkit.google_slides.get_edit_time_path(presentation_id),

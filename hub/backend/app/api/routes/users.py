@@ -1236,6 +1236,12 @@ def post_user_google_presentation_figure(
         url = storage.get_object_url(fpath, expires=600, fs=fs)
         resp = client.put_figure(presentation_id, path, url)
     except calkit.google_slides.GoogleError as e:
+        # Google can't fetch from object storage on a developer's machine
+        if settings.ENVIRONMENT == "local":
+            e.args = (
+                f"{e} Google can't reach a local hub's object storage, so "
+                "try this on staging.",
+            )
         _raise_google_error(e)
     finally:
         fs.rm(fpath)

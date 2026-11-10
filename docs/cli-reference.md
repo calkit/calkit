@@ -50,6 +50,7 @@
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
+| [`google-slides`](#command-group-google-slides)  | Work with Google Slides.                                                                                     |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
@@ -863,6 +864,7 @@ Create a new Calkit object.
 | [`figure\|fig`](#subcommand-new-create-figure-fig)                        | Create a new figure.                                                                              |
 | [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                                             |
 | [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                                                       |
+| [`google-slides`](#subcommand-new-create-google-slides)                   | Create a Google Slides presentation and add it to the project, with a stage that exports it.      |
 | [`question`](#subcommand-new-create-question)                             | Add a new question.                                                                               |
 | [`comment`](#subcommand-new-create-comment)                               | Start a review comment thread above a paragraph of a LaTeX or Markdown document, printing its ID. |
 | [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                                               |
@@ -1015,6 +1017,30 @@ Options:
 | `--stage`           | str     | no       |         | Name of the pipeline stage that generates this presentation. |
 | `--no-commit`       | boolean | no       | False   |                                                              |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing presentation if one exists.               |
+
+<a id="subcommand-new-create-google-slides"></a>
+
+#### `calkit new|create google-slides`
+
+Create a Google Slides presentation and add it to the project, with a stage that exports it.
+
+Usage:
+
+```text
+calkit new|create google-slides [OPTIONS]
+```
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                                  |
+| ------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--title`     | str     | yes      |         | Its title.                                                                   |
+| `--path`      | str     | yes      |         | PDF to export it to, e.g., 'poster/poster.pdf'.                              |
+| `--kind`      | str     | no       |         | Kind of presentation, either 'slides' or 'poster'.                           |
+| `--stage`     | str     | no       |         | Name of the stage that exports it. Defaults to 'export-' and the PDF's name. |
+| `--figure`    | str     | no       |         | Project figure to put in it, a PNG, JPEG, or GIF.                            |
+| `--no-pptx`   | boolean | no       | False   | Don't keep a PowerPoint copy in the project.                                 |
+| `--no-commit` | boolean | no       | False   |                                                                              |
 
 <a id="subcommand-new-create-question"></a>
 
@@ -2684,12 +2710,13 @@ Options:
 
 Import objects.
 
-| Command                                         | Description                                                 |
-| ----------------------------------------------- | ----------------------------------------------------------- |
-| [`dataset`](#subcommand-import-dataset)         | Import a dataset.                                           |
-| [`path`](#subcommand-import-path)               | Import a file from elsewhere, recording where it came from. |
-| [`environment`](#subcommand-import-environment) | Import an environment from another project.                 |
-| [`zenodo`](#subcommand-import-zenodo)           | Import files from a Zenodo record.                          |
+| Command                                             | Description                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`dataset`](#subcommand-import-dataset)             | Import a dataset.                                                              |
+| [`path`](#subcommand-import-path)                   | Import a file from elsewhere, recording where it came from.                    |
+| [`environment`](#subcommand-import-environment)     | Import an environment from another project.                                    |
+| [`zenodo`](#subcommand-import-zenodo)               | Import files from a Zenodo record.                                             |
+| [`google-slides`](#subcommand-import-google-slides) | Add a Google Slides presentation to the project, with a stage that exports it. |
 
 <a id="subcommand-import-dataset"></a>
 
@@ -2810,6 +2837,35 @@ Options:
 | `--name-not-like` | str     | no       |         | Exclude names matching pattern.                                                      |
 | `--storage`       | str     | no       |         | Storage backend to use (Git or DVC). If not specified, will be chosen based on size. |
 | `--no-commit`     | boolean | no       | False   | Do not commit changes to project.                                                    |
+
+<a id="subcommand-import-google-slides"></a>
+
+#### `calkit import google-slides`
+
+Add a Google Slides presentation to the project, with a stage that exports it.
+
+Usage:
+
+```text
+calkit import google-slides [OPTIONS] URL
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                            |
+| -------- | ---- | -------- | ------- | -------------------------------------- |
+| `url`    | str  | yes      |         | URL of the Google Slides presentation. |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                                  |
+| ------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--path`      | str     | yes      |         | PDF to export it to, e.g., 'poster/poster.pdf'.                              |
+| `--kind`      | str     | no       |         | Kind of presentation, either 'slides' or 'poster'.                           |
+| `--stage`     | str     | no       |         | Name of the stage that exports it. Defaults to 'export-' and the PDF's name. |
+| `--figure`    | str     | no       |         | Project figure to put in it, a PNG, JPEG, or GIF.                            |
+| `--no-pptx`   | boolean | no       | False   | Don't keep a PowerPoint copy in the project.                                 |
+| `--no-commit` | boolean | no       | False   |                                                                              |
 
 <a id="command-group-office"></a>
 
@@ -4486,6 +4542,55 @@ Options:
 | `--any-branch`   | boolean | no       | False   | Pull even if the current branch is missing commits from the default branch.                                                                 |
 | `--force`, `-f`  | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                            |
 | `--verbose`      | boolean | no       | False   | Enable verbose output.                                                                                                                      |
+
+<a id="command-group-google-slides"></a>
+
+### `calkit google-slides`
+
+Work with Google Slides.
+
+| Command                                      | Description                                                                                                                 |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [`export`](#subcommand-google-slides-export) | Put figures into a Google Slides presentation, then export it.                                                              |
+| [`pull`](#subcommand-google-slides-pull)     | Check whether the project's Google Slides presentations were edited, putting the stages that export them out of date if so. |
+
+<a id="subcommand-google-slides-export"></a>
+
+#### `calkit google-slides export`
+
+Put figures into a Google Slides presentation, then export it.
+
+Usage:
+
+```text
+calkit google-slides export [OPTIONS] URL
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                            |
+| -------- | ---- | -------- | ------- | -------------------------------------- |
+| `url`    | str  | yes      |         | URL of the Google Slides presentation. |
+
+Options:
+
+| Option             | Type | Required | Default | Description                                                                                             |
+| ------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`   | str  | yes      |         | File to export to, a .pdf or .pptx.                                                                     |
+| `--figure`         | str  | no       |         | Project figure to put in first, replacing the images tagged with its path, or added to the first slide. |
+| `--edit-time-path` | str  | no       |         | Where to record when the presentation was last edited.                                                  |
+
+<a id="subcommand-google-slides-pull"></a>
+
+#### `calkit google-slides pull`
+
+Check whether the project's Google Slides presentations were edited, putting the stages that export them out of date if so.
+
+Usage:
+
+```text
+calkit google-slides pull
+```
 
 <a id="command-group-hub-cloud"></a>
 

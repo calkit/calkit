@@ -8,7 +8,15 @@ from typing import Annotated, Any, Literal, Sequence
 
 import requests
 import sqlalchemy
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi import (
+    APIRouter,
+    Cookie,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+)
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import selectinload
@@ -16,6 +24,7 @@ from sqlmodel import Field, col, func, or_, select
 
 import app.projects
 import app.stripe
+import calkit.google_slides
 from app import mixpanel, users, zotero
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
@@ -1124,6 +1133,110 @@ def get_user_overleaf_session(
     return OverleafSessionResponse(
         session=users.get_overleaf_session(session=session, user=current_user)
     )
+
+
+class GooglePresentation(BaseModel):
+    id: str
+    title: str | None
+    url: str
+    modified_time: str
+
+
+class GooglePresentationPost(BaseModel):
+    title: str
+
+
+class GoogleFigurePut(BaseModel):
+    replaced: int
+    added: bool
+    modified_time: str
+
+
+def _get_google_slides_client(
+    session: SessionDep, user: User
+) -> calkit.google_slides.Client:
+    try:
+        token = users.get_google_token(session=session, user=user)
+    except HTTPException:
+        raise HTTPException(401, calkit.google_slides.CONNECT_ADVICE)
+    return calkit.google_slides.Client(token)
+
+
+def _raise_google_error(e: calkit.google_slides.GoogleError) -> None:
+    # Google's own 5xx is the hub failing to reach something upstream
+    status_code = 502 if e.status_code >= 500 else e.status_code
+    raise HTTPException(status_code, str(e))
+
+
+@router.post("/user/google/presentations")
+def post_user_google_presentation(
+    req: GooglePresentationPost,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> GooglePresentation:
+    """Create a Google Slides presentation in the user's Google Drive."""
+    client = _get_google_slides_client(session=session, user=current_user)
+    try:
+        info = client.create_presentation(req.title)
+    except calkit.google_slides.GoogleError as e:
+        _raise_google_error(e)
+    mixpanel.user_created_google_slides_presentation(current_user)
+    return GooglePresentation.model_validate(info)
+
+
+@router.get("/user/google/presentations/{presentation_id}")
+def get_user_google_presentation(
+    presentation_id: str, session: SessionDep, current_user: CurrentUser
+) -> GooglePresentation:
+    """Get a Google Slides presentation's title, and when it was last
+    edited.
+    """
+    client = _get_google_slides_client(session=session, user=current_user)
+    try:
+        info = client.get_presentation_info(presentation_id)
+    except calkit.google_slides.GoogleError as e:
+        _raise_google_error(e)
+    return GooglePresentation.model_validate(info)
+
+
+@router.post("/user/google/presentations/{presentation_id}/figures")
+def post_user_google_presentation_figure(
+    presentation_id: str,
+    path: str,
+    file: Annotated[UploadFile, File()],
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> GoogleFigurePut:
+    """Put the latest version of a project figure in a Google Slides
+    presentation, replacing the images tagged with its path.
+    """
+    try:
+        calkit.google_slides.get_figure_mime_type(path)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    client = _get_google_slides_client(session=session, user=current_user)
+    try:
+        resp = client.put_figure(presentation_id, path, file.file.read())
+    except calkit.google_slides.GoogleError as e:
+        _raise_google_error(e)
+    return GoogleFigurePut.model_validate(resp)
+
+
+@router.get("/user/google/presentations/{presentation_id}/export")
+def get_user_google_presentation_export(
+    presentation_id: str,
+    format: Literal["pdf", "pptx"],
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Response:
+    """Export a Google Slides presentation as a PDF or PowerPoint file."""
+    mime_type = calkit.google_slides.get_export_mime_type(f"x.{format}")
+    client = _get_google_slides_client(session=session, user=current_user)
+    try:
+        content = client.export_presentation(presentation_id, mime_type)
+    except calkit.google_slides.GoogleError as e:
+        _raise_google_error(e)
+    return Response(content=content, media_type=mime_type)
 
 
 @router.post("/user/google-auth")

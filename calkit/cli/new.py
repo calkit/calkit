@@ -923,6 +923,67 @@ def new_presentation(
     )
 
 
+@new_app.command(name="google-slides")
+def new_google_slides(
+    title: Annotated[str, typer.Option("--title", help="Its title.")],
+    path: Annotated[
+        str,
+        typer.Option(
+            "--path", help="PDF to export it to, e.g., 'poster/poster.pdf'."
+        ),
+    ],
+    kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help="Kind of presentation, either 'slides' or 'poster'.",
+        ),
+    ] = None,
+    stage_name: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help="Name of the stage that exports it. Defaults to 'export-' "
+            "and the PDF's name.",
+        ),
+    ] = None,
+    figures: Annotated[
+        list[str],
+        typer.Option(
+            "--figure",
+            help="Project figure to put in it, a PNG, JPEG, or GIF.",
+        ),
+    ] = [],
+    no_pptx: Annotated[
+        bool,
+        typer.Option(
+            "--no-pptx", help="Don't keep a PowerPoint copy in the project."
+        ),
+    ] = False,
+    no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
+) -> None:
+    """Create a Google Slides presentation and add it to the project, with a
+    stage that exports it.
+    """
+    from calkit.cli.google_slides import add_presentation
+
+    try:
+        info = calkit.hub.post(
+            "/user/google/presentations", json={"title": title}
+        )
+    except Exception as e:
+        raise_error(f"Failed to create the presentation: {e}")
+    add_presentation(
+        info,
+        path=path,
+        kind=kind,
+        stage_name=stage_name,
+        figures=figures,
+        pptx=not no_pptx,
+        no_commit=no_commit,
+    )
+
+
 @new_app.command("question")
 def new_question(
     question: str,

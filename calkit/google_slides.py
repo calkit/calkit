@@ -1,0 +1,339 @@
+"""Exporting Google Slides presentations, and putting project figures in
+them.
+
+The hub makes these calls with each user's Google token, so the token
+never leaves it; the CLI goes through the hub.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import posixpath
+import re
+import uuid
+from typing import Any
+
+DRIVE_API_URL = "https://www.googleapis.com/drive/v3/files"
+DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
+SLIDES_API_URL = "https://slides.googleapis.com/v1/presentations"
+PRESENTATION_MIME_TYPE = "application/vnd.google-apps.presentation"
+EXPORT_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".pptx": (
+        "application/vnd.openxmlformats-officedocument."
+        "presentationml.presentation"
+    ),
+}
+# What Slides can show, since it fetches and copies the image itself
+FIGURE_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+}
+# Put in an image's alt text title to say which project figure it shows
+FIGURE_TAG_PREFIX = "calkit:"
+CONNECT_ADVICE = (
+    "Connect Google Drive in your Calkit account settings, under "
+    "Connected accounts."
+)
+NOT_FOUND_ADVICE = (
+    "Calkit can only open presentations it created, or ones opened in "
+    "Google Drive with Calkit."
+)
+
+
+class GoogleError(RuntimeError):
+    """A request Google refused, with the HTTP status it gave."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def get_presentation_id(url: str) -> str:
+    """The ID of a presentation, from its URL or the ID itself."""
+    url = url.strip()
+    match = re.search(r"/presentation/d/([A-Za-z0-9_-]+)", url)
+    if match is not None:
+        return match.group(1)
+    if re.fullmatch(r"[A-Za-z0-9_-]{20,}", url):
+        return url
+    raise ValueError(f"Not a Google Slides URL: {url}")
+
+
+def get_presentation_url(presentation_id: str) -> str:
+    return f"https://docs.google.com/presentation/d/{presentation_id}/edit"
+
+
+def get_edit_time_path(presentation_id: str) -> str:
+    """Where the time a presentation was last edited is recorded, relative
+    to the project, which a stage exporting it depends on.
+    """
+    return f".calkit/google-slides/{presentation_id}.json"
+
+
+def write_edit_time(path: str, modified_time: str) -> bool:
+    """Record when a presentation was last edited, returning whether that
+    changed.
+    """
+    content = json.dumps({"modified_time": modified_time}, indent=2) + "\n"
+    if os.path.isfile(path):
+        with open(path) as f:
+            if f.read() == content:
+                return False
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        f.write(content)
+    return True
+
+
+def get_figure_tag(path: str) -> str:
+    return FIGURE_TAG_PREFIX + posixpath.normpath(path.replace("\\", "/"))
+
+
+def get_figure_mime_type(path: str) -> str:
+    ext = posixpath.splitext(path)[1].lower()
+    if ext not in FIGURE_MIME_TYPES:
+        raise ValueError(
+            f"Google Slides can't show {path}; figures in a presentation "
+            "must be PNG, JPEG, or GIF"
+        )
+    return FIGURE_MIME_TYPES[ext]
+
+
+def get_export_mime_type(path: str) -> str:
+    ext = posixpath.splitext(path)[1].lower()
+    if ext not in EXPORT_MIME_TYPES:
+        raise ValueError(
+            f"Google Slides can't export {path}; outputs must be .pdf or .pptx"
+        )
+    return EXPORT_MIME_TYPES[ext]
+
+
+class Client:
+    """Google Drive and Slides, with a user's OAuth token, which needs
+    only the ``drive.file`` scope.
+    """
+
+    def __init__(self, token: str) -> None:
+        import requests
+
+        self.http = requests.Session()
+        self.http.headers["Authorization"] = f"Bearer {token}"
+
+    def _check(self, resp: Any, action: str) -> None:
+        if resp.ok:
+            return
+        try:
+            error = resp.json().get("error", {})
+            message = error.get("message", "")
+            reasons = {e.get("reason") for e in error.get("errors", [])}
+            reasons |= {
+                d.get("reason")
+                for d in error.get("details", [])
+                if "reason" in d
+            }
+        except Exception:
+            message, reasons = "", set()
+        if resp.status_code == 401 or reasons & {
+            "insufficientPermissions",
+            "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+        }:
+            raise GoogleError(
+                f"Google refused to let Calkit {action}. " + CONNECT_ADVICE,
+                401,
+            )
+        if resp.status_code == 404:
+            raise GoogleError(
+                f"Google couldn't find the presentation to {action}. "
+                + NOT_FOUND_ADVICE,
+                404,
+            )
+        detail = f": {message}" if message else ""
+        raise GoogleError(
+            f"Failed to {action} (Google said HTTP {resp.status_code}"
+            f"{detail})",
+            resp.status_code,
+        )
+
+    def get_presentation_info(self, presentation_id: str) -> dict:
+        """The presentation's ID, title, URL, and when it was last edited."""
+        resp = self.http.get(
+            f"{DRIVE_API_URL}/{presentation_id}",
+            params={"fields": "id,name,mimeType,modifiedTime"},
+            timeout=30,
+        )
+        self._check(resp, "open the presentation")
+        file = resp.json()
+        if file.get("mimeType") != PRESENTATION_MIME_TYPE:
+            raise GoogleError(
+                "That file isn't a Google Slides presentation", 422
+            )
+        return {
+            "id": file["id"],
+            "title": file.get("name"),
+            "url": get_presentation_url(file["id"]),
+            "modified_time": file["modifiedTime"],
+        }
+
+    def create_presentation(self, title: str) -> dict:
+        """Create a blank presentation, returning what
+        ``get_presentation_info`` does.
+        """
+        resp = self.http.post(
+            DRIVE_API_URL,
+            params={"fields": "id,name,mimeType,modifiedTime"},
+            json={"name": title, "mimeType": PRESENTATION_MIME_TYPE},
+            timeout=30,
+        )
+        self._check(resp, "create a presentation")
+        file = resp.json()
+        return {
+            "id": file["id"],
+            "title": file.get("name"),
+            "url": get_presentation_url(file["id"]),
+            "modified_time": file["modifiedTime"],
+        }
+
+    def export_presentation(
+        self, presentation_id: str, mime_type: str
+    ) -> bytes:
+        """The presentation exported as a PDF or PowerPoint file."""
+        resp = self.http.get(
+            f"{DRIVE_API_URL}/{presentation_id}/export",
+            params={"mimeType": mime_type},
+            timeout=300,
+        )
+        # The export API stops at 10 MB, which a poster's images can pass,
+        # but the file's own export link doesn't
+        if resp.status_code == 403 and "exportSizeLimitExceeded" in resp.text:
+            links = self.http.get(
+                f"{DRIVE_API_URL}/{presentation_id}",
+                params={"fields": "exportLinks"},
+                timeout=30,
+            )
+            self._check(links, "export the presentation")
+            link = links.json().get("exportLinks", {}).get(mime_type)
+            if link is not None:
+                resp = self.http.get(link, timeout=300)
+        self._check(resp, "export the presentation")
+        content: bytes = resp.content
+        return content
+
+    def put_figure(
+        self,
+        presentation_id: str,
+        figure_path: str,
+        content: bytes,
+    ) -> dict:
+        """Replace every image tagged as showing a figure with its latest
+        version, keeping each one's place and size, or, if none is, add it
+        to the first slide, tagged, for someone to move into place.
+
+        Returns how many images were replaced, whether one was added, and
+        when the presentation was then last edited.
+        """
+        mime_type = get_figure_mime_type(figure_path)
+        tag = get_figure_tag(figure_path)
+
+        def get_tagged_ids(elements: list[dict]) -> list[str]:
+            ids = []
+            for element in elements:
+                if "elementGroup" in element:
+                    ids += get_tagged_ids(
+                        element["elementGroup"].get("children", [])
+                    )
+                elif "image" in element and element.get("title") == tag:
+                    ids.append(element["objectId"])
+            return ids
+
+        resp = self.http.get(
+            f"{SLIDES_API_URL}/{presentation_id}",
+            params={"fields": "slides(objectId,pageElements)"},
+            timeout=60,
+        )
+        self._check(resp, "read the presentation")
+        slides = resp.json().get("slides", [])
+        image_ids = []
+        for slide in slides:
+            image_ids += get_tagged_ids(slide.get("pageElements", []))
+        if not image_ids and not slides:
+            raise GoogleError(
+                "The presentation has no slides to put the figure on", 422
+            )
+        # Slides copies an image from a URL it can fetch, so the figure is
+        # shared from Drive just long enough for that
+        metadata = {
+            "name": f"calkit-{uuid.uuid4().hex}-{posixpath.basename(figure_path)}"
+        }
+        resp = self.http.post(
+            DRIVE_UPLOAD_URL,
+            params={"uploadType": "multipart", "fields": "id"},
+            files={
+                "metadata": (
+                    None,
+                    json.dumps(metadata),
+                    "application/json; charset=UTF-8",
+                ),
+                "file": (posixpath.basename(figure_path), content, mime_type),
+            },
+            timeout=300,
+        )
+        self._check(resp, "upload the figure")
+        file_id = resp.json()["id"]
+        try:
+            resp = self.http.post(
+                f"{DRIVE_API_URL}/{file_id}/permissions",
+                json={"role": "reader", "type": "anyone"},
+                timeout=30,
+            )
+            self._check(resp, "share the figure with Google Slides")
+            url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            batch: list[dict[str, Any]]
+            if image_ids:
+                batch = [
+                    {
+                        "replaceImage": {
+                            "imageObjectId": image_id,
+                            "url": url,
+                            "imageReplaceMethod": "CENTER_INSIDE",
+                        }
+                    }
+                    for image_id in image_ids
+                ]
+            else:
+                object_id = f"calkit_{uuid.uuid4().hex}"
+                batch = [
+                    {
+                        "createImage": {
+                            "objectId": object_id,
+                            "url": url,
+                            "elementProperties": {
+                                "pageObjectId": slides[0]["objectId"]
+                            },
+                        }
+                    },
+                    {
+                        "updatePageElementAltText": {
+                            "objectId": object_id,
+                            "title": tag,
+                        }
+                    },
+                ]
+            resp = self.http.post(
+                f"{SLIDES_API_URL}/{presentation_id}:batchUpdate",
+                json={"requests": batch},
+                timeout=120,
+            )
+            self._check(resp, "put the figure in the presentation")
+        finally:
+            # Slides keeps its own copy, so the shared one can go
+            self.http.delete(f"{DRIVE_API_URL}/{file_id}", timeout=30)
+        info = self.get_presentation_info(presentation_id)
+        return {
+            "replaced": len(image_ids),
+            "added": not image_ids,
+            "modified_time": info["modified_time"],
+        }

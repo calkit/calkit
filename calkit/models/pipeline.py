@@ -319,6 +319,7 @@ class Stage(Model):
         "manual-step",
         "inkscape-export",
         "gimp-export",
+        "google-slides-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -2466,6 +2467,91 @@ class GimpExportStage(AppExportStage):
         )
 
 
+class GoogleSlidesExportStage(Stage):
+    """A Google Slides presentation exported as a PDF, or as a PowerPoint
+    copy kept in the project, with the project's figures it shows put in
+    first.
+
+    It goes out of date when a figure changes, or when the presentation is
+    edited, which 'calkit run' and 'calkit pull' check for, since asking
+    Google takes too long for every 'calkit status'.
+    """
+
+    kind: Literal["google-slides-export"] = "google-slides-export"
+    presentation_url: str = Field(
+        description="URL of the Google Slides presentation."
+    )
+    figures: list[RelativeChildPathString] = Field(
+        default=[],
+        description=(
+            "Project figures the presentation shows, each a PNG, JPEG, or "
+            "GIF. Each replaces the images whose alt text title is 'calkit:' "
+            "and its path, e.g., 'calkit:figures/rates.png', keeping their "
+            "place and size, or, if there are none, is added to the first "
+            "slide with that title."
+        ),
+    )
+    environment: str = "_system"
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "GoogleSlidesExportStage":
+        from calkit.google_slides import (
+            get_export_mime_type,
+            get_figure_mime_type,
+            get_presentation_id,
+        )
+
+        get_presentation_id(self.presentation_url)
+        if not self.outputs:
+            raise ValueError(
+                "A Google Slides export needs an output, e.g., a PDF"
+            )
+        for out in self.outputs:
+            get_export_mime_type(out if isinstance(out, str) else out.path)
+        for figure in self.figures:
+            get_figure_mime_type(figure)
+        return self
+
+    @property
+    def presentation_id(self) -> str:
+        from calkit.google_slides import get_presentation_id
+
+        return get_presentation_id(self.presentation_url)
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        from calkit.google_slides import get_edit_time_path
+
+        deps = super().dvc_deps
+        edit_time_path = self.path_from_wdir(
+            get_edit_time_path(self.presentation_id)
+        )
+        for path in [edit_time_path] + list(self.figures):
+            if path not in deps:
+                deps.append(path)
+        return deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        from calkit.google_slides import get_edit_time_path
+
+        cmd = (
+            f"calkit google-slides export {shlex.quote(self.presentation_url)}"
+        )
+        for out in self.outputs:
+            path = out if isinstance(out, str) else out.path
+            cmd += f" -o {shlex.quote(path)}"
+        for figure in self.figures:
+            cmd += f" --figure {shlex.quote(figure)}"
+        # It runs in the wdir, but records the edit under the project
+        if self.wdir is not None:
+            edit_time_path = self.path_from_wdir(
+                get_edit_time_path(self.presentation_id)
+            )
+            cmd += f" --edit-time-path {shlex.quote(edit_time_path)}"
+        return cmd
+
+
 class MarimoHtmlWasmStage(Stage):
     """A stage that exports a marimo notebook to a WebAssembly app.
 
@@ -2877,6 +2963,7 @@ class Pipeline(Model):
                 | ManualStepStage
                 | InkscapeExportStage
                 | GimpExportStage
+                | GoogleSlidesExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

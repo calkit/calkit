@@ -2187,3 +2187,109 @@ def test_end_other_sessions(
         .where(RefreshToken.is_active)
     ).all()
     assert live == []
+
+
+def test_user_google_presentations(
+    client: TestClient, normal_user_token_headers: dict[str, str]
+) -> None:
+    import calkit.google_slides as gs
+
+    pid = "1AbCdEfGhIjKlMnOpQrStUv"
+    info = {
+        "id": pid,
+        "title": "Poster",
+        "url": gs.get_presentation_url(pid),
+        "modified_time": "2026-11-09T00:00:00.000Z",
+    }
+    calls = []
+
+    class Client:
+        def __init__(self, token):
+            calls.append(("token", token))
+
+        def create_presentation(self, title):
+            calls.append(("create", title))
+            return info
+
+        def get_presentation_info(self, presentation_id):
+            if presentation_id != pid:
+                raise gs.GoogleError("Not found", 404)
+            return info
+
+        def put_figure(self, presentation_id, path, content):
+            calls.append(("figure", path, content))
+            return {"replaced": 2, "added": False, "modified_time": "t2"}
+
+        def export_presentation(self, presentation_id, mime_type):
+            if mime_type == gs.EXPORT_MIME_TYPES[".pptx"]:
+                raise gs.GoogleError("Google is down", 503)
+            return b"%PDF"
+
+    base = "/user/google/presentations"
+    # Without Google connected, the user is told how to connect it
+    with patch(
+        "app.api.routes.users.users.get_google_token",
+        side_effect=HTTPException(401, "User needs to authenticate"),
+    ):
+        r = client.get(f"{base}/{pid}", headers=normal_user_token_headers)
+    assert r.status_code == 401
+    assert "Connect Google Drive" in r.json()["detail"]
+    with (
+        patch(
+            "app.api.routes.users.users.get_google_token",
+            return_value="google-token",
+        ),
+        patch("app.api.routes.users.calkit.google_slides.Client", Client),
+    ):
+        r = client.post(
+            base, headers=normal_user_token_headers, json={"title": "Poster"}
+        )
+        assert r.status_code == 200
+        assert r.json() == info
+        assert ("token", "google-token") in calls
+        assert ("create", "Poster") in calls
+        r = client.get(f"{base}/{pid}", headers=normal_user_token_headers)
+        assert r.json() == info
+        r = client.get(f"{base}/missing", headers=normal_user_token_headers)
+        assert r.status_code == 404
+        r = client.post(
+            f"{base}/{pid}/figures",
+            headers=normal_user_token_headers,
+            params={"path": "figures/rates.png"},
+            files={"file": ("rates.png", b"png", "image/png")},
+        )
+        assert r.json() == {
+            "replaced": 2,
+            "added": False,
+            "modified_time": "t2",
+        }
+        assert calls[-1] == ("figure", "figures/rates.png", b"png")
+        # A figure Slides can't show is refused before reaching Google
+        r = client.post(
+            f"{base}/{pid}/figures",
+            headers=normal_user_token_headers,
+            params={"path": "figures/rates.pdf"},
+            files={"file": ("rates.pdf", b"pdf", "application/pdf")},
+        )
+        assert r.status_code == 422
+        assert calls[-1][0] == "figure" and calls[-1][1].endswith(".png")
+        r = client.get(
+            f"{base}/{pid}/export",
+            headers=normal_user_token_headers,
+            params={"format": "pdf"},
+        )
+        assert r.content == b"%PDF"
+        assert r.headers["content-type"] == "application/pdf"
+        # Google failing is the hub failing to reach it
+        r = client.get(
+            f"{base}/{pid}/export",
+            headers=normal_user_token_headers,
+            params={"format": "pptx"},
+        )
+        assert r.status_code == 502
+        r = client.get(
+            f"{base}/{pid}/export",
+            headers=normal_user_token_headers,
+            params={"format": "docx"},
+        )
+        assert r.status_code == 422

@@ -365,6 +365,16 @@ export type BodyProjectsPutProjectContents = {
 }
 
 /**
+ * Body_users-post_user_google_presentation_figure
+ */
+export type BodyUsersPostUserGooglePresentationFigure = {
+  /**
+   * File
+   */
+  file: Blob | File
+}
+
+/**
  * CheckIn
  *
  * What a machine reports each time it checks in.
@@ -2198,6 +2208,56 @@ export type GithubPullRequest = {
    * Base Sha
    */
   base_sha: string
+}
+
+/**
+ * GoogleFigurePut
+ */
+export type GoogleFigurePut = {
+  /**
+   * Replaced
+   */
+  replaced: number
+  /**
+   * Added
+   */
+  added: boolean
+  /**
+   * Modified Time
+   */
+  modified_time: string
+}
+
+/**
+ * GooglePresentation
+ */
+export type GooglePresentation = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Title
+   */
+  title: string | null
+  /**
+   * Url
+   */
+  url: string
+  /**
+   * Modified Time
+   */
+  modified_time: string
+}
+
+/**
+ * GooglePresentationPost
+ */
+export type GooglePresentationPost = {
+  /**
+   * Title
+   */
+  title: string
 }
 
 /**
@@ -9869,6 +9929,136 @@ export type PutUserOverleafSessionResponses = {
 
 export type PutUserOverleafSessionResponse =
   PutUserOverleafSessionResponses[keyof PutUserOverleafSessionResponses]
+
+export type PostUserGooglePresentationData = {
+  body: GooglePresentationPost
+  path?: never
+  query?: never
+  url: "/user/google/presentations"
+}
+
+export type PostUserGooglePresentationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserGooglePresentationError =
+  PostUserGooglePresentationErrors[keyof PostUserGooglePresentationErrors]
+
+export type PostUserGooglePresentationResponses = {
+  /**
+   * Successful Response
+   */
+  200: GooglePresentation
+}
+
+export type PostUserGooglePresentationResponse =
+  PostUserGooglePresentationResponses[keyof PostUserGooglePresentationResponses]
+
+export type GetUserGooglePresentationData = {
+  body?: never
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query?: never
+  url: "/user/google/presentations/{presentation_id}"
+}
+
+export type GetUserGooglePresentationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserGooglePresentationError =
+  GetUserGooglePresentationErrors[keyof GetUserGooglePresentationErrors]
+
+export type GetUserGooglePresentationResponses = {
+  /**
+   * Successful Response
+   */
+  200: GooglePresentation
+}
+
+export type GetUserGooglePresentationResponse =
+  GetUserGooglePresentationResponses[keyof GetUserGooglePresentationResponses]
+
+export type PostUserGooglePresentationFigureData = {
+  body: BodyUsersPostUserGooglePresentationFigure
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+  }
+  url: "/user/google/presentations/{presentation_id}/figures"
+}
+
+export type PostUserGooglePresentationFigureErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserGooglePresentationFigureError =
+  PostUserGooglePresentationFigureErrors[keyof PostUserGooglePresentationFigureErrors]
+
+export type PostUserGooglePresentationFigureResponses = {
+  /**
+   * Successful Response
+   */
+  200: GoogleFigurePut
+}
+
+export type PostUserGooglePresentationFigureResponse =
+  PostUserGooglePresentationFigureResponses[keyof PostUserGooglePresentationFigureResponses]
+
+export type GetUserGooglePresentationExportData = {
+  body?: never
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query: {
+    /**
+     * Format
+     */
+    format: "pdf" | "pptx"
+  }
+  url: "/user/google/presentations/{presentation_id}/export"
+}
+
+export type GetUserGooglePresentationExportErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserGooglePresentationExportError =
+  GetUserGooglePresentationExportErrors[keyof GetUserGooglePresentationExportErrors]
+
+export type GetUserGooglePresentationExportResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
 
 export type PostUserGoogleAuthData = {
   body: AppApiRoutesUsersOAuthCodeExchange

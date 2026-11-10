@@ -666,6 +666,19 @@ export const Body_projects_put_project_contentsSchema = {
   title: "Body_projects-put_project_contents",
 } as const
 
+export const Body_users_post_user_google_presentation_figureSchema = {
+  properties: {
+    file: {
+      type: "string",
+      format: "binary",
+      title: "File",
+    },
+  },
+  type: "object",
+  required: ["file"],
+  title: "Body_users-post_user_google_presentation_figure",
+} as const
+
 export const CheckInSchema = {
   properties: {
     calkit_version: {
@@ -3741,6 +3754,69 @@ export const GithubPullRequestSchema = {
   type: "object",
   required: ["number", "title", "head_ref", "base_ref", "head_sha", "base_sha"],
   title: "GithubPullRequest",
+} as const
+
+export const GoogleFigurePutSchema = {
+  properties: {
+    replaced: {
+      type: "integer",
+      title: "Replaced",
+    },
+    added: {
+      type: "boolean",
+      title: "Added",
+    },
+    modified_time: {
+      type: "string",
+      title: "Modified Time",
+    },
+  },
+  type: "object",
+  required: ["replaced", "added", "modified_time"],
+  title: "GoogleFigurePut",
+} as const
+
+export const GooglePresentationSchema = {
+  properties: {
+    id: {
+      type: "string",
+      title: "Id",
+    },
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    url: {
+      type: "string",
+      title: "Url",
+    },
+    modified_time: {
+      type: "string",
+      title: "Modified Time",
+    },
+  },
+  type: "object",
+  required: ["id", "title", "url", "modified_time"],
+  title: "GooglePresentation",
+} as const
+
+export const GooglePresentationPostSchema = {
+  properties: {
+    title: {
+      type: "string",
+      title: "Title",
+    },
+  },
+  type: "object",
+  required: ["title"],
+  title: "GooglePresentationPost",
 } as const
 
 export const HTTPValidationErrorSchema = {

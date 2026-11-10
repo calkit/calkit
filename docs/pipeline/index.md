@@ -373,6 +373,24 @@ Model class: `DockerCommandStage`
 | ----------------------- | ---- | -------- | ------- | ----------------------------------------------------- |
 | `command`               | str  | yes      |         | Full command to run, including the 'docker run' call. |
 
+### `google-slides-export`
+
+Model class: `GoogleSlidesExportStage`
+
+A Google Slides presentation exported as a PDF, or as a PowerPoint
+copy kept in the project, with the project's figures it shows put in
+first.
+
+It goes out of date when a figure changes, or when the presentation is
+edited, which 'calkit run' and 'calkit pull' check for, since asking
+Google takes too long for every 'calkit status'.
+
+| Kind-specific parameter | Type      | Required | Default    | Description                                                                                                                                                                                                                                                                    |
+| ----------------------- | --------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `environment`           | str       | no       | '\_system' | Name of the environment in which to run this stage.                                                                                                                                                                                                                            |
+| `presentation_url`      | str       | yes      |            | URL of the Google Slides presentation.                                                                                                                                                                                                                                         |
+| `figures`               | list[str] | no       |            | Project figures the presentation shows, each a PNG, JPEG, or GIF. Each replaces the images whose alt text title is 'calkit:' and its path, e.g., 'calkit:figures/rates.png', keeping their place and size, or, if there are none, is added to the first slide with that title. |
+
 ### `json-to-latex`
 
 Model class: `JsonToLatexStage`

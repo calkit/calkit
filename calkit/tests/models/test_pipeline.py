@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from calkit.models.io import PathOutput
 from calkit.models.pipeline import (
     GimpExportStage,
+    GoogleSlidesExportStage,
     InkscapeExportStage,
     JsonToLatexStage,
     JuliaCommandStage,
@@ -97,6 +98,51 @@ def test_wordtopdfstage():
     assert sd["cmd"] == (
         'calkit office word-to-pdf "my word doc.docx" -o "my word doc.pdf"'
     )
+
+
+def test_googleslidesexportstage():
+    url = "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOpQrStUv/edit"
+    s = GoogleSlidesExportStage(
+        name="export-poster",
+        presentation_url=url,
+        figures=["figures/rates.png"],
+        outputs=["poster/poster.pdf", "poster/poster.pptx"],
+    )
+    sd = s.to_dvc()
+    assert sd["cmd"] == (
+        f"calkit google-slides export {url} -o poster/poster.pdf "
+        "-o poster/poster.pptx --figure figures/rates.png"
+    )
+    # Editing the presentation or a figure puts it out of date
+    assert sd["deps"] == [
+        ".calkit/google-slides/1AbCdEfGhIjKlMnOpQrStUv.json",
+        "figures/rates.png",
+    ]
+    assert s.to_ck_dict() == {
+        "kind": "google-slides-export",
+        "name": "export-poster",
+        "presentation_url": url,
+        "figures": ["figures/rates.png"],
+        "outputs": ["poster/poster.pdf", "poster/poster.pptx"],
+    }
+    # Run from a wdir, it still records the edit under the project
+    s = GoogleSlidesExportStage(
+        presentation_url=url, outputs=["poster.pdf"], wdir="poster"
+    )
+    edit_time_path = "../.calkit/google-slides/1AbCdEfGhIjKlMnOpQrStUv.json"
+    assert s.dvc_deps == [edit_time_path]
+    assert s.dvc_cmd.endswith(f"--edit-time-path {edit_time_path}")
+    for kwargs, match in [
+        (dict(presentation_url="https://example.com"), "Google Slides URL"),
+        (dict(presentation_url=url, outputs=[]), "needs an output"),
+        (dict(presentation_url=url, outputs=["p.docx"]), ".pdf or .pptx"),
+        (
+            dict(presentation_url=url, figures=["f.svg"]),
+            "PNG, JPEG, or GIF",
+        ),
+    ]:
+        with pytest.raises(ValidationError, match=match):
+            GoogleSlidesExportStage(**({"outputs": ["p.pdf"]} | kwargs))
 
 
 def test_manualstage():

@@ -62,6 +62,7 @@ from calkit.cli.fix import (
     TheirsOpt,
     fix_app,
 )
+from calkit.cli.google_slides import google_slides_app
 from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
@@ -107,6 +108,9 @@ app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
+app.add_typer(
+    google_slides_app, name="google-slides", help="Work with Google Slides."
+)
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
     scheduler_app,
@@ -1979,6 +1983,31 @@ def pull(
                     raise_error(f"DVC pull failed in subproject: {sp_path}")
                 calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
 
+    # Presentations edited in Google Slides since they were exported
+    ck_info = calkit.load_calkit_info()
+    if _has_google_slides_stages(ck_info):
+        from calkit.cli.google_slides import record_edit_times
+
+        typer.echo("Checking Google Slides")
+        try:
+            edited = record_edit_times(ck_info)
+        except Exception as e:
+            warn(f"Failed to check whether Google Slides were edited: {e}")
+        else:
+            if edited:
+                typer.echo(
+                    "Edited in Google Slides, so out of date: "
+                    + ", ".join(edited)
+                )
+
+
+def _has_google_slides_stages(ck_info: dict) -> bool:
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    return any(
+        isinstance(s, dict) and s.get("kind") == "google-slides-export"
+        for s in stages.values()
+    )
+
 
 # What ``calkit push`` can send, in the order it sends them
 PUSH_TARGETS = ["dvc", "docker", "git"]
@@ -3440,6 +3469,16 @@ def run(
                     allow_stale=True,
                     no_build=True,
                 )
+        # Each Google Slides presentation's last edit, so one edited since
+        # it was exported reruns. Asking takes too long for every status.
+        if _has_google_slides_stages(ck_info):
+            from calkit.cli.google_slides import record_edit_times
+
+            step("Checking Google Slides", "📽️")
+            try:
+                record_edit_times(ck_info)
+            except Exception as e:
+                warn(f"Failed to check whether Google Slides were edited: {e}")
         # Compile the DVC pipeline (and subproject pipelines)
         dvc_stages = None
         if ck_info.get("pipeline", {}) or ck_info.get("subprojects"):

@@ -3,6 +3,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import fsspec
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -2261,7 +2262,17 @@ def test_user_google_presentations(
     assert google_connected()
     save_google_token(None)
     assert google_connected()
-    with patch("app.api.routes.users.calkit.google.Client", Client):
+    # Object storage is kept in memory, and its presigned URLs faked
+    memory_fs = fsspec.filesystem("memory", skip_instance_cache=True)
+
+    def get_object_url(fpath, expires=None, fs=None, **kwargs):
+        return f"https://objects.test/{fpath}?Signature=x&Expires={expires}"
+
+    with (
+        patch("app.api.routes.users.calkit.google.Client", Client),
+        patch("app.storage.get_object_fs", return_value=memory_fs),
+        patch("app.storage.get_object_url", get_object_url),
+    ):
         r = client.post(
             base, headers=normal_user_token_headers, json={"title": "Poster"}
         )

@@ -482,3 +482,167 @@ def test_client_slides():
     n_batches = len(batches)
     assert client.tag_slides(pid, {"figures/a.pdf": "diagram"}) == 0
     assert len(batches) == n_batches
+
+
+def test_components(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    # Tags name a path, and for a value, its key and format
+    tag = gs.get_value_tag("results/wake.json", "mean_deficit", ".2f")
+    assert tag == "calkit:results/wake.json#mean_deficit:.2f"
+    assert gs.get_tag_parts(tag) == (
+        "results/wake.json",
+        "mean_deficit",
+        ".2f",
+    )
+    assert gs.get_tag_parts("calkit:results/wake.json#a.b") == (
+        "results/wake.json",
+        "a.b",
+        None,
+    )
+    assert gs.get_tag_parts("calkit:t.csv") == ("t.csv", None, None)
+    with pytest.raises(ValueError):
+        gs.get_tag_parts("Photo of the tank")
+    # Values are read and formatted as \ckvalue does
+    (tmp_path / "results").mkdir()
+    (tmp_path / "results/wake.json").write_text(
+        json.dumps({"mean_deficit": 0.12345, "case": {"name": "A", "n": 3}})
+    )
+    assert gs.get_value_text("results/wake.json", "mean_deficit", ".2f") == (
+        "0.12"
+    )
+    assert gs.get_value_text("results/wake.json", "case.name", ".2f") == "A"
+    assert gs.get_value_text("results/wake.json", "case.n") == "3"
+    with pytest.raises(KeyError):
+        gs.get_value_text("results/wake.json", "missing")
+    (tmp_path / "t.csv").write_text("a,b\n1,2\n3,4\n")
+    assert gs.get_table_rows("t.csv") == [["a", "b"], ["1", "2"], ["3", "4"]]
+    with pytest.raises(ValueError, match="CSV or TSV"):
+        gs.get_table_rows("t.xlsx")
+    # A presentation's components are found by their alt text titles
+    pid = "deck"
+    slides_url = f"{gs.SLIDES_API_URL}/{pid}"
+
+    def text(content):
+        return {"textElements": [{"textRun": {"content": c}} for c in content]}
+
+    def cell(content):
+        return {"text": text(content)}
+
+    deck = {
+        "slides": [
+            {
+                "objectId": "s1",
+                "pageElements": [
+                    {
+                        "objectId": "img",
+                        "title": "calkit:figures/rates.png",
+                        "image": {},
+                    },
+                    {
+                        "objectId": "box",
+                        "title": tag,
+                        "shape": {"text": text(["0.11\n"])},
+                    },
+                    {"objectId": "plain", "shape": {"text": text(["Hi\n"])}},
+                    {
+                        "objectId": "group",
+                        "elementGroup": {
+                            "children": [
+                                {
+                                    "objectId": "empty",
+                                    "title": "calkit:results/wake.json#case.n",
+                                    "shape": {},
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "objectId": "tbl",
+                        "title": "calkit:t.csv",
+                        "table": {
+                            "tableRows": [
+                                {"tableCells": [cell(["a\n"]), cell(["\n"])]}
+                            ]
+                        },
+                    },
+                ],
+            }
+        ]
+    }
+    http = FakeHttp(
+        {
+            ("get", slides_url): FakeResponse(body=deck),
+            ("get", f"{gs.DRIVE_API_URL}/{pid}"): FakeResponse(
+                body={
+                    "id": pid,
+                    "name": "Deck",
+                    "mimeType": gs.PRESENTATION_MIME_TYPE,
+                    "modifiedTime": "t2",
+                }
+            ),
+            ("post", f"{slides_url}:batchUpdate"): FakeResponse(),
+        }
+    )
+    client = gs.Client("token")
+    client.http = http
+    found = {c["element_id"]: c for c in client.get_components(pid)}
+    assert set(found) == {"img", "box", "empty", "tbl"}
+    assert found["img"]["kind"] == "figure"
+    assert found["box"] == {
+        "kind": "value",
+        "path": "results/wake.json",
+        "key": "mean_deficit",
+        "format": ".2f",
+        "slide_id": "s1",
+        "element_id": "box",
+        "tag": tag,
+        "text": "0.11",
+    }
+    assert found["empty"]["text"] == ""
+    assert found["tbl"]["rows"] == [["a", ""]]
+    # What's already right is left alone, so an unchanged presentation
+    # isn't edited
+    n_calls = len(http.calls)
+    resp = client.put_components(pid, values={tag: "0.11"}, tables={})
+    assert resp["values"] == 0
+    assert not any(c[0] == "post" for c in http.calls[n_calls:])
+    # Values replace a text box's text, keeping its style, and tables grow
+    # to fit their rows and columns
+    resp = client.put_components(
+        pid,
+        values={tag: "0.12", "calkit:results/wake.json#case.n": "3"},
+        tables={"calkit:t.csv": [["a", "b"], ["1", "2"]]},
+    )
+    assert resp == {"values": 2, "tables": 1, "modified_time": "t2"}
+    batch = http.calls[-2][2]["json"]["requests"]
+    assert batch[:2] == [
+        {
+            "insertText": {
+                "objectId": "box",
+                "text": "0.12",
+                "insertionIndex": 0,
+            }
+        },
+        {
+            "deleteText": {
+                "objectId": "box",
+                "textRange": {"type": "FROM_START_INDEX", "startIndex": 4},
+            }
+        },
+    ]
+    assert batch[2] == {"insertText": {"objectId": "empty", "text": "3"}}
+    assert batch[3] == {
+        "insertTableRows": {
+            "tableObjectId": "tbl",
+            "cellLocation": {"rowIndex": 0},
+            "insertBelow": True,
+            "number": 1,
+        }
+    }
+    cells_set = [
+        (r[k]["cellLocation"]["rowIndex"], r[k]["cellLocation"]["columnIndex"])
+        for r in batch[4:]
+        for k in r
+        if k == "insertText"
+    ]
+    assert cells_set == [(0, 1), (1, 0), (1, 1)]

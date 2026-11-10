@@ -111,6 +111,35 @@ export type AnalyticsStats = {
 }
 
 /**
+ * ArtifactComponent
+ *
+ * A project figure, value, or table shown in an artifact, e.g., a
+ * Google Slides presentation, as its export recorded it.
+ */
+export type ArtifactComponent = {
+  /**
+   * Kind
+   */
+  kind: "figure" | "value" | "table"
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Format
+   */
+  format?: string | null
+  /**
+   * Slide Id
+   */
+  slide_id?: string | null
+}
+
+/**
  * Body_login-login_access_token
  */
 export type BodyLoginLoginAccessToken = {
@@ -2211,6 +2240,87 @@ export type GithubPullRequest = {
 }
 
 /**
+ * GoogleComponent
+ *
+ * A project figure, value, or table a presentation shows, found by
+ * its alt text title.
+ */
+export type GoogleComponent = {
+  /**
+   * Kind
+   */
+  kind: "figure" | "value" | "table"
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Format
+   */
+  format?: string | null
+  /**
+   * Slide Id
+   */
+  slide_id: string
+  /**
+   * Element Id
+   */
+  element_id: string
+  /**
+   * Tag
+   */
+  tag: string
+  /**
+   * Text
+   */
+  text?: string | null
+  /**
+   * Rows
+   */
+  rows?: Array<Array<string>> | null
+}
+
+/**
+ * GoogleComponentsPut
+ */
+export type GoogleComponentsPut = {
+  /**
+   * Values
+   */
+  values?: {
+    [key: string]: string
+  }
+  /**
+   * Tables
+   */
+  tables?: {
+    [key: string]: Array<Array<string>>
+  }
+}
+
+/**
+ * GoogleComponentsPutResponse
+ */
+export type GoogleComponentsPutResponse = {
+  /**
+   * Values
+   */
+  values: number
+  /**
+   * Tables
+   */
+  tables: number
+  /**
+   * Modified Time
+   */
+  modified_time: string
+}
+
+/**
  * GoogleFigurePut
  */
 export type GoogleFigurePut = {
@@ -4118,6 +4228,10 @@ export type Presentation = {
    * Edit Url
    */
   edit_url?: string | null
+  /**
+   * Components
+   */
+  components?: Array<ArtifactComponent>
 }
 
 /**
@@ -10173,6 +10287,72 @@ export type PostUserGooglePresentationSlideTagsResponses = {
 
 export type PostUserGooglePresentationSlideTagsResponse =
   PostUserGooglePresentationSlideTagsResponses[keyof PostUserGooglePresentationSlideTagsResponses]
+
+export type GetUserGooglePresentationComponentsData = {
+  body?: never
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query?: never
+  url: "/user/google/presentations/{presentation_id}/components"
+}
+
+export type GetUserGooglePresentationComponentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserGooglePresentationComponentsError =
+  GetUserGooglePresentationComponentsErrors[keyof GetUserGooglePresentationComponentsErrors]
+
+export type GetUserGooglePresentationComponentsResponses = {
+  /**
+   * Response Users-Get User Google Presentation Components
+   *
+   * Successful Response
+   */
+  200: Array<GoogleComponent>
+}
+
+export type GetUserGooglePresentationComponentsResponse =
+  GetUserGooglePresentationComponentsResponses[keyof GetUserGooglePresentationComponentsResponses]
+
+export type PutUserGooglePresentationComponentsData = {
+  body: GoogleComponentsPut
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query?: never
+  url: "/user/google/presentations/{presentation_id}/components"
+}
+
+export type PutUserGooglePresentationComponentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutUserGooglePresentationComponentsError =
+  PutUserGooglePresentationComponentsErrors[keyof PutUserGooglePresentationComponentsErrors]
+
+export type PutUserGooglePresentationComponentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: GoogleComponentsPutResponse
+}
+
+export type PutUserGooglePresentationComponentsResponse =
+  PutUserGooglePresentationComponentsResponses[keyof PutUserGooglePresentationComponentsResponses]
 
 export type GetUserGooglePresentationExportData = {
   body?: never

@@ -2014,6 +2014,19 @@ class QuestionPut(SQLModel):
 PresentationKind = CkPresentationKind
 
 
+class ArtifactComponent(BaseModel):
+    """A project figure, value, or table shown in an artifact, e.g., a
+    Google Slides presentation, as its export recorded it.
+    """
+
+    kind: Literal["figure", "value", "table"]
+    path: str
+    key: str | None = None
+    format: str | None = None
+    # Where it is, e.g., the slide it's on
+    slide_id: str | None = None
+
+
 class Presentation(_DeclaredArtifact):
     """A presentation declared in calkit.yaml, or auto-detected in the repo."""
 
@@ -2029,6 +2042,8 @@ class Presentation(_DeclaredArtifact):
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
     # Where it's edited, when that's somewhere else, e.g., Google Slides
     edit_url: str | None = None
+    # The project figures, values, and tables it shows
+    components: list[ArtifactComponent] = []
 
 
 class Notebook(BaseModel):

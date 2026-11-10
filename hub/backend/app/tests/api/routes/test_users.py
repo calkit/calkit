@@ -2242,6 +2242,28 @@ def test_user_google_presentations(
             calls.append(("tags", tags))
             return len(tags)
 
+        def get_components(self, presentation_id):
+            return [
+                {
+                    "kind": "value",
+                    "path": "results/wake.json",
+                    "key": "u",
+                    "format": ".2f",
+                    "slide_id": "s1",
+                    "element_id": "box",
+                    "tag": "calkit:results/wake.json#u:.2f",
+                    "text": "1.20",
+                }
+            ]
+
+        def put_components(self, presentation_id, values, tables):
+            calls.append(("components", values, tables))
+            return {
+                "values": len(values),
+                "tables": len(tables),
+                "modified_time": "t3",
+            }
+
         def export_presentation(self, presentation_id, mime_type):
             if mime_type == gs.SLIDES_EXPORT_MIME_TYPES[".pptx"]:
                 raise gs.GoogleError("Google is down", 503)
@@ -2357,3 +2379,20 @@ def test_user_google_presentations(
             params={"format": "docx"},
         )
         assert r.status_code == 422
+        # What it shows can be found, and values and tables put in
+        r = client.get(
+            f"{base}/{pid}/components", headers=normal_user_token_headers
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()[0]["tag"] == "calkit:results/wake.json#u:.2f"
+        r = client.put(
+            f"{base}/{pid}/components",
+            headers=normal_user_token_headers,
+            json={"values": {"calkit:results/wake.json#u:.2f": "1.50"}},
+        )
+        assert r.json() == {"values": 1, "tables": 0, "modified_time": "t3"}
+        assert calls[-1] == (
+            "components",
+            {"calkit:results/wake.json#u:.2f": "1.50"},
+            {},
+        )

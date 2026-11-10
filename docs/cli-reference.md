@@ -2978,11 +2978,11 @@ Options:
 
 Export data and artifacts from various applications.
 
-| Command                                             | Description                                                                                 |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [`inkscape`](#subcommand-export-inkscape)           | Export a figure from an SVG.                                                                |
-| [`gimp`](#subcommand-export-gimp)                   | Export a flattened figure from an XCF file.                                                 |
-| [`google-slides`](#subcommand-export-google-slides) | Put figures into a Google Slides presentation, then export it, and figures from its slides. |
+| Command                                             | Description                                                                                                     |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape)           | Export a figure from an SVG.                                                                                    |
+| [`gimp`](#subcommand-export-gimp)                   | Export a flattened figure from an XCF file.                                                                     |
+| [`google-slides`](#subcommand-export-google-slides) | Put figures, values, and tables into a Google Slides presentation, then export it, and figures from its slides. |
 
 <a id="subcommand-export-inkscape"></a>
 
@@ -3037,7 +3037,7 @@ Options:
 
 #### `calkit export google-slides`
 
-Put figures into a Google Slides presentation, then export it, and figures from its slides.
+Put figures, values, and tables into a Google Slides presentation, then export it, and figures from its slides.
 
 Usage:
 
@@ -3053,12 +3053,14 @@ Arguments:
 
 Options:
 
-| Option             | Type | Required | Default | Description                                                                                                                            |
-| ------------------ | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o`   | str  | no       |         | File to export to, a .pdf or .pptx.                                                                                                    |
-| `--figure`         | str  | no       |         | Project figure to put in first, replacing the images tagged with its path, or added to the first slide.                                |
-| `--slide`          | str  | no       |         | Figure to export from a slide, as its path and the slide's ID, e.g., 'figures/setup.pdf=g2c3a1b9_0_12', cropped to what's drawn on it. |
-| `--edit-time-path` | str  | no       |         | Where to record when the presentation was last edited.                                                                                 |
+| Option              | Type | Required | Default | Description                                                                                                                            |
+| ------------------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`    | str  | no       |         | File to export to, a .pdf or .pptx.                                                                                                    |
+| `--figure`          | str  | no       |         | Project figure to put in first, replacing the images tagged with its path, or added to the first slide.                                |
+| `--slide`           | str  | no       |         | Figure to export from a slide, as its path and the slide's ID, e.g., 'figures/setup.pdf=g2c3a1b9_0_12', cropped to what's drawn on it. |
+| `--input`           | str  | no       |         | Other input of the stage, e.g., a results file, whose values and tables the presentation may show.                                     |
+| `--edit-time-path`  | str  | no       |         | Where to record when the presentation was last edited.                                                                                 |
+| `--components-path` | str  | no       |         | Where to record the figures, values, and tables it shows.                                                                              |
 
 <a id="command-group-update"></a>
 

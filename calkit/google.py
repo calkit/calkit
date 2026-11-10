@@ -77,6 +77,27 @@ def get_edit_time_path(presentation_id: str) -> str:
     return f".calkit/google/{presentation_id}.json"
 
 
+def get_components_path(presentation_id: str) -> str:
+    """Where the figures, values, and tables a presentation shows are
+    recorded, relative to the project.
+    """
+    return f".calkit/google/{presentation_id}-components.json"
+
+
+def write_components(path: str, components: list[dict]) -> None:
+    """Record the figures, values, and tables a presentation shows, as
+    ``Client.get_components`` found them, by slide and place on it.
+    """
+    keep = ["kind", "path", "key", "format", "slide_id", "element_id"]
+    content = (
+        json.dumps([{k: c.get(k) for k in keep} for c in components], indent=2)
+        + "\n"
+    )
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        f.write(content)
+
+
 def write_edit_time(path: str, modified_time: str) -> bool:
     """Record when a presentation was last edited, returning whether that
     changed.
@@ -163,6 +184,62 @@ def add_slides_presentation(
 
 def get_figure_tag(path: str) -> str:
     return FIGURE_TAG_PREFIX + posixpath.normpath(path.replace("\\", "/"))
+
+
+def get_value_tag(path: str, key: str, fmt: str | None = None) -> str:
+    """The alt text title of a text box showing a value from a results
+    file, e.g., 'calkit:results/wake.json#mean_deficit:.2f', with the same
+    path, key, and format as ``\\ckvalue`` in LaTeX.
+    """
+    tag = f"{get_figure_tag(path)}#{key}"
+    return f"{tag}:{fmt}" if fmt else tag
+
+
+def get_tag_parts(title: str | None) -> tuple[str, str | None, str | None]:
+    """The path, key, and format a Calkit alt text title names, e.g.,
+    ``('results/wake.json', 'mean_deficit', '.2f')``, with no key or format
+    for a figure or a table.
+
+    Raises ``ValueError`` for a title that isn't Calkit's.
+    """
+    if not title or not title.startswith(FIGURE_TAG_PREFIX):
+        raise ValueError(f"{title!r} isn't a Calkit tag")
+    rest = title[len(FIGURE_TAG_PREFIX) :].strip()
+    path, sep, key = rest.partition("#")
+    if not sep:
+        return path, None, None
+    key, sep, fmt = key.rpartition(":") if ":" in key else (key, "", "")
+    return path, key, fmt or None
+
+
+def get_value_text(path: str, key: str, fmt: str | None = None) -> str:
+    """A value from a results file as text, formatted with a Python format
+    spec, e.g., '.2f', if it's a number.
+    """
+    from calkit.questions import parse_evidence_text, resolve_key
+
+    with open(path, encoding="utf-8") as f:
+        data = parse_evidence_text(f.read(), path)
+    value = resolve_key(data, key)
+    if fmt and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return format(value, fmt)
+    return str(value)
+
+
+def get_table_rows(path: str) -> list[list[str]]:
+    """The cells of a table file, a CSV or TSV, header first."""
+    import csv
+
+    ext = posixpath.splitext(path)[1].lower()
+    if ext not in (".csv", ".tsv"):
+        raise ValueError(
+            f"A table in a presentation comes from a CSV or TSV, not {path}"
+        )
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f, delimiter="\t" if ext == ".tsv" else ","))
+    if not rows:
+        raise ValueError(f"{path} is empty")
+    return rows
 
 
 def get_figure_mime_type(path: str) -> str:
@@ -740,3 +817,196 @@ class Client:
             )
             self._check(resp, "tag the slides")
         return len(batch)
+
+    def get_components(self, presentation_id: str) -> list[dict]:
+        """The project figures, values, and tables a presentation shows,
+        found by their alt text titles, e.g., 'calkit:figures/rates.png',
+        each with its kind, path, key, format, slide, and what's needed to
+        update it.
+        """
+
+        def get_text(text: dict | None) -> str:
+            # A text box always ends with a newline
+            content = "".join(
+                e.get("textRun", {}).get("content", "")
+                for e in (text or {}).get("textElements", [])
+            )
+            return content[:-1] if content.endswith("\n") else content
+
+        def get_found(element: dict, slide_id: str) -> list[dict]:
+            if "elementGroup" in element:
+                return [
+                    c
+                    for child in element["elementGroup"].get("children", [])
+                    for c in get_found(child, slide_id)
+                ]
+            try:
+                path, key, fmt = get_tag_parts(element.get("title"))
+            except ValueError:
+                return []
+            found = {
+                "path": path,
+                "key": key,
+                "format": fmt,
+                "slide_id": slide_id,
+                "element_id": element["objectId"],
+                "tag": element["title"],
+            }
+            if "image" in element and key is None:
+                return [dict(found, kind="figure")]
+            if "shape" in element and key is not None:
+                text = get_text(element["shape"].get("text"))
+                return [dict(found, kind="value", text=text)]
+            if "table" in element and key is None:
+                rows = [
+                    [get_text(cell.get("text")) for cell in row["tableCells"]]
+                    for row in element["table"].get("tableRows", [])
+                ]
+                return [dict(found, kind="table", rows=rows)]
+            return []
+
+        resp = self.http.get(
+            f"{SLIDES_API_URL}/{presentation_id}",
+            params={"fields": "slides(objectId,pageElements)"},
+            timeout=60,
+        )
+        self._check(resp, "read the presentation")
+        return [
+            c
+            for slide in resp.json().get("slides", [])
+            for element in slide.get("pageElements", [])
+            for c in get_found(element, slide["objectId"])
+        ]
+
+    def put_components(
+        self,
+        presentation_id: str,
+        values: dict[str, str],
+        tables: dict[str, list[list[str]]],
+    ) -> dict:
+        """Put values in the text boxes, and tables in the tables, tagged
+        with them, given text and rows by tag, keeping each one's style.
+
+        Returns how many text boxes and tables were changed, and when the
+        presentation was then last edited.
+        """
+
+        def get_length(text: str) -> int:
+            return len(text.encode("utf-16-le")) // 2
+
+        def get_text_requests(target: dict, text: str, old: str) -> list[dict]:
+            # Inserting before the old text takes on its style, then the old
+            # text goes, and text already right is left alone, so an
+            # unchanged presentation isn't edited
+            if text == old:
+                return []
+            if not old:
+                return (
+                    [{"insertText": dict(target, text=text)}] if text else []
+                )
+            if not text:
+                return [
+                    {"deleteText": dict(target, textRange={"type": "ALL"})}
+                ]
+            return [
+                {"insertText": dict(target, text=text, insertionIndex=0)},
+                {
+                    "deleteText": dict(
+                        target,
+                        textRange={
+                            "type": "FROM_START_INDEX",
+                            "startIndex": get_length(text),
+                        },
+                    )
+                },
+            ]
+
+        batch: list[dict[str, Any]] = []
+        n_values = 0
+        n_tables = 0
+        for c in self.get_components(presentation_id):
+            if c["kind"] == "value" and c["tag"] in values:
+                requests = get_text_requests(
+                    {"objectId": c["element_id"]}, values[c["tag"]], c["text"]
+                )
+                n_values += bool(requests)
+                batch += requests
+            elif c["kind"] == "table" and c["tag"] in tables:
+                rows = tables[c["tag"]]
+                n_cols = max(len(r) for r in rows)
+                cells = c["rows"]
+                n_before = len(batch)
+                table_id = c["element_id"]
+                # Rows and columns are added after the last, or removed from
+                # the end, so the rest keep their formatting
+                if len(rows) > len(cells):
+                    batch.append(
+                        {
+                            "insertTableRows": {
+                                "tableObjectId": table_id,
+                                "cellLocation": {"rowIndex": len(cells) - 1},
+                                "insertBelow": True,
+                                "number": len(rows) - len(cells),
+                            }
+                        }
+                    )
+                for i in range(len(cells) - 1, len(rows) - 1, -1):
+                    batch.append(
+                        {
+                            "deleteTableRow": {
+                                "tableObjectId": table_id,
+                                "cellLocation": {"rowIndex": i},
+                            }
+                        }
+                    )
+                width = len(cells[0]) if cells else 0
+                if n_cols > width:
+                    batch.append(
+                        {
+                            "insertTableColumns": {
+                                "tableObjectId": table_id,
+                                "cellLocation": {"columnIndex": width - 1},
+                                "insertRight": True,
+                                "number": n_cols - width,
+                            }
+                        }
+                    )
+                for j in range(width - 1, n_cols - 1, -1):
+                    batch.append(
+                        {
+                            "deleteTableColumn": {
+                                "tableObjectId": table_id,
+                                "cellLocation": {"columnIndex": j},
+                            }
+                        }
+                    )
+                for i, row in enumerate(rows):
+                    for j in range(n_cols):
+                        old = (
+                            cells[i][j] if i < len(cells) and j < width else ""
+                        )
+                        batch += get_text_requests(
+                            {
+                                "objectId": table_id,
+                                "cellLocation": {
+                                    "rowIndex": i,
+                                    "columnIndex": j,
+                                },
+                            },
+                            row[j] if j < len(row) else "",
+                            old,
+                        )
+                n_tables += len(batch) > n_before
+        if batch:
+            resp = self.http.post(
+                f"{SLIDES_API_URL}/{presentation_id}:batchUpdate",
+                json={"requests": batch},
+                timeout=120,
+            )
+            self._check(resp, "put values and tables in the presentation")
+        info = self.get_presentation_info(presentation_id)
+        return {
+            "values": n_values,
+            "tables": n_tables,
+            "modified_time": info["modified_time"],
+        }

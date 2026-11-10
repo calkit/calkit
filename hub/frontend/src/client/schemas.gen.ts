@@ -177,6 +177,58 @@ export const AnalyticsStatsSchema = {
   title: "AnalyticsStats",
 } as const
 
+export const ArtifactComponentSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      enum: ["figure", "value", "table"],
+      title: "Kind",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    format: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Format",
+    },
+    slide_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Slide Id",
+    },
+  },
+  type: "object",
+  required: ["kind", "path"],
+  title: "ArtifactComponent",
+  description:
+    "A project figure, value, or table shown in an artifact, e.g., a\nGoogle Slides presentation, as its export recorded it.",
+} as const
+
 export const Body_login_login_access_tokenSchema = {
   properties: {
     analytics_consent: {
@@ -3756,6 +3808,136 @@ export const GithubPullRequestSchema = {
   title: "GithubPullRequest",
 } as const
 
+export const GoogleComponentSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      enum: ["figure", "value", "table"],
+      title: "Kind",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    format: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Format",
+    },
+    slide_id: {
+      type: "string",
+      title: "Slide Id",
+    },
+    element_id: {
+      type: "string",
+      title: "Element Id",
+    },
+    tag: {
+      type: "string",
+      title: "Tag",
+    },
+    text: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Text",
+    },
+    rows: {
+      anyOf: [
+        {
+          items: {
+            items: {
+              type: "string",
+            },
+            type: "array",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Rows",
+    },
+  },
+  type: "object",
+  required: ["kind", "path", "slide_id", "element_id", "tag"],
+  title: "GoogleComponent",
+  description:
+    "A project figure, value, or table a presentation shows, found by\nits alt text title.",
+} as const
+
+export const GoogleComponentsPutSchema = {
+  properties: {
+    values: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Values",
+      default: {},
+    },
+    tables: {
+      additionalProperties: {
+        items: {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        type: "array",
+      },
+      type: "object",
+      title: "Tables",
+      default: {},
+    },
+  },
+  type: "object",
+  title: "GoogleComponentsPut",
+} as const
+
+export const GoogleComponentsPutResponseSchema = {
+  properties: {
+    values: {
+      type: "integer",
+      title: "Values",
+    },
+    tables: {
+      type: "integer",
+      title: "Tables",
+    },
+    modified_time: {
+      type: "string",
+      title: "Modified Time",
+    },
+  },
+  type: "object",
+  required: ["values", "tables", "modified_time"],
+  title: "GoogleComponentsPutResponse",
+} as const
+
 export const GoogleFigurePutSchema = {
   properties: {
     replaced: {
@@ -6925,6 +7107,14 @@ export const PresentationSchema = {
         },
       ],
       title: "Edit Url",
+    },
+    components: {
+      items: {
+        $ref: "#/components/schemas/ArtifactComponent",
+      },
+      type: "array",
+      title: "Components",
+      default: [],
     },
   },
   type: "object",

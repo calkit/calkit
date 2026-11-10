@@ -1891,7 +1891,7 @@
     },
     "GoogleSlidesExportStage": {
       "additionalProperties": false,
-      "description": "A Google Slides presentation exported as a PDF, or as a PowerPoint\ncopy kept in the project, and its slides exported as figures, e.g., a\ndiagram drawn on one.\n\nThe images among its inputs, i.e., PNG, JPEG, or GIF figures, are put\nin first: each replaces the images whose alt text title is 'calkit:'\nand its path, e.g., 'calkit:figures/rates.png', keeping their place and\nsize, or, if there are none, is added to the first slide with that\ntitle.\n\nIt goes out of date when an input changes, or when the presentation is\nedited, which 'calkit status', 'calkit run', and 'calkit pull' check\nfor.",
+      "description": "A Google Slides presentation exported as a PDF, or as a PowerPoint\ncopy kept in the project, and its slides exported as figures, e.g., a\ndiagram drawn on one.\n\nThe images among its inputs, i.e., PNG, JPEG, or GIF figures, are put\nin first: each replaces the images whose alt text title is 'calkit:'\nand its path, e.g., 'calkit:figures/rates.png', keeping their place and\nsize, or, if there are none, is added to the first slide with that\ntitle.\n\nText boxes and tables can show values and tables from its inputs too,\ntagged with what they show: a text box whose alt text title is, e.g.,\n'calkit:results/wake.json#mean_deficit:.2f' shows that value, with\nthe same path, key, and format as '\\ckvalue' in LaTeX, and a table\nwhose alt text title is, e.g., 'calkit:results/cases.csv' shows that\nCSV's cells.\n\nIt goes out of date when an input changes, or when the presentation is\nedited, which 'calkit status', 'calkit run', and 'calkit pull' check\nfor.",
       "properties": {
         "always_run": {
           "default": false,

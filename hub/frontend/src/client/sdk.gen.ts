@@ -19,6 +19,7 @@ import type {
   BodyLoginLoginAccessToken,
   BodyProjectsPostProjectDatasetUpload,
   BodyProjectsPostProjectFigure,
+  BodyProjectsPostProjectGooglePresentationFigure,
   BodyProjectsPostProjectOverleafPublication,
   BodyProjectsPostProjectPublication,
   BodyProjectsPostProjectUpload,
@@ -183,6 +184,10 @@ import type {
   GetProjectGitRemoteHeadResponses,
   GetProjectGitRepoErrors,
   GetProjectGitRepoResponses,
+  GetProjectGooglePresentationErrors,
+  GetProjectGooglePresentationExportErrors,
+  GetProjectGooglePresentationExportResponses,
+  GetProjectGooglePresentationResponses,
   GetProjectHistoryErrors,
   GetProjectHistoryResponses,
   GetProjectInvitationsErrors,
@@ -407,6 +412,10 @@ import type {
   PostProjectFsOpResponses,
   PostProjectGithubReleaseErrors,
   PostProjectGithubReleaseResponses,
+  PostProjectGooglePresentationErrors,
+  PostProjectGooglePresentationFigureErrors,
+  PostProjectGooglePresentationFigureResponses,
+  PostProjectGooglePresentationResponses,
   PostProjectGoogleSlidesPresentationErrors,
   PostProjectGoogleSlidesPresentationResponses,
   PostProjectInvitationErrors,
@@ -5399,6 +5408,202 @@ export class ProjectsService {
       ...params,
       headers: {
         "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Google Presentation
+   *
+   * Get a project's Google Slides presentation's title, and when it was
+   * last edited, through the Google account of whoever linked it.
+   */
+  public static getProjectGooglePresentation<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      presentation_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectGooglePresentationResponses,
+    GetProjectGooglePresentationErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "presentation_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectGooglePresentationResponses,
+      GetProjectGooglePresentationErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/google/presentations/{presentation_id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Google Presentation
+   *
+   * Link a Google Slides presentation to a project, so everyone with
+   * access to the project reaches it through the current user's Google
+   * account, and share it with the project's collaborators in Google.
+   */
+  public static postProjectGooglePresentation<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      presentation_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectGooglePresentationResponses,
+    PostProjectGooglePresentationErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "presentation_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectGooglePresentationResponses,
+      PostProjectGooglePresentationErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/google/presentations/{presentation_id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Google Presentation Export
+   *
+   * Export a project's Google Slides presentation as a PDF or PowerPoint
+   * file.
+   */
+  public static getProjectGooglePresentationExport<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      presentation_id: string
+      format: "pdf" | "pptx"
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectGooglePresentationExportResponses,
+    GetProjectGooglePresentationExportErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "presentation_id" },
+            { in: "query", key: "format" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectGooglePresentationExportResponses,
+      GetProjectGooglePresentationExportErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/google/presentations/{presentation_id}/export",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Google Presentation Figure
+   *
+   * Put the latest version of a project figure in a project's Google
+   * Slides presentation, replacing the images tagged with its path.
+   */
+  public static postProjectGooglePresentationFigure<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      presentation_id: string
+      path: string
+      bodyProjectsPostProjectGooglePresentationFigure: BodyProjectsPostProjectGooglePresentationFigure
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectGooglePresentationFigureResponses,
+    PostProjectGooglePresentationFigureErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "presentation_id" },
+            { in: "query", key: "path" },
+            {
+              key: "bodyProjectsPostProjectGooglePresentationFigure",
+              map: "body",
+            },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectGooglePresentationFigureResponses,
+      PostProjectGooglePresentationFigureErrors,
+      ThrowOnError
+    >({
+      ...formDataBodySerializer,
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/google/presentations/{presentation_id}/figures",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": null,
         ...options?.headers,
         ...params.headers,
       },

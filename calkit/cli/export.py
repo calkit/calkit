@@ -171,13 +171,14 @@ def google_slides(
     """Put figures into a Google Slides presentation, then export it."""
     import posixpath
 
-    import calkit
     import calkit.google
-    from calkit.cli.google import get_hub_response
+    from calkit.cli.google import get_presentation_response
 
-    def ask_hub(kind: str, path: str, action: str, **kwargs: Any) -> Any:
+    def ask_hub(kind: str, suffix: str, action: str, **kwargs: Any) -> Any:
         try:
-            return get_hub_response(kind, path, **kwargs)
+            return get_presentation_response(
+                kind, presentation_id, suffix, **kwargs
+            )
         except Exception as e:
             raise_error(f"Failed to {action}: {e}")
 
@@ -191,7 +192,6 @@ def google_slides(
         ]
     except ValueError as e:
         raise_error(str(e))
-    api_path = f"/user/google/presentations/{presentation_id}"
     for figure, mime_type in zip(figures, figure_mime_types):
         if not os.path.isfile(figure):
             raise_error(f"Figure {figure} does not exist")
@@ -199,7 +199,7 @@ def google_slides(
             content = f.read()
         resp = ask_hub(
             "post",
-            f"{api_path}/figures",
+            "/figures",
             f"put {figure} in the presentation",
             params={"path": figure},
             files={"file": (posixpath.basename(figure), content, mime_type)},
@@ -213,12 +213,12 @@ def google_slides(
             typer.echo(f"Updated {figure} in {resp['replaced']} place(s)")
     # Taken before exporting, since putting the figures in edited it, and
     # so an edit made while exporting is seen as one next time
-    info = ask_hub("get", api_path, "check when it was last edited")
+    info = ask_hub("get", "", "check when it was last edited")
     for path, mime_type in zip(outputs, mime_types):
         typer.echo(f"Exporting {path}")
         resp = ask_hub(
             "get",
-            f"{api_path}/export",
+            "/export",
             f"export {path}",
             params={"format": posixpath.splitext(path)[1][1:].lower()},
             as_json=False,

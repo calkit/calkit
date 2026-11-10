@@ -9,6 +9,8 @@ import calkit
 from calkit.cli.export import export_app
 from calkit.cli.google import (
     get_hub_response,
+    get_presentation_response,
+    link_presentation,
     record_edit_times,
 )
 from calkit.cli.import_ import import_app
@@ -287,3 +289,51 @@ def test_google_slides(tmp_dir, monkeypatch):
     with pytest.raises(requests.HTTPError):
         get_hub_response("post", "/user/google/presentations")
     assert not opened
+    # With the project on the hub, the presentation is asked for there, so
+    # it's reached through whoever linked it, and through the user's own
+    # Google account if the hub doesn't know the project
+    asked = []
+
+    def hub_get_project(path, **kwargs):
+        asked.append(path)
+        if path.startswith("/projects/me/unknown/"):
+            resp = requests.Response()
+            resp.status_code = 404
+            raise requests.HTTPError("404: Not Found", response=resp)
+        return {"modified_time": "t9"}
+
+    monkeypatch.setattr(calkit.hub, "get", hub_get_project)
+    monkeypatch.setattr(calkit, "detect_project_name", lambda **kw: "me/known")
+    assert get_presentation_response("get", pid, "/export") == {
+        "modified_time": "t9"
+    }
+    assert asked == [f"/projects/me/known/google/presentations/{pid}/export"]
+    monkeypatch.setattr(
+        calkit, "detect_project_name", lambda **kw: "me/unknown"
+    )
+    asked.clear()
+    get_presentation_response("get", pid, connect=False)
+    assert asked == [
+        f"/projects/me/unknown/google/presentations/{pid}",
+        f"/user/google/presentations/{pid}",
+    ]
+    # Adding one links it to the project on the hub, which a hub that
+    # doesn't know the project quietly doesn't
+    linked = []
+
+    def hub_post_link(path, **kwargs):
+        linked.append(path)
+        if "unknown" in path:
+            resp = requests.Response()
+            resp.status_code = 404
+            raise requests.HTTPError("404: Not Found", response=resp)
+        return {}
+
+    monkeypatch.setattr(calkit.hub, "post", hub_post_link)
+    link_presentation(pid)
+    monkeypatch.setattr(calkit, "detect_project_name", lambda **kw: "me/known")
+    link_presentation(pid)
+    assert linked == [
+        f"/projects/me/unknown/google/presentations/{pid}",
+        f"/projects/me/known/google/presentations/{pid}",
+    ]

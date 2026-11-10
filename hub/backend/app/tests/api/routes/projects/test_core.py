@@ -23,7 +23,7 @@ from app.api.routes.projects.core import (
 )
 from app.config import settings
 from app.core import ryaml
-from app.models import OverleafLink, Project, UserCreate
+from app.models import OverleafLink, Project, ProjectGoogleFile, UserCreate
 from app.models.core import (
     ROLE_IDS,
     Account,
@@ -1302,6 +1302,7 @@ def test_google_slides_presentations(
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Init"])
     created = []
+    linked = []
 
     class Client:
         def create_presentation(self, title):
@@ -1327,12 +1328,17 @@ def test_google_slides_presentations(
                 "app.api.routes.projects.core.users.get_google_slides_client",
                 return_value=Client(),
             ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "link_project_google_file"
+            ) as link,
         ):
             r = client.post(
                 "/projects/o/p/presentations/google-slides",
                 headers=normal_user_token_headers,
                 json={"title": "My poster", "path": path, "kind": "poster"},
             )
+        linked.extend(c.kwargs["file_id"] for c in link.call_args_list)
         return r, push_and_expire
 
     r, push_and_expire = post("poster/poster.pdf")
@@ -1356,11 +1362,205 @@ def test_google_slides_presentations(
         == "Add presentation poster/poster.pdf"
     )
     assert not repo.is_dirty(untracked_files=True)
+    # It's linked to the project, so collaborators reach it
+    assert linked == [pid]
     # One that can't be added is refused before it's created in Drive
     for path in ["taken.pdf", "poster/poster.png"]:
         r, _ = post(path)
         assert r.status_code == 422, r.text
     assert created == ["My poster"]
+    assert linked == [pid]
+
+
+def test_project_google_presentations(client: TestClient, db: Session) -> None:
+    import calkit.google as gs
+
+    project, owner_headers = _make_owner_with_project(db, client)
+    owner = project.owner_account.user
+    base = f"/projects/{project.owner_account.name}/{project.name}"
+    pid = "1AbCdEfGhIjKlMnOpQrStUv"
+    collab = create_random_user(db)
+    collab_headers = authentication_token_from_email(
+        client=client, email=collab.email, db=db
+    )
+    r = client.post(
+        f"{base}/collaborators/by-email",
+        headers=owner_headers,
+        json={"email": collab.email},
+    )
+    assert r.status_code == 200, r.text
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def get_presentation_info(self, presentation_id):
+            self.calls.append(("info", presentation_id))
+            return {
+                "id": presentation_id,
+                "title": "Poster",
+                "url": gs.get_slides_presentation_url(presentation_id),
+                "modified_time": "t1",
+            }
+
+        def export_presentation(self, presentation_id, mime_type):
+            self.calls.append(("export", presentation_id))
+            return b"%PDF"
+
+        def share_file(self, file_id, email=None):
+            self.calls.append(("share", file_id, email))
+
+        def unshare_file(self, file_id):
+            self.calls.append(("unshare", file_id))
+
+    # Only the owner has connected Google so far
+    clients = {owner.id: FakeClient()}
+
+    def get_client(session, user):
+        if user.id not in clients:
+            raise HTTPException(403, gs.CONNECT_ADVICE)
+        return clients[user.id]
+
+    with patch("app.users.get_google_slides_client", side_effect=get_client):
+        # Linking it records whose Google account reaches it, and shares it
+        # with the project's collaborators in Google, without emailing them
+        r = client.post(
+            f"{base}/google/presentations/{pid}", headers=owner_headers
+        )
+        assert r.status_code == 200, r.text
+        link = db.get(ProjectGoogleFile, (project.id, pid))
+        assert link is not None and link.user_id == owner.id
+        assert ("share", pid, collab.email) in clients[owner.id].calls
+        assert ("share", pid, owner.email) not in clients[owner.id].calls
+        # A collaborator without Google connected reaches it through the
+        # owner's
+        r = client.get(
+            f"{base}/google/presentations/{pid}", headers=collab_headers
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["modified_time"] == "t1"
+        r = client.get(
+            f"{base}/google/presentations/{pid}/export",
+            headers=collab_headers,
+            params={"format": "pdf"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.content == b"%PDF"
+        # A presentation nobody linked is reached through their own, which
+        # they need to connect
+        r = client.get(
+            f"{base}/google/presentations/other", headers=collab_headers
+        )
+        assert r.status_code == 403
+        assert "Connect Google Drive" in r.json()["detail"]
+        # Someone without access to the project can't reach it at all
+        other = create_random_user(db)
+        other_headers = authentication_token_from_email(
+            client=client, email=other.email, db=db
+        )
+        r = client.get(
+            f"{base}/google/presentations/{pid}", headers=other_headers
+        )
+        assert r.status_code == 403
+        # A collaborator added later is shared it too
+        r = client.post(
+            f"{base}/collaborators/by-email",
+            headers=owner_headers,
+            json={"email": other.email},
+        )
+        assert r.status_code == 200, r.text
+        assert ("share", pid, other.email) in clients[owner.id].calls
+        # Making the project public lets anyone with the link view it only
+        # when asked to, and making it private again stops that
+        with (
+            patch(
+                "app.api.routes.projects.core.users.get_github_token",
+                return_value="token",
+            ),
+            patch(
+                "app.api.routes.projects.core.requests.patch",
+                return_value=SimpleNamespace(status_code=200, text=""),
+            ),
+        ):
+            for req in [
+                {"is_public": True},
+                {"is_public": False},
+                {"is_public": True, "share_google_files": True},
+                {"is_public": False},
+            ]:
+                r = client.patch(base, headers=owner_headers, json=req)
+                assert r.status_code == 200, r.text
+        visibility = [
+            c
+            for c in clients[owner.id].calls
+            if c in [("share", pid, None)] or c[0] == "unshare"
+        ]
+        assert visibility == [
+            ("unshare", pid),
+            ("share", pid, None),
+            ("unshare", pid),
+        ]
+        # While it's public, anyone can see when it was edited, but only the
+        # project's users can export it, since that shows its speaker notes
+        with (
+            patch(
+                "app.api.routes.projects.core.users.get_github_token",
+                return_value="token",
+            ),
+            patch(
+                "app.api.routes.projects.core.requests.patch",
+                return_value=SimpleNamespace(status_code=200, text=""),
+            ),
+        ):
+            r = client.patch(
+                base, headers=owner_headers, json={"is_public": True}
+            )
+            assert r.status_code == 200, r.text
+            outsider = create_random_user(db)
+            outsider_headers = authentication_token_from_email(
+                client=client, email=outsider.email, db=db
+            )
+            for headers in [{}, outsider_headers]:
+                r = client.get(
+                    f"{base}/google/presentations/{pid}", headers=headers
+                )
+                assert r.status_code == 200, r.text
+                r = client.get(
+                    f"{base}/google/presentations/{pid}/export",
+                    headers=headers,
+                    params={"format": "pptx"},
+                )
+                assert r.status_code == 403
+            r = client.get(
+                f"{base}/google/presentations/{pid}/export",
+                headers=collab_headers,
+                params={"format": "pptx"},
+            )
+            assert r.status_code == 200
+            r = client.patch(
+                base, headers=owner_headers, json={"is_public": False}
+            )
+            assert r.status_code == 200, r.text
+        # If the owner disconnects Google, the project can't reach it until
+        # someone links it with theirs
+        del clients[owner.id]
+        r = client.get(
+            f"{base}/google/presentations/{pid}", headers=collab_headers
+        )
+        assert r.status_code == 403
+        assert "whoever linked it" in r.json()["detail"]
+        clients[collab.id] = FakeClient()
+        r = client.post(
+            f"{base}/google/presentations/{pid}", headers=collab_headers
+        )
+        assert r.status_code == 200, r.text
+        db.expire_all()
+        link = db.get(ProjectGoogleFile, (project.id, pid))
+        assert link is not None and link.user_id == collab.id
+        r = client.get(
+            f"{base}/google/presentations/{pid}", headers=other_headers
+        )
+        assert r.status_code == 200, r.text
 
 
 def _make_owner_with_project(

@@ -860,6 +860,9 @@ class Project(ProjectBase, table=True):
     overleaf_links: list["OverleafLink"] = Relationship(
         back_populates="project", cascade_delete=True
     )
+    google_files: list["ProjectGoogleFile"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
     project_comments: list["ProjectComment"] = Relationship(
         back_populates="project", cascade_delete=True
     )
@@ -1683,6 +1686,25 @@ class OverleafLink(SQLModel, table=True):
     project: Project = Relationship(back_populates="overleaf_links")
 
 
+class ProjectGoogleFile(SQLModel, table=True):
+    """A Google Drive file linked to a project, e.g., a Google Slides
+    presentation its pipeline exports, and who linked it.
+
+    The project's calkit.yaml says what's done with the file. This records
+    whose Google account reaches it, since Calkit can only open files a
+    user created or opened with Calkit, so everyone with access to the
+    project reaches the file through the account of whoever linked it.
+    """
+
+    project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
+    file_id: str = Field(primary_key=True, max_length=255)
+    user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE")
+    created: datetime = Field(default_factory=utcnow)
+    # Relationships
+    project: Project = Relationship(back_populates="google_files")
+    user: User = Relationship()
+
+
 class FileLock(SQLModel, table=True):
     project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
     path: str = Field(primary_key=True)
@@ -2029,6 +2051,19 @@ class Presentation(_DeclaredArtifact):
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
     # Where it's edited, when that's somewhere else, e.g., Google Slides
     edit_url: str | None = None
+
+
+class GooglePresentation(BaseModel):
+    id: str
+    title: str | None
+    url: str
+    modified_time: str
+
+
+class GoogleFigurePut(BaseModel):
+    replaced: int
+    added: bool
+    modified_time: str
 
 
 class Notebook(BaseModel):

@@ -132,6 +132,8 @@ from app.models import (
     Figure,
     FileLock,
     GitRef,
+    GoogleFigurePut,
+    GooglePresentation,
     LatexComponents,
     LatexComponentsRequest,
     Message,
@@ -1470,6 +1472,9 @@ class ProjectPatch(BaseModel):
     title: str | None = None
     description: str | None = None
     is_public: bool | None = None
+    # Whether making it public lets anyone with their links view its Google
+    # files too, whose speaker notes and skipped slides an export leaves out
+    share_google_files: bool = False
 
 
 @router.patch("/projects/{owner_name}/{project_name}")
@@ -1510,6 +1515,10 @@ def patch_project(
             )
             raise HTTPException(
                 resp.status_code, "Failed to change GitHub repo visibility"
+            )
+        if req.share_google_files or not req.is_public:
+            app.projects.set_project_google_files_public(
+                session=session, project=project, is_public=req.is_public
             )
     session.commit()
     session.refresh(project)
@@ -6875,6 +6884,9 @@ def post_project_google_slides_presentation(
     repo.git.commit(["-m", f"Add presentation {path}"])
     push_and_expire(project, repo)
     mixpanel.user_created_google_slides_presentation(current_user)
+    app.projects.link_project_google_file(
+        session=session, project=project, file_id=info["id"], user=current_user
+    )
     return Presentation(
         path=path,
         title=req.title,
@@ -6882,6 +6894,162 @@ def post_project_google_slides_presentation(
         stage=calkit.google.get_default_slides_stage_name(path),
         edit_url=info["url"],
     )
+
+
+@router.get(
+    "/projects/{owner_name}/{project_name}/google/presentations/"
+    "{presentation_id}"
+)
+def get_project_google_presentation(
+    owner_name: str,
+    project_name: str,
+    presentation_id: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+) -> GooglePresentation:
+    """Get a project's Google Slides presentation's title, and when it was
+    last edited, through the Google account of whoever linked it.
+    """
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    client = app.projects.get_project_google_client(
+        session=session,
+        project=project,
+        file_id=presentation_id,
+        user=current_user,
+    )
+    try:
+        info = client.get_presentation_info(presentation_id)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    return GooglePresentation.model_validate(info)
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/google/presentations/"
+    "{presentation_id}"
+)
+def post_project_google_presentation(
+    owner_name: str,
+    project_name: str,
+    presentation_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> GooglePresentation:
+    """Link a Google Slides presentation to a project, so everyone with
+    access to the project reaches it through the current user's Google
+    account, and share it with the project's collaborators in Google.
+    """
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    client = users.get_google_slides_client(session=session, user=current_user)
+    try:
+        info = client.get_presentation_info(presentation_id)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    app.projects.link_project_google_file(
+        session=session,
+        project=project,
+        file_id=presentation_id,
+        user=current_user,
+    )
+    return GooglePresentation.model_validate(info)
+
+
+@router.get(
+    "/projects/{owner_name}/{project_name}/google/presentations/"
+    "{presentation_id}/export"
+)
+def get_project_google_presentation_export(
+    owner_name: str,
+    project_name: str,
+    presentation_id: str,
+    format: Literal["pdf", "pptx"],
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+) -> Response:
+    """Export a project's Google Slides presentation as a PDF or PowerPoint
+    file.
+    """
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    # Otherwise anyone who can read a public project could see the deck as
+    # it is now, with its speaker notes, through whoever linked it
+    if current_user is None or all(
+        u.id != current_user.id
+        for u in app.projects.get_project_users(
+            session=session, project=project
+        )
+    ):
+        raise HTTPException(
+            403,
+            "Only the project's collaborators can export its Google Slides "
+            "presentations",
+        )
+    mime_type = calkit.google.get_slides_export_mime_type(f"x.{format}")
+    client = app.projects.get_project_google_client(
+        session=session,
+        project=project,
+        file_id=presentation_id,
+        user=current_user,
+    )
+    try:
+        content = client.export_presentation(presentation_id, mime_type)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    return Response(content=content, media_type=mime_type)
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/google/presentations/"
+    "{presentation_id}/figures"
+)
+def post_project_google_presentation_figure(
+    owner_name: str,
+    project_name: str,
+    presentation_id: str,
+    path: str,
+    file: Annotated[UploadFile, File()],
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> GoogleFigurePut:
+    """Put the latest version of a project figure in a project's Google
+    Slides presentation, replacing the images tagged with its path.
+    """
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    resp = users.put_google_slides_figure(
+        lambda: app.projects.get_project_google_client(
+            session=session,
+            project=project,
+            file_id=presentation_id,
+            user=current_user,
+        ),
+        presentation_id,
+        path,
+        file.file.read(),
+    )
+    return GoogleFigurePut.model_validate(resp)
 
 
 @router.post("/projects/{owner_name}/{project_name}/publications")
@@ -8695,6 +8863,9 @@ def put_project_collaborator(
             )
         )
     session.commit()
+    app.projects.share_project_google_files(
+        session=session, project=project, users=[user]
+    )
     return Message(message="Success")
 
 
@@ -8806,6 +8977,9 @@ def post_project_collaborator_by_email(
             existing.invited_by_user_id = current_user.id
         session.add(existing)
     session.commit()
+    app.projects.share_project_google_files(
+        session=session, project=project, users=[user]
+    )
     return Message(message="Success")
 
 
@@ -9026,6 +9200,9 @@ def post_project_invitation_redemption(
     invitation.use_count += 1
     session.add(invitation)
     session.commit()
+    app.projects.share_project_google_files(
+        session=session, project=project, users=[current_user]
+    )
     return ProjectInvitationRedeemed(
         owner_name=project.owner_account.name,
         project_name=project.name,

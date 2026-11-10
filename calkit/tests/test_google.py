@@ -36,6 +36,9 @@ class FakeHttp:
     def post(self, url, **kwargs):
         return self._respond("post", url, **kwargs)
 
+    def delete(self, url, **kwargs):
+        return self._respond("delete", url, **kwargs)
+
 
 def test_paths_and_ids(tmp_path):
     pid = "1AbCdEfGhIjKlMnOpQrStUvWxYz_-012"
@@ -188,6 +191,33 @@ def test_client():
     )
     with pytest.raises(gs.GoogleError, match="isn't a Google Slides"):
         client.get_presentation_info(pid)
+    # Sharing lets a collaborator edit it, without emailing them, or anyone
+    # with the link view it, which can be undone
+    permissions_url = f"{file_url}/permissions"
+    routes[("post", permissions_url)] = FakeResponse(body={"id": "p1"})
+    client.share_file(pid, "a@example.com")
+    client.share_file(pid)
+    shares = [c for c in client.http.calls if c[1] == permissions_url]  # type: ignore[attr-defined]
+    assert [(c[2]["json"], c[2]["params"]) for c in shares] == [
+        (
+            {
+                "type": "user",
+                "role": "writer",
+                "emailAddress": "a@example.com",
+            },
+            {"sendNotificationEmail": "false"},
+        ),
+        (
+            {"type": "anyone", "role": "reader", "allowFileDiscovery": False},
+            {},
+        ),
+    ]
+    anyone_url = f"{permissions_url}/anyoneWithLink"
+    routes[("delete", anyone_url)] = FakeResponse(204)
+    client.unshare_file(pid)
+    # Not being shared already is fine
+    routes[("delete", anyone_url)] = FakeResponse(404, {"error": {}})
+    client.unshare_file(pid)
 
 
 def test_is_same_export():

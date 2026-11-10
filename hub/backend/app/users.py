@@ -6,7 +6,7 @@ import logging
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, NoReturn
+from typing import Any, Callable, NoReturn
 
 import requests
 from fastapi import HTTPException
@@ -1172,6 +1172,50 @@ def get_google_slides_client(
     if GOOGLE_DRIVE_SCOPE not in get_google_scopes(session=session, user=user):
         raise HTTPException(403, calkit.google.CONNECT_ADVICE)
     return calkit.google.Client(token)
+
+
+def put_google_slides_figure(
+    get_client: Callable[[], calkit.google.Client],
+    presentation_id: str,
+    path: str,
+    content: bytes,
+) -> dict[str, Any]:
+    """Put the latest version of a project figure in a Google Slides
+    presentation, returning what ``calkit.google.Client.put_figure`` does.
+
+    The client is made only once the figure is known to be one Slides can
+    show, since making it can refresh the Google token.
+    """
+    import posixpath
+
+    from app import storage
+
+    try:
+        mime_type = calkit.google.get_figure_mime_type(path)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    client = get_client()
+    # Slides copies an image from a URL it can fetch, so the figure is put
+    # in object storage just long enough for that
+    fs = storage.get_object_fs()
+    fpath = (
+        f"{storage.get_storage_root()}/{storage.GOOGLE_SLIDES_FIGURES_DIR}/"
+        f"{uuid.uuid4().hex}/{posixpath.basename(path)}"
+    )
+    storage.write_object(fpath, content, mime_type, fs=fs)
+    try:
+        url = storage.get_object_url(fpath, expires=600, fs=fs)
+        return dict(client.put_figure(presentation_id, path, url))
+    except calkit.google.GoogleError as e:
+        # Google can't fetch from object storage on a developer's machine
+        if settings.ENVIRONMENT == "local":
+            e.args = (
+                f"{e} Google can't reach a local hub's object storage, so "
+                "try this on staging.",
+            )
+        raise_google_error(e)
+    finally:
+        fs.rm(fpath)
 
 
 def raise_google_error(e: calkit.google.GoogleError) -> NoReturn:

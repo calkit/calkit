@@ -420,3 +420,42 @@ class Client:
             "added": not image_ids,
             "modified_time": info["modified_time"],
         }
+
+    def share_file(self, file_id: str, email: str | None = None) -> None:
+        """Let the Google account with ``email`` edit a file, without
+        emailing them, or, without an email, anyone with its link view it.
+        """
+        permission: dict[str, Any]
+        if email is not None:
+            permission = {
+                "type": "user",
+                "role": "writer",
+                "emailAddress": email,
+            }
+            params = {"sendNotificationEmail": "false"}
+        else:
+            permission = {
+                "type": "anyone",
+                "role": "reader",
+                "allowFileDiscovery": False,
+            }
+            params = {}
+        resp = self.http.post(
+            f"{DRIVE_API_URL}/{file_id}/permissions",
+            params=params,
+            json=permission,
+            timeout=30,
+        )
+        self._check(resp, "share the file")
+
+    def unshare_file(self, file_id: str) -> None:
+        """Stop anyone with a file's link being able to view it, if they
+        could.
+        """
+        resp = self.http.delete(
+            f"{DRIVE_API_URL}/{file_id}/permissions/anyoneWithLink",
+            timeout=30,
+        )
+        if resp.status_code == 404:
+            return
+        self._check(resp, "stop sharing the file")

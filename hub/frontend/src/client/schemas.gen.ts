@@ -3819,6 +3819,34 @@ export const GooglePresentationPostSchema = {
   title: "GooglePresentationPost",
 } as const
 
+export const GoogleSlidesPresentationPostSchema = {
+  properties: {
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    kind: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["slides", "poster"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Kind",
+    },
+  },
+  type: "object",
+  required: ["title", "path"],
+  title: "GoogleSlidesPresentationPost",
+} as const
+
 export const HTTPValidationErrorSchema = {
   properties: {
     detail: {
@@ -6792,6 +6820,17 @@ export const PresentationSchema = {
         },
       ],
       title: "Storage",
+    },
+    edit_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Edit Url",
     },
   },
   type: "object",

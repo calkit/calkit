@@ -6,7 +6,7 @@ import logging
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NoReturn
 
 import requests
 from fastapi import HTTPException
@@ -14,6 +14,7 @@ from requests.exceptions import JSONDecodeError
 from sqlmodel import Session, col, func, select
 
 import app.stripe
+import calkit.google_slides
 from app import utcnow
 from app.config import settings
 from app.core import (
@@ -1153,6 +1154,27 @@ def get_google_scopes(session: Session, user: User) -> set[str]:
     if credential is None or not credential.scopes:
         return set()
     return set(credential.scopes.split())
+
+
+def get_google_slides_client(
+    session: Session, user: User
+) -> calkit.google_slides.Client:
+    """A client for the user's Google Slides, which needs Drive connected,
+    not just signing in with Google.
+    """
+    try:
+        token = get_google_token(session=session, user=user)
+    except HTTPException:
+        raise HTTPException(401, calkit.google_slides.CONNECT_ADVICE)
+    if GOOGLE_DRIVE_SCOPE not in get_google_scopes(session=session, user=user):
+        raise HTTPException(401, calkit.google_slides.CONNECT_ADVICE)
+    return calkit.google_slides.Client(token)
+
+
+def raise_google_error(e: calkit.google_slides.GoogleError) -> NoReturn:
+    # Google's own 5xx is the hub failing to reach something upstream
+    status_code = 502 if e.status_code >= 500 else e.status_code
+    raise HTTPException(status_code, str(e))
 
 
 def save_zotero_request_token(

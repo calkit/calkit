@@ -286,6 +286,7 @@ import type {
   GlobalSearchErrors,
   GlobalSearchResponses,
   GooglePresentationPost,
+  GoogleSlidesPresentationPost,
   ImportGithubReleasesErrors,
   ImportGithubReleasesResponses,
   IssuePatch,
@@ -406,6 +407,8 @@ import type {
   PostProjectFsOpResponses,
   PostProjectGithubReleaseErrors,
   PostProjectGithubReleaseResponses,
+  PostProjectGoogleSlidesPresentationErrors,
+  PostProjectGoogleSlidesPresentationResponses,
   PostProjectInvitationErrors,
   PostProjectInvitationRedemptionErrors,
   PostProjectInvitationRedemptionResponses,
@@ -5349,6 +5352,56 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/presentations",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Post Project Google Slides Presentation
+   *
+   * Create a Google Slides presentation in the user's Google Drive and
+   * add it to the project, with the stage that exports it.
+   */
+  public static postProjectGoogleSlidesPresentation<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      googleSlidesPresentationPost: GoogleSlidesPresentationPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectGoogleSlidesPresentationResponses,
+    PostProjectGoogleSlidesPresentationErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "googleSlidesPresentationPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectGoogleSlidesPresentationResponses,
+      PostProjectGoogleSlidesPresentationErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/presentations/google-slides",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

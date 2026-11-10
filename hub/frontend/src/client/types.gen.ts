@@ -2261,6 +2261,24 @@ export type GooglePresentationPost = {
 }
 
 /**
+ * GoogleSlidesPresentationPost
+ */
+export type GoogleSlidesPresentationPost = {
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Kind
+   */
+  kind?: "slides" | "poster" | null
+}
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -4034,6 +4052,10 @@ export type Presentation = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+  /**
+   * Edit Url
+   */
+  edit_url?: string | null
 }
 
 /**
@@ -12816,6 +12838,42 @@ export type GetProjectPresentationsResponses = {
 
 export type GetProjectPresentationsResponse =
   GetProjectPresentationsResponses[keyof GetProjectPresentationsResponses]
+
+export type PostProjectGoogleSlidesPresentationData = {
+  body: GoogleSlidesPresentationPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/presentations/google-slides"
+}
+
+export type PostProjectGoogleSlidesPresentationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectGoogleSlidesPresentationError =
+  PostProjectGoogleSlidesPresentationErrors[keyof PostProjectGoogleSlidesPresentationErrors]
+
+export type PostProjectGoogleSlidesPresentationResponses = {
+  /**
+   * Successful Response
+   */
+  200: Presentation
+}
+
+export type PostProjectGoogleSlidesPresentationResponse =
+  PostProjectGoogleSlidesPresentationResponses[keyof PostProjectGoogleSlidesPresentationResponses]
 
 export type PostProjectOverleafPublicationData = {
   body: BodyProjectsPostProjectOverleafPublication

@@ -1072,9 +1072,15 @@ class _EmptyTree:
 
 
 def _get_declared_at_ref(
-    client: TestClient, endpoint: str, ck_key: str, declared: list
+    client: TestClient,
+    endpoint: str,
+    ck_key: str,
+    declared: list,
+    extra: dict | None = None,
 ):
-    """GET an artifact listing at a ref with ``declared`` in calkit.yaml."""
+    """GET an artifact listing at a ref with ``declared`` in calkit.yaml,
+    along with anything else in ``extra``.
+    """
     fake_project = SimpleNamespace(
         owner_account_name="o",
         name="p",
@@ -1101,7 +1107,8 @@ def _get_declared_at_ref(
                 ck_key: [
                     dict(d) if isinstance(d, dict) else d for d in declared
                 ]
-            },
+            }
+            | (extra or {}),
         ) as mock_ck_for_ref,
         patch(
             "app.api.routes.projects.core.app.projects"
@@ -1249,6 +1256,110 @@ def test_get_project_presentations_tolerates_odd_declarations(
     assert pres["slides/legacy.pdf"]["kind"] == "slides"
     # "talk" was a hub-only kind the CLI refuses, so it's no longer one here
     assert pres["slides/odd.pdf"]["kind"] is None
+
+
+def test_google_slides_presentations(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    tmp_path,
+) -> None:
+    import calkit.google_slides as gs
+
+    pid = "1AbCdEfGhIjKlMnOpQrStUv"
+    url = gs.get_presentation_url(pid)
+    # A presentation exported from Google Slides says where it's edited
+    response, _, _, _ = _get_declared_at_ref(
+        client,
+        "presentations",
+        "presentations",
+        [
+            {"path": "poster.pdf", "stage": "export-poster"},
+            {"path": "slides/talk.pdf"},
+        ],
+        extra={
+            "pipeline": {
+                "stages": {
+                    "export-poster": {
+                        "kind": "google-slides-export",
+                        "presentation_url": url,
+                        "outputs": ["poster.pdf"],
+                    }
+                }
+            }
+        },
+    )
+    assert response.status_code == 200, response.text
+    pres = {p["path"]: p for p in response.json()}
+    assert pres["poster.pdf"]["edit_url"] == url
+    assert pres["slides/talk.pdf"]["edit_url"] is None
+    # Creating one adds it and its stage to the project, and commits
+    repo = git.Repo.init(tmp_path)
+    ryaml.dump(
+        {"presentations": [{"path": "taken.pdf"}]}, tmp_path / "calkit.yaml"
+    )
+    repo.git.add("calkit.yaml")
+    repo.git.commit(["-m", "Init"])
+    created = []
+
+    class Client:
+        def create_presentation(self, title):
+            created.append(title)
+            return {
+                "id": pid,
+                "title": title,
+                "url": url,
+                "modified_time": "2026-11-09T00:00:00.000Z",
+            }
+
+    def post(path):
+        with (
+            patch(
+                "app.api.routes.projects.core.app.projects.get_project",
+                return_value=SimpleNamespace(),
+            ),
+            patch("app.api.routes.projects.core.get_repo", return_value=repo),
+            patch(
+                "app.api.routes.projects.core.push_and_expire"
+            ) as push_and_expire,
+            patch(
+                "app.api.routes.projects.core.users.get_google_slides_client",
+                return_value=Client(),
+            ),
+        ):
+            r = client.post(
+                "/projects/o/p/presentations/google-slides",
+                headers=normal_user_token_headers,
+                json={"title": "My poster", "path": path, "kind": "poster"},
+            )
+        return r, push_and_expire
+
+    r, push_and_expire = post("poster/poster.pdf")
+    assert r.status_code == 200, r.text
+    assert r.json()["stage"] == "export-poster"
+    assert r.json()["edit_url"] == url
+    push_and_expire.assert_called_once()
+    with open(tmp_path / "calkit.yaml") as f:
+        ck_info = ryaml.load(f)
+    assert ck_info["presentations"][-1] == {
+        "path": "poster/poster.pdf",
+        "title": "My poster",
+        "kind": "poster",
+        "stage": "export-poster",
+    }
+    assert ck_info["pipeline"]["stages"]["export-poster"][
+        "presentation_url"
+    ] == (url)
+    assert (tmp_path / gs.get_edit_time_path(pid)).is_file()
+    assert (
+        repo.head.commit.message.strip()
+        == "Add presentation poster/poster.pdf"
+    )
+    assert not repo.is_dirty(untracked_files=True)
+    # One that can't be added is refused before it's created in Drive
+    for path in ["taken.pdf", "poster/poster.png"]:
+        r, _ = post(path)
+        assert r.status_code == 422, r.text
+    assert created == ["My poster"]
 
 
 def _make_owner_with_project(

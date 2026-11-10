@@ -1157,26 +1157,6 @@ class GoogleFigurePut(BaseModel):
     modified_time: str
 
 
-def _get_google_slides_client(
-    session: SessionDep, user: User
-) -> calkit.google_slides.Client:
-    try:
-        token = users.get_google_token(session=session, user=user)
-    except HTTPException:
-        raise HTTPException(401, calkit.google_slides.CONNECT_ADVICE)
-    if users.GOOGLE_DRIVE_SCOPE not in users.get_google_scopes(
-        session=session, user=user
-    ):
-        raise HTTPException(401, calkit.google_slides.CONNECT_ADVICE)
-    return calkit.google_slides.Client(token)
-
-
-def _raise_google_error(e: calkit.google_slides.GoogleError) -> None:
-    # Google's own 5xx is the hub failing to reach something upstream
-    status_code = 502 if e.status_code >= 500 else e.status_code
-    raise HTTPException(status_code, str(e))
-
-
 @router.post("/user/google/presentations")
 def post_user_google_presentation(
     req: GooglePresentationPost,
@@ -1184,11 +1164,11 @@ def post_user_google_presentation(
     current_user: CurrentUser,
 ) -> GooglePresentation:
     """Create a Google Slides presentation in the user's Google Drive."""
-    client = _get_google_slides_client(session=session, user=current_user)
+    client = users.get_google_slides_client(session=session, user=current_user)
     try:
         info = client.create_presentation(req.title)
     except calkit.google_slides.GoogleError as e:
-        _raise_google_error(e)
+        users.raise_google_error(e)
     mixpanel.user_created_google_slides_presentation(current_user)
     return GooglePresentation.model_validate(info)
 
@@ -1200,11 +1180,11 @@ def get_user_google_presentation(
     """Get a Google Slides presentation's title, and when it was last
     edited.
     """
-    client = _get_google_slides_client(session=session, user=current_user)
+    client = users.get_google_slides_client(session=session, user=current_user)
     try:
         info = client.get_presentation_info(presentation_id)
     except calkit.google_slides.GoogleError as e:
-        _raise_google_error(e)
+        users.raise_google_error(e)
     return GooglePresentation.model_validate(info)
 
 
@@ -1223,7 +1203,7 @@ def post_user_google_presentation_figure(
         mime_type = calkit.google_slides.get_figure_mime_type(path)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    client = _get_google_slides_client(session=session, user=current_user)
+    client = users.get_google_slides_client(session=session, user=current_user)
     # Slides copies an image from a URL it can fetch, so the figure is put
     # in object storage just long enough for that
     fs = storage.get_object_fs()
@@ -1242,7 +1222,7 @@ def post_user_google_presentation_figure(
                 f"{e} Google can't reach a local hub's object storage, so "
                 "try this on staging.",
             )
-        _raise_google_error(e)
+        users.raise_google_error(e)
     finally:
         fs.rm(fpath)
     return GoogleFigurePut.model_validate(resp)
@@ -1257,11 +1237,11 @@ def get_user_google_presentation_export(
 ) -> Response:
     """Export a Google Slides presentation as a PDF or PowerPoint file."""
     mime_type = calkit.google_slides.get_export_mime_type(f"x.{format}")
-    client = _get_google_slides_client(session=session, user=current_user)
+    client = users.get_google_slides_client(session=session, user=current_user)
     try:
         content = client.export_presentation(presentation_id, mime_type)
     except calkit.google_slides.GoogleError as e:
-        _raise_google_error(e)
+        users.raise_google_error(e)
     return Response(content=content, media_type=mime_type)
 
 

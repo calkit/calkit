@@ -305,7 +305,11 @@ def test_slide_figures(tmp_path):
     from PIL import Image
 
     assert Image.open(io.BytesIO(png)).size == (360, 120)
-    # The same slide exports to the same bytes, so nothing downstream reruns
+    # The same slide exports to the same bytes, so nothing downstream reruns,
+    # even a second later, since the time it's saved is left out
+    import time
+
+    time.sleep(1.1)
     assert (
         gs.get_slide_export(deck_pdf, 1, bounds, [720.0, 405.0], "a.pdf")
         == pdf

@@ -6,7 +6,7 @@ import logging
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, NoReturn
+from typing import Any, Callable, NoReturn
 
 import requests
 from fastapi import HTTPException
@@ -1175,13 +1175,16 @@ def get_google_slides_client(
 
 
 def put_google_slides_figure(
-    client: calkit.google.Client,
+    get_client: Callable[[], calkit.google.Client],
     presentation_id: str,
     path: str,
     content: bytes,
 ) -> dict[str, Any]:
     """Put the latest version of a project figure in a Google Slides
     presentation, returning what ``calkit.google.Client.put_figure`` does.
+
+    The client is made only once the figure is known to be one Slides can
+    show, since making it can refresh the Google token.
     """
     import posixpath
 
@@ -1191,6 +1194,7 @@ def put_google_slides_figure(
         mime_type = calkit.google.get_figure_mime_type(path)
     except ValueError as e:
         raise HTTPException(422, str(e))
+    client = get_client()
     # Slides copies an image from a URL it can fetch, so the figure is put
     # in object storage just long enough for that
     fs = storage.get_object_fs()

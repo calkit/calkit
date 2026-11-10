@@ -380,6 +380,19 @@ export const Body_projects_post_project_figureSchema = {
   title: "Body_projects-post_project_figure",
 } as const
 
+export const Body_projects_post_project_google_presentation_figureSchema = {
+  properties: {
+    file: {
+      type: "string",
+      format: "binary",
+      title: "File",
+    },
+  },
+  type: "object",
+  required: ["file"],
+  title: "Body_projects-post_project_google_presentation_figure",
+} as const
+
 export const Body_projects_post_project_overleaf_publicationSchema = {
   properties: {
     path: {

@@ -1187,9 +1187,13 @@ def post_user_google_presentation_figure(
     """Put the latest version of a project figure in a Google Slides
     presentation, replacing the images tagged with its path.
     """
-    client = users.get_google_slides_client(session=session, user=current_user)
     resp = users.put_google_slides_figure(
-        client, presentation_id, path, file.file.read()
+        lambda: users.get_google_slides_client(
+            session=session, user=current_user
+        ),
+        presentation_id,
+        path,
+        file.file.read(),
     )
     return GoogleFigurePut.model_validate(resp)
 

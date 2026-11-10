@@ -1500,6 +1500,47 @@ def test_project_google_presentations(client: TestClient, db: Session) -> None:
             ("share", pid, None),
             ("unshare", pid),
         ]
+        # While it's public, anyone can see when it was edited, but only the
+        # project's users can export it, since that shows its speaker notes
+        with (
+            patch(
+                "app.api.routes.projects.core.users.get_github_token",
+                return_value="token",
+            ),
+            patch(
+                "app.api.routes.projects.core.requests.patch",
+                return_value=SimpleNamespace(status_code=200, text=""),
+            ),
+        ):
+            r = client.patch(
+                base, headers=owner_headers, json={"is_public": True}
+            )
+            assert r.status_code == 200, r.text
+            outsider = create_random_user(db)
+            outsider_headers = authentication_token_from_email(
+                client=client, email=outsider.email, db=db
+            )
+            for headers in [{}, outsider_headers]:
+                r = client.get(
+                    f"{base}/google/presentations/{pid}", headers=headers
+                )
+                assert r.status_code == 200, r.text
+                r = client.get(
+                    f"{base}/google/presentations/{pid}/export",
+                    headers=headers,
+                    params={"format": "pptx"},
+                )
+                assert r.status_code == 403
+            r = client.get(
+                f"{base}/google/presentations/{pid}/export",
+                headers=collab_headers,
+                params={"format": "pptx"},
+            )
+            assert r.status_code == 200
+            r = client.patch(
+                base, headers=owner_headers, json={"is_public": False}
+            )
+            assert r.status_code == 200, r.text
         # If the owner disconnects Google, the project can't reach it until
         # someone links it with theirs
         del clients[owner.id]

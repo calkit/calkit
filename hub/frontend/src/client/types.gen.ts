@@ -217,6 +217,16 @@ export type BodyProjectsPostProjectFigure = {
 }
 
 /**
+ * Body_projects-post_project_google_presentation_figure
+ */
+export type BodyProjectsPostProjectGooglePresentationFigure = {
+  /**
+   * File
+   */
+  file: Blob | File
+}
+
+/**
  * Body_projects-post_project_overleaf_publication
  */
 export type BodyProjectsPostProjectOverleafPublication = {
@@ -12878,6 +12888,173 @@ export type PostProjectGoogleSlidesPresentationResponses = {
 
 export type PostProjectGoogleSlidesPresentationResponse =
   PostProjectGoogleSlidesPresentationResponses[keyof PostProjectGoogleSlidesPresentationResponses]
+
+export type GetProjectGooglePresentationData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/google/presentations/{presentation_id}"
+}
+
+export type GetProjectGooglePresentationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectGooglePresentationError =
+  GetProjectGooglePresentationErrors[keyof GetProjectGooglePresentationErrors]
+
+export type GetProjectGooglePresentationResponses = {
+  /**
+   * Successful Response
+   */
+  200: GooglePresentation
+}
+
+export type GetProjectGooglePresentationResponse =
+  GetProjectGooglePresentationResponses[keyof GetProjectGooglePresentationResponses]
+
+export type PostProjectGooglePresentationData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/google/presentations/{presentation_id}"
+}
+
+export type PostProjectGooglePresentationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectGooglePresentationError =
+  PostProjectGooglePresentationErrors[keyof PostProjectGooglePresentationErrors]
+
+export type PostProjectGooglePresentationResponses = {
+  /**
+   * Successful Response
+   */
+  200: GooglePresentation
+}
+
+export type PostProjectGooglePresentationResponse =
+  PostProjectGooglePresentationResponses[keyof PostProjectGooglePresentationResponses]
+
+export type GetProjectGooglePresentationExportData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query: {
+    /**
+     * Format
+     */
+    format: "pdf" | "pptx"
+  }
+  url: "/projects/{owner_name}/{project_name}/google/presentations/{presentation_id}/export"
+}
+
+export type GetProjectGooglePresentationExportErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectGooglePresentationExportError =
+  GetProjectGooglePresentationExportErrors[keyof GetProjectGooglePresentationExportErrors]
+
+export type GetProjectGooglePresentationExportResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
+
+export type PostProjectGooglePresentationFigureData = {
+  body: BodyProjectsPostProjectGooglePresentationFigure
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+  }
+  url: "/projects/{owner_name}/{project_name}/google/presentations/{presentation_id}/figures"
+}
+
+export type PostProjectGooglePresentationFigureErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectGooglePresentationFigureError =
+  PostProjectGooglePresentationFigureErrors[keyof PostProjectGooglePresentationFigureErrors]
+
+export type PostProjectGooglePresentationFigureResponses = {
+  /**
+   * Successful Response
+   */
+  200: GoogleFigurePut
+}
+
+export type PostProjectGooglePresentationFigureResponse =
+  PostProjectGooglePresentationFigureResponses[keyof PostProjectGooglePresentationFigureResponses]
 
 export type PostProjectOverleafPublicationData = {
   body: BodyProjectsPostProjectOverleafPublication

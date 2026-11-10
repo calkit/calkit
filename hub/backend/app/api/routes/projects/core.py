@@ -6988,6 +6988,19 @@ def get_project_google_presentation_export(
         current_user=current_user,
         min_access_level="read",
     )
+    # Otherwise anyone who can read a public project could see the deck as
+    # it is now, with its speaker notes, through whoever linked it
+    if current_user is None or all(
+        u.id != current_user.id
+        for u in app.projects.get_project_users(
+            session=session, project=project
+        )
+    ):
+        raise HTTPException(
+            403,
+            "Only the project's collaborators can export its Google Slides "
+            "presentations",
+        )
     mime_type = calkit.google.get_slides_export_mime_type(f"x.{format}")
     client = app.projects.get_project_google_client(
         session=session,
@@ -7025,14 +7038,16 @@ def post_project_google_presentation_figure(
         current_user=current_user,
         min_access_level="write",
     )
-    client = app.projects.get_project_google_client(
-        session=session,
-        project=project,
-        file_id=presentation_id,
-        user=current_user,
-    )
     resp = users.put_google_slides_figure(
-        client, presentation_id, path, file.file.read()
+        lambda: app.projects.get_project_google_client(
+            session=session,
+            project=project,
+            file_id=presentation_id,
+            user=current_user,
+        ),
+        presentation_id,
+        path,
+        file.file.read(),
     )
     return GoogleFigurePut.model_validate(resp)
 

@@ -1411,8 +1411,10 @@ def get_status(
                 )
                 return PipelineStatus.model_validate(result)
         import dvc.repo
+        from dvc.exceptions import NotDvcRepoError
         from dvc.lock import LockError
 
+        dvc_repo = None
         try:
             dvc_repo = calkit.dvc.get_dvc_repo()
             # calkit.dvc.core installs a filter on dvc.repo.status that drops
@@ -1475,6 +1477,23 @@ def get_status(
                     "finishes."
                 )
             return PipelineStatus.model_validate(result)
+        except NotDvcRepoError as e:
+            # Nothing can be stale in a pipeline that gives DVC nothing,
+            # e.g., a project with no pipeline
+            stages_for_dvc = None
+            if os.path.isfile("dvc.yaml"):
+                with open("dvc.yaml") as f:
+                    stages_for_dvc = (calkit.ryaml.load(f) or {}).get("stages")
+            if stages_for_dvc or ck_info.get("subprojects"):
+                result["errors"].append(
+                    "Failed to get pipeline status from DVC: "
+                    f"{e.__class__.__name__}: {e}"
+                )
+                return PipelineStatus.model_validate(result)
+            raw_status = {}
+            dvc_out_paths = []
+            dvc_data_status = None
+            storage_problems = None
         except Exception as e:
             result["errors"].append(
                 "Failed to get pipeline status from DVC: "
@@ -1767,7 +1786,7 @@ def get_status(
                     for out in dvc_out_paths
                 ):
                     continue
-                if dvc_repo.dvcignore.is_ignored_file(
+                if dvc_repo is not None and dvc_repo.dvcignore.is_ignored_file(
                     os.path.abspath(ignored_path)
                 ):
                     continue
@@ -3075,7 +3094,9 @@ def to_dvc(
             }
         dvc_yaml["stages"] = written_stages
         dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
-        _dump_yaml_if_changed(dvc_yaml, dvc_yaml_fpath, verbose=verbose)
+        # A project with no stages for DVC needs no dvc.yaml to say so
+        if written_stages or os.path.isfile(dvc_yaml_fpath):
+            _dump_yaml_if_changed(dvc_yaml, dvc_yaml_fpath, verbose=verbose)
         _rename_lock_entries(lock_renames, wdir=wdir)
         # DVC errors out (FileIsGitIgnored) if dvc.lock is Git-ignored, so make
         # sure it isn't---this keeps both status and pipeline runs working

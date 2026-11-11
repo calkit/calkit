@@ -1736,6 +1736,9 @@ class _ContentsItemBase(BaseModel):
 
 class ContentsItem(_ContentsItemBase):
     dir_items: list[_ContentsItemBase] | None = None
+    # Full hash of the commit this was read at, so an importer can record
+    # exactly what it got, even when it named a branch or nothing at all
+    commit: str | None = None
 
 
 class PublicationOverleaf(BaseModel):

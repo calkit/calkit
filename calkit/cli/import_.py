@@ -226,31 +226,91 @@ def import_dataset(
             raise_error("Failed to pull from DVC")
 
 
+# Shared by the commands that import a single file
+_SrcPathArg = Annotated[
+    str,
+    typer.Argument(
+        help=(
+            "Where to get the file: a URL, including a GitHub or GitLab link "
+            "to a file or a link to a file on the Calkit hub, e.g., "
+            "calkit.io/someone/some-project/figures/plot.png, an SSH clone "
+            "URL like git@github.com:owner/repo/path, a DOI, a Calkit "
+            "project path like someone/some-project/scripts/setup.sh, or a "
+            "path inside the repo named by --git-repo."
+        )
+    ),
+]
+_DestPathArg = Annotated[
+    str | None,
+    typer.Argument(
+        help=(
+            "Path at which to save it in this project. Defaults to the "
+            "path within the source project for a Calkit project source, "
+            "and to the file's name for a Git repo, a URL, or anything else "
+            "that has no project-relative path."
+        )
+    ),
+]
+_GitRepoOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--git-repo",
+        help=(
+            "Clone URL of a Git repo to take the file from, for a repo that "
+            "isn't a Calkit project."
+        ),
+    ),
+]
+_GitRefOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--git-ref",
+        help=(
+            "Branch, tag, or commit to follow, recorded so 'calkit sync "
+            "import' knows where to look next time, and overriding one read "
+            "out of the URL. Needed for a URL whose branch name contains a "
+            "slash. Defaults to the default branch. Either way, the commit "
+            "fetched is recorded in .calkit/imports.json."
+        ),
+    ),
+]
+_TitleOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--title",
+        help=(
+            "Title for the entry. Defaults to the source project's, for a "
+            "Calkit project source."
+        ),
+    ),
+]
+_DescriptionOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--description",
+        help=(
+            "Description for the entry. Defaults to the source project's, "
+            "for a Calkit project source."
+        ),
+    ),
+]
+_OverwriteOpt = Annotated[
+    bool,
+    typer.Option(
+        "--overwrite",
+        "-f",
+        help="Replace an existing file or entry at this path.",
+    ),
+]
+_NoCommitOpt = Annotated[
+    bool, typer.Option("--no-commit", help="Do not commit changes to repo.")
+]
+
+
 @import_app.command(name="path")
 def import_path(
-    src_path: Annotated[
-        str,
-        typer.Argument(
-            help=(
-                "Where to get the file: a URL, including a GitHub or GitLab "
-                "link to a file, an SSH clone URL like "
-                "git@github.com:owner/repo/path, a DOI, a Calkit project "
-                "path like someone/some-project/scripts/setup.sh, or a path "
-                "inside the repo named by --git-repo."
-            )
-        ),
-    ],
-    dest_path: Annotated[
-        str | None,
-        typer.Argument(
-            help=(
-                "Path at which to save it in this project. Defaults to the "
-                "path within the source project for a Calkit project "
-                "source, and to the file's name for a Git repo, a URL, or "
-                "anything else that has no project-relative path."
-            )
-        ),
-    ] = None,
+    src_path: _SrcPathArg,
+    dest_path: _DestPathArg = None,
     kind: Annotated[
         str,
         typer.Option(
@@ -262,48 +322,12 @@ def import_path(
             ),
         ),
     ] = "misc",
-    git_repo: Annotated[
-        str | None,
-        typer.Option(
-            "--git-repo",
-            help=(
-                "Clone URL of a Git repo to take the file from, for a repo "
-                "that isn't a Calkit project."
-            ),
-        ),
-    ] = None,
-    git_ref: Annotated[
-        str | None,
-        typer.Option(
-            "--git-ref",
-            help=(
-                "Branch, tag, or commit to follow, recorded so 'calkit "
-                "sync import' knows where to look next time, and overriding "
-                "one read out of the URL. Needed for a URL whose branch "
-                "name contains a slash. Defaults to the repo's default "
-                "branch."
-            ),
-        ),
-    ] = None,
-    title: Annotated[
-        str | None, typer.Option("--title", help="Title for the entry.")
-    ] = None,
-    description: Annotated[
-        str | None,
-        typer.Option("--description", help="Description for the entry."),
-    ] = None,
-    overwrite: Annotated[
-        bool,
-        typer.Option(
-            "--overwrite",
-            "-f",
-            help="Replace an existing file or entry at this path.",
-        ),
-    ] = False,
-    no_commit: Annotated[
-        bool,
-        typer.Option("--no-commit", help="Do not commit changes to repo."),
-    ] = False,
+    git_repo: _GitRepoOpt = None,
+    git_ref: _GitRefOpt = None,
+    title: _TitleOpt = None,
+    description: _DescriptionOpt = None,
+    overwrite: _OverwriteOpt = False,
+    no_commit: _NoCommitOpt = False,
 ) -> None:
     """Import a file from elsewhere, recording where it came from.
 
@@ -365,12 +389,15 @@ def import_path(
             f"'{dest_path}' already exists; pass --overwrite to replace it"
         )
     typer.echo(f"Fetching {calkit.provenance.describe_source(imported_from)}")
+    source_entry: dict = {}
     try:
         imported_from, lock = calkit.provenance.fetch(
-            imported_from, dest_path=dest_path
+            imported_from, dest_path=dest_path, source_entry=source_entry
         )
     except ValueError as e:
         raise_error(str(e))
+    title = title or source_entry.get("title")
+    description = description or source_entry.get("description")
     # Validated the same way it would be reading calkit.yaml back, so a
     # rev that isn't a commit hash, or a DOI that isn't one, is caught
     # here rather than on the next load
@@ -402,6 +429,34 @@ def import_path(
         # Scoped, so unrelated staged work isn't swept into a commit
         # claiming to be about this import
         repo.git.commit(paths + ["-m", f"Import {dest_path}"])
+
+
+@import_app.command(name="figure")
+def import_figure(
+    src_path: _SrcPathArg,
+    dest_path: _DestPathArg = None,
+    git_repo: _GitRepoOpt = None,
+    git_ref: _GitRefOpt = None,
+    title: _TitleOpt = None,
+    description: _DescriptionOpt = None,
+    overwrite: _OverwriteOpt = False,
+    no_commit: _NoCommitOpt = False,
+) -> None:
+    """Import a figure from elsewhere, e.g., another Calkit project.
+
+    The same as 'calkit import path --kind figure'.
+    """
+    import_path(
+        src_path=src_path,
+        dest_path=dest_path,
+        kind="figure",
+        git_repo=git_repo,
+        git_ref=git_ref,
+        title=title,
+        description=description,
+        overwrite=overwrite,
+        no_commit=no_commit,
+    )
 
 
 @import_app.command(name="environment")

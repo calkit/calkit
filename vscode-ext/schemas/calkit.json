@@ -12221,6 +12221,19 @@
           "default": null,
           "title": "Filter Paths"
         },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Branch, tag, or commit to follow when refreshing this. Optional: an entry that names none follows the project's default branch. The commit it resolves to is recorded in .calkit/imports.json.",
+          "title": "Git Ref"
+        },
         "git_rev": {
           "anyOf": [
             {

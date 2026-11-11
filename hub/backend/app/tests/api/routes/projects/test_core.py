@@ -60,6 +60,10 @@ def test_get_project_contents_forwards_ref(client: TestClient) -> None:
                 "dir_items": None,
             },
         ) as mock_get_contents,
+        patch(
+            "app.api.routes.projects.core.resolve_commit_sha",
+            return_value="a" * 40,
+        ) as mock_resolve_commit,
     ):
         response = client.get(
             (
@@ -69,6 +73,9 @@ def test_get_project_contents_forwards_ref(client: TestClient) -> None:
         )
     assert response.status_code == 200
     assert response.json()["path"] == "README.md"
+    # The commit the ref resolved to comes back, so an import can pin it
+    assert response.json()["commit"] == "a" * 40
+    mock_resolve_commit.assert_called_once_with(fake_repo, "v1.2.3")
     mock_get_project.assert_called_once_with(
         owner_name="test-owner",
         project_name="test-project",

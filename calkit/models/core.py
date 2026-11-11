@@ -54,6 +54,15 @@ class _ImportedFromProject(Model):
 
     project: str
     path: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Branch, tag, or commit to follow when refreshing this. "
+            "Optional: an entry that names none follows the project's "
+            "default branch. The commit it resolves to is recorded in "
+            ".calkit/imports.json."
+        ),
+    )
     date: date_type | None = Field(
         default=None, description="When the data was downloaded."
     )

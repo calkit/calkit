@@ -333,6 +333,64 @@ def how_to_define_origin(path: str) -> str:
     )
 
 
+def get_imports_with_updates(ck_info: dict) -> list[str]:
+    """Paths of files imported from Calkit projects whose source now has a
+    different version than was fetched.
+
+    Only project sources are checked, since telling for a Git repo means
+    cloning it, and only files the hub sends inline. Anything that can't be
+    checked, e.g., when offline, is left out rather than reported: this is
+    a courtesy, and refreshing is what 'calkit sync import' is for.
+    """
+    import base64
+    import hashlib
+
+    from requests.exceptions import ConnectionError, Timeout
+
+    import calkit
+
+    locks = read_import_locks()
+    paths: list[str] = []
+    for kind in get_artifact_types_with_imports():
+        entries = ck_info.get(kind)
+        for entry in entries if isinstance(entries, list) else []:
+            source = (
+                entry.get("imported_from") if isinstance(entry, dict) else None
+            )
+            if not isinstance(source, dict):
+                continue
+            if not source.get("project") or not source.get("path"):
+                continue
+            lock = locks.get(entry.get("path")) or {}
+            recorded = lock.get("hash")
+            if not isinstance(recorded, str):
+                continue
+            ref = source.get("git_ref")
+            try:
+                contents = calkit.hub.get(
+                    f"/projects/{source['project']}/contents/{source['path']}",
+                    params={"ref": ref} if ref else None,
+                    max_retries=0,
+                    allow_login=False,
+                    timeout=(5, 30),
+                )
+            except (ConnectionError, Timeout):
+                # The rest would fail the same way, one timeout at a time
+                return paths
+            except Exception:
+                continue
+            # The same commit can't hold a different file
+            if lock.get("rev") and contents.get("commit") == lock["rev"]:
+                continue
+            content = contents.get("content")
+            if content is None:
+                continue
+            digest = hashlib.sha256(base64.b64decode(content)).hexdigest()
+            if f"{HASH_ALGORITHM}:{digest}" != recorded:
+                paths.append(entry["path"])
+    return paths
+
+
 def has_provenance(artifact: dict) -> bool:
     """Return whether an artifact entry records where it came from.
 
@@ -509,6 +567,58 @@ def _git_source_from_ssh_url(url: str, ref: str | None = None) -> dict | None:
     return source
 
 
+def _project_source_from_hub_url(
+    location: str, ref: str | None = None
+) -> dict | None:
+    """Read a project source out of a link to a file on the hub, or None.
+
+    Both the address a file's page shows, e.g.,
+    ``https://calkit.io/owner/project/files?path=fig.png&ref=v1``, and the
+    shorter ``calkit.io/owner/project/fig.png`` are read, with or without
+    a scheme. An explicit ``ref`` overrides one in the link.
+    """
+    from urllib.parse import parse_qs, urlsplit
+
+    import calkit.hub
+
+    has_scheme = location.startswith(("http://", "https://"))
+    parts = urlsplit(location if has_scheme else "https://" + location)
+    host = (parts.hostname or "").lower()
+    if not host:
+        return None
+    active_host = urlsplit(calkit.hub.get_hub_url()).hostname
+    if host != active_host:
+        # A link to another built-in hub would be fetched from the active
+        # one, which may not have the project or have a different one
+        others = {
+            urlsplit(url).hostname for url in calkit.hub.HUB_URLS.values()
+        }
+        if host in others and host != "localhost":
+            raise ValueError(
+                f"'{location}' links to {host}, but this project uses the "
+                f"hub at {calkit.hub.get_hub_url()}"
+            )
+        return None
+    segments = [seg for seg in parts.path.split("/") if seg]
+    if len(segments) < 2:
+        raise ValueError(f"'{location}' doesn't name a project on the hub")
+    project = "/".join(segments[:2])
+    query = parse_qs(parts.query)
+    path = "/".join(segments[2:])
+    url_ref: str | None = None
+    if segments[2:] == ["files"]:
+        path = (query.get("path") or [""])[0].strip("/")
+        url_ref = (query.get("ref") or [""])[0] or None
+    if not path:
+        raise ValueError(
+            f"'{location}' links to the project {project}, not a file in it"
+        )
+    source: dict = {"project": project, "path": path}
+    if ref or url_ref:
+        source["git_ref"] = ref or url_ref
+    return source
+
+
 def source_from_location(
     location: str,
     git_repo: str | None = None,
@@ -518,8 +628,9 @@ def source_from_location(
 
     ``location`` is a path inside ``git_repo`` when that's given, and
     otherwise a URL, an SSH clone URL like
-    ``git@github.com:owner/repo/path``, a DOI, or a Calkit project path
-    like ``someone/some-project/scripts/setup.sh``. An explicit ``ref`` names
+    ``git@github.com:owner/repo/path``, a DOI, a link to a file on the hub,
+    or a Calkit project path like ``someone/some-project/scripts/setup.sh``.
+    An explicit ``ref`` names
     the branch, tag, or commit to follow, and overrides one read out of a
     URL. Without one, the repo's default branch is what gets fetched, now
     and whenever the import is refreshed.
@@ -537,6 +648,9 @@ def source_from_location(
         # page, so treating it as a plain URL would save the HTML and call
         # it the data. 'fetch' says what to use instead.
         return {"doi": stripped}
+    hub_source = _project_source_from_hub_url(location, ref=ref)
+    if hub_source is not None:
+        return hub_source
     if location.startswith(("http://", "https://")):
         git_source = _git_source_from_url(location, ref=ref)
         if git_source is not None:
@@ -565,7 +679,13 @@ def source_from_location(
             "a Calkit project path like someone/some-project/path/to/file, "
             "or a path inside a repo named with --git-repo"
         )
-    return {"project": "/".join(segments[:2]), "path": "/".join(segments[2:])}
+    source = {
+        "project": "/".join(segments[:2]),
+        "path": "/".join(segments[2:]),
+    }
+    if ref is not None:
+        source["git_ref"] = ref
+    return source
 
 
 def git_source(imported_from: dict) -> dict | None:
@@ -710,7 +830,9 @@ def _with_state(lock: dict, dest_path: str, rev: str | None = None) -> dict:
     return lock
 
 
-def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
+def fetch(
+    imported_from: dict, dest_path: str, source_entry: dict | None = None
+) -> tuple[dict, dict]:
     """Download what an ``imported_from`` entry points at, to ``dest_path``.
 
     Returns the entry as it should now be recorded, and separately what the
@@ -728,6 +850,10 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
     Whatever is at ``dest_path`` is replaced. This is a one-way copy from
     the source, not a merge: an import is a statement about where a file
     came from, and a local edit that survived it would make that false.
+
+    ``source_entry``, if given, is filled with the source project's own
+    entry for the file, e.g., a figure's title and description, when it has
+    one.
     """
     import shutil
     import subprocess
@@ -856,17 +982,25 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
         src_path = imported_from.get("path")
         if not src_path:
             raise ValueError("Project source has no 'path' to fetch")
+        project_ref = imported_from.get("git_ref")
         try:
             contents: dict = calkit.hub.get(
-                f"/projects/{project}/contents/{src_path}"
+                f"/projects/{project}/contents/{src_path}",
+                params={"ref": project_ref} if project_ref else None,
             )
         except Exception as e:
             raise ValueError(f"Failed to fetch {src_path} from {project}: {e}")
+        # Older hubs don't say what commit they read
+        project_rev = contents.get("commit")
+        if source_entry is not None and isinstance(
+            contents.get("calkit_object"), dict
+        ):
+            source_entry.update(contents["calkit_object"])
         content = contents.get("content")
         if content is not None:
             with open(dest_path, "wb") as f:
                 f.write(base64.b64decode(content))
-            return imported_from, _with_state(lock, dest_path)
+            return imported_from, _with_state(lock, dest_path, rev=project_rev)
         download_url = contents.get("url")
         if download_url is None:
             raise ValueError(f"Could not fetch {src_path} from {project}")
@@ -874,7 +1008,7 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
         # URL branch above finishes the job. The entry still records the
         # project, since that is where the file came from.
         fetch({"url": download_url}, dest_path=dest_path)
-        return imported_from, _with_state(lock, dest_path)
+        return imported_from, _with_state(lock, dest_path, rev=project_rev)
     if imported_from.get("doi") is not None:
         raise ValueError(
             "Fetching by DOI is not supported here, since a DOI resolves to "

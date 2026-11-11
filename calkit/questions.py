@@ -846,25 +846,43 @@ def _plain(value: Any) -> Any:
     return value
 
 
+#: The fields of a question, its evidence, and its sign-offs that are prose
+_PROSE_FIELDS = (
+    "question",
+    "hypothesis",
+    "approach",
+    "answer",
+    "notes",
+    "explanation",
+)
+
+
 def _content(value: Any) -> Any:
     """Like ``_plain``, but with prose compared by its words.
 
     A line break is a space in Markdown, so rewrapping a question, or
     writing it as a literal or folded block instead, doesn't change what
     it says. A blank line still does, since it starts a new paragraph.
+
+    Only the prose fields are compared this way, and a string on its own,
+    which is taken for prose. The rest, e.g., an evidence ``key`` or
+    ``path``, picks something out, so its whitespace can matter.
     """
 
-    def words(value: Any) -> Any:
+    def words(value: Any, prose: bool) -> Any:
         if isinstance(value, dict):
-            return {k: words(v) for k, v in value.items()}
+            return {
+                k: words(v, prose or k in _PROSE_FIELDS)
+                for k, v in value.items()
+            }
         if isinstance(value, list):
-            return [words(v) for v in value]
-        if isinstance(value, str):
+            return [words(v, prose) for v in value]
+        if prose and isinstance(value, str):
             paragraphs = re.split(r"\n[ \t]*\n\s*", value.strip())
             return "\n\n".join(" ".join(p.split()) for p in paragraphs)
         return value
 
-    return words(_plain(value))
+    return words(_plain(value), isinstance(value, str))
 
 
 def question_commit(
@@ -1544,6 +1562,7 @@ def check_sign_offs(
         hist = history
         assert hist is not None
         target = _content(sign_off)
+        wanted = _content(question)
 
         def signed_at(sha: str) -> tuple[dict, dict] | None:
             old = hist.at(sha)
@@ -1559,9 +1578,9 @@ def check_sign_offs(
                 (
                     q
                     for key in ("name", "question")
-                    if question.get(key)
+                    if wanted.get(key)
                     for q in candidates
-                    if _content(q.get(key)) == _content(question.get(key))
+                    if _content(q).get(key) == wanted[key]
                 ),
                 candidates[0],
             )

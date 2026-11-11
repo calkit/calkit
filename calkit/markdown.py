@@ -25,7 +25,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import ruamel.yaml
 from pydantic import BaseModel
@@ -2897,6 +2897,153 @@ def format_value(value: Any, fmt: str | None = None) -> str:
     return json.dumps(value)
 
 
+# A compact marker with calkit.sty's bracketed option, e.g.,
+# ``ckvalue[.4f] metrics rms``, which reads naturally coming from LaTeX
+_BRACKET_CKVALUE_RE = re.compile(
+    r"<!--(?P<lead>\s*)ckvalue\[(?P<format>[^\]]*)\](?P<args>.*?)-->"
+)
+# A 'calkit values' directive or a long marker, in document order
+_LONG_FORM_RE = re.compile(
+    _VALUES_RE.pattern.replace("(?P<attrs>", "(?P<dattrs>")
+    + "|"
+    + _VALUE_RE.pattern
+)
+
+
+def heal_markers(
+    text: str, results: dict[str, str] | None = None
+) -> tuple[str, int]:
+    """Rewrite older spellings of value markers in the compact form.
+
+    A long ``calkit value`` marker becomes a ``ckvalue`` naming its own
+    source, taking it from a ``calkit values`` directive above it if it
+    named none, and the directives are then removed. A compact marker with
+    a bracketed format, as ``calkit.sty`` writes one, gets the format as its
+    third argument. Markers in code are examples and are left alone, as is a
+    long marker that can't be rewritten exactly, e.g., with no source.
+    Returns the new text and how many markers and directives were rewritten.
+    """
+
+    def compact_arg(arg: str) -> str:
+        return f'"{arg}"' if re.search(r"\s", arg) or not arg else arg
+
+    def long_to_compact(m: re.Match[str], default: str | None) -> str:
+        try:
+            attrs = parse_attrs(m.group("attrs"))
+        except ValueError:
+            return m.group(0)
+        source = attrs.pop("path", default)
+        key = attrs.pop("key", None)
+        fmt = attrs.pop("format", None)
+        if attrs or source is None or key is None:
+            return m.group(0)
+        source = str(source)
+        # Positionally, a declared result's name would win over the path, so
+        # it's named, and the arguments after it then have to be too
+        looks_like_path = "/" in source or "." in Path(source).name
+        named = not looks_like_path or bool(results and source in results)
+        args = [("path=" if named else "") + compact_arg(source)]
+        args.append(("key=" if named else "") + compact_arg(str(key)))
+        if fmt is not None:
+            spec = re.fullmatch(r"\{:([^{}]*)\}", str(fmt))
+            fmt_arg = compact_arg(spec.group(1) if spec else str(fmt))
+            args.append(("format=" if named else "") + fmt_arg)
+        return (
+            f"<!-- ckvalue {' '.join(args)} -->{m.group('text')}"
+            "<!-- /ckvalue -->"
+        )
+
+    def bracket_to_args(m: re.Match[str]) -> str:
+        args = m.group("args").strip()
+        return (
+            f"<!--{m.group('lead')}ckvalue {args} "
+            f"{compact_arg(m.group('format').strip())} -->"
+        )
+
+    def outside_code(line: str, fn: Callable[[str], str]) -> str:
+        # Code spans are examples, so only what's between them is rewritten
+        parts = []
+        pos = 0
+        for cm in _CODE_SPAN_RE.finditer(line):
+            parts.append(fn(line[pos : cm.start()]))
+            parts.append(cm.group(0))
+            pos = cm.end()
+        parts.append(fn(line[pos:]))
+        return "".join(parts)
+
+    out: list[str] = []
+    n = 0
+    default: str | None = None
+    fence: str | None = None
+    dropped_directive = False
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        eol = line[len(bare) :]
+        fm = _FENCE_RE.match(bare)
+        if fence is not None:
+            if (
+                fm is not None
+                and fm.group("fence")[0] == fence[0]
+                and len(fm.group("fence")) >= len(fence)
+                and not fm.group("info").strip()
+            ):
+                fence = None
+            out.append(line)
+            continue
+        if fm is not None:
+            fence = fm.group("fence")
+            out.append(line)
+            continue
+        # A blank line left doubled, or leading, by removing a directive
+        # goes with it
+        if (
+            dropped_directive
+            and not bare.strip()
+            and (not out or not out[-1].strip())
+        ):
+            dropped_directive = False
+            continue
+        dropped_directive = False
+
+        def rewrite(segment: str) -> str:
+            nonlocal default, n
+            pieces = []
+            pos = 0
+            for m in _LONG_FORM_RE.finditer(segment):
+                pieces.append(segment[pos : m.start()])
+                pos = m.end()
+                if m.group("dattrs") is not None:
+                    try:
+                        directive = parse_attrs(m.group("dattrs"))
+                    except ValueError:
+                        pieces.append(m.group(0))
+                        continue
+                    if set(directive) != {"path"}:
+                        pieces.append(m.group(0))
+                        continue
+                    default = str(directive["path"])
+                    n += 1
+                    continue
+                new = long_to_compact(m, default)
+                n += new != m.group(0)
+                pieces.append(new)
+            pieces.append(segment[pos:])
+            segment = "".join(pieces)
+            segment, n_bracket = _BRACKET_CKVALUE_RE.subn(
+                bracket_to_args, segment
+            )
+            n += n_bracket
+            return segment
+
+        new = outside_code(bare, rewrite)
+        if new != bare and not new.strip():
+            # The line held only a directive
+            dropped_directive = True
+            continue
+        out.append(new + eol)
+    return "".join(out), n
+
+
 def set_values(
     text: str,
     markdown_path: str,
@@ -2907,15 +3054,21 @@ def set_values(
 
     The results files are outputs of stages, so they are the truth about
     what was computed; the prose is brought into line with them rather
-    than the other way round. Returns the new text and whether anything
-    changed. A missing file or key raises ``MarkdownParseError`` naming
-    the line.
+    than the other way round. Results files are read as YAML or TOML by
+    extension, and as JSON otherwise. Older spellings of markers are
+    rewritten in the compact form first; see ``heal_markers``. Returns the
+    new text and whether anything changed. A missing file or key raises
+    ``MarkdownParseError`` naming the line.
     """
     import json
 
+    from calkit.questions import read_evidence_file
+
+    original = text
+    text, _ = heal_markers(text, results=results)
     values = extract_values(text, markdown_path, results=results)
     if not values:
-        return text, False
+        return text, text != original
     path = Path(markdown_path).as_posix()
     data_by_path: dict[str, Any] = {}
     for value in values:
@@ -2929,15 +3082,22 @@ def set_values(
                 path=path,
                 line=value.line,
             )
-        with open(fpath, encoding="utf-8") as f:
-            try:
-                data_by_path[value.path] = json.load(f)
-            except json.JSONDecodeError as e:
-                raise MarkdownParseError(
-                    f"Results file '{value.path}' is not valid JSON: {e}",
-                    path=path,
-                    line=value.line,
-                )
+        # Read the way calkit.sty's values are, with anything else as JSON
+        ext = os.path.splitext(fpath)[1].lower()
+        try:
+            if ext in (".yaml", ".yml", ".toml"):
+                data_by_path[value.path] = read_evidence_file(fpath)
+            else:
+                with open(fpath, encoding="utf-8") as f:
+                    data_by_path[value.path] = json.load(f)
+        except Exception as e:
+            kind = {".yaml": "YAML", ".yml": "YAML", ".toml": "TOML"}
+            raise MarkdownParseError(
+                f"Results file '{value.path}' is not valid "
+                f"{kind.get(ext, 'JSON')}: {e}",
+                path=path,
+                line=value.line,
+            )
     rendered = []
     for value in values:
         try:
@@ -2990,7 +3150,7 @@ def set_values(
                 changed = True
         n += len(matches)
         lines[i] = bare + line[len(line.rstrip("\r\n")) :]
-    return "".join(lines), changed
+    return "".join(lines), changed or text != original
 
 
 # Images in Markdown: inline, by reference, e.g., ``![plot][p]`` or

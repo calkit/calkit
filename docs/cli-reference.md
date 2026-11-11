@@ -3172,7 +3172,7 @@ Options:
 
 Update the values Markdown files show, and check their imported images.
 
-Each value marker's text, e.g., the 0.29 in '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is rewritten from the results file and key it names. Nothing else in the file changes. This is the update 'calkit run' makes after running the pipeline, for a project without one, e.g., one whose results are imported.
+Each value marker's text, e.g., the 0.29 in '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is rewritten from the JSON, YAML, or TOML results file and key it names. Markers in an older form, 'calkit value' or 'ckvalue[.2f]', are rewritten as above, and 'calkit values' directives removed. Nothing else in the file changes. This is the update 'calkit run' makes after running the pipeline, for a project without one, e.g., one whose results are imported.
 
 Each local image a file shows that calkit.yaml records as imported, including one written from the project root like /images/fig.png, is checked against what the import fetched: it should exist and not have been edited since. Images are only checked, never changed; 'calkit sync import' is what brings in a newer version.
 

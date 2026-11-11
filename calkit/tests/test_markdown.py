@@ -1473,20 +1473,22 @@ def test_values(tmp_path, monkeypatch):
     assert [b.name for b in parse_markdown(text)] == ["a"]
     new, changed = set_values(text, "README.md")
     assert changed
+    # Long markers are rewritten in the compact form, each naming its own
+    # source, and the directive they took one from is removed
+    assert new.startswith(
+        "# Title\n\nThe RMS is <!-- ckvalue results.json rms .4f -->0.2933"
+        "<!-- /ckvalue --> over <!-- ckvalue results.json n -->401"
+        "<!-- /ckvalue --> samples."
+    )
+    assert "calkit values" not in new
     assert (
-        'The RMS is <!-- calkit value key=rms format="{:.4f}" -->0.2933'
-        "<!-- /calkit value --> over <!-- calkit value key=n -->401"
-        "<!-- /calkit value --> samples."
+        "| leading coefficient | <!-- ckvalue results.json fit.coeffs.0 -->"
+        "1.974<!-- /ckvalue --> |"
     ) in new
     assert (
-        "| leading coefficient | <!-- calkit value key=fit.coeffs.0 -->1.974"
-        "<!-- /calkit value --> |"
-    ) in new
-    assert (
-        "Elsewhere: <!-- calkit value key=n path=other.json -->7"
-        "<!-- /calkit value -->, <!-- calkit value key=ok -->true"
-        "<!-- /calkit value -->, <!-- calkit value key=label -->damped"
-        "<!-- /calkit value -->."
+        "Elsewhere: <!-- ckvalue other.json n -->7<!-- /ckvalue -->, "
+        "<!-- ckvalue results.json ok -->true<!-- /ckvalue -->, "
+        "<!-- ckvalue results.json label -->damped<!-- /ckvalue -->."
     ) in new
     assert "<!-- calkit value key=rms -->example<!-- /calkit value -->" in new
     # Idempotent once in line with the results
@@ -1515,6 +1517,72 @@ def test_values(tmp_path, monkeypatch):
     # A value annotation on a fence is a mistake, not a block
     with pytest.raises(MarkdownParseError, match="inline marker"):
         parse_markdown("```python calkit value key=rms\npass\n```\n")
+    # YAML and TOML results files are read by extension, as calkit.sty does
+    (tmp_path / "r.yaml").write_text("fit:\n  rms: 0.5\n")
+    (tmp_path / "r.toml").write_text("[fit]\nn = 12\n")
+    (tmp_path / "r.out").write_text('{"n": 3}')
+    new, _ = set_values(
+        "<!-- ckvalue r.yaml fit.rms .2f -->?<!-- /ckvalue -->, "
+        "<!-- ckvalue r.toml fit.n -->?<!-- /ckvalue -->, "
+        "<!-- ckvalue r.out n -->?<!-- /ckvalue -->\n",
+        "README.md",
+    )
+    assert new == (
+        "<!-- ckvalue r.yaml fit.rms .2f -->0.50<!-- /ckvalue -->, "
+        "<!-- ckvalue r.toml fit.n -->12<!-- /ckvalue -->, "
+        "<!-- ckvalue r.out n -->3<!-- /ckvalue -->\n"
+    )
+    (tmp_path / "bad.toml").write_text("not = [toml\n")
+    with pytest.raises(MarkdownParseError, match="not valid TOML"):
+        set_values("<!-- ckvalue bad.toml n -->?<!-- /ckvalue -->\n", "x.md")
+
+
+def test_heal_markers():
+    from calkit.markdown import extract_values, heal_markers
+
+    results = {"metrics": "results.json"}
+    text = (
+        'Intro <!-- calkit value key=a path=r.json format="{:.1f}" -->1'
+        "<!-- /calkit value -->.\n\n"
+        "<!-- calkit values path=other.json -->\n\n"
+        "- <!-- calkit value key=b -->2<!-- /calkit value --> and "
+        '<!-- calkit value key=c format="{value:,} GB" -->3'
+        "<!-- /calkit value -->\n"
+        "- <!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n"
+        "- <!-- calkit value key=d path=metrics -->4<!-- /calkit value -->\n"
+        "- `<!-- calkit value key=x path=y.json -->5<!-- /calkit value -->`\n"
+        "\n```md\n<!-- calkit value key=z path=q.json -->6"
+        "<!-- /calkit value -->\n```\n"
+    )
+    healed, n = heal_markers(text, results=results)
+    assert n == 6
+    assert healed == (
+        "Intro <!-- ckvalue r.json a .1f -->1<!-- /ckvalue -->.\n\n"
+        "- <!-- ckvalue other.json b -->2<!-- /ckvalue --> and "
+        '<!-- ckvalue other.json c "{value:,} GB" -->3<!-- /ckvalue -->\n'
+        "- <!-- ckvalue metrics rms .4f -->0<!-- /ckvalue -->\n"
+        # A path that is also a result's name stays a path
+        "- <!-- ckvalue path=metrics key=d -->4<!-- /ckvalue -->\n"
+        # Code is an example, whether inline or fenced
+        "- `<!-- calkit value key=x path=y.json -->5<!-- /calkit value -->`\n"
+        "\n```md\n<!-- calkit value key=z path=q.json -->6"
+        "<!-- /calkit value -->\n```\n"
+    )
+    # Every value reads the same as before, apart from the inline-code one,
+    # which the bracketed form couldn't be read as at all
+    before = {
+        (v.key, v.path, v.format)
+        for v in extract_values(text, "x.md", results=results)
+    }
+    after = {
+        (v.key, v.path, v.format)
+        for v in extract_values(healed, "x.md", results=results)
+    }
+    assert after - before == {("rms", "results.json", "{:.4f}")}
+    assert heal_markers(healed, results=results) == (healed, 0)
+    # One that can't be rewritten exactly is left for the error it gives
+    unhealable = "<!-- calkit value key=rms -->?<!-- /calkit value -->\n"
+    assert heal_markers(unhealable) == (unhealable, 0)
 
 
 def test_compact_value_markers(tmp_path, monkeypatch):
@@ -1641,7 +1709,7 @@ def test_compact_value_markers(tmp_path, monkeypatch):
         "C <!-- ckvalue results.json n -->?<!-- /ckvalue -->\n"
     )
     out, _ = set_values(mixed, "README.md")
-    assert "L <!-- calkit value key=n -->7<!-- /calkit value -->" in out
+    assert "L <!-- ckvalue other.json n -->7<!-- /ckvalue -->" in out
     assert "C <!-- ckvalue results.json n -->401<!-- /ckvalue -->" in out
     # The long form's default never applies to a compact marker
     assert extract_values(mixed, "README.md")[1].path == "results.json"

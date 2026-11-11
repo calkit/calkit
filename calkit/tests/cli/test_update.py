@@ -1255,8 +1255,7 @@ def test_update_markdown(tmp_dir):
     post = (
         "Only <!-- ckvalue _data/r.json summary.frac .0% -->?"
         "<!-- /ckvalue --> of\n"
-        "<!-- calkit value key=n path=_data/r.json -->?"
-        "<!-- /calkit value --> runs.\n"
+        "<!-- ckvalue _data/r.json n -->?<!-- /ckvalue --> runs.\n"
     )
     with open("_posts/a.md", "w") as f:
         f.write(post)
@@ -1279,8 +1278,25 @@ def test_update_markdown(tmp_dir):
     with open("_posts/a.md") as f:
         text = f.read()
     assert "-->60%<!-- /ckvalue -->" in text
-    assert "-->15<!-- /calkit value -->" in text
+    assert "n -->15<!-- /ckvalue -->" in text
     assert run("--check", "_posts/a.md").returncode == 0
+    # Markers in an older form are rewritten as compact ones, which a check
+    # reports as out of date even when the values are right
+    with open("_posts/old.md", "w") as f:
+        f.write(
+            "<!-- calkit values path=_data/r.json -->\n\n"
+            "N is <!-- calkit value key=n -->15<!-- /calkit value -->.\n"
+        )
+    res = run("--check", "_posts/old.md")
+    assert res.returncode != 0
+    assert "2 marker(s) or directive(s) in an older form" in res.stdout
+    res = run("_posts/old.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "rewriting them as 'ckvalue'" in res.stdout
+    with open("_posts/old.md") as f:
+        assert f.read() == (
+            "N is <!-- ckvalue _data/r.json n -->15<!-- /ckvalue -->.\n"
+        )
     # A markdown stage's file is updated with no files named
     with open("calkit.yaml", "w") as f:
         f.write(

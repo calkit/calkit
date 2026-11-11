@@ -641,6 +641,10 @@ export type ContentsItem = {
    * Dir Items
    */
   dir_items?: Array<ContentsItemBase> | null
+  /**
+   * Commit
+   */
+  commit?: string | null
 }
 
 /**

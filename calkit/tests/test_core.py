@@ -650,6 +650,52 @@ def test_ryaml_keeps_how_prose_was_wrapped() -> None:
     assert "agree to within two\n" not in out
     assert calkit.ryaml.load(out) == data
     assert "      more than the measurement uncertainty?\n" in out
+    # Nor are lines longer than the width, in plain values or folded
+    # blocks, or long words, whether beside their key or below it
+    long = "word " * 20 + "end"
+    text = (
+        f"notes: {long}\n"
+        f"path: {'a/' * 45}b.json\n"
+        f"below:\n  {'c/' * 45}d.json\n"
+        f"answer: >-\n  {long}\n  and a second line.\n"
+        f"single: >-\n  {long}\n"
+    )
+    assert dumped(calkit.ryaml.load(text)) == text
+    # Unless they're new
+    data = calkit.ryaml.load(text)
+    data["notes"] = str(data["notes"])
+    data["path"] = str(data["path"])
+    out = dumped(data)
+    assert f"notes: {long}\n" not in out
+    assert "path:\n" in out
+    assert calkit.ryaml.load(out) == data
+    # Likewise double-quoted strings, including escapes, and flow lists,
+    # however they were wrapped
+    quoted = (
+        f'quoted: "{long}"\n'
+        f'escaped: "{long}\\t{{x:.0f}}"\n'
+        f'wrapped: "{long}\n  ms"\n'
+        f"items: [{', '.join(['item'] * 20)}]\n"
+        "names: [one, two,\n    three]\n"
+    )
+    for data in [
+        calkit.ryaml.load(quoted),
+        copy.deepcopy(calkit.ryaml.load(quoted)),
+    ]:
+        assert dumped(data) == quoted
+    # A break in quotes after an escape is left to ruamel
+    continued = f'continued: "{long}\\\n  ms"\n'
+    assert calkit.ryaml.load(dumped(calkit.ryaml.load(continued))) == (
+        calkit.ryaml.load(continued)
+    )
+    # Other dumpers can still write what was read, e.g., DVC writing
+    # dvc.yaml
+    import ruamel.yaml
+
+    for source in [text, quoted]:
+        buf = io.StringIO()
+        ruamel.yaml.YAML().dump(calkit.ryaml.load(source), buf)
+        assert calkit.ryaml.load(buf.getvalue()) == calkit.ryaml.load(source)
 
 
 def test_update_readme_content():

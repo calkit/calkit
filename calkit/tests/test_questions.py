@@ -1018,17 +1018,23 @@ def test_sign_offs_and_stages(tmp_dir):
         assert validations[0].status == expected, ref
     assert check().questions[0].validation_status == "current"
     repo.git.checkout("--", "results/summary.json")
-    # Each kind goes stale on its own changes, and notes go stale on neither
+    # Each kind goes stale on its own changes, and notes go stale on neither.
+    # Rewrapping changes nothing, since a line break is a space, but a blank
+    # line starts a new paragraph.
     edits = [
         ("notes", "Checked twice.", "current", "current", None),
         ("answer", "It does.", "current", "stale", "question was edited"),
+        ("answer", "It\ndoes.\n", "current", "current", None),
         ("question", "Does it?", "current", "stale", "question was edited"),
+        ("question", "Does  it?\n", "current", "current", None),
         ("approach", "Fit it.", "stale", "stale", "approach was edited"),
+        ("approach", "Fit\n  it.", "current", "current", None),
+        ("answer", "It\n\ndoes.", "current", "stale", "question was edited"),
     ]
     for n, (field, value, verification, validation, reason) in enumerate(
         edits, start=5
     ):
-        sign_off(date=f"2026-10-0{n}")
+        sign_off(date=f"2026-09-{n:02d}")
         question[field] = value
         _write_yaml(ck_info)
         _commit(f"Edit the {field}")

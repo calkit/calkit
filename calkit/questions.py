@@ -825,7 +825,9 @@ class CalkitYamlHistory:
 
 def _find_question(ck_info: dict, text: str) -> dict | None:
     for q in ck_info.get("questions", []) or []:
-        if isinstance(q, dict) and q.get("question") == text:
+        if isinstance(q, dict) and _content(q.get("question")) == _content(
+            text
+        ):
             return q
     return None
 
@@ -842,6 +844,27 @@ def _plain(value: Any) -> Any:
     if isinstance(value, (datetime.date, datetime.datetime)):
         return value.isoformat()
     return value
+
+
+def _content(value: Any) -> Any:
+    """Like ``_plain``, but with prose compared by its words.
+
+    A line break is a space in Markdown, so rewrapping a question, or
+    writing it as a literal or folded block instead, doesn't change what
+    it says. A blank line still does, since it starts a new paragraph.
+    """
+
+    def words(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: words(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [words(v) for v in value]
+        if isinstance(value, str):
+            paragraphs = re.split(r"\n[ \t]*\n\s*", value.strip())
+            return "\n\n".join(" ".join(p.split()) for p in paragraphs)
+        return value
+
+    return words(_plain(value))
 
 
 def question_commit(
@@ -863,14 +886,14 @@ def question_commit(
     if history is None:
         history = CalkitYamlHistory(repo, wdir)
     text = question.get("question", "")
-    current = _plain(question)
+    current = _content(question)
     found: str | None = None
     for sha in history.shas:
         old = history.at(sha)
         if old is None:
             break
         old_q = _find_question(old, text)
-        if old_q is None or _plain(old_q) != current:
+        if old_q is None or _content(old_q) != current:
             break
         found = sha
     return found
@@ -1493,7 +1516,9 @@ def check_sign_offs(
     from calkit.models.pipeline import Pipeline
 
     def validated_part(q: dict) -> dict:
-        return {k: v for k, v in _plain(q).items() if k not in _NOT_VALIDATED}
+        return {
+            k: v for k, v in _content(q).items() if k not in _NOT_VALIDATED
+        }
 
     def lock_stages(lock_text: str | None) -> dict[str, dict]:
         # Including each 'name@item' of a stage that iterates
@@ -1518,14 +1543,15 @@ def check_sign_offs(
         # identical one, the same name, then the same text, wins.
         hist = history
         assert hist is not None
-        target = _plain(sign_off)
+        target = _content(sign_off)
 
         def signed_at(sha: str) -> tuple[dict, dict] | None:
             old = hist.at(sha)
             candidates = [
                 q
                 for q in (old or {}).get("questions") or []
-                if isinstance(q, dict) and target in _plain(q.get(field) or [])
+                if isinstance(q, dict)
+                and target in _content(q.get(field) or [])
             ]
             if old is None or not candidates:
                 return None
@@ -1535,7 +1561,7 @@ def check_sign_offs(
                     for key in ("name", "question")
                     if question.get(key)
                     for q in candidates
-                    if q.get(key) == question.get(key)
+                    if _content(q.get(key)) == _content(question.get(key))
                 ),
                 candidates[0],
             )
@@ -1719,7 +1745,7 @@ def check_sign_offs(
                 reasons.insert(0, "the question was edited after it")
         else:
             reasons = stage_changes(sha, old_q, old_info)
-            if _plain(old_q.get("approach")) != _plain(
+            if _content(old_q.get("approach")) != _content(
                 question.get("approach")
             ):
                 reasons.insert(0, "the approach was edited after it")

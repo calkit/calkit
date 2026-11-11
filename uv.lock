@@ -1365,7 +1365,7 @@ requires-dist = [
     { name = "json2latex", specifier = ">=0.0.3" },
     { name = "jupyterlab", specifier = ">=4.4.5" },
     { name = "keyring" },
-    { name = "latex2arxiv" },
+    { name = "latex2arxiv", git = "https://github.com/rebeccamccabe/latex2arxiv?branch=whitespace-suppression-comments" },
     { name = "nbconvert" },
     { name = "pandas", marker = "extra == 'data'", specifier = ">=2.2.3" },
     { name = "papermill", specifier = ">=2.6.0" },
@@ -4500,17 +4500,13 @@ wheels = [
 
 [[package]]
 name = "latex2arxiv"
-version = "1.3.1"
-source = { registry = "https://pypi.org/simple" }
+version = "1.3.3"
+source = { git = "https://github.com/rebeccamccabe/latex2arxiv?branch=whitespace-suppression-comments#11bbb68260817833ba19406506ce9a460fb122d6" }
 dependencies = [
     { name = "bibtexparser" },
     { name = "pillow" },
     { name = "pyyaml" },
     { name = "regex" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/d6/cc33b83ff7ec19c995c9ebc0cb33c52c16c2e9299df2cfdb75c15ddf4e61/latex2arxiv-1.3.1.tar.gz", hash = "sha256:98cfbab1e28061750fee680186e00dbef89db10aeb9f746e6fa036c426c96474", size = 105691, upload-time = "2026-07-09T18:25:58.793Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/43/4408ed808e7c76a3993b5d997e03420a2c6d52e85a534deab12988017579/latex2arxiv-1.3.1-py3-none-any.whl", hash = "sha256:d65baeeb956be975f73d5556218b9c6030272e009d900cb0425c9b118fbe84ca", size = 60338, upload-time = "2026-07-09T18:25:57.349Z" },
 ]
 
 [[package]]

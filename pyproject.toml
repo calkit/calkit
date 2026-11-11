@@ -277,6 +277,12 @@ cache-keys = [{ git = { commit = true, tags = true } }]
 # chardet 6+, so bound it rather than teach everyone to ignore a warning.
 constraint-dependencies = ["chardet<6"]
 
+[tool.uv.sources]
+latex2arxiv = {
+    git = "https://github.com/rebeccamccabe/latex2arxiv",
+    branch = "whitespace-suppression-comments",
+}
+
 [tool.pytest.ini_options]
 env = [
   "CALKIT_ENV=test",

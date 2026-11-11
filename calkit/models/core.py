@@ -2022,7 +2022,7 @@ class FileEvidence(Model):
     path: str
     lines: (
         Annotated[int, Field(ge=1)]
-        | Annotated[str, Field(pattern=r"^\s*\d+\s*(-\s*\d+\s*)?$")]
+        | Annotated[str, Field(pattern=r"^\s*\d+\s*([-–]\s*\d+\s*)?$")]
         | None
     ) = Field(
         default=None,
@@ -2053,13 +2053,13 @@ class FileEvidence(Model):
 
 def _evidence_tag(value: object) -> str | None:
     # Resolved as the check resolves it, so the two can't disagree
-    from calkit.questions import evidence_kind
+    from calkit.questions import get_evidence_kind
 
     if isinstance(value, Model):
         value = value.model_dump()
     if not isinstance(value, dict):
         return None
-    return evidence_kind(value) or "file"
+    return get_evidence_kind(value) or "file"
 
 
 def _evidence_any_of(schema: dict[str, Any]) -> None:

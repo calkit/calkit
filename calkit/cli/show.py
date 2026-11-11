@@ -53,16 +53,16 @@ def show_question(
         EvidenceCheck,
         SignOffCheck,
         check_questions,
-        evidence_kind,
         format_letters,
         format_lines,
+        get_evidence_kind,
         placeholders,
         question_index,
         render_question,
     )
 
     def evidence_line(ev: dict, c: EvidenceCheck | None) -> list[str]:
-        kind = evidence_kind(ev)
+        kind = get_evidence_kind(ev)
         line = f"- {(kind or 'file').capitalize()} `{ev.get('path', '')}`"
         if kind is None and ev.get("lines") is not None:
             try:

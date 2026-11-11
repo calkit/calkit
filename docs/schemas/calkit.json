@@ -1603,7 +1603,7 @@
               "type": "integer"
             },
             {
-              "pattern": "^\\s*\\d+\\s*(-\\s*\\d+\\s*)?$",
+              "pattern": "^\\s*\\d+\\s*([-\u2013]\\s*\\d+\\s*)?$",
               "type": "string"
             },
             {

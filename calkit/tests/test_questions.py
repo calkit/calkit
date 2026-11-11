@@ -1424,17 +1424,21 @@ def test_conditional_answers(tmp_dir):
 
 
 def test_check_questions_plain_files_and_output_dirs(tmp_dir):
-    from calkit.questions import evidence_kind, parse_lines
+    from calkit.questions import format_lines, get_evidence_kind, parse_lines
 
     # How an entry's kind is read: a plain file has none, and one without a
     # kind but with a key or values is still a result
-    assert evidence_kind({"path": "a"}) is None
-    assert evidence_kind({"path": "a", "kind": None, "lines": 8}) is None
-    assert evidence_kind({"path": "a", "key": "v"}) == "result"
-    assert evidence_kind({"path": "a", "kind": None, "values": {}}) == "result"
-    assert evidence_kind({"path": "a", "kind": "figure"}) == "figure"
+    assert get_evidence_kind({"path": "a"}) is None
+    assert get_evidence_kind({"path": "a", "kind": None, "lines": 8}) is None
+    assert get_evidence_kind({"path": "a", "key": "v"}) == "result"
+    assert (
+        get_evidence_kind({"path": "a", "kind": None, "values": {}})
+        == "result"
+    )
+    assert get_evidence_kind({"path": "a", "kind": "figure"}) == "figure"
     assert parse_lines(8) == (8, 8)
-    assert parse_lines("8-12") == (8, 12)
+    assert parse_lines("8-12") == parse_lines("8–12") == (8, 12)
+    assert format_lines("8-12") == "lines 8–12"
     for bad in ["0", "12-8", "8-", "x", True]:
         with pytest.raises(ValueError):
             parse_lines(bad)
@@ -1541,7 +1545,7 @@ def test_check_questions_plain_files_and_output_dirs(tmp_dir):
     assert [ev.lines for ev in traced.evidence] == [None, "3", "1-2", None]
     assert traced.status == "ok"
     assert rotted.status == "error"
-    assert "lines 2-5 cited, but the file has only 2 lines" in (
+    assert "lines 2–5 cited, but the file has only 2 lines" in (
         rotted.evidence[0].message or ""
     )
     assert legacy.status == "ok"

@@ -32,7 +32,7 @@ export const isEvidenceMissing = (evidence: QuestionEvidence) =>
 export const parseLines = (
   lines?: string | null,
 ): [number, number] | undefined => {
-  const match = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/.exec(lines ?? "")
+  const match = /^\s*(\d+)\s*(?:[-–]\s*(\d+)\s*)?$/.exec(lines ?? "")
   if (!match) {
     return undefined
   }
@@ -41,14 +41,14 @@ export const parseLines = (
   return first >= 1 && last >= first ? [first, last] : undefined
 }
 
-/** The lines a file is cited at, as "line 8" or "lines 8-12". */
+/** The lines a file is cited at, as "line 8" or "lines 8–12". */
 export const formatLines = (lines?: string | null) => {
   const parsed = parseLines(lines)
   if (!parsed) {
     return lines ? `lines ${lines}` : undefined
   }
   const [first, last] = parsed
-  return first === last ? `line ${first}` : `lines ${first}-${last}`
+  return first === last ? `line ${first}` : `lines ${first}–${last}`
 }
 
 /** The one mark a question's answer gets, worst first.

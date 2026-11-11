@@ -78,6 +78,8 @@ write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
 
+Start function names with a verb, e.g., `get_evidence_kind` rather than
+`evidence_kind`.
 Name functions for what they return,
 e.g., `get_image_name` rather than `get_image`,
 which could just as well return an image.

@@ -304,7 +304,7 @@ test("questions show their H A V V row once checked, and their sign-offs", () =>
   assert.deepEqual(
     evidence.map((e) => e.description),
     [
-      "results/run/RESULTS.md, lines 8-12",
+      "results/run/RESULTS.md, lines 8–12",
       "logs/agent.txt, line 3",
       "results/fit.json",
       "figures/fit.png",

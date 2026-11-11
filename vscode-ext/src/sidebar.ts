@@ -72,7 +72,7 @@ function answerText(question: string | QuestionEntry): string | undefined {
 export function parseLines(
   lines: number | string | undefined,
 ): [number, number] | undefined {
-  const match = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/.exec(String(lines ?? ""));
+  const match = /^\s*(\d+)\s*(?:[-–]\s*(\d+)\s*)?$/.exec(String(lines ?? ""));
   if (!match) {
     return undefined;
   }
@@ -586,7 +586,7 @@ export class CalkitSidebarProvider
         "question-evidence",
         ev.path,
       );
-      // As calkit.questions.evidence_kind reads it: no kind is a plain
+      // As calkit.questions.get_evidence_kind reads it: no kind is a plain
       // file, unless a key or values make it a result
       const kind =
         ev.kind ?? (ev.key != null || ev.values != null ? "result" : undefined);
@@ -596,7 +596,7 @@ export class CalkitSidebarProvider
           ? `${ev.path}, ` +
             (lines[0] === lines[1]
               ? `line ${lines[0]}`
-              : `lines ${lines[0]}-${lines[1]}`)
+              : `lines ${lines[0]}–${lines[1]}`)
           : ev.path;
       evItem.tooltip = ev.explanation ?? ev.path;
       evItem.iconPath = new vscode.ThemeIcon(

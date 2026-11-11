@@ -418,7 +418,7 @@ def render(text: str | dict | None, values: dict[str, Any]) -> str | None:
     return _FORMATTER.vformat(text, (), values)
 
 
-def evidence_kind(ev: dict) -> str | None:
+def get_evidence_kind(ev: dict) -> str | None:
     """The kind of an evidence entry, or None for a plain file cited by path.
 
     An entry with no ``kind``, or a null one, is a plain file, unless it has
@@ -435,14 +435,14 @@ def evidence_kind(ev: dict) -> str | None:
 
 def parse_lines(lines: Any) -> tuple[int, int]:
     """The first and last line a ``lines`` field cites, e.g., ``8`` or
-    ``"8-12"``, 1-based and inclusive.
+    ``"8-12"``, or with an en dash, 1-based and inclusive.
 
     Raises ``ValueError`` if it's neither a line nor a range of them.
     """
     match = (
         None
         if isinstance(lines, bool)
-        else re.fullmatch(r"\s*(\d+)\s*(?:-\s*(\d+)\s*)?", str(lines))
+        else re.fullmatch(r"\s*(\d+)\s*(?:[-–]\s*(\d+)\s*)?", str(lines))
     )
     if match is None:
         raise ValueError(
@@ -459,15 +459,16 @@ def parse_lines(lines: Any) -> tuple[int, int]:
 
 
 def format_lines(lines: Any) -> str:
-    """``lines`` as prose, e.g., "line 8" or "lines 8-12"."""
+    """``lines`` as prose, e.g., "line 8" or "lines 8–12", with an en
+    dash."""
     first, last = parse_lines(lines)
-    return f"line {first}" if first == last else f"lines {first}-{last}"
+    return f"line {first}" if first == last else f"lines {first}–{last}"
 
 
 def is_value_evidence(ev: dict) -> bool:
     """Whether an entry points at one value: ``value``, or the deprecated
     ``result`` with a ``key``."""
-    kind = evidence_kind(ev)
+    kind = get_evidence_kind(ev)
     return kind == "value" or (kind == "result" and bool(ev.get("key")))
 
 
@@ -485,7 +486,7 @@ def named_keys(ev: dict) -> dict[str, str]:
         name = evidence_name(ev)
         return {name: ev["key"]} if name else {}
     values = ev.get("values")
-    if evidence_kind(ev) == "result" and isinstance(values, dict):
+    if get_evidence_kind(ev) == "result" and isinstance(values, dict):
         return {str(n): str(k) for n, k in values.items()}
     return {}
 
@@ -1450,7 +1451,7 @@ def check_evidence(
         )
 
     stage_wdirs = _stage_wdirs(ck_info)
-    kind = evidence_kind(ev)
+    kind = get_evidence_kind(ev)
     path = ev.get("path", "")
     key = ev.get("key")
     # Only a plain file is cited at lines

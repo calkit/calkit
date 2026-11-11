@@ -66,12 +66,13 @@ describe("question status letters", () => {
   it("reads the lines a file is cited at", () => {
     expect(parseLines("8")).toEqual([8, 8])
     expect(parseLines(" 8 - 12 ")).toEqual([8, 12])
+    expect(parseLines("8–12")).toEqual([8, 12])
     expect(parseLines("12-8")).toBeUndefined()
     expect(parseLines("0")).toBeUndefined()
     expect(parseLines("eight")).toBeUndefined()
     expect(parseLines(null)).toBeUndefined()
     expect(formatLines("8")).toBe("line 8")
-    expect(formatLines("8-12")).toBe("lines 8-12")
+    expect(formatLines("8-12")).toBe("lines 8–12")
     // Shown as written when it's neither, rather than dropped
     expect(formatLines("eight")).toBe("lines eight")
     expect(formatLines(undefined)).toBeUndefined()

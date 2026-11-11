@@ -37,10 +37,12 @@ from calkit.models.io import (
     ScheduleInput,
 )
 from calkit.models.iteration import (
+    DateRangeIteration,
     ExpandedParametersType,
     ParameterIteration,
     ParametersType,
     RangeIteration,
+    get_date_range_state_dir,
 )
 from calkit.models.requirements import RequirementType
 
@@ -151,6 +153,7 @@ class StageIteration(Model):
         | float
         | str
         | RangeIteration
+        | DateRangeIteration
         | ParameterIteration
         | list[int | float | str]
     ] = Field(description="Values over which to iterate.")
@@ -166,10 +169,13 @@ class StageIteration(Model):
             expected_length = len(arg_name)
             for i, value in enumerate(v):
                 # TODO: Support RangeIteration and ParameterIteration
-                if isinstance(value, (RangeIteration, ParameterIteration)):
+                if isinstance(
+                    value,
+                    (RangeIteration, DateRangeIteration, ParameterIteration),
+                ):
                     raise ValueError(
-                        "RangeIteration and ParameterIteration are not "
-                        "allowed when arg_name is a list"
+                        "Ranges and parameters are not allowed when "
+                        "arg_name is a list"
                     )
                 # Check if the value is a list and has the correct length
                 if not isinstance(value, list):
@@ -185,6 +191,73 @@ class StageIteration(Model):
                         "elements"
                     )
         return v
+
+    @model_validator(mode="after")
+    def _one_state_storage(self) -> StageIteration:
+        # Every item depends on its period's directory, so all must have one
+        storage = {
+            v.date_range.state_storage
+            if isinstance(v, DateRangeIteration)
+            else None
+            for v in self.values
+        }
+        if len(storage) > 1:
+            raise ValueError(
+                f"Values of '{self.arg_name}' must all be date ranges with "
+                "the same state_storage, or none may have one"
+            )
+        return self
+
+    @property
+    def state_storage(self) -> str | None:
+        """Where the state of each date-range period is kept, if anywhere."""
+        first = self.values[0] if self.values else None
+        if isinstance(first, DateRangeIteration):
+            return first.date_range.state_storage
+        return None
+
+    def write_date_range_state(
+        self, stage_name: str, wdir: str | None = None
+    ) -> None:
+        """Write each period's ``period.json``, if it changed, and remove
+        those of periods no longer iterated over.
+
+        Only ``period.json`` is removed, since whatever else is in a
+        period's directory was written there by something else.
+        """
+        from calkit.core import ensure_local_dir
+
+        if self.state_storage is None:
+            return
+        if self.state_storage == "local":
+            ensure_local_dir(wdir=wdir)
+        root = os.path.join(
+            wdir or ".",
+            get_date_range_state_dir(stage_name, self.state_storage),
+        )
+        periods = {}
+        for v in self.values:
+            if isinstance(v, DateRangeIteration):
+                periods |= {p["period"]: p for p in v.periods}
+        for name, period in periods.items():
+            fpath = os.path.join(root, name, "period.json")
+            content = json.dumps(period, indent=2) + "\n"
+            try:
+                with open(fpath) as f:
+                    if f.read() == content:
+                        continue
+            except OSError:
+                pass
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            with open(fpath, "w", newline="\n") as f:
+                f.write(content)
+        for name in os.listdir(root):
+            fpath = os.path.join(root, name, "period.json")
+            if name in periods or not os.path.isfile(fpath):
+                continue
+            os.remove(fpath)
+            if not os.listdir(os.path.dirname(fpath)):
+                os.rmdir(os.path.dirname(fpath))
 
     def expand_values(
         self, params: ParametersType | ExpandedParametersType
@@ -208,7 +281,7 @@ class StageIteration(Model):
             for vals_i in self.values:
                 if isinstance(vals_i, ParameterIteration):
                     vals += vals_i.values_from_params(params)
-                elif isinstance(vals_i, RangeIteration):
+                elif isinstance(vals_i, (RangeIteration, DateRangeIteration)):
                     vals += vals_i.values
                 else:
                     vals.append(vals_i)
@@ -435,6 +508,18 @@ class Stage(Model):
         description="Deprecated name for 'scheduler'; set 'scheduler' "
         "instead.",
     )
+
+    @field_validator("iterate_over")
+    @classmethod
+    def _one_date_range_state(
+        cls, value: list[StageIteration] | None
+    ) -> list[StageIteration] | None:
+        # The periods of two would share the stage's state directory
+        if len([it for it in value or [] if it.state_storage]) > 1:
+            raise ValueError(
+                "Only one iteration of a stage can have a state_storage"
+            )
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -698,6 +783,15 @@ class Stage(Model):
                 period_file = self.path_from_wdir(i.period_file_path)
                 if period_file not in deps:
                     deps.append(period_file)
+        # Each item's period directory, filled in when the matrix is formatted
+        for it in self.iterate_over or []:
+            if it.state_storage is not None and isinstance(it.arg_name, str):
+                state_dir = get_date_range_state_dir(
+                    str(self.name), it.state_storage
+                )
+                deps.append(
+                    self.path_from_wdir(f"{state_dir}/{{{it.arg_name}}}")
+                )
         for path in self.input_paths:
             if path not in deps:
                 deps.append(path)

@@ -1,5 +1,7 @@
 """Tests for ``calkit.models.pipeline``."""
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -402,7 +404,7 @@ def test_jupyternotebookstage():
     ) in dvc_stage["cmd"]
 
 
-def test_stageiteration():
+def test_stageiteration(monkeypatch, tmp_path):
     StageIteration(
         arg_name="param1",
         values=[1, 2, 3],
@@ -413,6 +415,78 @@ def test_stageiteration():
     i.values
     exp_vals = i.expand_values(params={})
     assert exp_vals == [{"param1": 1, "param2": 2}, {"param1": 3, "param2": 4}]
+    # Date ranges expand to their periods' names
+    monkeypatch.setenv("CALKIT_NOW", "2026-11-10T08:00:00Z")
+    quarters = {"start": "2026Q3", "step": "1 quarter"}
+    i = StageIteration(arg_name="q", values=[{"date_range": quarters}])
+    assert i.expand_values(params={}) == ["2026Q3", "2026Q4"]
+    assert i.state_storage is None
+    # Every item depends on its period's directory, so none can lack one
+    stateful = {"date_range": quarters | {"state_storage": "git"}}
+    for values in [
+        [stateful, "2027Q1"],
+        [stateful, {"date_range": {"start": "2027Q1"}}],
+    ]:
+        with pytest.raises(ValidationError, match="same state_storage"):
+            StageIteration(arg_name="q", values=values)
+    with pytest.raises(ValidationError):
+        StageIteration(arg_name=["q", "x"], values=[stateful])
+    with pytest.raises(ValidationError, match="Only one iteration"):
+        PythonScriptStage(
+            kind="python-script",
+            script_path="fetch.py",
+            environment="py",
+            iterate_over=[
+                {"arg_name": "q", "values": [stateful]},
+                {"arg_name": "r", "values": [stateful]},
+            ],
+        )
+    stage = PythonScriptStage(
+        name="fetch",
+        kind="python-script",
+        script_path="fetch.py",
+        environment="py",
+        iterate_over=[
+            {"arg_name": "q", "values": [stateful]},
+            {"arg_name": "turbine", "values": [1, 2]},
+        ],
+    )
+    assert ".calkit/date-ranges/fetch/{q}" in stage.dvc_deps
+    # Each period's window is written, and rewritten only when it changes
+    i = StageIteration(arg_name="q", values=[stateful])
+    i.write_date_range_state("fetch", wdir=str(tmp_path))
+    root = tmp_path / ".calkit" / "date-ranges" / "fetch"
+    open_q = root / "2026Q4" / "period.json"
+    assert json.loads(open_q.read_text())["through"] == "2026-11-09"
+    closed_q = root / "2026Q3" / "period.json"
+    mtime = closed_q.stat().st_mtime_ns
+    monkeypatch.setenv("CALKIT_NOW", "2026-11-11T08:00:00Z")
+    i.write_date_range_state("fetch", wdir=str(tmp_path))
+    assert json.loads(open_q.read_text())["through"] == "2026-11-10"
+    assert closed_q.stat().st_mtime_ns == mtime
+    # A period no longer iterated over loses its window but keeps what
+    # something else wrote there
+    (root / "2026Q3" / "listing.json").write_text("{}")
+    later = {"start": "2026Q4", "step": "1 quarter", "state_storage": "git"}
+    i = StageIteration(arg_name="q", values=[{"date_range": later}])
+    i.write_date_range_state("fetch", wdir=str(tmp_path))
+    assert sorted(p.name for p in (root / "2026Q3").iterdir()) == [
+        "listing.json"
+    ]
+    (root / "2026Q3" / "listing.json").unlink()
+    i = StageIteration(
+        arg_name="q",
+        values=[{"date_range": later | {"start": "2026-12-01"}}],
+    )
+    i.write_date_range_state("fetch", wdir=str(tmp_path))
+    assert sorted(p.name for p in root.iterdir()) == ["2026Q3", "2026Q4"]
+    # Local state is kept out of version control
+    local = {"date_range": later | {"state_storage": "local"}}
+    StageIteration(arg_name="q", values=[local]).write_date_range_state(
+        "fetch", wdir=str(tmp_path)
+    )
+    assert (tmp_path / ".calkit/local/date-ranges/fetch/2026Q4").is_dir()
+    assert (tmp_path / ".calkit/local/.gitignore").read_text() == "*\n"
 
 
 def test_juliacommandstage():

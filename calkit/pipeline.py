@@ -2757,6 +2757,11 @@ def to_dvc(
             for i in stage.inputs:
                 if isinstance(i, ScheduleInput):
                     i.write_period_file(wdir=wdir)
+        # The window and last full day of each date-range period, so an item
+        # goes out of date daily while its period is open
+        for name, stage in pipeline.stages.items():
+            for iteration in stage.iterate_over or []:
+                iteration.write_date_range_state(name, wdir=wdir)
         # Remove files left by stages that were renamed, deleted, or no
         # longer need one, since the command files are committed
         for gen_dir, kept in [

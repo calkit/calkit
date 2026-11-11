@@ -647,6 +647,91 @@
       "title": "Dataset",
       "type": "object"
     },
+    "DateRangeIteration": {
+      "properties": {
+        "date_range": {
+          "$ref": "#/$defs/DateRangeIterationParams",
+          "description": "A range of dates, iterated over one period at a time."
+        }
+      },
+      "required": [
+        "date_range"
+      ],
+      "title": "DateRangeIteration",
+      "type": "object"
+    },
+    "DateRangeIterationParams": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "format": "date",
+              "type": "string"
+            }
+          ],
+          "description": "When the range starts, either a day, e.g., '2024-03-22', or a period, e.g., '2024-03', '2024Q1', or 2024; the first item is the period containing it.",
+          "title": "Start"
+        },
+        "state_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "local"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Keep a directory for each period that its item depends on, holding the period's window and last full day in 'period.json', so an item whose period is still open reruns daily and once more when it closes. Anything else written there, e.g., a fingerprint of a source's data for the period, reruns the item when it changes. 'git' keeps the directories in '.calkit/date-ranges/<stage>/<period>', 'local' in '.calkit/local/date-ranges/<stage>/<period>'.",
+          "title": "State Storage"
+        },
+        "step": {
+          "default": "1 month",
+          "description": "The length of each period, e.g., '1 day', '1 week', '1 month', '1 quarter', or '1 year', which names it as it starts, e.g., '2026-11-10', '2026-W46', '2026-11', '2026Q4', or '2026'. Multiples are counted from 1970, so '2 months' always start in an odd month.",
+          "title": "Step",
+          "type": "string"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "format": "date",
+              "type": "string"
+            }
+          ],
+          "default": "today",
+          "description": "When the range stops, which is not included, written like 'start'. The default, 'today', runs to the last full day, so an item is added once a new period has one, as are items for a later date when it comes.",
+          "title": "Stop"
+        },
+        "timezone": {
+          "default": "UTC",
+          "description": "Time zone days start in, e.g., 'America/New_York'.",
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start"
+      ],
+      "title": "DateRangeIterationParams",
+      "type": "object"
+    },
     "DerivedFromProject": {
       "properties": {
         "git_repo_url": {
@@ -9479,7 +9564,7 @@
           "type": "string"
         },
         "period": {
-          "description": "How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, and years; 'm' is a minute and 'mo' a month.",
+          "description": "How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, quarters, and years; 'm' is a minute and 'mo' a month.",
           "title": "Period",
           "type": "string"
         },
@@ -10509,6 +10594,9 @@
               },
               {
                 "$ref": "#/$defs/RangeIteration"
+              },
+              {
+                "$ref": "#/$defs/DateRangeIteration"
               },
               {
                 "$ref": "#/$defs/ParameterIteration"

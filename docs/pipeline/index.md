@@ -250,6 +250,93 @@ pipeline:
         - results/{thresh}.csv
 ```
 
+### Over date ranges
+
+A `date_range` iterates over periods of time,
+e.g., to fetch a source's data one month at a time.
+Each item is named as its period starts,
+e.g., `2026-11-10` for a day, `2026-W46` for a week, `2026-11` for a month,
+`2026Q4` for a quarter, or `2026` for a year.
+
+```yaml
+pipeline:
+  stages:
+    fetch:
+      kind: python-script
+      script_path: scripts/fetch.py
+      args:
+        - "--quarter={quarter}"
+      iterate_over:
+        - arg_name: quarter
+          values:
+            - date_range:
+                start: 2024-03-22
+                step: 1 quarter
+                state_storage: git
+      outputs:
+        - data/raw/{quarter}
+```
+
+`start` is a day, e.g., `2024-03-22`, or a period, e.g., `2024-03` or
+`2024Q1`, and the first item is the period containing it.
+`stop`, which isn't included, defaults to `today`,
+so an item is added once a new period has a full day,
+and the range keeps growing without editing `calkit.yaml`.
+Multiples of a step, e.g., `2 months`, are counted from 1970,
+and days start in `timezone`, which defaults to UTC.
+
+With `state_storage`, each item depends on a directory for its period,
+`.calkit/date-ranges/<stage>/<period>`
+(or `.calkit/local/date-ranges/<stage>/<period>` for `local`),
+in which Calkit keeps `period.json`:
+
+```json
+{
+  "period": "2026Q4",
+  "start": "2026-10-01",
+  "end": "2027-01-01",
+  "through": "2026-11-09"
+}
+```
+
+`start` and `end` are the period's window within the range,
+`end` not included,
+and `through` is its last day that is over.
+`through` moves each day while a period is open,
+so only its item goes out of date,
+once a day and once more when the period closes.
+A stage can read `through` to stop there,
+so what it gets for a day doesn't depend on when it runs.
+
+Anything else written in a period's directory is part of what its item
+depends on, so a stage that fingerprints a source for each period,
+e.g., listing the files it holds, reruns just the items whose source
+changed, e.g., when an old period is backfilled:
+
+```yaml
+list-source:
+  kind: python-script
+  script_path: scripts/list.py
+  args:
+    - "--quarter={quarter}"
+  always_run: true
+  iterate_over:
+    - arg_name: quarter
+      values:
+        - date_range:
+            start: 2024-03-22
+            step: 1 quarter
+  outputs:
+    - path: .calkit/date-ranges/fetch/{quarter}/listing.json
+      storage: git
+```
+
+A fingerprint should describe only the data,
+since anything else in it, e.g., when it was taken,
+would put every item out of date each time.
+Kept in Git, the fingerprints' history is a record of how the source
+changed.
+
 ## Automatic stage and environment detection
 
 The `calkit xr` command, which stands for "execute and record,"
@@ -706,11 +793,11 @@ agrees where one starts, and is written as its first unit, e.g., the day
 it starts. Set `CALKIT_NOW` to an ISO 8601 time to compile as if it
 were then, e.g., to redo a past day.
 
-| Parameter  | Type                | Required | Default | Description                                                                                                                                                                                                                |
-| ---------- | ------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kind`     | Literal['schedule'] | yes      |         | Always 'schedule'.                                                                                                                                                                                                         |
-| `period`   | str                 | yes      |         | How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, and years; 'm' is a minute and 'mo' a month. |
-| `timezone` | str                 | no       | 'UTC'   | Time zone periods start in, e.g., 'America/New_York'.                                                                                                                                                                      |
+| Parameter  | Type                | Required | Default | Description                                                                                                                                                                                                                          |
+| ---------- | ------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kind`     | Literal['schedule'] | yes      |         | Always 'schedule'.                                                                                                                                                                                                                   |
+| `period`   | str                 | yes      |         | How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, quarters, and years; 'm' is a minute and 'mo' a month. |
+| `timezone` | str                 | no       | 'UTC'   | Time zone periods start in, e.g., 'America/New_York'.                                                                                                                                                                                |
 
 #### `PathInput`
 
@@ -753,10 +840,10 @@ A model for the `iterate_over` key in a stage definition.
 If `arg_name` is a list, `values` also must be a list of lists with
 each sublist the length of `arg_name`.
 
-| Parameter  | Type                                                                                           | Required | Default | Description                                                                  |
-| ---------- | ---------------------------------------------------------------------------------------------- | -------- | ------- | ---------------------------------------------------------------------------- |
-| `arg_name` | str \| list[str]                                                                               | yes      |         | Name(s) of the argument(s) to substitute into the stage's command and paths. |
-| `values`   | list[int \| float \| str \| RangeIteration \| ParameterIteration \| list[int \| float \| str]] | yes      |         | Values over which to iterate.                                                |
+| Parameter  | Type                                                                                                                 | Required | Default | Description                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `arg_name` | str \| list[str]                                                                                                     | yes      |         | Name(s) of the argument(s) to substitute into the stage's command and paths. |
+| `values`   | list[int \| float \| str \| RangeIteration \| DateRangeIteration \| ParameterIteration \| list[int \| float \| str]] | yes      |         | Values over which to iterate.                                                |
 
 #### `StageSchedulerOptions`
 
@@ -1012,6 +1099,12 @@ versions are pinned with it.
 | --------- | -------------------- | -------- | ------- | ------------------------------------------ |
 | `range`   | RangeIterationParams | yes      |         | Bounds of the range over which to iterate. |
 
+#### `DateRangeIteration`
+
+| Parameter    | Type                     | Required | Default | Description                                           |
+| ------------ | ------------------------ | -------- | ------- | ----------------------------------------------------- |
+| `date_range` | DateRangeIterationParams | yes      |         | A range of dates, iterated over one period at a time. |
+
 #### `ParameterIteration`
 
 | Parameter   | Type | Required | Default | Description                                                       |
@@ -1025,5 +1118,15 @@ versions are pinned with it.
 | `start`   | int \| float | yes      |         | First value in the range, which is included.   |
 | `stop`    | int \| float | yes      |         | Value at which to stop, which is not included. |
 | `step`    | int \| float | no       | 1       | Amount by which to increment each value.       |
+
+#### `DateRangeIterationParams`
+
+| Parameter       | Type                            | Required | Default   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------- | ------------------------------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start`         | str \| int \| date              | yes      |           | When the range starts, either a day, e.g., '2024-03-22', or a period, e.g., '2024-03', '2024Q1', or 2024; the first item is the period containing it.                                                                                                                                                                                                                                                                                                            |
+| `stop`          | str \| int \| date              | no       | 'today'   | When the range stops, which is not included, written like 'start'. The default, 'today', runs to the last full day, so an item is added once a new period has one, as are items for a later date when it comes.                                                                                                                                                                                                                                                  |
+| `step`          | str                             | no       | '1 month' | The length of each period, e.g., '1 day', '1 week', '1 month', '1 quarter', or '1 year', which names it as it starts, e.g., '2026-11-10', '2026-W46', '2026-11', '2026Q4', or '2026'. Multiples are counted from 1970, so '2 months' always start in an odd month.                                                                                                                                                                                               |
+| `timezone`      | str                             | no       | 'UTC'     | Time zone days start in, e.g., 'America/New_York'.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `state_storage` | Literal['git', 'local'] \| None | no       | null      | Keep a directory for each period that its item depends on, holding the period's window and last full day in 'period.json', so an item whose period is still open reruns daily and once more when it closes. Anything else written there, e.g., a fingerprint of a source's data for the period, reruns the item when it changes. 'git' keeps the directories in '.calkit/date-ranges/<stage>/<period>', 'local' in '.calkit/local/date-ranges/<stage>/<period>'. |
 
 <!-- AUTO-GENERATED: PIPELINE-STAGE-KINDS:END -->

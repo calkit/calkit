@@ -65,6 +65,42 @@ import QuestionStatusLetters, {
 // Past this, a plain file the listing didn't inline is linked, not read
 const MAX_FILE_TEXT_BYTES = 10_000_000
 
+/**
+ * A response's text, or undefined once it passes ``maxBytes``, so a file of
+ * unknown size, e.g., inside a DVC-tracked directory, is read only if small.
+ */
+const readTextUpTo = async (
+  response: Response,
+  maxBytes: number,
+): Promise<string | undefined> => {
+  if (!response.body) {
+    const text = await response.text()
+    return text.length > maxBytes ? undefined : text
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      return undefined
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
+}
+
 /** Whether file content, base64-encoded, looks binary rather than text. */
 const isBinaryContent = (content: string) => {
   try {
@@ -507,15 +543,20 @@ function EvidenceDetail({
       // A large file comes back as a download URL rather than inline, which
       // the viewer can't render as text, so read it from there. A plain
       // file could be anything, so one too big to be worth reading is
-      // left as a link.
+      // left as a link, and one of unknown size is read only up to that.
       const tooBig =
-        isPlainFile && (item.size == null || item.size > MAX_FILE_TEXT_BYTES)
+        isPlainFile && item.size != null && item.size > MAX_FILE_TEXT_BYTES
       if (!item.content && item.url && !shownFromUrl && !tooBig) {
         const response = await fetch(item.url)
         if (!response.ok) {
           throw new Error(`Could not read ${evidence.path}`)
         }
-        return { ...item, content: encodeBase64Utf8(await response.text()) }
+        const text = isPlainFile
+          ? await readTextUpTo(response, MAX_FILE_TEXT_BYTES)
+          : await response.text()
+        return text === undefined
+          ? item
+          : { ...item, content: encodeBase64Utf8(text) }
       }
       return item
     },

@@ -4501,7 +4501,7 @@ wheels = [
 [[package]]
 name = "latex2arxiv"
 version = "1.3.3"
-source = { git = "https://github.com/rebeccamccabe/latex2arxiv?branch=whitespace-suppression-comments#11bbb68260817833ba19406506ce9a460fb122d6" }
+source = { git = "https://github.com/rebeccamccabe/latex2arxiv?branch=whitespace-suppression-comments#d3311352b51a5250a04e67f53e41e7bec67dd1d7" }
 dependencies = [
     { name = "bibtexparser" },
     { name = "pillow" },

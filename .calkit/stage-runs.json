@@ -38,14 +38,14 @@
     }
   },
   "find-calkit-papers": {
-    "start_time": "2026-11-11T16:55:02.020000",
-    "end_time": "2026-11-11T16:55:09.177000",
+    "start_time": "2026-11-11T13:34:40.029000",
+    "end_time": "2026-11-11T13:34:47.459000",
     "environment": "dev",
-    "git_rev": "3ad15015051174f1e47b92ed1e83cd32be728b1b",
+    "git_rev": "00bf706ac136c8bad10c5dc16ef0c2af3eeb92a7",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:a449eeb0af63b3a4695d6bdffe71ff6f8f99dbcb62b3eac08dc2b0fa110e9dc9",
-    "calkit_version": "0.50.8.dev4+g3ad150150",
-    "calkit_git_rev": "3ad15015051174f1e47b92ed1e83cd32be728b1b",
+    "dvc_lock_hash": "sha256:68ae52d1844dcea1e0dff169fb63ca3b51c2f6c4890e693b052a04c2634b6209",
+    "calkit_version": "0.50.8.dev5+g00bf706ac",
+    "calkit_git_rev": "00bf706ac136c8bad10c5dc16ef0c2af3eeb92a7",
     "system": {
       "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
       "os": "Darwin",
@@ -57,14 +57,14 @@
     }
   },
   "find-calkit-projects": {
-    "start_time": "2026-11-11T16:51:01.702000",
-    "end_time": "2026-11-11T16:55:02.020000",
+    "start_time": "2026-11-11T13:30:40.464000",
+    "end_time": "2026-11-11T13:34:40.029000",
     "environment": "dev",
-    "git_rev": "3ad15015051174f1e47b92ed1e83cd32be728b1b",
+    "git_rev": "00bf706ac136c8bad10c5dc16ef0c2af3eeb92a7",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:d366bc70bf9793bfd99f2905abbb3628e4e6567d97cbb0ca2fb73f425ad7464f",
-    "calkit_version": "0.50.8.dev4+g3ad150150",
-    "calkit_git_rev": "3ad15015051174f1e47b92ed1e83cd32be728b1b",
+    "dvc_lock_hash": "sha256:307b289cd395ec56433201c7f6e55daf7a1965e67483b19ef1f6afb04e7eee21",
+    "calkit_version": "0.50.8.dev5+g00bf706ac",
+    "calkit_git_rev": "00bf706ac136c8bad10c5dc16ef0c2af3eeb92a7",
     "system": {
       "machine_id": "680295DC-2853-59C0-82C9-87907FA3FEDB",
       "os": "Darwin",

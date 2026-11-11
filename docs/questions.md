@@ -313,6 +313,8 @@ and goes stale when what it vouches for changes:
   including evidence pinned to a branch or tag that has moved since.
 
 Editing a question's `notes` doesn't make either stale.
+Nor does rewrapping its text, since a line break reads as a space,
+though a blank line does, since it starts a new paragraph.
 A stale sign-off fails `calkit check questions` until someone signs off
 again.
 A question nobody has signed off on doesn't fail the check.

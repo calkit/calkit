@@ -4582,6 +4582,54 @@ def test_question_evidence_values_documents_and_publications() -> None:
     assert evidence[13].stale_reason == "missing"
 
 
+def test_cited_paths_are_present_by_tree_or_dvc_manifest() -> None:
+    from app.api.routes.projects.core import (
+        _get_present_paths,
+        _get_project_path,
+    )
+
+    # dvc.lock's paths are relative to each stage's wdir, matrix or not
+    stage_wdirs = {"trace": "results", "plot": ""}
+    assert _get_project_path("trace", "trace/a.md", stage_wdirs) == (
+        "results/trace/a.md"
+    )
+    assert _get_project_path("trace@1", "trace", stage_wdirs) == (
+        "results/trace"
+    )
+    assert _get_project_path("plot", "figures/a.png", stage_wdirs) == (
+        "figures/a.png"
+    )
+    assert _get_project_path("gone", "x.txt", stage_wdirs) == "x.txt"
+    # Expanded outs, keyed as dvc.lock writes them, with what the
+    # directory's manifest lists
+    dvc_lock_outs = {
+        "trace": {"type": "dir", "stage": "trace"},
+        "trace/run-1": {"type": "dir", "stage": "trace"},
+        "trace/run-1/RESULTS.md": {"type": "file", "stage": "trace"},
+        "figures/a.png": {"type": "file", "stage": "plot"},
+    }
+    tree = SimpleNamespace(
+        is_file=lambda p: p in {"notes/log.txt", "data/raw.csv.dvc"}
+    )
+    cited = {
+        "results/trace/run-1/RESULTS.md",
+        # Inside the directory, but not in its manifest
+        "results/trace/run-1/typo.md",
+        # As dvc.lock spells it, which isn't where it is
+        "trace/run-1/RESULTS.md",
+        "figures/a.png",
+        "notes/log.txt",
+        "data/raw.csv",
+        "notes/gone.txt",
+    }
+    assert _get_present_paths(cited, tree, dvc_lock_outs, stage_wdirs) == {
+        "results/trace/run-1/RESULTS.md",
+        "figures/a.png",
+        "notes/log.txt",
+        "data/raw.csv",
+    }
+
+
 def test_saving_a_question_keeps_names_sections_and_labels() -> None:
     from app.api.routes.projects.core import _apply_question_update
     from app.models.core import QuestionEvidencePost, QuestionPut

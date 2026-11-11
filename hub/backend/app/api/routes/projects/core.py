@@ -2439,6 +2439,7 @@ class _EvidenceLookups(NamedTuple):
     results_by_path: dict[tuple[str, str | None], Result]
     tables_by_path: dict[str, Result]
     publications_by_path: dict[str, Publication]
+    # With its outs' paths relative to the project, not each stage's wdir
     dvc_lock: dict[str, Any]
     stage_statuses: dict[str, PipelineStageStatus]
     frozen_stages: set[str]
@@ -2473,6 +2474,40 @@ def _evidence_ref(ev: dict, ref: str | None) -> str | None:
     Its own ``git_ref`` when it names one, otherwise the ref being browsed.
     """
     return _declared_git_ref(ev) or ref
+
+
+def _get_project_path(
+    stage_name: str, path: str, stage_wdirs: dict[str, str]
+) -> str:
+    """A ``dvc.lock`` path, which is relative to its stage's ``wdir``, as a
+    path relative to the project, like an evidence path."""
+    wdir = stage_wdirs.get(str(stage_name).split("@")[0]) or ""
+    return posixpath.normpath(posixpath.join(wdir, path)) if wdir else path
+
+
+def _get_present_paths(
+    paths: set[str],
+    tree: Any,
+    dvc_lock_outs: dict[str, Any],
+    stage_wdirs: dict[str, str],
+) -> set[str]:
+    """The cited ``paths`` that are in the tree or DVC-tracked.
+
+    ``dvc_lock_outs`` is expanded, so a file inside a DVC-tracked directory
+    counts only if the directory's manifest lists it.
+    """
+    dvc_paths = {
+        _get_project_path(str(out.get("stage") or ""), key, stage_wdirs)
+        for key, out in dvc_lock_outs.items()
+        if isinstance(out, dict)
+    }
+    return {
+        path
+        for path in paths
+        if tree.is_file(path)
+        or tree.is_file(path + ".dvc")
+        or path in dvc_paths
+    }
 
 
 def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
@@ -2604,7 +2639,7 @@ def _build_question_evidence(
             continue
         # No kind at all is a plain file, or a result written before results
         # had to say so
-        kind = calkit.questions.evidence_kind(ev)
+        kind = calkit.questions.get_evidence_kind(ev)
         if kind not in (
             "figure",
             "result",
@@ -2774,7 +2809,7 @@ def _build_questions_public(
         ev_ref: str | None, entries: list[dict]
     ) -> _EvidenceLookups:
         """Resolve everything ``entries`` cites, all of it at ``ev_ref``."""
-        kinds = {calkit.questions.evidence_kind(ev) for ev in entries}
+        kinds = {calkit.questions.get_evidence_kind(ev) for ev in entries}
         figures_by_path: dict[str, Figure] = {}
         if "figure" in kinds:
             # Only the figures actually cited as evidence need their content
@@ -2783,7 +2818,7 @@ def _build_questions_public(
             evidence_fig_paths = {
                 ev.get("path")
                 for ev in entries
-                if calkit.questions.evidence_kind(ev) == "figure"
+                if calkit.questions.get_evidence_kind(ev) == "figure"
             }
             fig_ctx = _discover_figures(project=project, repo=repo, ref=ev_ref)
             cited = [
@@ -2829,13 +2864,13 @@ def _build_questions_public(
             }
         # Staleness is best-effort: never let it block the questions.
         dvc_lock: dict[str, Any] = {}
+        dvc_yaml: dict[str, Any] = {}
         stage_statuses: dict[str, PipelineStageStatus] = {}
         frozen_stages: set[str] = set()
         try:
             tree = get_repo_tree_for_ref(repo, ev_ref)
             if tree.is_file("dvc.lock"):
                 dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
-            dvc_yaml: dict[str, Any] = {}
             if tree.is_file("dvc.yaml"):
                 dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
             stage_statuses = compute_stage_statuses(
@@ -2855,39 +2890,53 @@ def _build_questions_public(
                 f"Failed to compute pipeline status for questions at "
                 f"{ev_ref}: {e}"
             )
+        # dvc.lock's paths are relative to each stage's wdir, which only
+        # dvc.yaml records, and evidence paths to the project
+        stage_wdirs = {
+            str(name): str(st.get("wdir") or "")
+            for name, st in (dvc_yaml.get("stages") or {}).items()
+            if isinstance(st, dict)
+        }
+        evidence_lock = {
+            "stages": {
+                name: {
+                    **st,
+                    "outs": [
+                        {
+                            **out,
+                            "path": _get_project_path(
+                                name, str(out["path"]), stage_wdirs
+                            ),
+                        }
+                        if isinstance(out, dict) and out.get("path")
+                        else out
+                        for out in st.get("outs") or []
+                    ],
+                }
+                if isinstance(st, dict)
+                else st
+                for name, st in (dvc_lock.get("stages") or {}).items()
+            }
+        }
         present_paths: set[str] = set()
         cited_paths = {
             ev["path"]
             for ev in entries
-            if calkit.questions.evidence_kind(ev)
+            if calkit.questions.get_evidence_kind(ev)
             in ("document", "publication", None)
             and isinstance(ev.get("path"), str)
         }
         if cited_paths:
             try:
                 tree = get_repo_tree_for_ref(repo, ev_ref)
-                dvc_outs = {
-                    out.get("path")
-                    for stage in (dvc_lock.get("stages") or {}).values()
-                    if isinstance(stage, dict)
-                    for out in stage.get("outs") or []
-                    if isinstance(out, dict)
-                }
-                # A file inside a DVC-tracked output directory is there too,
-                # matched the way find_stage_for_path matches its stage
-                dvc_dirs = {
-                    o.rstrip("/") + "/"
-                    for o in dvc_outs
-                    if isinstance(o, str) and o not in ("", ".")
-                }
-                present_paths = {
-                    path
-                    for path in cited_paths
-                    if tree.is_file(path)
-                    or tree.is_file(path + ".dvc")
-                    or path in dvc_outs
-                    or any(path.startswith(d) for d in dvc_dirs)
-                }
+                present_paths = _get_present_paths(
+                    cited_paths,
+                    tree,
+                    app.projects.get_ck_info_and_dvc_outs_from_tree(
+                        project, tree
+                    ).dvc_lock_outs,
+                    stage_wdirs,
+                )
             except Exception as e:
                 logger.warning(
                     f"Failed to find cited documents at {ev_ref}: {e}"
@@ -2897,7 +2946,7 @@ def _build_questions_public(
             results_by_path=results_by_path,
             tables_by_path=tables_by_path,
             publications_by_path=publications_by_path,
-            dvc_lock=dvc_lock,
+            dvc_lock=evidence_lock,
             stage_statuses=stage_statuses,
             frozen_stages=frozen_stages,
             present_paths=present_paths,

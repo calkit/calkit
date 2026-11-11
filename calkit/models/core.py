@@ -7,7 +7,7 @@ import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 from pydantic import (
     AliasChoices,
@@ -1848,7 +1848,8 @@ class ResultsEvidence(Model):
     without an entry per value.
     """
 
-    kind: Literal["result"] = "result"
+    # Null too, since an entry with no kind and a key or values is a result
+    kind: Literal["result"] | None = "result"
     path: str
     key: str | None = Field(
         default=None,
@@ -1873,6 +1874,11 @@ class ResultsEvidence(Model):
             "version of the repository where the result can be found."
         ),
     )
+
+    @field_validator("kind", mode="after")
+    @classmethod
+    def _result_kind(cls, kind: str | None) -> str:
+        return "result"
 
     @model_validator(mode="after")
     def _key_or_values(self) -> ResultsEvidence:
@@ -2000,6 +2006,87 @@ class DocumentEvidence(Model):
     )
 
 
+class FileEvidence(Model):
+    """Evidence in the form of a file cited as-is by its path, e.g., a log,
+    a transcript excerpt, a script, or a raw output, optionally at specific
+    lines.
+
+    It has no ``kind``. An entry without one that has a ``key`` or
+    ``values`` is a ``result``, which is how those used to be written.
+    """
+
+    kind: None = Field(
+        default=None,
+        description="Left out, or null, for a file cited by its path.",
+    )
+    path: str
+    lines: (
+        Annotated[int, Field(ge=1)]
+        | Annotated[str, Field(pattern=r"^\s*\d+\s*([-–]\s*\d+\s*)?$")]
+        | None
+    ) = Field(
+        default=None,
+        description=(
+            "Line or inclusive range of lines in the file where the evidence "
+            "is, e.g., 8 or '8-12'. Checked against the file, so a citation "
+            "of lines that are no longer there is an error."
+        ),
+    )
+    explanation: str | None = None
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Git reference (branch, tag, or commit hash) pointing to the "
+            "version of the repository where the file can be found."
+        ),
+    )
+
+    @field_validator("lines", mode="before")
+    @classmethod
+    def _lines_format(cls, lines: object) -> object:
+        from calkit.questions import parse_lines
+
+        if lines is not None:
+            parse_lines(lines)
+        return lines
+
+
+def _evidence_tag(value: object) -> str | None:
+    # Resolved as the check resolves it, so the two can't disagree
+    from calkit.questions import get_evidence_kind
+
+    if isinstance(value, Model):
+        value = value.model_dump()
+    if not isinstance(value, dict):
+        return None
+    return get_evidence_kind(value) or "file"
+
+
+def _evidence_any_of(schema: dict[str, Any]) -> None:
+    """Publish the evidence union as ``anyOf`` rather than ``oneOf``.
+
+    Every kind but a value's has a default or optional ``kind``, so an
+    entry with just a path, a file, matches several of them, which ``oneOf``
+    would reject.
+    """
+    for option in schema.get("anyOf") or []:
+        items = option.get("items") or {}
+        if "oneOf" in items:
+            items["anyOf"] = items.pop("oneOf")
+
+
+Evidence = Annotated[
+    Annotated[FigureEvidence, Tag("figure")]
+    | Annotated[ResultsEvidence, Tag("result")]
+    | Annotated[ValueEvidence, Tag("value")]
+    | Annotated[TableEvidence, Tag("table")]
+    | Annotated[PublicationEvidence, Tag("publication")]
+    | Annotated[DocumentEvidence, Tag("document")]
+    | Annotated[FileEvidence, Tag("file")],
+    Discriminator(_evidence_tag),
+]
+
+
 class SignOff(Model):
     """A person's sign-off on a question, as a verification or validation.
 
@@ -2089,17 +2176,9 @@ class Question(Model):
             "rather than as an answer lacking evidence."
         ),
     )
-    evidence: (
-        list[
-            FigureEvidence
-            | ResultsEvidence
-            | ValueEvidence
-            | TableEvidence
-            | PublicationEvidence
-            | DocumentEvidence
-        ]
-        | None
-    ) = None
+    evidence: list[Evidence] | None = Field(
+        default=None, json_schema_extra=_evidence_any_of
+    )
     verifications: list[SignOff] | None = Field(
         default=None,
         description=(

@@ -4454,6 +4454,17 @@ def test_question_evidence_values_documents_and_publications() -> None:
             "path": "results/summary.json",
             "values": {"avg2": "stats.mean", "gone": "stats.nope"},
         },
+        # With no kind, a key or values still makes it a result
+        {"path": "results/summary.json", "key": "stats.n"},
+        {
+            "kind": None,
+            "path": "results/summary.json",
+            "values": {"n": "stats.n"},
+        },
+        # Otherwise it's a plain file, at some lines or none
+        {"path": "logs/run.log", "lines": 8, "explanation": "It says so."},
+        {"kind": None, "path": "logs/run.log", "lines": " 8 - 12"},
+        {"path": "logs/gone.log"},
     ]
 
     def fake_contents(project, repo, path, ref):
@@ -4493,7 +4504,11 @@ def test_question_evidence_values_documents_and_publications() -> None:
                     dvc_lock={},
                     stage_statuses={},
                     frozen_stages=set(),
-                    present_paths={"docs/notes.md", "docs/draft.md"},
+                    present_paths={
+                        "docs/notes.md",
+                        "docs/draft.md",
+                        "logs/run.log",
+                    },
                 )
             },
             result_value_cache={},
@@ -4512,6 +4527,8 @@ def test_question_evidence_values_documents_and_publications() -> None:
         "total": 40,
         "failed": 13,
         "avg2": 2.5,
+        "stats.n": 40,
+        "n": 40,
     }
     assert [ev.kind for ev in evidence] == [
         "value",
@@ -4523,6 +4540,11 @@ def test_question_evidence_values_documents_and_publications() -> None:
         "value",
         "result",
         "result",
+        "result",
+        "result",
+        None,
+        None,
+        None,
     ]
     assert evidence[0].value == "2.5"
     assert evidence[0].name == "mean"
@@ -4547,6 +4569,65 @@ def test_question_evidence_values_documents_and_publications() -> None:
     # One value that can't be read is enough to call the card missing
     assert [v.value for v in evidence[8].values or []] == ["2.5", None]
     assert evidence[8].stale_reason == "missing"
+    assert evidence[9].value == "40"
+    assert [(v.name, v.value) for v in evidence[10].values or []] == [
+        ("n", "40")
+    ]
+    assert (evidence[11].path, evidence[11].lines) == ("logs/run.log", "8")
+    assert evidence[11].explanation == "It says so."
+    assert evidence[11].stale_reason is None
+    assert evidence[12].lines == "8-12"
+    assert evidence[12].stale_reason is None
+    assert evidence[13].lines is None
+    assert evidence[13].stale_reason == "missing"
+
+
+def test_cited_paths_are_present_by_tree_or_dvc_manifest() -> None:
+    from app.api.routes.projects.core import (
+        _get_present_paths,
+        _get_project_path,
+    )
+
+    # dvc.lock's paths are relative to each stage's wdir, matrix or not
+    stage_wdirs = {"trace": "results", "plot": ""}
+    assert _get_project_path("trace", "trace/a.md", stage_wdirs) == (
+        "results/trace/a.md"
+    )
+    assert _get_project_path("trace@1", "trace", stage_wdirs) == (
+        "results/trace"
+    )
+    assert _get_project_path("plot", "figures/a.png", stage_wdirs) == (
+        "figures/a.png"
+    )
+    assert _get_project_path("gone", "x.txt", stage_wdirs) == "x.txt"
+    # Expanded outs, keyed as dvc.lock writes them, with what the
+    # directory's manifest lists
+    dvc_lock_outs = {
+        "trace": {"type": "dir", "stage": "trace"},
+        "trace/run-1": {"type": "dir", "stage": "trace"},
+        "trace/run-1/RESULTS.md": {"type": "file", "stage": "trace"},
+        "figures/a.png": {"type": "file", "stage": "plot"},
+    }
+    tree = SimpleNamespace(
+        is_file=lambda p: p in {"notes/log.txt", "data/raw.csv.dvc"}
+    )
+    cited = {
+        "results/trace/run-1/RESULTS.md",
+        # Inside the directory, but not in its manifest
+        "results/trace/run-1/typo.md",
+        # As dvc.lock spells it, which isn't where it is
+        "trace/run-1/RESULTS.md",
+        "figures/a.png",
+        "notes/log.txt",
+        "data/raw.csv",
+        "notes/gone.txt",
+    }
+    assert _get_present_paths(cited, tree, dvc_lock_outs, stage_wdirs) == {
+        "results/trace/run-1/RESULTS.md",
+        "figures/a.png",
+        "notes/log.txt",
+        "data/raw.csv",
+    }
 
 
 def test_saving_a_question_keeps_names_sections_and_labels() -> None:
@@ -4586,6 +4667,12 @@ def test_saving_a_question_keeps_names_sections_and_labels() -> None:
                 key="stats.mean",
                 values={"avg": "stats.mean", "total": "stats.n"},
             ),
+            # A plain file has no kind to write, and keeps its lines
+            QuestionEvidencePost(
+                kind=None, path="logs/run.log", lines=" 8 ", key="x"
+            ),
+            QuestionEvidencePost(kind=None, path="logs/run.log", lines="8-12"),
+            QuestionEvidencePost(kind=None, path="logs/run.log"),
         ],
     )
     out = _apply_question_update("q?", req)
@@ -4611,7 +4698,23 @@ def test_saving_a_question_keeps_names_sections_and_labels() -> None:
             "path": "results/summary.json",
             "values": {"avg": "stats.mean", "total": "stats.n"},
         },
+        {"path": "logs/run.log", "lines": 8},
+        {"path": "logs/run.log", "lines": "8-12"},
+        {"path": "logs/run.log"},
     ]
+    # Lines that aren't a line or a range are refused
+    for lines in ("eight", "12-8", "0"):
+        bad = QuestionPut(
+            question="q?",
+            evidence=[
+                QuestionEvidencePost(
+                    kind=None, path="logs/run.log", lines=lines
+                )
+            ],
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            _apply_question_update("q?", bad)
+        assert exc_info.value.status_code == 422
 
 
 def test_delete_project_question(

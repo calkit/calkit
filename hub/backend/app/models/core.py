@@ -1900,7 +1900,8 @@ class QuestionEvidenceValue(SQLModel):
 
 
 class QuestionEvidence(SQLModel):
-    kind: EvidenceKind
+    # None for a plain file cited by path, e.g., a log or a script
+    kind: EvidenceKind | None
     path: str
     key: str | None = None
     # For result evidence citing several values in its file, each by name,
@@ -1912,6 +1913,8 @@ class QuestionEvidence(SQLModel):
     section: str | None = None
     # A publication's source anchor, e.g., a LaTeX label
     label: str | None = None
+    # The lines a plain file is cited at, e.g., "8" or "8-12"
+    lines: str | None = None
     # Why this piece of evidence answers the question. Written inline in
     # calkit.yaml, or kept in a file and cited by path -- a paragraph of
     # reasoning belongs in a file the pipeline can rebuild, not in a YAML
@@ -1950,7 +1953,8 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: EvidenceKind
+    # None for a plain file, which is written without a kind
+    kind: EvidenceKind | None
     path: str
     key: str | None = None
     # Name to key, for result evidence citing several values
@@ -1958,6 +1962,7 @@ class QuestionEvidencePost(SQLModel):
     name: str | None = None
     section: str | None = None
     label: str | None = None
+    lines: str | None = None
     explanation: str | None = None
     # Set instead of ``explanation`` to point at a file holding it. The two
     # are alternatives: a path wins, since the file is the record and the

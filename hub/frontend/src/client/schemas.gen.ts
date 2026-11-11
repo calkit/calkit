@@ -9021,8 +9021,22 @@ export const QuestionSchema = {
 export const QuestionEvidenceSchema = {
   properties: {
     kind: {
-      type: "string",
-      enum: ["figure", "result", "value", "table", "publication", "document"],
+      anyOf: [
+        {
+          type: "string",
+          enum: [
+            "figure",
+            "result",
+            "value",
+            "table",
+            "publication",
+            "document",
+          ],
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Kind",
     },
     path: {
@@ -9086,6 +9100,17 @@ export const QuestionEvidenceSchema = {
         },
       ],
       title: "Label",
+    },
+    lines: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Lines",
     },
     explanation: {
       anyOf: [
@@ -9203,8 +9228,22 @@ export const QuestionEvidenceSchema = {
 export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
-      type: "string",
-      enum: ["figure", "result", "value", "table", "publication", "document"],
+      anyOf: [
+        {
+          type: "string",
+          enum: [
+            "figure",
+            "result",
+            "value",
+            "table",
+            "publication",
+            "document",
+          ],
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Kind",
     },
     path: {
@@ -9268,6 +9307,17 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Label",
+    },
+    lines: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Lines",
     },
     explanation: {
       anyOf: [

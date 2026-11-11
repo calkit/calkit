@@ -13,7 +13,8 @@ values in one file, e.g., the outputs of one calculation, the same way.
 What can go wrong, worst first: the evidence isn't there at all (never run,
 never pushed, or pinned to a Git ref that doesn't exist); a reference is
 broken (a key that doesn't resolve, a placeholder that names no evidence, a
-label missing from the LaTeX); the stage that produces it is out of date, so
+label missing from the LaTeX, lines a cited file no longer has); the stage
+that produces it is out of date, so
 what's on disk isn't what the project would produce now; or the stage is
 frozen, or downstream of one, and its inputs or outputs have moved from
 what dvc.lock records, in which case the pipeline will never rerun it --
@@ -90,9 +91,12 @@ CALKIT_YAML = "calkit.yaml"
 class EvidenceCheck(BaseModel):
     """The result of checking one evidence entry."""
 
-    kind: str
+    #: None for a plain file cited by path
+    kind: str | None
     path: str
     key: str | None = None
+    #: The lines a plain file is cited at, e.g., "8" or "8-12"
+    lines: str | None = None
     name: str | None = None
     status: EvidenceStatus
     message: str | None = None
@@ -414,10 +418,57 @@ def render(text: str | dict | None, values: dict[str, Any]) -> str | None:
     return _FORMATTER.vformat(text, (), values)
 
 
+def get_evidence_kind(ev: dict) -> str | None:
+    """The kind of an evidence entry, or None for a plain file cited by path.
+
+    An entry with no ``kind``, or a null one, is a plain file, unless it has
+    a ``key`` or ``values``, which is how a ``result`` used to be written
+    before it had to say so.
+    """
+    kind = ev.get("kind")
+    if kind is not None and kind != "":
+        return str(kind)
+    if ev.get("key") is not None or ev.get("values") is not None:
+        return "result"
+    return None
+
+
+def parse_lines(lines: Any) -> tuple[int, int]:
+    """The first and last line a ``lines`` field cites, e.g., ``8`` or
+    ``"8-12"``, or with an en dash, 1-based and inclusive.
+
+    Raises ``ValueError`` if it's neither a line nor a range of them.
+    """
+    match = (
+        None
+        if isinstance(lines, bool)
+        else re.fullmatch(r"\s*(\d+)\s*(?:[-–]\s*(\d+)\s*)?", str(lines))
+    )
+    if match is None:
+        raise ValueError(
+            f"lines must be a line number or a range, e.g., 8 or '8-12', "
+            f"not {lines!r}"
+        )
+    first = int(match.group(1))
+    last = int(match.group(2) or first)
+    if first < 1 or last < first:
+        raise ValueError(
+            f"lines {lines!r} must start at 1 or later and not run backward"
+        )
+    return first, last
+
+
+def format_lines(lines: Any) -> str:
+    """``lines`` as prose, e.g., "line 8" or "lines 8–12", with an en
+    dash."""
+    first, last = parse_lines(lines)
+    return f"line {first}" if first == last else f"lines {first}–{last}"
+
+
 def is_value_evidence(ev: dict) -> bool:
     """Whether an entry points at one value: ``value``, or the deprecated
     ``result`` with a ``key``."""
-    kind = ev.get("kind", "result")
+    kind = get_evidence_kind(ev)
     return kind == "value" or (kind == "result" and bool(ev.get("key")))
 
 
@@ -435,7 +486,7 @@ def named_keys(ev: dict) -> dict[str, str]:
         name = evidence_name(ev)
         return {name: ev["key"]} if name else {}
     values = ev.get("values")
-    if ev.get("kind", "result") == "result" and isinstance(values, dict):
+    if get_evidence_kind(ev) == "result" and isinstance(values, dict):
         return {str(n): str(k) for n, k in values.items()}
     return {}
 
@@ -934,28 +985,44 @@ def _stage_wdirs(ck_info: dict) -> dict[str, str]:
 
 
 def _lock_hash(
-    lock_text: str, path: str, stage_wdirs: dict[str, str] | None = None
+    lock_text: str,
+    path: str,
+    stage_wdirs: dict[str, str] | None = None,
+    exact: bool = False,
 ) -> str | None:
     """The hash ``dvc.lock`` records for an output path, relative to the
-    project, if any."""
+    project, if any.
+
+    ``dvc.lock`` records a directory output with one hash for the whole
+    directory, not one per file, so a file inside one gets the directory's
+    hash, unless ``exact``. Change detection for that file is then as coarse
+    as the directory: any file in it changing counts.
+    """
     try:
         lock = _load_calkit_yaml_text(lock_text)
     except Exception:
         return None
     target = posixpath.normpath(Path(path).as_posix())
+    containing: tuple[int, str | None] | None = None
     for name, stage in (lock.get("stages") or {}).items():
         stage_wdir = (stage_wdirs or {}).get(str(name).split("@")[0], "")
         for out in (stage or {}).get("outs") or []:
+            if not isinstance(out, dict) or not out.get("path"):
+                continue
+            out_path = posixpath.normpath(
+                posixpath.join(stage_wdir, str(out["path"]))
+            )
+            hash_ = str(out.get("md5") or out.get("hash") or "") or None
+            if target == out_path:
+                return hash_
             if (
-                isinstance(out, dict)
-                and out.get("path")
-                and target
-                == (
-                    posixpath.normpath(posixpath.join(stage_wdir, out["path"]))
-                )
+                not exact
+                and out_path != "."
+                and target.startswith(out_path + "/")
+                and (containing is None or len(out_path) > containing[0])
             ):
-                return str(out.get("md5") or out.get("hash") or "") or None
-    return None
+                containing = (len(out_path), hash_)
+    return containing[1] if containing else None
 
 
 def _fmt(value: Any) -> str:
@@ -1224,6 +1291,21 @@ def _read_at_ref(
         return None
 
 
+def _lines_problem(lines: str, text: str) -> str | None:
+    """Why ``lines`` can't be found in ``text``, if they can't."""
+    try:
+        first, last = parse_lines(lines)
+    except ValueError as e:
+        return str(e)
+    n_lines = len(text.splitlines())
+    if last > n_lines:
+        return (
+            f"{format_lines(lines)} cited, but the file has only {n_lines} "
+            f"line{'s' if n_lines != 1 else ''}"
+        )
+    return None
+
+
 def check_pinned_evidence(
     out: EvidenceCheck,
     ev: dict,
@@ -1255,18 +1337,35 @@ def check_pinned_evidence(
         lock = _read_at_ref(repo, git_ref, "dvc.lock", wdir)
         if (
             lock is not None
-            and _lock_hash(lock, out.path, stage_wdirs) is not None
+            and _lock_hash(lock, out.path, stage_wdirs, exact=True) is not None
         ):
             # Tracked by DVC at that commit: present, but its content lives
-            # in storage, so a cited value can't be read from here.
-            if named_keys(ev):
+            # in storage, so a cited value or line can't be read from here.
+            if named_keys(ev) or out.lines is not None:
                 out.status = "skipped"
-                out.message = (
-                    f"DVC-tracked at {git_ref}; value not read from storage"
+                out.message = f"DVC-tracked at {git_ref}; " + (
+                    "value not read from storage"
+                    if named_keys(ev)
+                    else "lines not checked without its content"
                 )
+            return out
+        if lock is not None and _lock_hash(lock, out.path, stage_wdirs):
+            # The lock hashes only the directory, so whether this file was
+            # in it can't be told without fetching the directory's listing
+            out.status = "skipped"
+            out.message = (
+                f"inside a DVC-tracked directory at {git_ref}; not read from "
+                "storage"
+            )
             return out
         out.status = "missing"
         out.message = f"not found at {git_ref}; run the pipeline or push it"
+        return out
+    if out.lines is not None:
+        problem = _lines_problem(out.lines, text)
+        if problem:
+            out.status = "error"
+            out.message = f"{problem} at {git_ref}"
         return out
     if is_value_evidence(ev):
         try:
@@ -1352,13 +1451,16 @@ def check_evidence(
         )
 
     stage_wdirs = _stage_wdirs(ck_info)
-    kind = ev.get("kind", "result")
+    kind = get_evidence_kind(ev)
     path = ev.get("path", "")
     key = ev.get("key")
+    # Only a plain file is cited at lines
+    lines = ev.get("lines") if kind is None else None
     out = EvidenceCheck(
         kind=kind,
         path=path,
         key=key,
+        lines=None if lines is None else str(lines),
         name=evidence_name(ev) if is_value_evidence(ev) else None,
         status="ok",
         # A document may also be a Markdown stage's target
@@ -1375,6 +1477,19 @@ def check_evidence(
         out.status = "missing"
         out.message = "path does not exist; run the pipeline or pull"
         return out
+    if out.lines is not None:
+        # Lines that are no longer there mean the citation has rotted
+        try:
+            with open(
+                os.path.join(wdir, path), encoding="utf-8", errors="replace"
+            ) as f:
+                problem = _lines_problem(out.lines, f.read())
+        except OSError as e:
+            problem = f"cannot read {path}: {e.__class__.__name__}: {e}"
+        if problem:
+            out.status = "error"
+            out.message = problem
+            return out
     if kind == "publication":
         out.status, out.message = _check_publication_label(ev, ck_info, wdir)
         return out
@@ -2103,8 +2218,11 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
             if not verbose and ev.status in ("ok", "skipped"):
                 continue
             where = f"{ev.path}" + (f":{ev.key}" if ev.key else "")
+            where += f":{ev.lines}" if ev.lines else ""
             detail = f" -- {ev.message}" if ev.message else ""
-            lines.append(f"     {ev.kind} {where} [{ev.status}]{detail}")
+            lines.append(
+                f"     {ev.kind or 'file'} {where} [{ev.status}]{detail}"
+            )
     if lines:
         lines.append("")
     n_ok = sum(1 for q in answered if q.status == "ok")

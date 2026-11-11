@@ -5173,7 +5173,14 @@ export type QuestionEvidence = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
+  kind:
+    | "figure"
+    | "result"
+    | "value"
+    | "table"
+    | "publication"
+    | "document"
+    | null
   /**
    * Path
    */
@@ -5198,6 +5205,10 @@ export type QuestionEvidence = {
    * Label
    */
   label?: string | null
+  /**
+   * Lines
+   */
+  lines?: string | null
   /**
    * Explanation
    */
@@ -5235,7 +5246,14 @@ export type QuestionEvidencePost = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
+  kind:
+    | "figure"
+    | "result"
+    | "value"
+    | "table"
+    | "publication"
+    | "document"
+    | null
   /**
    * Path
    */
@@ -5262,6 +5280,10 @@ export type QuestionEvidencePost = {
    * Label
    */
   label?: string | null
+  /**
+   * Lines
+   */
+  lines?: string | null
   /**
    * Explanation
    */

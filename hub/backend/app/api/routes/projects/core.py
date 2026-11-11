@@ -2442,8 +2442,8 @@ class _EvidenceLookups(NamedTuple):
     dvc_lock: dict[str, Any]
     stage_statuses: dict[str, PipelineStageStatus]
     frozen_stages: set[str]
-    # Cited documents and publications present in the tree or dvc.lock,
-    # since those need not be declared to be cited
+    # Cited documents, publications, and plain files present in the tree or
+    # dvc.lock, since those need not be declared to be cited
     present_paths: set[str] = set()
 
 
@@ -2489,7 +2489,7 @@ def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
         return item.figure is None
     if item.kind == "publication":
         return item.publication is None and item.path not in present_paths
-    if item.kind == "document":
+    if item.kind in ("document", None):
         return item.path not in present_paths
     # A value is the number itself, so without a key there's nothing to show
     if item.kind == "value":
@@ -2585,16 +2585,34 @@ def _build_question_evidence(
     evidence cites; a ref missing from it is one that could not be read, and
     its evidence comes back unresolved rather than failing the question.
     """
+
+    def lines_of(ev: dict[str, Any]) -> str | None:
+        # As "8" or "8-12", or as written if it's neither, so it still shows
+        lines = _optional_str(ev.get("lines"))
+        if lines is None:
+            return None
+        try:
+            first, last = calkit.questions.parse_lines(lines)
+        except ValueError:
+            return lines
+        return str(first) if first == last else f"{first}-{last}"
+
     empty = _EvidenceLookups({}, {}, {}, {}, {}, {}, set(), set())
     evidence = []
     for ev in evidence_ck:
-        if not isinstance(ev, dict) or ev.get("kind") not in (
+        if not isinstance(ev, dict):
+            continue
+        # No kind at all is a plain file, or a result written before results
+        # had to say so
+        kind = calkit.questions.evidence_kind(ev)
+        if kind not in (
             "figure",
             "result",
             "value",
             "table",
             "publication",
             "document",
+            None,
         ):
             continue
         path = ev.get("path", "")
@@ -2604,12 +2622,13 @@ def _build_question_evidence(
             ev.get("explanation")
         )
         item = QuestionEvidence(
-            kind=ev["kind"],
+            kind=kind,
             path=path,
             key=ev.get("key"),
             name=_optional_str(ev.get("name")),
             section=_optional_str(ev.get("section")),
             label=_optional_str(ev.get("label")),
+            lines=lines_of(ev) if kind is None else None,
             explanation=explanation,
             explanation_path=explanation_path,
             # What the entry declares, not what it resolved at: this is the
@@ -2755,14 +2774,16 @@ def _build_questions_public(
         ev_ref: str | None, entries: list[dict]
     ) -> _EvidenceLookups:
         """Resolve everything ``entries`` cites, all of it at ``ev_ref``."""
-        kinds = {ev.get("kind") for ev in entries}
+        kinds = {calkit.questions.evidence_kind(ev) for ev in entries}
         figures_by_path: dict[str, Figure] = {}
         if "figure" in kinds:
             # Only the figures actually cited as evidence need their content
             # resolved; resolving every figure in the project would make this
             # scale with the project rather than with the questions.
             evidence_fig_paths = {
-                ev.get("path") for ev in entries if ev.get("kind") == "figure"
+                ev.get("path")
+                for ev in entries
+                if calkit.questions.evidence_kind(ev) == "figure"
             }
             fig_ctx = _discover_figures(project=project, repo=repo, ref=ev_ref)
             cited = [
@@ -2838,7 +2859,8 @@ def _build_questions_public(
         cited_paths = {
             ev["path"]
             for ev in entries
-            if ev.get("kind") in ("document", "publication")
+            if calkit.questions.evidence_kind(ev)
+            in ("document", "publication", None)
             and isinstance(ev.get("path"), str)
         }
         if cited_paths:
@@ -2851,12 +2873,20 @@ def _build_questions_public(
                     for out in stage.get("outs") or []
                     if isinstance(out, dict)
                 }
+                # A file inside a DVC-tracked output directory is there too,
+                # matched the way find_stage_for_path matches its stage
+                dvc_dirs = {
+                    o.rstrip("/") + "/"
+                    for o in dvc_outs
+                    if isinstance(o, str) and o not in ("", ".")
+                }
                 present_paths = {
                     path
                     for path in cited_paths
                     if tree.is_file(path)
                     or tree.is_file(path + ".dvc")
                     or path in dvc_outs
+                    or any(path.startswith(d) for d in dvc_dirs)
                 }
             except Exception as e:
                 logger.warning(
@@ -3111,7 +3141,12 @@ def _apply_question_update(
         question["answer"] = req.answer
     evidence = []
     for ev in req.evidence:
-        entry: dict = {"kind": ev.kind, "path": ev.path}
+        # A plain file is written without a kind, which is how it's spelled
+        entry: dict = (
+            {"path": ev.path}
+            if ev.kind is None
+            else {"kind": ev.kind, "path": ev.path}
+        )
         if ev.kind == "result" and ev.values:
             entry["values"] = dict(ev.values)
         elif ev.kind in ("result", "value") and ev.key:
@@ -3122,6 +3157,13 @@ def _apply_question_update(
             entry["section"] = ev.section
         if ev.kind == "publication" and ev.label:
             entry["label"] = ev.label
+        if ev.kind is None and ev.lines:
+            try:
+                first, last = calkit.questions.parse_lines(ev.lines)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            # As it would be written by hand, e.g., 8 or 8-12
+            entry["lines"] = first if first == last else f"{first}-{last}"
         if ev.explanation_path:
             entry["explanation"] = {"path": ev.explanation_path}
         elif ev.explanation:

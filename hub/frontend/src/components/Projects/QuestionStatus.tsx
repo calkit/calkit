@@ -27,6 +27,30 @@ export const isEvidenceStale = (evidence: QuestionEvidence) =>
 export const isEvidenceMissing = (evidence: QuestionEvidence) =>
   evidence.stale_reason === "missing"
 
+/** The first and last line a file is cited at, e.g., "8" or "8-12", if
+ * that's what it says. */
+export const parseLines = (
+  lines?: string | null,
+): [number, number] | undefined => {
+  const match = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/.exec(lines ?? "")
+  if (!match) {
+    return undefined
+  }
+  const first = Number(match[1])
+  const last = Number(match[2] ?? match[1])
+  return first >= 1 && last >= first ? [first, last] : undefined
+}
+
+/** The lines a file is cited at, as "line 8" or "lines 8-12". */
+export const formatLines = (lines?: string | null) => {
+  const parsed = parseLines(lines)
+  if (!parsed) {
+    return lines ? `lines ${lines}` : undefined
+  }
+  const [first, last] = parsed
+  return first === last ? `line ${first}` : `lines ${first}-${last}`
+}
+
 /** The one mark a question's answer gets, worst first.
  *
  * No answer, then an answer with nothing behind it, then evidence that can't

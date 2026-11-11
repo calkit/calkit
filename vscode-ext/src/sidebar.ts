@@ -67,6 +67,20 @@ function answerText(question: string | QuestionEntry): string | undefined {
     .join("; ");
 }
 
+// The first and last line a plain file's evidence cites, e.g., 8 or "8-12",
+// or undefined if none or malformed, which the CLI's check reports.
+export function parseLines(
+  lines: number | string | undefined,
+): [number, number] | undefined {
+  const match = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/.exec(String(lines ?? ""));
+  if (!match) {
+    return undefined;
+  }
+  const first = Number(match[1]);
+  const last = Number(match[2] ?? match[1]);
+  return first >= 1 && last >= first ? [first, last] : undefined;
+}
+
 // Where scheduler logs go, under a subproject's directory for its stages
 const SCHEDULER_LOG_DIR = /(^|\/)\.calkit\/scheduler\/logs\//;
 
@@ -572,16 +586,45 @@ export class CalkitSidebarProvider
         "question-evidence",
         ev.path,
       );
-      evItem.description = ev.path;
+      // As calkit.questions.evidence_kind reads it: no kind is a plain
+      // file, unless a key or values make it a result
+      const kind =
+        ev.kind ?? (ev.key != null || ev.values != null ? "result" : undefined);
+      const lines = kind === undefined ? parseLines(ev.lines) : undefined;
+      evItem.description =
+        ev.path && lines
+          ? `${ev.path}, ` +
+            (lines[0] === lines[1]
+              ? `line ${lines[0]}`
+              : `lines ${lines[0]}-${lines[1]}`)
+          : ev.path;
       evItem.tooltip = ev.explanation ?? ev.path;
       evItem.iconPath = new vscode.ThemeIcon(
-        ev.kind === "result" ? "graph" : "file-media",
+        kind === "result" || kind === "value"
+          ? "graph"
+          : kind === undefined
+          ? "file"
+          : "file-media",
       );
       if (this.workspaceRoot && ev.path) {
+        const uri = vscode.Uri.file(path.join(this.workspaceRoot, ev.path));
+        // Opened at the cited lines, which are 1-based and inclusive
         evItem.command = {
           command: "vscode.open",
           title: "Open",
-          arguments: [vscode.Uri.file(path.join(this.workspaceRoot, ev.path))],
+          arguments: lines
+            ? [
+                uri,
+                {
+                  selection: new vscode.Range(
+                    lines[0] - 1,
+                    0,
+                    lines[1] - 1,
+                    Number.MAX_SAFE_INTEGER,
+                  ),
+                },
+              ]
+            : [uri],
         };
       }
       items.push(evItem);

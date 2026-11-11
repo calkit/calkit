@@ -1866,27 +1866,41 @@ def get_map_paths_source(stage: dict, path: str) -> str | None:
 
 
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
-    """Return the name of the pipeline stage that produces ``path``, if any."""
+    """Return the name of the pipeline stage that produces ``path``, if any.
+
+    A stage produces everything inside a directory it declares as an output
+    or writes into through ``map-paths``. A stage declaring the path itself
+    wins, then the one declaring the innermost directory that contains it.
+    """
     target = posixpath.normpath(Path(path).as_posix())
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if not isinstance(stages, dict):
         return None
+    containing: tuple[int, str] | None = None
     for name, stage in stages.items():
         if not isinstance(stage, dict):
             continue
         wdir = stage.get("wdir") or ""
-        for out in stage.get("outputs") or []:
-            out_path = out.get("path") if isinstance(out, dict) else out
-            if out_path and target == posixpath.normpath(
-                posixpath.join(wdir, Path(out_path).as_posix())
+        declared = [
+            out.get("path") if isinstance(out, dict) else out
+            for out in stage.get("outputs") or []
+        ]
+        outs = [
+            posixpath.normpath(posixpath.join(wdir, Path(p).as_posix()))
+            for p in declared
+            if p and isinstance(p, str)
+        ] + get_map_paths_outputs(stage)
+        for out in outs:
+            if target == out:
+                return str(name)
+            # Except the project root, which would claim every path
+            if (
+                out != "."
+                and target.startswith(out + "/")
+                and (containing is None or len(out) > containing[0])
             ):
-                return str(name)
-        for out in get_map_paths_outputs(stage):
-            # A directory mapping produces everything it writes into, except
-            # into the project root, which would claim every path
-            if target == out or (out != "." and target.startswith(out + "/")):
-                return str(name)
-    return None
+                containing = (len(out), str(name))
+    return containing[1] if containing else None
 
 
 def get_output_storage_map(

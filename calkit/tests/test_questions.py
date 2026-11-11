@@ -1396,3 +1396,186 @@ def test_conditional_answers(tmp_dir):
         assert (checked.status == "error") == bool(expected), answer
         for fragment in expected:
             assert fragment in messages, (answer, messages)
+
+
+def test_check_questions_plain_files_and_output_dirs(tmp_dir):
+    from calkit.questions import evidence_kind, parse_lines
+
+    # How an entry's kind is read: a plain file has none, and one without a
+    # kind but with a key or values is still a result
+    assert evidence_kind({"path": "a"}) is None
+    assert evidence_kind({"path": "a", "kind": None, "lines": 8}) is None
+    assert evidence_kind({"path": "a", "key": "v"}) == "result"
+    assert evidence_kind({"path": "a", "kind": None, "values": {}}) == "result"
+    assert evidence_kind({"path": "a", "kind": "figure"}) == "figure"
+    assert parse_lines(8) == (8, 8)
+    assert parse_lines("8-12") == (8, 12)
+    for bad in ["0", "12-8", "8-", "x", True]:
+        with pytest.raises(ValueError):
+            parse_lines(bad)
+    # A stage that copies a write-up and a transcript excerpt into a
+    # directory it declares as one output, which DVC hashes as a whole
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results/trace/run-1")
+    with open("results/trace/run-1/RESULTS.md", "w") as f:
+        f.write("# Results\n\nThe modulus is 210 GPa.\n")
+    with open("results/trace/run-1/transcript.txt", "w") as f:
+        f.write("$ python fit.py\nE = 210\n")
+    with open(".gitignore", "w") as f:
+        f.write("/results/trace\n")
+    os.makedirs("notes")
+    with open("notes/log.txt", "w") as f:
+        f.write("one\ntwo\n")
+    with open("results/fit.json", "w") as f:
+        json.dump({"E": 210, "nu": 0.3}, f)
+    lock = {
+        "stages": {
+            "trace": {"outs": [{"path": "trace", "md5": "aaa.dir"}]},
+            "fit": {"outs": [{"path": "results/fit.json", "md5": "bbb"}]},
+        }
+    }
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    run = "results/trace/run-1"
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                # Paths relative to its wdir, as is dvc.lock's
+                "trace": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "wdir": "results",
+                    "script_path": "trace.py",
+                    "outputs": ["trace"],
+                },
+                "fit": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "fit.py",
+                    "outputs": ["results/fit.json"],
+                },
+            }
+        },
+        "questions": [
+            {
+                "question": "Where does the wrong modulus come from?",
+                "answer": "The write-up retyped it.",
+                "evidence": [
+                    {"kind": "document", "path": f"{run}/RESULTS.md"},
+                    {"path": f"{run}/RESULTS.md", "lines": 3},
+                    {
+                        "kind": None,
+                        "path": f"{run}/transcript.txt",
+                        "lines": "1-2",
+                        "explanation": "The fit printed it.",
+                    },
+                    {"path": "notes/log.txt"},
+                ],
+            },
+            {
+                "question": "Do rotted lines fail?",
+                "answer": "Yes.",
+                "evidence": [
+                    {"path": f"{run}/transcript.txt", "lines": "2-5"}
+                ],
+            },
+            {
+                "question": "Do results without a kind still read?",
+                "answer": "E is {E} and nu is {nu}.",
+                "evidence": [
+                    {"path": "results/fit.json", "key": "E", "name": "E"},
+                    {"path": "results/fit.json", "values": {"nu": "nu"}},
+                ],
+            },
+        ],
+    }
+    _write_yaml(ck_info)
+    sha = _commit("Trace")
+    status = check_questions(ck_info=ck_info, wdir=".", check_pipeline=False)
+    traced, rotted, legacy = status.questions
+    # Files inside the directory belong to the stage, so the document isn't
+    # an error, and a file nothing produces is only worth a look
+    assert [ev.status for ev in traced.evidence] == [
+        "ok",
+        "ok",
+        "ok",
+        "unattributed",
+    ]
+    assert [ev.stage for ev in traced.evidence] == [
+        "trace",
+        "trace",
+        "trace",
+        None,
+    ]
+    assert [ev.kind for ev in traced.evidence] == [
+        "document",
+        None,
+        None,
+        None,
+    ]
+    assert [ev.lines for ev in traced.evidence] == [None, "3", "1-2", None]
+    assert traced.status == "ok"
+    assert rotted.status == "error"
+    assert "lines 2-5 cited, but the file has only 2 lines" in (
+        rotted.evidence[0].message or ""
+    )
+    assert legacy.status == "ok"
+    assert [ev.kind for ev in legacy.evidence] == ["result", "result"]
+    assert legacy.evidence[0].current == 210
+    assert legacy.evidence[1].values == {"nu": 0.3}
+    report = format_status(status)
+    assert f"file {run}/transcript.txt:2-5 [error]" in report
+    assert "file notes/log.txt [unattributed]" in report
+    # A rerun of the stage makes its files stale
+    stale = check_question(
+        1,
+        ck_info["questions"][0],
+        ck_info,
+        ".",
+        calkit.git.get_repo("."),
+        stale_stages={"trace"},
+    )
+    assert [ev.status for ev in stale.evidence][:3] == ["stale"] * 3
+    # dvc.lock hashes only the directory, so a file in it changes with it
+    lock["stages"]["trace"]["outs"][0]["md5"] = "ccc.dir"
+    with open("dvc.lock", "w") as f:
+        calkit.ryaml.dump(lock, f)
+    _commit("Rerun trace")
+    changed = check_questions(ck_info=ck_info, wdir=".", check_pipeline=False)
+    assert [ev.status for ev in changed.questions[0].evidence][:3] == [
+        "changed"
+    ] * 3
+    assert "hash in dvc.lock changed" in (
+        changed.questions[0].evidence[1].message or ""
+    )
+    # Pinned: a file inside a DVC-tracked directory can't be read at the
+    # ref, while a Git-tracked one has its lines checked there
+    with open("notes/log.txt", "w") as f:
+        f.write("one\ntwo\nthree\n")
+    _commit("Longer log")
+    pinned = check_question(
+        1,
+        {
+            "question": "Pinned?",
+            "answer": "Yes.",
+            "evidence": [
+                {"path": f"{run}/RESULTS.md", "lines": 3, "git_ref": sha},
+                {"path": "notes/log.txt", "lines": "1-2", "git_ref": sha},
+                {"path": "notes/log.txt", "lines": 3, "git_ref": sha},
+                {"path": "notes/log.txt", "lines": 3},
+            ],
+        },
+        ck_info,
+        ".",
+        calkit.git.get_repo("."),
+    )
+    assert [ev.status for ev in pinned.evidence] == [
+        "skipped",
+        "ok",
+        "error",
+        "unattributed",
+    ]
+    assert "inside a DVC-tracked directory" in (
+        pinned.evidence[0].message or ""
+    )
+    assert f"at {sha}" in (pinned.evidence[2].message or "")

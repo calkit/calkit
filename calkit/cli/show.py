@@ -53,15 +53,23 @@ def show_question(
         EvidenceCheck,
         SignOffCheck,
         check_questions,
+        evidence_kind,
         format_letters,
+        format_lines,
         placeholders,
         question_index,
         render_question,
     )
 
     def evidence_line(ev: dict, c: EvidenceCheck | None) -> list[str]:
-        kind = ev.get("kind", "result")
-        line = f"- {kind.capitalize()} `{ev.get('path', '')}`"
+        kind = evidence_kind(ev)
+        line = f"- {(kind or 'file').capitalize()} `{ev.get('path', '')}`"
+        if kind is None and ev.get("lines") is not None:
+            try:
+                line += f", {format_lines(ev['lines'])}"
+            except ValueError:
+                # The check reports a malformed range
+                line += f", lines {ev['lines']}"
         sub = []
         key = ev.get("key")
         # A value without a key is an error the check reports

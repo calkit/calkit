@@ -1562,6 +1562,69 @@
       "title": "FigureEvidence",
       "type": "object"
     },
+    "FileEvidence": {
+      "description": "Evidence in the form of a file cited as-is by its path, e.g., a log,\na transcript excerpt, a script, or a raw output, optionally at specific\nlines.\n\nIt has no ``kind``. An entry without one that has a ``key`` or\n``values`` is a ``result``, which is how those used to be written.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the file can be found.",
+          "title": "Git Ref"
+        },
+        "kind": {
+          "default": null,
+          "description": "Left out, or null, for a file cited by its path.",
+          "title": "Kind",
+          "type": "null"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*\\d+\\s*(-\\s*\\d+\\s*)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Line or inclusive range of lines in the file where the evidence is, e.g., 8 or '8-12'. Checked against the file, so a citation of lines that are no longer there is an error.",
+          "title": "Lines"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FileEvidence",
+      "type": "object"
+    },
     "Formula": {
       "properties": {
         "description": {
@@ -7851,6 +7914,9 @@
                   },
                   {
                     "$ref": "#/$defs/DocumentEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/FileEvidence"
                   }
                 ]
               },
@@ -9146,10 +9212,17 @@
           "title": "Key"
         },
         "kind": {
-          "const": "result",
+          "anyOf": [
+            {
+              "const": "result",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": "result",
-          "title": "Kind",
-          "type": "string"
+          "title": "Kind"
         },
         "path": {
           "title": "Path",

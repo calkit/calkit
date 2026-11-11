@@ -6,7 +6,6 @@ import csv
 import json
 import logging
 import os
-import posixpath
 import shlex
 import shutil
 import signal
@@ -47,7 +46,6 @@ from calkit.cli import (
 from calkit.cli.check import (
     check_app,
     check_conda_env,
-    check_docker_env,
     check_environment,
     check_matlab_env,
     check_venv,
@@ -2076,11 +2074,13 @@ def push(
         else:
             warn("No DVC remotes configured; skipping DVC push")
     if "docker" in selected:
+        from calkit.environments import docker as env_docker
+
         # Everything that can be settled locally is settled before the
         # network: a project with no image to publish must not reach a
         # registry at all, since that means a round-trip, and credentials
         # asked for or replaced, on behalf of a push that was never on
-        images = calkit.docker.get_pushable_images()
+        images = env_docker.get_pushable_images()
         asked_for_docker = "docker" in (targets or [])
         pushable = {}
         for env_name, info in images.items():
@@ -2100,6 +2100,7 @@ def push(
                 "No Docker environments are set up to be pushed; set "
                 "'registry' on one built from a Dockerfile to publish it"
             )
+        failed = []
         for env_name, info in pushable.items():
             remote_ref = info["remote_ref"]
             # Ask the registry rather than trusting the image's own
@@ -2113,6 +2114,7 @@ def push(
             typer.echo(f"Pushing image for '{env_name}' to {remote_ref}")
             if not calkit.docker.tag_image(info["image"], remote_ref):
                 warn(f"Failed to tag image as {remote_ref}")
+                failed.append(env_name)
                 continue
             success, push_output = calkit.docker.push_image_with_login(
                 remote_ref, interactive=sys.stdin.isatty()
@@ -2128,6 +2130,20 @@ def push(
                     + textwrap.indent(push_output.strip()[-500:], "    ")
                     + (f"\n{hint}" if hint else "")
                 )
+                failed.append(env_name)
+        # A commit whose lock names an image nobody can pull sends everyone
+        # who checks it out to rebuild that image, so it stays here
+        if failed:
+            msg = "Failed to push the image for " + ", ".join(
+                f"'{name}'" for name in failed
+            )
+            if "git" in selected:
+                msg += (
+                    "; not pushing to Git, since its lock file names an "
+                    "image the registry doesn't have; fix the push, or skip "
+                    "it with --no-docker"
+                )
+            raise_error(msg)
     if "git" in selected:
         typer.echo("Pushing to Git remote")
         try:
@@ -2303,20 +2319,6 @@ def ignore(
         repo.git.add(".gitignore")
         if calkit.git.get_staged_files():
             repo.git.commit(["-m", f"Ignore {path}"])
-
-
-@app.command(name="local-server")
-def run_local_server() -> None:
-    """Run the local server to interact over HTTP."""
-    import uvicorn
-
-    uvicorn.run(
-        "calkit.server:app",
-        port=8866,
-        host="localhost",
-        reload=True,
-        reload_dirs=[os.path.dirname(os.path.dirname(__file__))],
-    )
 
 
 # Stage output is teed into the run log and can look exactly like a DVC log
@@ -2608,6 +2610,9 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
     """
     from dvc.cli import main as dvc_cli_main
 
+    # A pull here sends the remotes' auth, so gate it as run_dvc_command does
+    calkit.dvc.clear_off_hub_auth()
+    calkit.dvc.ensure_writable_site_cache()
     try:
         return int(dvc_cli_main(argv))
     except ModuleNotFoundError as e:
@@ -2643,30 +2648,50 @@ def _prune_run_logs(
             pass
 
 
-def _get_latest_run_log_content() -> str | None:
-    """Return the contents of the most recent run log, or ``None``.
+def _get_latest_run_log_content(wdir: str = ".") -> str | None:
+    """Return the contents of the most recent run log, or ``None``."""
+    latest = _get_latest_run_log_path(wdir)
+    if latest is None:
+        return None
+    # Only the end of a large one, which is read while a run goes, e.g., by
+    # a hub link at every check-in
+    try:
+        with open(latest, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 10_000_000))
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _get_latest_run_log_path(wdir: str = ".") -> str | None:
+    """Return the path of the most recent run log, or ``None``.
 
     Looks in the private ``.calkit/local/logs`` directory (always written)
     and the tracked ``.calkit/logs`` directory, choosing the latest ``.log``
     file across both by name (logs are named by start timestamp).
     """
     candidates = []
+    root = os.path.realpath(wdir)
     for d in [
-        os.path.join(".calkit", "local", "logs"),
-        os.path.join(".calkit", "logs"),
+        os.path.join(wdir, ".calkit", "local", "logs"),
+        os.path.join(wdir, ".calkit", "logs"),
     ]:
         if os.path.isdir(d):
             candidates += [
                 os.path.join(d, f) for f in os.listdir(d) if f.endswith(".log")
             ]
+    # A repo can commit a link named like a log to any file, e.g., an SSH
+    # key, which a hub link would send the hub
+    candidates = [
+        c
+        for c in candidates
+        if not os.path.islink(c)
+        and os.path.realpath(c).startswith(root + os.sep)
+    ]
     if not candidates:
         return None
-    latest = max(candidates, key=os.path.basename)
-    try:
-        with open(latest) as f:
-            return f.read()
-    except OSError:
-        return None
+    return max(candidates, key=os.path.basename)
 
 
 def _format_run_elapsed(start_iso: str) -> str:
@@ -2704,7 +2729,7 @@ def _stage_target_from_cmd(cmd: str) -> str | None:
     return targets[-1] if targets else None
 
 
-def _get_running_pipeline_status() -> dict | None:
+def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
     """Return live pipeline run progress, or ``None`` if no run is running.
 
     A run is in progress when a live process holds DVC's rwlock. The most
@@ -2713,7 +2738,7 @@ def _get_running_pipeline_status() -> dict | None:
     their own processes before the run log exists, so their stage names are
     also recovered from the lock's command strings.
     """
-    processes = calkit.dvc.get_running_pipeline_processes()
+    processes = calkit.dvc.get_running_pipeline_processes(wdir)
     if not processes:
         return None
     # Stage targets in the lock commands identify concurrently-run scheduler
@@ -2733,7 +2758,7 @@ def _get_running_pipeline_status() -> dict | None:
             "stages": {},
             "running_stages": concurrent_stages,
         }
-    content = _get_latest_run_log_content()
+    content = _get_latest_run_log_content(wdir)
     stages = (
         _stage_run_info_from_log_content(content)
         if content is not None
@@ -4397,12 +4422,6 @@ def run_in_env(
             raise_error(f"Invalid --env-var '{item}'; write it as KEY=VALUE")
         extra_env_vars[key] = value
         os.environ[key] = value
-    docker_wdir = env.get("wdir", "/work")
-    docker_wdir_mount = docker_wdir
-    if wdir is not None:
-        docker_wdir = posixpath.join(docker_wdir, wdir)
-    shell = env.get("shell", "sh")
-    platform = env.get("platform")
 
     def _with_system_env_setup(shell_cmd: str) -> list[str] | None:
         """Chain the setup commands before a stage's command.
@@ -4466,132 +4485,19 @@ def run_in_env(
             )
         no_check = True
     if env["kind"] == "docker":
-        image_name = calkit.docker.get_image_name(env, env_name)
-        if image_name is None:
-            if not env.get("path"):
-                raise_error(
-                    f"Environment '{env_name}' must define an image, since "
-                    "it has no Dockerfile to build one from"
-                )
-            raise_error(
-                f"Cannot work out what to call the image for environment "
-                f"'{env_name}': set 'image' on it, or set 'owner' and "
-                "'name' in calkit.yaml"
-            )
-        command_mode = env.get("command_mode", "shell")
-        if command_mode not in ["shell", "entrypoint"]:
-            raise_error(
-                "Invalid Docker environment 'command_mode': "
-                f"{command_mode}; Use 'shell' or 'entrypoint'"
-            )
+        from calkit.environments import docker as env_docker
+
         if not no_check:
-            check_docker_env(
-                tag=image_name,
-                fpath=env.get("path"),
-                lock_fpath=get_env_lock_fpath(
-                    env=env, env_name=env_name, as_posix=False
-                ),
-                platform=env.get("platform"),
-                deps=calkit.environments.get_env_input_paths(env, env_name),
-                env_vars=env.get("env_vars", []),
-                ports=env.get("ports", []),
-                gpus=env.get("gpus"),
-                user=env.get("user"),
-                wdir=env.get("wdir"),
-                args=env.get("args", []),
-                build_platforms=env.get("build_platforms", []),
-                registry=env.get("registry"),
-                lock_archs=calkit.docker.get_lock_archs(env),
-                quiet=not verbose,
-            )
+            env_docker.check(env_name, env, verbose=verbose)
             save_env_check_cache()
-        docker_cmd = [
-            "docker",
-            "run",
-        ]
-        if platform:
-            docker_cmd += ["--platform", platform]
-        env_vars = env.get("env_vars", {})
-        if "env-vars" in env:
-            warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
-            env_vars.update(env["env-vars"])
-        # Add project-level env vars (non-secret)
-        env_vars.update(ck_info.get("env_vars", {}))
-        # Also add any project-level environmental variable dependencies
-        project_env_vars = calkit.get_env_var_dep_names()
-        if project_env_vars:
-            env_vars.update({k: f"${k}" for k in project_env_vars})
-        if env_vars:
-            for key, value in env_vars.items():
-                if isinstance(value, str):
-                    value = os.path.expandvars(value)
-                docker_cmd += ["-e", f"{key}={value}"]
-        # A container inherits nothing from here, so what --env-var asked
-        # for has to be handed to it
-        for key, value in extra_env_vars.items():
-            docker_cmd += ["-e", f"{key}={value}"]
-        if (gpus := env.get("gpus")) is not None:
-            docker_cmd += ["--gpus", gpus]
-        if ports := env.get("ports"):
-            for port in ports:
-                docker_cmd += ["-p", port]
-        docker_user = env.get("user")
-        if docker_user is None:
-            try:
-                uid = os.getuid()
-                gid = os.getgid()
-                docker_user = f"{uid}:{gid}"
-            except AttributeError:
-                # We're probably on Windows, so there is no UID to map
-                pass
-        if docker_user is not None:
-            docker_cmd += ["--user", docker_user]
-        docker_cmd += env.get("args", [])
-        docker_cmd += [
-            # A pipeline stage is nobody's terminal session: asking for a
-            # TTY there puts the user's terminal into raw mode for the
-            # duration, and the container's own line discipline stops
-            # translating newlines, so everything the stage prints
-            # staircases down the screen. DVC sets DVC_STAGE for the
-            # commands it runs, which is how a stage is told apart from
-            # someone running 'calkit xenv' themselves
-            "-it"
-            if sys.stdin.isatty() and not os.getenv("DVC_STAGE")
-            else "-i",
-            "--rm",
-            "-w",
-            docker_wdir,
-            "-v",
-            f"{os.getcwd()}:{docker_wdir_mount}",
-            image_name,
-        ]
-        if command_mode == "shell":
-            shell_cmd = _to_shell_cmd(cmd)
-            docker_cmd += [shell, "-c", shell_cmd]
-        else:
-            if not cmd:
-                raise_error(
-                    "No command provided for Docker environment in "
-                    "'entrypoint' command mode"
-                )
-            docker_cmd += cmd
-        if verbose:
-            typer.echo(f"Running command: {docker_cmd}")
-        try:
-            subprocess.check_call(docker_cmd, cwd=wdir)
-        except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            # Docker exits 125 when it couldn't run the container at all,
-            # which is most often because Docker itself isn't running
-            if isinstance(e, FileNotFoundError) or e.returncode == 125:
-                try:
-                    calkit.docker.ensure_ready()
-                except calkit.docker.DockerNotReadyError as ready_error:
-                    raise_error(str(ready_error))
-            returncode = getattr(e, "returncode", None)
-            raise_error(
-                "Failed to run in Docker environment: command exited with "
-                f"status {returncode}"
-            )
+        env_docker.run(
+            env_name,
+            env,
+            cmd,
+            wdir=wdir,
+            env_vars=extra_env_vars,
+            verbose=verbose,
+        )
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
@@ -5443,38 +5349,78 @@ def merge_driver(
 
 @app.command(name="stash")
 def stash(
+    action: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "'push' to stash changes, which is the default, or 'pop' to "
+                "bring back the most recent stash."
+            )
+        ),
+    ] = "push",
+    message: Annotated[
+        str | None,
+        typer.Option(
+            "--message", "-m", help="A message to stash the changes with."
+        ),
+    ] = None,
     pop: Annotated[
-        bool, typer.Option("--pop", help="Pop the most recent stash.")
+        bool, typer.Option("--pop", help="Same as 'calkit stash pop'.")
     ] = False,
 ) -> None:
-    """Stash or restore workspace changes including dvc-zip tracked dirs.
+    """Stash workspace changes, including DVC-tracked data, or bring them
+    back.
 
-    Without --pop: zips any modified workspace dirs and commits any other
-    modified DVC-tracked paths into the DVC cache, then git-stashes (saving
-    the updated .dvc files and dvc.lock), checks out the committed DVC state,
-    and unzips it to the workspace.
-
-    With --pop: pops the git stash (restoring the saved .dvc files), checks
-    out the stashed DVC state, and unzips it to the workspace.
+    Stashing commits changed DVC-tracked data to the DVC cache, including
+    zipped folders, so the Git stash holds pointers to it, then checks out
+    the committed data. Popping restores the stash and checks out the data
+    it points to.
     """
     if pop:
+        action = "pop"
+    if action not in ("push", "pop"):
+        raise_error(f"Unknown action '{action}'; use 'push' or 'pop'")
+
+    def changed_data(deleted: bool = False) -> list[str]:
+        # DVC-tracked data that doesn't match what its pointers say
+        if not os.path.isdir(".dvc"):
+            return []
+        status = calkit.dvc.get_dvc_repo().data_status()
+        uncommitted = status.get("uncommitted", {})
+        paths = list(uncommitted.get("modified", []))
+        if deleted:
+            # Except what was never pulled, which can't be brought back
+            not_in_cache = status.get("not_in_cache", [])
+            paths += [
+                p
+                for p in uncommitted.get("deleted", [])
+                if p not in not_in_cache
+            ]
+        return paths
+
+    def check_out_changed_data() -> None:
+        for path in changed_data(deleted=True):
+            if calkit.dvc.run_dvc_command(["checkout", path, "--force"]):
+                raise_error(f"Failed to check out {path}")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+
+    if action == "pop":
         subprocess.check_call(["git", "stash", "pop"])
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
-    else:
-        # Zip any modified workspace dirs so their current state is in the DVC
-        # cache (the updated .dvc file will be captured by git stash)
-        calkit.dvc.zip.sync_all(direction="to-zip")
-        # Same for other modified DVC-tracked paths, which DVC would otherwise
-        # refuse to check out over since their data isn't in the cache
+        check_out_changed_data()
+        return
+    # Zipped folders go into their zips, and changed data into the cache, so
+    # the stash can point at both
+    calkit.dvc.zip.sync_all(direction="to-zip")
+    # Only outputs are committed, so a stage that was out of date stays so
+    modified = changed_data()
+    if modified:
         dvc_repo = calkit.dvc.get_dvc_repo()
-        uncommitted = dvc_repo.data_status()["uncommitted"]
-        for path in uncommitted.get("modified", []):
+        for path in modified:
             calkit.dvc.commit_path(dvc_repo, path, outs_only=True)
-        subprocess.check_call(["git", "stash"])
-        # Restore the committed zip versions and unzip them
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
+    subprocess.check_call(
+        ["git", "stash", "push"] + (["-m", message] if message else [])
+    )
+    check_out_changed_data()
 
 
 @app.command(

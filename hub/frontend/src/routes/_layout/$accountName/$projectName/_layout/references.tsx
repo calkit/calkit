@@ -60,6 +60,7 @@ import useProject from "../../../../../hooks/useProject"
 import { formatBibField } from "../../../../../lib/bibtex"
 import { handleError } from "../../../../../lib/errors"
 import { stashZoteroReturn } from "../../../../../lib/zotero"
+import { safeHref } from "../../../../../lib/strings"
 
 const referencesSearchSchema = z.object({
   // Selected collection path, so a link restores the same collection.
@@ -115,7 +116,7 @@ const ReferenceEntryTable = memo(function ReferenceEntryTable({
                     <Td>{k}</Td>
                     <Td>
                       {href ? (
-                        <Link href={href} isExternal variant="blue">
+                        <Link href={safeHref(href)} isExternal variant="blue">
                           {value}
                         </Link>
                       ) : (

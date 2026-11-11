@@ -22,14 +22,20 @@ NotebookLanguage = Literal["python", "julia", "r"]
 def detect_python_script_io(
     script_path: str,
     wdir: str | None = None,
+    project_dir: str = ".",
 ) -> dict[str, list[str]]:
-    """Detect inputs and outputs from a Python script using static analysis."""
+    """Detect inputs and outputs from a Python script using static analysis.
+
+    Paths are relative to the project, which is only read from
+    ``project_dir``, so it needn't be the current directory.
+    """
     inputs = []
     outputs = []
-    if not os.path.exists(script_path):
+    file_path = os.path.join(project_dir, script_path)
+    if not os.path.exists(file_path):
         return {"inputs": inputs, "outputs": outputs}
     try:
-        with open(script_path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
@@ -354,19 +360,22 @@ def detect_jupyter_notebook_io(
     notebook_path: str,
     language: NotebookLanguage | None = None,
     wdir: str | None = None,
+    project_dir: str = ".",
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Jupyter notebook.
 
     Extracts all code cells and passes them to the appropriate
     language-specific detection function. Detection functions handle
-    variable tracking and directory changes across cells.
+    variable tracking and directory changes across cells. Like for scripts,
+    the notebook is read from ``project_dir``.
     """
     inputs = []
     outputs = []
-    if not os.path.exists(notebook_path):
+    file_path = os.path.join(project_dir, notebook_path)
+    if not os.path.exists(file_path):
         return {"inputs": inputs, "outputs": outputs}
     try:
-        with open(notebook_path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             nb = json.load(f)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {"inputs": inputs, "outputs": outputs}
@@ -559,13 +568,27 @@ def _resolve_path_expr(node: ast.AST, variables: dict[str, str]) -> str | None:
     # Variable reference
     if isinstance(node, ast.Name) and node.id in variables:
         return variables[node.id]
-    # Path composition with / or +
+    # Path composition with /, or strings joined with +
     if isinstance(node, ast.BinOp):
         if isinstance(node.op, (ast.Div, ast.Add)):
             left = _resolve_path_expr(node.left, variables)
             right = _resolve_path_expr(node.right, variables)
             if left and right:
+                if isinstance(node.op, ast.Add):
+                    return left + right
                 return os.path.join(left, right)
+    # f-strings whose every part resolves
+    if isinstance(node, ast.JoinedStr):
+        pieces = []
+        for value in node.values:
+            if isinstance(value, ast.FormattedValue):
+                piece = _resolve_path_expr(value.value, variables)
+            else:
+                piece = _extract_string_from_node(value)
+            if piece is None:
+                return None
+            pieces.append(piece)
+        return "".join(pieces) or None
     # Path attribute access
     if isinstance(node, ast.Attribute):
         if node.attr == "parent":
@@ -595,16 +618,21 @@ def _resolve_path_expr(node: ast.AST, variables: dict[str, str]) -> str | None:
                             return None
                         parts.append(part)
                     return os.path.join(*parts)
+            # Kept relative, since it's resolved from wherever the code runs,
+            # not from here
             if node.func.attr in ["absolute", "resolve"]:
-                base = _resolve_path_expr(node.func.value, variables)
-                if base:
-                    return os.path.abspath(base)
-            if node.func.attr == "cwd":
+                return _resolve_path_expr(node.func.value, variables)
+            if node.func.attr in ["cwd", "home"]:
                 if (
                     isinstance(node.func.value, ast.Name)
                     and node.func.value.id == "Path"
                 ):
-                    return "."
+                    return "." if node.func.attr == "cwd" else "~"
+            # The home folder is kept as ~, since it's not this machine's
+            if node.func.attr == "expanduser":
+                if node.args:
+                    return _resolve_path_expr(node.args[0], variables)
+                return _resolve_path_expr(node.func.value, variables)
     return None
 
 
@@ -695,6 +723,56 @@ def _resolve_variable_in_call(
                             return base_path
                     return base_path
     return None
+
+
+def rewrite_paths(text: str, moves: dict[str, str]) -> tuple[str, list[str]]:
+    """Point the paths a script or notebook names at new ones, e.g., data
+    outside the project at its copy inside, returning the new text and the
+    old paths that were found.
+
+    A path is only found written out whole in one string, e.g.,
+    ``"/data/runs/"``, not put together from pieces, and anything after it
+    in the string is kept, e.g., a file in a moved folder. New paths can't
+    have quotes or backslashes, which each kind of string escapes
+    differently.
+    """
+
+    def relocate(match: re.Match, new: str, sep: str | None) -> str:
+        rest: str = match[1]
+        if sep is None:
+            return new + rest
+        # The rest of a Windows path gets slashes too, so it's found on
+        # Linux, but not a backslash escaping the closing quote
+        tail = "\\" if sep == "\\" and rest.endswith("\\") else ""
+        return new + rest[: len(rest) - len(tail)].replace(sep, "/") + tail
+
+    for new in moves.values():
+        if re.search(r"['\"\\]", new):
+            raise ValueError(f"{new} can't have quotes or backslashes")
+    found = []
+    # Longest first, so a file is moved as itself rather than with its folder
+    for old in sorted(moves, key=len, reverse=True):
+        count = 0
+        # As written, with Windows separators escaped or as slashes, and
+        # escaped again in a notebook's JSON
+        seps: dict[str, str | None] = {}
+        for written_sep in ("\\", "/", "\\" * 2, "\\" * 4):
+            seps.setdefault(
+                old.replace("\\", written_sep),
+                written_sep if "\\" in old else None,
+            )
+        for written, sep in seps.items():
+            text, n = re.subn(
+                r"(?<=['\"])"
+                + re.escape(written)
+                + r"(?=[/\\'\"])([^'\"\n]*)",
+                lambda m, new=moves[old], sep=sep: relocate(m, new, sep),
+                text,
+            )
+            count += n
+        if count:
+            found.append(old)
+    return text, found
 
 
 def filter_covered_inputs(
@@ -807,10 +885,38 @@ def _detect_python_code_io(
                             os.path.join(current_dir, chdir_path)
                         )
 
+    def is_outside(path: str) -> bool:
+        # Absolute, in the home folder, or climbing out of the project, on
+        # any platform, since a script may come from another machine
+        return path == ".." or bool(
+            re.match(r"(/|\\|~|\.\./|[A-Za-z]:[\\/])", path)
+        )
+
     # Helper to resolve a relative path back to project root
     def resolve_to_root(path: str) -> str:
         """Resolve a path from current_dir to project root."""
-        full_path = os.path.normpath(os.path.join(current_dir, path))
+        # A path outside the project is kept as written, to say where it is
+        if is_outside(path) and not path.startswith(".."):
+            import ntpath
+            import posixpath
+
+            # Only drive and backslash-rooted paths are Windows ones, since
+            # joining, e.g., '~' and a folder adds backslashes on Windows
+            if re.match(r"[A-Za-z]:|\\", path):
+                return ntpath.normpath(path)
+            return posixpath.normpath(path.replace("\\", "/"))
+        # Relative Windows paths, e.g., '..\\data.csv', are read the same on
+        # any platform
+        path = path.replace("\\", "/")
+        base = current_dir
+        if not is_outside(base):
+            base = base.replace("\\", "/")
+        full_path = os.path.normpath(os.path.join(base, path))
+        if is_outside(base):
+            return Path(full_path).as_posix()
+        in_project = os.path.relpath(os.path.abspath(full_path))
+        if is_outside(Path(in_project).as_posix()):
+            return Path(in_project).as_posix()
         # Handle paths that reference parent directories
         # by computing the real path
         abs_path = os.path.abspath(full_path)
@@ -839,8 +945,57 @@ def _detect_python_code_io(
         "to_hdf",
         "to_stata",
     }
+
+    def read_folder(node: ast.Call) -> str | None:
+        # The folder a glob or listing reads, up to its first wildcard
+        func = node.func
+        owner = func.value if isinstance(func, ast.Attribute) else None
+        module = owner.id if isinstance(owner, ast.Name) else None
+        name = func.attr if isinstance(func, ast.Attribute) else None
+        if isinstance(func, ast.Name):
+            name, module = func.id, "glob"
+        if not node.args:
+            return None
+        arg = _resolve_variable_in_call(node.args[0], variables)
+        if arg is None:
+            return None
+        if module == "glob" and name in ("glob", "iglob"):
+            # The pattern may be relative to a root_dir
+            for kw in node.keywords:
+                if kw.arg == "root_dir":
+                    root = _resolve_variable_in_call(kw.value, variables)
+                    if root is None:
+                        return None
+                    arg = os.path.join(root, arg)
+        elif module == "os" and name in ("listdir", "scandir", "walk"):
+            return arg
+        elif owner is not None and name in ("glob", "rglob"):
+            # A Path's glob, with the pattern relative to it
+            base = _resolve_path_expr(owner, variables)
+            if base is None:
+                return None
+            # rglob matches at any depth, so it reads the whole folder
+            if name == "rglob":
+                return base
+            arg = os.path.join(base, arg)
+        else:
+            return None
+        wild = min(
+            (i for i in (arg.find(c) for c in "*?[") if i >= 0),
+            default=len(arg),
+        )
+        if wild == len(arg):
+            return arg
+        cut = max(arg.rfind("/", 0, wild), arg.rfind("\\", 0, wild))
+        return arg[: max(cut, 1)] if cut >= 0 else "."
+
     # Third pass: extract I/O operations using current_dir
     for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            folder = read_folder(node)
+            if folder is not None:
+                inputs.append(resolve_to_root(folder))
+                continue
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local_file = _resolve_python_import(alias.name, import_dir)
@@ -966,11 +1121,37 @@ def _detect_python_code_io(
                             )
                             if path:
                                 outputs.append(resolve_to_root(path))
-    inputs = [p for p in inputs if _is_valid_project_path(p)]
-    outputs = [p for p in outputs if _is_valid_project_path(p)]
+    # Paths outside the project are reported apart, since they're data the
+    # project lacks rather than inputs or outputs a stage can declare
+    external_inputs, external_outputs = (
+        list(
+            dict.fromkeys(
+                p
+                for p in paths
+                if is_outside(p)
+                and not p.startswith(("/dev/", "/proc/", "/sys/"))
+            )
+        )
+        for paths in (inputs, outputs)
+    )
+    inputs = [
+        p
+        for p in inputs
+        if p not in (".", "")
+        and not is_outside(p)
+        and _is_valid_project_path(p)
+    ]
+    outputs = [
+        p for p in outputs if not is_outside(p) and _is_valid_project_path(p)
+    ]
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
-    return {"inputs": inputs, "outputs": outputs}
+    return {
+        "inputs": inputs,
+        "outputs": outputs,
+        "external_inputs": external_inputs,
+        "external_outputs": external_outputs,
+    }
 
 
 def _detect_julia_code_io(

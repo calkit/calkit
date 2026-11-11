@@ -1,4 +1,4 @@
-"""Functionality related to environments."""
+"""What environments of every kind share."""
 
 import fnmatch
 import functools
@@ -537,27 +537,6 @@ def get_docker_arch() -> str:
         return "riscv64"
     # Fallback
     return mach
-
-
-def get_all_docker_lock_fpaths(
-    env_name: str,
-    wdir: str | None = None,
-    as_posix: bool = True,
-) -> list[str]:
-    """Return docker environment lock file paths for every supported
-    architecture.
-
-    This intentionally excludes legacy (pre-arch) lock file locations;
-    legacy handling is performed separately.
-    """
-    env_lock_dir = get_env_lock_dir(wdir=wdir)
-    docker_dir = os.path.join(env_lock_dir, env_name)
-    fpaths = [
-        os.path.join(docker_dir, arch + ".json") for arch in DOCKER_ARCHS
-    ]
-    if as_posix:
-        fpaths = [Path(p).as_posix() for p in fpaths]
-    return fpaths
 
 
 def get_all_conda_lock_fpaths(
@@ -2084,9 +2063,13 @@ def check_cache(
     # hashes changing, and the pipeline can't run in an image that isn't
     # there, so its absence has to invalidate the check
     if env.get("kind") == "docker":
-        from calkit.docker import get_image_name, image_exists
+        from calkit.docker import image_exists
+        from calkit.environments import docker as env_docker
 
-        image = get_image_name(env, env_name, wdir=wdir)
+        try:
+            image = env_docker.get_image_name(env_name, env, wdir=wdir)
+        except ValueError:
+            image = None
         if image and not image_exists(image):
             return False
     # Check if this environment is up-to-date
@@ -2178,6 +2161,135 @@ def runs_elsewhere(env: dict) -> bool:
     return False
 
 
+def get_pipeline_env_names(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    targets: list[str] | None = None,
+    skip_stages: list[str] | None = None,
+) -> tuple[list[str], dict, dict[str, dict]]:
+    """Names of the environments the pipeline's stages use, the project info
+    with markdown stages expanded, which they're defined in, and the stages.
+    """
+    import calkit
+    import calkit.markdown
+
+    @functools.cache
+    def outer_runs_elsewhere(env_name: str) -> bool:
+        env = envs.get(env_name) or {}
+        if env.get("kind") == SWITCH_KIND:
+            try:
+                picked = resolve_switch(env_name, envs)
+            except ValueError:
+                return False
+            env = (get_env(picked, envs) or {}) if picked else {}
+        return runs_elsewhere(env)
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    # Markdown stages carry no environment of their own; the stages their
+    # blocks declare do, so expand before looking for environments to check.
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
+    ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    # A frozen stage never runs, so its environment isn't needed
+    stages = {
+        k: v
+        for k, v in stages.items()
+        if not (isinstance(v, dict) and v.get("frozen"))
+    }
+    if targets:
+        # Split targets by "@" to handle sub-stages from iterations
+        targets = [t.split("@")[0] for t in targets]
+        # A target naming a markdown stage covers every stage its file
+        # declares, which are named '<stage>/<block>'
+        prefixes = [
+            t + calkit.markdown.STAGE_NAME_SEPARATOR
+            for t in targets
+            if t in md_stages
+        ]
+        # A latex stage's diffs run in its environment, whether they're
+        # named one at a time or all together
+        import calkit.latex
+
+        stages = {
+            k: v
+            for k, v in stages.items()
+            if k in targets
+            or any(k.startswith(p) for p in prefixes)
+            or k + calkit.latex.DIFFS_TARGET_SUFFIX in targets
+            or any(
+                name in targets
+                for name in calkit.latex.get_diff_stage_names(k, v)
+            )
+        }
+    # Stages that can't run here don't need their environments
+    stages = {k: v for k, v in stages.items() if k not in (skip_stages or [])}
+    envs = ck_info.get("environments", {})
+    # If any environments are composite environments, we need to split them
+    # up into their individual names in the list
+    split_envs = []
+    for stage in stages.values():
+        env_name = stage.get("environment")
+        if not env_name or str(env_name).startswith("_"):
+            continue
+        if env_name.count(COMPOSITE_ENV_SEP) == 1:
+            outer_env_name, sub_env_name = env_name.split(COMPOSITE_ENV_SEP)
+            split_envs.append(outer_env_name)
+            # An inner env is built where the stage runs, so one whose
+            # outer env is another machine is checked there, not here
+            if not (
+                stage.get("kind") in STAGE_KINDS_SENT_TO_OUTER_ENV
+                and outer_runs_elsewhere(outer_env_name)
+            ):
+                split_envs.append(sub_env_name)
+        else:
+            split_envs.append(env_name)
+    return list(dict.fromkeys(split_envs)), ck_info, stages
+
+
+def get_cached_env_states(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    targets: list[str] | None = None,
+) -> dict[str, dict]:
+    """What's known about the pipeline's environments without checking them.
+
+    Checking an environment can build it, which runs whatever its spec says,
+    so this only reads the record of the last check: when it was, whether it
+    passed, and whether the spec, lock file, or prefix has changed since.
+    """
+    names, ck_info, _ = get_pipeline_env_names(
+        ck_info=ck_info, wdir=wdir, targets=targets
+    )
+    envs = ck_info.get("environments", {})
+    states: dict[str, dict] = {}
+    for env_name in sorted(names):
+        env = envs.get(env_name)
+        if env is None or env.get("kind") in KINDS_NO_CHECK:
+            continue
+        with get_cache_db() as db:
+            cached = db.get(make_cache_key(env_name=env_name, wdir=wdir))
+        if cached is None:
+            states[env_name] = {
+                "checked_at": None,
+                "success": None,
+                "changed": None,
+            }
+            continue
+        checked_at = cached.get("checked_at")
+        up_to_date = cacheable(env) and check_cache(
+            env_name=env_name, env=env, wdir=wdir, respect_ttl=False
+        )
+        states[env_name] = {
+            "checked_at": checked_at.isoformat() if checked_at else None,
+            "success": cached.get("success", False),
+            # Whether anything it was checked against has changed since,
+            # e.g., its spec or lock file
+            "changed": not up_to_date if cached.get("success") else None,
+        }
+    return states
+
+
 def check_all_in_pipeline(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -2208,19 +2320,7 @@ def check_all_in_pipeline(
     from collections.abc import Iterator
     from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
-    import calkit
     from calkit.cli.check import check_environment
-
-    @functools.cache
-    def outer_runs_elsewhere(env_name: str) -> bool:
-        env = envs.get(env_name) or {}
-        if env.get("kind") == SWITCH_KIND:
-            try:
-                picked = resolve_switch(env_name, envs)
-            except ValueError:
-                return False
-            env = (get_env(picked, envs) or {}) if picked else {}
-        return runs_elsewhere(env)
 
     def runs_docker_here(env_name: str) -> bool:
         # A Docker environment inside one that dispatches to another machine
@@ -2298,70 +2398,10 @@ def check_all_in_pipeline(
             "Can currently only run from current working directory"
         )
     res = {}
-    # First get a list of environments used in the pipeline
-    if ck_info is None:
-        ck_info = calkit.load_calkit_info(wdir=wdir)
-    # Markdown stages carry no environment of their own; the stages their
-    # blocks declare do, so expand before looking for environments to check.
-    import calkit.markdown
-
-    md_stages = calkit.markdown.get_markdown_stages(ck_info)
-    ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
-    stages = ck_info.get("pipeline", {}).get("stages", {})
-    # A frozen stage never runs, so its environment isn't needed
-    stages = {
-        k: v
-        for k, v in stages.items()
-        if not (isinstance(v, dict) and v.get("frozen"))
-    }
-    if targets:
-        # Split targets by "@" to handle sub-stages from iterations
-        targets = [t.split("@")[0] for t in targets]
-        # A target naming a markdown stage covers every stage its file
-        # declares, which are named '<stage>/<block>'
-        prefixes = [
-            t + calkit.markdown.STAGE_NAME_SEPARATOR
-            for t in targets
-            if t in md_stages
-        ]
-        # A latex stage's diffs run in its environment, whether they're
-        # named one at a time or all together
-        import calkit.latex
-
-        stages = {
-            k: v
-            for k, v in stages.items()
-            if k in targets
-            or any(k.startswith(p) for p in prefixes)
-            or k + calkit.latex.DIFFS_TARGET_SUFFIX in targets
-            or any(
-                name in targets
-                for name in calkit.latex.get_diff_stage_names(k, v)
-            )
-        }
-    # Stages that can't run here don't need their environments
-    stages = {k: v for k, v in stages.items() if k not in (skip_stages or [])}
+    envs_in_pipeline, ck_info, stages = get_pipeline_env_names(
+        ck_info=ck_info, wdir=wdir, targets=targets, skip_stages=skip_stages
+    )
     envs = ck_info.get("environments", {})
-    # If any environments are composite environments, we need to split them
-    # up into their individual names in the list
-    split_envs = []
-    for stage in stages.values():
-        env_name = stage.get("environment")
-        if not env_name or str(env_name).startswith("_"):
-            continue
-        if env_name.count(COMPOSITE_ENV_SEP) == 1:
-            outer_env_name, sub_env_name = env_name.split(COMPOSITE_ENV_SEP)
-            split_envs.append(outer_env_name)
-            # An inner env is built where the stage runs, so one whose
-            # outer env is another machine is checked there, not here
-            if not (
-                stage.get("kind") in STAGE_KINDS_SENT_TO_OUTER_ENV
-                and outer_runs_elsewhere(outer_env_name)
-            ):
-                split_envs.append(sub_env_name)
-        else:
-            split_envs.append(env_name)
-    envs_in_pipeline = list(dict.fromkeys(split_envs))
     # Checked regardless of the cache, since Docker can be stopped or
     # removed without anything in the project changing
     stage_envs = [
@@ -3931,3 +3971,108 @@ def detect_env_for_stage(
         dependencies=dependencies,
         created_from_dependencies=True,
     )
+
+
+def relock(env_name: str, env: dict) -> None:
+    """Rebuild an environment from its spec and write a fresh lock.
+
+    Tools with an upgrade command of their own run it. Otherwise the locks
+    are removed and the environment is rebuilt from scratch, since a check
+    with a lock in place reproduces the lock rather than the spec. If any
+    of it fails, the old locks are put back, so a failed relock leaves the
+    environment pinned where it was.
+    """
+    import typer
+
+    from calkit.cli import raise_error
+    from calkit.cli.check import check_environment
+
+    kind = env.get("kind")
+    spec_path = env.get("path") or ""
+    env_dir = os.path.dirname(spec_path) or "."
+    if kind in ("slurm", "pbs"):
+        typer.echo(
+            f"Environment '{env_name}' is locked to its configuration in "
+            "calkit.yaml, so there is nothing to relock"
+        )
+        return
+    upgrade_cmd = None
+    if kind == "uv":
+        upgrade_cmd = ["uv", "lock", "--upgrade"]
+    elif kind == "pixi":
+        # Named, since a directory can hold more than one manifest
+        upgrade_cmd = ["pixi", "update"]
+        if spec_path:
+            upgrade_cmd += ["--manifest-path", os.path.abspath(spec_path)]
+    elif kind == "nix":
+        upgrade_cmd = [
+            "nix",
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "flake",
+            "update",
+        ]
+    # Every lock, including other platforms' and legacy ones, since a check
+    # falls back to any of them
+    lock_fpaths = []
+    if kind == "docker":
+        from calkit.environments import docker as env_docker
+
+        lock_fpaths = env_docker.get_lock_fpaths(env_name, as_posix=False)
+    elif kind == "conda":
+        lock_fpaths = get_all_conda_lock_fpaths(env_name, as_posix=False)
+    elif kind in ("venv", "uv-venv"):
+        lock_fpaths = get_all_venv_lock_fpaths(env_name, as_posix=False)
+    elif kind == "renv":
+        renv_dir = env_dir if spec_path.endswith("DESCRIPTION") else spec_path
+        lock_fpaths = [os.path.join(renv_dir or ".", "renv.lock")]
+    elif kind == "julia":
+        # Julia falls back to this when there's no manifest for its version
+        lock_fpaths = [os.path.join(env_dir, "Manifest.toml")]
+    for legacy in (False, True):
+        try:
+            fpath = get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False, legacy=legacy
+            )
+        except ValueError as e:
+            raise_error(f"Environment '{env_name}': {e}")
+        if fpath is not None:
+            lock_fpaths.append(fpath)
+    lock_fpaths = list(dict.fromkeys(lock_fpaths))
+    old_locks: dict[str, bytes | None] = {}
+    for fpath in lock_fpaths:
+        if os.path.isfile(fpath):
+            with open(fpath, "rb") as f:
+                old_locks[fpath] = f.read()
+        else:
+            old_locks[fpath] = None
+    try:
+        if upgrade_cmd is not None:
+            typer.echo(f"Running: {' '.join(upgrade_cmd)}")
+            if subprocess.run(upgrade_cmd, cwd=env_dir).returncode != 0:
+                raise_error(f"Failed to relock environment '{env_name}'")
+            typer.echo(f"Checking environment '{env_name}'")
+            check_environment(env_name=env_name, verbose=True)
+            return
+        for fpath, content in old_locks.items():
+            if content is not None:
+                typer.echo(f"Removing lock file: {fpath}")
+                os.remove(fpath)
+        typer.echo(f"Relocking environment '{env_name}'")
+        check_environment(env_name=env_name, verbose=True, force=True)
+    except BaseException:
+        # Including an exit from raise_error or Ctrl-C partway through
+        for fpath, content in old_locks.items():
+            if content is None:
+                if os.path.isfile(fpath):
+                    os.remove(fpath)
+                continue
+            os.makedirs(os.path.dirname(fpath) or ".", exist_ok=True)
+            with open(fpath, "wb") as f:
+                f.write(content)
+        typer.echo(
+            f"Relocking environment '{env_name}' failed, so its old locks "
+            "were put back",
+            err=True,
+        )
+        raise

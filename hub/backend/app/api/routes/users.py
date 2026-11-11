@@ -1,6 +1,7 @@
 """Routes for users."""
 
 import logging
+import posixpath
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -8,7 +9,15 @@ from typing import Annotated, Any, Literal, Sequence
 
 import requests
 import sqlalchemy
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi import (
+    APIRouter,
+    Cookie,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+)
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import selectinload
@@ -16,7 +25,8 @@ from sqlmodel import Field, col, func, or_, select
 
 import app.projects
 import app.stripe
-from app import mixpanel, users, zotero
+import calkit.google
+from app import mixpanel, storage, users, zotero
 from app.api.deps import (
     PAT_SELECTOR_END_CHAR_IDX,
     PAT_SELECTOR_LENGTH_BYTES,
@@ -944,10 +954,14 @@ def get_user_connected_accounts(
         zenodo_connected = True
     except HTTPException:
         pass
+    # Signing in with Google gives a token too, but only for signing in, so
+    # Google counts as connected once it can reach Drive
     google_connected = False
     try:
         users.get_google_token(session=session, user=current_user)
-        google_connected = True
+        google_connected = users.GOOGLE_DRIVE_SCOPE in users.get_google_scopes(
+            session=session, user=current_user
+        )
     except HTTPException:
         pass
     # Overleaf doesn't have refresh logic, just check if credential exists
@@ -1124,6 +1138,111 @@ def get_user_overleaf_session(
     return OverleafSessionResponse(
         session=users.get_overleaf_session(session=session, user=current_user)
     )
+
+
+class GooglePresentation(BaseModel):
+    id: str
+    title: str | None
+    url: str
+    modified_time: str
+
+
+class GooglePresentationPost(BaseModel):
+    title: str
+
+
+class GoogleFigurePut(BaseModel):
+    replaced: int
+    added: bool
+    modified_time: str
+
+
+@router.post("/user/google/presentations")
+def post_user_google_presentation(
+    req: GooglePresentationPost,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> GooglePresentation:
+    """Create a Google Slides presentation in the user's Google Drive."""
+    client = users.get_google_slides_client(session=session, user=current_user)
+    try:
+        info = client.create_presentation(req.title)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    mixpanel.user_created_google_slides_presentation(current_user)
+    return GooglePresentation.model_validate(info)
+
+
+@router.get("/user/google/presentations/{presentation_id}")
+def get_user_google_presentation(
+    presentation_id: str, session: SessionDep, current_user: CurrentUser
+) -> GooglePresentation:
+    """Get a Google Slides presentation's title, and when it was last
+    edited.
+    """
+    client = users.get_google_slides_client(session=session, user=current_user)
+    try:
+        info = client.get_presentation_info(presentation_id)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    return GooglePresentation.model_validate(info)
+
+
+@router.post("/user/google/presentations/{presentation_id}/figures")
+def post_user_google_presentation_figure(
+    presentation_id: str,
+    path: str,
+    file: Annotated[UploadFile, File()],
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> GoogleFigurePut:
+    """Put the latest version of a project figure in a Google Slides
+    presentation, replacing the images tagged with its path.
+    """
+    try:
+        mime_type = calkit.google.get_figure_mime_type(path)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    client = users.get_google_slides_client(session=session, user=current_user)
+    # Slides copies an image from a URL it can fetch, so the figure is put
+    # in object storage just long enough for that
+    fs = storage.get_object_fs()
+    fpath = (
+        f"{storage.get_storage_root()}/{storage.GOOGLE_SLIDES_FIGURES_DIR}/"
+        f"{uuid.uuid4().hex}/{posixpath.basename(path)}"
+    )
+    storage.write_object(fpath, file.file.read(), mime_type, fs=fs)
+    try:
+        url = storage.get_object_url(fpath, expires=600, fs=fs)
+        resp = client.put_figure(presentation_id, path, url)
+    except calkit.google.GoogleError as e:
+        # Google can't fetch from object storage on a developer's machine
+        if settings.ENVIRONMENT == "local":
+            e.args = (
+                f"{e} Google can't reach a local hub's object storage, so "
+                "try this on staging.",
+            )
+        users.raise_google_error(e)
+    finally:
+        fs.rm(fpath)
+    return GoogleFigurePut.model_validate(resp)
+
+
+@router.get("/user/google/presentations/{presentation_id}/export")
+def get_user_google_presentation_export(
+    presentation_id: str,
+    format: Literal["pdf", "pptx"],
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Response:
+    """Export a Google Slides presentation as a PDF or PowerPoint file."""
+    mime_type = calkit.google.get_slides_export_mime_type(f"x.{format}")
+    client = users.get_google_slides_client(session=session, user=current_user)
+    try:
+        content = client.export_presentation(presentation_id, mime_type)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    return Response(content=content, media_type=mime_type)
 
 
 @router.post("/user/google-auth")

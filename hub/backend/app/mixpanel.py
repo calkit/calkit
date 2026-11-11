@@ -511,3 +511,7 @@ def user_used_machine(
         "Used machine",
         add_event_info=dict(platform=platform, mode=mode) | usage,
     )
+
+
+def user_created_google_slides_presentation(user: User):
+    track(user, "Created Google Slides presentation")

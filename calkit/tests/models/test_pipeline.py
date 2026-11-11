@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from calkit.models.io import PathOutput
 from calkit.models.pipeline import (
     GimpExportStage,
+    GoogleSlidesExportStage,
     InkscapeExportStage,
     JsonToLatexStage,
     JuliaCommandStage,
@@ -97,6 +98,59 @@ def test_wordtopdfstage():
     assert sd["cmd"] == (
         'calkit office word-to-pdf "my word doc.docx" -o "my word doc.pdf"'
     )
+
+
+def test_googleslidesexportstage():
+    url = "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOpQrStUv/edit"
+    s = GoogleSlidesExportStage(
+        name="export-poster",
+        presentation_url=url,
+        inputs=["figures/rates.png", "data/rates.csv"],
+        outputs=["poster/poster.pdf", "poster/poster.pptx"],
+    )
+    sd = s.to_dvc()
+    # Only the images among its inputs are put in it
+    assert sd["cmd"] == (
+        f"calkit export google-slides {url} -o poster/poster.pdf "
+        "-o poster/poster.pptx --figure figures/rates.png"
+    )
+    # Editing the presentation or an input puts it out of date
+    assert sd["deps"] == [
+        "figures/rates.png",
+        "data/rates.csv",
+        ".calkit/google/1AbCdEfGhIjKlMnOpQrStUv.json",
+    ]
+    # Outputs are kept while it runs, so an unchanged export can be kept
+    assert sd["outs"] == [
+        {"poster/poster.pdf": {"persist": True}},
+        {"poster/poster.pptx": {"persist": True}},
+    ]
+    s2 = GoogleSlidesExportStage(
+        presentation_url=url,
+        outputs=[{"path": "poster.pdf", "storage": "git"}],
+    )
+    assert s2.dvc_outs == [{"poster.pdf": {"cache": False, "persist": True}}]
+    assert s.to_ck_dict() == {
+        "kind": "google-slides-export",
+        "name": "export-poster",
+        "presentation_url": url,
+        "inputs": ["figures/rates.png", "data/rates.csv"],
+        "outputs": ["poster/poster.pdf", "poster/poster.pptx"],
+    }
+    # Run from a wdir, it still records the edit under the project
+    s = GoogleSlidesExportStage(
+        presentation_url=url, outputs=["poster.pdf"], wdir="poster"
+    )
+    edit_time_path = "../.calkit/google/1AbCdEfGhIjKlMnOpQrStUv.json"
+    assert s.dvc_deps == [edit_time_path]
+    assert s.dvc_cmd.endswith(f"--edit-time-path {edit_time_path}")
+    for kwargs, match in [
+        (dict(presentation_url="https://example.com"), "Google Slides URL"),
+        (dict(presentation_url=url, outputs=[]), "needs an output"),
+        (dict(presentation_url=url, outputs=["p.docx"]), ".pdf or .pptx"),
+    ]:
+        with pytest.raises(ValidationError, match=match):
+            GoogleSlidesExportStage(**({"outputs": ["p.pdf"]} | kwargs))
 
 
 def test_manualstage():

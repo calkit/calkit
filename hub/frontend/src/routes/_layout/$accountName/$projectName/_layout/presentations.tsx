@@ -1,16 +1,38 @@
 import {
+  Alert,
+  AlertIcon,
   Badge,
   Box,
   Button,
   Code,
   Flex,
-  HStack,
+  FormControl,
+  FormHelperText,
+  FormLabel,
   Heading,
   Icon,
+  IconButton,
+  Input,
   Link,
+  LinkBox,
+  LinkOverlay,
+  Menu,
+  MenuButton,
+  MenuItem,
+  MenuList,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
+  Select,
+  SimpleGrid,
   Text,
   VStack,
   useColorModeValue,
+  useDisclosure,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -19,19 +41,20 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router"
-import { useRef, useState } from "react"
-import { FiDownload, FiFile, FiMonitor } from "react-icons/fi"
+import type { AxiosError } from "axios"
+import { useEffect, useRef, useState } from "react"
+import { FaPlus } from "react-icons/fa"
+import { FiDownload, FiExternalLink, FiMonitor } from "react-icons/fi"
 import { z } from "zod"
-import Tooltip from "../../../../../components/Common/Tooltip"
 
 import type { Presentation } from "../../../../../client"
-import { ProjectsService } from "../../../../../client"
+import { ProjectsService, UsersService } from "../../../../../client"
 import CommentsPanel, {
   projectCommentToPanelComment,
 } from "../../../../../components/Common/CommentsPanel"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
-import PageMenu from "../../../../../components/Common/PageMenu"
+import PdfCanvas from "../../../../../components/Common/PdfCanvas"
 import PresentationView from "../../../../../components/Presentations/PresentationView"
 import PdfAnnotator, {
   commentToHighlight,
@@ -39,9 +62,11 @@ import PdfAnnotator, {
 } from "../../../../../components/Publications/PdfAnnotator"
 import ArtifactReleasesPanel from "../../../../../components/Releases/ArtifactReleasesPanel"
 import useAuth from "../../../../../hooks/useAuth"
+import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject, {
   useProjectPresentations,
 } from "../../../../../hooks/useProject"
+import { handleError } from "../../../../../lib/errors"
 import { safeHref } from "../../../../../lib/strings"
 
 const presSearchSchema = z.object({
@@ -116,6 +141,21 @@ function PresInfo({ presentation }: PresInfoProps) {
           </Text>
         )}
       </Text>
+      {presentation.edit_url && (
+        <Box mt={3}>
+          <Button
+            as="a"
+            // SWC 1.12 renames target to edit_url if it follows href
+            target="_blank"
+            href={safeHref(presentation.edit_url)}
+            rel="noopener noreferrer"
+            size="sm"
+            leftIcon={<FiExternalLink />}
+          >
+            Open in Google Slides
+          </Button>
+        </Box>
+      )}
       {presentation.url && (
         <Box mt={3}>
           <Button
@@ -135,6 +175,309 @@ function PresInfo({ presentation }: PresInfoProps) {
   )
 }
 
+/** Where an exported presentation lives, from its title. */
+function getDefaultPath(title: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  return slug ? `presentations/${slug}.pdf` : ""
+}
+
+interface NewGoogleSlidesProps {
+  isOpen: boolean
+  onClose: () => void
+  accountName: string
+  projectName: string
+}
+
+function NewGoogleSlides({
+  isOpen,
+  onClose,
+  accountName,
+  projectName,
+}: NewGoogleSlidesProps) {
+  const queryClient = useQueryClient()
+  const showToast = useCustomToast()
+  const [title, setTitle] = useState("")
+  const [path, setPath] = useState("")
+  const [pathEdited, setPathEdited] = useState(false)
+  const [kind, setKind] = useState<"slides" | "poster">("slides")
+  // Linked from here once made, since opening a window after the request
+  // returns, rather than on a click, gets blocked as a pop-up
+  const [created, setCreated] = useState<Presentation | null>(null)
+  const connectedAccountsQuery = useQuery({
+    queryFn: () =>
+      UsersService.getUserConnectedAccounts().then((response) => response.data),
+    queryKey: ["user", "connected-accounts"],
+    enabled: isOpen,
+  })
+  // Signing in with Google isn't enough, since it doesn't reach Drive
+  const googleConnected = connectedAccountsQuery.data?.google ?? false
+  const close = () => {
+    setTitle("")
+    setPath("")
+    setPathEdited(false)
+    setKind("slides")
+    setCreated(null)
+    onClose()
+  }
+  const mutation = useMutation({
+    mutationFn: () =>
+      ProjectsService.postProjectGoogleSlidesPresentation({
+        owner_name: accountName,
+        project_name: projectName,
+        googleSlidesPresentationPost: { title, path, kind },
+      }).then((response) => response.data),
+    onSuccess: (data) => {
+      setCreated(data)
+    },
+    onError: (err: AxiosError) => {
+      handleError(err, showToast)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["projects", accountName, projectName, "presentations"],
+      })
+    },
+  })
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={close}
+      size="md"
+      isCentered
+      motionPreset="none"
+    >
+      <ModalOverlay />
+      <ModalContent
+        as="form"
+        onSubmit={(e) => {
+          e.preventDefault()
+          mutation.mutate()
+        }}
+      >
+        <ModalHeader>New Google Slides presentation</ModalHeader>
+        <ModalCloseButton />
+        {created ? (
+          <>
+            <ModalBody>
+              <Text>
+                Created <b>{created.title}</b>. The pipeline exports it to{" "}
+                <Code>{created.path}</Code>.
+              </Text>
+            </ModalBody>
+            <ModalFooter gap={3}>
+              <Button
+                as="a"
+                // SWC 1.12 renames target to edit_url if it follows href
+                target="_blank"
+                href={safeHref(created.edit_url)}
+                rel="noopener noreferrer"
+                variant="primary"
+                leftIcon={<FiExternalLink />}
+                onClick={close}
+              >
+                Open in Google Slides
+              </Button>
+              <Button onClick={close}>Done</Button>
+            </ModalFooter>
+          </>
+        ) : (
+          <>
+            <ModalBody>
+              {connectedAccountsQuery.isSuccess && !googleConnected && (
+                <Alert status="warning" mb={4} borderRadius="md" fontSize="sm">
+                  <AlertIcon />
+                  <Text>
+                    Connect Google Drive in{" "}
+                    <Link
+                      as={RouterLink}
+                      to="/settings"
+                      search={{ tab: "connected-accounts" } as any}
+                      textDecoration="underline"
+                    >
+                      your settings
+                    </Link>{" "}
+                    first.
+                  </Text>
+                </Alert>
+              )}
+              <FormControl isRequired>
+                <FormLabel>Title</FormLabel>
+                <Input
+                  value={title}
+                  autoComplete="off"
+                  placeholder="My poster"
+                  onChange={(e) => {
+                    setTitle(e.target.value)
+                    if (!pathEdited) setPath(getDefaultPath(e.target.value))
+                  }}
+                />
+              </FormControl>
+              <FormControl mt={4}>
+                <FormLabel>Kind</FormLabel>
+                <Select
+                  value={kind}
+                  onChange={(e) =>
+                    setKind(e.target.value as "slides" | "poster")
+                  }
+                >
+                  <option value="slides">Slides</option>
+                  <option value="poster">Poster</option>
+                </Select>
+              </FormControl>
+              <FormControl mt={4} isRequired>
+                <FormLabel>PDF path</FormLabel>
+                <Input
+                  value={path}
+                  autoComplete="off"
+                  placeholder="presentations/my-poster.pdf"
+                  onChange={(e) => {
+                    setPath(e.target.value)
+                    setPathEdited(true)
+                  }}
+                />
+                <FormHelperText>
+                  Where the pipeline exports it in the project, with a
+                  PowerPoint copy beside it.
+                </FormHelperText>
+              </FormControl>
+            </ModalBody>
+            <ModalFooter gap={3}>
+              <Button
+                variant="primary"
+                type="submit"
+                isLoading={mutation.isPending}
+                isDisabled={!googleConnected || !title || !path}
+              >
+                Create
+              </Button>
+              <Button onClick={close}>Cancel</Button>
+            </ModalFooter>
+          </>
+        )}
+      </ModalContent>
+    </Modal>
+  )
+}
+
+interface PresCardProps {
+  presentation: Presentation
+  onClick: () => void
+}
+
+function PresCard({ presentation, onClick }: PresCardProps) {
+  const borderColor = useColorModeValue("gray.200", "gray.600")
+  const bg = useColorModeValue("white", "gray.800")
+  const hoverBg = useColorModeValue("gray.50", "gray.700")
+  const isPdf = presentation.path.toLowerCase().endsWith(".pdf")
+  const src = presentation.content
+    ? `data:application/pdf;base64,${presentation.content}`
+    : presentation.url
+      ? String(presentation.url)
+      : null
+  // Previews are rendered at their own size once scrolled near, since a
+  // poster rendered in full takes a lot of memory
+  const previewRef = useRef<HTMLDivElement>(null)
+  const [previewWidth, setPreviewWidth] = useState<number>()
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el || !isPdf || !src) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setPreviewWidth(el.clientWidth)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: "200px" },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [isPdf, src])
+  return (
+    <LinkBox
+      borderWidth={1}
+      borderColor={borderColor}
+      borderRadius="lg"
+      overflow="hidden"
+      bg={bg}
+      _hover={{ bg: hoverBg, shadow: "md" }}
+      sx={{
+        "&:has(.chakra-linkbox__overlay:focus-visible)": {
+          boxShadow: "outline",
+        },
+      }}
+      transition="all 0.15s"
+    >
+      <Box ref={previewRef} height="160px" overflow="hidden" bg="gray.50">
+        {isPdf && src ? (
+          previewWidth !== undefined && (
+            <PdfCanvas src={src} maxPages={1} renderWidth={previewWidth} />
+          )
+        ) : (
+          <Flex
+            height="100%"
+            direction="column"
+            align="center"
+            justify="center"
+            color="gray.400"
+            gap={2}
+          >
+            <Icon as={FiMonitor} fontSize="3xl" />
+            {!src && (
+              <Text fontSize="xs" textAlign="center" px={3}>
+                Not exported yet; run the pipeline to export it
+              </Text>
+            )}
+          </Flex>
+        )}
+      </Box>
+      <Box p={3}>
+        <Flex align="center" gap={2}>
+          <LinkOverlay
+            as="button"
+            type="button"
+            onClick={onClick}
+            textAlign="left"
+            flex={1}
+            minW={0}
+            _focusVisible={{ outline: "none" }}
+          >
+            <Text fontWeight="semibold" fontSize="sm" noOfLines={1}>
+              {presentation.title}
+            </Text>
+          </LinkOverlay>
+          {presentation.kind && (
+            <Badge fontSize="xs" flexShrink={0}>
+              {presentation.kind}
+            </Badge>
+          )}
+          {presentation.edit_url && (
+            <IconButton
+              as="a"
+              // SWC 1.12 renames target to edit_url if it follows href
+              target="_blank"
+              href={safeHref(presentation.edit_url)}
+              rel="noopener noreferrer"
+              aria-label="Open in Google Slides"
+              title="Open in Google Slides"
+              icon={<FiExternalLink />}
+              size="xs"
+              variant="ghost"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
+        </Flex>
+        <Text fontSize="xs" color="gray.500" noOfLines={1}>
+          {presentation.path}
+        </Text>
+      </Box>
+    </LinkBox>
+  )
+}
+
 function Presentations() {
   const { accountName, projectName } = Route.useParams()
   const layoutSearch = useSearch({
@@ -151,20 +494,20 @@ function Presentations() {
   )
   const { path: selectedPath } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
-  const setSelectedPath = (p: string) =>
+  const setSelectedPath = (p: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, path: p }) })
   const { user } = useAuth()
   const queryClient = useQueryClient()
+  const newGoogleSlidesModal = useDisclosure()
   const [showResolved, setShowResolved] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pdfScrollRef = useRef<(h: any) => void>(() => {})
 
-  const selectedPres =
-    presentationsRequest.data?.find((p) => p.path === selectedPath) ??
-    presentationsRequest.data?.[0]
+  const selectedPres = presentationsRequest.data?.find(
+    (p) => p.path === selectedPath,
+  )
 
   const isPdf = selectedPres?.path?.toLowerCase().endsWith(".pdf") ?? false
-
   const commentsQuery = useQuery({
     queryKey: [
       "projects",
@@ -244,140 +587,176 @@ function Presentations() {
 
   return (
     <>
-      {presentationsRequest.isPending ? (
-        <LoadingSpinner height="100vh" />
-      ) : (
-        <Flex height="100%" gap={0}>
-          {/* Left: index */}
-          <PageMenu>
-            <Flex align="center" mb={2}>
-              <Heading size="md">Presentations</Heading>
-            </Flex>
-            {presentationsRequest.data?.map((pres) => {
-              const isSelected = pres.path === selectedPres?.path
-              return (
-                <Tooltip key={pres.path} label={pres.title} placement="right">
-                  <HStack
-                    px={1}
-                    py={0.5}
-                    borderRadius="md"
-                    cursor="pointer"
-                    fontWeight={isSelected ? "semibold" : "normal"}
-                    _hover={{ color: "blue.500" }}
-                    onClick={() => setSelectedPath(pres.path)}
-                    spacing={1}
-                  >
-                    <Icon as={FiFile} flexShrink={0} />
-                    <Text fontSize="sm" noOfLines={1}>
-                      {pres.title}
-                    </Text>
-                  </HStack>
-                </Tooltip>
-              )
-            })}
-          </PageMenu>
-
-          {/* Center: presentation viewer */}
-          <Box flex={1} minW={0} mr={6} minH={0}>
-            {selectedPres ? (
-              isPdf && selectedPres.url ? (
-                <Box height="82vh">
-                  <PdfAnnotator
-                    url={String(selectedPres.url)}
-                    ownerName={accountName}
-                    projectName={projectName}
-                    publicationPath={selectedPres.path}
-                    artifactType="presentation"
-                    gitRef={ref}
-                    showResolved={showResolved}
-                    pagedNav
-                    externalScrollRef={pdfScrollRef}
-                  />
-                </Box>
-              ) : (
-                <Box height="82vh" borderRadius="lg" overflow="hidden">
-                  <PresentationView presentation={selectedPres} />
-                </Box>
-              )
-            ) : (
-              <NoArtifactFound
-                icon={FiMonitor}
-                title="No presentations found"
-                hint={
-                  <>
-                    Declare slides or a poster in the <Code>presentations</Code>{" "}
-                    section of <Code>calkit.yaml</Code> to show them here.
-                  </>
-                }
-                docsUrl="https://docs.calkit.org/calkit-yaml/"
-              />
-            )}
-          </Box>
-
-          {/* Right: info + comments */}
-          {selectedPres && (
-            <Box w="280px" flexShrink={0} overflowY="auto">
-              <VStack align="stretch" spacing={3}>
-                <PresInfo presentation={selectedPres} />
-                {selectedPres.path && (
-                  <Box bg={secBgColor} borderRadius="lg" p={3}>
-                    <ArtifactReleasesPanel
-                      ownerName={accountName}
-                      projectName={projectName}
-                      path={selectedPres.path}
-                      userHasWriteAccess={userHasWriteAccess}
-                      kind="presentation"
-                    />
-                  </Box>
-                )}
-                <CommentsPanel
-                  comments={comments.map(projectCommentToPanelComment)}
-                  isLoading={commentsQuery.isPending}
-                  canComment={!!user}
-                  canResolve={!!user}
-                  showResolved={showResolved}
-                  onShowResolvedChange={setShowResolved}
-                  showCreateIssueCheckbox
-                  emptyText="Select text in the PDF or use the button below to add a comment."
-                  onHighlightClick={(c) => {
-                    const h = highlights.find((x) => x.dbId === c.id)
-                    if (h) pdfScrollRef.current(h)
-                  }}
-                  onPostComment={(body, opts) =>
-                    postCommentMutation.mutateAsync({
-                      body,
-                      createIssue: opts.createIssue,
-                    })
-                  }
-                  postingComment={postCommentMutation.isPending}
-                  onPostReply={(parentId, body) =>
-                    replyCommentMutation.mutateAsync({
-                      commentId: parentId,
-                      body,
-                    })
-                  }
-                  postingReplyForId={
-                    replyCommentMutation.isPending
-                      ? replyCommentMutation.variables?.commentId ?? null
-                      : null
-                  }
-                  onResolve={(id, resolved) =>
-                    resolveCommentMutation.mutate({
-                      commentId: id,
-                      resolved,
-                    })
-                  }
-                  resolvingId={
-                    resolveCommentMutation.isPending
-                      ? resolveCommentMutation.variables?.commentId ?? null
-                      : null
-                  }
-                />
-              </VStack>
-            </Box>
+      <Box>
+        <Flex align="center" mb={4} gap={2}>
+          <Heading size="md">Presentations</Heading>
+          {userHasWriteAccess && !ref && (
+            <Menu>
+              <MenuButton
+                as={Button}
+                variant="primary"
+                height="25px"
+                width="9px"
+                px={1}
+                aria-label="New presentation"
+              >
+                <Icon as={FaPlus} fontSize="xs" />
+              </MenuButton>
+              <MenuList>
+                <MenuItem onClick={newGoogleSlidesModal.onOpen}>
+                  New Google Slides presentation
+                </MenuItem>
+              </MenuList>
+            </Menu>
           )}
         </Flex>
-      )}
+        <NewGoogleSlides
+          isOpen={newGoogleSlidesModal.isOpen}
+          onClose={newGoogleSlidesModal.onClose}
+          accountName={accountName}
+          projectName={projectName}
+        />
+        {presentationsRequest.isPending ? (
+          <LoadingSpinner height="300px" />
+        ) : presentationsRequest.data?.length ? (
+          <SimpleGrid columns={{ base: 1, md: 2, lg: 3, xl: 4 }} spacing={4}>
+            {presentationsRequest.data.map((pres) => (
+              <PresCard
+                key={pres.path}
+                presentation={pres}
+                onClick={() => setSelectedPath(pres.path)}
+              />
+            ))}
+          </SimpleGrid>
+        ) : (
+          <NoArtifactFound
+            icon={FiMonitor}
+            title="No presentations found"
+            hint={
+              <>
+                Declare slides or a poster in the <Code>presentations</Code>{" "}
+                section of <Code>calkit.yaml</Code> to show them here.
+              </>
+            }
+            docsUrl="https://docs.calkit.org/calkit-yaml/"
+          >
+            {userHasWriteAccess && !ref && (
+              <Button
+                mt={3}
+                size="sm"
+                variant="primary"
+                onClick={newGoogleSlidesModal.onOpen}
+              >
+                New Google Slides presentation
+              </Button>
+            )}
+          </NoArtifactFound>
+        )}
+      </Box>
+      <Modal
+        isOpen={!!selectedPres}
+        onClose={() => setSelectedPath(undefined)}
+        size="full"
+        motionPreset="none"
+      >
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>{selectedPres?.title}</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            {selectedPres && (
+              <Flex height="100%" gap={6}>
+                <Box flex={1} minW={0} minH={0}>
+                  {isPdf && selectedPres.url ? (
+                    <Box height="82vh">
+                      <PdfAnnotator
+                        url={String(selectedPres.url)}
+                        ownerName={accountName}
+                        projectName={projectName}
+                        publicationPath={selectedPres.path}
+                        artifactType="presentation"
+                        gitRef={ref}
+                        showResolved={showResolved}
+                        pagedNav
+                        externalScrollRef={pdfScrollRef}
+                      />
+                    </Box>
+                  ) : selectedPres.url || selectedPres.content ? (
+                    <Box height="82vh" borderRadius="lg" overflow="hidden">
+                      <PresentationView presentation={selectedPres} />
+                    </Box>
+                  ) : (
+                    <NoArtifactFound
+                      icon={FiMonitor}
+                      title="Not exported yet"
+                      hint="Run the pipeline to export it."
+                    />
+                  )}
+                </Box>
+                <Box w="280px" flexShrink={0} overflowY="auto">
+                  <VStack align="stretch" spacing={3}>
+                    <PresInfo presentation={selectedPres} />
+                    {selectedPres.path && (
+                      <Box bg={secBgColor} borderRadius="lg" p={3}>
+                        <ArtifactReleasesPanel
+                          ownerName={accountName}
+                          projectName={projectName}
+                          path={selectedPres.path}
+                          userHasWriteAccess={userHasWriteAccess}
+                          kind="presentation"
+                        />
+                      </Box>
+                    )}
+                    <CommentsPanel
+                      comments={comments.map(projectCommentToPanelComment)}
+                      isLoading={commentsQuery.isPending}
+                      canComment={!!user}
+                      canResolve={!!user}
+                      showResolved={showResolved}
+                      onShowResolvedChange={setShowResolved}
+                      showCreateIssueCheckbox
+                      emptyText="Select text in the PDF or use the button below to add a comment."
+                      onHighlightClick={(c) => {
+                        const h = highlights.find((x) => x.dbId === c.id)
+                        if (h) pdfScrollRef.current(h)
+                      }}
+                      onPostComment={(body, opts) =>
+                        postCommentMutation.mutateAsync({
+                          body,
+                          createIssue: opts.createIssue,
+                        })
+                      }
+                      postingComment={postCommentMutation.isPending}
+                      onPostReply={(parentId, body) =>
+                        replyCommentMutation.mutateAsync({
+                          commentId: parentId,
+                          body,
+                        })
+                      }
+                      postingReplyForId={
+                        replyCommentMutation.isPending
+                          ? replyCommentMutation.variables?.commentId ?? null
+                          : null
+                      }
+                      onResolve={(id, resolved) =>
+                        resolveCommentMutation.mutate({
+                          commentId: id,
+                          resolved,
+                        })
+                      }
+                      resolvingId={
+                        resolveCommentMutation.isPending
+                          ? resolveCommentMutation.variables?.commentId ?? null
+                          : null
+                      }
+                    />
+                  </VStack>
+                </Box>
+              </Flex>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </>
   )
 }

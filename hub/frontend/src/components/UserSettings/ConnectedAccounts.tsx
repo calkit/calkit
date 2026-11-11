@@ -11,8 +11,9 @@ import {
   useDisclosure,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useSearch } from "@tanstack/react-router"
 import mixpanel from "mixpanel-browser"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FaCheck, FaPlus, FaTimes, FaTrash } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
 import LoadingSpinner from "../Common/LoadingSpinner"
@@ -51,9 +52,10 @@ function ConnectedAccounts() {
 
   const handleConnectGoogle = () => {
     mixpanel.track("Clicked connect Google Drive")
-    // Google Drive API scope
+    // Google Drive API scope, asking which account, since someone may be
+    // signed in to a work account whose admin doesn't allow Calkit
     const scope = "https://www.googleapis.com/auth/drive.file"
-    location.href = `${getGoogleAuthUrl()}?client_id=${googleClientId}&state=${createGoogleOAuthState()}&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&response_type=code&redirect_uri=${encodeURIComponent(getGoogleRedirectUri())}`
+    location.href = `${getGoogleAuthUrl()}?client_id=${googleClientId}&state=${createGoogleOAuthState()}&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent%20select_account&include_granted_scopes=true&response_type=code&redirect_uri=${encodeURIComponent(getGoogleRedirectUri())}`
   }
   // Zotero uses OAuth 1.0a, whose requests must be signed with our client
   // secret, so the backend has to hand us the authorization URL.
@@ -72,6 +74,20 @@ function ConnectedAccounts() {
     queryFn: () =>
       UsersService.getUserConnectedAccounts().then((response) => response.data),
     queryKey: ["user", "connected-accounts"],
+  })
+  // The CLI links here to connect Google when a command needs it
+  const { connect } = useSearch({ from: "/_layout/settings" })
+  const startedConnecting = useRef(false)
+  useEffect(() => {
+    if (
+      connect === "google" &&
+      connectedAccountsQuery.isSuccess &&
+      !connectedAccountsQuery.data?.google &&
+      !startedConnecting.current
+    ) {
+      startedConnecting.current = true
+      handleConnectGoogle()
+    }
   })
   const ghInstallQuery = useQuery({
     queryFn: () =>

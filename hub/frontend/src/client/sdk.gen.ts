@@ -23,6 +23,7 @@ import type {
   BodyProjectsPostProjectPublication,
   BodyProjectsPostProjectUpload,
   BodyProjectsPutProjectContents,
+  BodyUsersPostUserGooglePresentationFigure,
   CheckIn,
   CommentReply,
   ContentPatch,
@@ -261,6 +262,10 @@ import type {
   GetUserGithubReposErrors,
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
+  GetUserGooglePresentationErrors,
+  GetUserGooglePresentationExportErrors,
+  GetUserGooglePresentationExportResponses,
+  GetUserGooglePresentationResponses,
   GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
   GetUserOverleafSessionResponses,
@@ -280,6 +285,8 @@ import type {
   GitHubTokenReq,
   GlobalSearchErrors,
   GlobalSearchResponses,
+  GooglePresentationPost,
+  GoogleSlidesPresentationPost,
   ImportGithubReleasesErrors,
   ImportGithubReleasesResponses,
   IssuePatch,
@@ -400,6 +407,8 @@ import type {
   PostProjectFsOpResponses,
   PostProjectGithubReleaseErrors,
   PostProjectGithubReleaseResponses,
+  PostProjectGoogleSlidesPresentationErrors,
+  PostProjectGoogleSlidesPresentationResponses,
   PostProjectInvitationErrors,
   PostProjectInvitationRedemptionErrors,
   PostProjectInvitationRedemptionResponses,
@@ -464,6 +473,10 @@ import type {
   PostUserGithubAuthResponses,
   PostUserGoogleAuthErrors,
   PostUserGoogleAuthResponses,
+  PostUserGooglePresentationErrors,
+  PostUserGooglePresentationFigureErrors,
+  PostUserGooglePresentationFigureResponses,
+  PostUserGooglePresentationResponses,
   PostUserSessionsEndOthersResponses,
   PostUserTokenErrors,
   PostUserTokenResponses,
@@ -2171,6 +2184,169 @@ export class UsersService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Post User Google Presentation
+   *
+   * Create a Google Slides presentation in the user's Google Drive.
+   */
+  public static postUserGooglePresentation<ThrowOnError extends boolean = true>(
+    parameters: {
+      googlePresentationPost: GooglePresentationPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserGooglePresentationResponses,
+    PostUserGooglePresentationErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "googlePresentationPost", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserGooglePresentationResponses,
+      PostUserGooglePresentationErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/google/presentations",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Google Presentation
+   *
+   * Get a Google Slides presentation's title, and when it was last
+   * edited.
+   */
+  public static getUserGooglePresentation<ThrowOnError extends boolean = true>(
+    parameters: {
+      presentation_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserGooglePresentationResponses,
+    GetUserGooglePresentationErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "presentation_id" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetUserGooglePresentationResponses,
+      GetUserGooglePresentationErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/google/presentations/{presentation_id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post User Google Presentation Figure
+   *
+   * Put the latest version of a project figure in a Google Slides
+   * presentation, replacing the images tagged with its path.
+   */
+  public static postUserGooglePresentationFigure<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      presentation_id: string
+      path: string
+      bodyUsersPostUserGooglePresentationFigure: BodyUsersPostUserGooglePresentationFigure
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserGooglePresentationFigureResponses,
+    PostUserGooglePresentationFigureErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "presentation_id" },
+            { in: "query", key: "path" },
+            { key: "bodyUsersPostUserGooglePresentationFigure", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostUserGooglePresentationFigureResponses,
+      PostUserGooglePresentationFigureErrors,
+      ThrowOnError
+    >({
+      ...formDataBodySerializer,
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/google/presentations/{presentation_id}/figures",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": null,
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get User Google Presentation Export
+   *
+   * Export a Google Slides presentation as a PDF or PowerPoint file.
+   */
+  public static getUserGooglePresentationExport<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      presentation_id: string
+      format: "pdf" | "pptx"
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserGooglePresentationExportResponses,
+    GetUserGooglePresentationExportErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "presentation_id" },
+            { in: "query", key: "format" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetUserGooglePresentationExportResponses,
+      GetUserGooglePresentationExportErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/google/presentations/{presentation_id}/export",
+      ...options,
+      ...params,
     })
   }
 
@@ -5176,6 +5352,56 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/presentations",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Post Project Google Slides Presentation
+   *
+   * Create a Google Slides presentation in the user's Google Drive and
+   * add it to the project, with the stage that exports it.
+   */
+  public static postProjectGoogleSlidesPresentation<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      googleSlidesPresentationPost: GoogleSlidesPresentationPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectGoogleSlidesPresentationResponses,
+    PostProjectGoogleSlidesPresentationErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "googleSlidesPresentationPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectGoogleSlidesPresentationResponses,
+      PostProjectGoogleSlidesPresentationErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/presentations/google-slides",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

@@ -750,6 +750,18 @@ def get_status(
             # reporting status
             step("Syncing zip files")
             calkit.dvc.zip.sync_all(direction="to-zip")
+            if _has_google_slides_stages(ck_info):
+                from calkit.cli.google import record_edit_times
+
+                step("Checking Google Slides")
+                try:
+                    record_edit_times(ck_info, quick=True)
+                except Exception as e:
+                    warn(
+                        f"Failed to check Google Slides for edits ({e}), so "
+                        "edited presentations may not show as out of date",
+                        err=as_json,
+                    )
             pipeline_status = calkit.pipeline.get_status(
                 ck_info=ck_info,
                 targets=targets,
@@ -1877,8 +1889,21 @@ def _warn_on_hub_mismatch() -> None:
         )
 
 
+# What ``calkit pull`` can bring in, in the order it does
+PULL_TARGETS = ["git", "dvc", "google"]
+
+
 @app.command(name="pull")
 def pull(
+    targets: Annotated[
+        Optional[list[str]],
+        typer.Argument(
+            help=(
+                "What to pull: 'git', 'dvc', 'google' (whether Google Slides "
+                "presentations were edited), or 'all'. Defaults to all."
+            ),
+        ),
+    ] = None,
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
     no_dvc: Annotated[
         bool, typer.Option("--no-dvc", help="Do not pull from DVC.")
@@ -1909,14 +1934,32 @@ def pull(
         ),
     ] = False,
 ) -> None:
-    """Pull with both Git and DVC."""
+    """Pull with Git and DVC, and check whether Google Slides presentations
+    were edited.
+    """
+    selected = set(PULL_TARGETS)
+    if targets:
+        selected = set()
+        for target in targets:
+            if target == "all":
+                selected.update(PULL_TARGETS)
+            elif target in PULL_TARGETS:
+                selected.add(target)
+            else:
+                raise_error(
+                    f"Invalid target to pull: '{target}'; choose from "
+                    + ", ".join(PULL_TARGETS + ["all"])
+                )
+    for target, excluded in [("dvc", no_dvc), ("git", no_git)]:
+        if excluded:
+            selected.discard(target)
     _warn_on_hub_mismatch()
     if force:
         if "-f" not in git_args and "--force" not in git_args:
             git_args.append("-f")
         if "-f" not in dvc_args and "--force" not in dvc_args:
             dvc_args.append("-f")
-    if not no_git:
+    if "git" in selected:
         typer.echo("Git pulling")
         # So Git merges dvc.lock and stage run records stage by stage
         calkit.merge.configure_driver()
@@ -1936,7 +1979,7 @@ def pull(
                     "conflicts in dvc.lock and stage run records"
                 )
             raise_error("Git pull failed")
-    if not no_dvc:
+    if "dvc" in selected:
         typer.echo("DVC pulling")
         if not no_check_auth:
             # Check that our dvc remotes all have our DVC token set for them
@@ -1978,6 +2021,37 @@ def pull(
                 if sp_result != 0:
                     raise_error(f"DVC pull failed in subproject: {sp_path}")
                 calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
+
+    # Presentations edited in Google Slides since they were exported
+    ck_info = calkit.load_calkit_info()
+    if "google" in selected and _has_google_slides_stages(ck_info):
+        from calkit.cli.google import record_edit_times
+
+        typer.echo("Checking Google Slides")
+        try:
+            edited = record_edit_times(ck_info)
+        except Exception as e:
+            # Only a failure of what was asked for by name fails the pull
+            msg = f"Failed to check whether Google Slides were edited: {e}"
+            if targets and "google" in targets:
+                raise_error(msg)
+            warn(msg)
+        else:
+            typer.echo(
+                "Edited in Google Slides, so out of date: " + ", ".join(edited)
+                if edited
+                else "No Google Slides presentations were edited"
+            )
+    elif targets and "google" in targets:
+        typer.echo("The project exports no Google Slides presentations")
+
+
+def _has_google_slides_stages(ck_info: dict) -> bool:
+    return any(
+        isinstance(s, dict) and s.get("kind") == "google-slides-export"
+        for _, info in calkit.iter_projects(ck_info=ck_info)
+        for s in ((info.get("pipeline") or {}).get("stages") or {}).values()
+    )
 
 
 # What ``calkit push`` can send, in the order it sends them
@@ -3440,6 +3514,16 @@ def run(
                     allow_stale=True,
                     no_build=True,
                 )
+        # Each Google Slides presentation's last edit, so one edited since
+        # it was exported reruns. Asking takes too long for every status.
+        if _has_google_slides_stages(ck_info):
+            from calkit.cli.google import record_edit_times
+
+            step("Checking Google Slides", "📽️")
+            try:
+                record_edit_times(ck_info)
+            except Exception as e:
+                warn(f"Failed to check whether Google Slides were edited: {e}")
         # Compile the DVC pipeline (and subproject pipelines)
         dvc_stages = None
         if ck_info.get("pipeline", {}) or ck_info.get("subprojects"):

@@ -319,6 +319,7 @@ class Stage(Model):
         "manual-step",
         "inkscape-export",
         "gimp-export",
+        "google-slides-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -2466,6 +2467,112 @@ class GimpExportStage(AppExportStage):
         )
 
 
+class GoogleSlidesExportStage(Stage):
+    """A Google Slides presentation exported as a PDF, or as a PowerPoint
+    copy kept in the project.
+
+    The images among its inputs, i.e., PNG, JPEG, or GIF figures, are put
+    in first: each replaces the images whose alt text title is 'calkit:'
+    and its path, e.g., 'calkit:figures/rates.png', keeping their place and
+    size, or, if there are none, is added to the first slide with that
+    title.
+
+    It goes out of date when an input changes, or when the presentation is
+    edited, which 'calkit status', 'calkit run', and 'calkit pull' check
+    for.
+    """
+
+    kind: Literal["google-slides-export"] = "google-slides-export"
+    presentation_url: str = Field(
+        description="URL of the Google Slides presentation."
+    )
+    environment: str = "_system"
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "GoogleSlidesExportStage":
+        from calkit.google import (
+            get_slides_export_mime_type,
+            get_slides_presentation_id,
+        )
+
+        get_slides_presentation_id(self.presentation_url)
+        if not self.outputs:
+            raise ValueError(
+                "A Google Slides export needs an output, e.g., a PDF"
+            )
+        for out in self.outputs:
+            get_slides_export_mime_type(
+                out if isinstance(out, str) else out.path
+            )
+        return self
+
+    @property
+    def figure_paths(self) -> list[str]:
+        """The inputs put in the presentation, which are its images."""
+        from calkit.google import FIGURE_MIME_TYPES
+
+        return [
+            path
+            for path in self.input_paths
+            if posixpath.splitext(path)[1].lower() in FIGURE_MIME_TYPES
+        ]
+
+    @property
+    def presentation_id(self) -> str:
+        from calkit.google import get_slides_presentation_id
+
+        return get_slides_presentation_id(self.presentation_url)
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        from calkit.google import get_edit_time_path
+
+        deps = super().dvc_deps
+        edit_time_path = self.path_from_wdir(
+            get_edit_time_path(self.presentation_id)
+        )
+        if edit_time_path not in deps:
+            deps.append(edit_time_path)
+        return deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        # Kept while it runs, so an export identical to the last but for its
+        # date can be left alone, rather than rerunning what depends on it
+        outs: list[str | dict] = []
+        for out in super().dvc_outs:
+            if isinstance(out, str):
+                outs.append({out: dict(persist=True)})
+            else:
+                outs.append(
+                    {
+                        path: dict(opts or {}, persist=True)
+                        for path, opts in out.items()
+                    }
+                )
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        from calkit.google import get_edit_time_path
+
+        cmd = (
+            f"calkit export google-slides {shlex.quote(self.presentation_url)}"
+        )
+        for out in self.outputs:
+            path = out if isinstance(out, str) else out.path
+            cmd += f" -o {shlex.quote(path)}"
+        for figure in self.figure_paths:
+            cmd += f" --figure {shlex.quote(figure)}"
+        # It runs in the wdir, but records the edit under the project
+        if self.wdir is not None:
+            edit_time_path = self.path_from_wdir(
+                get_edit_time_path(self.presentation_id)
+            )
+            cmd += f" --edit-time-path {shlex.quote(edit_time_path)}"
+        return cmd
+
+
 class MarimoHtmlWasmStage(Stage):
     """A stage that exports a marimo notebook to a WebAssembly app.
 
@@ -2877,6 +2984,7 @@ class Pipeline(Model):
                 | ManualStepStage
                 | InkscapeExportStage
                 | GimpExportStage
+                | GoogleSlidesExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

@@ -693,3 +693,68 @@ def import_from_zenodo(
                 commit_paths
                 + ["-m", f"Import {src} from Zenodo to {dest_dir}"]
             )
+
+
+@import_app.command(name="google-slides")
+def import_google_slides(
+    url: Annotated[
+        str, typer.Argument(help="URL of the Google Slides presentation.")
+    ],
+    path: Annotated[
+        str,
+        typer.Option(
+            "--path", help="PDF to export it to, e.g., 'poster/poster.pdf'."
+        ),
+    ],
+    kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help="Kind of presentation, either 'slides' or 'poster'.",
+        ),
+    ] = None,
+    stage_name: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help="Name of the stage that exports it. Defaults to 'export-' "
+            "and the PDF's name.",
+        ),
+    ] = None,
+    figures: Annotated[
+        list[str],
+        typer.Option(
+            "--figure",
+            help="Project figure to put in it, a PNG, JPEG, or GIF.",
+        ),
+    ] = [],
+    no_pptx: Annotated[
+        bool,
+        typer.Option(
+            "--no-pptx", help="Don't keep a PowerPoint copy in the project."
+        ),
+    ] = False,
+    no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
+) -> None:
+    """Add a Google Slides presentation to the project, with a stage that
+    exports it.
+    """
+    import calkit.google
+    from calkit.cli.google import add_slides_presentation, get_hub_response
+
+    try:
+        presentation_id = calkit.google.get_slides_presentation_id(url)
+        info = get_hub_response(
+            "get", f"/user/google/presentations/{presentation_id}"
+        )
+    except Exception as e:
+        raise_error(f"Failed to open the presentation: {e}")
+    add_slides_presentation(
+        info,
+        path=path,
+        kind=kind,
+        stage_name=stage_name,
+        figures=figures,
+        pptx=not no_pptx,
+        no_commit=no_commit,
+    )

@@ -16,7 +16,7 @@
 | [`add`](#top-command-add)                        | Add paths to the repo.                                                                                       |
 | [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                 |
 | [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
-| [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
+| [`pull`](#top-command-pull)                      | Pull with Git and DVC, and check whether Google Slides presentations were edited.                            |
 | [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                 |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
@@ -251,13 +251,19 @@ Options:
 
 ### `calkit pull`
 
-Pull with both Git and DVC.
+Pull with Git and DVC, and check whether Google Slides presentations were edited.
 
 Usage:
 
 ```text
-calkit pull [OPTIONS]
+calkit pull [OPTIONS] [TARGETS...]
 ```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description                                                                                                        |
+| --------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
+| `targets` | str  | no       |         | What to pull: 'git', 'dvc', 'google' (whether Google Slides presentations were edited), or 'all'. Defaults to all. |
 
 Options:
 
@@ -863,6 +869,7 @@ Create a new Calkit object.
 | [`figure\|fig`](#subcommand-new-create-figure-fig)                        | Create a new figure.                                                                              |
 | [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                                             |
 | [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                                                       |
+| [`google-slides`](#subcommand-new-create-google-slides)                   | Create a Google Slides presentation and add it to the project, with a stage that exports it.      |
 | [`question`](#subcommand-new-create-question)                             | Add a new question.                                                                               |
 | [`comment`](#subcommand-new-create-comment)                               | Start a review comment thread above a paragraph of a LaTeX or Markdown document, printing its ID. |
 | [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                                               |
@@ -1015,6 +1022,30 @@ Options:
 | `--stage`           | str     | no       |         | Name of the pipeline stage that generates this presentation. |
 | `--no-commit`       | boolean | no       | False   |                                                              |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing presentation if one exists.               |
+
+<a id="subcommand-new-create-google-slides"></a>
+
+#### `calkit new|create google-slides`
+
+Create a Google Slides presentation and add it to the project, with a stage that exports it.
+
+Usage:
+
+```text
+calkit new|create google-slides [OPTIONS]
+```
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                                  |
+| ------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--title`     | str     | yes      |         | Its title.                                                                   |
+| `--path`      | str     | yes      |         | PDF to export it to, e.g., 'poster/poster.pdf'.                              |
+| `--kind`      | str     | no       |         | Kind of presentation, either 'slides' or 'poster'.                           |
+| `--stage`     | str     | no       |         | Name of the stage that exports it. Defaults to 'export-' and the PDF's name. |
+| `--figure`    | str     | no       |         | Project figure to put in it, a PNG, JPEG, or GIF.                            |
+| `--no-pptx`   | boolean | no       | False   | Don't keep a PowerPoint copy in the project.                                 |
+| `--no-commit` | boolean | no       | False   |                                                                              |
 
 <a id="subcommand-new-create-question"></a>
 
@@ -2684,12 +2715,13 @@ Options:
 
 Import objects.
 
-| Command                                         | Description                                                 |
-| ----------------------------------------------- | ----------------------------------------------------------- |
-| [`dataset`](#subcommand-import-dataset)         | Import a dataset.                                           |
-| [`path`](#subcommand-import-path)               | Import a file from elsewhere, recording where it came from. |
-| [`environment`](#subcommand-import-environment) | Import an environment from another project.                 |
-| [`zenodo`](#subcommand-import-zenodo)           | Import files from a Zenodo record.                          |
+| Command                                             | Description                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`dataset`](#subcommand-import-dataset)             | Import a dataset.                                                              |
+| [`path`](#subcommand-import-path)                   | Import a file from elsewhere, recording where it came from.                    |
+| [`environment`](#subcommand-import-environment)     | Import an environment from another project.                                    |
+| [`zenodo`](#subcommand-import-zenodo)               | Import files from a Zenodo record.                                             |
+| [`google-slides`](#subcommand-import-google-slides) | Add a Google Slides presentation to the project, with a stage that exports it. |
 
 <a id="subcommand-import-dataset"></a>
 
@@ -2811,6 +2843,35 @@ Options:
 | `--storage`       | str     | no       |         | Storage backend to use (Git or DVC). If not specified, will be chosen based on size. |
 | `--no-commit`     | boolean | no       | False   | Do not commit changes to project.                                                    |
 
+<a id="subcommand-import-google-slides"></a>
+
+#### `calkit import google-slides`
+
+Add a Google Slides presentation to the project, with a stage that exports it.
+
+Usage:
+
+```text
+calkit import google-slides [OPTIONS] URL
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                            |
+| -------- | ---- | -------- | ------- | -------------------------------------- |
+| `url`    | str  | yes      |         | URL of the Google Slides presentation. |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                                  |
+| ------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--path`      | str     | yes      |         | PDF to export it to, e.g., 'poster/poster.pdf'.                              |
+| `--kind`      | str     | no       |         | Kind of presentation, either 'slides' or 'poster'.                           |
+| `--stage`     | str     | no       |         | Name of the stage that exports it. Defaults to 'export-' and the PDF's name. |
+| `--figure`    | str     | no       |         | Project figure to put in it, a PNG, JPEG, or GIF.                            |
+| `--no-pptx`   | boolean | no       | False   | Don't keep a PowerPoint copy in the project.                                 |
+| `--no-commit` | boolean | no       | False   |                                                                              |
+
 <a id="command-group-office"></a>
 
 ### `calkit office`
@@ -2916,10 +2977,11 @@ Options:
 
 Export data and artifacts from various applications.
 
-| Command                                   | Description                                 |
-| ----------------------------------------- | ------------------------------------------- |
-| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                |
-| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file. |
+| Command                                             | Description                                                    |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape)           | Export a figure from an SVG.                                   |
+| [`gimp`](#subcommand-export-gimp)                   | Export a flattened figure from an XCF file.                    |
+| [`google-slides`](#subcommand-export-google-slides) | Put figures into a Google Slides presentation, then export it. |
 
 <a id="subcommand-export-inkscape"></a>
 
@@ -2969,6 +3031,32 @@ Options:
 | Option           | Type | Required | Default | Description                             |
 | ---------------- | ---- | -------- | ------- | --------------------------------------- |
 | `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
+
+<a id="subcommand-export-google-slides"></a>
+
+#### `calkit export google-slides`
+
+Put figures into a Google Slides presentation, then export it.
+
+Usage:
+
+```text
+calkit export google-slides [OPTIONS] URL
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                            |
+| -------- | ---- | -------- | ------- | -------------------------------------- |
+| `url`    | str  | yes      |         | URL of the Google Slides presentation. |
+
+Options:
+
+| Option             | Type | Required | Default | Description                                                                                             |
+| ------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`   | str  | yes      |         | File to export to, a .pdf or .pptx.                                                                     |
+| `--figure`         | str  | no       |         | Project figure to put in first, replacing the images tagged with its path, or added to the first slide. |
+| `--edit-time-path` | str  | no       |         | Where to record when the presentation was last edited.                                                  |
 
 <a id="command-group-update"></a>
 

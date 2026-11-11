@@ -365,6 +365,16 @@ export type BodyProjectsPutProjectContents = {
 }
 
 /**
+ * Body_users-post_user_google_presentation_figure
+ */
+export type BodyUsersPostUserGooglePresentationFigure = {
+  /**
+   * File
+   */
+  file: Blob | File
+}
+
+/**
  * CheckIn
  *
  * What a machine reports each time it checks in.
@@ -2201,6 +2211,74 @@ export type GithubPullRequest = {
 }
 
 /**
+ * GoogleFigurePut
+ */
+export type GoogleFigurePut = {
+  /**
+   * Replaced
+   */
+  replaced: number
+  /**
+   * Added
+   */
+  added: boolean
+  /**
+   * Modified Time
+   */
+  modified_time: string
+}
+
+/**
+ * GooglePresentation
+ */
+export type GooglePresentation = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Title
+   */
+  title: string | null
+  /**
+   * Url
+   */
+  url: string
+  /**
+   * Modified Time
+   */
+  modified_time: string
+}
+
+/**
+ * GooglePresentationPost
+ */
+export type GooglePresentationPost = {
+  /**
+   * Title
+   */
+  title: string
+}
+
+/**
+ * GoogleSlidesPresentationPost
+ */
+export type GoogleSlidesPresentationPost = {
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Kind
+   */
+  kind?: "slides" | "poster" | null
+}
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -3974,6 +4052,10 @@ export type Presentation = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+  /**
+   * Edit Url
+   */
+  edit_url?: string | null
 }
 
 /**
@@ -9870,6 +9952,136 @@ export type PutUserOverleafSessionResponses = {
 export type PutUserOverleafSessionResponse =
   PutUserOverleafSessionResponses[keyof PutUserOverleafSessionResponses]
 
+export type PostUserGooglePresentationData = {
+  body: GooglePresentationPost
+  path?: never
+  query?: never
+  url: "/user/google/presentations"
+}
+
+export type PostUserGooglePresentationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserGooglePresentationError =
+  PostUserGooglePresentationErrors[keyof PostUserGooglePresentationErrors]
+
+export type PostUserGooglePresentationResponses = {
+  /**
+   * Successful Response
+   */
+  200: GooglePresentation
+}
+
+export type PostUserGooglePresentationResponse =
+  PostUserGooglePresentationResponses[keyof PostUserGooglePresentationResponses]
+
+export type GetUserGooglePresentationData = {
+  body?: never
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query?: never
+  url: "/user/google/presentations/{presentation_id}"
+}
+
+export type GetUserGooglePresentationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserGooglePresentationError =
+  GetUserGooglePresentationErrors[keyof GetUserGooglePresentationErrors]
+
+export type GetUserGooglePresentationResponses = {
+  /**
+   * Successful Response
+   */
+  200: GooglePresentation
+}
+
+export type GetUserGooglePresentationResponse =
+  GetUserGooglePresentationResponses[keyof GetUserGooglePresentationResponses]
+
+export type PostUserGooglePresentationFigureData = {
+  body: BodyUsersPostUserGooglePresentationFigure
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+  }
+  url: "/user/google/presentations/{presentation_id}/figures"
+}
+
+export type PostUserGooglePresentationFigureErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserGooglePresentationFigureError =
+  PostUserGooglePresentationFigureErrors[keyof PostUserGooglePresentationFigureErrors]
+
+export type PostUserGooglePresentationFigureResponses = {
+  /**
+   * Successful Response
+   */
+  200: GoogleFigurePut
+}
+
+export type PostUserGooglePresentationFigureResponse =
+  PostUserGooglePresentationFigureResponses[keyof PostUserGooglePresentationFigureResponses]
+
+export type GetUserGooglePresentationExportData = {
+  body?: never
+  path: {
+    /**
+     * Presentation Id
+     */
+    presentation_id: string
+  }
+  query: {
+    /**
+     * Format
+     */
+    format: "pdf" | "pptx"
+  }
+  url: "/user/google/presentations/{presentation_id}/export"
+}
+
+export type GetUserGooglePresentationExportErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserGooglePresentationExportError =
+  GetUserGooglePresentationExportErrors[keyof GetUserGooglePresentationExportErrors]
+
+export type GetUserGooglePresentationExportResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
+
 export type PostUserGoogleAuthData = {
   body: AppApiRoutesUsersOAuthCodeExchange
   path?: never
@@ -12626,6 +12838,42 @@ export type GetProjectPresentationsResponses = {
 
 export type GetProjectPresentationsResponse =
   GetProjectPresentationsResponses[keyof GetProjectPresentationsResponses]
+
+export type PostProjectGoogleSlidesPresentationData = {
+  body: GoogleSlidesPresentationPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/presentations/google-slides"
+}
+
+export type PostProjectGoogleSlidesPresentationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectGoogleSlidesPresentationError =
+  PostProjectGoogleSlidesPresentationErrors[keyof PostProjectGoogleSlidesPresentationErrors]
+
+export type PostProjectGoogleSlidesPresentationResponses = {
+  /**
+   * Successful Response
+   */
+  200: Presentation
+}
+
+export type PostProjectGoogleSlidesPresentationResponse =
+  PostProjectGoogleSlidesPresentationResponses[keyof PostProjectGoogleSlidesPresentationResponses]
 
 export type PostProjectOverleafPublicationData = {
   body: BodyProjectsPostProjectOverleafPublication

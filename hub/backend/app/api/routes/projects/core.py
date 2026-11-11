@@ -60,6 +60,7 @@ import calkit
 import calkit.core
 import calkit.detect
 import calkit.environments
+import calkit.google
 import calkit.latex
 import calkit.pipeline
 import calkit.provenance
@@ -148,6 +149,7 @@ from app.models import (
     PipelineStagePut,
     PipelineYaml,
     Presentation,
+    PresentationKind,
     Project,
     ProjectComment,
     ProjectCommentPatch,
@@ -6767,6 +6769,7 @@ def get_project_presentations(
     )
     _register_outs(pipeline.get("stages") or {}, "outs", out_path_to_stage)
 
+    ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     resp = []
     for pres in presentations:
         if "stage" not in pres and "path" in pres:
@@ -6783,6 +6786,12 @@ def get_project_presentations(
                 pres["stage"] = stage_name
         if "stage" in pres:
             pres["stage_info"] = pipeline.get("stages", {}).get(pres["stage"])
+            ck_stage = ck_stages.get(pres["stage"])
+            if (
+                isinstance(ck_stage, dict)
+                and ck_stage.get("kind") == "google-slides-export"
+            ):
+                pres["edit_url"] = ck_stage.get("presentation_url")
         if "path" in pres:
             try:
                 item = app.projects.get_contents_from_tree(
@@ -6803,6 +6812,76 @@ def get_project_presentations(
                 )
         resp.append(Presentation.model_validate(pres))
     return resp
+
+
+class GoogleSlidesPresentationPost(BaseModel):
+    title: str
+    path: str
+    kind: PresentationKind | None = None
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/presentations/google-slides"
+)
+def post_project_google_slides_presentation(
+    owner_name: str,
+    project_name: str,
+    req: GoogleSlidesPresentationPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> Presentation:
+    """Create a Google Slides presentation in the user's Google Drive and
+    add it to the project, with the stage that exports it.
+    """
+    path = _normalize_artifact_file_path(req.path)
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    ck_info = get_ck_info_from_repo(repo)
+    # Checked before the presentation is created, so one that can't be
+    # added isn't left behind in the user's Drive
+    stand_in = {
+        "id": "x" * 20,
+        "title": req.title,
+        "url": calkit.google.get_slides_presentation_url("x" * 20),
+    }
+    try:
+        calkit.google.add_slides_presentation(
+            deepcopy(ck_info), stand_in, path=path, kind=req.kind
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    client = users.get_google_slides_client(session=session, user=current_user)
+    try:
+        info = client.create_presentation(req.title)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    calkit.google.add_slides_presentation(
+        ck_info, info, path=path, kind=req.kind
+    )
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
+    edit_time_path = calkit.google.get_edit_time_path(info["id"])
+    calkit.google.write_edit_time(
+        os.path.join(repo.working_dir, edit_time_path), info["modified_time"]
+    )
+    repo.git.add(["calkit.yaml", edit_time_path])
+    repo.git.commit(["-m", f"Add presentation {path}"])
+    push_and_expire(project, repo)
+    mixpanel.user_created_google_slides_presentation(current_user)
+    return Presentation(
+        path=path,
+        title=req.title,
+        kind=req.kind,
+        stage=calkit.google.get_default_slides_stage_name(path),
+        edit_url=info["url"],
+    )
 
 
 @router.post("/projects/{owner_name}/{project_name}/publications")

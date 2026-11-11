@@ -2027,6 +2027,8 @@ class Presentation(_DeclaredArtifact):
     stage_info: DvcPipelineStage | None = None
     url: str | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # Where it's edited, when that's somewhere else, e.g., Google Slides
+    edit_url: str | None = None
 
 
 class Notebook(BaseModel):

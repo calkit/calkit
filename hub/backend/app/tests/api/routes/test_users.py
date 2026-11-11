@@ -3,12 +3,13 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import fsspec
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app import mixpanel, users
+from app import mixpanel, storage, users
 from app.config import settings
 from app.models import User, UserCreate
 from app.security import verify_password
@@ -2187,3 +2188,143 @@ def test_end_other_sessions(
         .where(RefreshToken.is_active)
     ).all()
     assert live == []
+
+
+def test_user_google_presentations(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    import calkit.google as gs
+
+    pid = "1AbCdEfGhIjKlMnOpQrStUv"
+    info = {
+        "id": pid,
+        "title": "Poster",
+        "url": gs.get_slides_presentation_url(pid),
+        "modified_time": "2026-11-09T00:00:00.000Z",
+    }
+    calls = []
+
+    class Client:
+        def __init__(self, token):
+            calls.append(("token", token))
+
+        def create_presentation(self, title):
+            calls.append(("create", title))
+            return info
+
+        def get_presentation_info(self, presentation_id):
+            if presentation_id != pid:
+                raise gs.GoogleError("Not found", 404)
+            return info
+
+        def put_figure(self, presentation_id, path, url):
+            # Held in object storage only while Slides copies it
+            fs = storage.get_object_fs()
+            held = fs.find(figures_dir)
+            calls.append(("figure", path, [fs.cat(p) for p in held], url))
+            return {"replaced": 2, "added": False, "modified_time": "t2"}
+
+        def export_presentation(self, presentation_id, mime_type):
+            if mime_type == gs.SLIDES_EXPORT_MIME_TYPES[".pptx"]:
+                raise gs.GoogleError("Google is down", 503)
+            return b"%PDF"
+
+    figures_dir = (
+        f"{storage.get_storage_root()}/{storage.GOOGLE_SLIDES_FIGURES_DIR}"
+    )
+    base = "/user/google/presentations"
+    r = client.get("/user", headers=normal_user_token_headers)
+    user = db.get(User, uuid.UUID(r.json()["id"]))
+    assert user
+
+    def save_google_token(scope):
+        resp = {"access_token": "google-token", "expires_in": 3600}
+        if scope is not None:
+            resp["scope"] = scope
+        users.save_google_token(session=db, user=user, google_resp=resp)
+
+    def google_connected():
+        r = client.get(
+            "/user/connected-accounts", headers=normal_user_token_headers
+        )
+        return r.json()["google"]
+
+    # Signing in with Google alone can't reach Drive, so the user is told
+    # how to connect it
+    save_google_token("openid email profile")
+    assert not google_connected()
+    r = client.get(f"{base}/{pid}", headers=normal_user_token_headers)
+    assert r.status_code == 403
+    assert "Connect Google Drive" in r.json()["detail"]
+    # Connecting Drive gives a token with both, which a later save that
+    # doesn't list its scopes, e.g., a refresh, keeps
+    save_google_token(f"openid email {users.GOOGLE_DRIVE_SCOPE}")
+    assert google_connected()
+    save_google_token(None)
+    assert google_connected()
+    # Object storage is kept in memory, and its presigned URLs faked
+    memory_fs = fsspec.filesystem("memory", skip_instance_cache=True)
+
+    def get_object_url(fpath, expires=None, fs=None, **kwargs):
+        return f"https://objects.test/{fpath}?Signature=x&Expires={expires}"
+
+    with (
+        patch("app.api.routes.users.calkit.google.Client", Client),
+        patch("app.storage.get_object_fs", return_value=memory_fs),
+        patch("app.storage.get_object_url", get_object_url),
+    ):
+        r = client.post(
+            base, headers=normal_user_token_headers, json={"title": "Poster"}
+        )
+        assert r.status_code == 200
+        assert r.json() == info
+        assert ("token", "google-token") in calls
+        assert ("create", "Poster") in calls
+        r = client.get(f"{base}/{pid}", headers=normal_user_token_headers)
+        assert r.json() == info
+        r = client.get(f"{base}/missing", headers=normal_user_token_headers)
+        assert r.status_code == 404
+        r = client.post(
+            f"{base}/{pid}/figures",
+            headers=normal_user_token_headers,
+            params={"path": "figures/rates.png"},
+            files={"file": ("rates.png", b"png", "image/png")},
+        )
+        assert r.json() == {
+            "replaced": 2,
+            "added": False,
+            "modified_time": "t2",
+        }
+        _, path, held, url = calls[-1]
+        assert (path, held) == ("figures/rates.png", [b"png"])
+        assert "rates.png" in url and "Signature" in url
+        assert not storage.get_object_fs().find(figures_dir)
+        # A figure Slides can't show is refused before reaching Google
+        r = client.post(
+            f"{base}/{pid}/figures",
+            headers=normal_user_token_headers,
+            params={"path": "figures/rates.pdf"},
+            files={"file": ("rates.pdf", b"pdf", "application/pdf")},
+        )
+        assert r.status_code == 422
+        assert calls[-1][0] == "figure" and calls[-1][1].endswith(".png")
+        r = client.get(
+            f"{base}/{pid}/export",
+            headers=normal_user_token_headers,
+            params={"format": "pdf"},
+        )
+        assert r.content == b"%PDF"
+        assert r.headers["content-type"] == "application/pdf"
+        # Google failing is the hub failing to reach it
+        r = client.get(
+            f"{base}/{pid}/export",
+            headers=normal_user_token_headers,
+            params={"format": "pptx"},
+        )
+        assert r.status_code == 502
+        r = client.get(
+            f"{base}/{pid}/export",
+            headers=normal_user_token_headers,
+            params={"format": "docx"},
+        )
+        assert r.status_code == 422

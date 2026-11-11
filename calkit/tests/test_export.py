@@ -11,24 +11,42 @@ from calkit.models.pipeline import (
 
 
 def test_export_stage():
-    # Every app that exports has its own stage kind
+    # Every app that exports has its own stage kind, except slides, which
+    # either of two apps exports
     kinds = [e.kind for e in calkit.export.exporters()]
-    assert kinds == ["inkscape-export", "gimp-export"]
+    assert kinds == [
+        "inkscape-export",
+        "gimp-export",
+        "pptx-export",
+        "pptx-export",
+    ]
     for source, output, app, kind in [
         # An app that can, does it as the pipeline runs
         ("figs/setup.svg", "paper/setup.png", None, "inkscape-export"),
         ("figs/setup.svg", "paper/setup.pdf", "inkscape", "inkscape-export"),
         ("figs/photo.xcf", "paper/photo.png", "GIMP", "gimp-export"),
+        ("figs/setup.pptx", "paper/setup.pdf", None, "pptx-export"),
+        # including when it's named for the app the source is made in
+        ("figs/setup.pptx", "paper/setup.png", "PowerPoint", "pptx-export"),
+        ("figs/setup.pptm", "paper/setup.png", "LibreOffice", "pptx-export"),
         # One that can't is a manual step
         ("figs/photo.psd", "paper/photo.png", "Photoshop", "manual-step"),
         ("figs/setup.svg", "paper/setup.jpg", None, "manual-step"),
+        ("figs/setup.pptx", "paper/setup.svg", "PowerPoint", "manual-step"),
+        ("figs/setup.key", "paper/setup.pdf", "Keynote", "manual-step"),
+        # The old binary format can't be prepared for cropping
+        ("figs/setup.ppt", "paper/setup.pdf", None, "manual-step"),
         # and so is one the person exports with another app
         ("figs/setup.svg", "paper/setup.png", "Illustrator", "manual-step"),
         ("figs/notes", "paper/notes.png", None, "manual-step"),
     ]:
         stage = calkit.export.export_stage(source, output, app=app)
         assert stage["kind"] == kind, (source, output, app)
-        assert stage["outputs"] == [output]
+        # A deck's starts at its first slide
+        expected: list = [output]
+        if kind == "pptx-export":
+            expected = [{"path": output, "slide": 1}]
+        assert stage["outputs"] == expected
         # What it makes is a stage calkit.yaml can have
         Pipeline.model_validate({"stages": {"export": stage}})
     assert calkit.export.export_stage(
@@ -83,3 +101,33 @@ def test_exporter_here(tmp_path, monkeypatch):
     assert inkscape.find_executable() is None
     assert inkscape.version() is None
     assert stage.run_properties() == {"inkscape_version": None}
+
+
+def test_get_slide_environment() -> None:
+    image = calkit.export.LIBREOFFICE_IMAGE
+    new = {"kind": "docker", "image": f"{image}:0.1.0"}
+    for envs, expected in [
+        # Added the first time
+        ({}, ("libreoffice", new)),
+        # and reused after, by whatever name, at whatever release
+        (
+            {"py": {"kind": "uv"}, "lo": {"kind": "docker", "image": image}},
+            ("lo", None),
+        ),
+        (
+            {"x": {"kind": "docker", "image": f"{image}@sha256:ab"}},
+            ("x", None),
+        ),
+        # without taking a name that's taken
+        (
+            {
+                "libreoffice": {"kind": "system"},
+                "libreoffice-2": {"kind": "docker", "image": "other"},
+            },
+            ("libreoffice-3", new),
+        ),
+    ]:
+        assert (
+            calkit.export.get_slide_environment({"environments": envs})
+            == expected
+        )

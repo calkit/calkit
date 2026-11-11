@@ -4763,7 +4763,7 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
     )
     assert gated == {} and errors == {}
     # An export needs its app installed where it runs
-    from calkit.export import GIMP, INKSCAPE
+    from calkit.export import GIMP, INKSCAPE, LIBREOFFICE, POWERPOINT
 
     ck_info["pipeline"]["stages"]["drawn"] = {
         "kind": "inkscape-export",
@@ -4775,14 +4775,25 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         "source_path": "made/photo.xcf",
         "outputs": ["made/photo.png"],
     }
+    ck_info["pipeline"]["stages"]["slide"] = {
+        "kind": "pptx-export",
+        "source_path": "made/setup.pptx",
+        "outputs": [{"path": "made/setup.pdf", "slide": 1}],
+    }
     monkeypatch.setattr(INKSCAPE, "executables", ["calkit-no-inkscape"])
     monkeypatch.setattr(GIMP, "executables", ["calkit-no-gimp"])
+    monkeypatch.setattr(LIBREOFFICE, "executables", ["calkit-no-soffice"])
+    monkeypatch.setattr(POWERPOINT, "executables", ["calkit-no-powerpoint"])
     gated, errors = calkit.pipeline.get_gated_stages(
-        ck_info, stage_names=["drawn", "photo"], interactive=False
+        ck_info, stage_names=["drawn", "photo", "slide"], interactive=False
     )
     assert gated == {
         "drawn": "needs Inkscape installed to export made/drawn.svg",
         "photo": "needs GIMP installed to export made/photo.xcf",
+        "slide": (
+            "needs LibreOffice or PowerPoint installed to export "
+            "made/setup.pptx"
+        ),
     }
     monkeypatch.setattr(INKSCAPE, "executables", [sys.executable])
     gated, errors = calkit.pipeline.get_gated_stages(

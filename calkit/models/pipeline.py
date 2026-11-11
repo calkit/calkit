@@ -35,6 +35,7 @@ from calkit.models.io import (
     PathInput,
     PathOutput,
     ScheduleInput,
+    SlideOutput,
 )
 from calkit.models.iteration import (
     ExpandedParametersType,
@@ -319,6 +320,7 @@ class Stage(Model):
         "manual-step",
         "inkscape-export",
         "gimp-export",
+        "pptx-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -2466,6 +2468,121 @@ class GimpExportStage(AppExportStage):
         )
 
 
+class PptxExportStage(AppExportStage):
+    """Figures exported from slides in a PowerPoint file, e.g., PDFs or
+    PNGs, each cropped to what's drawn on it.
+
+    Its environment says which app exports them: LibreOffice in a Docker
+    environment, e.g., one with the ``ghcr.io/calkit/libreoffice`` image,
+    or the app a system environment requires, PowerPoint or LibreOffice.
+    ``_system`` takes whichever is installed, so it can export differently
+    from machine to machine.
+    """
+
+    kind: Literal["pptx-export"] = "pptx-export"
+    source_path: RelativeChildPathString = Field(
+        description="The PowerPoint file to export from."
+    )
+    outputs: list[str | SlideOutput] = Field(  # type: ignore[assignment]
+        default=[],
+        description="Files to export, each with the slide it shows, e.g., "
+        "{path: figures/setup.png, slide: 3}. A PDF without one shows "
+        "every slide.",
+    )
+    dpi: int | None = Field(
+        default=None, description="Resolution of an exported PNG."
+    )
+    trim: bool | None = Field(
+        default=None,
+        description="Crop each slide to what's drawn on it, which it does "
+        "unless a PDF shows several.",
+    )
+
+    @property
+    def slide_outputs(self) -> list[tuple[list[int] | None, str]]:
+        """Each output's slides, or ``None`` for every one, and its path."""
+        outs: list[tuple[list[int] | None, str]] = []
+        for out in self.outputs:
+            if isinstance(out, str) or out.slide is None:
+                outs.append((None, out if isinstance(out, str) else out.path))
+            else:
+                slides = (
+                    [out.slide] if isinstance(out.slide, int) else out.slide
+                )
+                outs.append((list(dict.fromkeys(slides)), out.path))
+        return outs
+
+    @model_validator(mode="after")
+    def _check_one_output(self) -> "PptxExportStage":
+        if not self.outputs:
+            raise ValueError("A slide export has at least one output")
+        return self
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "PptxExportStage":
+        from calkit.export import LIBREOFFICE
+
+        for slides, path in self.slide_outputs:
+            LIBREOFFICE.check(self.source_path, path)
+            if slides is not None and (not slides or min(slides) < 1):
+                raise ValueError("Slides are numbered from 1")
+            if (
+                slides is None or len(slides) != 1
+            ) and not path.lower().endswith(".pdf"):
+                raise ValueError(
+                    f"'{path}' can show one slide, so give it a 'slide'"
+                )
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = ""
+        # A system environment can be another machine, so the command runs
+        # there; any other is where the app runs, which the command reads
+        if self._system_env is not None:
+            if self.inner_environment != self.outer_environment:
+                raise ValueError(
+                    "Slides are exported by the app one environment "
+                    f"provides, not '{self.environment}'"
+                )
+            cmd = self.xenv_cmd + " "
+        cmd += f"calkit export pptx {shlex.quote(self.source_path)}"
+        for slides, path in self.slide_outputs:
+            spec = (
+                path
+                if slides is None
+                else f"{','.join(map(str, slides))}={path}"
+            )
+            cmd += f" -o {shlex.quote(spec)}"
+        if self.dpi is not None:
+            cmd += f" --dpi {self.dpi}"
+        if self.trim is not None:
+            cmd += " --trim" if self.trim else " --no-trim"
+        if self.environment != "_system":
+            cmd += f" --env {shlex.quote(self.environment)}"
+        return cmd
+
+    def run_properties(self) -> dict[str, Any]:
+        # Which app exported it, and its version, from the environment
+        import calkit
+        from calkit.export import (
+            get_slide_exporter,
+            get_slide_exporter_version,
+        )
+
+        exporter, docker_env = get_slide_exporter(
+            self.environment,
+            ck_info=None
+            if self.environment == "_system"
+            else calkit.load_calkit_info(),
+        )
+        return {
+            f"{exporter.name}_version": get_slide_exporter_version(
+                exporter, docker_env
+            )
+        }
+
+
 class MarimoHtmlWasmStage(Stage):
     """A stage that exports a marimo notebook to a WebAssembly app.
 
@@ -2877,6 +2994,7 @@ class Pipeline(Model):
                 | ManualStepStage
                 | InkscapeExportStage
                 | GimpExportStage
+                | PptxExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage

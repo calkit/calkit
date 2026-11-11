@@ -2817,10 +2817,11 @@ Options:
 
 Work with Microsoft Office.
 
-| Command                                                           | Description                                   |
-| ----------------------------------------------------------------- | --------------------------------------------- |
-| [`excel-chart-to-image`](#subcommand-office-excel-chart-to-image) | Extract a chart from Excel and save to image. |
-| [`word-to-pdf`](#subcommand-office-word-to-pdf)                   | Convert a Word document to PDF.               |
+| Command                                                           | Description                                            |
+| ----------------------------------------------------------------- | ------------------------------------------------------ |
+| [`excel-chart-to-image`](#subcommand-office-excel-chart-to-image) | Extract a chart from Excel and save to image.          |
+| [`word-to-pdf`](#subcommand-office-word-to-pdf)                   | Convert a Word document to PDF.                        |
+| [`update-pptx-figures`](#subcommand-office-update-pptx-figures)   | Put figures in place of pictures in a PowerPoint file. |
 
 <a id="subcommand-office-excel-chart-to-image"></a>
 
@@ -2872,6 +2873,32 @@ Options:
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
 
+<a id="subcommand-office-update-pptx-figures"></a>
+
+#### `calkit office update-pptx-figures`
+
+Put figures in place of pictures in a PowerPoint file.
+
+Usage:
+
+```text
+calkit office update-pptx-figures [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                |
+| -------- | ---- | -------- | ------- | -------------------------- |
+| `source` | str  | yes      |         | PowerPoint file to update. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                                                                                   |
+| ---------------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--figure`, `-f` | str  | yes      |         | Slide, picture name in the selection pane, and figure, e.g., '3:Plot=figures/plot.png', or '3=figures/plot.png' for the slide's only picture. |
+| `--output`, `-o` | str  | no       |         | File to write (default: update in place).                                                                                                     |
+| `--dpi`          | int  | no       | 300     | Resolution of a PDF figure.                                                                                                                   |
+
 <a id="command-group-open"></a>
 
 ### `calkit open`
@@ -2916,10 +2943,11 @@ Options:
 
 Export data and artifacts from various applications.
 
-| Command                                   | Description                                 |
-| ----------------------------------------- | ------------------------------------------- |
-| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                |
-| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file. |
+| Command                                   | Description                                         |
+| ----------------------------------------- | --------------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                        |
+| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file.         |
+| [`pptx`](#subcommand-export-pptx)         | Export slides from a PowerPoint file to PDF or PNG. |
 
 <a id="subcommand-export-inkscape"></a>
 
@@ -2969,6 +2997,33 @@ Options:
 | Option           | Type | Required | Default | Description                             |
 | ---------------- | ---- | -------- | ------- | --------------------------------------- |
 | `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
+
+<a id="subcommand-export-pptx"></a>
+
+#### `calkit export pptx`
+
+Export slides from a PowerPoint file to PDF or PNG.
+
+Usage:
+
+```text
+calkit export pptx [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                     |
+| -------- | ---- | -------- | ------- | ------------------------------- |
+| `source` | str  | yes      |         | PowerPoint file to export from. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                                          |
+| --------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--output`, `-o`      | str     | yes      |         | File to export to, after the slides it shows, e.g., '3=figures/setup.png' or '2,4-6=talk.pdf'; a PDF without them shows every slide. |
+| `--dpi`               | int     | no       |         | Resolution of a PNG (default 300).                                                                                                   |
+| `--trim`, `--no-trim` | boolean | no       |         | Crop to what's drawn on each slide (default unless a PDF shows several).                                                             |
+| `--env`, `-e`         | str     | no       |         | Environment whose app exports them (default the system).                                                                             |
 
 <a id="command-group-update"></a>
 

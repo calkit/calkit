@@ -6433,6 +6433,7 @@
                 "markdown": "#/$defs/MarkdownStage",
                 "matlab-command": "#/$defs/MatlabCommandStage",
                 "matlab-script": "#/$defs/MatlabScriptStage",
+                "pptx-export": "#/$defs/PptxExportStage",
                 "procedure": "#/$defs/ProcedureStage",
                 "python-script": "#/$defs/PythonScriptStage",
                 "quarto": "#/$defs/QuartoStage",
@@ -6493,6 +6494,9 @@
               },
               {
                 "$ref": "#/$defs/GimpExportStage"
+              },
+              {
+                "$ref": "#/$defs/PptxExportStage"
               },
               {
                 "$ref": "#/$defs/JupyterNotebookStage"
@@ -6595,6 +6599,267 @@
         "path"
       ],
       "title": "PixiEnvironment",
+      "type": "object"
+    },
+    "PptxExportStage": {
+      "additionalProperties": false,
+      "description": "Figures exported from slides in a PowerPoint file, e.g., PDFs or\nPNGs, each cropped to what's drawn on it.\n\nIts environment says which app exports them: LibreOffice in a Docker\nenvironment, e.g., one with the ``ghcr.io/calkit/libreoffice`` image,\nor the app a system environment requires, PowerPoint or LibreOffice.\n``_system`` takes whichever is installed, so it can export differently\nfrom machine to machine.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "dpi": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Resolution of an exported PNG.",
+          "title": "Dpi"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "pptx-export",
+          "default": "pptx-export",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Files to export, each with the slide it shows, e.g., {path: figures/setup.png, slide: 3}. A PDF without one shows every slide.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SlideOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "source_path": {
+          "description": "The PowerPoint file to export from.",
+          "title": "Source Path",
+          "type": "string"
+        },
+        "trim": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Crop each slide to what's drawn on it, which it does unless a PDF shows several.",
+          "title": "Trim"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "source_path"
+      ],
+      "title": "PptxExportStage",
       "type": "object"
     },
     "Presentation": {
@@ -10383,6 +10648,65 @@
         "date"
       ],
       "title": "SignOff",
+      "type": "object"
+    },
+    "SlideOutput": {
+      "additionalProperties": false,
+      "description": "A file exported from slides, and which ones it shows.",
+      "properties": {
+        "delete_before_run": {
+          "default": true,
+          "description": "Delete this output before the stage runs.",
+          "title": "Delete Before Run",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "Path to the output file or directory.",
+          "title": "Path",
+          "type": "string"
+        },
+        "slide": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The slide it shows, numbered from 1 and counting hidden ones, or a list for a PDF of several; every slide if not given, which only a PDF can show.",
+          "title": "Slide"
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc",
+                "dvc-zip"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store this output. Use null to leave it untracked.",
+          "title": "Storage"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SlideOutput",
       "type": "object"
     },
     "SlurmEnvironment": {

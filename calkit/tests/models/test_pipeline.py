@@ -19,6 +19,7 @@ from calkit.models.pipeline import (
     MatlabCommandStage,
     MatlabScriptStage,
     Pipeline,
+    PptxExportStage,
     PythonScriptStage,
     QuartoStage,
     ShellScriptStage,
@@ -159,6 +160,44 @@ def test_appexportstage():
     assert s.to_dvc()["cmd"] == (
         "calkit export gimp figures/src/photo.xcf -o paper/photo.tif"
     )
+    slide = PptxExportStage.model_validate(
+        dict(
+            source_path="figures/src/lab setup.pptx",
+            outputs=[{"path": "paper/setup.pdf", "slide": 2}],
+        )
+    )
+    assert slide.to_dvc()["cmd"] == (
+        "calkit export pptx 'figures/src/lab setup.pptx' -o 2=paper/setup.pdf"
+    )
+    # A file per slide, each its own output, a PDF of several, and the
+    # environment that says which app exports them
+    slides = PptxExportStage.model_validate(
+        dict(
+            source_path="setup.pptx",
+            outputs=[
+                {"path": "figs/panel a.png", "slide": 5, "storage": "git"},
+                {"path": "figs/b.png", "slide": 3},
+                {"path": "figs/both.pdf", "slide": [7, 3, 7]},
+            ],
+            dpi=150,
+            trim=False,
+            environment="libreoffice",
+        )
+    )
+    sd = slides.to_dvc()
+    assert sd["cmd"] == (
+        "calkit export pptx setup.pptx -o '5=figs/panel a.png' "
+        "-o 3=figs/b.png -o 7,3=figs/both.pdf --dpi 150 --no-trim "
+        "--env libreoffice"
+    )
+    assert sd["outs"] == [
+        {"figs/panel a.png": {"cache": False, "persist": False}},
+        {"figs/b.png": {"cache": True, "persist": False}},
+        {"figs/both.pdf": {"cache": True, "persist": False}},
+    ]
+    # Every slide into one PDF
+    deck = PptxExportStage(source_path="talk.pptx", outputs=["talk.pdf"])
+    assert deck.to_dvc()["cmd"] == "calkit export pptx talk.pptx -o talk.pdf"
     # What an app doesn't export from, or to, is refused, as is a stage
     # with other than one output
     for model, bad, error in [
@@ -167,6 +206,28 @@ def test_appexportstage():
         (InkscapeExportStage, dict(outputs=[]), "exactly one output"),
         (GimpExportStage, dict(source_path="a.svg"), "from an XCF"),
         (GimpExportStage, dict(source_path="a.xcf", dpi=72), "dpi"),
+        (PptxExportStage, dict(source_path="a.key"), "PowerPoint file"),
+        (
+            PptxExportStage,
+            dict(
+                source_path="a.pptx", outputs=[{"path": "a.pdf", "slide": 0}]
+            ),
+            "numbered from 1",
+        ),
+        (
+            PptxExportStage,
+            dict(
+                source_path="a.pptx",
+                outputs=[{"path": "a.png", "slide": [1, 2]}],
+            ),
+            "'a.png' can show one slide",
+        ),
+        (PptxExportStage, dict(source_path="a.pptx"), "can show one slide"),
+        (
+            PptxExportStage,
+            dict(source_path="a.pptx", outputs=[]),
+            "at least one output",
+        ),
     ]:
         with pytest.raises(ValidationError, match=error):
             model(**{"source_path": "a.svg", "outputs": ["a.png"], **bad})

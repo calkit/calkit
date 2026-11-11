@@ -1310,6 +1310,9 @@ def test_no_dvc_repo(tmp_dir, tmp_path):
         for path in [".dvc", ".dvcignore", "dvc.yaml"]:
             assert not os.path.exists(path), path
 
+    # Not even checking status, as an editor does when the project opens
+    subprocess.check_call(["calkit", "status", "--json", "-c", "pipeline"])
+    assert_no_dvc()
     subprocess.check_call(["calkit", "run"])
     assert_no_dvc()
     # A stage that isn't there is still an error
@@ -1671,8 +1674,25 @@ def test_status_in_subdir_uses_the_parent_dvc_repo(tmp_dir):
     assert not os.path.exists(os.path.join("sub", ".dvc"))
     assert not os.path.exists(os.path.join("sub", ".dvcignore"))
     assert os.path.isfile(os.path.join(".dvc", "config"))
-    # With no DVC repo anywhere above it, one is still created
+    # With no DVC repo anywhere above it, one is still created for a
+    # pipeline
     shutil.rmtree(".dvc")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "sub",
+                "pipeline": {
+                    "stages": {
+                        "echo": {
+                            "kind": "command",
+                            "environment": "_system",
+                            "command": "echo hi",
+                        }
+                    }
+                },
+            },
+            f,
+        )
     proc = subprocess.run(
         ["calkit", "status"], cwd="sub", capture_output=True, text=True
     )

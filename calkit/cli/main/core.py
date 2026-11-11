@@ -685,13 +685,21 @@ def get_status(
         try:
             calkit.dvc.get_dvc_repo()
         except NotDvcRepoError:
-            typer.echo("Initializing DVC repository")
-            try:
-                result = calkit.dvc.init(quiet=True)
-                if result != 0:
-                    raise subprocess.CalledProcessError(result, "dvc init")
-            except subprocess.CalledProcessError as e:
-                raise_error(f"Failed to initialize DVC repository: {e}")
+            # Not for a project with nothing for DVC, e.g., a website
+            # showing imported results, which an editor checking its status
+            # would otherwise turn into a DVC repo
+            if (
+                (ck_info.get("pipeline") or {}).get("stages")
+                or ck_info.get("subprojects")
+                or os.path.isfile("dvc.yaml")
+            ):
+                typer.echo("Initializing DVC repository")
+                try:
+                    result = calkit.dvc.init(quiet=True)
+                    if result != 0:
+                        raise subprocess.CalledProcessError(result, "dvc init")
+                except subprocess.CalledProcessError as e:
+                    raise_error(f"Failed to initialize DVC repository: {e}")
         except Exception as e:
             # E.g., DVC's site cache dir isn't writable, which init can't fix
             raise_error(

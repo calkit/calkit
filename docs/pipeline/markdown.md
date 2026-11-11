@@ -260,6 +260,12 @@ format. The spelling matches [`\ckvalue`](../latex.md) in LaTeX, so the
 two sides of a project look the same.
 After every run, the text between each pair is rewritten from the results
 file, so the file says what was actually computed.
+
+<!-- TODO: needs human review -->
+
+Results files can be JSON, YAML, or TOML, read by their extension.
+In a project without a pipeline, e.g., one whose results are imported,
+`calkit update markdown` makes the same update.
 Keys can be dotted to reach into nested objects and lists, e.g.,
 `fit.coeffs.0`.
 The format is a Python format spec like `.2%`, or a whole replacement
@@ -302,7 +308,7 @@ results:
 ```
 
 ```md
-The RMS is <!-- ckvalue[.4f] metrics rms -->0.2933<!-- /ckvalue -->.
+The RMS is <!-- ckvalue metrics rms .4f -->0.2933<!-- /ckvalue -->.
 ```
 
 The name is shorter than the path, so repeating it on every marker costs
@@ -312,22 +318,17 @@ above it.
 It also survives the file being renamed, and says which stage produces
 the number.
 
-### The longer form
+### Older markers
 
-The original spelling still works, taking `key=` and `path=` as
-attributes, with `format=` as a whole replacement field. Note that its
-arguments are all named, and that its `format` is a replacement field
-rather than a bare spec:
+<!-- TODO: needs human review -->
 
-```md
-The RMS is <!-- calkit value key=rms path=results.json format="{:.4f}" -->0.2933<!-- /calkit value -->
-```
-
-A `calkit values path=results.json` directive sets the results file for
-every `calkit value` marker after it, so a file drawing on one results
-file needn't name it each time.
-That default never applies to a `ckvalue` marker, which always names its
-own source.
+Markers in an earlier spelling, e.g.,
+`calkit value key=rms path=results.json format="{:.4f}"`, and
+`calkit values path=...` directives that set a file for the markers after
+them, are rewritten in the form above whenever their values are updated.
+So is a compact marker with its format in brackets, as LaTeX's
+`\ckvalue[.4f]` writes it.
+Markers in code are left as they are.
 
 ## Running
 

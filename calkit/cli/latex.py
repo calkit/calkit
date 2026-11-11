@@ -2022,6 +2022,7 @@ def to_arxiv(
                 output_folder,
                 "--main",
                 tex_file,
+                "--flatten",
             ],
             check=True,
         )

@@ -643,6 +643,11 @@ def test_ryaml_keeps_how_prose_was_wrapped() -> None:
     calkit.save_calkit_info(info)
     with open("calkit.yaml") as f:
         assert f.read() == text + "owner: someone\n"
+    # A save that fails leaves the file as it was
+    with pytest.raises(Exception):
+        calkit.save_calkit_info({**info, "bad": object()})
+    with open("calkit.yaml") as f:
+        assert f.read() == text + "owner: someone\n"
     # A value that's changed is wrapped at the width like any other
     data = calkit.ryaml.load(text)
     data["questions"][0]["notes"] += " And one more sentence to fold."
@@ -688,6 +693,14 @@ def test_ryaml_keeps_how_prose_was_wrapped() -> None:
     assert calkit.ryaml.load(dumped(calkit.ryaml.load(continued))) == (
         calkit.ryaml.load(continued)
     )
+    # A quoted value replaced in code keeps its quotes, as ruamel keeps the
+    # type of what it replaced, but is wrapped like any other new value
+    data = calkit.ryaml.load(quoted)
+    data["wrapped"] = f"{long} and more"
+    out = dumped(data)
+    assert 'wrapped: "word' in out
+    assert f'wrapped: "{long} and more"\n' not in out
+    assert calkit.ryaml.load(out) == data
     # Other dumpers can still write what was read, e.g., DVC writing
     # dvc.yaml
     import ruamel.yaml

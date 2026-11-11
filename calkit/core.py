@@ -154,6 +154,10 @@ class _FoldPreservingRepresenter(ruamel.yaml.representer.RoundTripRepresenter):
 
     def represent_source_double_quoted(self, data: Any) -> Any:
         node = self.represent_double_quoted_scalarstring(data)
+        # One given a new value in code has nothing to keep, since ruamel
+        # keeps the type of the value it replaced
+        if not hasattr(data, "fold_pos"):
+            return node
         node.value = _FoldedPlainStr(node.value)
         node.value.fold_pos = data.fold_pos
         node.value.own_line = data.own_line
@@ -759,13 +763,16 @@ def save_calkit_info(
     wdir: str | PathLike | None = None,
 ) -> None:
     """Save Calkit project information to ``calkit.yaml``."""
+    from pathlib import Path
+
     fpath = "calkit.yaml"
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
-    # Always write as UTF-8; on Windows the default open() encoding is cp1252,
-    # which mangles non-ASCII content (e.g., Greek letters) into mojibake.
-    with open(fpath, "w", encoding="utf-8") as f:
-        ryaml.dump(info, f)
+    # Written as UTF-8, since on Windows the default open() encoding is
+    # cp1252, which mangles non-ASCII content (e.g., Greek letters) into
+    # mojibake, and only once the dump has succeeded, so a failure can't
+    # leave the file empty
+    ryaml.dump(info, Path(fpath))
 
 
 def load_calkit_info_object(wdir: str | None = None) -> ProjectInfo:

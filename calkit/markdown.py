@@ -3013,17 +3013,16 @@ def _is_local_path(path: str) -> bool:
     )
 
 
-def pdf_inputs(
-    text: str, markdown_path: str, results: dict[str, str] | None = None
+def get_image_paths(
+    text: str, markdown_path: str, rooted: bool = False
 ) -> list[str]:
-    """What building a Markdown file into a PDF reads besides the file:
-    the results files its values come from and the images it shows, as
-    paths from the project root."""
+    """The local images Markdown text shows, as paths from the project root.
+
+    Only what renders counts, not code, whether fenced or inline. With
+    ``rooted``, a path starting with ``/`` is from the project root, as a
+    website built from the project serves it, rather than not local.
+    """
     md_dir = os.path.dirname(markdown_path)
-    paths = [
-        v.path for v in extract_values(text, markdown_path, results=results)
-    ]
-    # Only what renders: not code, whether fenced or inline
     prose = []
     fence: str | None = None
     for line in text.splitlines():
@@ -3051,10 +3050,26 @@ def pdf_inputs(
         ref = (m.group("ref") or m.group("alt")).lower()
         if ref in defs:
             images.append(defs[ref])
+    paths = []
     for image in images:
-        if _is_local_path(image):
+        if rooted and image.startswith("/") and not image.startswith("//"):
+            paths.append(Path(os.path.normpath(image.lstrip("/"))).as_posix())
+        elif _is_local_path(image):
             joined = os.path.normpath(os.path.join(md_dir, image))
             paths.append(Path(joined).as_posix())
+    return list(dict.fromkeys(paths))
+
+
+def pdf_inputs(
+    text: str, markdown_path: str, results: dict[str, str] | None = None
+) -> list[str]:
+    """What building a Markdown file into a PDF reads besides the file:
+    the results files its values come from and the images it shows, as
+    paths from the project root."""
+    paths = [
+        v.path for v in extract_values(text, markdown_path, results=results)
+    ]
+    paths += get_image_paths(text, markdown_path)
     return list(dict.fromkeys(paths))
 
 

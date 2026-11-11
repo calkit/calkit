@@ -3017,6 +3017,7 @@ Update objects.
 | [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match this version of Calkit's recommendations. |
 | [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match this version of Calkit's recommendations. |
 | [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                         |
+| [`markdown`](#subcommand-update-markdown)             | Update the values Markdown files show, and check their imported images.              |
 | [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                             |
 | [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                             |
 | [`pixi-env`](#subcommand-update-pixi-env)             | Update a pixi environment.                                                           |
@@ -3164,6 +3165,34 @@ Options:
 | ----------- | ------- | -------- | ------- | ----------------------------------------------- |
 | `--set-env` | str     | no       |         | Environment name to associate with the notebook |
 | `--json`    | boolean | no       | False   | Output result as JSON.                          |
+
+<a id="subcommand-update-markdown"></a>
+
+#### `calkit update markdown`
+
+Update the values Markdown files show, and check their imported images.
+
+Each value marker's text, e.g., the 0.29 in '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is rewritten from the results file and key it names. Nothing else in the file changes. This is the update 'calkit run' makes after running the pipeline, for a project without one, e.g., one whose results are imported.
+
+Each local image a file shows that calkit.yaml records as imported, including one written from the project root like /images/fig.png, is checked against what the import fetched: it should exist and not have been edited since. Images are only checked, never changed; 'calkit sync import' is what brings in a newer version.
+
+Usage:
+
+```text
+calkit update markdown [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                              |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------ |
+| `paths`  | str  | no       |         | Markdown files to update. Defaults to those declared as markdown stages. |
+
+Options:
+
+| Option    | Type    | Required | Default | Description                                                                                                                              |
+| --------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--check` | boolean | no       | False   | Change nothing, and fail if any file shows a value its results file no longer holds, or an imported image that doesn't match its import. |
 
 <a id="subcommand-update-agent-skills"></a>
 

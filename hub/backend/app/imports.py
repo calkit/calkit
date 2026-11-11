@@ -73,6 +73,80 @@ def download_to(
     return total
 
 
+def verify_or_download_url(
+    url: str, dest: str, max_bytes: int = MAX_DOWNLOAD_BYTES
+) -> tuple[bool, str]:
+    """Return (downloaded, sha256), raising HTTPException on failure.
+
+    If dest does not exist the file is downloaded and moved into place.
+    If dest exists and matches the remote the temp file is removed.
+    If dest exists but content differs, raises 409.
+    """
+    import hashlib
+
+    parent = os.path.dirname(os.path.abspath(dest))
+    os.makedirs(parent, exist_ok=True)
+    if os.path.isdir(dest):
+        raise HTTPException(
+            400, f"'{dest}' is a directory, expected a file path"
+        )
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=parent)
+    try:
+        h = hashlib.sha256()
+        total = 0
+        try:
+            with requests.get(
+                url, stream=True, timeout=DOWNLOAD_TIMEOUT_S
+            ) as resp:
+                resp.raise_for_status()
+                with os.fdopen(tmp_fd, "wb") as f:
+                    tmp_fd = -1
+                    for chunk in resp.iter_content(chunk_size=CHUNK):
+                        total += len(chunk)
+                        if total > max_bytes:
+                            raise HTTPException(
+                                413,
+                                f"{url} is larger than the "
+                                f"{max_bytes // 10**9} GB limit for fetching "
+                                "through the hub",
+                            )
+                        h.update(chunk)
+                        f.write(chunk)
+        except HTTPException:
+            raise
+        except requests.RequestException as e:
+            raise HTTPException(502, f"Could not download {url}: {e}")
+        remote_hash = h.hexdigest()
+        if not os.path.exists(dest):
+            os.replace(tmp_path, dest)
+            return True, remote_hash
+        local_h = hashlib.sha256()
+        with open(dest, "rb") as f:
+            for chunk in iter(lambda: f.read(CHUNK), b""):
+                local_h.update(chunk)
+        local_hash = local_h.hexdigest()
+        if local_hash == remote_hash:
+            os.remove(tmp_path)
+            return False, remote_hash
+        raise HTTPException(
+            409,
+            f"'{dest}' already exists and does not match {url}. "
+            f"Local SHA-256: {local_hash}  Remote SHA-256: {remote_hash}",
+        )
+    except Exception:
+        if tmp_fd != -1:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise
+
+
 DOI_PREFIX_RE = re.compile(
     r"^(?:https?://)?(?:www\.|dx\.)?doi\.org/|^doi:\s*", re.IGNORECASE
 )

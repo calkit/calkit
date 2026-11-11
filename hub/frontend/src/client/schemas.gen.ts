@@ -64,6 +64,80 @@ export const ActiveCountsSchema = {
   title: "ActiveCounts",
 } as const
 
+export const AgentInfoSchema = {
+  properties: {
+    tool: {
+      type: "string",
+      maxLength: 32,
+      title: "Tool",
+    },
+    pid: {
+      type: "integer",
+      maximum: 2147483647,
+      minimum: 0,
+      title: "Pid",
+    },
+    started: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started",
+    },
+    where: {
+      type: "string",
+      enum: ["session", "tmux", "terminal"],
+      title: "Where",
+      default: "terminal",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    status: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Status",
+    },
+  },
+  type: "object",
+  required: ["tool", "pid"],
+  title: "AgentInfo",
+  description: "A coding agent running in a workspace, e.g., Claude Code.",
+} as const
+
 export const AnalyticsStatsSchema = {
   properties: {
     active_users: {
@@ -590,6 +664,171 @@ export const Body_projects_put_project_contentsSchema = {
   type: "object",
   required: ["file"],
   title: "Body_projects-put_project_contents",
+} as const
+
+export const CheckInSchema = {
+  properties: {
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["service", "foreground", "cron"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: true,
+    },
+    restart_pending: {
+      type: "boolean",
+      title: "Restart Pending",
+      default: false,
+    },
+    workspaces: {
+      items: {
+        $ref: "#/components/schemas/WorkspaceInfo",
+      },
+      type: "array",
+      maxItems: 200,
+      title: "Workspaces",
+      default: [],
+    },
+    channel_sessions: {
+      items: {
+        type: "string",
+        format: "uuid",
+      },
+      type: "array",
+      maxItems: 100,
+      title: "Channel Sessions",
+      default: [],
+    },
+    public_key: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/PublicKey",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    usage: {
+      patternProperties: {
+        "^[a-z][a-z_]*\\.[a-z_]+$": {
+          type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
+        },
+      },
+      propertyNames: {
+        maxLength: 40,
+      },
+      type: "object",
+      maxProperties: 50,
+      title: "Usage",
+      default: {},
+    },
+  },
+  type: "object",
+  title: "CheckIn",
+  description: "What a machine reports each time it checks in.",
+} as const
+
+export const CheckInRespSchema = {
+  properties: {
+    machine_id: {
+      type: "string",
+      format: "uuid",
+      title: "Machine Id",
+    },
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+    relay_url: {
+      type: "string",
+      title: "Relay Url",
+    },
+    relay_token: {
+      type: "string",
+      title: "Relay Token",
+    },
+    check_in_interval: {
+      type: "integer",
+      title: "Check In Interval",
+      default: 60,
+    },
+    grant_public_key: {
+      type: "string",
+      title: "Grant Public Key",
+    },
+    connect: {
+      type: "boolean",
+      title: "Connect",
+      default: false,
+    },
+    restart: {
+      type: "boolean",
+      title: "Restart",
+      default: false,
+    },
+    ended_sessions: {
+      items: {
+        type: "string",
+        format: "uuid",
+      },
+      type: "array",
+      title: "Ended Sessions",
+      default: [],
+    },
+  },
+  type: "object",
+  required: [
+    "machine_id",
+    "name",
+    "user_id",
+    "relay_url",
+    "relay_token",
+    "grant_public_key",
+  ],
+  title: "CheckInResp",
+  description: "Where and how a machine connects to the relay.",
+} as const
+
+export const CliTokenSchema = {
+  properties: {
+    token: {
+      type: "string",
+      title: "Token",
+    },
+  },
+  type: "object",
+  required: ["token"],
+  title: "CliToken",
 } as const
 
 export const CollaboratorSchema = {
@@ -1973,6 +2212,19 @@ export const DvcPipelineStageSchema = {
   title: "DvcPipelineStage",
 } as const
 
+export const EmailChangeCodeSchema = {
+  properties: {
+    email: {
+      type: "string",
+      format: "email",
+      title: "Email",
+    },
+  },
+  type: "object",
+  required: ["email"],
+  title: "EmailChangeCode",
+} as const
+
 export const EmailVerificationConfirmSchema = {
   properties: {
     code: {
@@ -2104,6 +2356,79 @@ export const ExistsResultSchema = {
   type: "object",
   required: ["exists"],
   title: "ExistsResult",
+} as const
+
+export const ExportStageSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    exported_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Exported By",
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "stage"],
+  title: "ExportStage",
+} as const
+
+export const ExportStagePostSchema = {
+  properties: {
+    source: {
+      type: "string",
+      title: "Source",
+    },
+    output: {
+      type: "string",
+      title: "Output",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: true,
+    },
+  },
+  type: "object",
+  required: ["source", "output"],
+  title: "ExportStagePost",
 } as const
 
 export const ExternalReleasePostSchema = {
@@ -2969,6 +3294,32 @@ export const FsOpResponseSchema = {
     "Response describing how to perform a file system operation\n(get/put/exists/list) for a given path within the project.",
 } as const
 
+export const GitHubActionsRunOptionsSchema = {
+  properties: {
+    workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Workflow",
+    },
+    inputs: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Inputs",
+      default: {},
+    },
+  },
+  type: "object",
+  title: "GitHubActionsRunOptions",
+} as const
+
 export const GitHubInstallationsSchema = {
   properties: {
     total_count: {
@@ -3058,6 +3409,48 @@ export const GitHubReleasePostSchema = {
   type: "object",
   required: ["tag_name", "body"],
   title: "GitHubReleasePost",
+} as const
+
+export const GitHubTokenSchema = {
+  properties: {
+    token: {
+      type: "string",
+      title: "Token",
+    },
+    expires: {
+      type: "integer",
+      title: "Expires",
+    },
+  },
+  type: "object",
+  required: ["token", "expires"],
+  title: "GitHubToken",
+} as const
+
+export const GitHubTokenReqSchema = {
+  properties: {
+    grant: {
+      type: "string",
+      maxLength: 8192,
+      title: "Grant",
+    },
+    owner: {
+      type: "string",
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+      title: "Owner",
+    },
+    repo: {
+      type: "string",
+      maxLength: 100,
+      pattern: "^[A-Za-z0-9._]*[A-Za-z0-9_][A-Za-z0-9._-]*$",
+      title: "Repo",
+    },
+  },
+  type: "object",
+  required: ["grant", "owner", "repo"],
+  title: "GitHubTokenReq",
+  description:
+    "What a machine shows to get a token for Git, and the GitHub repo Git\nasked about.",
 } as const
 
 export const GitImportSchema = {
@@ -3496,6 +3889,16 @@ export const HubStatsSchema = {
     projects: {
       $ref: "#/components/schemas/ProjectStats",
     },
+    machines: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/MachineStats",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
     excluded_accounts: {
       items: {
         type: "string",
@@ -3831,6 +4234,54 @@ export const ItemLockSchema = {
   type: "object",
   required: ["created", "user_id", "user_email", "user_github_username"],
   title: "ItemLock",
+} as const
+
+export const LastRunSchema = {
+  properties: {
+    status: {
+      type: "string",
+      maxLength: 16,
+      title: "Status",
+    },
+    started: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started",
+    },
+    ended: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ended",
+    },
+    failed_stages: {
+      items: {
+        type: "string",
+        maxLength: 256,
+      },
+      type: "array",
+      maxItems: 50,
+      title: "Failed Stages",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["status"],
+  title: "LastRun",
+  description: "How the latest pipeline run in a workspace ended.",
 } as const
 
 export const LatexCommentMessageSchema = {
@@ -4187,6 +4638,460 @@ export const LatexComponentsRequestSchema = {
   required: ["path"],
   title: "LatexComponentsRequest",
   description: "A LaTeX document to bring calkit.sty's components in for.",
+} as const
+
+export const LogoutRequestSchema = {
+  properties: {
+    refresh_token: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Refresh Token",
+    },
+  },
+  type: "object",
+  title: "LogoutRequest",
+} as const
+
+export const MachineOutSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+    name: {
+      type: "string",
+      maxLength: 64,
+      minLength: 1,
+      title: "Name",
+    },
+    hostname: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hostname",
+    },
+    system_machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "System Machine Id",
+    },
+    platform: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Platform",
+    },
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    hosts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Hosts",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    last_seen: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Seen",
+    },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 16,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: false,
+    },
+    connect_requested_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Connect Requested At",
+    },
+    restart_pending: {
+      type: "boolean",
+      title: "Restart Pending",
+      default: false,
+    },
+    restart_requested: {
+      type: "boolean",
+      title: "Restart Requested",
+      default: false,
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_online: {
+      type: "boolean",
+      title: "Is Online",
+    },
+    is_asleep: {
+      type: "boolean",
+      title: "Is Asleep",
+    },
+    workspace_count: {
+      type: "integer",
+      title: "Workspace Count",
+    },
+  },
+  type: "object",
+  required: ["user_id", "name", "is_online", "is_asleep", "workspace_count"],
+  title: "MachineOut",
+  description:
+    "A machine as the API returns it: its record plus its current state.",
+} as const
+
+export const MachinePostSchema = {
+  properties: {
+    name: {
+      anyOf: [
+        {
+          type: "string",
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    hostname: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hostname",
+    },
+    machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Machine Id",
+    },
+    platform: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Platform",
+    },
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    hosts: {
+      items: {
+        type: "string",
+        maxLength: 255,
+      },
+      type: "array",
+      maxItems: 20,
+      title: "Hosts",
+      default: [],
+    },
+    public_key: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/PublicKey",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+  },
+  type: "object",
+  title: "MachinePost",
+  description: "What a machine reports about itself when registering.",
+} as const
+
+export const MachineRegisteredSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+    name: {
+      type: "string",
+      maxLength: 64,
+      minLength: 1,
+      title: "Name",
+    },
+    hostname: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hostname",
+    },
+    system_machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "System Machine Id",
+    },
+    platform: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Platform",
+    },
+    calkit_version: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Version",
+    },
+    hosts: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Hosts",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    last_seen: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Seen",
+    },
+    mode: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 16,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Mode",
+    },
+    connected: {
+      type: "boolean",
+      title: "Connected",
+      default: false,
+    },
+    connect_requested_at: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Connect Requested At",
+    },
+    restart_pending: {
+      type: "boolean",
+      title: "Restart Pending",
+      default: false,
+    },
+    restart_requested: {
+      type: "boolean",
+      title: "Restart Requested",
+      default: false,
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_online: {
+      type: "boolean",
+      title: "Is Online",
+    },
+    is_asleep: {
+      type: "boolean",
+      title: "Is Asleep",
+    },
+    workspace_count: {
+      type: "integer",
+      title: "Workspace Count",
+    },
+    token: {
+      type: "string",
+      title: "Token",
+    },
+    grant_public_key: {
+      type: "string",
+      title: "Grant Public Key",
+    },
+  },
+  type: "object",
+  required: [
+    "user_id",
+    "name",
+    "is_online",
+    "is_asleep",
+    "workspace_count",
+    "token",
+    "grant_public_key",
+  ],
+  title: "MachineRegistered",
+  description: "A newly registered machine, with the token only returned here.",
+} as const
+
+export const MachineStatsSchema = {
+  properties: {
+    linked: {
+      type: "integer",
+      title: "Linked",
+    },
+    users: {
+      type: "integer",
+      title: "Users",
+    },
+    users_online: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description: "Users with a linked machine that checked in",
+    },
+    users_connected: {
+      $ref: "#/components/schemas/ActiveCounts",
+      description:
+        "Users who connected to one of their machines from the browser, so last_30_days is the feature's MAU",
+    },
+  },
+  type: "object",
+  required: ["linked", "users", "users_online", "users_connected"],
+  title: "MachineStats",
 } as const
 
 export const MapPathEntrySchema = {
@@ -4707,6 +5612,19 @@ export const OperationResultSchema = {
   description: "Result for file operations like delete, move, copy.",
 } as const
 
+export const OrgMemberPatchSchema = {
+  properties: {
+    role: {
+      type: "string",
+      enum: ["read", "write", "admin", "owner"],
+      title: "Role",
+    },
+  },
+  type: "object",
+  required: ["role"],
+  title: "OrgMemberPatch",
+} as const
+
 export const OrgMemberPostSchema = {
   properties: {
     username: {
@@ -4949,7 +5867,14 @@ export const OrgUserPublicSchema = {
       title: "Name",
     },
     github_name: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Github Name",
     },
     role: {
@@ -5015,6 +5940,17 @@ export const OverleafLinkPublicSchema = {
       ],
       title: "Current User Access",
     },
+    github_repo_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Repo Url",
+    },
   },
   type: "object",
   required: [
@@ -5026,6 +5962,8 @@ export const OverleafLinkPublicSchema = {
     "current_user_access",
   ],
   title: "OverleafLinkPublic",
+  description:
+    "A folder of a Calkit project an Overleaf project syncs with, and what\nthe current user can do with that project.\n\n``github_repo_url`` is the project's repo on GitHub, in one canonical\nform, e.g., to open it in a Codespace, or none if it's elsewhere.",
 } as const
 
 export const OverleafLookupSchema = {
@@ -5343,6 +6281,262 @@ export const PipelinePutSchema = {
   type: "object",
   required: ["yaml"],
   title: "PipelinePut",
+} as const
+
+export const PipelineRunSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    started: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started",
+    },
+    finished: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Finished",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    started_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Started By",
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    github_run_id: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Run Id",
+    },
+  },
+  type: "object",
+  required: ["id", "location", "status", "created"],
+  title: "PipelineRun",
+  description: "A run of the pipeline, wherever it ran.",
+} as const
+
+export const PipelineRunLogPartSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+    phases: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPhase",
+      },
+      type: "array",
+      title: "Phases",
+      default: [],
+    },
+    log: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Log",
+    },
+    log_truncated: {
+      type: "boolean",
+      title: "Log Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPart",
+  description: "Part of a run's log, e.g., a GitHub Actions job's.",
+} as const
+
+export const PipelineRunLogPhaseSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    status: {
+      type: "string",
+      enum: ["queued", "running", "succeeded", "failed", "canceled"],
+      title: "Status",
+    },
+  },
+  type: "object",
+  required: ["name", "status"],
+  title: "PipelineRunLogPhase",
+} as const
+
+export const PipelineRunLogsSchema = {
+  properties: {
+    parts: {
+      items: {
+        $ref: "#/components/schemas/PipelineRunLogPart",
+      },
+      type: "array",
+      title: "Parts",
+      default: [],
+    },
+  },
+  type: "object",
+  title: "PipelineRunLogs",
+} as const
+
+export const PipelineRunPostSchema = {
+  properties: {
+    location: {
+      type: "string",
+      const: "github-actions",
+      title: "Location",
+      default: "github-actions",
+    },
+    github_actions: {
+      $ref: "#/components/schemas/GitHubActionsRunOptions",
+    },
+  },
+  type: "object",
+  title: "PipelineRunPost",
+} as const
+
+export const PipelineRunsSchema = {
+  properties: {
+    runs: {
+      items: {
+        $ref: "#/components/schemas/PipelineRun",
+      },
+      type: "array",
+      title: "Runs",
+      default: [],
+    },
+    total: {
+      type: "integer",
+      title: "Total",
+      default: 0,
+    },
+    github_workflow: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Workflow",
+    },
+    can_start: {
+      type: "boolean",
+      title: "Can Start",
+      default: false,
+    },
+    cannot_start_reason: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Cannot Start Reason",
+    },
+  },
+  type: "object",
+  title: "PipelineRuns",
 } as const
 
 export const PipelineStageSchema = {
@@ -7135,6 +8329,294 @@ export const ProjectsPublicSchema = {
   title: "ProjectsPublic",
 } as const
 
+export const ProvenanceSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    exists: {
+      type: "boolean",
+      title: "Exists",
+      default: false,
+    },
+    value: {
+      title: "Value",
+    },
+    value_error: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Value Error",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_kind: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Kind",
+    },
+    stage_app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage App",
+    },
+    source: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Source",
+    },
+    command: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Command",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+    },
+    input_to_stages: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Input To Stages",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    stale_reason: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["pipeline", "frozen"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stale Reason",
+    },
+    copied_from: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copied From",
+    },
+    copy_stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Copy Stage",
+    },
+    origin: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin",
+    },
+    origin_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Url",
+    },
+    origin_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Origin Path",
+    },
+    gaps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceGap",
+      },
+      type: "array",
+      title: "Gaps",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "Provenance",
+  description:
+    "Where an artifact, or one value inside a results file, came from.",
+} as const
+
+export const ProvenanceGapSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    steps: {
+      items: {
+        $ref: "#/components/schemas/ProvenanceStep",
+      },
+      type: "array",
+      title: "Steps",
+    },
+    unchecked: {
+      type: "boolean",
+      title: "Unchecked",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceGap",
+  description: "Something nothing records the origin of, and the chain to it.",
+} as const
+
+export const ProvenanceStepSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ProvenanceStep",
+  description:
+    "A path on the way back from an artifact, and the stage producing it.",
+} as const
+
+export const PublicKeySchema = {
+  properties: {
+    kty: {
+      type: "string",
+      const: "EC",
+      title: "Kty",
+    },
+    crv: {
+      type: "string",
+      const: "P-256",
+      title: "Crv",
+    },
+    x: {
+      type: "string",
+      pattern: "^[A-Za-z0-9_-]{43}$",
+      title: "X",
+    },
+    y: {
+      type: "string",
+      pattern: "^[A-Za-z0-9_-]{43}$",
+      title: "Y",
+    },
+  },
+  type: "object",
+  required: ["kty", "crv", "x", "y"],
+  title: "PublicKey",
+  description:
+    "A P-256 public key as a JSON Web Key, e.g., a browser's for one\nconnection, or a machine's own.\n\nThe browser signs every message it sends the machine with the private\nhalf of its key, which it can't export, so a grant naming this key is\nno use to the relay that carries it, and the machine signs its replies\nwith its own, so the relay can't forge those either.",
+} as const
+
 export const PublicationSchema = {
   properties: {
     path: {
@@ -7539,8 +9021,22 @@ export const QuestionSchema = {
 export const QuestionEvidenceSchema = {
   properties: {
     kind: {
-      type: "string",
-      enum: ["figure", "result", "value", "table", "publication", "document"],
+      anyOf: [
+        {
+          type: "string",
+          enum: [
+            "figure",
+            "result",
+            "value",
+            "table",
+            "publication",
+            "document",
+          ],
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Kind",
     },
     path: {
@@ -7604,6 +9100,17 @@ export const QuestionEvidenceSchema = {
         },
       ],
       title: "Label",
+    },
+    lines: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Lines",
     },
     explanation: {
       anyOf: [
@@ -7721,8 +9228,22 @@ export const QuestionEvidenceSchema = {
 export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
-      type: "string",
-      enum: ["figure", "result", "value", "table", "publication", "document"],
+      anyOf: [
+        {
+          type: "string",
+          enum: [
+            "figure",
+            "result",
+            "value",
+            "table",
+            "publication",
+            "document",
+          ],
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Kind",
     },
     path: {
@@ -7786,6 +9307,17 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Label",
+    },
+    lines: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Lines",
     },
     explanation: {
       anyOf: [
@@ -7908,6 +9440,17 @@ export const QuestionPublicSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7925,6 +9468,22 @@ export const QuestionPublicSchema = {
       },
       type: "array",
       title: "Evidence",
+      default: [],
+    },
+    verifications: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Verifications",
+      default: [],
+    },
+    validations: {
+      items: {
+        $ref: "#/components/schemas/QuestionSignOff",
+      },
+      type: "array",
+      title: "Validations",
       default: [],
     },
   },
@@ -7957,6 +9516,17 @@ export const QuestionPutSchema = {
       ],
       title: "Hypothesis",
     },
+    approach: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Approach",
+    },
     answer: {
       anyOf: [
         {
@@ -7979,6 +9549,66 @@ export const QuestionPutSchema = {
   },
   type: "object",
   title: "QuestionPut",
+} as const
+
+export const QuestionSignOffSchema = {
+  properties: {
+    by: {
+      type: "string",
+      title: "By",
+    },
+    date: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date",
+    },
+    notes: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Notes",
+    },
+    with_ai: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "With Ai",
+      default: [],
+    },
+    status: {
+      type: "string",
+      enum: ["current", "stale", "unchecked"],
+      title: "Status",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["by", "status"],
+  title: "QuestionSignOff",
+  description:
+    "A verification or validation of a question, checked against history.\n\nA verification says the stages behind the evidence implement the\napproach; a validation says the approach suits the question and the\nevidence justifies the answer. Stale means what it vouches for changed\nafter the commit that added it; unchecked means that commit couldn't be\nfound.",
 } as const
 
 export const ReferenceEntrySchema = {
@@ -8436,6 +10066,43 @@ export const RefreshTokenRequestSchema = {
   type: "object",
   required: ["refresh_token"],
   title: "RefreshTokenRequest",
+} as const
+
+export const RelayTokenReqSchema = {
+  properties: {
+    public_key: {
+      $ref: "#/components/schemas/PublicKey",
+    },
+  },
+  type: "object",
+  required: ["public_key"],
+  title: "RelayTokenReq",
+  description: "What a browser asking to connect to a machine sends.",
+} as const
+
+export const RelayTokenRespSchema = {
+  properties: {
+    relay_url: {
+      type: "string",
+      title: "Relay Url",
+    },
+    token: {
+      type: "string",
+      title: "Token",
+    },
+    machine_public_key: {
+      $ref: "#/components/schemas/PublicKey",
+    },
+    grant_id: {
+      type: "string",
+      title: "Grant Id",
+    },
+  },
+  type: "object",
+  required: ["relay_url", "token", "machine_public_key", "grant_id"],
+  title: "RelayTokenResp",
+  description:
+    "Where and how a browser connects to a machine through the relay,\nand how it checks the replies it gets are the machine's.",
 } as const
 
 export const ReleaseCommentPostSchema = {
@@ -9594,12 +11261,36 @@ export const ReproCheckSchema = {
       title: "Misc Needing Provenance",
       default: [],
     },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
       },
       type: "array",
       title: "Scripts Not In Pipeline",
+      default: [],
+    },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
       default: [],
     },
     n_dvc_remotes: {
@@ -9764,10 +11455,63 @@ export const ResultSchema = {
       ],
       title: "Key",
     },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
   },
   type: "object",
   required: ["path", "title"],
   title: "Result",
+} as const
+
+export const ScriptDataSchema = {
+  properties: {
+    external: {
+      type: "string",
+      title: "External",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/ScriptDataFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["external", "path"],
+  title: "ScriptData",
+  description:
+    "Data a script reads from outside the project, and its place in it.",
+} as const
+
+export const ScriptDataFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+      default: "",
+    },
+    content: {
+      type: "string",
+      title: "Content",
+    },
+  },
+  type: "object",
+  required: ["content"],
+  title: "ScriptDataFile",
 } as const
 
 export const SearchResultItemSchema = {
@@ -9844,6 +11588,21 @@ export const SearchResultsSchema = {
   type: "object",
   required: ["results"],
   title: "SearchResults",
+} as const
+
+export const SessionCredentialsReqSchema = {
+  properties: {
+    grant: {
+      type: "string",
+      maxLength: 8192,
+      title: "Grant",
+    },
+  },
+  type: "object",
+  required: ["grant"],
+  title: "SessionCredentialsReq",
+  description:
+    "What a machine shows to get credentials for one of its sessions: the\ngrant of the channel that opened it, or last attached to it.",
 } as const
 
 export const SftpAccessSchema = {
@@ -10056,6 +11815,265 @@ export const SoftwareItemSchema = {
   title: "SoftwareItem",
 } as const
 
+export const StageFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    created_by_me: {
+      type: "boolean",
+      title: "Created By Me",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "StageFile",
+  description:
+    "A file a new stage needs, e.g., a script or the file a figure is\nexported from.",
+} as const
+
+export const StageFromScriptOrNotebookPostSchema = {
+  properties: {
+    script_path: {
+      type: "string",
+      title: "Script Path",
+    },
+    content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Content",
+    },
+    shows: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Shows",
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    data: {
+      items: {
+        $ref: "#/components/schemas/ScriptData",
+      },
+      type: "array",
+      title: "Data",
+      default: [],
+    },
+    save: {
+      type: "boolean",
+      title: "Save",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["script_path"],
+  title: "StageFromScriptOrNotebookPost",
+} as const
+
+export const StageFromScriptOrNotebookResponseSchema = {
+  properties: {
+    stage_name: {
+      type: "string",
+      title: "Stage Name",
+    },
+    stage_yaml: {
+      type: "string",
+      title: "Stage Yaml",
+    },
+    environment: {
+      type: "string",
+      title: "Environment",
+    },
+    environment_is_new: {
+      type: "boolean",
+      title: "Environment Is New",
+    },
+    environment_spec_path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Path",
+    },
+    environment_spec_content: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment Spec Content",
+    },
+    dependencies: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Dependencies",
+      default: [],
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+      default: [],
+    },
+    outputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Outputs",
+      default: [],
+    },
+    missing_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Missing Inputs",
+      default: [],
+    },
+    external_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "External Inputs",
+      default: [],
+    },
+    rewritten: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Rewritten",
+      default: [],
+    },
+    produces: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Produces",
+    },
+    included_in: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Included In",
+      default: [],
+    },
+    saved: {
+      type: "boolean",
+      title: "Saved",
+      default: false,
+    },
+    git_repo_url: {
+      type: "string",
+      title: "Git Repo Url",
+    },
+  },
+  type: "object",
+  required: [
+    "stage_name",
+    "stage_yaml",
+    "environment",
+    "environment_is_new",
+    "git_repo_url",
+  ],
+  title: "StageFromScriptOrNotebookResponse",
+} as const
+
+export const StagePostSchema = {
+  properties: {
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    stage: {
+      additionalProperties: true,
+      type: "object",
+      title: "Stage",
+    },
+    files: {
+      items: {
+        $ref: "#/components/schemas/StageFile",
+      },
+      type: "array",
+      title: "Files",
+      default: [],
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["stage"],
+  title: "StagePost",
+} as const
+
 export const StageStatusSchema = {
   properties: {
     status: {
@@ -10185,6 +12203,84 @@ export const SubscriptionUpdateSchema = {
   type: "object",
   required: ["plan_name", "period"],
   title: "SubscriptionUpdate",
+} as const
+
+export const TOTPCodeSchema = {
+  properties: {
+    code: {
+      type: "string",
+      maxLength: 8,
+      minLength: 6,
+      title: "Code",
+    },
+  },
+  type: "object",
+  required: ["code"],
+  title: "TOTPCode",
+} as const
+
+export const TOTPConfirmSchema = {
+  properties: {
+    code: {
+      type: "string",
+      maxLength: 8,
+      minLength: 6,
+      title: "Code",
+    },
+    email_code: {
+      type: "string",
+      maxLength: 8,
+      minLength: 6,
+      title: "Email Code",
+    },
+  },
+  type: "object",
+  required: ["code", "email_code"],
+  title: "TOTPConfirm",
+} as const
+
+export const TOTPSetupSchema = {
+  properties: {
+    secret: {
+      type: "string",
+      title: "Secret",
+    },
+    otpauth_uri: {
+      type: "string",
+      title: "Otpauth Uri",
+    },
+  },
+  type: "object",
+  required: ["secret", "otpauth_uri"],
+  title: "TOTPSetup",
+} as const
+
+export const TOTPStatusSchema = {
+  properties: {
+    enabled: {
+      type: "boolean",
+      title: "Enabled",
+    },
+    verified: {
+      type: "boolean",
+      title: "Verified",
+    },
+    verified_until: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Verified Until",
+    },
+  },
+  type: "object",
+  required: ["enabled", "verified"],
+  title: "TOTPStatus",
 } as const
 
 export const TableSchema = {
@@ -10613,6 +12709,18 @@ export const TokenRespSchema = {
       ],
       title: "Last Used",
     },
+    machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Machine Id",
+    },
   },
   type: "object",
   required: ["access_token", "user_id", "expires", "is_active"],
@@ -10724,6 +12832,10 @@ export const UserAdminPublicSchema = {
       type: "boolean",
       title: "Email Verified",
     },
+    can_link_machines: {
+      type: "boolean",
+      title: "Can Link Machines",
+    },
     subscription: {
       anyOf: [
         {
@@ -10763,6 +12875,7 @@ export const UserAdminPublicSchema = {
     "created",
     "github_username",
     "email_verified",
+    "can_link_machines",
     "subscription",
   ],
   title: "UserAdminPublic",
@@ -10890,6 +13003,10 @@ export const UserPublicSchema = {
       type: "boolean",
       title: "Email Verified",
     },
+    can_link_machines: {
+      type: "boolean",
+      title: "Can Link Machines",
+    },
     subscription: {
       anyOf: [
         {
@@ -10919,6 +13036,7 @@ export const UserPublicSchema = {
     "created",
     "github_username",
     "email_verified",
+    "can_link_machines",
     "subscription",
   ],
   title: "UserPublic",
@@ -11207,6 +13325,18 @@ export const UserTokenPublicSchema = {
       ],
       title: "Last Used",
     },
+    machine_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Machine Id",
+    },
   },
   type: "object",
   required: ["user_id", "expires", "is_active"],
@@ -11318,6 +13448,18 @@ export const UserUpdateMeSchema = {
       ],
       title: "Analytics Consent",
     },
+    email_code: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 8,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Email Code",
+    },
   },
   type: "object",
   title: "UserUpdateMe",
@@ -11370,6 +13512,377 @@ export const ValidationErrorSchema = {
   type: "object",
   required: ["loc", "msg", "type"],
   title: "ValidationError",
+} as const
+
+export const WorkspaceSchema = {
+  properties: {
+    path: {
+      type: "string",
+      maxLength: 4096,
+      title: "Path",
+    },
+    kind: {
+      type: "string",
+      enum: ["personal", "managed"],
+      title: "Kind",
+      default: "personal",
+    },
+    project: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 257,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Project",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    commit: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Commit",
+    },
+    dirty: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Dirty",
+    },
+    ahead: {
+      anyOf: [
+        {
+          type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ahead",
+    },
+    behind: {
+      anyOf: [
+        {
+          type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Behind",
+    },
+    running: {
+      type: "boolean",
+      title: "Running",
+      default: false,
+    },
+    running_stages: {
+      items: {
+        type: "string",
+        maxLength: 256,
+      },
+      type: "array",
+      maxItems: 50,
+      title: "Running Stages",
+      default: [],
+    },
+    running_since: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Running Since",
+    },
+    last_run: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/LastRun",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    in_use_by: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "In Use By",
+    },
+    last_activity: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Activity",
+    },
+    agents: {
+      items: {
+        $ref: "#/components/schemas/AgentInfo",
+      },
+      type: "array",
+      maxItems: 20,
+      title: "Agents",
+      default: [],
+    },
+    machine_id: {
+      type: "string",
+      format: "uuid",
+      title: "Machine Id",
+    },
+    machine_name: {
+      type: "string",
+      title: "Machine Name",
+    },
+    machine_online: {
+      type: "boolean",
+      title: "Machine Online",
+    },
+    machine_asleep: {
+      type: "boolean",
+      title: "Machine Asleep",
+    },
+    machine_platform: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Machine Platform",
+    },
+    updated: {
+      type: "string",
+      title: "Updated",
+    },
+    on_hub: {
+      type: "boolean",
+      title: "On Hub",
+    },
+  },
+  type: "object",
+  required: [
+    "path",
+    "machine_id",
+    "machine_name",
+    "machine_online",
+    "machine_asleep",
+    "machine_platform",
+    "updated",
+    "on_hub",
+  ],
+  title: "Workspace",
+  description: "A workspace along with the machine it's on.",
+} as const
+
+export const WorkspaceInfoSchema = {
+  properties: {
+    path: {
+      type: "string",
+      maxLength: 4096,
+      title: "Path",
+    },
+    kind: {
+      type: "string",
+      enum: ["personal", "managed"],
+      title: "Kind",
+      default: "personal",
+    },
+    project: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 257,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Project",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    commit: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Commit",
+    },
+    dirty: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Dirty",
+    },
+    ahead: {
+      anyOf: [
+        {
+          type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Ahead",
+    },
+    behind: {
+      anyOf: [
+        {
+          type: "integer",
+          maximum: 2147483647,
+          minimum: 0,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Behind",
+    },
+    running: {
+      type: "boolean",
+      title: "Running",
+      default: false,
+    },
+    running_stages: {
+      items: {
+        type: "string",
+        maxLength: 256,
+      },
+      type: "array",
+      maxItems: 50,
+      title: "Running Stages",
+      default: [],
+    },
+    running_since: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Running Since",
+    },
+    last_run: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/LastRun",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    in_use_by: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "In Use By",
+    },
+    last_activity: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 64,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Activity",
+    },
+    agents: {
+      items: {
+        $ref: "#/components/schemas/AgentInfo",
+      },
+      type: "array",
+      maxItems: 20,
+      title: "Agents",
+      default: [],
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "WorkspaceInfo",
+  description: "A workspace as a machine reports it at check-in.",
 } as const
 
 export const ZoteroAuthFinishSchema = {
@@ -12165,12 +14678,36 @@ export const ReproCheckWritableSchema = {
       title: "Misc Needing Provenance",
       default: [],
     },
+    provenance_gaps: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Provenance Gaps",
+      default: [],
+    },
+    unchecked_imports: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Unchecked Imports",
+      default: [],
+    },
     scripts_not_in_pipeline: {
       items: {
         type: "string",
       },
       type: "array",
       title: "Scripts Not In Pipeline",
+      default: [],
+    },
+    paths_outside_project: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Paths Outside Project",
       default: [],
     },
     n_dvc_remotes: {
@@ -12303,6 +14840,10 @@ export const UserAdminPublicWritableSchema = {
       type: "boolean",
       title: "Email Verified",
     },
+    can_link_machines: {
+      type: "boolean",
+      title: "Can Link Machines",
+    },
     subscription: {
       anyOf: [
         {
@@ -12342,6 +14883,7 @@ export const UserAdminPublicWritableSchema = {
     "created",
     "github_username",
     "email_verified",
+    "can_link_machines",
     "subscription",
   ],
   title: "UserAdminPublic",
@@ -12403,6 +14945,10 @@ export const UserPublicWritableSchema = {
       type: "boolean",
       title: "Email Verified",
     },
+    can_link_machines: {
+      type: "boolean",
+      title: "Can Link Machines",
+    },
     subscription: {
       anyOf: [
         {
@@ -12432,6 +14978,7 @@ export const UserPublicWritableSchema = {
     "created",
     "github_username",
     "email_verified",
+    "can_link_machines",
     "subscription",
   ],
   title: "UserPublic",

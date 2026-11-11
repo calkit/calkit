@@ -19,7 +19,6 @@
 | [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
 | [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                 |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
-| [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
@@ -30,7 +29,7 @@
 | [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
 | [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
 | [`merge`](#top-command-merge)                    | Merge a branch, resolving dvc.lock and stage run records per stage.                                          |
-| [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                           |
+| [`stash`](#top-command-stash)                    | Stash workspace changes, including DVC-tracked data, or bring them back.                                     |
 | [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
 | [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
 | [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                      |
@@ -44,6 +43,8 @@
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
+| [`open`](#command-group-open)                    | Open things.                                                                                                 |
+| [`export`](#command-group-export)                | Export data and artifacts from various applications.                                                         |
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
@@ -88,19 +89,20 @@ calkit clone [OPTIONS] URL [LOCATION]
 
 Arguments:
 
-| Argument   | Type | Required | Default | Description                                          |
-| ---------- | ---- | -------- | ------- | ---------------------------------------------------- |
-| `url`      | str  | yes      |         | Repo URL.                                            |
-| `location` | str  | no       |         | Location to clone to (default will be ./{repo_name}) |
+| Argument   | Type | Required | Default | Description                                                                                                                   |
+| ---------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `url`      | str  | yes      |         | Project as OWNER/NAME, or HUB/OWNER/NAME for one on another hub, e.g., calkit.example.edu/someone/my-proj, or a Git repo URL. |
+| `location` | str  | no       |         | Location to clone to (default will be ./{repo_name})                                                                          |
 
 Options:
 
-| Option               | Type    | Required | Default | Description                                       |
-| -------------------- | ------- | -------- | ------- | ------------------------------------------------- |
-| `--ssh`              | boolean | no       | False   | Use SSH with Git.                                 |
-| `--no-config-remote` | boolean | no       | False   | Do not automatically configure Calkit DVC remote. |
-| `--no-dvc-pull`      | boolean | no       | False   | Do not pull DVC objects.                          |
-| `--no-recursive`     | boolean | no       | False   | Do not recursively clone submodules.              |
+| Option               | Type    | Required | Default | Description                                                                                            |
+| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--ssh`, `--https`   | boolean | no       |         | Use SSH or HTTPS with Git. Defaults to SSH for GitHub if it's set up, i.e., GitHub accepts a key here. |
+| `--hub`              | str     | no       |         | URL of the project's hub, e.g., https://calkit.example.edu. Defaults to calkit.io.                     |
+| `--no-config-remote` | boolean | no       | False   | Do not automatically configure Calkit DVC remote.                                                      |
+| `--no-dvc-pull`      | boolean | no       | False   | Do not pull DVC objects.                                                                               |
+| `--no-recursive`     | boolean | no       | False   | Do not recursively clone submodules.                                                                   |
 
 <a id="top-command-status-st"></a>
 
@@ -323,18 +325,6 @@ Options:
 | ------------- | ------- | -------- | ------- | ------------------------------------ |
 | `--no-commit` | boolean | no       | False   | Do not commit changes to .gitignore. |
 
-<a id="top-command-local-server"></a>
-
-### `calkit local-server`
-
-Run the local server to interact over HTTP.
-
-Usage:
-
-```text
-calkit local-server
-```
-
 <a id="top-command-run"></a>
 
 ### `calkit run`
@@ -399,12 +389,15 @@ calkit manual-step [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description                     |
-| ----------------- | ------- | -------- | ------- | ------------------------------- |
-| `--message`, `-m` | str     | yes      |         | Message to display as a prompt. |
-| `--cmd`           | str     | no       |         | Command to run.                 |
-| `--show-stdout`   | boolean | no       | False   | Show stdout.                    |
-| `--show-stderr`   | boolean | no       | False   | Show stderr.                    |
+| Option            | Type    | Required | Default | Description                                                           |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------------------------- |
+| `--message`, `-m` | str     | yes      |         | Message to display as a prompt.                                       |
+| `--cmd`           | str     | no       |         | Command to run.                                                       |
+| `--app`           | str     | no       |         | App to open, e.g., 'Inkscape'.                                        |
+| `--open`          | str     | no       |         | File to open with the app.                                            |
+| `--output`, `-o`  | str     | no       |         | File the step writes, which must change for it to be considered done. |
+| `--show-stdout`   | boolean | no       | False   | Show stdout.                                                          |
+| `--show-stderr`   | boolean | no       | False   | Show stderr.                                                          |
 
 <a id="top-command-xenv-runenv"></a>
 
@@ -606,23 +599,28 @@ Options:
 
 ### `calkit stash`
 
-Stash or restore workspace changes including dvc-zip tracked dirs.
+Stash workspace changes, including DVC-tracked data, or bring them back.
 
-Without --pop: zips any modified workspace dirs and commits any other modified DVC-tracked paths into the DVC cache, then git-stashes (saving the updated .dvc files and dvc.lock), checks out the committed DVC state, and unzips it to the workspace.
-
-With --pop: pops the git stash (restoring the saved .dvc files), checks out the stashed DVC state, and unzips it to the workspace.
+Stashing commits changed DVC-tracked data to the DVC cache, including zipped folders, so the Git stash holds pointers to it, then checks out the committed data. Popping restores the stash and checks out the data it points to.
 
 Usage:
 
 ```text
-calkit stash [OPTIONS]
+calkit stash [OPTIONS] [ACTION]
 ```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                  |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `action` | str  | no       | push    | 'push' to stash changes, which is the default, or 'pop' to bring back the most recent stash. |
 
 Options:
 
-| Option  | Type    | Required | Default | Description                |
-| ------- | ------- | -------- | ------- | -------------------------- |
-| `--pop` | boolean | no       | False   | Pop the most recent stash. |
+| Option            | Type    | Required | Default | Description                          |
+| ----------------- | ------- | -------- | ------- | ------------------------------------ |
+| `--message`, `-m` | str     | no       |         | A message to stash the changes with. |
+| `--pop`           | boolean | no       | False   | Same as 'calkit stash pop'.          |
 
 <a id="top-command-dvc"></a>
 
@@ -889,6 +887,7 @@ Create a new Calkit object.
 | [`latex-stage`](#subcommand-new-create-latex-stage)                       | Add a stage to the pipeline that compiles a LaTeX document.                                       |
 | [`jupyter-notebook-stage`](#subcommand-new-create-jupyter-notebook-stage) | Add a stage to the pipeline that runs a Jupyter notebook.                                         |
 | [`release`](#subcommand-new-create-release)                               | Create a new release.                                                                             |
+| [`workspace`](#subcommand-new-create-workspace)                           | Create another workspace for this project, e.g., to work on a change without disturbing this one. |
 
 <a id="subcommand-new-create-project"></a>
 
@@ -1749,6 +1748,33 @@ Options:
 | `--license`               | str     | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                              |
 | `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                 |
 
+<a id="subcommand-new-create-workspace"></a>
+
+#### `calkit new|create workspace`
+
+Create another workspace for this project, e.g., to work on a change without disturbing this one.
+
+It's a Git worktree that shares the main checkout's DVC cache, so its data is checked out without being pulled again.
+
+Usage:
+
+```text
+calkit new|create workspace [OPTIONS] BRANCH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                        |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `branch` | str  | yes      |         | The branch to work on there, created from the current commit unless it exists here or on a remote. |
+
+Options:
+
+| Option   | Type | Required | Default | Description                                                                  |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--path` | str  | no       |         | Where to put it; defaults to beside this one, named after it and the branch. |
+| `--from` | str  | no       |         | What to start a new branch from, e.g., another branch.                       |
+
 <a id="command-group-delete-rm"></a>
 
 ### `calkit delete|rm`
@@ -1964,7 +1990,7 @@ List Calkit objects.
 | [`results`](#subcommand-list-ls-results)                        | List results in the project.                                                                   |
 | [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.                                                             |
 | [`tables\|tbls`](#subcommand-list-ls-tables-tbls)               | List tables in the project.                                                                    |
-| [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).                                                      |
+| [`questions\|q`](#subcommand-list-ls-questions-q)               | List the project's questions (1-indexed).                                                      |
 | [`comments`](#subcommand-list-ls-comments)                      | List review comment threads in LaTeX and Markdown documents.                                   |
 | [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.                                                              |
 | [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
@@ -2101,26 +2127,25 @@ Options:
 | `--json`          | boolean | no       | False   | Output result as JSON.                                         |
 | `--declared-only` | boolean | no       | False   | Only list tables declared in calkit.yaml; skip auto-detection. |
 
-<a id="subcommand-list-ls-questions"></a>
+<a id="subcommand-list-ls-questions-q"></a>
 
-#### `calkit list|ls questions`
+#### `calkit list|ls questions|q`
 
 List the project's questions (1-indexed).
 
-Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. Subprojects' questions are listed too, numbered within each, and in the JSON output each has a `project` key with the subproject's path.
+Each has a row of letters: H if it has a hypothesis, A if it's answered, then V if it's verified and V if it's validated, colored as in the hub, with a dash for each it doesn't have yet. Evidence isn't checked against the pipeline here; 'calkit check questions' does that. Subprojects' questions are listed too, numbered within each. Use 'calkit show question' to see one in full.
 
 Usage:
 
 ```text
-calkit list|ls questions [OPTIONS]
+calkit list|ls questions|q [OPTIONS]
 ```
 
 Options:
 
-| Option   | Type    | Required | Default | Description                                                                                    |
-| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
-| `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-comments"></a>
 
@@ -2418,11 +2443,39 @@ Options:
 
 Show Calkit objects.
 
-| Command                                      | Description                           |
-| -------------------------------------------- | ------------------------------------- |
-| [`latex-diff`](#subcommand-show-latex-diff)  | Open a LaTeX diff the pipeline keeps. |
-| [`table\|tbl`](#subcommand-show-table-tbl)   | Show a table, or part of one.         |
-| [`result\|res`](#subcommand-show-result-res) | Show a result's keys and values.      |
+| Command                                      | Description                                                           |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| [`question\|q`](#subcommand-show-question-q) | Show a question in full as Markdown, with its evidence and sign-offs. |
+| [`latex-diff`](#subcommand-show-latex-diff)  | Open a LaTeX diff the pipeline keeps.                                 |
+| [`table\|tbl`](#subcommand-show-table-tbl)   | Show a table, or part of one.                                         |
+| [`result\|res`](#subcommand-show-result-res) | Show a result's keys and values.                                      |
+
+<a id="subcommand-show-question-q"></a>
+
+#### `calkit show question|q`
+
+Show a question in full as Markdown, with its evidence and sign-offs.
+
+Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`. The pipeline stages behind its evidence are shown too, upstream first.
+
+Usage:
+
+```text
+calkit show question|q [OPTIONS] QUESTION
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                                                                              |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name; prefix a subproject's with its path, e.g., 'sub:1'. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description                                                                                    |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
+| `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
 
 <a id="subcommand-show-latex-diff"></a>
 
@@ -2819,6 +2872,104 @@ Options:
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
 | `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
 
+<a id="command-group-open"></a>
+
+### `calkit open`
+
+Open things.
+
+| Command                               | Description                                                  |
+| ------------------------------------- | ------------------------------------------------------------ |
+| [`project`](#subcommand-open-project) | Open a project on this machine in its editor, from anywhere. |
+
+<a id="subcommand-open-project"></a>
+
+#### `calkit open project`
+
+Open a project on this machine in its editor, from anywhere.
+
+Looks for it among the Calkit projects in your home folder, e.g., in ~/calkit or ~/dev, and offers to clone it into ~/calkit if it isn't there. The editor is the 'default_editor' setting, VS Code unless set otherwise, e.g., with 'calkit config set default_editor cursor', or the one given with '--with'.
+
+Usage:
+
+```text
+calkit open project [OPTIONS] PROJECT
+```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description                                                                                                                               |
+| --------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `project` | str  | yes      |         | Project name, or owner and name, e.g., 'someone/my-proj', with its hub to clone from another, e.g., 'calkit.example.edu/someone/my-proj'. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                                                                                                         |
+| -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `--yes`, `-y`  | boolean | no       | False   | Clone into ~/calkit without asking if it isn't here.                                                                                |
+| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default, e.g., 'jupyterlab', or a command that takes the folder.                              |
+| `--hub`        | str     | no       |         | Hub to clone it from if it isn't here, e.g., https://calkit.example.edu, or localhost for a development hub. Defaults to calkit.io. |
+
+<a id="command-group-export"></a>
+
+### `calkit export`
+
+Export data and artifacts from various applications.
+
+| Command                                   | Description                                 |
+| ----------------------------------------- | ------------------------------------------- |
+| [`inkscape`](#subcommand-export-inkscape) | Export a figure from an SVG.                |
+| [`gimp`](#subcommand-export-gimp)         | Export a flattened figure from an XCF file. |
+
+<a id="subcommand-export-inkscape"></a>
+
+#### `calkit export inkscape`
+
+Export a figure from an SVG.
+
+Usage:
+
+```text
+calkit export inkscape [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description         |
+| -------- | ---- | -------- | ------- | ------------------- |
+| `source` | str  | yes      |         | SVG to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                            |
+| ---------------- | ---- | -------- | ------- | -------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or PDF. |
+| `--dpi`          | int  | no       |         | Resolution of a PNG.                   |
+
+<a id="subcommand-export-gimp"></a>
+
+#### `calkit export gimp`
+
+Export a flattened figure from an XCF file.
+
+Usage:
+
+```text
+calkit export gimp [OPTIONS] SOURCE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `source` | str  | yes      |         | XCF file to export from. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                             |
+| ---------------- | ---- | -------- | ------- | --------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | File to export to, e.g., a PNG or TIFF. |
+
 <a id="command-group-update"></a>
 
 ### `calkit update`
@@ -2845,6 +2996,7 @@ Update objects.
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
+| [`question`](#subcommand-update-question)             | Update a question in calkit.yaml, or verify or validate it.                          |
 | [`path-storage`](#subcommand-update-path-storage)     | Move paths between Git and DVC storage without rerunning anything.                   |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
 | [`hub`](#subcommand-update-hub)                       | Connect this project to a Calkit hub.                                                |
@@ -2947,10 +3099,11 @@ calkit update github-actions [OPTIONS]
 
 Options:
 
-| Option        | Type    | Required | Default | Description                                                       |
-| ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
-| `--wdir`      | str     | no       |         | Working directory. By default will run current working directory. |
-| `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.        |
+| Option        | Type    | Required | Default | Description                                                                                                                   |
+| ------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--wdir`      | str     | no       |         | Working directory. By default will run current working directory.                                                             |
+| `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.                                                                    |
+| `--on`        | str     | no       |         | Event that runs the workflow, e.g., push or workflow_dispatch; repeat for more. An existing workflow's are kept if not given. |
 
 <a id="subcommand-update-notebook"></a>
 
@@ -3099,12 +3252,12 @@ calkit update docker-env [OPTIONS]
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                                                                                                                                          |
-| -------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n` | str     | yes      |         | Environment name.                                                                                                                                                    |
-| `--image`      | str     | no       |         | Docker image name/tag.                                                                                                                                               |
-| `--registry`   | str     | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
-| `--lock`       | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
+| Option               | Type    | Required | Default | Description                                                                                                                                                          |
+| -------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`       | str     | yes      |         | Environment name.                                                                                                                                                    |
+| `--image`            | str     | no       |         | Docker image name/tag.                                                                                                                                               |
+| `--registry`         | str     | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
+| `--lock`, `--relock` | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
 
 <a id="subcommand-update-latex-image"></a>
 
@@ -3152,7 +3305,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
+Supports relocking any environment, and adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -3162,11 +3315,11 @@ calkit update env [OPTIONS]
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                                              |
-| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
-| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
-| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                                                                       |
+| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                                                                 |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                                                         |
+| `--lock`, `--relock`     | boolean | no       | False   | Rebuild the environment from its spec and lock it again, taking the newest versions the spec allows, or for a system environment, lock it to this machine. Reruns every stage that depends on it. |
 
 <a id="subcommand-update-environment"></a>
 
@@ -3174,7 +3327,7 @@ Options:
 
 Update an environment.
 
-Currently supports adding packages to Julia and Nix (flake) envs, and re-locking a system environment to this machine.
+Supports relocking any environment, and adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -3184,11 +3337,11 @@ calkit update environment [OPTIONS]
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                                              |
-| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                        |
-| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                |
-| `--lock`, `--relock`     | boolean | no       | False   | Record this machine's properties in a system environment's lock file, replacing the machine it is locked to. Invalidates every stage that depends on it. |
+| Option                   | Type    | Required | Default | Description                                                                                                                                                                                       |
+| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`           | str     | yes      |         | Name of the environment to update                                                                                                                                                                 |
+| `--add`, `--add-package` | str     | no       |         | Package to add to the environment. Repeat the flag for multiple packages.                                                                                                                         |
+| `--lock`, `--relock`     | boolean | no       | False   | Rebuild the environment from its spec and lock it again, taking the newest versions the spec allows, or for a system environment, lock it to this machine. Reruns every stage that depends on it. |
 
 <a id="subcommand-update-stage"></a>
 
@@ -3246,6 +3399,38 @@ Options:
 | `--imported-from`     | str  | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
 | `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
 | `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
+
+<a id="subcommand-update-question"></a>
+
+#### `calkit update question`
+
+Update a question in calkit.yaml, or verify or validate it.
+
+A sign-off is recorded with your Git name and email and the time, replaces any earlier one of yours of the same kind, and applies to the question as updated by this command.
+
+Usage:
+
+```text
+calkit update question [OPTIONS] QUESTION
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                          |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `question` | str  | yes      |         | The question's 1-based position, as 'calkit list questions' numbers it, or its name. |
+
+Options:
+
+| Option         | Type | Required | Default | Description                                                                                                                                               |
+| -------------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hypothesis` | str  | no       |         | New hypothesis.                                                                                                                                           |
+| `--approach`   | str  | no       |         | One sentence on how the question is answered.                                                                                                             |
+| `--answer`     | str  | no       |         | New answer. One that picks its wording from the evidence is written in calkit.yaml.                                                                       |
+| `--notes`      | str  | no       |         | New notes on the question.                                                                                                                                |
+| `--verify`     | str  | no       |         | Sign off that the pipeline stages behind the evidence implement the approach correctly, with what you checked, e.g., 'fit.py fits both models as stated.' |
+| `--validate`   | str  | no       |         | Sign off that the approach suits the question and the evidence justifies the answer, with what you checked, e.g., 'The linear fit's residuals curve.'     |
+| `--with-ai`    | str  | no       |         | A generative AI tool used in verifying or validating, e.g., 'Claude Opus 5'. Can be given more than once.                                                 |
 
 <a id="subcommand-update-path-storage"></a>
 
@@ -3764,7 +3949,7 @@ Options:
 
 Check that answered questions are backed by current evidence.
 
-Reports, worst first: evidence that isn't there (never run, never pushed, or pinned to a Git ref that doesn't exist); broken references (a key that doesn't resolve, a placeholder that names no evidence, a label missing from the LaTeX); evidence the pipeline would rebuild; and evidence from a frozen stage, or downstream of one, that no longer matches dvc.lock, which won't be rerun, unless the citation pins a git_ref. Subprojects' questions are checked too.
+Reports, worst first: evidence that isn't there (never run, never pushed, or pinned to a Git ref that doesn't exist); broken references (a key that doesn't resolve, a placeholder that names no evidence, a label missing from the LaTeX, lines a cited file no longer has); evidence the pipeline would rebuild; and evidence from a frozen stage, or downstream of one, that no longer matches dvc.lock, which won't be rerun, unless the citation pins a git_ref. Subprojects' questions are checked too.
 
 Evidence pinned with a git_ref is checked at that ref rather than in the working tree. Exits with an error if any answered question is missing evidence, broken, or out of date with the pipeline.
 
@@ -4051,14 +4236,14 @@ Arguments:
 
 Options:
 
-| Option           | Type    | Required | Default | Description                                                                                                                                                                                                                |
-| ---------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF.                                                                                                                                    |
-| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                                                                                                                                                               |
-| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                                                                                                                                                             |
-| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                                                                                                                                                              |
-| `--engine`       | str     | no       |         | What makes the Word copy: 'word', which imports the compiled PDF so the copy looks like it, or 'libreoffice', which converts the source with TeX4ht's make4ht and then LibreOffice. Defaults to Word where it's installed. |
-| `--log`, `-l`    | boolean | no       | False   | Also keep the export record in the project, under .calkit/latex/docx-exports, rather than only on this machine.                                                                                                            |
+| Option           | Type    | Required | Default | Description                                                                                                                                                                                                                                                                                                                          |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--source`       | str     | no       |         | Main .tex file. Defaults to the pipeline stage's target, else the .tex next to the PDF.                                                                                                                                                                                                                                              |
+| `--output`, `-o` | str     | no       |         | Where to write the .docx. Defaults to <pdf>-for-review.docx.                                                                                                                                                                                                                                                                         |
+| `--comment-only` | boolean | no       | False   | Lock the document to comments.                                                                                                                                                                                                                                                                                                       |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite an existing export.                                                                                                                                                                                                                                                                                                        |
+| `--engine`       | str     | no       |         | What makes the Word copy: 'word', which imports the compiled PDF so the copy looks like it, 'libreoffice', which converts the source with TeX4ht's make4ht and then LibreOffice, or 'pandoc', experimental, which converts the source with Pandoc, with numbers and citations from the build. Defaults to Word where it's installed. |
+| `--log`, `-l`    | boolean | no       | False   | Also keep the export record in the project, under .calkit/latex/docx-exports, rather than only on this machine.                                                                                                                                                                                                                      |
 
 <a id="subcommand-latex-tex-merge-docx"></a>
 
@@ -4309,11 +4494,12 @@ Options:
 
 Interact with a Calkit hub.
 
-| Command                                  | Description                             |
-| ---------------------------------------- | --------------------------------------- |
-| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.        |
-| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                 |
-| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens). |
+| Command                                  | Description                                               |
+| ---------------------------------------- | --------------------------------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.                          |
+| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                                   |
+| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens).                   |
+| [`link`](#subcommand-hub-cloud-link)     | Manage this machine's hub link, to work on it from a hub. |
 
 <a id="subcommand-hub-cloud-get"></a>
 
@@ -4372,6 +4558,277 @@ Usage:
 calkit hub|cloud config COMMAND [ARGS]...
 ```
 
+| Command                                       | Description                                             |
+| --------------------------------------------- | ------------------------------------------------------- |
+| [`list`](#subcommand-hub-cloud-config-list)   | List per-hub credential keys.                           |
+| [`set`](#subcommand-hub-cloud-config-set)     | Set a credential for the active or given hub.           |
+| [`get`](#subcommand-hub-cloud-config-get)     | Get and print a credential for the active or given hub. |
+| [`unset`](#subcommand-hub-cloud-config-unset) | Unset a credential for the active or given hub.         |
+
+<a id="subcommand-hub-cloud-config-list"></a>
+
+##### `calkit hub|cloud config list`
+
+List per-hub credential keys.
+
+Usage:
+
+```text
+calkit hub|cloud config list
+```
+
+<a id="subcommand-hub-cloud-config-set"></a>
+
+##### `calkit hub|cloud config set`
+
+Set a credential for the active or given hub.
+
+Usage:
+
+```text
+calkit hub|cloud config set [OPTIONS] KEY VALUE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | str  | yes      |         |             |
+| `value`  | str  | yes      |         |             |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                  |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub, e.g., https://staging.calkit.io. Defaults to the active hub. |
+
+<a id="subcommand-hub-cloud-config-get"></a>
+
+##### `calkit hub|cloud config get`
+
+Get and print a credential for the active or given hub.
+
+Usage:
+
+```text
+calkit hub|cloud config get [OPTIONS] KEY
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | str  | yes      |         |             |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                  |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub, e.g., https://staging.calkit.io. Defaults to the active hub. |
+
+<a id="subcommand-hub-cloud-config-unset"></a>
+
+##### `calkit hub|cloud config unset`
+
+Unset a credential for the active or given hub.
+
+Usage:
+
+```text
+calkit hub|cloud config unset [OPTIONS] KEY
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | str  | yes      |         |             |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                  |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub, e.g., https://staging.calkit.io. Defaults to the active hub. |
+
+<a id="subcommand-hub-cloud-link"></a>
+
+#### `calkit hub|cloud link`
+
+Manage this machine's hub link, to work on it from a hub.
+
+Usage:
+
+```text
+calkit hub|cloud link COMMAND [ARGS]...
+```
+
+| Command                                                     | Description                                                                                     |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [`install`](#subcommand-hub-cloud-link-install)             | Link this machine to a hub and run the hub link as a service.                                   |
+| [`start`](#subcommand-hub-cloud-link-start)                 | Run the hub link in the foreground, e.g., inside tmux.                                          |
+| [`status`](#subcommand-hub-cloud-link-status)               | Show this machine's hub links and their workspaces.                                             |
+| [`stop`](#subcommand-hub-cloud-link-stop)                   | Stop the hub link's service until it's restarted, for every hub unless one is given.            |
+| [`restart`](#subcommand-hub-cloud-link-restart)             | Restart the hub link's service, e.g., after updating Calkit, for every hub unless one is given. |
+| [`logs`](#subcommand-hub-cloud-link-logs)                   | Show the hub link service's logs.                                                               |
+| [`add-workspace`](#subcommand-hub-cloud-link-add-workspace) | Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or one on another hub.      |
+| [`uninstall`](#subcommand-hub-cloud-link-uninstall)         | Revoke this machine on the hub and remove its hub link.                                         |
+
+<a id="subcommand-hub-cloud-link-install"></a>
+
+##### `calkit hub|cloud link install`
+
+Link this machine to a hub and run the hub link as a service.
+
+Usage:
+
+```text
+calkit hub|cloud link install [OPTIONS]
+```
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                                                                                                                                      |
+| -------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub`        | str     | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+| `--login`      | boolean | no       | False   | Start at login, not at boot (boot requires sudo on macOS and Linux).                                                                                             |
+| `--cron`       | boolean | no       | False   | Have cron start it when the hub asks rather than running it as a service, e.g., on a cluster's login node.                                                       |
+| `--ssh`        | str     | no       |         | Link another machine over SSH, e.g., 'user@cluster.example.edu' or a host from ~/.ssh/config, installing Calkit there if needed.                                 |
+| `--no-service` | boolean | no       | False   | Only register it, e.g., to run it with 'calkit hub link start' inside tmux on a cluster.                                                                         |
+
+<a id="subcommand-hub-cloud-link-start"></a>
+
+##### `calkit hub|cloud link start`
+
+Run the hub link in the foreground, e.g., inside tmux.
+
+Usage:
+
+```text
+calkit hub|cloud link start [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                                                                      |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | Log in more detail.                                                                                                                                              |
+| `--hub`           | str     | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-status"></a>
+
+##### `calkit hub|cloud link status`
+
+Show this machine's hub links and their workspaces.
+
+Usage:
+
+```text
+calkit hub|cloud link status [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-stop"></a>
+
+##### `calkit hub|cloud link stop`
+
+Stop the hub link's service until it's restarted, for every hub unless one is given.
+
+Usage:
+
+```text
+calkit hub|cloud link stop [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-restart"></a>
+
+##### `calkit hub|cloud link restart`
+
+Restart the hub link's service, e.g., after updating Calkit, for every hub unless one is given.
+
+Usage:
+
+```text
+calkit hub|cloud link restart [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-logs"></a>
+
+##### `calkit hub|cloud link logs`
+
+Show the hub link service's logs.
+
+Usage:
+
+```text
+calkit hub|cloud link logs [OPTIONS]
+```
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                                                      |
+| ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--follow`, `-f` | boolean | no       | False   | Keep printing new lines.                                                                                                                                         |
+| `--hub`          | str     | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-add-workspace"></a>
+
+##### `calkit hub|cloud link add-workspace`
+
+Add a project as a workspace, e.g., one outside ~/calkit and ~/dev, or one on another hub.
+
+Usage:
+
+```text
+calkit hub|cloud link add-workspace [OPTIONS] [PATH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description               |
+| -------- | ---- | -------- | ------- | ------------------------- |
+| `path`   | str  | no       | .       | Path to a Calkit project. |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
+<a id="subcommand-hub-cloud-link-uninstall"></a>
+
+##### `calkit hub|cloud link uninstall`
+
+Revoke this machine on the hub and remove its hub link.
+
+Usage:
+
+```text
+calkit hub|cloud link uninstall [OPTIONS]
+```
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                                                      |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | str  | no       |         | URL of the hub the hub link is for, e.g., https://calkit.io; a machine can have one per hub. Defaults to the only one here, or for linking, to your default hub. |
+
 <a id="command-group-scheduler-sch"></a>
 
 ### `calkit scheduler|sch`
@@ -4429,6 +4886,8 @@ Options:
 #### `calkit scheduler|sch queue|q`
 
 List scheduler jobs submitted via Calkit (across SLURM and PBS).
+
+Includes interactive jobs, e.g., Jupyter servers for notebooks.
 
 Usage:
 

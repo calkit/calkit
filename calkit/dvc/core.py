@@ -176,6 +176,61 @@ def _hash_dirs_inside_nested_repos() -> None:
 _hash_dirs_inside_nested_repos()
 
 
+def _tolerate_purged_rwlock_entries() -> None:
+    """Stop a process's purged rwlock entries from failing its stage.
+
+    DVC records each running stage's paths in ``.dvc/tmp/rwlock`` with the
+    holder's PID, and any DVC process that can't see that PID, e.g., one on
+    another login node or in a container sharing the project directory,
+    removes the entries as left by a killed process. When the stage finishes,
+    DVC's release then fails a bare ``assert`` on its missing entries, so a
+    stage whose command succeeded is reported as "failed to reproduce" with
+    an empty message and its lock entry is never written. Releasing is all
+    that's left to do at that point, so entries already gone are skipped.
+    """
+    import dvc.rwlock
+    from dvc.utils import relpath
+
+    def warn_purged(urls: list[str]) -> None:
+        if urls:
+            logger.warning(
+                "Another process, e.g., on another machine, removed DVC's "
+                f"lock on {', '.join(repr(relpath(u)) for u in urls)} while "
+                "it was in use"
+            )
+
+    def release_write(lock: dict, info: dict, changes: list[str]) -> None:
+        purged = []
+        for url in changes:
+            if lock.get("write", {}).get(url) != info:
+                purged.append(url)
+                continue
+            del lock["write"][url]
+            if not lock["write"]:
+                del lock["write"]
+        warn_purged(purged)
+
+    def release_read(lock: dict, info: dict, changes: list[str]) -> None:
+        purged = []
+        for url in changes:
+            readers = lock.get("read", {}).get(url, [])
+            if info not in readers:
+                purged.append(url)
+                continue
+            readers.remove(info)
+            if not readers:
+                del lock["read"][url]
+            if not lock["read"]:
+                del lock["read"]
+        warn_purged(purged)
+
+    dvc.rwlock._release_write = release_write
+    dvc.rwlock._release_read = release_read
+
+
+_tolerate_purged_rwlock_entries()
+
+
 # Default seconds to wait for DVC's repo-level lock during a pipeline run.
 #
 # DVC's own default is only 3 seconds (``dvc.lock.DEFAULT_TIMEOUT``), after
@@ -668,6 +723,7 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
             return True
 
     register_ck_scheme()
+    ensure_writable_site_cache()
     dvc.cli._log_unknown_exceptions = log_unknown_exceptions
     links = DropLinks()
     dvc.cli.logger.addFilter(links)
@@ -677,9 +733,34 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
         dvc.cli.logger.removeFilter(links)
 
 
+def ensure_writable_site_cache() -> None:
+    """Point DVC at a per-user site cache if the shared one isn't writable.
+
+    On Linux, DVC keeps per-repo state in ``/var/tmp/dvc``, which every user
+    on a machine shares, so on, e.g., an HPC login node, another user can
+    own it and DVC fails to open any repo. The fallback goes in the
+    environment, so DVC subprocesses use it too.
+    """
+    import dvc.dirs
+
+    if os.environ.get("DVC_SITE_CACHE_DIR"):
+        return
+    # DVC creates whatever is missing, so check the deepest part that exists
+    path = os.path.join(dvc.dirs.site_cache_dir(), "repo")
+    while not os.path.exists(path) and os.path.dirname(path) != path:
+        path = os.path.dirname(path)
+    if os.access(path, os.W_OK | os.X_OK):
+        return
+    cache_home = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache"
+    )
+    os.environ["DVC_SITE_CACHE_DIR"] = os.path.join(cache_home, "dvc", "site")
+
+
 def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     """Return a DVC repo with ``ck://`` scheme support registered."""
     register_ck_scheme()
+    ensure_writable_site_cache()
     return dvc.repo.Repo(wdir)
 
 
@@ -1050,6 +1131,18 @@ def run_dvc_command(
     #942, where ``calkit pull`` failed and succeeded on a second try. See
     :func:`dvc_lock_timeout`.
     """
+    # DVC would send the hub's token wherever the repo points a remote,
+    # e.g., after a Git pull changed it, in the repo DVC's own --cd names,
+    # if given, as with 'calkit dvc --cd path pull'
+    wdir = cwd
+    for i, arg in enumerate(argv):
+        if arg == "--":
+            break
+        if arg == "--cd" and i + 1 < len(argv):
+            wdir = os.path.join(cwd or "", argv[i + 1])
+        elif arg.startswith("--cd="):
+            wdir = os.path.join(cwd or "", arg.removeprefix("--cd="))
+    clear_off_hub_auth(wdir=wdir)
     if cwd:
         argv = ["--cd", cwd] + argv
     if lock_timeout is not None:
@@ -1081,11 +1174,141 @@ def detect_calkit_remote_type(
     )
     if not name_matches:
         return None
-    if url.startswith("ck://"):
+    # Schemes are case-insensitive, and DVC treats them so
+    scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+    if scheme == "ck":
         return "ck"
-    if url.startswith("http"):
+    if scheme in ("http", "https"):
         return "http"
     return None
+
+
+def is_on_hub(url: str, base_url: str) -> bool:
+    """Whether a URL is on the hub's API, by its scheme, host, port, and
+    path, so the hub's token is sent nowhere else.
+    """
+    from urllib.parse import urlsplit
+
+    def port(parts: Any) -> int | None:
+        return parts.port or {"http": 80, "https": 443}.get(parts.scheme)
+
+    try:
+        target, base = urlsplit(url.strip()), urlsplit(base_url)
+        same_port = port(target) == port(base)
+    except ValueError:
+        return False
+    base_path = base.path.rstrip("/")
+    return (
+        target.scheme.lower() in ("http", "https")
+        and target.scheme.lower() == base.scheme.lower()
+        and target.hostname is not None
+        and target.hostname == base.hostname
+        and same_port
+        and target.username is None
+        and target.password is None
+        and (
+            target.path == base_path or target.path.startswith(base_path + "/")
+        )
+    )
+
+
+# What the hub's token is kept in for a remote, in its local config
+REMOTE_AUTH_OPTIONS = (
+    "custom_auth_header",
+    "password",
+    "auth",
+    "token",
+    "user",
+)
+
+
+def clear_off_hub_auth(wdir: str | None = None) -> list[str]:
+    """Remove the hub's token from the local config of DVC remotes it wasn't
+    stored for, returning their names.
+
+    The repo says where its remotes are, so a pull can point one that has
+    the token anywhere, which DVC would send it to. So the token is stored
+    along with the remote's URL, in the local config, which a pull can't
+    change, and it's removed if the repo's URL for that remote differs, or
+    if it was stored without one for a URL off the hub. ``run_dvc_command``
+    runs this first.
+    """
+
+    def is_hub_token(secret: object) -> bool:
+        import jwt
+
+        token = str(secret).removeprefix("Bearer ").strip()
+        if token.startswith("ckp_"):
+            return True
+        # Older hub tokens are JWTs naming the token they are, and a hub
+        # link's sessions' name their machine
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+        except jwt.PyJWTError:
+            return False
+        return isinstance(payload, dict) and bool(
+            {"token_id", "machine_id"} & payload.keys()
+        )
+
+    root = os.path.abspath(wdir or ".")
+    while not os.path.isdir(os.path.join(root, ".dvc")):
+        if os.path.dirname(root) == root:
+            return []
+        root = os.path.dirname(root)
+    config_local = os.path.join(root, ".dvc", "config.local")
+    if not os.path.isfile(config_local):
+        return []
+    try:
+        local = ConfigObj(config_local, encoding="utf-8")
+        shared_path = os.path.join(root, ".dvc", "config")
+        shared = (
+            ConfigObj(shared_path, encoding="utf-8")
+            if os.path.isfile(shared_path)
+            else {}
+        )
+    except Exception:
+        return []
+    cleared = []
+    changed = False
+    for section, options in list(local.items()):
+        match = re.fullmatch(r'remote "(.+)"', section)
+        if match is None or not isinstance(options, dict):
+            continue
+        # Only the hub's token, not credentials of the user's own for
+        # remotes elsewhere, e.g., with a custom header of their own
+        if not any(
+            is_hub_token(options.get(k, "")) for k in ("password", "token")
+        ):
+            continue
+        pinned = options.get("url")
+        repo_url = (shared.get(section) or {}).get("url")
+        if pinned and (repo_url is None or repo_url == pinned):
+            continue
+        # Stored before URLs were, for one still on the hub, so it's pinned
+        # there rather than set up again
+        if (
+            not pinned
+            and repo_url
+            and is_on_hub(repo_url, calkit.hub.get_base_url())
+        ):
+            options["url"] = repo_url
+            changed = True
+            continue
+        # The repo's URL wins again, without the token
+        for option in (*REMOTE_AUTH_OPTIONS, "url"):
+            options.pop(option, None)
+        if not options:
+            local.pop(section)
+        cleared.append(match.group(1))
+    if cleared or changed:
+        local.write()
+        for name in cleared:
+            logger.warning(
+                f"Removed the hub's token from DVC remote {name}, since its "
+                "URL changed or wasn't stored with it; run 'calkit config "
+                "remote-auth' to set it up again"
+            )
+    return cleared
 
 
 def configure_remote(
@@ -1154,12 +1377,14 @@ def clear_remote_local_http_auth(
     if not isinstance(remote, dict):
         return
     changed = False
-    for option in ("custom_auth_header", "password", "auth"):
+    for option in REMOTE_AUTH_OPTIONS:
         if option in remote:
             remote.pop(option)
             changed = True
     if not changed:
         return
+    # Along with the URL it was stored for, so the repo's is used again
+    remote.pop("url", None)
     if not remote:
         cfg.pop(section_name, None)
     cfg.write()
@@ -1178,14 +1403,46 @@ def set_remote_auth(
     """
     if remote_name is None:
         remote_name = make_remote_name()
+    # So a token stored for a URL the repo has since changed isn't kept
+    # with it
+    clear_off_hub_auth(wdir=wdir)
     # Check if this is a ck:// remote (doesn't need HTTP auth)
     remotes = get_remotes(wdir=wdir)
     remote_url = remotes.get(remote_name, "")
-    if remote_url.startswith("ck://"):
+    if remote_url.lower().startswith("ck://"):
         clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         logger.info(
             f"Remote {remote_name} uses ck:// scheme; skipping HTTP auth setup"
         )
+        return
+    # The token is the user's own, and a repo can point a remote named like
+    # the hub's anywhere, so it only goes to the hub it came from
+    base_url = calkit.hub.get_base_url().rstrip("/")
+    if not is_on_hub(remote_url, base_url):
+        # Including any set while it pointed at the hub
+        clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
+        logger.warning(
+            f"Not setting up authentication for DVC remote {remote_name}, "
+            f"since its URL ({remote_url}) isn't on the hub ({base_url})"
+        )
+        return
+    # A hub link's session can't make a lasting token, and its own are
+    # short-lived, so neither goes in the config; a remote set up before
+    # keeps working, and 'ck://' ones get the session's token as they go
+    if calkit.hub.uses_link(base_url):
+        config_local = os.path.join(wdir or ".", ".dvc", "config.local")
+        local = (
+            ConfigObj(config_local, encoding="utf-8")
+            if os.path.isfile(config_local)
+            else {}
+        )
+        section = local.get(f'remote "{remote_name}"')
+        if not isinstance(section, dict) or not section.get("password"):
+            logger.warning(
+                f"DVC remote {remote_name} can't be authenticated in a hub "
+                "session; 'calkit update hub' switches it to Calkit's ck:// "
+                "scheme, which can"
+            )
         return
     settings = calkit.config.read()
     if settings.dvc_token is None or always_auth:
@@ -1195,6 +1452,13 @@ def set_remote_auth(
         )["access_token"]
         settings.dvc_token = token
         settings.write()
+    # The URL it's for goes first, in the local config, which the repo can't
+    # change, so the token only goes where it was meant to, and isn't
+    # cleared by the next command as a token without one
+    r3 = run_dvc_command(
+        ["remote", "modify", "--local", remote_name, "url", remote_url],
+        cwd=wdir,
+    )
     r1 = run_dvc_command(
         [
             "remote",
@@ -1217,7 +1481,7 @@ def set_remote_auth(
         ],
         cwd=wdir,
     )
-    if r1 != 0 or r2 != 0:
+    if r1 != 0 or r2 != 0 or r3 != 0:
         raise RuntimeError(
             f"Failed to set DVC remote authentication for {remote_name}"
         )

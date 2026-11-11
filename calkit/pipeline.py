@@ -169,6 +169,9 @@ class PipelineStatus(BaseModel):
 
     has_pipeline: bool
     environment_checks: dict[str, dict] = Field(default_factory=dict)
+    # When environments aren't checked, what the record of their last checks
+    # says instead: when, whether it passed, and whether they've changed since
+    environment_states: dict[str, dict] = Field(default_factory=dict)
     cleaned_notebooks: list[str] = Field(default_factory=list)
     stale_stages: dict[str, "StaleStage"] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
@@ -895,6 +898,7 @@ def get_gated_stages(
     interactive: bool | None = None,
     system_info: dict | None = None,
     remote: bool = True,
+    manual: bool = True,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -909,7 +913,8 @@ def get_gated_stages(
     and anything the checks print goes to stderr, keeping stdout for,
     e.g., ``calkit status --json``. ``interactive`` only decides whether
     connecting to a machine may prompt. Without ``remote``, nothing is
-    checked on another machine, which would take connecting to it.
+    checked on another machine, which would take connecting to it. Without
+    ``manual``, nobody is there to do a manual step, so those can't run.
     """
     import contextlib
     import json
@@ -929,6 +934,10 @@ def get_gated_stages(
     cache: dict[str, tuple[str | None, bool]] = {}
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
+    # The app each export kind needs
+    from calkit.export import exporters
+
+    apps = {e.kind: e for e in exporters()}
 
     def check(key: Any, func: Any) -> tuple[str | None, bool]:
         """Memoize a check, returning its problem and whether it's an error."""
@@ -1078,6 +1087,17 @@ def get_gated_stages(
             continue
         if stage.get("frozen"):
             continue
+        if not manual and stage.get("kind") == "manual-step":
+            gated[name] = f"needs a manual step: {stage.get('message')}"
+            continue
+        if stage.get("kind") in apps:
+            exporter = apps[stage["kind"]]
+            if exporter.find_executable() is None:
+                source = stage.get("source_path")
+                gated[name] = (
+                    f"needs {exporter.app} installed to export {source}"
+                )
+                continue
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )
@@ -1348,6 +1368,18 @@ def get_status(
             ]
             if failed_env_checks:
                 return PipelineStatus.model_validate(result)
+        else:
+            try:
+                result["environment_states"] = (
+                    calkit.environments.get_cached_env_states(
+                        ck_info=ck_info, targets=targets
+                    )
+                )
+            except Exception as e:
+                result["errors"].append(
+                    "Failed to read environment check records: "
+                    f"{e.__class__.__name__}: {e}"
+                )
         if compile_to_dvc and (
             ck_info.get("pipeline", {}).get("stages", {})
             or ck_info.get("subprojects")
@@ -1775,6 +1807,7 @@ def get_status(
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
             environment_checks=result["environment_checks"],
+            environment_states=result.get("environment_states", {}),
             cleaned_notebooks=result["cleaned_notebooks"],
             stale_stages=result["stale_stages"],
             errors=result["errors"],
@@ -1807,28 +1840,67 @@ def get_map_paths_outputs(stage: dict) -> list[str]:
     ]
 
 
+def get_map_paths_source(stage: dict, path: str) -> str | None:
+    """Where a ``map-paths`` stage copied ``path`` from, both relative to the
+    project, so a copy can be followed back to whatever made the original.
+    """
+    from calkit.models.pipeline import MapPathsStage
+
+    if stage.get("kind") != "map-paths":
+        return None
+    try:
+        parsed = MapPathsStage.model_validate(stage)
+    except Exception:
+        return None
+    wdir = parsed.wdir or ""
+    target = posixpath.normpath(path)
+    for mapping in parsed.paths:
+        src = posixpath.normpath(posixpath.join(wdir, mapping.src))
+        out = posixpath.normpath(posixpath.join(wdir, mapping.out_path))
+        if target == out:
+            return src
+        # A directory copy maps everything inside it
+        if mapping.kind.startswith("dir-") and target.startswith(out + "/"):
+            return posixpath.join(src, target[len(out) + 1 :])
+    return None
+
+
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
-    """Return the name of the pipeline stage that produces ``path``, if any."""
+    """Return the name of the pipeline stage that produces ``path``, if any.
+
+    A stage produces everything inside a directory it declares as an output
+    or writes into through ``map-paths``. A stage declaring the path itself
+    wins, then the one declaring the innermost directory that contains it.
+    """
     target = posixpath.normpath(Path(path).as_posix())
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if not isinstance(stages, dict):
         return None
+    containing: tuple[int, str] | None = None
     for name, stage in stages.items():
         if not isinstance(stage, dict):
             continue
         wdir = stage.get("wdir") or ""
-        for out in stage.get("outputs") or []:
-            out_path = out.get("path") if isinstance(out, dict) else out
-            if out_path and target == posixpath.normpath(
-                posixpath.join(wdir, Path(out_path).as_posix())
+        declared = [
+            out.get("path") if isinstance(out, dict) else out
+            for out in stage.get("outputs") or []
+        ]
+        outs = [
+            posixpath.normpath(posixpath.join(wdir, Path(p).as_posix()))
+            for p in declared
+            if p and isinstance(p, str)
+        ] + get_map_paths_outputs(stage)
+        for out in outs:
+            if target == out:
+                return str(name)
+            # Except the project root, which would claim every path
+            if (
+                out != "."
+                and target.startswith(out + "/")
+                and (containing is None or len(out) > containing[0])
             ):
-                return str(name)
-        for out in get_map_paths_outputs(stage):
-            # A directory mapping produces everything it writes into, except
-            # into the project root, which would claim every path
-            if target == out or (out != "." and target.startswith(out + "/")):
-                return str(name)
-    return None
+                containing = (len(out), str(name))
+    return containing[1] if containing else None
 
 
 def get_output_storage_map(
@@ -2032,7 +2104,8 @@ def _ensure_latex_aux_gitignore(
     so aux files are caught wherever latexmk writes them relative to the
     source -- next to it, or in an ``aux``/output subdirectory via
     ``$aux_dir``/``$out_dir``/``output_dir``. A stage's own ``aux_dir`` is
-    also ignored whole. ``*.pdf`` is never ignored so the compiled output
+    also ignored whole, from its own ``.gitignore`` if it's outside the
+    source directory. ``*.pdf`` is never ignored so the compiled output
     stays tracked.
 
     Returns True if ``.gitignore`` was modified.
@@ -2099,27 +2172,40 @@ def _ensure_latex_aux_gitignore(
     source_dir = os.path.dirname(stage.target_path)
     gitignore_path = os.path.join(base, source_dir, ".gitignore")
     # An aux dir is ignored whole, since packages like glossaries write
-    # files with extensions no list could anticipate. One outside the
-    # source directory can't be named from its .gitignore. Pure path
+    # files with extensions no list could anticipate. Pure path
     # arithmetic, since os.path.relpath resolves 'aux' to a device on
     # Windows.
+    aux_dir_changed = False
     if stage.aux_dir is not None:
         aux = norm(stage.aux_dir)
         src = norm(source_dir or ".")
-        if src == ".":
-            inside = aux != "." and not aux.startswith(("../", "/"))
-            rel = aux
-        else:
-            inside = aux.startswith(src + "/")
-            rel = aux[len(src) + 1 :]
-        if inside:
+        # Unless the PDF goes there too
+        pdf_there = (
+            stage.output_dir is not None and norm(stage.output_dir) == aux
+        )
+        if (
+            aux in (".", "..")
+            or aux.startswith(("../", "/"))
+            or re.match(r"[A-Za-z]:", aux)
+        ):
+            # The project itself, or outside it
+            pass
+        elif src == "." or aux.startswith(src + "/"):
+            rel = aux if src == "." else aux[len(src) + 1 :]
             aux_globs.append(f"/{rel}/*")
-            # Unless the PDF goes there too
-            if stage.output_dir is not None and norm(stage.output_dir) == aux:
+            if pdf_there:
                 aux_globs.append(f"!/{rel}/*.pdf")
-    return _write_managed_gitignore_block(
+        elif not (src + "/").startswith(aux + "/"):
+            # The source's .gitignore can't name it, so it ignores itself
+            aux_dir_changed = _write_managed_gitignore_block(
+                os.path.join(base, aux, ".gitignore"),
+                marker="calkit latex aux files",
+                lines=["*"] + (["!*.pdf"] if pdf_there else []),
+            )
+    source_changed = _write_managed_gitignore_block(
         gitignore_path, marker="calkit latex aux files", lines=aux_globs
     )
+    return source_changed or aux_dir_changed
 
 
 def sync_markdown(
@@ -2945,6 +3031,15 @@ def to_dvc(
                         else:
                             stage_output_paths.append(out)
                             dvc_stages[stage_name]["deps"].append(out)
+        # What a document reads from a folder those stages make is covered
+        if stage_output_paths and isinstance(stage, LatexStage):
+            folders = tuple(p.rstrip("/") + "/" for p in stage_output_paths)
+            found = set(stage.found_paths)
+            dvc_stages[stage_name]["deps"] = [
+                d
+                for d in dvc_stages[stage_name]["deps"]
+                if d not in found or not d.startswith(folders)
+            ]
         # Stages generated from this one read these too, e.g., a latex
         # stage's diffs, but the paths are only known now
         if stage_output_paths:

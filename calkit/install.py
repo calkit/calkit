@@ -48,6 +48,8 @@ class Installer(_InstallerRequired, total=False):
     # Registry apps that must be present first, e.g., Homebrew before
     # anything installed through it
     requires: list[str]
+    # What to look for afterward, when it isn't named after the app
+    binary: str
 
 
 # ``unix`` is the fallback for both ``mac`` and ``linux`` when an entry
@@ -227,10 +229,21 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
         },
     },
     "code": {
+        # VS Code's own download, unzipped where its installer would put it,
+        # so it doesn't take Homebrew
         "mac": {
-            "script": "brew install --cask visual-studio-code",
-            "path_add": _BREW_BINS,
-            "requires": ["brew"],
+            "script": (
+                'zip="$(mktemp)" && curl -fsSL -o "$zip" '
+                "https://update.code.visualstudio.com/latest/darwin-universal/"
+                'stable && ditto -xk "$zip" /Applications && rm "$zip"'
+            ),
+            # Also where one dragged into the user's own Applications runs
+            "path_add": [
+                "/Applications/Visual Studio Code.app/Contents/Resources/app/"
+                "bin",
+                "~/Applications/Visual Studio Code.app/Contents/Resources/app/"
+                "bin",
+            ],
         },
         "windows": {
             "script": _WINGET + "Microsoft.VisualStudioCode",
@@ -239,6 +252,35 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "conda": _MINIFORGE_INSTALLER,
     "R": _R_INSTALLER,
+    # Converts LaTeX documents to Word without Word, with its Math
+    # component, which Linux distributions package separately and without
+    # which equations come out empty
+    "libreoffice": {
+        "mac": {
+            "script": "brew install --cask libreoffice",
+            "path_add": "/Applications/LibreOffice.app/Contents/MacOS",
+            "requires": ["brew"],
+            "binary": "soffice",
+        },
+        "linux": {
+            "script": (
+                "if command -v apt-get >/dev/null; then "
+                "sudo apt-get update && "
+                "sudo apt-get install -y libreoffice-writer libreoffice-math; "
+                "elif command -v dnf >/dev/null; then "
+                "sudo dnf install -y libreoffice-writer libreoffice-math; "
+                "else echo 'Install LibreOffice Writer and Math with your "
+                "package manager' >&2; exit 1; fi"
+            ),
+            "path_add": "/usr/bin",
+            "binary": "soffice",
+        },
+        "windows": {
+            "script": _WINGET + "TheDocumentFoundation.LibreOffice",
+            "path_add": "%ProgramFiles%\\LibreOffice\\program",
+            "binary": "soffice",
+        },
+    },
     # Converts equations for Word exports of LaTeX documents
     "pandoc": {
         "mac": {
@@ -254,6 +296,7 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
 }
 # Aliases for the binaries users actually invoke / list as deps; sharing
 # the same installer dict by reference keeps the entries in lockstep.
+INSTALLERS["soffice"] = INSTALLERS["libreoffice"]
 INSTALLERS["cargo"] = _RUSTUP_INSTALLER
 INSTALLERS["julia"] = _JULIAUP_INSTALLER
 INSTALLERS["mamba"] = _MINIFORGE_INSTALLER
@@ -416,6 +459,62 @@ def _add_to_path(entry: Installer) -> None:
             os.environ["PATH"] = path_add + os.pathsep + current_path
 
 
+def find(app: str) -> str | None:
+    """Find an app's binary on ``PATH``, or where its installer puts it.
+
+    An app can be installed without being on ``PATH``, e.g., VS Code
+    dragged into /Applications without its shell command.
+    """
+    found = shutil.which(app)
+    if found is not None:
+        return found
+    entry = get_installer(app)
+    if entry is None:
+        return None
+    paths = entry["path_add"]
+    dirs = [
+        _expand_path(p) for p in ([paths] if isinstance(paths, str) else paths)
+    ]
+    return shutil.which(app, path=os.pathsep.join(dirs))
+
+
+# Where to get apps whose installers aren't registered for every platform
+DOWNLOAD_PAGES = {"code": "https://code.visualstudio.com/download"}
+
+
+def add_vscode_recs(code: str) -> None:
+    """Install the VS Code extensions Calkit recommends, and add its
+    recommended settings to the user's, keeping any already set.
+    """
+    from calkit.resources import load_json
+
+    extensions = load_json("vscode", "extensions.json")["recommendations"]
+    args = [a for e in extensions for a in ("--install-extension", e)]
+    subprocess.call([code, *args])
+    settings_dir = {
+        "mac": "~/Library/Application Support/Code/User",
+        "windows": "%APPDATA%\\Code\\User",
+    }.get(_current_platform(), "~/.config/Code/User")
+    settings_path = os.path.join(_expand_path(settings_dir), "settings.json")
+    current: dict = {}
+    if os.path.isfile(settings_path):
+        try:
+            with open(settings_path, encoding="utf-8") as f:
+                current = json.load(f)
+        except ValueError:
+            # VS Code allows comments there, which can't be merged into
+            # without losing them
+            print(
+                f"Not adding Calkit's settings to {settings_path}, since it "
+                "isn't plain JSON"
+            )
+            return
+    recommended = load_json("vscode", "settings.json")
+    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump(recommended | current, f, indent=2)
+
+
 def install(app: str) -> bool:
     """Run the registered install script for ``app`` and update ``PATH``.
 
@@ -437,7 +536,7 @@ def install(app: str) -> bool:
     if result.returncode != 0:
         return False
     _add_to_path(entry)
-    ok = shutil.which(app) is not None
+    ok = shutil.which(entry.get("binary", app)) is not None
     if ok:
         record_install(app, entry)
     return ok

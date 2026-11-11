@@ -1562,6 +1562,69 @@
       "title": "FigureEvidence",
       "type": "object"
     },
+    "FileEvidence": {
+      "description": "Evidence in the form of a file cited as-is by its path, e.g., a log,\na transcript excerpt, a script, or a raw output, optionally at specific\nlines.\n\nIt has no ``kind``. An entry without one that has a ``key`` or\n``values`` is a ``result``, which is how those used to be written.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the file can be found.",
+          "title": "Git Ref"
+        },
+        "kind": {
+          "default": null,
+          "description": "Left out, or null, for a file cited by its path.",
+          "title": "Kind",
+          "type": "null"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*\\d+\\s*([-\u2013]\\s*\\d+\\s*)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Line or inclusive range of lines in the file where the evidence is, e.g., 8 or '8-12'. Checked against the file, so a citation of lines that are no longer there is an error.",
+          "title": "Lines"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FileEvidence",
+      "type": "object"
+    },
     "Formula": {
       "properties": {
         "description": {
@@ -1647,6 +1710,248 @@
       "title": "FormulaParams",
       "type": "object"
     },
+    "GimpExportStage": {
+      "additionalProperties": false,
+      "description": "A figure GIMP exports, flattened, from an XCF file, e.g., a PNG.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "gimp-export",
+          "default": "gimp-export",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "source_path": {
+          "description": "The XCF file to export from.",
+          "title": "Source Path",
+          "type": "string"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "source_path"
+      ],
+      "title": "GimpExportStage",
+      "type": "object"
+    },
     "HostnameMatchesCondition": {
       "additionalProperties": false,
       "properties": {
@@ -1670,6 +1975,261 @@
         "hostname_matches"
       ],
       "title": "HostnameMatchesCondition",
+      "type": "object"
+    },
+    "InkscapeExportStage": {
+      "additionalProperties": false,
+      "description": "A figure Inkscape exports from an SVG, e.g., a PNG or PDF.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "dpi": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Resolution of an exported PNG.",
+          "title": "Dpi"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "inkscape-export",
+          "default": "inkscape-export",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "source_path": {
+          "description": "The SVG to export from.",
+          "title": "Source Path",
+          "type": "string"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "source_path"
+      ],
+      "title": "InkscapeExportStage",
       "type": "object"
     },
     "Input": {
@@ -3509,6 +4069,288 @@
         "machine_id_equals"
       ],
       "title": "MachineIdEqualsCondition",
+      "type": "object"
+    },
+    "ManualStepOpen": {
+      "description": "What a manual step opens.\n\nThe app is always named, since the default app for a file differs\nbetween machines, e.g., Illustrator rather than Inkscape for an SVG.",
+      "properties": {
+        "app": {
+          "description": "App to open, e.g., 'Inkscape'.",
+          "title": "App",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "File to open in it, e.g., the Inkscape SVG.",
+          "title": "Path"
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "title": "ManualStepOpen",
+      "type": "object"
+    },
+    "ManualStepStage": {
+      "additionalProperties": false,
+      "description": "A step someone does manually, e.g., exporting a figure from\nPhotoshop, which the pipeline asks for when its inputs change, e.g.,\nthe Photoshop file.\n\nIts outputs are kept while it runs, since they're what the person\nreplaces, and the step checks that they changed.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "manual-step",
+          "default": "manual-step",
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "description": "What to do, e.g., 'In Photoshop, export figures/wake-diagram.png'.",
+          "title": "Message",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "open": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManualStepOpen"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "App to open for the step, and the file to open in it."
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "ManualStepStage",
       "type": "object"
     },
     "MapPathsStage": {
@@ -5578,11 +6420,14 @@
               "mapping": {
                 "command": "#/$defs/CommandStage",
                 "docker-command": "#/$defs/DockerCommandStage",
+                "gimp-export": "#/$defs/GimpExportStage",
+                "inkscape-export": "#/$defs/InkscapeExportStage",
                 "json-to-latex": "#/$defs/JsonToLatexStage",
                 "julia-command": "#/$defs/JuliaCommandStage",
                 "julia-script": "#/$defs/JuliaScriptStage",
                 "jupyter-notebook": "#/$defs/JupyterNotebookStage",
                 "latex": "#/$defs/LatexStage",
+                "manual-step": "#/$defs/ManualStepStage",
                 "map-paths": "#/$defs/MapPathsStage",
                 "marimo-html-wasm": "#/$defs/MarimoHtmlWasmStage",
                 "markdown": "#/$defs/MarkdownStage",
@@ -5639,6 +6484,15 @@
               },
               {
                 "$ref": "#/$defs/WordToPdfStage"
+              },
+              {
+                "$ref": "#/$defs/ManualStepStage"
+              },
+              {
+                "$ref": "#/$defs/InkscapeExportStage"
+              },
+              {
+                "$ref": "#/$defs/GimpExportStage"
               },
               {
                 "$ref": "#/$defs/JupyterNotebookStage"
@@ -7004,7 +7858,7 @@
       "type": "object"
     },
     "Question": {
-      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a ``value`` evidence entry can be templated into the text by\nname, as in ``\"about {improvement:.1f}x\"``, so it is read from the\nresults file rather than retyped. Longer reasoning belongs in the\npublication, pointed at with a publication evidence entry and its\n``section``.\n\nAn answer is a claim about the evidence as it was when the answer was\nlast edited, and Git records when that was. ``calkit check questions``\nreports a question as stale when any of its evidence has changed since\nthat commit, so editing the question after re-reading it against the\nnew evidence is how to say it still holds.",
+      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a ``value`` evidence entry can be templated into the text by\nname, as in ``\"about {improvement:.1f}x\"``, so it is read from the\nresults file rather than retyped. Longer reasoning belongs in the\npublication, pointed at with a publication evidence entry and its\n``section``.\n\nAn answer is a claim about the evidence as it was when the answer was\nlast edited, and Git records when that was. ``calkit check questions``\nreports evidence that has changed since that commit. People sign off on\na question in two ways. A verification says the stages behind the\nevidence implement the ``approach``, and goes stale when the approach or\nthose stages change. A validation says the approach suits the question\nand the evidence justifies the answer, and goes stale when the question\nor its evidence changes.",
       "properties": {
         "answer": {
           "anyOf": [
@@ -7024,6 +7878,19 @@
           "default": null,
           "description": "The claim the evidence supports. A mapping keyed by 'if <condition>', 'elif <condition>' and 'else' picks its wording from the evidence, so an answer resting on a threshold states the other outcome instead of going stale when a value moves.",
           "title": "Answer"
+        },
+        "approach": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One sentence on how the question is answered, e.g., the method the pipeline implements. The stages themselves aren't listed here, since they follow from the evidence the pipeline produces.",
+          "title": "Approach"
         },
         "evidence": {
           "anyOf": [
@@ -7047,6 +7914,9 @@
                   },
                   {
                     "$ref": "#/$defs/DocumentEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/FileEvidence"
                   }
                 ]
               },
@@ -7100,6 +7970,38 @@
         "question": {
           "title": "Question",
           "type": "string"
+        },
+        "validations": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SignOff"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sign-offs that the approach suits the question and the evidence justifies the answer, i.e., the right thing was worked out. Stale once the question, hypothesis, approach, answer, or evidence changes. One per person; signing off again replaces theirs.",
+          "title": "Validations"
+        },
+        "verifications": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SignOff"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sign-offs that the pipeline stages behind the evidence implement the approach correctly, i.e., the answer was worked out right. Stale once the approach or any of those stages changes. One per person; signing off again replaces theirs.",
+          "title": "Verifications"
         }
       },
       "required": [
@@ -8310,10 +9212,17 @@
           "title": "Key"
         },
         "kind": {
-          "const": "result",
+          "anyOf": [
+            {
+              "const": "result",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": "result",
-          "title": "Kind",
-          "type": "string"
+          "title": "Kind"
         },
         "path": {
           "title": "Path",
@@ -9431,6 +10340,49 @@
         "yaml_file"
       ],
       "title": "ShowcaseYamlFile",
+      "type": "object"
+    },
+    "SignOff": {
+      "additionalProperties": false,
+      "description": "A person's sign-off on a question, as a verification or validation.\n\nIt applies to the question as it was at the commit that added it, which\nis read from Git rather than written here, so a sign-off can't quietly\ncarry over to something nobody checked.",
+      "properties": {
+        "by": {
+          "$ref": "#/$defs/_Person",
+          "description": "Who signed off. Generative AI tools used are disclosed with their ``with_ai``."
+        },
+        "date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "format": "date-time",
+              "type": "string"
+            }
+          ],
+          "description": "When they signed off. Written with the time, so signing off again, even on the same day, records a new sign-off.",
+          "title": "Date"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What they checked, or anything they want on record.",
+          "title": "Notes"
+        }
+      },
+      "required": [
+        "by",
+        "date"
+      ],
+      "title": "SignOff",
       "type": "object"
     },
     "SlurmEnvironment": {

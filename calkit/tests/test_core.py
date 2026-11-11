@@ -558,6 +558,30 @@ def test_ryaml_dump_leaves_no_trailing_whitespace():
         assert calkit.ryaml.load(buf.getvalue()) == data
 
 
+def test_ryaml_dump_failure(tmp_path):
+    import io
+
+    from ruamel.yaml.representer import RepresenterError
+
+    import calkit
+
+    # A failed dump doesn't send later ones to its stream, which emptied
+    # calkit.yaml on the hub
+    with pytest.raises(RepresenterError):
+        calkit.ryaml.dump({"a": object()}, io.StringIO())
+    buf = io.StringIO()
+    calkit.ryaml.dump({"questions": ["q1", "q2"]}, buf)
+    assert calkit.ryaml.load(buf.getvalue()) == {"questions": ["q1", "q2"]}
+    # A path is only written once the dump succeeds
+    fpath = tmp_path / "calkit.yaml"
+    fpath.write_text("name: proj\n")
+    with pytest.raises(RepresenterError):
+        calkit.ryaml.dump({"a": object()}, fpath)
+    assert fpath.read_text() == "name: proj\n"
+    calkit.ryaml.dump({"name": "proj", "questions": ["q1"]}, fpath)
+    assert calkit.ryaml.load(fpath) == {"name": "proj", "questions": ["q1"]}
+
+
 def test_ryaml_dump_keeps_significant_trailing_whitespace():
     # In a block scalar a trailing space is content, not formatting.
     import io
@@ -619,6 +643,11 @@ def test_ryaml_keeps_how_prose_was_wrapped() -> None:
     calkit.save_calkit_info(info)
     with open("calkit.yaml") as f:
         assert f.read() == text + "owner: someone\n"
+    # A save that fails leaves the file as it was
+    with pytest.raises(Exception):
+        calkit.save_calkit_info({**info, "bad": object()})
+    with open("calkit.yaml") as f:
+        assert f.read() == text + "owner: someone\n"
     # A value that's changed is wrapped at the width like any other
     data = calkit.ryaml.load(text)
     data["questions"][0]["notes"] += " And one more sentence to fold."
@@ -626,6 +655,60 @@ def test_ryaml_keeps_how_prose_was_wrapped() -> None:
     assert "agree to within two\n" not in out
     assert calkit.ryaml.load(out) == data
     assert "      more than the measurement uncertainty?\n" in out
+    # Nor are lines longer than the width, in plain values or folded
+    # blocks, or long words, whether beside their key or below it
+    long = "word " * 20 + "end"
+    text = (
+        f"notes: {long}\n"
+        f"path: {'a/' * 45}b.json\n"
+        f"below:\n  {'c/' * 45}d.json\n"
+        f"answer: >-\n  {long}\n  and a second line.\n"
+        f"single: >-\n  {long}\n"
+    )
+    assert dumped(calkit.ryaml.load(text)) == text
+    # Unless they're new
+    data = calkit.ryaml.load(text)
+    data["notes"] = str(data["notes"])
+    data["path"] = str(data["path"])
+    out = dumped(data)
+    assert f"notes: {long}\n" not in out
+    assert "path:\n" in out
+    assert calkit.ryaml.load(out) == data
+    # Likewise double-quoted strings, including escapes, and flow lists,
+    # however they were wrapped
+    quoted = (
+        f'quoted: "{long}"\n'
+        f'escaped: "{long}\\t{{x:.0f}}"\n'
+        f'wrapped: "{long}\n  ms"\n'
+        f"items: [{', '.join(['item'] * 20)}]\n"
+        "names: [one, two,\n    three]\n"
+    )
+    for data in [
+        calkit.ryaml.load(quoted),
+        copy.deepcopy(calkit.ryaml.load(quoted)),
+    ]:
+        assert dumped(data) == quoted
+    # A break in quotes after an escape is left to ruamel
+    continued = f'continued: "{long}\\\n  ms"\n'
+    assert calkit.ryaml.load(dumped(calkit.ryaml.load(continued))) == (
+        calkit.ryaml.load(continued)
+    )
+    # A quoted value replaced in code keeps its quotes, as ruamel keeps the
+    # type of what it replaced, but is wrapped like any other new value
+    data = calkit.ryaml.load(quoted)
+    data["wrapped"] = f"{long} and more"
+    out = dumped(data)
+    assert 'wrapped: "word' in out
+    assert f'wrapped: "{long} and more"\n' not in out
+    assert calkit.ryaml.load(out) == data
+    # Other dumpers can still write what was read, e.g., DVC writing
+    # dvc.yaml
+    import ruamel.yaml
+
+    for source in [text, quoted]:
+        buf = io.StringIO()
+        ruamel.yaml.YAML().dump(calkit.ryaml.load(source), buf)
+        assert calkit.ryaml.load(buf.getvalue()) == calkit.ryaml.load(source)
 
 
 def test_update_readme_content():

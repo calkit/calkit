@@ -1,6 +1,7 @@
 """GitHub related functionality."""
 
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -30,6 +31,28 @@ def _load_app_signing_key() -> bytes:
     return settings.GH_APP_PRIVATE_KEY.replace("\\n", "\n").encode()
 
 
+# A GitHub repo's URL, as a project's git_repo_url may give it: over HTTPS
+# or HTTP, or SSH in either form, with or without ".git" and a trailing slash
+_GITHUB_REPO_URL = re.compile(
+    r"(?:https?://github\.com/|ssh://git@github\.com(?::22)?/"
+    r"|git@github\.com:)"
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9._][A-Za-z0-9._-]*?)"
+    r"(?:\.git)?/?",
+    re.IGNORECASE,
+)
+
+
+def parse_github_repo(url: str) -> str | None:
+    """The "owner/repo" a GitHub URL is for, lowercased, so two forms of
+    one repo's URL compare equal, or None if it isn't one.
+    """
+    match = _GITHUB_REPO_URL.fullmatch(url.strip())
+    # Repos can start with ".", e.g., ".github", but aren't all dots
+    if match is None or not match.group(2).strip("."):
+        return None
+    return f"{match.group(1)}/{match.group(2)}".lower()
+
+
 def create_app_token() -> str:
     client_id = os.environ["GH_CLIENT_ID"]
     signing_key = _load_app_signing_key()
@@ -51,7 +74,9 @@ def create_app_token() -> str:
 # before expiry means a GitHub-less user's request doesn't mint a fresh token
 # (two GitHub API calls) on every repo operation. This is a per-worker
 # in-process cache, so each worker mints at most once per repo per ~hour.
-_installation_token_cache: dict[tuple[str, str, bool], tuple[str, float]] = {}
+_installation_token_cache: dict[
+    tuple[str, str, bool, tuple[tuple[str, str], ...]], tuple[str, float]
+] = {}
 _installation_token_cache_lock = threading.Lock()
 # Refresh this long before GitHub's stated expiry so a cached token can't lapse
 # mid-request.
@@ -59,9 +84,28 @@ _INSTALLATION_TOKEN_SAFETY_SECONDS = 300
 
 
 def get_app_installation_token(
-    owner_name: str, repo_name: str, read_only: bool = False
+    owner_name: str,
+    repo_name: str,
+    read_only: bool = False,
+    permissions: dict[str, str] | None = None,
 ) -> str:
     """Return a GitHub App installation access token scoped to one repo.
+
+    See ``get_app_installation_token_and_expiry``.
+    """
+    return get_app_installation_token_and_expiry(
+        owner_name, repo_name, read_only=read_only, permissions=permissions
+    )[0]
+
+
+def get_app_installation_token_and_expiry(
+    owner_name: str,
+    repo_name: str,
+    read_only: bool = False,
+    permissions: dict[str, str] | None = None,
+) -> tuple[str, float]:
+    """Return a GitHub App installation access token scoped to one repo,
+    and when to stop using it, a little before GitHub's expiry.
 
     Used to perform git operations on behalf of users who have native Calkit
     access to a project but no personal GitHub token (e.g. email/Google
@@ -73,18 +117,29 @@ def get_app_installation_token(
     these: it is read by everyone with access to the project, and a token
     that cannot write is a better guarantee than one that merely shouldn't.
     Cached separately, so a reader never picks up a writable token.
+
+    Otherwise it has the installation's permissions except ``workflows`` and
+    ``actions``, since anyone with write access on the hub gets one, and a
+    workflow it could push would run with the repo's secrets. Pass
+    ``permissions`` to ask for exactly those instead, e.g., to push a
+    workflow the hub wrote itself.
     """
-    cache_key = (owner_name.lower(), repo_name.lower(), read_only)
+    cache_key = (
+        owner_name.lower(),
+        repo_name.lower(),
+        read_only,
+        tuple(sorted((permissions or {}).items())),
+    )
     now = time.time()
     with _installation_token_cache_lock:
         cached = _installation_token_cache.get(cache_key)
         if cached is not None and cached[1] > now:
-            return cached[0]
+            return cached
     # Miss or expired: mint a fresh token. Done outside the lock so requests
     # for different repos don't serialize; a rare concurrent double-mint just
     # yields two valid tokens.
     token, expires_at = _mint_app_installation_token(
-        owner_name, repo_name, read_only=read_only
+        owner_name, repo_name, read_only=read_only, permissions=permissions
     )
     # ~50 min fallback if GitHub omits expires_at for some reason.
     expiry = now + 3000.0
@@ -96,11 +151,14 @@ def get_app_installation_token(
             pass
     with _installation_token_cache_lock:
         _installation_token_cache[cache_key] = (token, expiry)
-    return token
+    return token, expiry
 
 
 def _mint_app_installation_token(
-    owner_name: str, repo_name: str, read_only: bool = False
+    owner_name: str,
+    repo_name: str,
+    read_only: bool = False,
+    permissions: dict[str, str] | None = None,
 ) -> tuple[str, str | None]:
     """Mint a fresh installation token, returning (token, expires_at)."""
     app_jwt = create_app_token()
@@ -124,18 +182,23 @@ def _mint_app_installation_token(
             f"{owner_name}/{repo_name}: GitHub returned {resp.status_code} "
             f"({resp.text[:200]})",
         )
-    installation_id = resp.json()["id"]
+    installation = resp.json()
+    if permissions is None and read_only:
+        permissions = {"contents": "read"}
+    elif permissions is None:
+        # Narrowing is allowed; widening is not
+        permissions = {
+            name: level
+            for name, level in (
+                installation.get("permissions") or {"contents": "write"}
+            ).items()
+            if name not in ("workflows", "actions")
+        }
     resp = requests.post(
-        f"https://api.github.com/app/installations/{installation_id}"
+        f"https://api.github.com/app/installations/{installation['id']}"
         "/access_tokens",
         headers=headers,
-        json=(
-            {"repositories": [repo_name], "permissions": {"contents": "read"}}
-            if read_only
-            # Otherwise the installation's own permissions, which is what a
-            # push needs. Narrowing is allowed; widening is not.
-            else {"repositories": [repo_name]}
-        ),
+        json={"repositories": [repo_name], "permissions": permissions},
         timeout=15,
     )
     if resp.status_code not in (200, 201):
@@ -156,6 +219,24 @@ def token_resp_text_to_dict(resp_text: str) -> dict:
         key, value = item.split("=")
         out[key] = value
     return out
+
+
+def has_verified_email(access_token: str, email: str) -> bool:
+    """Whether GitHub verified this email for the token's user."""
+    resp = requests.get(
+        "https://api.github.com/user/emails",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    emails = resp.json() if resp.status_code == 200 else None
+    if not isinstance(emails, list):
+        return False
+    return any(
+        isinstance(e, dict)
+        and e.get("verified") is True
+        and str(e.get("email", "")).lower() == email.lower()
+        for e in emails
+    )
 
 
 def resolve_email(access_token: str) -> tuple[str, bool]:

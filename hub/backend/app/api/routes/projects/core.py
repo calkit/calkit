@@ -94,6 +94,7 @@ from app.core import (
     ryaml,
     title_from_path,
     utcnow,
+    web_url_or_none,
 )
 from app.dvc import (
     expand_dvc_lock_outs,
@@ -168,6 +169,7 @@ from app.models import (
     QuestionEvidenceValue,
     QuestionPublic,
     QuestionPut,
+    QuestionSignOff,
     Result,
     StageStatus,
     Table,
@@ -199,6 +201,7 @@ from app.pipeline import (
     compute_stage_statuses,
     find_frozen_tainted_stages,
     find_stage_for_path,
+    pipeline_at_ref,
 )
 from app.security import generate_refresh_token, hash_refresh_token
 from app.storage import (
@@ -346,31 +349,7 @@ def get_projects(
         # opened the project won't appear until they do.
         where_clause = app.projects.writable_project_clause(current_user)
     else:
-        where_clause = or_(
-            Project.is_public,
-            Project.owner_account_id == current_user.account.id,
-            # A row in the unified access table with either a native Calkit
-            # grant (role_id, e.g. an invite redemption) or GitHub-derived
-            # access. A row with both null is a cached "no access" result.
-            and_(
-                UserProjectAccess.user_id == current_user.id,
-                or_(
-                    UserProjectAccess.role_id.is_not(None),  # type: ignore
-                    UserProjectAccess.github_access.is_not(None),  # type: ignore
-                ),
-            ),
-            Project.owner_account.has(  # type: ignore
-                and_(
-                    Account.org_id.is_not(None),  # type: ignore
-                    select(UserOrgMembership)
-                    .where(
-                        UserOrgMembership.user_id == current_user.id,
-                        UserOrgMembership.org_id == Account.org_id,
-                    )
-                    .exists(),
-                )
-            ),
-        )
+        where_clause = app.projects.readable_project_clause(current_user)
     if owner_name is not None:
         where_clause = and_(
             where_clause,
@@ -572,14 +551,19 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
 
 
 def _push_dvc_cache_to_storage(
-    repo_dir: str, owner_name: str, project_name: str
+    repo_dir: str,
+    owner_name: str,
+    project_name: str,
+    skip: set[str] | None = None,
 ) -> int:
     """Copy a repo's local DVC cache into this project's object storage.
 
     Walking the cache rather than reading each .dvc file covers directory
     outputs and their .dir objects the same way single files are covered,
     which is the difference between a pointer that resolves and one that
-    dangles. Returns how many objects were written.
+    dangles. Objects in ``skip``, named like ``ab/cdef...``, e.g., those
+    cached before something was added, aren't copied. Returns how many
+    objects were written.
     """
     cache_dir = os.path.join(repo_dir, ".dvc", "cache", "files", "md5")
     if not os.path.isdir(cache_dir):
@@ -592,7 +576,7 @@ def _push_dvc_cache_to_storage(
             continue
         for rest in sorted(os.listdir(idx_dir)):
             src = os.path.join(idx_dir, rest)
-            if not os.path.isfile(src):
+            if not os.path.isfile(src) or f"{idx}/{rest}" in (skip or ()):
                 continue
             fpath = make_data_fpath(
                 owner_name=owner_name,
@@ -677,8 +661,7 @@ def post_project_upload(
         "hub": settings.frontend_host,
         "git_repo_url": project.git_repo_url,
     }
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     # Which files belong in Git and which in DVC is a real decision (size,
     # extension, directories of many small files), and calkit already makes
     # it. Shelling out keeps that judgment in one place rather than growing
@@ -768,8 +751,8 @@ def get_owned_projects(
 ) -> ProjectsPublic:
     where_clause = or_(
         Project.owner_account_id == current_user.account.id,
-        # A native Calkit grant (role_id), e.g. an invite redemption, the only
-        # access path for GitHub-less collaborators.
+        # A native Calkit grant (role_id), e.g., an invite redemption, the
+        # only access path for GitHub-less collaborators.
         Project.user_access_records.any(  # type: ignore
             and_(
                 UserProjectAccess.user_id == current_user.id,
@@ -923,13 +906,26 @@ def post_project(
             current_user=current_user,
             template=project_in.template,
         )
-    # Validate the git repo URL is on github.com to prevent SSRF
+    # Validate the git repo URL is an https github.com repo, to prevent SSRF
+    # and so it's safe to render as a link
     parsed_git_url = urlparse(project_in.git_repo_url)
-    if parsed_git_url.hostname not in ("github.com", "www.github.com"):
-        raise HTTPException(400, "Git repo URL must be on github.com")
+    is_github = parsed_git_url.netloc.lower() in (
+        "github.com",
+        "www.github.com",
+    )
+    if parsed_git_url.scheme != "https" or not is_github:
+        raise HTTPException(400, "Git repo URL must be on https://github.com")
     # Detect owner and repo name from Git repo URL
     # TODO: This should be generalized to not depend on GitHub?
-    owner_name, repo_name = project_in.git_repo_url.split("/")[-2:]
+    repo_match = re.fullmatch(
+        r"/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)/?", parsed_git_url.path
+    )
+    if repo_match is None or parsed_git_url.query or parsed_git_url.fragment:
+        raise HTTPException(
+            400, "Git repo URL must be https://github.com/<owner>/<repo>"
+        )
+    owner_name, repo_name = repo_match.groups()
+    project_in.git_repo_url = f"https://github.com/{owner_name}/{repo_name}"
     # Validate that the owner is either the current user or an org they belong
     # to before retrieving their GitHub token
     # This prevents users from using their token to make API calls for repos
@@ -1159,8 +1155,7 @@ def post_project(
                     git_repo_url=template_git_repo_url,
                     git_rev=template_git_rev,
                 )
-            with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-                ryaml.dump(ck_info, f)
+            ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
             repo.git.add("calkit.yaml")
             if project_in.template is None:
                 # Create devcontainer spec from the one bundled with Calkit
@@ -1169,9 +1164,8 @@ def post_project(
                 dc_fpath = os.path.join(dc_dir, "devcontainer.json")
                 with open(dc_fpath, "w", encoding="utf-8") as f:
                     f.write(
-                        calkit.resources.read_text(
-                            "devcontainer",
-                            calkit.resources.DEVCONTAINER_FNAME,
+                        calkit.resources.make_devcontainer_spec(
+                            ck_info, wdir=repo.working_dir
                         )
                     )
                 repo.git.add(".devcontainer")
@@ -2302,8 +2296,7 @@ def patch_project_contents(
         else:
             ck_info[target_category] = [current_object]
     # Now it's time to write and commit
-    with open(ck_fpath, "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(ck_fpath))
     git_diff = repo.git.diff("calkit.yaml")
     if not git_diff:
         logger.info("No changes to calkit.yaml detected")
@@ -2446,11 +2439,12 @@ class _EvidenceLookups(NamedTuple):
     results_by_path: dict[tuple[str, str | None], Result]
     tables_by_path: dict[str, Result]
     publications_by_path: dict[str, Publication]
+    # With its outs' paths relative to the project, not each stage's wdir
     dvc_lock: dict[str, Any]
     stage_statuses: dict[str, PipelineStageStatus]
     frozen_stages: set[str]
-    # Cited documents and publications present in the tree or dvc.lock,
-    # since those need not be declared to be cited
+    # Cited documents, publications, and plain files present in the tree or
+    # dvc.lock, since those need not be declared to be cited
     present_paths: set[str] = set()
 
 
@@ -2482,6 +2476,40 @@ def _evidence_ref(ev: dict, ref: str | None) -> str | None:
     return _declared_git_ref(ev) or ref
 
 
+def _get_project_path(
+    stage_name: str, path: str, stage_wdirs: dict[str, str]
+) -> str:
+    """A ``dvc.lock`` path, which is relative to its stage's ``wdir``, as a
+    path relative to the project, like an evidence path."""
+    wdir = stage_wdirs.get(str(stage_name).split("@")[0]) or ""
+    return posixpath.normpath(posixpath.join(wdir, path)) if wdir else path
+
+
+def _get_present_paths(
+    paths: set[str],
+    tree: Any,
+    dvc_lock_outs: dict[str, Any],
+    stage_wdirs: dict[str, str],
+) -> set[str]:
+    """The cited ``paths`` that are in the tree or DVC-tracked.
+
+    ``dvc_lock_outs`` is expanded, so a file inside a DVC-tracked directory
+    counts only if the directory's manifest lists it.
+    """
+    dvc_paths = {
+        _get_project_path(str(out.get("stage") or ""), key, stage_wdirs)
+        for key, out in dvc_lock_outs.items()
+        if isinstance(out, dict)
+    }
+    return {
+        path
+        for path in paths
+        if tree.is_file(path)
+        or tree.is_file(path + ".dvc")
+        or path in dvc_paths
+    }
+
+
 def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
     """Whether the citation resolves to anything the reader can look at.
 
@@ -2496,7 +2524,7 @@ def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
         return item.figure is None
     if item.kind == "publication":
         return item.publication is None and item.path not in present_paths
-    if item.kind == "document":
+    if item.kind in ("document", None):
         return item.path not in present_paths
     # A value is the number itself, so without a key there's nothing to show
     if item.kind == "value":
@@ -2592,16 +2620,34 @@ def _build_question_evidence(
     evidence cites; a ref missing from it is one that could not be read, and
     its evidence comes back unresolved rather than failing the question.
     """
+
+    def lines_of(ev: dict[str, Any]) -> str | None:
+        # As "8" or "8-12", or as written if it's neither, so it still shows
+        lines = _optional_str(ev.get("lines"))
+        if lines is None:
+            return None
+        try:
+            first, last = calkit.questions.parse_lines(lines)
+        except ValueError:
+            return lines
+        return str(first) if first == last else f"{first}-{last}"
+
     empty = _EvidenceLookups({}, {}, {}, {}, {}, {}, set(), set())
     evidence = []
     for ev in evidence_ck:
-        if not isinstance(ev, dict) or ev.get("kind") not in (
+        if not isinstance(ev, dict):
+            continue
+        # No kind at all is a plain file, or a result written before results
+        # had to say so
+        kind = calkit.questions.get_evidence_kind(ev)
+        if kind not in (
             "figure",
             "result",
             "value",
             "table",
             "publication",
             "document",
+            None,
         ):
             continue
         path = ev.get("path", "")
@@ -2611,12 +2657,13 @@ def _build_question_evidence(
             ev.get("explanation")
         )
         item = QuestionEvidence(
-            kind=ev["kind"],
+            kind=kind,
             path=path,
             key=ev.get("key"),
             name=_optional_str(ev.get("name")),
             section=_optional_str(ev.get("section")),
             label=_optional_str(ev.get("label")),
+            lines=lines_of(ev) if kind is None else None,
             explanation=explanation,
             explanation_path=explanation_path,
             # What the entry declares, not what it resolved at: this is the
@@ -2691,18 +2738,87 @@ def _build_questions_public(
     def _evidence_of(q: str | dict) -> list:
         return q.get("evidence") or [] if isinstance(q, dict) else []
 
+    def check_sign_offs() -> list[tuple[list[Any], list[Any]]]:
+        """Each question's verifications and validations, checked against
+        the history up to ``ref``, cached by the commit it resolves to."""
+        empty: list[tuple[list[Any], list[Any]]] = [
+            ([], []) for _ in questions_ck
+        ]
+        if not any(
+            isinstance(q, dict)
+            and (q.get("verifications") or q.get("validations"))
+            for q in questions_ck
+        ):
+            return empty
+        try:
+            sha = repo.git.rev_parse(f"{ref or 'HEAD'}^{{commit}}")
+        except Exception:
+            return empty
+        # A branch or tag cited by evidence can move without the project's
+        # commit changing, so where each points now is part of the key
+        cited = sorted(
+            {
+                str(ev["git_ref"])
+                for q in questions_ck
+                for ev in _evidence_of(q)
+                if isinstance(ev, dict) and ev.get("git_ref")
+            }
+        )
+        resolved = []
+        for cited_ref in cited:
+            try:
+                resolved.append(repo.git.rev_parse(f"{cited_ref}^{{commit}}"))
+            except Exception:
+                resolved.append("-")
+        key = cache.make_key(
+            "question-sign-offs", str(project.id), sha, *resolved
+        )
+        cached = cache.get_json(key)
+        if isinstance(cached, list) and len(cached) == len(questions_ck):
+            return [(v, a) for v, a in cached]
+        wdir = str(repo.working_dir)
+        history = calkit.questions.CalkitYamlHistory(repo, wdir, sha)
+        # As committed, not as normalized for display, so it compares
+        # cleanly with the history it's checked against
+        raw = history.at(sha) or {}
+        out: list[tuple[list[Any], list[Any]]] = []
+        for q in raw.get("questions") or []:
+            if not isinstance(q, dict):
+                out.append(([], []))
+                continue
+            try:
+                ver, val = calkit.questions.check_sign_offs(
+                    q, raw, wdir, repo, history, ref=sha
+                )
+            except Exception as e:
+                # Best-effort, like evidence staleness
+                logger.warning(f"Could not check question sign-offs: {e}")
+                ver, val = [], []
+            out.append(
+                (
+                    [c.model_dump(mode="json") for c in ver],
+                    [c.model_dump(mode="json") for c in val],
+                )
+            )
+        if len(out) != len(questions_ck):
+            return empty
+        cache.set_json(key, out)
+        return out
+
     def _build_lookups(
         ev_ref: str | None, entries: list[dict]
     ) -> _EvidenceLookups:
         """Resolve everything ``entries`` cites, all of it at ``ev_ref``."""
-        kinds = {ev.get("kind") for ev in entries}
+        kinds = {calkit.questions.get_evidence_kind(ev) for ev in entries}
         figures_by_path: dict[str, Figure] = {}
         if "figure" in kinds:
             # Only the figures actually cited as evidence need their content
             # resolved; resolving every figure in the project would make this
             # scale with the project rather than with the questions.
             evidence_fig_paths = {
-                ev.get("path") for ev in entries if ev.get("kind") == "figure"
+                ev.get("path")
+                for ev in entries
+                if calkit.questions.get_evidence_kind(ev) == "figure"
             }
             fig_ctx = _discover_figures(project=project, repo=repo, ref=ev_ref)
             cited = [
@@ -2748,13 +2864,13 @@ def _build_questions_public(
             }
         # Staleness is best-effort: never let it block the questions.
         dvc_lock: dict[str, Any] = {}
+        dvc_yaml: dict[str, Any] = {}
         stage_statuses: dict[str, PipelineStageStatus] = {}
         frozen_stages: set[str] = set()
         try:
             tree = get_repo_tree_for_ref(repo, ev_ref)
             if tree.is_file("dvc.lock"):
                 dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
-            dvc_yaml: dict[str, Any] = {}
             if tree.is_file("dvc.yaml"):
                 dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
             stage_statuses = compute_stage_statuses(
@@ -2774,30 +2890,53 @@ def _build_questions_public(
                 f"Failed to compute pipeline status for questions at "
                 f"{ev_ref}: {e}"
             )
+        # dvc.lock's paths are relative to each stage's wdir, which only
+        # dvc.yaml records, and evidence paths to the project
+        stage_wdirs = {
+            str(name): str(st.get("wdir") or "")
+            for name, st in (dvc_yaml.get("stages") or {}).items()
+            if isinstance(st, dict)
+        }
+        evidence_lock = {
+            "stages": {
+                name: {
+                    **st,
+                    "outs": [
+                        {
+                            **out,
+                            "path": _get_project_path(
+                                name, str(out["path"]), stage_wdirs
+                            ),
+                        }
+                        if isinstance(out, dict) and out.get("path")
+                        else out
+                        for out in st.get("outs") or []
+                    ],
+                }
+                if isinstance(st, dict)
+                else st
+                for name, st in (dvc_lock.get("stages") or {}).items()
+            }
+        }
         present_paths: set[str] = set()
         cited_paths = {
             ev["path"]
             for ev in entries
-            if ev.get("kind") in ("document", "publication")
+            if calkit.questions.get_evidence_kind(ev)
+            in ("document", "publication", None)
             and isinstance(ev.get("path"), str)
         }
         if cited_paths:
             try:
                 tree = get_repo_tree_for_ref(repo, ev_ref)
-                dvc_outs = {
-                    out.get("path")
-                    for stage in (dvc_lock.get("stages") or {}).values()
-                    if isinstance(stage, dict)
-                    for out in stage.get("outs") or []
-                    if isinstance(out, dict)
-                }
-                present_paths = {
-                    path
-                    for path in cited_paths
-                    if tree.is_file(path)
-                    or tree.is_file(path + ".dvc")
-                    or path in dvc_outs
-                }
+                present_paths = _get_present_paths(
+                    cited_paths,
+                    tree,
+                    app.projects.get_ck_info_and_dvc_outs_from_tree(
+                        project, tree
+                    ).dvc_lock_outs,
+                    stage_wdirs,
+                )
             except Exception as e:
                 logger.warning(
                     f"Failed to find cited documents at {ev_ref}: {e}"
@@ -2807,7 +2946,7 @@ def _build_questions_public(
             results_by_path=results_by_path,
             tables_by_path=tables_by_path,
             publications_by_path=publications_by_path,
-            dvc_lock=dvc_lock,
+            dvc_lock=evidence_lock,
             stage_statuses=stage_statuses,
             frozen_stages=frozen_stages,
             present_paths=present_paths,
@@ -2843,9 +2982,11 @@ def _build_questions_public(
     # wherever the shorter list ended.
     db_by_number = {q.number: q for q in project.questions}
     result_value_cache: dict[tuple[str | None, str], dict | None] = {}
+    sign_offs = check_sign_offs()
     questions_public = []
     for number, q_ck in enumerate(questions_ck, start=1):
         hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
+        approach = q_ck.get("approach") if isinstance(q_ck, dict) else None
         answer = q_ck.get("answer") if isinstance(q_ck, dict) else None
         # Templates are filled from the question's own value evidence, so a
         # number in an answer is read out of the results file rather than
@@ -2859,6 +3000,7 @@ def _build_questions_public(
             cache=result_value_cache,
         )
         hypothesis = _render_template(hypothesis, values)
+        approach = _render_template(approach, values)
         answer = _render_template(answer, values)
         evidence = _build_question_evidence(
             project=project,
@@ -2882,8 +3024,17 @@ def _build_questions_public(
                 number=number,
                 question=app.index.extract_question_text(q_ck),
                 hypothesis=hypothesis,
+                approach=approach,
                 answer=answer,
                 evidence=evidence,
+                verifications=[
+                    QuestionSignOff.model_validate(c)
+                    for c in sign_offs[number - 1][0]
+                ],
+                validations=[
+                    QuestionSignOff.model_validate(c)
+                    for c in sign_offs[number - 1][1]
+                ],
             )
         )
     return questions_public
@@ -2982,8 +3133,7 @@ def post_project_question(
     else:
         ck_questions.append(req.question)
     ck_info["questions"] = ck_questions
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", "Add question"])
     push_and_expire(project, repo)
@@ -3026,6 +3176,11 @@ def _apply_question_update(
         question["hypothesis"] = req.hypothesis
     else:
         question.pop("hypothesis", None)
+    if "approach" in req.model_fields_set:
+        if req.approach:
+            question["approach"] = req.approach
+        else:
+            question.pop("approach", None)
     unchanged = calkit.questions.is_conditional(question.get("answer")) and (
         req.answer == rendered_answer
     )
@@ -3035,7 +3190,12 @@ def _apply_question_update(
         question["answer"] = req.answer
     evidence = []
     for ev in req.evidence:
-        entry: dict = {"kind": ev.kind, "path": ev.path}
+        # A plain file is written without a kind, which is how it's spelled
+        entry: dict = (
+            {"path": ev.path}
+            if ev.kind is None
+            else {"kind": ev.kind, "path": ev.path}
+        )
         if ev.kind == "result" and ev.values:
             entry["values"] = dict(ev.values)
         elif ev.kind in ("result", "value") and ev.key:
@@ -3046,6 +3206,13 @@ def _apply_question_update(
             entry["section"] = ev.section
         if ev.kind == "publication" and ev.label:
             entry["label"] = ev.label
+        if ev.kind is None and ev.lines:
+            try:
+                first, last = calkit.questions.parse_lines(ev.lines)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            # As it would be written by hand, e.g., 8 or 8-12
+            entry["lines"] = first if first == last else f"{first}-{last}"
         if ev.explanation_path:
             entry["explanation"] = {"path": ev.explanation_path}
         elif ev.explanation:
@@ -3106,8 +3273,7 @@ def put_project_question(
         existing, req, rendered_answer=rendered_answer
     )
     ck_info["questions"] = ck_questions
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     if repo.is_dirty():
         repo.git.commit(["-m", f"Update question {number}"])
@@ -3152,8 +3318,7 @@ def delete_project_question(
         ck_info["questions"] = ck_questions
     else:
         ck_info.pop("questions", None)
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Delete question {number}"])
     push_and_expire(project, repo)
@@ -3984,7 +4149,21 @@ def get_project_results(
         ref=ref,
         read_only=True,
     )
-    return _build_results(project=project, repo=repo, ref=ref)
+    results = _build_results(project=project, repo=repo, ref=ref)
+    # Whether each is out of date, like a figure or table
+    pipeline = pipeline_at_ref(
+        repo, ref, project.owner_account_name, project.name
+    )
+    for result in results:
+        result.stage = result.stage or find_stage_for_path(
+            result.path, pipeline.dvc_lock, valid_stages=set(pipeline.statuses)
+        )
+        status = pipeline.statuses.get(result.stage) if result.stage else None
+        if status is not None:
+            result.stage_status = StageStatus.model_validate(
+                status.model_dump()
+            )
+    return results
 
 
 # ``figure_path`` takes the path convertor because figures live in nested
@@ -4149,8 +4328,7 @@ def post_project_figure(
             raise HTTPException(422, f"Invalid figure: {e}")
     figures.append(fig_entry)
     ck_info["figures"] = figures
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Make a commit
     repo.git.commit(["-m", f"Add figure {path}"])
@@ -4548,13 +4726,16 @@ def _github_token_for_repo(
     session: Session,
     current_user: User,
     owner_repo: str,
+    permissions: dict[str, str] | None = None,
 ) -> str | None:
     """Return a token for GitHub API calls on ``owner/repo``.
 
     Prefers the user's personal token; for GitHub-less collaborators (e.g.
     invite-link members) falls back to the Calkit GitHub App installation
     token so they can still open, close, and comment on issues. Returns None
-    if neither is available.
+    if neither is available. ``permissions`` are what an App token is
+    narrowed to, e.g., ``{"actions": "read"}``, which the App's default
+    token leaves out.
     """
     try:
         return users.get_github_token(session, current_user)
@@ -4562,7 +4743,9 @@ def _github_token_for_repo(
         pass
     try:
         owner_name, repo_name = owner_repo.split("/", 1)
-        return github.get_app_installation_token(owner_name, repo_name)
+        return github.get_app_installation_token(
+            owner_name, repo_name, permissions=permissions
+        )
     except (github.GitHubAppNotConfigured, HTTPException) as e:
         logger.info(
             f"No GitHub token for {current_user.email} on {owner_repo}: {e}"
@@ -4966,13 +5149,28 @@ def _imported_from_info(value: Any) -> dict[str, Any] | None:
     schema does, so ``imported_from: https://doi.org/...`` is a DOI here too.
     """
     if isinstance(value, dict):
-        return value
-    if isinstance(value, str) and value.strip():
+        info = dict(value)
+    elif isinstance(value, str) and value.strip():
         try:
-            return calkit.provenance.source_from_location(value)
+            info = calkit.provenance.source_from_location(value)
         except ValueError:
             return {"description": value}
-    return None
+    else:
+        return None
+    # These are rendered as links, so drop any that aren't http(s), keeping
+    # SSH clone URLs, e.g., git@github.com:owner/repo, which calkit accepts
+    if "url" in info and web_url_or_none(info["url"]) is None:
+        del info["url"]
+    repo_url = info.get("git_repo_url")
+    if repo_url is not None and not (
+        web_url_or_none(repo_url)
+        or (
+            isinstance(repo_url, str)
+            and re.fullmatch(r"(ssh://|[\w.-]+@[\w.-]+:)\S+", repo_url)
+        )
+    ):
+        del info["git_repo_url"]
+    return info
 
 
 @router.get("/projects/{owner_name}/{project_name}/datasets/{path:path}")
@@ -5411,8 +5609,7 @@ def post_project_dataset(
                 outs[0]["path"] = os.path.basename(req.path)
                 outs[0]["remote"] = remote_name
             dvc_import["outs"] = outs
-            with open(os.path.join(wdir, dvc_fpath), "w") as f:
-                ryaml.dump(dvc_import, f)
+            ryaml.dump(dvc_import, Path(wdir, dvc_fpath))
             repo.git.add(dvc_fpath)
             gitignore_path = os.path.join(wdir, ".gitignore")
             existing_ignore = (
@@ -5541,8 +5738,7 @@ def post_project_dataset(
         raise HTTPException(422, f"Invalid dataset: {e}")
     datasets.append(ds)
     ck_info["datasets"] = datasets
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Add dataset {ds['path']}"])
     push_and_expire(project, repo)
@@ -5682,8 +5878,7 @@ def post_project_dataset_upload(
             raise HTTPException(422, f"Invalid dataset: {e}")
     datasets.append(ds)
     ck_info["datasets"] = datasets
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Make a commit
     repo.git.commit(["-m", f"Add dataset {path}"])
@@ -6173,8 +6368,10 @@ def get_project_publication_components(
             if not isinstance(entry, dict) or not entry.get("path"):
                 continue
             entry_path = normalize_artifact_path(str(entry["path"]))
+            # A person can't be the origin of an exported format, e.g., PNG
             if entry.get("created_by"):
-                declared.setdefault(entry_path, "attested")
+                if calkit.provenance.can_be_created_by_person(entry_path):
+                    declared.setdefault(entry_path, "attested")
             elif entry.get("imported_from"):
                 declared.setdefault(entry_path, "imported")
     overleaf_info = calkit.overleaf.get_sync_info(
@@ -6345,7 +6542,14 @@ def post_project_latex_components(
     if not loads:
         return LatexComponents(loads_calkit=False)
     plan = calkit.latex.plan_ck_components(
-        components, is_file=is_file, read_data=read_data, is_outside=is_outside
+        components,
+        is_file=is_file,
+        read_data=read_data,
+        is_outside=is_outside,
+        link_base=(
+            f"{settings.frontend_host.rstrip('/')}/"
+            f"{project.owner_account_name}/{project.name}"
+        ),
     )
     return LatexComponents(
         loads_calkit=True,
@@ -6403,10 +6607,23 @@ def post_project_misc(
             "A misc artifact must say who created it or where it was "
             "imported from",
         )
+    if req.created_by is not None and not (
+        calkit.provenance.can_be_created_by_person(path)
+    ):
+        raise HTTPException(
+            422,
+            f"A person can't be the origin of '{path}', since something "
+            "else exports that format; add the stage that makes it, or "
+            "record where it was imported from",
+        )
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
     ck_info = get_ck_info_from_repo(repo)
+    # A declared artifact that doesn't say where it came from yet, or only
+    # describes where it was imported from, gets the origin added to its
+    # own entry
+    declared = None
     for section, label in [
         ("figures", "figure"),
         ("datasets", "dataset"),
@@ -6418,11 +6635,21 @@ def post_project_misc(
                 normalize_artifact_path(str(existing.get("path") or ""))
                 == path
             ):
-                raise HTTPException(
-                    400,
-                    f"'{path}' is already declared as a {label}; edit that "
-                    "entry instead",
-                )
+                imported_from = existing.get("imported_from")
+                if (
+                    section == "publications"
+                    or any(
+                        existing.get(k) is not None
+                        for k in ("created_by", "stage")
+                    )
+                    or calkit.provenance.import_is_checkable(imported_from)
+                ):
+                    raise HTTPException(
+                        400,
+                        f"'{path}' is already declared as a {label}; edit "
+                        "that entry instead",
+                    )
+                declared = existing
     # Whether tracked by Git or DVC, the path has to be here to attribute
     wdir = str(repo.working_dir)
     if not os.path.exists(os.path.join(wdir, path)) and not os.path.isfile(
@@ -6453,11 +6680,17 @@ def post_project_misc(
         )
     except ValidationError as e:
         raise HTTPException(422, f"Invalid misc artifact: {e}")
-    misc = ck_info.get("misc", [])
-    misc.append(entry)
-    ck_info["misc"] = misc
-    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    if declared is not None:
+        for k in ("created_by", "imported_from"):
+            if k in entry:
+                declared[k] = entry[k]
+            else:
+                declared.pop(k, None)
+    else:
+        misc = ck_info.get("misc", [])
+        misc.append(entry)
+        ck_info["misc"] = misc
+    ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
     push_and_expire(project, repo)
@@ -6805,8 +7038,7 @@ def post_project_publication(
             )
         )
         ck_info["publications"] = publications
-        with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-            ryaml.dump(ck_info, f)
+        ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
         repo.git.add("calkit.yaml")
     # Make a commit
     repo.git.commit(["-m", f"Add publication {path} ({kind})"])
@@ -7271,8 +7503,7 @@ async def post_project_overleaf_publication(
         with open(os.path.join(repo.working_dir, ".gitignore"), "a") as f:
             f.write("\n.calkit/overleaf/\n")
         repo.git.add(".gitignore")
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     if not import_zip_mode:
         repo.git.add(calkit.overleaf.get_sync_info_fpath())
@@ -7582,12 +7813,20 @@ def get_project_overleaf_sync_status(
 
 
 class OverleafLinkPublic(BaseModel):
+    """A folder of a Calkit project an Overleaf project syncs with, and what
+    the current user can do with that project.
+
+    ``github_repo_url`` is the project's repo on GitHub, in one canonical
+    form, e.g., to open it in a Codespace, or none if it's elsewhere.
+    """
+
     overleaf_project_id: str
     path: str
     project_owner_name: str
     project_name: str
     project_title: str
     current_user_access: Literal["read", "write", "admin", "owner"] | None
+    github_repo_url: str | None = None
 
 
 def _indexed_overleaf_links(
@@ -7620,6 +7859,11 @@ def _indexed_overleaf_links(
                 project_name=project.name,
                 project_title=project.title,
                 current_user_access=project.current_user_access,
+                github_repo_url=(
+                    f"https://github.com/{project.github_repo}"
+                    if project.github_repo
+                    else None
+                ),
             )
         )
     return resp
@@ -7910,9 +8154,11 @@ def get_project_pipeline(
     # commit identifies it. Building the diagram walks the whole graph
     # through DVC, which is over a second on a pipeline of any size.
     commit_sha = resolve_commit_sha(repo, ref)
+    # Versioned, so diagrams drawn before arrows were labeled, or with
+    # unescaped labels, go
     mermaid_key = (
         cache.make_key(
-            "mermaid", f"{owner_name}/{project_name}".lower(), commit_sha
+            "mermaid-v3", f"{owner_name}/{project_name}".lower(), commit_sha
         )
         if commit_sha
         else None
@@ -8204,8 +8450,7 @@ def put_project_pipeline_stage(
     _validate_ck_stage(stage_map, stage_name)
     stages[stage_name] = stage_map
     ck_info["pipeline"]["stages"] = stages
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
     # read; otherwise the edit sits in calkit.yaml until the next run.
@@ -8297,8 +8542,7 @@ def put_project_pipeline(
     pipeline = _load_ck_pipeline(req.yaml)
     # Written as the user wrote it: same key order, same comments.
     ck_info["pipeline"] = pipeline
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
     # read; otherwise the edit sits in calkit.yaml until the next run.
@@ -9291,8 +9535,7 @@ def post_project_references(
             f.write("")
     references.append({"path": req.path})
     ck_info["references"] = references
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add(req.path)
     repo.git.add("calkit.yaml")
     verb = "Label" if req.label_existing else "Add"
@@ -9343,8 +9586,7 @@ def delete_project_references(
     if len(kept) == len(references) and not os.path.isfile(bib_full_path):
         raise HTTPException(404, "References collection not found")
     ck_info["references"] = kept
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     if os.path.isfile(bib_full_path):
         os.remove(bib_full_path)
@@ -9470,8 +9712,7 @@ def post_project_reference_item(
         ):
             collections.append({"path": req.path})
             ck_info["references"] = collections
-            with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-                ryaml.dump(ck_info, f)
+            ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
             repo.git.add("calkit.yaml")
     if repo.git.diff("--cached", "--name-only").strip():
         message = (
@@ -9833,8 +10074,7 @@ def post_project_zotero_import(
     else:
         references.append({"path": req.bib_path})
     ck_info["references"] = references
-    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(repo.working_dir, "calkit.yaml"))
     last_synced = _record_zotero_sync_info(
         repo=repo,
         bib_path=req.bib_path,
@@ -10731,8 +10971,7 @@ def post_project_environment(
     envs[req.name] = new_env
     ck_info["environments"] = envs
     fpath = os.path.join(repo.working_dir, "calkit.yaml")
-    with open(fpath, "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(fpath))
     repo.git.add("calkit.yaml")
     if req.path and req.file_content:
         fpath = os.path.join(repo.working_dir, req.path)

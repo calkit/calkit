@@ -632,6 +632,8 @@ def save_docker_images(
     Returns breadcrumbs keyed by image ID, which the environment check reads
     to fetch an image back out of a release when no registry can serve it.
     """
+    from calkit.environments import docker as env_docker
+
     ck_info = calkit.load_calkit_info(wdir=wdir)
     resp = {}
     for env_name, env in (ck_info.get("environments") or {}).items():
@@ -639,8 +641,9 @@ def save_docker_images(
             continue
         if not env.get("path"):
             continue
-        image = calkit.docker.get_image_name(env, env_name)
-        if not image:
+        try:
+            image = env_docker.get_image_name(env_name, env, wdir=wdir)
+        except ValueError:
             continue
         info = calkit.docker.inspect_image(image)
         if info is None:

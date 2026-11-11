@@ -54,6 +54,7 @@ import {
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
+import { canBeCreatedByPerson } from "../../lib/provenance"
 import {
   IMPORTED_FROM_DEFAULTS,
   type ImportSource,
@@ -501,12 +502,14 @@ function ComponentsModal({
                               >
                                 Link figure
                               </Button>
-                              <Button
-                                isActive={expanded === "attest"}
-                                onClick={() => onResolve(item.path, "attest")}
-                              >
-                                Made here
-                              </Button>
+                              {!canBeCreatedByPerson(item.path) ? null : (
+                                <Button
+                                  isActive={expanded === "attest"}
+                                  onClick={() => onResolve(item.path, "attest")}
+                                >
+                                  Made here
+                                </Button>
+                              )}
                               <Button
                                 isActive={expanded === "import"}
                                 onClick={() => onResolve(item.path, "import")}

@@ -34,16 +34,14 @@ import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Tooltip from "../../../../../components/Common/Tooltip"
 
 import { type ContentsItem, ProjectsService } from "../../../../../client"
-import {
-  ArtifactCompareModal,
-  type ArtifactKind,
-} from "../../../../../components/Common/ArtifactCompareModal"
+import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import FileContent from "../../../../../components/Files/FileContent"
 import FileEditorModal, {
   isEditableText,
 } from "../../../../../components/Files/FileEditorModal"
 import SelectedItemInfo, {
+  type FileKind,
   inferKindFromPath,
 } from "../../../../../components/Files/SelectedItemInfo"
 import UploadFile from "../../../../../components/Files/UploadFile"
@@ -367,9 +365,9 @@ function Files() {
     })
 
   const selectedItem = selectedItemQuery.data
-  const artifactKind: ArtifactKind | undefined =
+  const artifactKind: FileKind | undefined =
     selectedItem?.type === "file"
-      ? (selectedItem.calkit_object?.kind as ArtifactKind | undefined) ??
+      ? (selectedItem.calkit_object?.kind as FileKind | undefined) ??
         inferKindFromPath(selectedItem.path)
       : undefined
   // The in-browser LaTeX editor can open a .tex source directly, or a LaTeX
@@ -612,7 +610,13 @@ function Files() {
           ownerName={accountName}
           projectName={projectName}
           path={selectedItem.path}
-          kind={artifactKind ?? "file"}
+          kind={
+            artifactKind === "figure" ||
+            artifactKind === "publication" ||
+            artifactKind === "notebook"
+              ? artifactKind
+              : "file"
+          }
           initialRef={base_ref}
           initialRef2={compare_ref}
           onRefsChange={(r1, r2) =>
@@ -627,7 +631,7 @@ function Files() {
         />
       )}
 
-      {file_editor_open && editableFilePath && (
+      {file_editor_open && editableFilePath && canEdit && (
         <FileEditorModal
           isOpen={Boolean(file_editor_open)}
           onClose={closeFileEditor}
@@ -637,7 +641,7 @@ function Files() {
         />
       )}
 
-      {editor_open && latexTexPath && (
+      {editor_open && latexTexPath && canEdit && (
         <LatexEditor
           isOpen={Boolean(editor_open)}
           onClose={closeEditor}

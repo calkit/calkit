@@ -1,5 +1,6 @@
-"""Map-paths stages: copying project paths to where something expects them.
+"""Routes for managing project pipelines.
 
+Map-paths stages copy project paths to where something expects them.
 A file or directory often needs to be somewhere other than where it lives,
 e.g., a paper wants figures from the root ``figures`` directory under its
 own, where LaTeX can find them without ``../``. A symlink would do that on
@@ -7,32 +8,71 @@ one machine, but doesn't survive Git on every platform; a map-paths stage
 is the reproducible, cross-platform stand-in, making the copy part of the
 pipeline so it's always current and any stage that reads it can depend on
 it.
+
+A stage can also be made from a script, as ``calkit xr`` makes one locally,
+e.g., for a figure a paper includes that nothing in the pipeline produces.
 """
 
+import base64
+import binascii
+import glob
+import hashlib
+import json
 import os
-from typing import Any
+import posixpath
+import re
+import subprocess
+import sys
+import tempfile
+import uuid
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+import requests
+from fastapi import APIRouter, HTTPException, Query
+from git import GitCommandError
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import col, select
 
+import app.cache
+import app.github
 import app.projects
+import calkit.detect
+import calkit.export
+import calkit.latex
 import calkit.pipeline
+import calkit.provenance
+import calkit.resources
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import (
+    DEFAULT_REPO_TTL,
     STAGE_NAME_RE,
     _dump_ck_stage_map,
+    _github_token_for_repo,
+    _inside,
+    _push_dvc_cache_to_storage,
     _validate_ck_stage,
 )
-from app.api.routes.projects.figures import _clean_rel_path
-from app.core import ryaml
+from app.api.routes.projects.figures import _clean_rel_path, _slug
+from app.config import settings
+from app.core import logger, ryaml, utcnow
+from app.dvc import run_dvc_command
 from app.git import (
+    _make_git_auth_env,
     get_ck_info_from_repo,
+    get_default_branch,
     get_repo,
     get_repo_tree_for_ref,
     push_and_expire,
     record_project_update,
 )
-from app.models import PipelineStage
+from app.models import PipelineStage, ProjectPipelineRun
+from app.storage import get_object_fs, make_data_fpath, remove_gcs_content_type
 from calkit.models.pipeline import MapPathsKind, MapPathsStage
 
 router = APIRouter()
@@ -275,8 +315,7 @@ def _commit_pipeline(
     ``to_dvc`` carries the stage over rather than compiling it.
     """
     wdir = str(repo.working_dir)
-    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
-        ryaml.dump(ck_info, f)
+    ryaml.dump(ck_info, Path(wdir, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     try:
         calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
@@ -287,8 +326,7 @@ def _commit_pipeline(
             target = dvc_yaml["stages"][legacy_target]
             deps = [d for d in (target.get("deps") or []) if d not in removed]
             target["deps"] = deps + [d for d in dests if d not in deps]
-            with open(dvc_path, "w") as f:
-                ryaml.dump(dvc_yaml, f)
+            ryaml.dump(dvc_yaml, Path(dvc_path))
         repo.git.add("-A")
     except Exception as e:
         repo.git.checkout("--", ".")
@@ -298,3 +336,1383 @@ def _commit_pipeline(
         repo.git.commit(["-m", message])
         push_and_expire(project, repo)
         record_project_update(project, repo, session)
+
+
+# What calkit xr makes a script stage from, by extension
+SCRIPT_EXTS = (".py", ".r", ".jl", ".m", ".ipynb", ".sh")
+MAX_SCRIPT_BYTES = 1_000_000
+# All the data uploaded with a script, which arrives in one request
+MAX_SCRIPT_DATA_BYTES = 50_000_000
+
+
+class ScriptDataFile(BaseModel):
+    # Relative to the data's path in the project, or empty for a single file
+    path: str = ""
+    # Base64-encoded
+    content: str
+
+
+class ScriptData(BaseModel):
+    """Data a script reads from outside the project, and its place in it."""
+
+    # As the script names it, e.g., one of the detected external inputs
+    external: str
+    # Where it goes, or already is, in the project
+    path: str
+    # Uploaded; without any, it's already in the project, or for a dry run,
+    # will be
+    files: list[ScriptDataFile] = []
+
+
+class StageFromScriptOrNotebookPost(BaseModel):
+    # Where the script is in the project, or goes, when it's uploaded
+    script_path: str
+    # An uploaded script, base64-encoded
+    content: str | None = None
+    # What a document shows, e.g., a figure a paper includes, and which of
+    # the script's outputs that is, when the script writes it elsewhere
+    shows: str | None = None
+    produces: str | None = None
+    # Data to read from the project instead, with the script's paths to it
+    # rewritten
+    data: list[ScriptData] = []
+    # Without it, nothing is written, so the user can see what would be
+    save: bool = False
+
+
+class StageFromScriptOrNotebookResponse(BaseModel):
+    stage_name: str
+    stage_yaml: str
+    environment: str
+    environment_is_new: bool
+    # A spec file written for a new environment, e.g., a pyproject.toml
+    # listing the packages the script imports
+    environment_spec_path: str | None = None
+    environment_spec_content: str | None = None
+    dependencies: list[str] = []
+    inputs: list[str] = []
+    outputs: list[str] = []
+    # Inputs that aren't in the project and that no stage produces
+    missing_inputs: list[str] = []
+    # Data read from outside the project, e.g., a synced Box folder, as the
+    # script names it, which only the machine it came from has
+    external_inputs: list[str] = []
+    # Data paths the script was changed to read from the project instead,
+    # as it named them
+    rewritten: list[str] = []
+    # Which output is what the document shows, and the documents changed
+    # to show it from there with \ckfigure when that's a different path
+    produces: str | None = None
+    included_in: list[str] = []
+    saved: bool = False
+    git_repo_url: str
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook"
+)
+def post_project_stage_from_script_or_notebook(
+    owner_name: str,
+    project_name: str,
+    req: StageFromScriptOrNotebookPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> StageFromScriptOrNotebookResponse:
+    """Make a stage from a script, uploaded or already in the project.
+
+    The script is read, not run, as ``calkit xr --dry-run`` reads it: its
+    environment from what it imports, and its inputs and outputs from the
+    paths it opens. That happens in a checkout of its own, so an uploaded
+    script isn't left in the project's clone before it's saved. With
+    ``save``, the script, its environment, and the stage are committed,
+    with each document that shows the output elsewhere changed to show it
+    with ``\\ckfigure`` from where it's made. Data it reads from outside
+    the project can come with it, and the script is changed to read the
+    project's copy.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    script_path = _clean_rel_path(req.script_path, "script")
+    if not script_path.lower().endswith(SCRIPT_EXTS):
+        raise HTTPException(
+            422,
+            "Scripts can be Python, R, Julia, MATLAB, shell, or Jupyter "
+            "notebooks",
+        )
+    content = None
+    if req.content is not None:
+        try:
+            content = base64.b64decode(req.content, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(422, "Script content isn't valid base64")
+        if len(content) > MAX_SCRIPT_BYTES:
+            raise HTTPException(413, "Script is too large")
+    elif not os.path.isfile(os.path.join(wdir, script_path)):
+        raise HTTPException(404, f"'{script_path}' is not in the project")
+    # An upload never replaces a different file already there
+    existing_path = os.path.join(wdir, script_path)
+    if content is not None and not _inside(wdir, existing_path):
+        raise HTTPException(422, f"'{script_path}' leads outside the project")
+    if content is not None and os.path.isfile(existing_path):
+        with open(existing_path, "rb") as fb:
+            if fb.read() != content:
+                raise HTTPException(
+                    409,
+                    f"'{script_path}' is already in the project; pick it "
+                    "without uploading, or upload under another name",
+                )
+    # Data, checked in full before anything is written
+    data_files: list[tuple[str, bytes]] = []
+    data_paths: list[str] = []
+    moves: dict[str, str] = {}
+    # What the script names is relative to where it runs: a notebook's
+    # folder, or else the project
+    run_dir = (
+        posixpath.dirname(script_path)
+        if script_path.lower().endswith(".ipynb")
+        else "."
+    )
+    for data in req.data:
+        data_path = _clean_rel_path(data.path, "data")
+        if not _inside(wdir, os.path.join(wdir, data_path)):
+            raise HTTPException(
+                422, f"'{data_path}' leads outside the project"
+            )
+        # The script names it in a string
+        if re.search("['\"]", data_path):
+            raise HTTPException(422, f"'{data_path}' can't have quotes")
+        for file in data.files:
+            path = _clean_rel_path(
+                posixpath.join(data_path, file.path)
+                if file.path
+                else data_path,
+                "data",
+            )
+            full = os.path.join(wdir, path)
+            if not _inside(wdir, full):
+                raise HTTPException(422, f"'{path}' leads outside the project")
+            try:
+                content_bytes = base64.b64decode(file.content, validate=True)
+            except (binascii.Error, ValueError):
+                raise HTTPException(
+                    422, f"Content of '{path}' isn't valid base64"
+                )
+            data_files.append((path, content_bytes))
+            if sum(len(c) for _, c in data_files) > MAX_SCRIPT_DATA_BYTES:
+                raise HTTPException(
+                    413,
+                    "The data is too large to upload with the script; add "
+                    "it to the project another way, e.g., with 'calkit add' "
+                    "on the computer that has it",
+                )
+        if (
+            req.save
+            and not data.files
+            and not any(
+                os.path.exists(os.path.join(wdir, data_path + ext))
+                for ext in ("", ".dvc")
+            )
+        ):
+            raise HTTPException(404, f"'{data_path}' is not in the project")
+        data_paths.append(data_path)
+        moves[data.external] = posixpath.relpath(data_path, run_dir)
+    # Nothing already in the project, or uploaded with it, is replaced, and
+    # a file never goes where a folder is or the other way around
+    planned: dict[str, bytes] = {}
+    for path, content_bytes in data_files:
+        if planned.setdefault(path, content_bytes) != content_bytes:
+            raise HTTPException(
+                409,
+                f"Different files would go to '{path}'; pick another place "
+                "for one",
+            )
+    for path, content_bytes in planned.items():
+        full = os.path.join(wdir, path)
+        parents = []
+        parent = posixpath.dirname(path)
+        while parent:
+            parents.append(parent)
+            parent = posixpath.dirname(parent)
+        same = False
+        if os.path.isfile(full):
+            with open(full, "rb") as fb:
+                same = fb.read() == content_bytes
+        taken = (
+            (os.path.exists(full) and not same)
+            or any(p in planned for p in parents)
+            or any(os.path.isfile(os.path.join(wdir, p)) for p in parents)
+        )
+        # DVC-tracked data is there even when it isn't checked out
+        for p in [path, *parents]:
+            dvc_path = os.path.join(wdir, p + ".dvc")
+            if same or taken or not os.path.isfile(dvc_path):
+                continue
+            with open(dvc_path) as f:
+                outs = (ryaml.load(f) or {}).get("outs") or [{}]
+            taken = (
+                p != path
+                or outs[0].get("md5") != hashlib.md5(content_bytes).hexdigest()
+            )
+        if taken:
+            raise HTTPException(
+                409,
+                f"'{path}' is already in the project; pick another place for "
+                "the data",
+            )
+    # The script, changed to read the project's copies
+    rewritten: list[str] = []
+    if moves:
+        if content is not None:
+            source = content
+        else:
+            with open(os.path.join(wdir, script_path), "rb") as fb:
+                source = fb.read()
+        try:
+            text, rewritten = calkit.detect.rewrite_paths(
+                source.decode("utf-8"), moves
+            )
+        except UnicodeDecodeError:
+            raise HTTPException(422, f"'{script_path}' isn't UTF-8 text")
+        if rewritten:
+            content = text.encode("utf-8")
+    # Read in a checkout of its own, discarded after
+    scan_dir = tempfile.mkdtemp(prefix="calkit-xr-")
+    os.rmdir(scan_dir)
+    repo.git.worktree("add", "--detach", scan_dir, "HEAD")
+    try:
+        if content is not None:
+            dest = os.path.join(scan_dir, script_path)
+            if not _inside(scan_dir, dest):
+                raise HTTPException(
+                    422, f"'{script_path}' leads outside the project"
+                )
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as fb:
+                fb.write(content)
+        try:
+            result = subprocess.run(
+                ["calkit", "xr", "--dry-run", "--json", script_path],
+                cwd=scan_dir,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, f"Reading '{script_path}' took too long")
+    finally:
+        repo.git.worktree("remove", "--force", scan_dir)
+    # Anything printed before the JSON is xr saying what it chose
+    start = result.stdout.find("\n{")
+    if result.returncode != 0 or not result.stdout.strip():
+        lines = [x.strip() for x in result.stderr.splitlines() if x.strip()]
+        detail = lines[-1].removeprefix("Error: ") if lines else ""
+        logger.info(f"xr --dry-run on {script_path} failed: {result.stderr}")
+        raise HTTPException(422, detail or f"Can't read '{script_path}'")
+    detected = json.loads(
+        result.stdout
+        if result.stdout.startswith("{")
+        else result.stdout[start + 1 :]
+    )
+    env = detected["environment"]
+    stage_name = detected["stage"]["name"]
+    stage = detected["stage"]["stage"]
+    ck_info = get_ck_info_from_repo(repo=repo)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    # A stage that already runs this script keeps what it declares, with
+    # anything newly found added
+    existing_stage = stages.get(stage_name)
+    if isinstance(existing_stage, dict):
+        merged = dict(existing_stage)
+        for field in ("outputs", "inputs"):
+            items = list(existing_stage.get(field) or [])
+            known = {
+                i.get("path") if isinstance(i, dict) else i for i in items
+            }
+            items += [
+                i
+                for i in stage.get(field) or []
+                if (i["path"] if isinstance(i, dict) else i) not in known
+            ]
+            if items:
+                merged[field] = items
+        stage = merged
+    outputs = [
+        o["path"] if isinstance(o, dict) else o
+        for o in stage.get("outputs") or []
+    ]
+    # Env vars, schedules, and other stages' outputs aren't paths
+    inputs = [
+        i if isinstance(i, str) else i["path"]
+        for i in stage.get("inputs") or []
+        if isinstance(i, str) or "path" in i
+    ]
+    tree = get_repo_tree_for_ref(repo, None)
+    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    missing = [
+        i
+        for i in inputs
+        if not os.path.exists(os.path.join(wdir, i))
+        and i not in dvc_outs
+        and calkit.pipeline.get_stage_for_output(i, ck_info) is None
+        and not any(i == p or i.startswith(p + "/") for p in data_paths)
+    ]
+
+    def include(shown: str, path: str) -> dict[str, str]:
+        # The new text of each document file that would show it from path
+        documents = [
+            s["target_path"]
+            for s in stages.values()
+            if isinstance(s, dict)
+            and s.get("kind") == "latex"
+            and s.get("target_path")
+        ]
+        for folder in ck_info.get("overleaf_sync") or {}:
+            if os.path.isdir(os.path.join(wdir, folder)):
+                documents += [
+                    os.path.relpath(d, wdir)
+                    for d in calkit.latex.root_documents(
+                        os.path.join(wdir, folder)
+                    )
+                ]
+        changed: dict[str, str] = {}
+        for document in dict.fromkeys(documents):
+            changed.update(
+                calkit.latex.include_figure(document, shown, path, wdir=wdir)
+            )
+        return changed
+
+    # The output the document shows: the same path, or the one the user
+    # picked, or else the only one with the same file name
+    shows = _clean_rel_path(req.shows, "shown") if req.shows else None
+    produces = None
+    if req.produces is not None:
+        produces = _clean_rel_path(req.produces, "output")
+        if produces not in outputs and produces != shows:
+            raise HTTPException(
+                422, f"'{script_path}' doesn't write '{produces}'"
+            )
+    elif shows in outputs:
+        produces = shows
+    elif shows is not None:
+        same_name = [
+            o
+            for o in outputs
+            if os.path.basename(o) == os.path.basename(shows)
+        ]
+        # Only worth guessing if a document includes it, so it can show it
+        # from there instead
+        if len(same_name) == 1 and include(shows, same_name[0]):
+            produces = same_name[0]
+    # What the document shows is what the stage makes, so if the script
+    # isn't found writing it anywhere, it writes it there
+    if shows is not None and produces is None:
+        produces = shows
+    if produces is not None and produces not in outputs:
+        tracked = bool(repo.git.ls_files("--", produces).strip())
+        stage.setdefault("outputs", []).append(
+            {"path": produces, "storage": "git"} if tracked else produces
+        )
+        outputs.append(produces)
+    included: dict[str, str] = {}
+    if shows is not None and produces is not None and produces != shows:
+        included = include(shows, produces)
+        if not included:
+            raise HTTPException(
+                422,
+                f"No document includes '{shows}' to show it from "
+                f"'{produces}' instead",
+            )
+    out = StageFromScriptOrNotebookResponse(
+        stage_name=stage_name,
+        stage_yaml=_dump_ck_stage_map(stage),
+        environment=env["name"],
+        environment_is_new=not env["exists"],
+        environment_spec_path=(
+            env["spec_path"] if env["created_from_dependencies"] else None
+        ),
+        environment_spec_content=(
+            env["spec_content"] if env["created_from_dependencies"] else None
+        ),
+        dependencies=env.get("dependencies") or [],
+        inputs=inputs,
+        outputs=outputs,
+        missing_inputs=missing,
+        external_inputs=detected.get("external_inputs") or [],
+        rewritten=rewritten,
+        produces=produces,
+        included_in=sorted(included),
+        git_repo_url=project.git_repo_url,
+    )
+    if not req.save:
+        return out
+    # Nothing is written through a symlink that leads out of the project
+    writes = [script_path] if content is not None else []
+    if out.environment_spec_path:
+        writes.append(
+            _clean_rel_path(out.environment_spec_path, "environment")
+        )
+    for path in writes + list(included):
+        if not _inside(wdir, os.path.join(wdir, path)):
+            raise HTTPException(422, f"'{path}' leads outside the project")
+    # The data goes where calkit add puts it, Git or DVC, with only what it
+    # newly cached copied to the hub's storage
+    if data_files:
+        cache_dir = os.path.join(wdir, ".dvc", "cache", "files", "md5")
+        cached = {
+            os.path.relpath(p, cache_dir).replace(os.sep, "/")
+            for p in glob.glob(os.path.join(cache_dir, "*", "*"))
+        }
+        uploaded = sorted(
+            {
+                d
+                for d in data_paths
+                if any(p == d or p.startswith(d + "/") for p in planned)
+            }
+        )
+        try:
+            for path, data_bytes in planned.items():
+                full = os.path.join(wdir, path)
+                os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
+                with open(full, "wb") as fb:
+                    fb.write(data_bytes)
+            subprocess.check_call(
+                [sys.executable, "-m", "calkit", "add", *uploaded],
+                cwd=wdir,
+                stdin=subprocess.DEVNULL,
+            )
+            _push_dvc_cache_to_storage(
+                repo_dir=wdir,
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                skip=cached,
+            )
+        except Exception as e:
+            logger.exception(f"Adding {uploaded} failed: {e}")
+            # Uncached too, so a retry caches, and so stores, it again
+            for p in glob.glob(os.path.join(cache_dir, "*", "*")):
+                if os.path.relpath(p, cache_dir).replace(os.sep, "/") not in (
+                    cached
+                ):
+                    os.remove(p)
+            repo.git.reset("--hard")
+            repo.git.clean("-fd")
+            raise HTTPException(500, "Couldn't add the data to the project")
+        # Recorded as a dataset, from where it was, unless it's already one
+        datasets = ck_info.setdefault("datasets", [])
+        known = {d.get("path") for d in datasets if isinstance(d, dict)}
+        for data in req.data:
+            data_path = _clean_rel_path(data.path, "data")
+            if data_path in uploaded and data_path not in known:
+                datasets.append(
+                    {
+                        "path": data_path,
+                        "imported_from": {
+                            "description": f"Uploaded from {data.external}",
+                            "date": utcnow().date(),
+                        },
+                    }
+                )
+    # Written as xr writes them, then committed with the pipeline
+    if content is not None:
+        dest = os.path.join(wdir, script_path)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fb:
+            fb.write(content)
+    if out.environment_spec_path and out.environment_spec_content is not None:
+        spec_path = os.path.join(
+            wdir, _clean_rel_path(out.environment_spec_path, "environment")
+        )
+        os.makedirs(os.path.dirname(spec_path) or wdir, exist_ok=True)
+        with open(spec_path, "w") as f:
+            f.write(out.environment_spec_content)
+    if out.environment_is_new:
+        ck_info.setdefault("environments", {})[env["name"]] = env["env"]
+    _validate_ck_stage(stage, stage_name)
+    stages[stage_name] = stage
+    for path, text in included.items():
+        with open(os.path.join(wdir, path), "w") as f:
+            f.write(text)
+    ck_info.setdefault("pipeline", {})["stages"] = stages
+    _commit_pipeline(
+        project,
+        session,
+        repo,
+        ck_info,
+        None,
+        [],
+        [],
+        f"Add stage {stage_name} for {script_path}",
+    )
+    out.saved = True
+    return out
+
+
+MAX_FILE_BYTES = 500_000_000
+# A file bigger than this is stored with DVC rather than in Git
+FILE_GIT_MAX_BYTES = 1_000_000
+
+
+class StageFile(BaseModel):
+    """A file a new stage needs, e.g., a script or the file a figure is
+    exported from."""
+
+    path: str
+    # Uploaded, base64-encoded; without it, the file is already in the
+    # project
+    content: str | None = None
+    # Recorded as created by whoever adds it, e.g., a Photoshop file
+    created_by_me: bool = False
+
+
+class StagePost(BaseModel):
+    # A taken name gets a number appended; without one, it's named after
+    # its first output
+    name: str | None = None
+    # As written under the stage's name in calkit.yaml
+    stage: dict[str, Any]
+    files: list[StageFile] = []
+    message: str | None = None
+
+
+@router.post("/projects/{owner_name}/{project_name}/pipeline/stages")
+def post_project_pipeline_stage(
+    owner_name: str,
+    project_name: str,
+    req: StagePost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineStage:
+    """Add a stage, with any files it needs, in one commit.
+
+    An upload never replaces a different file already there, and one too
+    big for Git is stored with DVC. An output another stage already makes
+    is refused, and one already in Git stays there.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    ck_info = get_ck_info_from_repo(repo=repo)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    stage = dict(req.stage)
+    # Outputs are made by one stage only, and one already in Git can't
+    # move to DVC
+    outputs = []
+    for out in stage.get("outputs") or []:
+        path = _clean_rel_path(
+            out["path"] if isinstance(out, dict) else str(out), "output"
+        )
+        producer = calkit.pipeline.get_stage_for_output(path, ck_info)
+        if producer is not None:
+            raise HTTPException(409, f"'{path}' is made by stage '{producer}'")
+        if not isinstance(out, dict):
+            tracked = repo.git.ls_files("--", path).strip()
+            out = {"path": path, "storage": "git"} if tracked else path
+        outputs.append(out)
+    if outputs:
+        stage["outputs"] = outputs
+    first = outputs[0] if outputs else None
+    first_path = first["path"] if isinstance(first, dict) else first
+    base_name = req.name or (
+        _slug(os.path.splitext(os.path.basename(first_path))[0])
+        if first_path
+        else "stage"
+    )
+    if not STAGE_NAME_RE.fullmatch(base_name or ""):
+        raise HTTPException(422, f"Invalid stage name: {req.name!r}")
+    stage_name = base_name
+    n = 2
+    while stage_name in stages:
+        stage_name = f"{base_name}-{n}"
+        n += 1
+    _validate_ck_stage(stage, stage_name)
+    # Files are all checked before any is written
+    uploads: list[tuple[str, bytes]] = []
+    created: list[str] = []
+    for file in req.files:
+        path = _clean_rel_path(file.path, "file")
+        full = os.path.join(wdir, path)
+        if not _inside(wdir, full):
+            raise HTTPException(422, f"'{path}' leads outside the project")
+        if file.created_by_me:
+            if not calkit.provenance.can_be_created_by_person(path):
+                raise HTTPException(
+                    422,
+                    f"'{path}' is exported from something itself, so it "
+                    "can't be created by a person; add the file it's made "
+                    "from, e.g., a Photoshop file",
+                )
+            created.append(path)
+        if file.content is None:
+            if not (os.path.isfile(full) or os.path.isfile(full + ".dvc")):
+                raise HTTPException(404, f"'{path}' is not in the project")
+            continue
+        try:
+            content = base64.b64decode(file.content, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(422, f"Content of '{path}' isn't valid base64")
+        if len(content) > MAX_FILE_BYTES:
+            raise HTTPException(413, f"'{path}' is too large")
+        if os.path.isfile(full):
+            with open(full, "rb") as fb:
+                if fb.read() != content:
+                    raise HTTPException(
+                        409,
+                        f"'{path}' is already in the project; pick it "
+                        "without uploading, or upload under another name",
+                    )
+        uploads.append((path, content))
+    for path, content in uploads:
+        full = os.path.join(wdir, path)
+        os.makedirs(os.path.dirname(full) or wdir, exist_ok=True)
+        with open(full, "wb") as fb:
+            fb.write(content)
+        if len(content) <= FILE_GIT_MAX_BYTES:
+            continue
+        if not os.path.isdir(os.path.join(wdir, ".dvc")):
+            run_dvc_command(["init"], wdir=wdir, check=True)
+        run_dvc_command(["add", path], wdir=wdir, check=True)
+        # Put where the hub's DVC remote serves it, by its hash
+        with open(full + ".dvc") as f:
+            md5 = (ryaml.load(f) or {})["outs"][0]["md5"]
+        fpath = make_data_fpath(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            idx=md5[:2],
+            md5=md5[2:],
+        )
+        with get_object_fs().open(fpath, "wb") as f_out:
+            f_out.write(content)
+        if settings.ENVIRONMENT != "local":
+            remove_gcs_content_type(fpath)
+    # What someone made is theirs, unless something already says otherwise
+    person = {"email": current_user.email}
+    if current_user.full_name:
+        person["name"] = current_user.full_name
+    for path in created:
+        entry = next(
+            (
+                e
+                for items in ck_info.values()
+                if isinstance(items, list)
+                for e in items
+                if isinstance(e, dict) and e.get("path") == path
+            ),
+            None,
+        )
+        if entry is None:
+            ck_info.setdefault("misc", []).append(
+                {"path": path, "created_by": [person]}
+            )
+        elif not (
+            entry.get("created_by")
+            or entry.get("imported_from")
+            or entry.get("stage")
+        ):
+            entry["created_by"] = [person]
+    stages[stage_name] = stage
+    ck_info.setdefault("pipeline", {})["stages"] = stages
+    _commit_pipeline(
+        project,
+        session,
+        repo,
+        ck_info,
+        None,
+        [],
+        [],
+        req.message or f"Add stage {stage_name}",
+    )
+    return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage))
+
+
+class ExportStagePost(BaseModel):
+    # The file it's exported from, and the figure it's exported to
+    source: str
+    output: str
+    # The app a person exports it with, e.g., Photoshop
+    app: str | None = None
+    files: list[StageFile] = []
+    # False to see the stage without adding it
+    save: bool = True
+
+
+class ExportStage(BaseModel):
+    name: str
+    stage: dict[str, Any]
+    # The app that exports it as the pipeline runs, if one does
+    exported_by: str | None = None
+    saved: bool = False
+
+
+@router.post("/projects/{owner_name}/{project_name}/pipeline/stages/export")
+def post_project_pipeline_export_stage(
+    owner_name: str,
+    project_name: str,
+    req: ExportStagePost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> ExportStage:
+    """Add the stage that exports a figure from the file it's drawn in.
+
+    An app that can do it as the pipeline runs does, unless the person
+    named another; otherwise it's a manual step.
+    """
+    source = _clean_rel_path(req.source, "source")
+    output = _clean_rel_path(req.output, "output")
+    exporter = calkit.export.exporter_for(source, output, app=req.app)
+    stage = calkit.export.export_stage(source, output, app=req.app)
+    name = calkit.export.export_stage_name(output)
+    if not req.save:
+        return ExportStage(
+            name=name,
+            stage=stage,
+            exported_by=exporter.app if exporter else None,
+        )
+    saved = post_project_pipeline_stage(
+        owner_name=owner_name,
+        project_name=project_name,
+        req=StagePost(
+            name=name,
+            stage=stage,
+            files=req.files,
+            message=(
+                f"Export {output} from {source}"
+                + (f" with {exporter.app}" if exporter else " manually")
+            ),
+        ),
+        current_user=current_user,
+        session=session,
+    )
+    return ExportStage(
+        name=saved.name,
+        stage=stage,
+        exported_by=exporter.app if exporter else None,
+        saved=True,
+    )
+
+
+# Runs listed at a time, newest first
+DEFAULT_PIPELINE_RUNS = 10
+# How often runs are looked up where they ran, e.g., on GitHub, so everyone
+# watching a project shares one lookup
+RUNS_SYNC_INTERVAL_S = 10
+# Runs of the pipeline on the default branch, not, e.g., a pull request's
+GITHUB_RUN_EVENTS = ("workflow_dispatch", "push")
+# How long one started here can go unlisted on GitHub before it's taken as
+# never having started
+GITHUB_RUN_LISTING_TIMEOUT_S = 600
+RunStatus = Literal["queued", "running", "succeeded", "failed", "canceled"]
+
+
+class PipelineRun(BaseModel):
+    """A run of the pipeline, wherever it ran."""
+
+    id: uuid.UUID
+    location: Literal["github-actions"]
+    status: RunStatus
+    created: datetime
+    started: datetime | None = None
+    finished: datetime | None = None
+    url: str | None = None
+    git_rev: str | None = None
+    branch: str | None = None
+    started_by: str | None = None
+    # By file name
+    github_workflow: str | None = None
+    github_run_id: int | None = None
+
+    @field_validator("created", "started", "finished")
+    @classmethod
+    def _in_utc(cls, value: datetime | None) -> datetime | None:
+        # Stored without a time zone, as UTC
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+
+class PipelineRuns(BaseModel):
+    runs: list[PipelineRun] = []
+    # Of all those recorded, for paging through them
+    total: int = 0
+    # The workflow that starting a run on GitHub Actions uses, if the project
+    # has one
+    github_workflow: str | None = None
+    # Whether it can be started from here, and if not, why
+    can_start: bool = False
+    cannot_start_reason: str | None = None
+
+
+def _convert_github_status(
+    status: str | None, conclusion: str | None
+) -> RunStatus:
+    if status == "in_progress":
+        return "running"
+    if status != "completed":
+        return "queued"
+    if conclusion == "success":
+        return "succeeded"
+    if conclusion in ("cancelled", "skipped", "stale", "neutral"):
+        return "canceled"
+    return "failed"
+
+
+def _convert_github_run(run: dict[str, Any], workflow: str) -> dict[str, Any]:
+    def parse(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        return (
+            datetime.fromisoformat(value)
+            .astimezone(timezone.utc)
+            .replace(tzinfo=None)
+        )
+
+    status = _convert_github_status(run.get("status"), run.get("conclusion"))
+    return dict(
+        status=status,
+        started=parse(run.get("run_started_at") or run.get("created_at")),
+        finished=(
+            parse(run.get("updated_at"))
+            if status in ("succeeded", "failed", "canceled")
+            else None
+        ),
+        git_rev=run.get("head_sha"),
+        branch=run.get("head_branch"),
+        started_by=(run.get("triggering_actor") or {}).get("login"),
+        url=run.get("html_url"),
+        github_workflow=workflow,
+        github_run_id=run.get("id"),
+    )
+
+
+def _runs_sync_key(project_id: uuid.UUID) -> str:
+    return app.cache.make_key("pipeline-runs-sync", str(project_id))
+
+
+@router.get("/projects/{owner_name}/{project_name}/pipeline/runs")
+def get_project_pipeline_runs(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    limit: int = Query(DEFAULT_PIPELINE_RUNS, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> PipelineRuns:
+    """The pipeline's runs, newest first, and whether one can be started
+    here.
+
+    Only on GitHub Actions so far, where the default branch's runs of every
+    workflow that runs the Calkit action are recorded, however each was
+    started.
+    """
+
+    def sync_github_runs(token: str, branch: str) -> None:
+        # GitHub's latest, oldest first, so they pair up in order with runs
+        # started here that it hadn't listed yet
+        listed = []
+        for fname, _ in found:
+            try:
+                resp = requests.get(
+                    f"https://api.github.com/repos/{project.github_repo}"
+                    f"/actions/workflows/{quote(fname, safe='')}/runs",
+                    params={
+                        "per_page": DEFAULT_PIPELINE_RUNS,
+                        "branch": branch,
+                    },
+                    headers={
+                        "Accept": "application/vnd.github+json",
+                        "Authorization": f"Bearer {token}",
+                    },
+                    timeout=10,
+                )
+            except requests.RequestException as e:
+                logger.warning(f"Could not list runs of {fname}: {e}")
+                continue
+            if not resp.ok:
+                logger.warning(
+                    f"Could not list runs of {fname} for "
+                    f"{project.github_repo}: {resp.status_code} {resp.text}"
+                )
+                continue
+            listed += [
+                (run.get("event"), _convert_github_run(run, workflow=fname))
+                for run in resp.json().get("workflow_runs", [])
+                if run.get("event") in GITHUB_RUN_EVENTS
+            ]
+        listed.sort(key=lambda x: x[1]["started"] or datetime.min)
+        rows = session.exec(
+            select(ProjectPipelineRun)
+            .where(ProjectPipelineRun.project_id == project.id)
+            .where(ProjectPipelineRun.location == "github-actions")
+            .where(
+                or_(
+                    col(ProjectPipelineRun.github_run_id).in_(
+                        [fields["github_run_id"] for _, fields in listed]
+                    ),
+                    col(ProjectPipelineRun.github_run_id).is_(None),
+                )
+            )
+        ).all()
+        known = {row.github_run_id: row for row in rows if row.github_run_id}
+        pending = sorted(
+            (row for row in rows if row.github_run_id is None),
+            key=lambda row: row.created,
+        )
+        for event, fields in listed:
+            row = known.get(fields["github_run_id"])
+            if row is None and event == "workflow_dispatch":
+                row = next(
+                    (
+                        r
+                        for r in pending
+                        if r.github_workflow == fields["github_workflow"]
+                        and fields["started"]
+                        and fields["started"]
+                        >= r.created - timedelta(minutes=1)
+                    ),
+                    None,
+                )
+                if row is not None:
+                    pending.remove(row)
+            if row is None:
+                row = ProjectPipelineRun(project_id=project.id)
+            # Whoever started it here, rather than the token GitHub saw
+            if row.started_by_user_id is not None:
+                fields = fields | {"started_by": row.started_by}
+            for name, value in fields.items():
+                setattr(row, name, value)
+            session.add(row)
+        for row in pending:
+            age = (utcnow() - row.created).total_seconds()
+            if age > GITHUB_RUN_LISTING_TIMEOUT_S:
+                row.status = "failed"
+                session.add(row)
+        try:
+            session.commit()
+        except IntegrityError:
+            # Another request recorded the same runs first
+            session.rollback()
+
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    if not project.github_repo:
+        return PipelineRuns(cannot_start_reason="This project isn't on GitHub")
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        read_only=True,
+    )
+    found = calkit.resources.find_run_workflows(str(repo.working_dir))
+    startable = [
+        fname
+        for fname, txt in found
+        if calkit.resources.can_start_workflow(txt)
+    ]
+    token = _github_token_for_repo(
+        session,
+        current_user,
+        project.github_repo,
+        permissions={"actions": "read"},
+    )
+    if (
+        found
+        and token is not None
+        and app.cache.claim(_runs_sync_key(project.id), RUNS_SYNC_INTERVAL_S)
+    ):
+        sync_github_runs(token, get_default_branch(repo))
+    where = ProjectPipelineRun.project_id == project.id
+    total = session.exec(
+        select(func.count()).select_from(ProjectPipelineRun).where(where)
+    ).one()
+    rows = session.exec(
+        select(ProjectPipelineRun)
+        .where(where)
+        .order_by(
+            func.coalesce(
+                ProjectPipelineRun.started, ProjectPipelineRun.created
+            ).desc()
+        )
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    if token is None:
+        reason: str | None = "No GitHub access to its runs"
+    elif found and not startable:
+        names = ", ".join(fname for fname, _ in found)
+        reason = f"No workflow_dispatch trigger in {names}"
+    else:
+        # Starting one without a workflow adds it first
+        reason = None
+    return PipelineRuns(
+        runs=[
+            PipelineRun.model_validate(row, from_attributes=True)
+            for row in rows
+        ],
+        total=total,
+        github_workflow=(
+            startable[0] if startable else found[0][0] if found else None
+        ),
+        can_start=reason is None,
+        cannot_start_reason=reason,
+    )
+
+
+class GitHubActionsRunOptions(BaseModel):
+    # By file name, else the first of the project's that can be started
+    workflow: str | None = None
+    # Its workflow_dispatch inputs
+    inputs: dict[str, str] = {}
+
+
+class PipelineRunPost(BaseModel):
+    location: Literal["github-actions"] = "github-actions"
+    github_actions: GitHubActionsRunOptions = Field(
+        default_factory=GitHubActionsRunOptions
+    )
+
+
+@router.post("/projects/{owner_name}/{project_name}/pipeline/runs")
+def post_project_pipeline_run(
+    owner_name: str,
+    project_name: str,
+    req: PipelineRunPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineRun:
+    """Start the pipeline, on the default branch.
+
+    Only on GitHub Actions so far, where a project without a workflow that
+    runs the Calkit action gets one that only runs when started, since
+    every Overleaf sync is a push.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    if not project.github_repo:
+        raise HTTPException(422, "This project isn't on GitHub")
+    # Before anything's pushed, so a refusal leaves the project as it was
+    token = _github_token_for_repo(
+        session,
+        current_user,
+        project.github_repo,
+        permissions={"actions": "write"},
+    )
+    if token is None:
+        raise HTTPException(403, "No GitHub access to start a run")
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    wdir = str(repo.working_dir)
+    branch = get_default_branch(repo)
+    found = calkit.resources.find_run_workflows(wdir)
+    if not found:
+        rel_path = os.path.join(".github", "workflows", "run-calkit.yml")
+        if not _inside(wdir, os.path.join(wdir, os.path.dirname(rel_path))):
+            raise HTTPException(
+                409, ".github/workflows links out of the project"
+            )
+        if os.path.lexists(os.path.join(wdir, rel_path)):
+            raise HTTPException(
+                409, f"{rel_path} doesn't run the Calkit action"
+            )
+        try:
+            subprocess.check_call(
+                [
+                    "calkit",
+                    "update",
+                    "github-actions",
+                    "--on",
+                    "workflow_dispatch",
+                    "--no-commit",
+                ],
+                cwd=wdir,
+            )
+            repo.git.add(rel_path)
+            repo.git.commit(
+                [rel_path, "-m", "Add a workflow that runs the pipeline"]
+            )
+            if current_user.account.github_name is None:
+                # The App's usual token can't push workflows, so its holder
+                # can't push one that reads the repo's secrets
+                gh_owner, gh_repo = project.github_repo.split("/", 1)
+                with repo.git.custom_environment(
+                    **_make_git_auth_env(
+                        app.github.get_app_installation_token(
+                            gh_owner,
+                            gh_repo,
+                            permissions={
+                                "contents": "write",
+                                "workflows": "write",
+                            },
+                        )
+                    )
+                ):
+                    push_and_expire(project, repo, branch)
+            else:
+                push_and_expire(project, repo, branch)
+        except (
+            subprocess.CalledProcessError,
+            GitCommandError,
+            HTTPException,
+            app.github.GitHubAppNotConfigured,
+        ) as e:
+            repo.git.reset(["--hard", f"origin/{branch}"])
+            repo.git.clean(["-fd"])
+            logger.warning(
+                f"Could not add a workflow to {project.github_repo}: {e}"
+            )
+            if isinstance(e, HTTPException) or (
+                "without `workflows` permission" in str(e)
+            ):
+                raise HTTPException(
+                    403,
+                    "Calkit's GitHub App needs permission to add workflows "
+                    "to add the one that runs the pipeline",
+                )
+            raise HTTPException(
+                502, "Could not add the workflow that runs the pipeline"
+            )
+        record_project_update(project, repo, session)
+        found = calkit.resources.find_run_workflows(wdir)
+    startable = [
+        fname
+        for fname, txt in found
+        if calkit.resources.can_start_workflow(txt)
+    ]
+    names = ", ".join(fname for fname, _ in found)
+    if req.github_actions.workflow is not None:
+        if req.github_actions.workflow not in [f for f, _ in found]:
+            raise HTTPException(
+                422, f"{req.github_actions.workflow} isn't one of {names}"
+            )
+        startable = [f for f in startable if f == req.github_actions.workflow]
+    if not startable:
+        raise HTTPException(409, f"No workflow_dispatch trigger in {names}")
+    fname = startable[0]
+    try:
+        resp = requests.post(
+            f"https://api.github.com/repos/{project.github_repo}"
+            f"/actions/workflows/{quote(fname, safe='')}/dispatches",
+            json={"ref": branch}
+            | (
+                {"inputs": req.github_actions.inputs}
+                if req.github_actions.inputs
+                else {}
+            ),
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+            },
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Could not reach GitHub: {e}")
+    if not resp.ok:
+        logger.warning(
+            f"Could not start {fname} for {project.github_repo}: "
+            f"{resp.status_code} {resp.text}"
+        )
+        try:
+            reason = resp.json().get("message") or resp.reason
+        except ValueError:
+            reason = resp.reason
+        raise HTTPException(
+            403 if resp.status_code in (403, 404) else 502,
+            f"GitHub didn't start {fname}: {reason}",
+        )
+    # GitHub lists it once it's started, and the next listing links them
+    row = ProjectPipelineRun(
+        project_id=project.id,
+        location=req.location,
+        branch=branch,
+        started_by_user_id=current_user.id,
+        started_by=current_user.github_username or current_user.full_name,
+        url=f"https://github.com/{project.github_repo}/actions/workflows/{fname}",
+        github_workflow=fname,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    app.cache.delete(_runs_sync_key(project.id))
+    return PipelineRun.model_validate(row, from_attributes=True)
+
+
+class PipelineRunLogPhase(BaseModel):
+    name: str
+    status: RunStatus
+
+
+class PipelineRunLogPart(BaseModel):
+    """Part of a run's log, e.g., a GitHub Actions job's."""
+
+    name: str
+    status: RunStatus
+    # What it did, in order, e.g., a GitHub Actions job's steps
+    phases: list[PipelineRunLogPhase] = []
+    # Only once it's finished, since GitHub keeps it until then
+    log: str | None = None
+    # The start was cut, keeping the end, which is where failures are
+    log_truncated: bool = False
+
+
+class PipelineRunLogs(BaseModel):
+    parts: list[PipelineRunLogPart] = []
+
+
+MAX_RUN_LOG_CHARS = 200_000
+# Of a part's log, the end is all that's read
+MAX_RUN_LOG_BYTES = 1_000_000
+# Parts whose logs are read, of those GitHub lists first
+MAX_LOGGED_PARTS = 10
+# A finished run's logs don't change, so they're kept this long
+RUN_LOGS_CACHE_TTL_S = 24 * 3600
+# GitHub's timestamp on every line, and its markers for folding sections
+_LOG_TIMESTAMP_RE = re.compile(r"^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?", re.M)
+_LOG_GROUP_RE = re.compile(r"^##\[(group|endgroup)\]", re.M)
+
+
+@router.get(
+    "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs"
+)
+def get_project_pipeline_run_logs(
+    owner_name: str,
+    project_name: str,
+    run_id: uuid.UUID,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineRunLogs:
+    """A pipeline run's logs, in parts, e.g., one per GitHub Actions job,
+    with what each did.
+    """
+
+    def read_log(url: str) -> tuple[str, bool]:
+        # Redirects to storage, which doesn't get the token, and only the
+        # end is kept, without holding all of a huge log at once
+        chunks: deque[bytes] = deque()
+        kept = 0
+        truncated = False
+        with requests.get(
+            url, headers=headers, timeout=20, stream=True
+        ) as resp:
+            resp.raise_for_status()
+            for chunk in resp.iter_content(64 * 1024):
+                chunks.append(chunk)
+                kept += len(chunk)
+                while kept - len(chunks[0]) >= MAX_RUN_LOG_BYTES:
+                    kept -= len(chunks.popleft())
+                    truncated = True
+        log = b"".join(chunks).decode("utf-8", errors="replace")
+        log = _LOG_GROUP_RE.sub("", _LOG_TIMESTAMP_RE.sub("", log))
+        if len(log) > MAX_RUN_LOG_CHARS:
+            log = log[-MAX_RUN_LOG_CHARS:]
+            truncated = True
+        return log, truncated
+
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    run = session.get(ProjectPipelineRun, run_id)
+    if run is None or run.project_id != project.id:
+        raise HTTPException(404, "Run not found")
+    if run.github_run_id is None or not project.github_repo:
+        # Not listed on GitHub yet
+        return PipelineRunLogs()
+    cache_key = app.cache.make_key("pipeline-run-logs", str(run.id))
+    cached = app.cache.get_json(cache_key)
+    if cached is not None:
+        return PipelineRunLogs.model_validate(cached)
+    token = _github_token_for_repo(
+        session,
+        current_user,
+        project.github_repo,
+        permissions={"actions": "read"},
+    )
+    if token is None:
+        raise HTTPException(403, "No GitHub access to its runs")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+    }
+    base = f"https://api.github.com/repos/{project.github_repo}/actions"
+    try:
+        resp = requests.get(
+            f"{base}/runs/{run.github_run_id}/jobs",
+            headers=headers,
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Could not reach GitHub: {e}")
+    if not resp.ok:
+        raise HTTPException(
+            404 if resp.status_code == 404 else 502,
+            f"GitHub didn't list the run's jobs: {resp.reason}",
+        )
+    parts = []
+    for i, job in enumerate(resp.json().get("jobs", [])):
+        log = None
+        truncated = False
+        if job.get("status") == "completed" and i < MAX_LOGGED_PARTS:
+            try:
+                log, truncated = read_log(f"{base}/jobs/{job['id']}/logs")
+            except requests.RequestException as e:
+                logger.warning(
+                    f"Could not get the log of job {job['id']}: {e}"
+                )
+        parts.append(
+            PipelineRunLogPart(
+                name=job.get("name") or "",
+                status=_convert_github_status(
+                    job.get("status"), job.get("conclusion")
+                ),
+                phases=[
+                    PipelineRunLogPhase(
+                        name=step.get("name") or "",
+                        status=_convert_github_status(
+                            step.get("status"), step.get("conclusion")
+                        ),
+                    )
+                    for step in job.get("steps") or []
+                ],
+                log=log,
+                log_truncated=truncated,
+            )
+        )
+    out = PipelineRunLogs(parts=parts)
+    finished = ("succeeded", "failed", "canceled")
+    if parts and all(
+        part.status in finished and part.log is not None for part in parts
+    ):
+        app.cache.set_json(
+            cache_key, out.model_dump(), ttl=RUN_LOGS_CACHE_TTL_S
+        )
+    return out

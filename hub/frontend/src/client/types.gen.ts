@@ -49,6 +49,42 @@ export type ActiveCounts = {
 }
 
 /**
+ * AgentInfo
+ *
+ * A coding agent running in a workspace, e.g., Claude Code.
+ */
+export type AgentInfo = {
+  /**
+   * Tool
+   */
+  tool: string
+  /**
+   * Pid
+   */
+  pid: number
+  /**
+   * Started
+   */
+  started?: string | null
+  /**
+   * Where
+   */
+  where?: "session" | "tmux" | "terminal"
+  /**
+   * App
+   */
+  app?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Status
+   */
+  status?: string | null
+}
+
+/**
  * AnalyticsStats
  */
 export type AnalyticsStats = {
@@ -326,6 +362,103 @@ export type BodyProjectsPutProjectContents = {
    * Message
    */
   message?: string | null
+}
+
+/**
+ * CheckIn
+ *
+ * What a machine reports each time it checks in.
+ */
+export type CheckIn = {
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Mode
+   */
+  mode?: "service" | "foreground" | "cron" | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Restart Pending
+   */
+  restart_pending?: boolean
+  /**
+   * Workspaces
+   */
+  workspaces?: Array<WorkspaceInfo>
+  /**
+   * Channel Sessions
+   */
+  channel_sessions?: Array<string>
+  public_key?: PublicKey | null
+  /**
+   * Usage
+   */
+  usage?: {
+    [key: string]: unknown | number
+  }
+}
+
+/**
+ * CheckInResp
+ *
+ * Where and how a machine connects to the relay.
+ */
+export type CheckInResp = {
+  /**
+   * Machine Id
+   */
+  machine_id: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * User Id
+   */
+  user_id: string
+  /**
+   * Relay Url
+   */
+  relay_url: string
+  /**
+   * Relay Token
+   */
+  relay_token: string
+  /**
+   * Check In Interval
+   */
+  check_in_interval?: number
+  /**
+   * Grant Public Key
+   */
+  grant_public_key: string
+  /**
+   * Connect
+   */
+  connect?: boolean
+  /**
+   * Restart
+   */
+  restart?: boolean
+  /**
+   * Ended Sessions
+   */
+  ended_sessions?: Array<string>
+}
+
+/**
+ * CliToken
+ */
+export type CliToken = {
+  /**
+   * Token
+   */
+  token: string
 }
 
 /**
@@ -1097,6 +1230,16 @@ export type DvcPipelineStage = {
 }
 
 /**
+ * EmailChangeCode
+ */
+export type EmailChangeCode = {
+  /**
+   * Email
+   */
+  email: string
+}
+
+/**
  * EmailVerificationConfirm
  */
 export type EmailVerificationConfirm = {
@@ -1184,6 +1327,56 @@ export type ExistsResult = {
    * Exists
    */
   exists: boolean
+}
+
+/**
+ * ExportStage
+ */
+export type ExportStage = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Exported By
+   */
+  exported_by?: string | null
+  /**
+   * Saved
+   */
+  saved?: boolean
+}
+
+/**
+ * ExportStagePost
+ */
+export type ExportStagePost = {
+  /**
+   * Source
+   */
+  source: string
+  /**
+   * Output
+   */
+  output: string
+  /**
+   * App
+   */
+  app?: string | null
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Save
+   */
+  save?: boolean
 }
 
 /**
@@ -1691,6 +1884,22 @@ export type FsOpResponse = {
 }
 
 /**
+ * GitHubActionsRunOptions
+ */
+export type GitHubActionsRunOptions = {
+  /**
+   * Workflow
+   */
+  workflow?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: {
+    [key: string]: string
+  }
+}
+
+/**
  * GitHubInstallations
  */
 export type GitHubInstallations = {
@@ -1760,6 +1969,41 @@ export type GitHubReleasePost = {
    * Generate Release Notes
    */
   generate_release_notes?: boolean
+}
+
+/**
+ * GitHubToken
+ */
+export type GitHubToken = {
+  /**
+   * Token
+   */
+  token: string
+  /**
+   * Expires
+   */
+  expires: number
+}
+
+/**
+ * GitHubTokenReq
+ *
+ * What a machine shows to get a token for Git, and the GitHub repo Git
+ * asked about.
+ */
+export type GitHubTokenReq = {
+  /**
+   * Grant
+   */
+  grant: string
+  /**
+   * Owner
+   */
+  owner: string
+  /**
+   * Repo
+   */
+  repo: string
 }
 
 /**
@@ -2046,6 +2290,7 @@ export type HttpRequestAccess = {
 export type HubStats = {
   users: UserStats
   projects: ProjectStats
+  machines?: MachineStats | null
   /**
    * Excluded Accounts
    */
@@ -2244,6 +2489,30 @@ export type ItemLock = {
    * User Github Username
    */
   user_github_username: string
+}
+
+/**
+ * LastRun
+ *
+ * How the latest pipeline run in a workspace ended.
+ */
+export type LastRun = {
+  /**
+   * Status
+   */
+  status: string
+  /**
+   * Started
+   */
+  started?: string | null
+  /**
+   * Ended
+   */
+  ended?: string | null
+  /**
+   * Failed Stages
+   */
+  failed_stages?: Array<string>
 }
 
 /**
@@ -2468,6 +2737,247 @@ export type LatexComponentsRequest = {
   sources?: {
     [key: string]: string
   }
+}
+
+/**
+ * LogoutRequest
+ */
+export type LogoutRequest = {
+  /**
+   * Refresh Token
+   */
+  refresh_token?: string | null
+}
+
+/**
+ * MachineOut
+ *
+ * A machine as the API returns it: its record plus its current state.
+ */
+export type MachineOut = {
+  /**
+   * Id
+   */
+  id?: string
+  /**
+   * User Id
+   */
+  user_id: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Hostname
+   */
+  hostname?: string | null
+  /**
+   * System Machine Id
+   */
+  system_machine_id?: string | null
+  /**
+   * Platform
+   */
+  platform?: string | null
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Hosts
+   */
+  hosts?: Array<string>
+  /**
+   * Created
+   */
+  created?: string
+  /**
+   * Last Seen
+   */
+  last_seen?: string | null
+  /**
+   * Mode
+   */
+  mode?: string | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Connect Requested At
+   */
+  connect_requested_at?: string | null
+  /**
+   * Restart Pending
+   */
+  restart_pending?: boolean
+  /**
+   * Restart Requested
+   */
+  restart_requested?: boolean
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Online
+   */
+  is_online: boolean
+  /**
+   * Is Asleep
+   */
+  is_asleep: boolean
+  /**
+   * Workspace Count
+   */
+  workspace_count: number
+}
+
+/**
+ * MachinePost
+ *
+ * What a machine reports about itself when registering.
+ */
+export type MachinePost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Hostname
+   */
+  hostname?: string | null
+  /**
+   * Machine Id
+   */
+  machine_id?: string | null
+  /**
+   * Platform
+   */
+  platform?: string | null
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Hosts
+   */
+  hosts?: Array<string>
+  public_key?: PublicKey | null
+}
+
+/**
+ * MachineRegistered
+ *
+ * A newly registered machine, with the token only returned here.
+ */
+export type MachineRegistered = {
+  /**
+   * Id
+   */
+  id?: string
+  /**
+   * User Id
+   */
+  user_id: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Hostname
+   */
+  hostname?: string | null
+  /**
+   * System Machine Id
+   */
+  system_machine_id?: string | null
+  /**
+   * Platform
+   */
+  platform?: string | null
+  /**
+   * Calkit Version
+   */
+  calkit_version?: string | null
+  /**
+   * Hosts
+   */
+  hosts?: Array<string>
+  /**
+   * Created
+   */
+  created?: string
+  /**
+   * Last Seen
+   */
+  last_seen?: string | null
+  /**
+   * Mode
+   */
+  mode?: string | null
+  /**
+   * Connected
+   */
+  connected?: boolean
+  /**
+   * Connect Requested At
+   */
+  connect_requested_at?: string | null
+  /**
+   * Restart Pending
+   */
+  restart_pending?: boolean
+  /**
+   * Restart Requested
+   */
+  restart_requested?: boolean
+  /**
+   * Is Active
+   */
+  is_active?: boolean
+  /**
+   * Is Online
+   */
+  is_online: boolean
+  /**
+   * Is Asleep
+   */
+  is_asleep: boolean
+  /**
+   * Workspace Count
+   */
+  workspace_count: number
+  /**
+   * Token
+   */
+  token: string
+  /**
+   * Grant Public Key
+   */
+  grant_public_key: string
+}
+
+/**
+ * MachineStats
+ */
+export type MachineStats = {
+  /**
+   * Linked
+   */
+  linked: number
+  /**
+   * Users
+   */
+  users: number
+  /**
+   * Users with a linked machine that checked in
+   */
+  users_online: ActiveCounts
+  /**
+   * Users who connected to one of their machines from the browser, so last_30_days is the feature's MAU
+   */
+  users_connected: ActiveCounts
 }
 
 /**
@@ -2767,6 +3277,16 @@ export type OperationResult = {
 }
 
 /**
+ * OrgMemberPatch
+ */
+export type OrgMemberPatch = {
+  /**
+   * Role
+   */
+  role: "read" | "write" | "admin" | "owner"
+}
+
+/**
  * OrgMemberPost
  */
 export type OrgMemberPost = {
@@ -2923,7 +3443,7 @@ export type OrgUserPublic = {
   /**
    * Github Name
    */
-  github_name: string
+  github_name: string | null
   /**
    * Role
    */
@@ -2946,6 +3466,12 @@ export type OrgsResponse = {
 
 /**
  * OverleafLinkPublic
+ *
+ * A folder of a Calkit project an Overleaf project syncs with, and what
+ * the current user can do with that project.
+ *
+ * ``github_repo_url`` is the project's repo on GitHub, in one canonical
+ * form, e.g., to open it in a Codespace, or none if it's elsewhere.
  */
 export type OverleafLinkPublic = {
   /**
@@ -2972,6 +3498,10 @@ export type OverleafLinkPublic = {
    * Current User Access
    */
   current_user_access: "read" | "write" | "admin" | "owner" | null
+  /**
+   * Github Repo Url
+   */
+  github_repo_url?: string | null
 }
 
 /**
@@ -3175,6 +3705,151 @@ export type PipelinePut = {
    * Message
    */
   message?: string | null
+}
+
+/**
+ * PipelineRun
+ *
+ * A run of the pipeline, wherever it ran.
+ */
+export type PipelineRun = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Location
+   */
+  location: "github-actions"
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Started
+   */
+  started?: string | null
+  /**
+   * Finished
+   */
+  finished?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Started By
+   */
+  started_by?: string | null
+  /**
+   * Github Workflow
+   */
+  github_workflow?: string | null
+  /**
+   * Github Run Id
+   */
+  github_run_id?: number | null
+}
+
+/**
+ * PipelineRunLogPart
+ *
+ * Part of a run's log, e.g., a GitHub Actions job's.
+ */
+export type PipelineRunLogPart = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+  /**
+   * Phases
+   */
+  phases?: Array<PipelineRunLogPhase>
+  /**
+   * Log
+   */
+  log?: string | null
+  /**
+   * Log Truncated
+   */
+  log_truncated?: boolean
+}
+
+/**
+ * PipelineRunLogPhase
+ */
+export type PipelineRunLogPhase = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Status
+   */
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled"
+}
+
+/**
+ * PipelineRunLogs
+ */
+export type PipelineRunLogs = {
+  /**
+   * Parts
+   */
+  parts?: Array<PipelineRunLogPart>
+}
+
+/**
+ * PipelineRunPost
+ */
+export type PipelineRunPost = {
+  /**
+   * Location
+   */
+  location?: "github-actions"
+  github_actions?: GitHubActionsRunOptions
+}
+
+/**
+ * PipelineRuns
+ */
+export type PipelineRuns = {
+  /**
+   * Runs
+   */
+  runs?: Array<PipelineRun>
+  /**
+   * Total
+   */
+  total?: number
+  /**
+   * Github Workflow
+   */
+  github_workflow?: string | null
+  /**
+   * Can Start
+   */
+  can_start?: boolean
+  /**
+   * Cannot Start Reason
+   */
+  cannot_start_reason?: string | null
 }
 
 /**
@@ -4129,6 +4804,161 @@ export type ProjectsPublic = {
 }
 
 /**
+ * Provenance
+ *
+ * Where an artifact, or one value inside a results file, came from.
+ */
+export type Provenance = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Exists
+   */
+  exists?: boolean
+  /**
+   * Value
+   */
+  value?: unknown
+  /**
+   * Value Error
+   */
+  value_error?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Stage Kind
+   */
+  stage_kind?: string | null
+  /**
+   * Stage App
+   */
+  stage_app?: string | null
+  /**
+   * Source
+   */
+  source?: string | null
+  /**
+   * Command
+   */
+  command?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Input To Stages
+   */
+  input_to_stages?: Array<string>
+  stage_status?: StageStatus | null
+  /**
+   * Stale Reason
+   */
+  stale_reason?: "pipeline" | "frozen" | null
+  /**
+   * Copied From
+   */
+  copied_from?: string | null
+  /**
+   * Copy Stage
+   */
+  copy_stage?: string | null
+  /**
+   * Origin
+   */
+  origin?: string | null
+  /**
+   * Origin Url
+   */
+  origin_url?: string | null
+  /**
+   * Origin Path
+   */
+  origin_path?: string | null
+  /**
+   * Gaps
+   */
+  gaps?: Array<ProvenanceGap>
+}
+
+/**
+ * ProvenanceGap
+ *
+ * Something nothing records the origin of, and the chain to it.
+ */
+export type ProvenanceGap = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Steps
+   */
+  steps?: Array<ProvenanceStep>
+  /**
+   * Unchecked
+   */
+  unchecked?: boolean
+}
+
+/**
+ * ProvenanceStep
+ *
+ * A path on the way back from an artifact, and the stage producing it.
+ */
+export type ProvenanceStep = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Stage
+   */
+  stage?: string | null
+}
+
+/**
+ * PublicKey
+ *
+ * A P-256 public key as a JSON Web Key, e.g., a browser's for one
+ * connection, or a machine's own.
+ *
+ * The browser signs every message it sends the machine with the private
+ * half of its key, which it can't export, so a grant naming this key is
+ * no use to the relay that carries it, and the machine signs its replies
+ * with its own, so the relay can't forge those either.
+ */
+export type PublicKey = {
+  /**
+   * Kty
+   */
+  kty: "EC"
+  /**
+   * Crv
+   */
+  crv: "P-256"
+  /**
+   * X
+   */
+  x: string
+  /**
+   * Y
+   */
+  y: string
+}
+
+/**
  * Publication
  *
  * A publication declared in calkit.yaml.
@@ -4343,7 +5173,14 @@ export type QuestionEvidence = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
+  kind:
+    | "figure"
+    | "result"
+    | "value"
+    | "table"
+    | "publication"
+    | "document"
+    | null
   /**
    * Path
    */
@@ -4368,6 +5205,10 @@ export type QuestionEvidence = {
    * Label
    */
   label?: string | null
+  /**
+   * Lines
+   */
+  lines?: string | null
   /**
    * Explanation
    */
@@ -4405,7 +5246,14 @@ export type QuestionEvidencePost = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "value" | "table" | "publication" | "document"
+  kind:
+    | "figure"
+    | "result"
+    | "value"
+    | "table"
+    | "publication"
+    | "document"
+    | null
   /**
    * Path
    */
@@ -4432,6 +5280,10 @@ export type QuestionEvidencePost = {
    * Label
    */
   label?: string | null
+  /**
+   * Lines
+   */
+  lines?: string | null
   /**
    * Explanation
    */
@@ -4505,6 +5357,10 @@ export type QuestionPublic = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4512,6 +5368,14 @@ export type QuestionPublic = {
    * Evidence
    */
   evidence?: Array<QuestionEvidence>
+  /**
+   * Verifications
+   */
+  verifications?: Array<QuestionSignOff>
+  /**
+   * Validations
+   */
+  validations?: Array<QuestionSignOff>
 }
 
 /**
@@ -4527,6 +5391,10 @@ export type QuestionPut = {
    */
   hypothesis?: string | null
   /**
+   * Approach
+   */
+  approach?: string | null
+  /**
    * Answer
    */
   answer?: string | null
@@ -4534,6 +5402,44 @@ export type QuestionPut = {
    * Evidence
    */
   evidence?: Array<QuestionEvidencePost>
+}
+
+/**
+ * QuestionSignOff
+ *
+ * A verification or validation of a question, checked against history.
+ *
+ * A verification says the stages behind the evidence implement the
+ * approach; a validation says the approach suits the question and the
+ * evidence justifies the answer. Stale means what it vouches for changed
+ * after the commit that added it; unchecked means that commit couldn't be
+ * found.
+ */
+export type QuestionSignOff = {
+  /**
+   * By
+   */
+  by: string
+  /**
+   * Date
+   */
+  date?: string | null
+  /**
+   * Notes
+   */
+  notes?: string | null
+  /**
+   * With Ai
+   */
+  with_ai?: Array<string>
+  /**
+   * Status
+   */
+  status: "current" | "stale" | "unchecked"
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -4815,6 +5721,37 @@ export type RefreshTokenRequest = {
    * Refresh Token
    */
   refresh_token: string
+}
+
+/**
+ * RelayTokenReq
+ *
+ * What a browser asking to connect to a machine sends.
+ */
+export type RelayTokenReq = {
+  public_key: PublicKey
+}
+
+/**
+ * RelayTokenResp
+ *
+ * Where and how a browser connects to a machine through the relay,
+ * and how it checks the replies it gets are the machine's.
+ */
+export type RelayTokenResp = {
+  /**
+   * Relay Url
+   */
+  relay_url: string
+  /**
+   * Token
+   */
+  token: string
+  machine_public_key: PublicKey
+  /**
+   * Grant Id
+   */
+  grant_id: string
 }
 
 /**
@@ -5473,9 +6410,21 @@ export type ReproCheck = {
    */
   misc_needing_provenance?: Array<string>
   /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
+  /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
+  /**
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
+  /**
+   * Paths Outside Project
+   */
+  paths_outside_project?: Array<string>
   /**
    * N Dvc Remotes
    */
@@ -5564,6 +6513,41 @@ export type Result = {
    * Key
    */
   key?: string | null
+  stage_status?: StageStatus | null
+}
+
+/**
+ * ScriptData
+ *
+ * Data a script reads from outside the project, and its place in it.
+ */
+export type ScriptData = {
+  /**
+   * External
+   */
+  external: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Files
+   */
+  files?: Array<ScriptDataFile>
+}
+
+/**
+ * ScriptDataFile
+ */
+export type ScriptDataFile = {
+  /**
+   * Path
+   */
+  path?: string
+  /**
+   * Content
+   */
+  content: string
 }
 
 /**
@@ -5604,6 +6588,19 @@ export type SearchResults = {
    * Results
    */
   results: Array<SearchResultItem>
+}
+
+/**
+ * SessionCredentialsReq
+ *
+ * What a machine shows to get credentials for one of its sessions: the
+ * grant of the channel that opened it, or last attached to it.
+ */
+export type SessionCredentialsReq = {
+  /**
+   * Grant
+   */
+  grant: string
 }
 
 /**
@@ -5741,6 +6738,151 @@ export type SoftwareItem = {
 }
 
 /**
+ * StageFile
+ *
+ * A file a new stage needs, e.g., a script or the file a figure is
+ * exported from.
+ */
+export type StageFile = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Created By Me
+   */
+  created_by_me?: boolean
+}
+
+/**
+ * StageFromScriptOrNotebookPost
+ */
+export type StageFromScriptOrNotebookPost = {
+  /**
+   * Script Path
+   */
+  script_path: string
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Shows
+   */
+  shows?: string | null
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Data
+   */
+  data?: Array<ScriptData>
+  /**
+   * Save
+   */
+  save?: boolean
+}
+
+/**
+ * StageFromScriptOrNotebookResponse
+ */
+export type StageFromScriptOrNotebookResponse = {
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Stage Yaml
+   */
+  stage_yaml: string
+  /**
+   * Environment
+   */
+  environment: string
+  /**
+   * Environment Is New
+   */
+  environment_is_new: boolean
+  /**
+   * Environment Spec Path
+   */
+  environment_spec_path?: string | null
+  /**
+   * Environment Spec Content
+   */
+  environment_spec_content?: string | null
+  /**
+   * Dependencies
+   */
+  dependencies?: Array<string>
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Outputs
+   */
+  outputs?: Array<string>
+  /**
+   * Missing Inputs
+   */
+  missing_inputs?: Array<string>
+  /**
+   * External Inputs
+   */
+  external_inputs?: Array<string>
+  /**
+   * Rewritten
+   */
+  rewritten?: Array<string>
+  /**
+   * Produces
+   */
+  produces?: string | null
+  /**
+   * Included In
+   */
+  included_in?: Array<string>
+  /**
+   * Saved
+   */
+  saved?: boolean
+  /**
+   * Git Repo Url
+   */
+  git_repo_url: string
+}
+
+/**
+ * StagePost
+ */
+export type StagePost = {
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Stage
+   */
+  stage: {
+    [key: string]: unknown
+  }
+  /**
+   * Files
+   */
+  files?: Array<StageFile>
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
  * StageStatus
  */
 export type StageStatus = {
@@ -5832,6 +6974,62 @@ export type SubscriptionUpdate = {
    * Discount Code
    */
   discount_code?: string | null
+}
+
+/**
+ * TOTPCode
+ */
+export type TotpCode = {
+  /**
+   * Code
+   */
+  code: string
+}
+
+/**
+ * TOTPConfirm
+ */
+export type TotpConfirm = {
+  /**
+   * Code
+   */
+  code: string
+  /**
+   * Email Code
+   */
+  email_code: string
+}
+
+/**
+ * TOTPSetup
+ */
+export type TotpSetup = {
+  /**
+   * Secret
+   */
+  secret: string
+  /**
+   * Otpauth Uri
+   */
+  otpauth_uri: string
+}
+
+/**
+ * TOTPStatus
+ */
+export type TotpStatus = {
+  /**
+   * Enabled
+   */
+  enabled: boolean
+  /**
+   * Verified
+   */
+  verified: boolean
+  /**
+   * Verified Until
+   */
+  verified_until?: string | null
 }
 
 /**
@@ -6105,6 +7303,10 @@ export type TokenResp = {
    * Last Used
    */
   last_used?: string | null
+  /**
+   * Machine Id
+   */
+  machine_id?: string | null
 }
 
 /**
@@ -6173,6 +7375,10 @@ export type UserAdminPublic = {
    * Email Verified
    */
   email_verified: boolean
+  /**
+   * Can Link Machines
+   */
+  can_link_machines: boolean
   subscription: UserSubscription | null
   /**
    * Analytics Consent
@@ -6258,6 +7464,10 @@ export type UserPublic = {
    * Email Verified
    */
   email_verified: boolean
+  /**
+   * Can Link Machines
+   */
+  can_link_machines: boolean
   subscription: UserSubscription | null
   /**
    * Analytics Consent
@@ -6433,6 +7643,10 @@ export type UserTokenPublic = {
    * Last Used
    */
   last_used?: string | null
+  /**
+   * Machine Id
+   */
+  machine_id?: string | null
 }
 
 /**
@@ -6481,6 +7695,10 @@ export type UserUpdateMe = {
    * Analytics Consent
    */
   analytics_consent?: boolean | null
+  /**
+   * Email Code
+   */
+  email_code?: string | null
 }
 
 /**
@@ -6513,6 +7731,164 @@ export type ValidationError = {
    * Error Type
    */
   type: string
+}
+
+/**
+ * Workspace
+ *
+ * A workspace along with the machine it's on.
+ */
+export type Workspace = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Kind
+   */
+  kind?: "personal" | "managed"
+  /**
+   * Project
+   */
+  project?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Commit
+   */
+  commit?: string | null
+  /**
+   * Dirty
+   */
+  dirty?: boolean | null
+  /**
+   * Ahead
+   */
+  ahead?: number | null
+  /**
+   * Behind
+   */
+  behind?: number | null
+  /**
+   * Running
+   */
+  running?: boolean
+  /**
+   * Running Stages
+   */
+  running_stages?: Array<string>
+  /**
+   * Running Since
+   */
+  running_since?: string | null
+  last_run?: LastRun | null
+  /**
+   * In Use By
+   */
+  in_use_by?: string | null
+  /**
+   * Last Activity
+   */
+  last_activity?: string | null
+  /**
+   * Agents
+   */
+  agents?: Array<AgentInfo>
+  /**
+   * Machine Id
+   */
+  machine_id: string
+  /**
+   * Machine Name
+   */
+  machine_name: string
+  /**
+   * Machine Online
+   */
+  machine_online: boolean
+  /**
+   * Machine Asleep
+   */
+  machine_asleep: boolean
+  /**
+   * Machine Platform
+   */
+  machine_platform: string | null
+  /**
+   * Updated
+   */
+  updated: string
+  /**
+   * On Hub
+   */
+  on_hub: boolean
+}
+
+/**
+ * WorkspaceInfo
+ *
+ * A workspace as a machine reports it at check-in.
+ */
+export type WorkspaceInfo = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Kind
+   */
+  kind?: "personal" | "managed"
+  /**
+   * Project
+   */
+  project?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Commit
+   */
+  commit?: string | null
+  /**
+   * Dirty
+   */
+  dirty?: boolean | null
+  /**
+   * Ahead
+   */
+  ahead?: number | null
+  /**
+   * Behind
+   */
+  behind?: number | null
+  /**
+   * Running
+   */
+  running?: boolean
+  /**
+   * Running Stages
+   */
+  running_stages?: Array<string>
+  /**
+   * Running Since
+   */
+  running_since?: string | null
+  last_run?: LastRun | null
+  /**
+   * In Use By
+   */
+  in_use_by?: string | null
+  /**
+   * Last Activity
+   */
+  last_activity?: string | null
+  /**
+   * Agents
+   */
+  agents?: Array<AgentInfo>
 }
 
 /**
@@ -7015,9 +8391,21 @@ export type ReproCheckWritable = {
    */
   misc_needing_provenance?: Array<string>
   /**
+   * Provenance Gaps
+   */
+  provenance_gaps?: Array<string>
+  /**
+   * Unchecked Imports
+   */
+  unchecked_imports?: Array<string>
+  /**
    * Scripts Not In Pipeline
    */
   scripts_not_in_pipeline?: Array<string>
+  /**
+   * Paths Outside Project
+   */
+  paths_outside_project?: Array<string>
   /**
    * N Dvc Remotes
    */
@@ -7088,6 +8476,10 @@ export type UserAdminPublicWritable = {
    * Email Verified
    */
   email_verified: boolean
+  /**
+   * Can Link Machines
+   */
+  can_link_machines: boolean
   subscription: UserSubscriptionWritable | null
   /**
    * Analytics Consent
@@ -7139,6 +8531,10 @@ export type UserPublicWritable = {
    * Email Verified
    */
   email_verified: boolean
+  /**
+   * Can Link Machines
+   */
+  can_link_machines: boolean
   subscription: UserSubscriptionWritable | null
   /**
    * Analytics Consent
@@ -7327,6 +8723,34 @@ export type RefreshAccessTokenResponses = {
 
 export type RefreshAccessTokenResponse =
   RefreshAccessTokenResponses[keyof RefreshAccessTokenResponses]
+
+export type PostLogoutData = {
+  /**
+   * Req
+   */
+  body?: LogoutRequest | null
+  path?: never
+  query?: never
+  url: "/logout"
+}
+
+export type PostLogoutErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostLogoutError = PostLogoutErrors[keyof PostLogoutErrors]
+
+export type PostLogoutResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostLogoutResponse = PostLogoutResponses[keyof PostLogoutResponses]
 
 export type RecoverPasswordData = {
   body?: never
@@ -7759,6 +9183,50 @@ export type UpdateCurrentUserResponses = {
 
 export type UpdateCurrentUserResponse =
   UpdateCurrentUserResponses[keyof UpdateCurrentUserResponses]
+
+export type PostUserEmailChangeCodeData = {
+  body: EmailChangeCode
+  path?: never
+  query?: never
+  url: "/user/email-change-code"
+}
+
+export type PostUserEmailChangeCodeErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserEmailChangeCodeError =
+  PostUserEmailChangeCodeErrors[keyof PostUserEmailChangeCodeErrors]
+
+export type PostUserEmailChangeCodeResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserEmailChangeCodeResponse =
+  PostUserEmailChangeCodeResponses[keyof PostUserEmailChangeCodeResponses]
+
+export type PostUserSessionsEndOthersData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/sessions/end-others"
+}
+
+export type PostUserSessionsEndOthersResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserSessionsEndOthersResponse =
+  PostUserSessionsEndOthersResponses[keyof PostUserSessionsEndOthersResponses]
 
 export type UpdateCurrentUserPasswordData = {
   body: UpdatePassword
@@ -8650,6 +10118,130 @@ export type PutUserOnboardingFlagResponses = {
 
 export type PutUserOnboardingFlagResponse =
   PutUserOnboardingFlagResponses[keyof PutUserOnboardingFlagResponses]
+
+export type DeleteUserTotpData = {
+  body: TotpCode
+  path?: never
+  query?: never
+  url: "/user/totp"
+}
+
+export type DeleteUserTotpErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteUserTotpError =
+  DeleteUserTotpErrors[keyof DeleteUserTotpErrors]
+
+export type DeleteUserTotpResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpStatus
+}
+
+export type DeleteUserTotpResponse =
+  DeleteUserTotpResponses[keyof DeleteUserTotpResponses]
+
+export type GetUserTotpData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/totp"
+}
+
+export type GetUserTotpErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserTotpError = GetUserTotpErrors[keyof GetUserTotpErrors]
+
+export type GetUserTotpResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpStatus
+}
+
+export type GetUserTotpResponse =
+  GetUserTotpResponses[keyof GetUserTotpResponses]
+
+export type PostUserTotpData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/totp"
+}
+
+export type PostUserTotpResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpSetup
+}
+
+export type PostUserTotpResponse =
+  PostUserTotpResponses[keyof PostUserTotpResponses]
+
+export type PostUserTotpConfirmData = {
+  body: TotpConfirm
+  path?: never
+  query?: never
+  url: "/user/totp/confirm"
+}
+
+export type PostUserTotpConfirmErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserTotpConfirmError =
+  PostUserTotpConfirmErrors[keyof PostUserTotpConfirmErrors]
+
+export type PostUserTotpConfirmResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpStatus
+}
+
+export type PostUserTotpConfirmResponse =
+  PostUserTotpConfirmResponses[keyof PostUserTotpConfirmResponses]
+
+export type PostUserTotpVerifyData = {
+  body: TotpCode
+  path?: never
+  query?: never
+  url: "/user/totp/verify"
+}
+
+export type PostUserTotpVerifyErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserTotpVerifyError =
+  PostUserTotpVerifyErrors[keyof PostUserTotpVerifyErrors]
+
+export type PostUserTotpVerifyResponses = {
+  /**
+   * Successful Response
+   */
+  200: TotpStatus
+}
+
+export type PostUserTotpVerifyResponse =
+  PostUserTotpVerifyResponses[keyof PostUserTotpVerifyResponses]
 
 export type GetHubVersionData = {
   body?: never
@@ -13527,6 +15119,284 @@ export type PostProjectMapPathsResponses = {
 export type PostProjectMapPathsResponse =
   PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
 
+export type PostProjectStageFromScriptOrNotebookData = {
+  body: StageFromScriptOrNotebookPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/from-script-or-notebook"
+}
+
+export type PostProjectStageFromScriptOrNotebookErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectStageFromScriptOrNotebookError =
+  PostProjectStageFromScriptOrNotebookErrors[keyof PostProjectStageFromScriptOrNotebookErrors]
+
+export type PostProjectStageFromScriptOrNotebookResponses = {
+  /**
+   * Successful Response
+   */
+  200: StageFromScriptOrNotebookResponse
+}
+
+export type PostProjectStageFromScriptOrNotebookResponse =
+  PostProjectStageFromScriptOrNotebookResponses[keyof PostProjectStageFromScriptOrNotebookResponses]
+
+export type PostProjectPipelineStageData = {
+  body: StagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages"
+}
+
+export type PostProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineStageError =
+  PostProjectPipelineStageErrors[keyof PostProjectPipelineStageErrors]
+
+export type PostProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PostProjectPipelineStageResponse =
+  PostProjectPipelineStageResponses[keyof PostProjectPipelineStageResponses]
+
+export type PostProjectPipelineExportStageData = {
+  body: ExportStagePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/export"
+}
+
+export type PostProjectPipelineExportStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineExportStageError =
+  PostProjectPipelineExportStageErrors[keyof PostProjectPipelineExportStageErrors]
+
+export type PostProjectPipelineExportStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExportStage
+}
+
+export type PostProjectPipelineExportStageResponse =
+  PostProjectPipelineExportStageResponses[keyof PostProjectPipelineExportStageResponses]
+
+export type GetProjectPipelineRunsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+    /**
+     * Offset
+     */
+    offset?: number
+  }
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type GetProjectPipelineRunsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunsError =
+  GetProjectPipelineRunsErrors[keyof GetProjectPipelineRunsErrors]
+
+export type GetProjectPipelineRunsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRuns
+}
+
+export type GetProjectPipelineRunsResponse =
+  GetProjectPipelineRunsResponses[keyof GetProjectPipelineRunsResponses]
+
+export type PostProjectPipelineRunData = {
+  body: PipelineRunPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs"
+}
+
+export type PostProjectPipelineRunErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPipelineRunError =
+  PostProjectPipelineRunErrors[keyof PostProjectPipelineRunErrors]
+
+export type PostProjectPipelineRunResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRun
+}
+
+export type PostProjectPipelineRunResponse =
+  PostProjectPipelineRunResponses[keyof PostProjectPipelineRunResponses]
+
+export type GetProjectPipelineRunLogsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Run Id
+     */
+    run_id: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/runs/{run_id}/logs"
+}
+
+export type GetProjectPipelineRunLogsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineRunLogsError =
+  GetProjectPipelineRunLogsErrors[keyof GetProjectPipelineRunLogsErrors]
+
+export type GetProjectPipelineRunLogsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineRunLogs
+}
+
+export type GetProjectPipelineRunLogsResponse =
+  GetProjectPipelineRunLogsResponses[keyof GetProjectPipelineRunLogsResponses]
+
+export type GetProjectProvenanceData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Key
+     */
+    key?: string | null
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/provenance"
+}
+
+export type GetProjectProvenanceErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectProvenanceError =
+  GetProjectProvenanceErrors[keyof GetProjectProvenanceErrors]
+
+export type GetProjectProvenanceResponses = {
+  /**
+   * Successful Response
+   */
+  200: Provenance
+}
+
+export type GetProjectProvenanceResponse =
+  GetProjectProvenanceResponses[keyof GetProjectProvenanceResponses]
+
 export type PostProjectFigureScriptData = {
   body: FigureScriptPost
   path: {
@@ -14847,6 +16717,78 @@ export type AddOrgMemberResponses = {
 export type AddOrgMemberResponse =
   AddOrgMemberResponses[keyof AddOrgMemberResponses]
 
+export type DeleteOrgMemberData = {
+  body?: never
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type DeleteOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteOrgMemberError =
+  DeleteOrgMemberErrors[keyof DeleteOrgMemberErrors]
+
+export type DeleteOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteOrgMemberResponse =
+  DeleteOrgMemberResponses[keyof DeleteOrgMemberResponses]
+
+export type UpdateOrgMemberData = {
+  body: OrgMemberPatch
+  path: {
+    /**
+     * Org Name
+     */
+    org_name: string
+    /**
+     * Username
+     */
+    username: string
+  }
+  query?: never
+  url: "/orgs/{org_name}/members/{username}"
+}
+
+export type UpdateOrgMemberErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type UpdateOrgMemberError =
+  UpdateOrgMemberErrors[keyof UpdateOrgMemberErrors]
+
+export type UpdateOrgMemberResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type UpdateOrgMemberResponse =
+  UpdateOrgMemberResponses[keyof UpdateOrgMemberResponses]
+
 export type PutOrgSubscriptionData = {
   body: OrgSubscriptionUpdate
   path: {
@@ -15194,3 +17136,396 @@ export type GetFeatureVotesResponses = {
 
 export type GetFeatureVotesResponse =
   GetFeatureVotesResponses[keyof GetFeatureVotesResponses]
+
+export type GetMachinesData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/machines"
+}
+
+export type GetMachinesResponses = {
+  /**
+   * Response Machines-Get Machines
+   *
+   * Successful Response
+   */
+  200: Array<MachineOut>
+}
+
+export type GetMachinesResponse =
+  GetMachinesResponses[keyof GetMachinesResponses]
+
+export type PostMachineData = {
+  body: MachinePost
+  path?: never
+  query?: never
+  url: "/machines"
+}
+
+export type PostMachineErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineError = PostMachineErrors[keyof PostMachineErrors]
+
+export type PostMachineResponses = {
+  /**
+   * Successful Response
+   */
+  200: MachineRegistered
+}
+
+export type PostMachineResponse =
+  PostMachineResponses[keyof PostMachineResponses]
+
+export type DeleteMachineSelfData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/machines/self"
+}
+
+export type DeleteMachineSelfResponses = {
+  /**
+   * Successful Response
+   */
+  200: MachineOut
+}
+
+export type DeleteMachineSelfResponse =
+  DeleteMachineSelfResponses[keyof DeleteMachineSelfResponses]
+
+export type GetMachineSelfData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/machines/self"
+}
+
+export type GetMachineSelfResponses = {
+  /**
+   * Successful Response
+   */
+  200: MachineOut
+}
+
+export type GetMachineSelfResponse =
+  GetMachineSelfResponses[keyof GetMachineSelfResponses]
+
+export type DeleteMachineData = {
+  body?: never
+  path: {
+    /**
+     * Machine Id
+     */
+    machine_id: string
+  }
+  query?: never
+  url: "/machines/{machine_id}"
+}
+
+export type DeleteMachineErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteMachineError = DeleteMachineErrors[keyof DeleteMachineErrors]
+
+export type DeleteMachineResponses = {
+  /**
+   * Successful Response
+   */
+  200: MachineOut
+}
+
+export type DeleteMachineResponse =
+  DeleteMachineResponses[keyof DeleteMachineResponses]
+
+export type PostMachineCheckInData = {
+  body: CheckIn
+  path?: never
+  query?: never
+  url: "/machines/check-in"
+}
+
+export type PostMachineCheckInErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineCheckInError =
+  PostMachineCheckInErrors[keyof PostMachineCheckInErrors]
+
+export type PostMachineCheckInResponses = {
+  /**
+   * Successful Response
+   */
+  200: CheckInResp
+}
+
+export type PostMachineCheckInResponse =
+  PostMachineCheckInResponses[keyof PostMachineCheckInResponses]
+
+export type PostMachineWakeData = {
+  body?: never
+  path: {
+    /**
+     * Machine Id
+     */
+    machine_id: string
+  }
+  query?: never
+  url: "/machines/{machine_id}/wake"
+}
+
+export type PostMachineWakeErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineWakeError =
+  PostMachineWakeErrors[keyof PostMachineWakeErrors]
+
+export type PostMachineWakeResponses = {
+  /**
+   * Successful Response
+   */
+  200: MachineOut
+}
+
+export type PostMachineWakeResponse =
+  PostMachineWakeResponses[keyof PostMachineWakeResponses]
+
+export type PostMachineRestartData = {
+  body?: never
+  path: {
+    /**
+     * Machine Id
+     */
+    machine_id: string
+  }
+  query?: never
+  url: "/machines/{machine_id}/restart"
+}
+
+export type PostMachineRestartErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineRestartError =
+  PostMachineRestartErrors[keyof PostMachineRestartErrors]
+
+export type PostMachineRestartResponses = {
+  /**
+   * Successful Response
+   */
+  200: MachineOut
+}
+
+export type PostMachineRestartResponse =
+  PostMachineRestartResponses[keyof PostMachineRestartResponses]
+
+export type PostMachineRelayTokenData = {
+  body: RelayTokenReq
+  path: {
+    /**
+     * Machine Id
+     */
+    machine_id: string
+  }
+  query?: never
+  url: "/machines/{machine_id}/relay-token"
+}
+
+export type PostMachineRelayTokenErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineRelayTokenError =
+  PostMachineRelayTokenErrors[keyof PostMachineRelayTokenErrors]
+
+export type PostMachineRelayTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: RelayTokenResp
+}
+
+export type PostMachineRelayTokenResponse =
+  PostMachineRelayTokenResponses[keyof PostMachineRelayTokenResponses]
+
+export type PostMachineCliTokenRequestData = {
+  body?: never
+  path: {
+    /**
+     * Machine Id
+     */
+    machine_id: string
+  }
+  query?: never
+  url: "/machines/{machine_id}/cli-token-request"
+}
+
+export type PostMachineCliTokenRequestErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineCliTokenRequestError =
+  PostMachineCliTokenRequestErrors[keyof PostMachineCliTokenRequestErrors]
+
+export type PostMachineCliTokenRequestResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostMachineCliTokenRequestResponse =
+  PostMachineCliTokenRequestResponses[keyof PostMachineCliTokenRequestResponses]
+
+export type PostMachineCliTokenData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/machines/cli-token"
+}
+
+export type PostMachineCliTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: CliToken
+}
+
+export type PostMachineCliTokenResponse =
+  PostMachineCliTokenResponses[keyof PostMachineCliTokenResponses]
+
+export type PostMachineSessionTokenData = {
+  body: SessionCredentialsReq
+  path?: never
+  query?: never
+  url: "/machines/session-token"
+}
+
+export type PostMachineSessionTokenErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineSessionTokenError =
+  PostMachineSessionTokenErrors[keyof PostMachineSessionTokenErrors]
+
+export type PostMachineSessionTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: CliToken
+}
+
+export type PostMachineSessionTokenResponse =
+  PostMachineSessionTokenResponses[keyof PostMachineSessionTokenResponses]
+
+export type PostMachineGithubTokenData = {
+  body: GitHubTokenReq
+  path?: never
+  query?: never
+  url: "/machines/github-token"
+}
+
+export type PostMachineGithubTokenErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostMachineGithubTokenError =
+  PostMachineGithubTokenErrors[keyof PostMachineGithubTokenErrors]
+
+export type PostMachineGithubTokenResponses = {
+  /**
+   * Successful Response
+   */
+  200: GitHubToken
+}
+
+export type PostMachineGithubTokenResponse =
+  PostMachineGithubTokenResponses[keyof PostMachineGithubTokenResponses]
+
+export type GetWorkspacesData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/workspaces"
+}
+
+export type GetWorkspacesResponses = {
+  /**
+   * Response Machines-Get Workspaces
+   *
+   * Successful Response
+   */
+  200: Array<Workspace>
+}
+
+export type GetWorkspacesResponse =
+  GetWorkspacesResponses[keyof GetWorkspacesResponses]
+
+export type GetProjectWorkspacesData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/workspaces"
+}
+
+export type GetProjectWorkspacesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectWorkspacesError =
+  GetProjectWorkspacesErrors[keyof GetProjectWorkspacesErrors]
+
+export type GetProjectWorkspacesResponses = {
+  /**
+   * Response Machines-Get Project Workspaces
+   *
+   * Successful Response
+   */
+  200: Array<Workspace>
+}
+
+export type GetProjectWorkspacesResponse =
+  GetProjectWorkspacesResponses[keyof GetProjectWorkspacesResponses]

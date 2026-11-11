@@ -53,6 +53,15 @@
     },
     {
       "matches": [
+        "https://www.overleaf.com/project/*",
+        "https://overleaf.com/project/*"
+      ],
+      "js": ["content/overleaf-editor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
         "https://arxiv.org/*",
         "https://*.biorxiv.org/*",
         "https://*.medrxiv.org/*",

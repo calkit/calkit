@@ -1,17 +1,38 @@
 import { getOverleafProjectId } from "../core/detect";
+import calkitLogo from "../../public/icons/calkit.svg?raw";
 import {
   renderFailure,
   renderHubPicker,
+  renderPathPicker,
   renderProjectPicker,
 } from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
+import {
+  type Citation,
+  type CitationProblem,
+  canBeCreatedByPerson,
+  citationProblems,
+  citationText,
+  citationCandidates,
+} from "../core/latex";
 import { runContentScript } from "../core/lifecycle";
-import { isUnsupportedByHub, RequestFailed, send } from "../core/messages";
+import {
+  isUnsupportedByHub,
+  type Request,
+  RequestFailed,
+  send,
+} from "../core/messages";
 import type {
   GithubRepo,
   OverleafLinkPublic,
+  Provenance,
+  StageFromScriptOrNotebookResponse,
+  OverleafSyncResponse,
   OverleafSyncStatus,
   OverleafSyncStatusFile,
+  PipelineRun,
+  PipelineRuns,
+  ProjectPipeline,
   ProjectPublic,
 } from "../core/types";
 import {
@@ -22,14 +43,14 @@ import {
   loading,
   mountPanel,
   type Panel,
+  STYLES,
   textInput,
 } from "../core/ui";
+import type { EditorCitation, FromEditor, ToEditor } from "./overleaf-editor";
 
 const PANEL_ID = "calkit-overleaf-panel";
 const LAUNCHER_ID = "calkit-overleaf-launcher";
 const TOKEN_PANEL_ID = "calkit-overleaf-token-panel";
-const OVERLEAF_GIT_SETTINGS =
-  "https://www.overleaf.com/user/settings#git-integration";
 const OVERLEAF_TOKEN_RE = /\bolp_[A-Za-z0-9]{20,}\b/;
 
 let panel: Panel | null = null;
@@ -49,6 +70,2294 @@ let lastCheck: {
 // that finishes after any of them doesn't draw over it
 let loadGeneration = 0;
 let tokenWatcher: MutationObserver | null = null;
+// The Calkit project this Overleaf project syncs with, once found
+let currentLink: OverleafLinkPublic | null = null;
+// Kept for a minute, since the project changes under it, e.g., with a sync
+const provenanceCache = new Map<
+  string,
+  { at: number; provenance: Promise<Provenance> }
+>();
+
+function provenanceFor(
+  link: OverleafLinkPublic,
+  path: string,
+  key?: string,
+): Promise<Provenance> {
+  const cacheKey = `${link.project_owner_name}/${link.project_name}:${path}:${
+    key ?? ""
+  }`;
+  const cached = provenanceCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.provenance;
+  }
+  const provenance = send({
+    type: "project.provenance",
+    owner: link.project_owner_name,
+    project: link.project_name,
+    path,
+    key,
+  });
+  // A failure is worth asking again about next time
+  provenance.catch(() => provenanceCache.delete(cacheKey));
+  provenanceCache.set(cacheKey, { at: Date.now(), provenance });
+  return provenance;
+}
+
+/**
+ * Where a file the document shows came from, finding it in the project
+ * first, since TeX may find it under a name with an extension added, and
+ * finds a plainly included one relative to the document.
+ */
+async function citationProvenance(
+  link: OverleafLinkPublic,
+  citation: Citation,
+): Promise<Provenance> {
+  if (citation.kind === "value") {
+    return provenanceFor(link, citation.path, citation.key);
+  }
+  const candidates = citationCandidates(link.path, citation);
+  let first: Provenance | null = null;
+  for (const candidate of candidates) {
+    const provenance = await provenanceFor(link, candidate);
+    if (provenance.exists) {
+      return provenance;
+    }
+    first ??= provenance;
+  }
+  return first ?? provenanceFor(link, candidates[0]);
+}
+
+/**
+ * Type into Overleaf's editor at the cursor, as if the user had.
+ *
+ * CodeMirror keeps its selection while the panel has focus and puts it
+ * back when the editor is focused again, and it handles an insertText
+ * command like typing, so the edit lands in Overleaf's history and syncs.
+ * Falls back to the clipboard when there's no editor to type into, e.g.,
+ * with a PDF open instead of a .tex file.
+ */
+async function insertIntoEditor(text: string): Promise<"inserted" | "copied"> {
+  const editor = document.querySelector<HTMLElement>(".cm-content");
+  if (editor) {
+    editor.focus();
+    if (document.execCommand("insertText", false, text)) {
+      return "inserted";
+    }
+  }
+  await navigator.clipboard.writeText(text);
+  return "copied";
+}
+
+/** All the data that can be uploaded with a script, as the hub allows. */
+const MAX_SCRIPT_DATA_BYTES = 50_000_000;
+
+/** A value as it reads in a panel row. */
+function valueText(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/**
+ * Make the stage that produces what the document shows, from the script
+ * that makes it, uploaded or already in the project.
+ *
+ * The hub reads the script the way `calkit xr --dry-run` does, without
+ * running it, so the user sees the environment, inputs, and outputs before
+ * anything is committed. Overleaf can't run it, so once it's saved the
+ * panel says how to, on the user's own computer.
+ */
+function renderAddScript(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+  shows: string,
+  kind: "script" | "notebook",
+): HTMLElement {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const exts =
+    kind === "notebook" ? [".ipynb"] : [".py", ".r", ".jl", ".m", ".sh"];
+  const file = el("input", {
+    type: "file",
+    attrs: { accept: exts.join(",") },
+  });
+  const { element: picker, input: path } = renderPathPicker({
+    owner,
+    project,
+    placeholder: "Or find it in the project",
+    accept: (p) => exts.some((ext) => p.toLowerCase().endsWith(ext)),
+  });
+  const read = el("button", { class: "action", text: `Read the ${kind}` });
+  const message = el("div", { class: "small" });
+  const review = el("div", { class: "stack", style: { marginTop: "6px" } });
+  let request: {
+    scriptPath: string;
+    content?: string;
+  } | null = null;
+  // Data the script reads from outside the project, by how it names it,
+  // and the files that go in the project in its place
+  const data = new Map<
+    string,
+    { path: string; files: { path: string; file: File }[] }
+  >();
+  // Contents are only read to save; until then, where it goes is enough to
+  // see the script read it from there
+  const dataRequest = (withContent: boolean) =>
+    Promise.all(
+      [...data].map(async ([external, { path, files }]) => ({
+        external,
+        path,
+        files: withContent
+          ? await Promise.all(
+              files.map(async (f) => ({
+                path: f.path,
+                content: await fileBase64(f.file),
+              })),
+            )
+          : [],
+      })),
+    );
+  const reread = async () => {
+    if (!request) {
+      return;
+    }
+    const detected = await send({
+      type: "project.stageFromScriptOrNotebook",
+      owner,
+      project,
+      ...request,
+      shows,
+      data: await dataRequest(false),
+    });
+    clear(message);
+    clear(review);
+    renderReview(detected);
+  };
+  const fail = (e: unknown) =>
+    clear(message).append(
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
+  read.addEventListener("click", async () => {
+    clear(message);
+    clear(review);
+    const upload = file.files?.[0];
+    const typed = path.value.trim();
+    if (!upload && !typed) {
+      fail(`Choose the ${kind}, or find it in the project.`);
+      return;
+    }
+    read.disabled = true;
+    message.append(loading("Reading"));
+    data.clear();
+    try {
+      request = upload
+        ? {
+            // An upload goes where it's named, or with others of its kind
+            scriptPath: typed || `${kind}s/${upload.name}`,
+            content: await fileBase64(upload),
+          }
+        : { scriptPath: typed };
+      await reread();
+    } catch (e) {
+      fail(e);
+    } finally {
+      read.disabled = false;
+    }
+  });
+  // Where data from outside the project goes in it, uploaded from this
+  // computer, which is likely the one the script ran on
+  const renderExternal = (
+    external: string,
+    detected: StageFromScriptOrNotebookResponse,
+  ) => {
+    const chosen = data.get(external);
+    const name = external.split(/[\\/]/).filter(Boolean).pop() ?? "data";
+    const dest = textInput({ value: chosen?.path ?? `data/${name}` });
+    const files = el("input", {
+      type: "file",
+      attrs: { multiple: "" },
+      style: { display: "none" },
+    });
+    const folder = el("input", {
+      type: "file",
+      attrs: { webkitdirectory: "" },
+      style: { display: "none" },
+    });
+    const pickFiles = el("button", {
+      class: "action secondary",
+      text: "Choose files",
+    });
+    const pickFolder = el("button", {
+      class: "action secondary",
+      text: "Choose a folder",
+    });
+    const note = el("div", { class: "small" });
+    const use = async (picked: { path: string; file: File }[]) => {
+      const size = [...data]
+        .filter(([other]) => other !== external)
+        .flatMap(([, d]) => d.files)
+        .concat(picked)
+        .reduce((n, f) => n + f.file.size, 0);
+      if (size > MAX_SCRIPT_DATA_BYTES) {
+        clear(note).append(
+          errorMessage(
+            `That's ${Math.ceil(size / 1e6)} MB, more than the ` +
+              `${MAX_SCRIPT_DATA_BYTES / 1e6} MB that can be uploaded here.`,
+          ),
+        );
+        return;
+      }
+      data.set(external, {
+        path: dest.value.trim() || `data/${name}`,
+        files: picked,
+      });
+      clear(note).append(loading("Reading"));
+      try {
+        await reread();
+      } catch (e) {
+        data.delete(external);
+        clear(note).append(
+          errorMessage(e instanceof Error ? e.message : String(e)),
+        );
+      }
+    };
+    pickFiles.addEventListener("click", () => files.click());
+    pickFolder.addEventListener("click", () => folder.click());
+    files.addEventListener("change", () => {
+      const list = [...(files.files ?? [])];
+      // One file is the data itself when it's the one the script names, or
+      // else one in that folder
+      const single = list.length === 1 && list[0].name === name;
+      if (list.length) {
+        void use(list.map((file) => ({ path: single ? "" : file.name, file })));
+      }
+    });
+    folder.addEventListener("change", () => {
+      const list = [...(folder.files ?? [])];
+      if (list.length) {
+        void use(
+          list.map((file) => ({
+            path: file.webkitRelativePath.split("/").slice(1).join("/"),
+            file,
+          })),
+        );
+      }
+    });
+    dest.addEventListener("change", () => {
+      if (chosen) {
+        void use(chosen.files);
+      }
+    });
+    const n = chosen?.files.length ?? 0;
+    const status = !chosen
+      ? `Reads ${external}, which is outside the project, so it will only ` +
+        "run on the computer it came from. Upload it to read it from the " +
+        "project instead:"
+      : detected.rewritten?.includes(external)
+      ? `Reads ${external}, outside the project. ${n} ` +
+        `${n === 1 ? "file" : "files"} will be uploaded to ${chosen.path}, ` +
+        "and the script will read them from there."
+      : `${n} ${n === 1 ? "file" : "files"} will be uploaded to ` +
+        `${chosen.path}, but Calkit couldn't find where the script names ` +
+        `${external}; change it to read ${chosen.path}.`;
+    return el("div", { class: "stack", style: { marginTop: "4px" } }, [
+      el("div", {
+        class: "small",
+        style: {
+          color:
+            chosen && detected.rewritten?.includes(external)
+              ? ""
+              : "var(--ck-warning)",
+        },
+        text: status,
+      }),
+      dest,
+      el("div", { class: "actions" }, [pickFiles, pickFolder]),
+      files,
+      folder,
+      note,
+    ]);
+  };
+  const renderReview = (detected: StageFromScriptOrNotebookResponse) => {
+    review.append(
+      el("div", { class: "small" }, [
+        document.createTextNode("Stage "),
+        el("span", { class: "name", text: detected.stage_name }),
+        el("span", {
+          class: "dim",
+          text:
+            ` runs ${request?.scriptPath} in ${detected.environment}` +
+            (detected.environment_is_new
+              ? `, a new environment${
+                  detected.dependencies.length
+                    ? ` with ${detected.dependencies.join(", ")}`
+                    : ""
+                }`
+              : ""),
+        }),
+      ]),
+    );
+    if (detected.inputs.length) {
+      review.append(
+        el("div", { class: "small" }, [
+          el("span", { class: "dim", text: "Reads " }),
+          document.createTextNode(detected.inputs.join(", ")),
+        ]),
+      );
+    }
+    if (detected.missing_inputs.length) {
+      review.append(
+        el("div", {
+          class: "small",
+          style: { color: "var(--ck-warning)" },
+          text:
+            `Not in the project yet: ${detected.missing_inputs.join(", ")}. ` +
+            "Add it, or record where it came from, before running.",
+        }),
+      );
+    }
+    for (const external of new Set([
+      ...data.keys(),
+      ...(detected.external_inputs ?? []),
+    ])) {
+      review.append(renderExternal(external, detected));
+    }
+    // Which output this is, when the script writes several or names it
+    // differently from the paper
+    const choices = detected.outputs.map((output) => {
+      const radio = el("input", {
+        type: "radio",
+        attrs: { name: "ck-produces", value: output },
+      });
+      radio.checked = output === detected.produces;
+      return { output, radio };
+    });
+    const citeNote = el("div", { class: "dim small" });
+    const chosen = () => choices.find((c) => c.radio.checked)?.output;
+    const updateNote = () => {
+      const output = chosen();
+      citeNote.textContent =
+        output && output !== shows
+          ? `The paper will show it from there, with \\ckfigure{${output}}.`
+          : "";
+    };
+    if (choices.length) {
+      review.append(
+        el("div", { class: "small dim", text: `Which output is ${shows}?` }),
+        ...choices.map(({ output, radio }) => {
+          radio.addEventListener("change", updateNote);
+          return el("label", { class: "small", style: { display: "block" } }, [
+            radio,
+            document.createTextNode(` ${output}`),
+          ]);
+        }),
+        citeNote,
+      );
+      updateNote();
+    } else {
+      review.append(
+        el("div", {
+          class: "small dim",
+          text: "Calkit didn't find anything the script writes.",
+        }),
+      );
+    }
+    const save = el("button", {
+      class: "action",
+      text: "Add to the pipeline",
+    });
+    save.addEventListener("click", async () => {
+      if (!request) {
+        return;
+      }
+      save.disabled = true;
+      clear(message).append(loading(data.size ? "Uploading" : "Saving"));
+      try {
+        const saved = await send({
+          type: "project.stageFromScriptOrNotebook",
+          owner,
+          project,
+          ...request,
+          shows,
+          produces: chosen(),
+          data: await dataRequest(true),
+          save: true,
+        });
+        // Brings the \ckfigure into the editor
+        if (saved.included_in.length) {
+          clear(message).append(loading("Syncing"));
+          await syncOverleaf(owner, project, link.path);
+        }
+        await showDefined(container, link, citation);
+        container.append(renderRunIt(saved, link));
+      } catch (e) {
+        fail(e);
+        save.disabled = false;
+      }
+    });
+    // Only a stage that makes what's shown defines its origin
+    if (choices.length) {
+      review.append(el("div", { class: "actions" }, [save]));
+    }
+  };
+  return el("div", { class: "stack", style: { marginTop: "6px" } }, [
+    el("div", { class: "small" }, [
+      document.createTextNode(`The ${kind} that makes `),
+      el("span", { class: "name", text: shows }),
+    ]),
+    file,
+    picker,
+    el("div", { class: "actions" }, [read]),
+    message,
+    review,
+  ]);
+}
+
+/**
+ * Record that a figure is exported manually from a file someone made, e.g.,
+ * a PNG from a Photoshop file, so the pipeline asks for a new export
+ * whenever that file changes.
+ */
+function renderExported(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+  target: string,
+): HTMLElement {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const file = el("input", { type: "file" });
+  const { element: picker, input: path } = renderPathPicker({
+    owner,
+    project,
+    placeholder: "Or find it in the project",
+    accept: (p) => p !== target && canBeCreatedByPerson(p),
+  });
+  const appName = textInput({
+    placeholder: "App it's exported with, e.g., Photoshop (optional)",
+  });
+  const save = el("button", { class: "action", text: "Add the export step" });
+  const message = el("div", { class: "small" });
+  const fail = (e: unknown) =>
+    clear(message).append(
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
+  save.addEventListener("click", async () => {
+    clear(message);
+    const upload = file.files?.[0];
+    const typed = path.value.trim();
+    if (!upload && !typed) {
+      fail("Choose the file it's exported from, or find it in the project.");
+      return;
+    }
+    // Kept out of the paper's folder, which syncs to Overleaf
+    const sourcePath = typed || `figures/src/${upload?.name}`;
+    if (!canBeCreatedByPerson(sourcePath)) {
+      fail(
+        `${sourcePath} is exported from something itself; choose the ` +
+          "file it's made from.",
+      );
+      return;
+    }
+    save.disabled = true;
+    message.append(loading(upload ? "Uploading" : "Saving"));
+    try {
+      // Whether an app exports it as the pipeline runs, so nobody has to
+      // remember to, is the hub's to say
+      await send({
+        type: "project.addExportStage",
+        owner,
+        project,
+        source: sourcePath,
+        output: target,
+        app: appName.value.trim() || undefined,
+        files: [
+          {
+            path: sourcePath,
+            content: upload ? await fileBase64(upload) : undefined,
+            created_by_me: true,
+          },
+        ],
+      });
+      await showDefined(container, link, citation);
+    } catch (e) {
+      fail(e);
+      save.disabled = false;
+    }
+  });
+  return el("div", { class: "stack", style: { marginTop: "6px" } }, [
+    el("div", { class: "small" }, [
+      document.createTextNode("The file "),
+      el("span", { class: "name", text: target }),
+      document.createTextNode(" is exported from"),
+    ]),
+    file,
+    picker,
+    appName,
+    el("div", { class: "actions" }, [save]),
+    message,
+  ]);
+}
+
+/** Show what's cited again, now that an origin is defined. */
+async function showDefined(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+): Promise<void> {
+  provenanceCache.clear();
+  void checkCitations();
+  const fresh = await citationProvenance(link, citation);
+  clear(container);
+  renderProvenance(container, link, citation, fresh);
+}
+
+/** Record that a file was imported, or made by the signed-in user. */
+function renderRecordOrigin(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+  target: string,
+  how: "imported" | "created",
+): HTMLElement {
+  const message = el("div", { class: "small" });
+  const fields = el("div", { class: "stack" });
+  const save = el("button", { class: "action", text: "Save" });
+  let read: () => Promise<Omit<
+    ToRecord,
+    "type" | "owner" | "project" | "path"
+  > | null>;
+  if (how === "imported") {
+    const sources = [
+      ["url", "Website", "https://example.org/data/measurements.csv"],
+      ["doi", "DOI", "10.5281/zenodo.1234567"],
+      ["git", "Git repo", "https://github.com/owner/repo"],
+    ] as const;
+    let source: (typeof sources)[number][0] = "url";
+    const where = textInput({ placeholder: sources[0][2] });
+    const rev = textInput({ placeholder: "Commit or tag (optional)" });
+    const repoPath = textInput({ placeholder: "Path in the repo (optional)" });
+    const gitFields = el(
+      "div",
+      { class: "stack", style: { display: "none" } },
+      [rev, repoPath],
+    );
+    const date = el("input", { type: "date" });
+    const radios = sources.map(([value, text, placeholder]) => {
+      const radio = el("input", {
+        type: "radio",
+        attrs: { name: "ck-import-source", value },
+      });
+      radio.checked = value === source;
+      radio.addEventListener("change", () => {
+        source = value;
+        where.placeholder = placeholder;
+        gitFields.style.display = value === "git" ? "" : "none";
+      });
+      return el("label", { class: "small", style: { display: "inline" } }, [
+        radio,
+        document.createTextNode(` ${text}  `),
+      ]);
+    });
+    fields.append(
+      el("div", {}, radios),
+      where,
+      gitFields,
+      el("label", { text: "Retrieved (optional)" }),
+      date,
+    );
+    read = async () => {
+      const value = where.value.trim();
+      if (!value) {
+        return null;
+      }
+      const when = date.value || null;
+      return {
+        importedFrom:
+          source === "url"
+            ? { url: value, date: when }
+            : source === "doi"
+            ? { doi: value, date: when }
+            : {
+                git_repo_url: value,
+                git_ref: rev.value.trim() || null,
+                path: repoPath.value.trim() || null,
+                date: when,
+              },
+      };
+    };
+  } else {
+    const ai = textInput({ placeholder: "Ex: Claude Opus 5" });
+    const who = el("div", { class: "small" });
+    const user = send({ type: "auth.state" }).then((state) => state.user);
+    void user.then((u) => {
+      who.textContent = `Created by ${u?.full_name || u?.email || "you"}`;
+    });
+    fields.append(
+      who,
+      el("label", { text: "Made with generative AI (optional)" }),
+      ai,
+    );
+    read = async () => {
+      const u = await user;
+      if (!u) {
+        throw new Error("Sign in to say you made it.");
+      }
+      const tool = ai.value.trim();
+      return {
+        createdBy: [
+          {
+            email: u.email,
+            name: u.full_name ?? null,
+            ...(tool ? { with_ai: [tool] } : {}),
+          },
+        ],
+      };
+    };
+  }
+  save.addEventListener("click", async () => {
+    clear(message);
+    save.disabled = true;
+    try {
+      const origin = await read();
+      if (!origin) {
+        throw new Error("Say where it came from.");
+      }
+      message.append(loading("Saving"));
+      await send({
+        type: "project.recordOrigin",
+        owner: link.project_owner_name,
+        project: link.project_name,
+        path: target,
+        ...origin,
+      });
+      await showDefined(container, link, citation);
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+      save.disabled = false;
+    }
+  });
+  return el("div", { class: "stack", style: { marginTop: "6px" } }, [
+    el("div", { class: "small" }, [
+      document.createTextNode(how === "imported" ? "Where " : "Who made "),
+      el("span", { class: "name", text: target }),
+      document.createTextNode(how === "imported" ? " came from" : ""),
+    ]),
+    fields,
+    el("div", { class: "actions" }, [save]),
+    message,
+  ]);
+}
+
+type ToRecord = Extract<Request, { type: "project.recordOrigin" }>;
+
+/** The ways to define where a file came from, each opening its form. */
+function renderDefineOrigin(
+  link: OverleafLinkPublic,
+  citation: Citation,
+  target: string,
+): HTMLElement {
+  const open = (form: (body: HTMLElement) => HTMLElement) =>
+    showInPanel((body) => body.append(form(body)));
+  const choices: [string, () => void][] = [
+    [
+      "Script",
+      () =>
+        open((body) => renderAddScript(body, link, citation, target, "script")),
+    ],
+    [
+      "Notebook",
+      () =>
+        open((body) =>
+          renderAddScript(body, link, citation, target, "notebook"),
+        ),
+    ],
+    [
+      "Imported",
+      () =>
+        open((body) =>
+          renderRecordOrigin(body, link, citation, target, "imported"),
+        ),
+    ],
+  ];
+  // Something exported, e.g., a PNG, comes from a file a person made
+  if (!canBeCreatedByPerson(target)) {
+    choices.push([
+      "Exported",
+      () => open((body) => renderExported(body, link, citation, target)),
+    ]);
+  }
+  if (canBeCreatedByPerson(target)) {
+    choices.push([
+      "Created",
+      () =>
+        open((body) =>
+          renderRecordOrigin(body, link, citation, target, "created"),
+        ),
+    ]);
+  }
+  return el(
+    "div",
+    {
+      class: "actions",
+      style: { alignItems: "center", flexWrap: "wrap", marginTop: "4px" },
+    },
+    [
+      el("span", { class: "small dim", text: "Define origin:" }),
+      ...choices.map(([text, onClick]) =>
+        el("button", { class: "action secondary", text, onClick }),
+      ),
+    ],
+  );
+}
+
+/** How to run a stage that's never run, since Overleaf can't. */
+function renderRunIt(
+  saved: StageFromScriptOrNotebookResponse,
+  link: OverleafLinkPublic,
+): HTMLElement {
+  const folder = saved.git_repo_url
+    .replace(/\.git$/, "")
+    .split("/")
+    .pop();
+  const commands = [
+    "curl -LsSf install.calkit.org | sh",
+    `calkit clone ${link.project_owner_name}/${link.project_name}`,
+    `cd ${folder}`,
+    "calkit run --save --overleaf",
+  ].join("\n");
+  const copy = el("button", { class: "action secondary", text: "Copy" });
+  copy.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(commands);
+    copy.textContent = "Copied";
+  });
+  return el("div", { class: "muted-box", style: { marginTop: "6px" } }, [
+    el("div", {
+      class: "small",
+      text:
+        `Added stage ${saved.stage_name}. It hasn't run yet. Run it on ` +
+        "GitHub Actions, and its results come into this paper when it " +
+        "finishes:",
+    }),
+    renderRuns(link, true),
+    el("div", {
+      class: "small",
+      style: { marginTop: "6px" },
+      text: "Or on your computer:",
+    }),
+    el("pre", {
+      class: "name",
+      style: { whiteSpace: "pre-wrap", margin: "6px 0" },
+      text: commands,
+    }),
+    el("div", { class: "actions" }, [copy]),
+  ]);
+}
+
+// The project's pipeline runs, checked often while one is going, so a
+// finished run syncs to Overleaf even with the panel closed, and now and
+// then otherwise, to see ones started elsewhere
+let pipelineRuns: {
+  key: string;
+  runs: PipelineRuns;
+  // What the last finished run did here
+  notice?: string;
+} | null = null;
+let runsTimer: ReturnType<typeof setTimeout> | undefined;
+// The check going now, which others wait on rather than repeat
+let runsRequest: { key: string; promise: Promise<void> } | null = null;
+// Checks that failed in a row, which space the next ones out
+let runsFailures = 0;
+// A start from a run button, kept across their redraws
+let starting: { key: string; busy: boolean; error?: string } | null = null;
+// Where the open panel shows them, redrawn as they change
+const runsBoxes = new Set<{
+  box: HTMLElement;
+  link: OverleafLinkPublic;
+  offer: boolean;
+}>();
+
+function linkKey(link: OverleafLinkPublic): string {
+  return `${link.project_owner_name}/${link.project_name}`;
+}
+
+/** Whether the user can change the project, e.g., run or sync it. */
+function canWrite(link: OverleafLinkPublic): boolean {
+  return ["write", "admin", "owner"].includes(link.current_user_access ?? "");
+}
+
+/** The run going now, if there is one. */
+function activeRun(): PipelineRun | null {
+  const latest = pipelineRuns?.runs.runs[0];
+  return latest && ["queued", "running"].includes(latest.status)
+    ? latest
+    : null;
+}
+
+/** Show what's going on on the launcher, while the panel is closed. */
+function remountLauncher(): void {
+  if (!panel && currentProjectId) {
+    const id = currentProjectId;
+    mountLauncher(() => openPanel(id), launcherTone());
+  }
+}
+
+/**
+ * Check the project's runs, and keep checking: often while one is going,
+ * now and then otherwise, less often after failures, and not while the tab
+ * is hidden. A check already going is waited on rather than repeated.
+ */
+function refreshRuns(link: OverleafLinkPublic): Promise<void> {
+  const key = linkKey(link);
+  const schedule = () => {
+    clearTimeout(runsTimer);
+    const delay = runsFailures
+      ? Math.min(15_000 * 2 ** runsFailures, 300_000)
+      : activeRun()
+      ? 15_000
+      : 60_000;
+    runsTimer = setTimeout(() => {
+      if (document.hidden) {
+        schedule();
+      } else {
+        void refreshRuns(link);
+      }
+    }, delay);
+  };
+  const check = async () => {
+    const known = pipelineRuns?.key === key ? pipelineRuns : null;
+    const wasRunning = Boolean(known && activeRun());
+    let runs: PipelineRuns;
+    try {
+      runs = await send({
+        type: "project.pipelineRuns",
+        owner: link.project_owner_name,
+        project: link.project_name,
+      });
+      runsFailures = 0;
+    } catch {
+      runsFailures++;
+      schedule();
+      return;
+    }
+    if (currentLink && linkKey(currentLink) !== key) {
+      return;
+    }
+    pipelineRuns = { key, runs, notice: known?.notice };
+    if (!activeRun() && wasRunning) {
+      if (railOpen) {
+        void refreshRailPipeline(link);
+      }
+      if (runs.runs[0]?.status === "succeeded") {
+        await syncAfterRun(link);
+      } else {
+        pipelineRuns.notice = undefined;
+      }
+    }
+    schedule();
+    drawRuns();
+    drawRail();
+    remountLauncher();
+  };
+  if (runsRequest?.key === key) {
+    return runsRequest.promise;
+  }
+  const promise = check().finally(() => {
+    if (runsRequest?.promise === promise) {
+      runsRequest = null;
+    }
+  });
+  runsRequest = { key, promise };
+  return promise;
+}
+
+/** Sync the paper with its project, showing that it's going meanwhile. */
+async function syncOverleaf(
+  owner: string,
+  project: string,
+  path: string,
+): Promise<OverleafSyncResponse> {
+  syncing = true;
+  drawRail();
+  remountLauncher();
+  try {
+    return await send({ type: "overleaf.sync", owner, project, path });
+  } finally {
+    syncing = false;
+    drawRail();
+    remountLauncher();
+  }
+}
+
+/** Look again at what's synced and shown, now that a sync changed it. */
+function afterSync(): void {
+  provenanceCache.clear();
+  if (!currentProjectId) {
+    return;
+  }
+  if (panel) {
+    void load(currentProjectId);
+  } else {
+    void checkSyncStatus(currentProjectId);
+  }
+}
+
+// Why the last sync from a Sync now button failed, kept across redraws
+let syncError: string | undefined;
+
+/** A Sync now button, for where a sync is all that's needed. */
+function syncNow(
+  link: OverleafLinkPublic,
+  path: string,
+  secondary = false,
+): { button: HTMLElement; message: HTMLElement } {
+  const message = el("div", { class: "small" }, [
+    syncError ? errorMessage(syncError) : null,
+  ]);
+  const button = el("button", {
+    class: secondary ? "action secondary" : "action",
+    text: "Sync now",
+    disabled: !canWrite(link) || syncing,
+    title: canWrite(link)
+      ? "Push project files to Overleaf and pull Overleaf edits back"
+      : "You need write access to this project to sync",
+  });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    syncError = undefined;
+    clear(message).append(loading("Syncing"));
+    try {
+      await syncOverleaf(link.project_owner_name, link.project_name, path);
+      clear(message).append(el("div", { class: "dim", text: "Synced." }));
+      afterSync();
+    } catch (e) {
+      syncError = e instanceof Error ? e.message : String(e);
+      button.disabled = false;
+      clear(message).append(errorMessage(syncError));
+    }
+  });
+  return { button, message };
+}
+
+/** Start the pipeline on GitHub Actions, which syncs here when it's done. */
+async function startRun(link: OverleafLinkPublic): Promise<void> {
+  const key = linkKey(link);
+  starting = { key, busy: true };
+  drawRuns();
+  try {
+    const run = await send({
+      type: "project.startPipelineRun",
+      owner: link.project_owner_name,
+      project: link.project_name,
+    });
+    starting = null;
+    // Listed as soon as it's recorded, before GitHub lists it
+    if (pipelineRuns?.key === key) {
+      pipelineRuns.runs.runs.unshift(run);
+      pipelineRuns.notice = undefined;
+    }
+  } catch (e) {
+    starting = {
+      key,
+      busy: false,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+  drawRuns();
+  drawRail();
+  remountLauncher();
+  if (!starting) {
+    // One that was already going may not have it yet
+    await runsRequest?.promise;
+    await refreshRuns(link);
+  }
+}
+
+/** Bring what a finished run made into this paper. */
+async function syncAfterRun(link: OverleafLinkPublic): Promise<void> {
+  if (!pipelineRuns) {
+    return;
+  }
+  if (canWrite(link)) {
+    try {
+      await syncOverleaf(link.project_owner_name, link.project_name, link.path);
+      pipelineRuns.notice =
+        "The pipeline finished on GitHub Actions, and its results were " +
+        "synced here.";
+    } catch (e) {
+      pipelineRuns.notice =
+        "The pipeline finished on GitHub Actions, but syncing failed: " +
+        (e instanceof Error ? e.message : String(e));
+    }
+  }
+  afterSync();
+}
+
+/**
+ * The pipeline's latest run, and a button to start one when ``offer``
+ * says there's something to run.
+ */
+function renderRuns(link: OverleafLinkPublic, offer: boolean): HTMLElement {
+  const box = el("div", { style: { marginTop: "6px" } });
+  runsBoxes.add({ box, link, offer });
+  if (pipelineRuns?.key === linkKey(link)) {
+    drawRuns();
+  } else if (!runsFailures) {
+    // Failed checks are retried on a timer instead
+    void refreshRuns(link);
+  }
+  return box;
+}
+
+function drawRuns(): void {
+  for (const entry of runsBoxes) {
+    const { box, link, offer } = entry;
+    if (!box.isConnected && box.dataset.drawn) {
+      runsBoxes.delete(entry);
+      continue;
+    }
+    box.dataset.drawn = "1";
+    clear(box);
+    if (pipelineRuns?.key !== linkKey(link)) {
+      continue;
+    }
+    const { runs, notice } = pipelineRuns;
+    const run = activeRun();
+    const latest = runs.runs[0];
+    const view = (r: PipelineRun, text: string) =>
+      r.url
+        ? el("a", { text, href: r.url, attrs: { target: "_blank" } })
+        : null;
+    if (run) {
+      const since = run.started
+        ? ` since ${new Date(run.started).toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+          })}`
+        : "";
+      box.append(
+        el("div", { class: "row" }, [
+          el("span", { class: "spinner" }),
+          el("div", {
+            class: "grow small",
+            text:
+              run.status === "running"
+                ? `Running on GitHub Actions${since}`
+                : "Waiting to run on GitHub Actions",
+          }),
+          view(run, "View"),
+        ]),
+      );
+      continue;
+    }
+    if (notice) {
+      box.append(el("div", { class: "dim small", text: notice }));
+    } else if (latest?.status === "failed") {
+      box.append(
+        el("div", { class: "row" }, [
+          el("div", {
+            class: "grow small",
+            text: "The last run on GitHub Actions failed.",
+          }),
+          view(latest, "See why"),
+        ]),
+      );
+    }
+    // Something the document shows being out of date is reason to run
+    // too, even when Overleaf has what the project has
+    const staleShown = editorProblems?.found.some((problems) =>
+      problems.some((p) => p.kind === "stale"),
+    );
+    if (!offer && !staleShown && latest?.status !== "failed") {
+      continue;
+    }
+    const mine = starting?.key === linkKey(link) ? starting : null;
+    const start = el("button", {
+      class: "action",
+      text: "Run and sync",
+      disabled: !canWrite(link) || !runs.can_start || Boolean(mine?.busy),
+      title: !canWrite(link)
+        ? "You need write access to this project to run it"
+        : runs.cannot_start_reason ??
+          "Run the pipeline on GitHub Actions, then sync what it makes here",
+      onClick: () => void startRun(link),
+    });
+    box.append(
+      el("div", { class: "actions" }, [start]),
+      mine?.busy
+        ? loading("Starting")
+        : mine?.error
+        ? errorMessage(mine.error)
+        : el("div"),
+    );
+  }
+}
+
+/** A file's contents, base64-encoded, as the hub takes an upload. */
+function fileBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * What produced a figure, table, or value the document shows, and whether
+ * it's current.
+ *
+ * Overleaf can't run the pipeline, so the actions are ways into the
+ * project: the script to edit, and the page in the hub with the rest.
+ */
+function renderProvenance(
+  container: HTMLElement,
+  link: OverleafLinkPublic,
+  citation: Citation,
+  provenance: Provenance,
+): void {
+  const base = projectUrl(
+    hubWebUrl,
+    link.project_owner_name,
+    link.project_name,
+  );
+  const fileUrl = (path: string) =>
+    `${base}/files?path=${encodeURIComponent(path)}`;
+  // Where each input came from, a level at a time, so the chain can be
+  // followed back to an import, a person, or a gap
+  const trace = (paths: string[], seen: Set<string>): HTMLElement => {
+    const list = el("div");
+    for (const input of paths) {
+      const toggle = el("button", {
+        class: "twisty",
+        type: "button",
+        text: "\u25b8",
+        title: `Where ${input} came from`,
+      });
+      const detail = el("div", { class: "trace-detail small" });
+      detail.hidden = true;
+      let loaded = false;
+      toggle.addEventListener("click", async () => {
+        detail.hidden = !detail.hidden;
+        toggle.textContent = detail.hidden ? "\u25b8" : "\u25be";
+        if (loaded || detail.hidden) {
+          return;
+        }
+        loaded = true;
+        clear(detail).append(loading());
+        try {
+          const p = await provenanceFor(link, input);
+          const original = p.copied_from ?? p.path;
+          const lines: HTMLElement[] = [];
+          if (p.copied_from) {
+            lines.push(
+              el("div", { class: "dim" }, [
+                document.createTextNode("Copied from "),
+                el("a", { text: p.copied_from, href: fileUrl(p.copied_from) }),
+              ]),
+            );
+          }
+          if (p.stage) {
+            lines.push(
+              el("div", {}, [
+                document.createTextNode("Stage "),
+                el("a", {
+                  text: p.stage,
+                  href: `${base}/pipeline?stage=${encodeURIComponent(p.stage)}`,
+                }),
+                p.stage_kind
+                  ? el("span", {
+                      class: "dim",
+                      text: ` \u00b7 ${p.stage_kind}`,
+                    })
+                  : null,
+                p.stale_reason
+                  ? el("span", { class: "badge warn", text: "stale" })
+                  : null,
+              ]),
+            );
+            if (p.stage_kind === "manual-step" && p.message) {
+              lines.push(
+                el("div", { class: "dim", text: `Manual step: ${p.message}` }),
+              );
+            } else if (p.source) {
+              lines.push(
+                el("div", { class: "dim" }, [
+                  document.createTextNode(
+                    p.stage_app
+                      ? `Exported with ${p.stage_app} from `
+                      : "Runs ",
+                  ),
+                  el("a", { text: p.source, href: fileUrl(p.source) }),
+                ]),
+              );
+            }
+          } else if (p.origin) {
+            lines.push(
+              p.origin_url
+                ? el("a", { text: p.origin, href: p.origin_url })
+                : el("div", { text: p.origin }),
+            );
+          } else if (p.gaps?.some((gap) => gap.path === original)) {
+            lines.push(
+              el("div", {
+                text: "Origin not defined",
+                style: { color: "var(--ck-danger)", fontWeight: "600" },
+              }),
+            );
+          } else if (!p.exists) {
+            lines.push(el("div", { class: "dim", text: "Not in the project" }));
+          } else {
+            lines.push(el("div", { class: "dim", text: "Source file" }));
+          }
+          const next = new Set([...seen, input, original]);
+          const upstream = p.inputs.filter((i) => !next.has(i));
+          if (upstream.length) {
+            lines.push(
+              el("div", { class: "dim", text: "Reads" }),
+              trace(upstream, next),
+            );
+          }
+          clear(detail).append(...lines);
+        } catch (e) {
+          loaded = false;
+          clear(detail).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+        }
+      });
+      list.append(
+        el("div", { class: "small" }, [
+          toggle,
+          el("a", { text: input, href: fileUrl(input) }),
+        ]),
+        detail,
+      );
+    }
+    return list;
+  };
+  // A file is named as the project has it, not as written
+  const path = citation.kind === "value" ? citation.path : provenance.path;
+  const label = citation.key ? `${path}: ${citation.key}` : path;
+  container.append(el("div", { class: "name", text: label }));
+  const problems = citationProblems(citation, provenance);
+  for (const problem of problems) {
+    container.append(problemLine(problem));
+    if (problem.kind === "origin" && link.current_user_access !== "read") {
+      container.append(renderDefineOrigin(link, citation, problem.path));
+    }
+  }
+  if (provenance.copied_from) {
+    container.append(
+      el("div", { class: "dim small" }, [
+        document.createTextNode("Copied from "),
+        el("a", {
+          text: provenance.copied_from,
+          href: fileUrl(provenance.copied_from),
+          attrs: { target: "_blank" },
+        }),
+        provenance.copy_stage
+          ? document.createTextNode(` by ${provenance.copy_stage}`)
+          : null,
+      ]),
+    );
+  }
+  if (
+    citation.kind === "value" &&
+    !provenance.value_error &&
+    provenance.value !== undefined
+  ) {
+    container.append(
+      el("div", {
+        style: { fontSize: "18px", fontWeight: "600", margin: "4px 0" },
+        text: valueText(provenance.value),
+      }),
+    );
+  }
+  if (!provenance.stage && provenance.origin) {
+    container.append(
+      el("div", { class: "small" }, [
+        provenance.origin_url
+          ? el("a", {
+              text: provenance.origin,
+              href: provenance.origin_url,
+              attrs: { target: "_blank" },
+            })
+          : document.createTextNode(provenance.origin),
+        provenance.origin_path
+          ? el("span", {
+              class: "dim",
+              text: ` (recorded for ${provenance.origin_path})`,
+            })
+          : null,
+      ]),
+    );
+  } else if (provenance.stage) {
+    container.append(
+      el("div", { class: "row" }, [
+        el("div", { class: "grow small" }, [
+          document.createTextNode("Stage "),
+          el("a", {
+            text: provenance.stage,
+            href: `${base}/pipeline?stage=${encodeURIComponent(
+              provenance.stage,
+            )}`,
+            attrs: { target: "_blank" },
+          }),
+          provenance.stage_kind
+            ? el("span", {
+                class: "dim",
+                text: ` \u00b7 ${provenance.stage_kind}`,
+              })
+            : null,
+        ]),
+        !provenance.stale_reason &&
+        provenance.stage_status?.status === "up-to-date"
+          ? el("span", { class: "badge ok", text: "current" })
+          : null,
+      ]),
+    );
+    if (provenance.stage_kind === "manual-step" && provenance.message) {
+      container.append(
+        el("div", {
+          class: "small",
+          text: `Manual step: ${provenance.message}`,
+        }),
+      );
+    } else if (provenance.source) {
+      const source = el("a", {
+        text: provenance.source,
+        href: fileUrl(provenance.source),
+        attrs: { target: "_blank" },
+      });
+      container.append(
+        el(
+          "div",
+          { class: "small" },
+          provenance.stage_app
+            ? [
+                document.createTextNode(
+                  `Exported with ${provenance.stage_app} from `,
+                ),
+                source,
+              ]
+            : [
+                document.createTextNode("Edit "),
+                source,
+                document.createTextNode(" to change it."),
+              ],
+        ),
+      );
+    }
+    if (provenance.inputs.length) {
+      container.append(
+        el("div", {
+          class: "dim small",
+          text: "Reads",
+          style: { marginTop: "4px" },
+        }),
+        trace(
+          provenance.inputs,
+          new Set([path, provenance.copied_from ?? path]),
+        ),
+      );
+    }
+  }
+  container.append(
+    el("div", { class: "small", style: { marginTop: "6px" } }, [
+      el("a", {
+        text: "Open in Calkit",
+        href:
+          citation.kind === "value"
+            ? `${base}/results?path=${encodeURIComponent(path)}` +
+              `&key=${encodeURIComponent(citation.key ?? "")}`
+            : citation.kind === "figure"
+            ? `${base}/figures?path=${encodeURIComponent(
+                provenance.copied_from ?? path,
+              )}`
+            : citation.kind === "table"
+            ? `${base}/tables?path=${encodeURIComponent(path)}`
+            : fileUrl(path),
+        attrs: { target: "_blank" },
+      }),
+    ]),
+  );
+}
+
+/** One problem, colored by how bad it is. */
+function problemLine(problem: CitationProblem): HTMLElement {
+  return el("div", {
+    class: "small",
+    style: {
+      color:
+        problem.severity === "error" ? "var(--ck-danger)" : "var(--ck-warning)",
+      fontWeight: "600",
+    },
+    text: problem.message,
+  });
+}
+
+type Without<T> = T extends unknown ? Omit<T, "calkit"> : never;
+
+// What the editor last said the open document shows, and what's wrong with
+// each, by its index there
+let editorCitations: { version: number; items: EditorCitation[] } | null = null;
+let editorProblems: { version: number; found: CitationProblem[][] } | null =
+  null;
+
+function toEditor(message: Without<ToEditor>): void {
+  window.postMessage({ calkit: "lint", ...message }, window.location.origin);
+}
+
+/** Find what's wrong with what the open document shows, and mark it. */
+async function checkCitations(): Promise<void> {
+  const link = currentLink;
+  const snapshot = editorCitations;
+  if (!link || !snapshot) {
+    return;
+  }
+  const found: CitationProblem[][] = [];
+  // A few at a time, since each has the hub read the project
+  let next = 0;
+  const work = async () => {
+    while (next < snapshot.items.length) {
+      const i = next++;
+      const { citation } = snapshot.items[i];
+      try {
+        found[i] = citationProblems(
+          citation,
+          await citationProvenance(link, citation),
+        );
+      } catch {
+        found[i] = [];
+      }
+    }
+  };
+  await Promise.all([work(), work(), work(), work()]);
+  if (editorCitations !== snapshot || currentLink !== link) {
+    return;
+  }
+  editorProblems = { version: snapshot.version, found };
+  drawRuns();
+  drawRail();
+  toEditor({
+    type: "problems",
+    version: snapshot.version,
+    items: found.flatMap((problems, index) =>
+      problems.length
+        ? [
+            {
+              index,
+              severity: problems.some((p) => p.severity === "error")
+                ? "error"
+                : "warning",
+            },
+          ]
+        : [],
+    ),
+  });
+  void drawPdfBoxes();
+}
+
+const TOOLTIP_STYLES = `
+.tip {
+  color: var(--ck-fg);
+  background: var(--ck-bg);
+  padding: 8px 10px;
+  max-width: 360px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+`;
+
+/** Fill a tooltip the editor opened over something the document shows. */
+async function fillTooltip(
+  id: string,
+  version: number,
+  index: number,
+): Promise<void> {
+  const link = currentLink;
+  const item =
+    editorCitations?.version === version
+      ? editorCitations.items[index]
+      : undefined;
+  if (!link || !item) {
+    return;
+  }
+  // Made as the tooltip opens, so it may not be on the page quite yet
+  let host = document.getElementById(id);
+  for (let i = 0; i < 20 && !host; i++) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    host = document.getElementById(id);
+  }
+  if (!host || host.shadowRoot) {
+    return;
+  }
+  const root = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = STYLES + TOOLTIP_STYLES;
+  const body = el("div", { class: "tip" });
+  root.append(style, body);
+  await fillCard(body, link, item);
+}
+
+/**
+ * Where something the document shows came from, and how to fix what's
+ * wrong with it, as its hover card and the sidebar show it.
+ */
+async function fillCard(
+  body: HTMLElement,
+  link: OverleafLinkPublic,
+  item: EditorCitation,
+): Promise<void> {
+  clear(body).append(loading());
+  try {
+    const provenance = await citationProvenance(link, item.citation);
+    clear(body);
+    renderProvenance(body, link, item.citation, provenance);
+    body.append(bringUpToDate(link, item.citation, provenance));
+  } catch (e) {
+    clear(body).append(
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
+  }
+}
+
+/**
+ * A way to bring what the document shows up to date from its card: syncing
+ * what the project already has, or running what's stale first, which syncs
+ * when it's done.
+ */
+function bringUpToDate(
+  link: OverleafLinkPublic,
+  citation: Citation,
+  provenance: Provenance,
+): HTMLElement {
+  const path = provenance.path;
+  // What the next sync would bring, by where Overleaf gets its copy
+  const status =
+    lastCheck && linkKey(lastCheck.link) === linkKey(link)
+      ? lastCheck.status
+      : null;
+  const waiting = (status?.files_to_push ?? []).some(
+    (f) =>
+      f.project_path === path ||
+      f.project_path.endsWith(`/_calkit/${path}`) ||
+      (citation.kind === "value" &&
+        f.project_path.endsWith("/_calkit/values.tex")),
+  );
+  // A frozen stage won't rerun, and a manual step needs a person
+  const stale =
+    provenance.stale_reason === "pipeline" &&
+    provenance.stage_kind !== "manual-step";
+  if (stale) {
+    return renderRuns(link, true);
+  }
+  const box = el("div", { style: { marginTop: "6px" } });
+  if (waiting) {
+    const { button, message } = syncNow(link, link.path);
+    box.append(el("div", { class: "actions" }, [button]), message);
+  }
+  return box;
+}
+
+/**
+ * Hear from the editor, through the script in the page's world, what the
+ * open document shows and when a tooltip opens over it.
+ *
+ * The page can post these too, so all they can do is have the linked
+ * project's provenance looked up and shown, which the page could show
+ * anyway.
+ */
+function watchEditor(): void {
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.calkit !== "editor") {
+      return;
+    }
+    const message = event.data as FromEditor;
+    if (message.type === "citations") {
+      editorCitations = { version: message.version, items: message.items };
+      drawRail();
+      void checkCitations();
+    } else if (message.type === "tooltip") {
+      void fillTooltip(message.id, message.version, message.index);
+    }
+  });
+}
+
+/** Where a problem lands in the PDF, in points from the page's top left. */
+interface PdfBox {
+  page: number;
+  h: number;
+  v: number;
+  width: number;
+  height: number;
+  message: string;
+  line: number;
+  column: number;
+}
+
+type SynctexBox = Omit<PdfBox, "message">;
+
+/** The PDF Overleaf last built, which synctex lookups have to name. */
+interface PdfBuild {
+  buildId: string;
+  /** Overleaf's lookups fail without it once its URLs carry one. */
+  editorId: string | null;
+  clsiServerId: string | null;
+}
+
+let pdfBuild: PdfBuild | null = null;
+let pdfBoxes: PdfBox[] = [];
+const synctexCache = new Map<string, Promise<SynctexBox[]>>();
+
+/** The open document's path in the Overleaf project, from the file tree. */
+function openDocPath(): string | null {
+  const selected = document.querySelector<HTMLElement>(
+    '[role="treeitem"][aria-selected="true"]',
+  );
+  const name = selected?.getAttribute("aria-label");
+  if (!selected || !name || !/\.tex$/i.test(name)) {
+    return null;
+  }
+  const parts = [name];
+  let folder = selected.parentElement?.closest('[role="treeitem"]');
+  while (folder) {
+    parts.unshift(folder.getAttribute("aria-label") ?? "");
+    folder = folder.parentElement?.closest('[role="treeitem"]');
+  }
+  return parts.join("/");
+}
+
+// Overleaf's synctex wants an editor ID, but a build in a user's own zone
+// doesn't belong to one, so any will do for those
+const ANY_EDITOR_ID = crypto.randomUUID();
+
+function setBuildParams(params: URLSearchParams, build: PdfBuild): void {
+  params.set("buildId", build.buildId);
+  params.set("editorId", build.editorId ?? ANY_EDITOR_ID);
+  if (build.clsiServerId) {
+    params.set("clsiserverid", build.clsiServerId);
+  }
+}
+
+/** Where in the PDF a line of the open document landed, as Overleaf says. */
+function synctex(
+  projectId: string,
+  build: PdfBuild,
+  file: string,
+  line: number,
+  column: number,
+): Promise<SynctexBox[]> {
+  const params = new URLSearchParams({
+    file,
+    line: String(line),
+    column: String(column),
+  });
+  setBuildParams(params, build);
+  const key = params.toString();
+  let cached = synctexCache.get(key);
+  if (!cached) {
+    cached = fetch(`/project/${projectId}/sync/code?${params}`, {
+      headers: { Accept: "application/json" },
+    })
+      .then((response) => (response.ok ? response.json() : { pdf: [] }))
+      .then((data: { pdf?: Omit<SynctexBox, "line" | "column">[] }) =>
+        (data.pdf ?? []).map((box) => ({ ...box, line, column })),
+      )
+      .catch(() => []);
+    synctexCache.set(key, cached);
+  }
+  return cached;
+}
+
+/** Find where each error in the open document lands in the PDF. */
+async function drawPdfBoxes(): Promise<void> {
+  const build = pdfBuild;
+  const snapshot = editorCitations;
+  const problems = editorProblems;
+  const projectId = currentProjectId;
+  const file = openDocPath();
+  if (
+    !build ||
+    !snapshot ||
+    !projectId ||
+    !file ||
+    problems?.version !== snapshot.version
+  ) {
+    return;
+  }
+  const boxes: PdfBox[] = [];
+  for (const [index, item] of snapshot.items.entries()) {
+    const error = problems.found[index]?.find((p) => p.severity === "error");
+    if (!error) {
+      continue;
+    }
+    const found = await synctex(projectId, build, file, item.line, item.column);
+    // Overleaf repeats boxes, and puts the line's box around a figure's,
+    // so only the innermost of each is kept
+    const inside = (a: SynctexBox, b: SynctexBox) =>
+      a.page === b.page &&
+      a.h >= b.h &&
+      a.h + a.width <= b.h + b.width &&
+      a.v - a.height >= b.v - b.height &&
+      a.v <= b.v;
+    const kept: SynctexBox[] = [];
+    for (const box of found) {
+      if (
+        !kept.some((k) => inside(k, box)) &&
+        !found.some(
+          (other) => other !== box && inside(other, box) && !inside(box, other),
+        )
+      ) {
+        kept.push(box);
+      }
+    }
+    for (const box of kept) {
+      boxes.push({ ...box, message: error.message });
+    }
+  }
+  if (pdfBuild !== build || editorCitations !== snapshot) {
+    return;
+  }
+  pdfBoxes = boxes;
+  placePdfBoxes();
+}
+
+/**
+ * Put a red box around each error on the PDF's pages.
+ *
+ * pdf.js clears a page it redraws, e.g., on zooming, so this runs whenever
+ * the viewer changes, and leaves a page alone that already has its boxes.
+ * A box's ``v`` is its bottom, e.g., a figure's baseline, and its height
+ * goes up from there; for a scaled figure, it's the unscaled height.
+ */
+function placePdfBoxes(): void {
+  const color = "#e5484d";
+  for (const page of document.querySelectorAll<HTMLElement>(
+    ".pdfViewer .page[data-page-number]",
+  )) {
+    const number = Number(page.dataset.pageNumber);
+    const scale = parseFloat(
+      getComputedStyle(page).getPropertyValue("--scale-factor"),
+    );
+    const wanted = Number.isFinite(scale)
+      ? pdfBoxes.filter((box) => box.page === number)
+      : [];
+    const signature = `${scale}|${wanted
+      .map((box) => [box.h, box.v, box.width, box.height].join(","))
+      .join(";")}`;
+    const existing = page.querySelectorAll(":scope > .calkit-pdf-box");
+    if (
+      existing.length === wanted.length &&
+      page.dataset.calkitBoxes === signature
+    ) {
+      continue;
+    }
+    existing.forEach((node) => node.remove());
+    page.dataset.calkitBoxes = signature;
+    for (const box of wanted) {
+      const tag = el("button", {
+        text: box.message,
+        title: `${box.message}. Click to show it in the editor.`,
+        onClick: () =>
+          toEditor({ type: "goto", line: box.line, column: box.column }),
+      });
+      Object.assign(tag.style, {
+        position: "absolute",
+        left: "-2px",
+        bottom: "100%",
+        maxWidth: "320px",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        padding: "1px 5px",
+        border: "none",
+        borderRadius: "3px 3px 0 0",
+        background: color,
+        color: "#fff",
+        font: "600 11px/1.4 -apple-system, BlinkMacSystemFont, sans-serif",
+        cursor: "pointer",
+        pointerEvents: "auto",
+      });
+      const outline = el("div", { class: "calkit-pdf-box" }, [tag]);
+      Object.assign(outline.style, {
+        position: "absolute",
+        left: `${box.h * scale}px`,
+        top: `${(box.v - box.height) * scale}px`,
+        width: `${box.width * scale}px`,
+        height: `${box.height * scale}px`,
+        border: `2px solid ${color}`,
+        borderRadius: "2px",
+        boxSizing: "border-box",
+        // Left to the PDF, so a double click still goes to the source
+        pointerEvents: "none",
+        zIndex: "5",
+      });
+      page.append(outline);
+    }
+  }
+}
+
+/** Follow Overleaf's builds and its PDF viewer, to keep the boxes on it. */
+function watchPdf(): void {
+  // A new build means new positions, and a lookup that failed for
+  // want of the editor ID shouldn't stay cached
+  const noteBuild = (url: string, clsiServerId: string | null) => {
+    // e.g., build/<editor id>-<build id>/output/output.pdf, where the
+    // editor ID, a UUID, isn't always there
+    const match = url.match(
+      /\/build\/(?:([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})-)?([0-9a-f]+-[0-9a-f]+)\/output\/(?:cached\/)?output\.pdf/,
+    );
+    if (!match) {
+      return;
+    }
+    const [, editorId = null, buildId] = match;
+    const same = buildId === pdfBuild?.buildId ? pdfBuild : null;
+    const next = {
+      buildId,
+      editorId: editorId ?? same?.editorId ?? null,
+      clsiServerId: clsiServerId ?? same?.clsiServerId ?? null,
+    };
+    if (
+      same &&
+      same.editorId === next.editorId &&
+      same.clsiServerId === next.clsiServerId
+    ) {
+      return;
+    }
+    pdfBuild = next;
+    synctexCache.clear();
+    void drawPdfBoxes();
+  };
+  // Overleaf's own requests say which compile server has the build, but
+  // a content script may not see them, so the PDF's download link, which
+  // it always can, says which build it is
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) {
+      noteBuild(
+        entry.name,
+        URL.canParse(entry.name)
+          ? new URL(entry.name).searchParams.get("clsiserverid")
+          : null,
+      );
+    }
+  }).observe({ type: "resource", buffered: true });
+  const noteDownloadLink = () => {
+    const link = document.querySelector<HTMLAnchorElement>(
+      'a[href*="/build/"][href*="output.pdf"]',
+    );
+    if (link) {
+      noteBuild(link.href, null);
+    }
+  };
+  noteDownloadLink();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  new MutationObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      noteDownloadLink();
+      placePdfBoxes();
+    }, 200);
+  }).observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["href"],
+  });
+  // A component's provenance on hover, as in the editor. Where each one
+  // lands is asked of Overleaf once per build and edit, the first time the
+  // pointer rests on the PDF, so moving it around costs nothing, and the
+  // PDF still gets every click
+  let shown: { index: number; version: number; host: HTMLElement } | null =
+    null;
+  let showing: ReturnType<typeof setTimeout> | undefined;
+  let hiding: ReturnType<typeof setTimeout> | undefined;
+  let lookups = 0;
+  let tips = 0;
+  let landed: {
+    build: PdfBuild;
+    snapshot: NonNullable<typeof editorCitations>;
+    file: string;
+    boxes: Promise<{ index: number; box: SynctexBox }[]>;
+  } | null = null;
+  const hide = () => {
+    clearTimeout(hiding);
+    hiding = undefined;
+    shown?.host.remove();
+    shown = null;
+  };
+  const citationAt = async (page: number, h: number, v: number) => {
+    const build = pdfBuild;
+    const projectId = currentProjectId;
+    const snapshot = editorCitations;
+    const file = openDocPath();
+    // Only a paper linked to a project has anything to show
+    if (!currentLink || !build || !projectId || !snapshot || !file) {
+      return null;
+    }
+    if (
+      landed?.build !== build ||
+      landed.snapshot !== snapshot ||
+      landed.file !== file
+    ) {
+      // One at a time, and cached by line, so an edit only asks again
+      // about what moved
+      const boxes = (async () => {
+        const found: { index: number; box: SynctexBox }[] = [];
+        for (const [index, item] of snapshot.items.entries()) {
+          if (!item.citation) {
+            continue;
+          }
+          for (const box of await synctex(
+            projectId,
+            build,
+            file,
+            item.line,
+            item.column,
+          )) {
+            found.push({ index, box });
+          }
+        }
+        return found;
+      })();
+      landed = { build, snapshot, file, boxes };
+    }
+    // The smallest box under the pointer, e.g., a figure's rather than the
+    // line's around it; a box's v is its bottom
+    let best: { index: number; area: number } | null = null;
+    for (const { index, box } of await landed.boxes) {
+      const area = box.width * box.height;
+      if (
+        box.page === page &&
+        h >= box.h &&
+        h <= box.h + box.width &&
+        v >= box.v - box.height &&
+        v <= box.v &&
+        (!best || area < best.area)
+      ) {
+        best = { index, area };
+      }
+    }
+    return best ? { index: best.index, version: snapshot.version } : null;
+  };
+  const show = (
+    found: { index: number; version: number },
+    x: number,
+    y: number,
+  ) => {
+    hide();
+    const host = el("div");
+    host.id = `calkit-pdf-tooltip-${++tips}`;
+    const below = y < window.innerHeight / 2;
+    Object.assign(host.style, {
+      position: "fixed",
+      left: `${Math.max(4, Math.min(x - 20, window.innerWidth - 386))}px`,
+      ...(below
+        ? { top: `${y + 12}px` }
+        : { bottom: `${window.innerHeight - y + 12}px` }),
+      zIndex: "2147483646",
+      border: "1px solid rgba(0, 0, 0, 0.15)",
+      borderRadius: "4px",
+      boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
+      overflow: "hidden",
+    });
+    document.body.append(host);
+    shown = { ...found, host };
+    void fillTooltip(host.id, found.version, found.index);
+  };
+  document.addEventListener(
+    "mousemove",
+    (event) => {
+      clearTimeout(showing);
+      if (shown && event.target === shown.host) {
+        clearTimeout(hiding);
+        hiding = undefined;
+        return;
+      }
+      const page = (event.target as Element | null)?.closest?.<HTMLElement>(
+        ".pdfViewer .page[data-page-number]",
+      );
+      const scale = page
+        ? parseFloat(getComputedStyle(page).getPropertyValue("--scale-factor"))
+        : NaN;
+      if (!page || !Number.isFinite(scale)) {
+        if (shown && hiding === undefined) {
+          hiding = setTimeout(hide, 300);
+        }
+        return;
+      }
+      // Over the PDF, what's under the pointer once it rests decides
+      clearTimeout(hiding);
+      hiding = undefined;
+      const bounds = page.getBoundingClientRect();
+      const h = (event.clientX - bounds.left - page.clientLeft) / scale;
+      const v = (event.clientY - bounds.top - page.clientTop) / scale;
+      const number = Number(page.dataset.pageNumber);
+      const { clientX, clientY } = event;
+      showing = setTimeout(async () => {
+        const lookup = ++lookups;
+        const found = await citationAt(number, h, v);
+        if (lookup !== lookups) {
+          return;
+        }
+        if (!found) {
+          hide();
+        } else if (
+          shown?.index !== found.index ||
+          shown.version !== found.version
+        ) {
+          show(found, clientX, clientY);
+        }
+      }, 300);
+    },
+    { passive: true },
+  );
+  // A fixed tooltip would stay put while the PDF scrolls away under it
+  document.addEventListener(
+    "scroll",
+    (event) => {
+      if (shown && event.target !== shown.host) {
+        clearTimeout(showing);
+        hide();
+      }
+    },
+    { capture: true, passive: true },
+  );
+}
+
+/**
+ * Insert a figure, table, or value from the project at the cursor.
+ *
+ * What's inserted is a calkit.sty command naming it by its path in the
+ * project. The next sync brings what it cites into the paper's _calkit
+ * folder, so there's nothing to set up: no map-paths or json-to-latex
+ * stage, and no copying files by hand.
+ */
+function renderInsert(
+  link: OverleafLinkPublic,
+  path: string,
+  reload: () => void,
+): HTMLElement {
+  const owner = link.project_owner_name;
+  const project = link.project_name;
+  const list = el("div", { class: "stack", style: { marginTop: "6px" } });
+  const message = el("div", { class: "small" });
+  const format = textInput({ placeholder: "Format, e.g., .2f (optional)" });
+  const insert = async (citation: Citation) => {
+    try {
+      const how = await insertIntoEditor(citationText(citation));
+      const sync = async () => {
+        clear(message).append(loading("Syncing"));
+        // Overleaf saves an edit a moment after it's made, and a sync
+        // started first would miss it
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        try {
+          await syncOverleaf(owner, project, path);
+          reload();
+        } catch (e) {
+          clear(message).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+        }
+      };
+      // Synced right away so it shows up, unless it still has to be pasted
+      if (how === "inserted") {
+        await sync();
+        return;
+      }
+      clear(message).append(
+        el("div", {
+          class: "dim small",
+          text:
+            "Copied; paste it where it should go, then sync to bring it " +
+            "into the paper. The document needs \\usepackage{calkit} in " +
+            "its preamble.",
+        }),
+        el("div", { class: "actions" }, [
+          el("button", {
+            class: "action secondary",
+            text: "Sync now",
+            onClick: (e: Event) => {
+              (e.currentTarget as HTMLButtonElement).disabled = true;
+              void sync();
+            },
+          }),
+        ]),
+      );
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  };
+  const row = (title: string, detail: string, onClick: () => void) =>
+    el("div", { class: "row" }, [
+      el("div", { class: "grow" }, [
+        el("div", { class: "small", text: title }),
+        el("div", { class: "dim small", text: detail }),
+      ]),
+      el("button", {
+        class: "action secondary",
+        text: "Insert",
+        onClick,
+      }),
+    ]);
+  const showFigures = async () => {
+    clear(list).append(loading());
+    try {
+      const page = await send({ type: "project.figures", owner, project });
+      clear(list);
+      for (const figure of page.items) {
+        list.append(
+          row(figure.title, figure.path, () =>
+            insert({
+              kind: "figure",
+              path: figure.path,
+              options: "width=\\linewidth",
+            }),
+          ),
+        );
+      }
+      if (!page.items.length) {
+        list.append(el("div", { class: "dim small", text: "No figures" }));
+      }
+    } catch (e) {
+      clear(list).append(renderFailure(e, { onSignedIn: reload }));
+    }
+  };
+  const showTables = async () => {
+    clear(list).append(loading());
+    try {
+      // \cktable inputs TeX, so a CSV would need a stage to typeset it
+      const tables = (
+        await send({ type: "project.tables", owner, project })
+      ).filter((table) => table.path.endsWith(".tex"));
+      clear(list);
+      for (const table of tables) {
+        list.append(
+          row(table.title, table.path, () =>
+            insert({ kind: "table", path: table.path, options: "" }),
+          ),
+        );
+      }
+      if (!tables.length) {
+        list.append(
+          el("div", {
+            class: "dim small",
+            text: "No tables written as TeX",
+          }),
+        );
+      }
+    } catch (e) {
+      clear(list).append(renderFailure(e, { onSignedIn: reload }));
+    }
+  };
+  // A value is picked from inside a results file, so a file opens to its
+  // keys rather than inserting anything
+  const showValues = async () => {
+    clear(list).append(loading());
+    try {
+      const results = await send({ type: "project.results", owner, project });
+      const paths = [...new Set(results.map((result) => result.path))].filter(
+        (resultPath) => /\.(json|ya?ml|toml)$/i.test(resultPath),
+      );
+      clear(list).append(format);
+      for (const resultPath of paths) {
+        const keys = el("div", { style: { paddingLeft: "10px" } });
+        const open = el("button", {
+          class: "action secondary",
+          text: "Open",
+        });
+        open.addEventListener("click", async () => {
+          open.disabled = true;
+          clear(keys).append(loading());
+          try {
+            const file = await provenanceFor(link, resultPath);
+            clear(keys);
+            if (file.value_error) {
+              keys.append(errorMessage(file.value_error));
+              return;
+            }
+            // Every leaf, by its dotted key, which is what \ckvalue takes
+            const walk = (value: unknown, prefix: string) => {
+              if (value === null || typeof value !== "object") {
+                keys.append(
+                  row(prefix, valueText(value), () =>
+                    insert({
+                      kind: "value",
+                      path: resultPath,
+                      key: prefix,
+                      options: format.value.trim(),
+                    }),
+                  ),
+                );
+                return;
+              }
+              const entries = Array.isArray(value)
+                ? value.map((item, i) => [String(i), item] as const)
+                : Object.entries(value as Record<string, unknown>);
+              for (const [name, item] of entries) {
+                walk(item, prefix ? `${prefix}.${name}` : name);
+              }
+            };
+            walk(file.value, "");
+          } catch (e) {
+            open.disabled = false;
+            clear(keys).append(
+              errorMessage(e instanceof Error ? e.message : String(e)),
+            );
+          }
+        });
+        list.append(
+          el("div", { class: "row" }, [
+            el("div", { class: "grow small", text: resultPath }),
+            open,
+          ]),
+          keys,
+        );
+      }
+      if (!paths.length) {
+        list.append(
+          el("div", {
+            class: "dim small",
+            text: "No JSON, YAML, or TOML results",
+          }),
+        );
+      }
+    } catch (e) {
+      clear(list).append(renderFailure(e, { onSignedIn: reload }));
+    }
+  };
+  return el("div", { style: { marginTop: "10px" } }, [
+    el("div", {
+      class: "small",
+      style: { fontWeight: "600" },
+      text: "Insert from the project",
+    }),
+    el("div", { class: "actions" }, [
+      el("button", {
+        class: "action secondary",
+        text: "Figure",
+        onClick: () => void showFigures(),
+      }),
+      el("button", {
+        class: "action secondary",
+        text: "Table",
+        onClick: () => void showTables(),
+      }),
+      el("button", {
+        class: "action secondary",
+        text: "Value",
+        onClick: () => void showValues(),
+      }),
+    ]),
+    list,
+    message,
+  ]);
+}
 
 /**
  * Whether a failure is about the user's Overleaf Git token, missing or
@@ -111,7 +2420,23 @@ function renderTokenForm(
   const input = textInput({ placeholder: "olp_..." });
   input.type = "password";
   const message = el("div", { class: "small" });
-  const save = el("button", { class: "action", text: "Save token" });
+  const get = el("button", {
+    class: "action",
+    text: "Get a token from Overleaf",
+  });
+  get.addEventListener("click", async () => {
+    try {
+      await send({ type: "overleaf.openTokenSettings" });
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  const save = el("button", {
+    class: "action secondary",
+    text: "Save token",
+  });
   save.addEventListener("click", async () => {
     const token = input.value.trim();
     if (!token.startsWith("olp_")) {
@@ -139,15 +2464,14 @@ function renderTokenForm(
         : "Calkit needs an Overleaf Git token to read this project.",
     }),
     el("div", { class: "dim small", style: { marginTop: "6px" } }, [
-      document.createTextNode("Generate one under Git Integration in "),
-      el("a", {
-        text: "your Overleaf account settings",
-        href: OVERLEAF_GIT_SETTINGS,
-        attrs: { target: "_blank" },
-      }),
       document.createTextNode(
-        ". Calkit offers to save it from there, or paste it here.",
+        "Opens your Overleaf settings, where you click Generate token. " +
+          "Calkit saves it and brings you back here.",
       ),
+    ]),
+    el("div", { class: "actions" }, [get]),
+    el("div", { class: "dim small", style: { marginTop: "12px" } }, [
+      document.createTextNode("Or paste one you have:"),
     ]),
     input,
     el("div", { class: "actions" }, [
@@ -181,65 +2505,121 @@ function renderOverleafFailure(e: unknown, reload: () => void): HTMLElement {
 }
 
 /**
- * Offer to save an Overleaf Git token to Calkit as soon as Overleaf shows
- * one, which it only does once, right after it's generated.
+ * Save an Overleaf Git token to Calkit as soon as Overleaf shows one, which
+ * it only does once, right after it's generated.
  *
- * Only ever on the user's click: the token is read from the page they're
- * looking at, and nothing is sent until they say so.
+ * In a tab the Calkit panel opened for this, the user already asked for the
+ * token to be saved, so it is, and they go back to their project. Anywhere
+ * else it's only offered: nothing is read or sent until they click.
  */
-function watchForNewToken(): void {
+async function watchForNewToken(): Promise<void> {
   if (tokenWatcher) {
+    return;
+  }
+  // Set now so a second sync doesn't start another while this one asks
+  const placeholder = new MutationObserver(() => undefined);
+  tokenWatcher = placeholder;
+  const { requested } = await send({ type: "overleaf.tokenTab" }).catch(() => ({
+    requested: false,
+  }));
+  if (tokenWatcher !== placeholder) {
+    // Torn down meanwhile
     return;
   }
   const texts = (): string[] => [
     ...Array.from(document.querySelectorAll("input"), (input) => input.value),
     document.body.innerText,
   ];
-  // Only whether one is showing until the user asks to save it, so the
-  // token itself is never held before then
+  const message = el("div", { class: "small" });
+  const save = async (tokenPanel: Panel): Promise<void> => {
+    const token = texts()
+      .map((text) => text.match(OVERLEAF_TOKEN_RE)?.[0])
+      .find(Boolean);
+    if (!token) {
+      clear(message).append(errorMessage("The token is no longer on the page"));
+      return;
+    }
+    clear(message).append(loading("Saving"));
+    try {
+      await send({ type: "overleaf.setToken", token });
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+      return;
+    }
+    clear(tokenPanel.body).append(
+      el("div", {
+        class: "small",
+        text: "Saved. Your Overleaf projects can sync with Calkit now.",
+      }),
+    );
+    if (requested) {
+      await send({ type: "overleaf.returnFromTokenTab" }).catch(
+        () => undefined,
+      );
+    }
+  };
+  // Point at the button that makes one, which Overleaf labels by whether
+  // the account has a token already
+  let pointed = false;
+  const pointAtGenerate = (): void => {
+    const button = Array.from(document.querySelectorAll("button")).find((b) =>
+      /^\s*(generate token|add another token)\s*$/i.test(b.textContent ?? ""),
+    );
+    if (!button) {
+      return;
+    }
+    pointed = true;
+    button.scrollIntoView({ block: "center" });
+    button.style.outline = "3px solid #f0ad4e";
+    button.style.outlineOffset = "2px";
+  };
+  const guide = requested
+    ? mountPanel({ id: TOKEN_PANEL_ID, title: "Calkit" })
+    : null;
+  if (guide) {
+    guide.body.append(
+      el("div", {
+        class: "small",
+        text:
+          "Click Generate token under Git integration. Calkit saves the " +
+          "token and takes you back to your project.",
+      }),
+      message,
+    );
+    pointAtGenerate();
+  }
+  // Only whether one is showing until it's saved, so the token itself is
+  // never held before then
   let showing = false;
   tokenWatcher = new MutationObserver(() => {
+    if (requested && !pointed) {
+      pointAtGenerate();
+    }
     const visible = texts().some((text) => OVERLEAF_TOKEN_RE.test(text));
     if (visible === showing) {
       return;
     }
     showing = visible;
+    if (guide) {
+      if (visible) {
+        void save(guide);
+      }
+      return;
+    }
     if (!visible) {
       document.getElementById(TOKEN_PANEL_ID)?.remove();
       return;
     }
     const tokenPanel = mountPanel({ id: TOKEN_PANEL_ID, title: "Calkit" });
-    const message = el("div", { class: "small" });
-    const save = el("button", { class: "action", text: "Save to Calkit" });
-    save.addEventListener("click", async () => {
-      const token = texts()
-        .map((text) => text.match(OVERLEAF_TOKEN_RE)?.[0])
-        .find(Boolean);
-      if (!token) {
-        clear(message).append(
-          errorMessage("The token is no longer on the page"),
-        );
-        return;
-      }
-      save.disabled = true;
-      clear(message).append(loading("Saving"));
-      try {
-        await send({ type: "overleaf.setToken", token });
-        clear(tokenPanel.body).append(
-          el("div", {
-            class: "small",
-            text:
-              "Saved. Go back to your Overleaf project and press Check " +
-              "again in the Calkit panel.",
-          }),
-        );
-      } catch (e) {
-        save.disabled = false;
-        clear(message).append(
-          errorMessage(e instanceof Error ? e.message : String(e)),
-        );
-      }
+    const button = el("button", { class: "action", text: "Save to Calkit" });
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      await save(tokenPanel);
+      button.disabled = false;
     });
+    clear(message);
     tokenPanel.body.append(
       el("div", {
         class: "small",
@@ -247,7 +2627,7 @@ function watchForNewToken(): void {
           "Save this Overleaf Git token to Calkit, so it can check and " +
           "sync your Overleaf projects?",
       }),
-      el("div", { class: "actions" }, [save]),
+      el("div", { class: "actions" }, [button]),
       message,
     );
   });
@@ -287,9 +2667,6 @@ function renderStatus(
   clear(body);
   const figures = status.files_to_push.filter((f) => f.figure);
   const others = status.files_to_push.filter((f) => !f.figure);
-  const canWrite = ["write", "admin", "owner"].includes(
-    link.current_user_access ?? "",
-  );
   body.append(
     el("div", { class: "row" }, [
       el("div", { class: "grow" }, [
@@ -305,6 +2682,18 @@ function renderStatus(
           class: "dim small",
           text: `Synced folder: ${status.path}`,
         }),
+        // Where to work on what the paper shows, without installing anything
+        link.github_repo_url
+          ? el("a", {
+              class: "small",
+              text: "Open in Codespaces",
+              href: `https://codespaces.new${
+                new URL(link.github_repo_url).pathname
+              }?quickstart=1`,
+              title: "Work on the project in a GitHub Codespace",
+              attrs: { target: "_blank" },
+            })
+          : null,
       ]),
       status.in_sync
         ? el("span", { class: "badge ok", text: "in sync" })
@@ -369,11 +2758,16 @@ function renderStatus(
       }),
     );
   }
+  // Something stale is what a run would fix
+  const stale = [...status.files_to_push, ...status.files_to_delete].some(
+    (f) => f.stage_status && f.stage_status.status !== "up-to-date",
+  );
+  body.append(renderRuns(link, stale));
   const syncButton = el("button", {
     class: "action",
     text: "Sync now",
-    disabled: !canWrite || status.in_sync,
-    title: canWrite
+    disabled: !canWrite(link) || status.in_sync,
+    title: canWrite(link)
       ? "Push project files to Overleaf and pull Overleaf edits back"
       : "You need write access to this project to sync",
   });
@@ -383,12 +2777,11 @@ function renderStatus(
     syncButton.disabled = true;
     clear(message).append(loading("Syncing"));
     try {
-      const result = await send({
-        type: "overleaf.sync",
-        owner: link.project_owner_name,
-        project: link.project_name,
-        path: status.path,
-      });
+      const result = await syncOverleaf(
+        link.project_owner_name,
+        link.project_name,
+        status.path,
+      );
       // Shown as in sync straight away, since that's what a sync leaves,
       // while the hub confirms it
       lastSyncNeeded = false;
@@ -405,8 +2798,10 @@ function renderStatus(
         },
         notice:
           `Synced. ${result.commits_from_overleaf} change` +
-          `${result.commits_from_overleaf === 1 ? "" : "s"} came from ` +
-          "Overleaf.",
+          (result.commits_from_overleaf === 1
+            ? " from Overleaf was"
+            : "s from Overleaf were") +
+          " synced to the main project.",
       };
       reload();
     } catch (e) {
@@ -416,9 +2811,11 @@ function renderStatus(
       );
     }
   });
+  // Nothing to sync while it's in sync, e.g., when what's out of date
+  // needs a run first
   body.append(
     el("div", { class: "actions" }, [
-      syncButton,
+      status.in_sync ? null : syncButton,
       el("button", {
         class: "action secondary",
         text: "Refresh",
@@ -1129,9 +3526,12 @@ async function load(overleafProjectId: string): Promise<void> {
     }
     lastTokenProblem = false;
     lastSyncNeeded = !statuses[0].in_sync;
+    currentLink = link;
+    void checkCitations();
     lastCheck = { overleafProjectId, hubWebUrl, link, status: statuses[0] };
     renderStatus(content, link, statuses[0], reload);
     showNotice();
+    content.append(renderInsert(link, statuses[0].path, reload));
     if (links.length > 1) {
       content.append(
         el("div", {
@@ -1198,7 +3598,13 @@ async function load(overleafProjectId: string): Promise<void> {
  * without the panel opening on top of the document uninvited. A paper
  * not in any project gets it too, since linking it is the first step.
  */
-type LauncherTone = "idle" | "attention" | "reconnect" | "unlinked";
+type LauncherTone =
+  | "idle"
+  | "attention"
+  | "reconnect"
+  | "unlinked"
+  | "running"
+  | "syncing";
 
 function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
   document.getElementById(LAUNCHER_ID)?.remove();
@@ -1233,8 +3639,10 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
       attention: "Calkit: sync needed",
       reconnect: "Calkit: reconnect Overleaf",
       unlinked: "Calkit: not linked",
+      running: "Calkit: running",
+      syncing: "Calkit: syncing",
     }[tone],
-    class: tone === "idle" ? "" : "attention",
+    class: ["idle", "running", "syncing"].includes(tone) ? "" : "attention",
   });
   button.addEventListener("click", onClick);
   root.append(style, button);
@@ -1243,29 +3651,66 @@ function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
 
 // Remembered so a closed panel can still show that something is waiting
 let lastSyncNeeded = false;
+// A sync from here is going, which the sidebar and launcher show
+let syncing = false;
 let lastTokenProblem = false;
 let lastUnlinked = false;
 
-function openPanel(overleafProjectId: string): void {
+function launcherTone(): LauncherTone {
+  if (lastTokenProblem) {
+    return "reconnect";
+  }
+  if (lastUnlinked) {
+    return "unlinked";
+  }
+  if (syncing) {
+    return "syncing";
+  }
+  if (activeRun()) {
+    return "running";
+  }
+  return lastSyncNeeded ? "attention" : "idle";
+}
+
+function openPanel(
+  overleafProjectId: string,
+  fill?: (body: HTMLElement) => void,
+): void {
   document.getElementById(LAUNCHER_ID)?.remove();
   panel = mountPanel({
     id: PANEL_ID,
     title: "Calkit",
     onClose: () => {
       panel = null;
-      mountLauncher(
-        () => openPanel(overleafProjectId),
-        lastTokenProblem
-          ? "reconnect"
-          : lastUnlinked
-          ? "unlinked"
-          : lastSyncNeeded
-          ? "attention"
-          : "idle",
-      );
+      mountLauncher(() => openPanel(overleafProjectId), launcherTone());
     },
   });
-  void load(overleafProjectId);
+  if (fill) {
+    fill(panel.body);
+  } else {
+    void load(overleafProjectId);
+  }
+}
+
+/** Open the panel on something to do, e.g., a fix from a tooltip. */
+function showInPanel(fill: (body: HTMLElement) => void): void {
+  const overleafProjectId = currentProjectId;
+  if (!overleafProjectId) {
+    return;
+  }
+  openPanel(overleafProjectId, (body) => {
+    // Its own element, so what clears it keeps the way back
+    const content = el("div");
+    body.append(
+      el("button", {
+        class: "action secondary",
+        text: "\u2190 Back",
+        onClick: () => openPanel(overleafProjectId),
+      }),
+      content,
+    );
+    fill(content);
+  });
 }
 
 function teardown(): void {
@@ -1276,11 +3721,12 @@ function teardown(): void {
   panel?.remove();
   panel = null;
   currentProjectId = null;
+  currentLink = null;
 }
 
 function sync(): void {
   if (new URL(window.location.href).pathname.startsWith("/user/settings")) {
-    watchForNewToken();
+    void watchForNewToken();
     return;
   }
   const overleafProjectId = getOverleafProjectId(window.location.href);
@@ -1334,6 +3780,18 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
       }
       return;
     }
+    // Cards link to the hub the project was found on, and can show before
+    // the panel, which also sets it, is opened
+    hubWebUrl = hub;
+    currentLink = link;
+    void checkCitations();
+    drawRail();
+    if (railOpen && railPipeline?.key !== linkKey(link)) {
+      void refreshRailPipeline(link);
+    }
+    if (pipelineRuns?.key !== linkKey(link)) {
+      void refreshRuns(link);
+    }
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
@@ -1350,15 +3808,13 @@ async function checkSyncStatus(overleafProjectId: string): Promise<void> {
     lastCheck = statuses.length
       ? { overleafProjectId, hubWebUrl: hub, link, status: statuses[0] }
       : null;
+    drawRail();
     // Nothing to say if the panel was opened in the meantime, or if the
     // page moved on to another project
     if (panel || currentProjectId !== overleafProjectId) {
       return;
     }
-    mountLauncher(
-      () => openPanel(overleafProjectId),
-      lastSyncNeeded ? "attention" : "idle",
-    );
+    mountLauncher(() => openPanel(overleafProjectId), launcherTone());
   } catch (e) {
     if (!(await current())) {
       return;
@@ -1408,7 +3864,557 @@ function watchForSaves(): void {
   );
 }
 
+const RAIL_TAB_ID = "calkit-rail-tab";
+const RAIL_PANE_ID = "calkit-rail-pane";
+// Whether Calkit's tab is the one showing in Overleaf's sidebar
+let railOpen = false;
+let railPane: { host: HTMLElement; body: HTMLElement } | null = null;
+// The component opened in the sidebar, kept through redraws, which come
+// with every edit
+let railCard: { key: string; element: HTMLElement } | null = null;
+let railPipeline: {
+  key: string;
+  pipeline?: ProjectPipeline;
+  error?: string;
+} | null = null;
+
+/**
+ * A Calkit tab in Overleaf's sidebar, listing what the open document shows
+ * from the project and the pipeline's stages, with a button to run it.
+ *
+ * Overleaf renders only its active tab's pane, so this one is put in the
+ * sidebar's content area while it's open, with Overleaf's pane hidden,
+ * rather than being a tab Overleaf knows about.
+ */
+function watchRail(): void {
+  const style = document.createElement("style");
+  style.textContent = `
+    .ide-rail-tab-content.calkit-open > :not(#${RAIL_PANE_ID}) {
+      display: none !important;
+    }
+    #${RAIL_PANE_ID} { height: 100%; overflow-y: auto; }
+    body.calkit-rail-open .ide-rail-tab-link.active:not(#${RAIL_TAB_ID}) {
+      background-color: transparent !important;
+      color: inherit !important;
+    }
+    body.calkit-rail-open
+      .ide-rail-tab-link.active:not(#${RAIL_TAB_ID})::after {
+      display: none !important;
+    }
+    #${RAIL_TAB_ID} svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+      margin: 0 auto;
+      color: #009688;
+    }
+    #${RAIL_TAB_ID}.active svg { color: #fff; }
+  `;
+  document.head.append(style);
+  // One of Overleaf's own tabs brings its pane back. The one it thinks is
+  // showing would otherwise close the sidebar instead.
+  document.addEventListener(
+    "click",
+    (event) => {
+      const target = (event.target as Element | null)?.closest?.(
+        ".ide-rail-tab-link",
+      );
+      if (!railOpen || !target || target.id === RAIL_TAB_ID) {
+        return;
+      }
+      if (target.classList.contains("active")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      setRail(false);
+    },
+    true,
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const ensure = () => {
+    const first = document.getElementById("ide-rail-tabs-tab-file-tree");
+    const tabs = first?.parentElement;
+    if (!tabs || !currentProjectId) {
+      return;
+    }
+    let tab = document.getElementById(RAIL_TAB_ID);
+    if (!tab) {
+      tab = el("button", {
+        class: "ide-rail-tab-link nav-link",
+        attrs: {
+          id: RAIL_TAB_ID,
+          type: "button",
+          role: "tab",
+          title: "Calkit",
+          "aria-label": "Calkit",
+        },
+      });
+      // Inline, so it takes the tab's color: white while ours is open
+      tab.innerHTML = calkitLogo;
+      tab.addEventListener("click", () => setRail(!railOpen));
+      const separated = tabs.querySelector(".separated-rail-tab");
+      if (separated) {
+        separated.before(tab);
+      } else {
+        tabs.append(tab);
+      }
+    }
+    // Overleaf underlines the tab whose pane is open by open-rail
+    tab.classList.toggle("active", railOpen);
+    tab.classList.toggle("open-rail", railOpen);
+    tab.setAttribute("aria-selected", String(railOpen));
+    if (railOpen) {
+      placeRailPane();
+    }
+  };
+  new MutationObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(ensure, 100);
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+function setRail(open: boolean): void {
+  railOpen = open;
+  document.body.classList.toggle("calkit-rail-open", open);
+  const tab = document.getElementById(RAIL_TAB_ID);
+  tab?.classList.toggle("active", open);
+  tab?.classList.toggle("open-rail", open);
+  tab?.setAttribute("aria-selected", String(open));
+  if (!open) {
+    document
+      .querySelector(".ide-rail-tab-content")
+      ?.classList.remove("calkit-open");
+    railPane?.host.remove();
+    return;
+  }
+  // A closed sidebar has no content area to show it in, so open it on the
+  // file tree first
+  const content = document.querySelector(".ide-rail-tab-content");
+  if (!content || content.getBoundingClientRect().width < 20) {
+    // Its pane is put there once it's drawn, as Overleaf redraws
+    document.getElementById("ide-rail-tabs-tab-file-tree")?.click();
+  } else {
+    placeRailPane();
+  }
+  drawRail();
+  if (currentLink) {
+    void refreshRailPipeline(currentLink);
+  }
+}
+
+// The Calkit pane in Overleaf's sidebar, which brings its own background,
+// since its colors follow the system's theme rather than Overleaf's
+const RAIL_STYLES = `
+  .rail {
+    padding: 10px 12px; min-height: 100%; box-sizing: border-box;
+    color: var(--ck-fg); background: var(--ck-bg);
+  }
+  .rail .project {
+    flex-direction: column; align-items: flex-start; gap: 2px;
+    overflow-wrap: anywhere;
+  }
+  .rail h3 {
+    font-size: 12px; font-weight: 600; margin: 14px 0 4px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ck-dim);
+  }
+  .item {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 3px 4px; border: 0; border-radius: 4px; text-align: left;
+    background: none; color: inherit; cursor: pointer;
+  }
+  .item:hover { background: var(--ck-subtle-bg); }
+  .item .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+    background: var(--ck-success); }
+  .dot.warning { background: var(--ck-warning); }
+  .dot.error { background: var(--ck-danger); }
+  .dot.unknown { background: var(--ck-dim); }
+  .item .spinner { width: 8px; height: 8px; border-width: 1.5px;
+    flex: none; }
+  .card {
+    margin: 2px 0 8px 14px; padding: 6px 8px; font-size: 12px;
+    border-left: 2px solid var(--ck-border);
+  }
+`;
+
+/** Put the pane in the sidebar, where Overleaf may have redrawn it away. */
+function placeRailPane(): void {
+  const content = document.querySelector(".ide-rail-tab-content");
+  if (!content) {
+    return;
+  }
+  if (!railPane) {
+    const host = el("div", { attrs: { id: RAIL_PANE_ID } });
+    const root = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = STYLES + RAIL_STYLES;
+    const body = el("div", { class: "rail" });
+    root.append(style, body);
+    railPane = { host, body };
+    drawRail();
+  }
+  if (railPane.host.parentElement !== content) {
+    content.append(railPane.host);
+  }
+  content.classList.add("calkit-open");
+}
+
+/** Ask the hub for the pipeline's stages, then show them. */
+async function refreshRailPipeline(link: OverleafLinkPublic): Promise<void> {
+  try {
+    const pipeline = await send({
+      type: "project.pipeline",
+      owner: link.project_owner_name,
+      project: link.project_name,
+    });
+    railPipeline = { key: linkKey(link), pipeline };
+  } catch (e) {
+    railPipeline = {
+      key: linkKey(link),
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+  drawRail();
+}
+
+function drawRail(): void {
+  if (!railPane) {
+    return;
+  }
+  const body = clear(railPane.body);
+  const link = currentLink;
+  if (!link) {
+    body.append(
+      el("div", {
+        class: "small",
+        text: "This paper isn't linked to a Calkit project yet.",
+      }),
+      el("div", { class: "actions" }, [
+        el("button", {
+          class: "action",
+          text: "Link it",
+          onClick: () => currentProjectId && openPanel(currentProjectId),
+        }),
+      ]),
+    );
+    return;
+  }
+  const base = projectUrl(
+    hubWebUrl,
+    link.project_owner_name,
+    link.project_name,
+  );
+  body.append(
+    el("div", { class: "row project" }, [
+      el("a", {
+        text: linkKey(link),
+        href: base,
+        attrs: { target: "_blank" },
+      }),
+      link.github_repo_url
+        ? el("a", {
+            class: "small",
+            text: "Open in Codespaces",
+            href: `https://codespaces.new${
+              new URL(link.github_repo_url).pathname
+            }?quickstart=1`,
+            title: "Work on the project in a GitHub Codespace",
+            attrs: { target: "_blank" },
+          })
+        : null,
+    ]),
+  );
+  // What's going on between the paper and its project
+  const running = activeRun();
+  const status =
+    lastCheck && linkKey(lastCheck.link) === linkKey(link)
+      ? lastCheck.status
+      : null;
+  if (syncing) {
+    body.append(loading("Syncing with the project"));
+  } else if (running) {
+    body.append(
+      loading(
+        running.status === "running"
+          ? "Running on GitHub Actions"
+          : "Waiting to run on GitHub Actions",
+      ),
+    );
+  } else if (status?.in_sync) {
+    body.append(
+      el("div", { class: "row small" }, [
+        el("span", { class: "dot" }),
+        el("span", { text: "In sync with the project" }),
+      ]),
+    );
+  } else if (status) {
+    const { button, message } = syncNow(link, status.path, true);
+    body.append(
+      el("div", { class: "row small" }, [
+        el("span", { class: "dot warning" }),
+        el("span", { class: "grow", text: "Changes to sync" }),
+        button,
+      ]),
+      message,
+    );
+  }
+  // Components the open document shows, each with what's wrong with it
+  body.append(el("h3", { text: "Components" }));
+  const items = editorCitations?.items ?? [];
+  const checked =
+    editorProblems && editorProblems.version === editorCitations?.version
+      ? editorProblems.found
+      : null;
+  if (!items.length) {
+    body.append(
+      el("div", {
+        class: "dim small",
+        text: "Nothing from the project here yet.",
+      }),
+    );
+  }
+  const seen = new Map<string, number>();
+  items.forEach((item, index) => {
+    const problems = checked?.[index];
+    // What it shows, and which time, since its line moves with edits
+    const text = citationText(item.citation);
+    const nth = (seen.get(text) ?? 0) + 1;
+    seen.set(text, nth);
+    const key = `${text}#${nth}`;
+    const label = item.citation.key
+      ? `${item.citation.path} · ${item.citation.key}`
+      : item.citation.path;
+    body.append(
+      el(
+        "button",
+        {
+          class: "item",
+          title: problems?.length
+            ? problems.map((p) => p.message).join("\n")
+            : `Line ${item.line}`,
+          onClick: () => {
+            toEditor({ type: "goto", line: item.line, column: item.column });
+            if (railCard?.key === key) {
+              railCard = null;
+            } else {
+              const element = el("div", { class: "card" });
+              railCard = { key, element };
+              void fillCard(element, link, item);
+            }
+            drawRail();
+          },
+        },
+        [
+          el("span", {
+            class: `dot ${
+              problems === undefined
+                ? "unknown"
+                : problems.some((p) => p.severity === "error")
+                ? "error"
+                : problems.length
+                ? "warning"
+                : ""
+            }`,
+          }),
+          el("span", { class: "grow small", text: label }),
+          el("span", { class: "dim small", text: `${item.line}` }),
+        ],
+      ),
+    );
+    if (railCard?.key === key) {
+      body.append(railCard.element);
+    }
+  });
+  // The pipeline's stages, and running it
+  body.append(el("h3", { text: "Pipeline" }));
+  const known = railPipeline?.key === linkKey(link) ? railPipeline : null;
+  const pipeline = known?.pipeline;
+  if (known?.error) {
+    body.append(errorMessage(known.error));
+  } else if (!pipeline) {
+    body.append(loading());
+  } else if (!pipeline.ck_stages.length) {
+    body.append(el("div", { class: "dim small", text: "No stages yet." }));
+  }
+  for (const name of pipeline?.ck_stages ?? []) {
+    const status = pipeline?.stage_statuses[name]?.status ?? "unknown";
+    const due = ["stale", "not-run"].includes(status);
+    // What a run going now will run
+    const toRun = Boolean(running) && due;
+    body.append(
+      el(
+        "a",
+        {
+          class: "item",
+          href: `${base}/pipeline?stage=${encodeURIComponent(name)}`,
+          attrs: { target: "_blank" },
+          title: status,
+        },
+        [
+          toRun
+            ? el("span", { class: "spinner" })
+            : el("span", {
+                class: `dot ${
+                  status === "up-to-date" ? "" : due ? "warning" : "unknown"
+                }`,
+              }),
+          el("span", { class: "grow small", text: name }),
+          status !== "up-to-date"
+            ? el("span", {
+                class: "dim small",
+                text: toRun ? "running" : status,
+              })
+            : null,
+        ],
+      ),
+    );
+  }
+  body.append(renderRuns(link, true));
+}
+
+/**
+ * List Calkit among Overleaf's own integrations, beside GitHub and
+ * Dropbox, as another way to open the panel.
+ */
+function watchIntegrations(): void {
+  // An image has no text color to inherit, so the logo gets its own
+  const icon = `data:image/svg+xml,${encodeURIComponent(
+    calkitLogo.replace(/currentColor/g, "#009688"),
+  )}`;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const addCard = () => {
+    const list = document.querySelector(".integrations-panel");
+    if (!list || !currentProjectId) {
+      return;
+    }
+    const description = currentLink
+      ? `Synced with ${currentLink.project_owner_name}/${currentLink.project_name}.`
+      : "Make this paper reproducible.";
+    const existing = list.querySelector<HTMLElement>("#calkit-integration");
+    if (existing) {
+      const text = existing.querySelector(
+        ".integrations-panel-card-description",
+      );
+      if (text && text.textContent !== description) {
+        text.textContent = description;
+      }
+      return;
+    }
+    const card = el(
+      "button",
+      {
+        class: "integrations-panel-card-button",
+        attrs: { id: "calkit-integration", type: "button" },
+      },
+      [
+        el("div", { class: "integrations-panel-card-contents" }, [
+          el("div", { class: "integrations-panel-card-icon" }, [
+            el("img", {
+              attrs: { src: icon, alt: "", width: "32", height: "32" },
+            }),
+          ]),
+          el("div", { class: "integrations-panel-card-inner" }, [
+            el("div", { class: "integrations-panel-card-header" }, [
+              el("div", {
+                class: "integrations-panel-card-title",
+                text: "Calkit",
+                attrs: { translate: "no" },
+              }),
+            ]),
+            el("p", {
+              class: "integrations-panel-card-description",
+              text: description,
+            }),
+          ]),
+        ]),
+      ],
+    );
+    card.addEventListener("click", () => {
+      if (currentProjectId && !panel) {
+        openPanel(currentProjectId);
+      }
+    });
+    // First after the header, being the one that brings the rest together
+    const header = list.querySelector(".rail-panel-header");
+    if (header) {
+      header.after(card);
+    } else {
+      list.prepend(card);
+    }
+  };
+  new MutationObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(addCard, 100);
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+/**
+ * Add inserting from the project to the editor's right-click menu, which
+ * Overleaf draws itself rather than leaving to the browser. Right-clicking
+ * moves the cursor there, so that's where it's inserted.
+ */
+function watchContextMenu(): void {
+  const addItem = () => {
+    const menu = document.querySelector<HTMLElement>(
+      ".editor-context-menu-container ul[role=menu]",
+    );
+    const check = lastCheck;
+    const ours = menu?.querySelector("#calkit-insert")?.parentElement;
+    if (ours) {
+      // Kept last, since Overleaf adds some of its own items after opening
+      if (ours !== menu?.lastElementChild) {
+        menu?.append(menu.querySelector("#calkit-insert-divider") ?? "", ours);
+      }
+      return;
+    }
+    if (
+      !menu ||
+      !check ||
+      check.link !== currentLink ||
+      check.link.current_user_access === "read"
+    ) {
+      return;
+    }
+    const item = el("button", {
+      class: "dropdown-item",
+      text: "Insert from Calkit\u2026",
+      attrs: { id: "calkit-insert", role: "menuitem", type: "button" },
+    });
+    item.addEventListener("click", () => {
+      // Closes Overleaf's menu, as choosing one of its own items would
+      menu.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      showInPanel((body) =>
+        body.append(
+          renderInsert(check.link, check.status.path, () =>
+            openPanel(check.overleafProjectId),
+          ),
+        ),
+      );
+    });
+    menu.append(
+      el("li", {
+        class: "dropdown-divider",
+        attrs: { id: "calkit-insert-divider", role: "separator" },
+      }),
+      el("li", { attrs: { role: "none" } }, [item]),
+    );
+  };
+  new MutationObserver(addItem).observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+}
+
 watchForSaves();
+watchEditor();
+watchPdf();
+watchIntegrations();
+watchRail();
+watchContextMenu();
 runContentScript({
   id: "overleaf",
   sync,
@@ -1423,6 +4429,8 @@ runContentScript({
     lastSyncNeeded = false;
     lastTokenProblem = false;
     lastUnlinked = false;
+    currentLink = null;
+    provenanceCache.clear();
     lastCheck = null;
     if (panel) {
       void load(overleafProjectId);

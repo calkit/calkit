@@ -316,6 +316,9 @@ class Stage(Model):
         "julia-script",
         "julia-command",
         "word-to-pdf",
+        "manual-step",
+        "inkscape-export",
+        "gimp-export",
         "map-paths",
         "marimo-html-wasm",
         "markdown",
@@ -667,12 +670,15 @@ class Stage(Model):
         project_dir: str | None,
         is_output: Callable[[str], bool],
         write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
     ) -> None:
         """Work out what the stage depends on from the project before it's
         compiled, for a kind of stage whose sources name some of it.
 
         ``project_dir`` is where the project is, and ``is_output`` says
-        whether a stage makes a project path. With ``write_files``, the stage also
+        whether a stage makes a project path, including by matching an
+        iterated stage's output pattern, while ``is_exact_output`` says
+        whether a stage declares it as is. With ``write_files``, the stage also
         writes files it reads that aren't kept in the project, since it's
         about to run or have its status checked. That happens on every
         call, so only fast work belongs here.
@@ -887,6 +893,13 @@ class Stage(Model):
             storage=self.scheduler.log_storage,
             delete_before_run=False,
         )
+
+    def run_properties(self) -> dict[str, Any]:
+        """What a run of it records about the machine, beyond what every
+        run does, e.g., the version of an app it runs that no environment
+        pins.
+        """
+        return {}
 
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
@@ -1492,6 +1505,7 @@ class LatexStage(Stage):
         project_dir: str | None,
         is_output: Callable[[str], bool],
         write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
     ) -> None:
         """Read which components the document includes with calkit.sty's
         commands, since they're as much inputs as its source, and with
@@ -1544,6 +1558,20 @@ class LatexStage(Stage):
                 and not is_output(rel)
             ):
                 copied.append(rel)
+        # What it includes plainly, e.g., with \includegraphics, is as much
+        # an input, e.g., a figure a stage exports
+        wdir = self.wdir or ""
+        for rel in calkit.latex.detect_inputs(
+            self.target_path,
+            wdir=os.path.join(project_dir or "", wdir),
+            is_output=lambda p: is_output(posixpath.join(wdir, p)),
+            is_exact_output=(
+                None
+                if is_exact_output is None
+                else lambda p: is_exact_output(posixpath.join(wdir, p))
+            ),
+        ):
+            paths.append(posixpath.normpath(posixpath.join(wdir, rel)))
         self._component_paths = list(dict.fromkeys(paths))
         self._copied_paths = list(dict.fromkeys(copied))
         if write_files and self._loads_calkit:
@@ -1571,13 +1599,22 @@ class LatexStage(Stage):
         ] + [posixpath.join(components_dir, p) for p in self._copied_paths]
 
     @property
+    def found_paths(self) -> list[str]:
+        """What the document reads that preprocessing found, relative to the
+        stage's ``wdir``.
+        """
+        return [self.path_from_wdir(p) for p in self._component_paths]
+
+    @property
     def dvc_deps(self) -> list[str]:
         # The copies the document reads, and what they're copied from, so it
-        # builds after the stages making them
+        # builds after the stages making them, unless in a folder it declares
+        declared = super().dvc_deps
+        folders = tuple(d.rstrip("/") + "/" for d in declared)
         deps = (
             [self.target_path]
-            + super().dvc_deps
-            + [self.path_from_wdir(p) for p in self._component_paths]
+            + declared
+            + [p for p in self.found_paths if not p.startswith(folders)]
             + self.component_copies
         )
         if self.latexmkrc_path is not None:
@@ -1802,6 +1839,10 @@ class MatlabCommandStage(Stage):
         return cmd
 
 
+# What a shell takes to skip the user's startup files
+NORC_ARGS = {"bash": " --noprofile --norc", "zsh": " -f", "sh": ""}
+
+
 class ShellCommandStage(Stage):
     kind: Literal["shell-command"]
     command: str = Field(description="Shell command to run.")
@@ -1854,17 +1895,16 @@ class ShellCommandStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = self.xenv_cmd
-        if self.shell == "zsh":
-            norc_args = "-f"
-        else:
-            norc_args = "--noprofile --norc"
+        # Without startup files; a POSIX sh run like this reads none anyway,
+        # and refuses Bash's options for skipping them
+        norc_args = NORC_ARGS[self.shell]
         command_file = self.command_file_path
         if command_file is not None:
             command_file = self.path_from_wdir(command_file)
-            cmd += f" {self.shell} {norc_args} {command_file}"
+            cmd += f" {self.shell}{norc_args} {command_file}"
             return cmd.strip()
         shell_cmd = self.command.replace('"', '\\"')
-        cmd += f' {self.shell} {norc_args} -c "{shell_cmd}"'
+        cmd += f' {self.shell}{norc_args} -c "{shell_cmd}"'
         return cmd.strip()
 
 
@@ -1904,11 +1944,7 @@ class ShellScriptStage(Stage):
                 cmd = cmd.replace(dep_txt, "")
             return cmd
         cmd = self.xenv_cmd
-        if self.shell == "zsh":
-            norc_args = "-f"
-        else:
-            norc_args = "--noprofile --norc"
-        cmd += f" {self.shell} {norc_args} {self.script_path}"
+        cmd += f" {self.shell}{NORC_ARGS[self.shell]} {self.script_path}"
         for arg in self.args:
             cmd += f" {quote_arg(arg)}"
         return cmd.strip()
@@ -2267,6 +2303,166 @@ class WordToPdfStage(Stage):
         return (
             f'calkit office word-to-pdf "{self.word_doc_path}" '
             f'-o "{self.out_path}"'
+        )
+
+
+class ManualStepOpen(Model):
+    """What a manual step opens.
+
+    The app is always named, since the default app for a file differs
+    between machines, e.g., Illustrator rather than Inkscape for an SVG.
+    """
+
+    app: str = Field(description="App to open, e.g., 'Inkscape'.")
+    path: str | None = Field(
+        default=None,
+        description="File to open in it, e.g., the Inkscape SVG.",
+    )
+
+
+class ManualStepStage(Stage):
+    """A step someone does manually, e.g., exporting a figure from
+    Photoshop, which the pipeline asks for when its inputs change, e.g.,
+    the Photoshop file.
+
+    Its outputs are kept while it runs, since they're what the person
+    replaces, and the step checks that they changed.
+    """
+
+    kind: Literal["manual-step"] = "manual-step"
+    message: str = Field(
+        description=(
+            "What to do, e.g., 'In Photoshop, export "
+            "figures/wake-diagram.png'."
+        )
+    )
+    open: ManualStepOpen | None = Field(
+        default=None,
+        description="App to open for the step, and the file to open in it.",
+    )
+    environment: str = "_system"
+
+    @property
+    def output_paths(self) -> list[str]:
+        return [o if isinstance(o, str) else o.path for o in self.outputs]
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs: list[str | dict] = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(persist=True)})
+            else:
+                outs.append(
+                    {out.path: dict(cache=out.storage == "dvc", persist=True)}
+                )
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit manual-step --message {shlex.quote(self.message)}"
+        if self.open is not None:
+            cmd += f" --app {shlex.quote(self.open.app)}"
+            if self.open.path is not None:
+                cmd += f" --open {shlex.quote(self.open.path)}"
+        for path in self.output_paths:
+            cmd += f" --output {shlex.quote(path)}"
+        return cmd
+
+
+class AppExportStage(Stage):
+    """A figure an app exports from the file it's drawn in, e.g., a PNG
+    from an Inkscape SVG. Each app is its own kind, since what it takes and
+    what it needs installed differ.
+
+    A source no app can export without a person, e.g., a Photoshop file, is
+    a manual step instead.
+    """
+
+    source_path: RelativeChildPathString = Field(
+        description="The file to export from."
+    )
+    environment: str = "_system"
+
+    @property
+    def output_path(self) -> str:
+        out = self.outputs[0]
+        return out if isinstance(out, str) else out.path
+
+    @model_validator(mode="after")
+    def _check_one_output(self) -> "AppExportStage":
+        if len(self.outputs) != 1:
+            raise ValueError("An export stage has exactly one output")
+        return self
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = super().dvc_deps
+        if self.source_path not in deps:
+            deps = [self.source_path] + deps
+        return deps
+
+    def run_properties(self) -> dict[str, Any]:
+        # The app runs from the system, so nothing else says which version
+        # made the output
+        from calkit.export import exporters
+
+        return {
+            f"{e.name}_version": e.version()
+            for e in exporters()
+            if e.kind == self.kind
+        }
+
+
+class InkscapeExportStage(AppExportStage):
+    """A figure Inkscape exports from an SVG, e.g., a PNG or PDF."""
+
+    kind: Literal["inkscape-export"] = "inkscape-export"
+    source_path: RelativeChildPathString = Field(
+        description="The SVG to export from."
+    )
+    dpi: int | None = Field(
+        default=None, description="Resolution of an exported PNG."
+    )
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "InkscapeExportStage":
+        from calkit.export import INKSCAPE
+
+        INKSCAPE.check(self.source_path, self.output_path)
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            f"calkit export inkscape {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(self.output_path)}"
+        )
+        if self.dpi is not None:
+            cmd += f" --dpi {self.dpi}"
+        return cmd
+
+
+class GimpExportStage(AppExportStage):
+    """A figure GIMP exports, flattened, from an XCF file, e.g., a PNG."""
+
+    kind: Literal["gimp-export"] = "gimp-export"
+    source_path: RelativeChildPathString = Field(
+        description="The XCF file to export from."
+    )
+
+    @model_validator(mode="after")
+    def _check_paths(self) -> "GimpExportStage":
+        from calkit.export import GIMP
+
+        GIMP.check(self.source_path, self.output_path)
+        return self
+
+    @property
+    def dvc_cmd(self) -> str:
+        return (
+            f"calkit export gimp {shlex.quote(self.source_path)} "
+            f"-o {shlex.quote(self.output_path)}"
         )
 
 
@@ -2678,6 +2874,9 @@ class Pipeline(Model):
                 | CommandStage
                 | RScriptStage
                 | WordToPdfStage
+                | ManualStepStage
+                | InkscapeExportStage
+                | GimpExportStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage
@@ -3011,7 +3210,12 @@ class Pipeline(Model):
             return path in outputs or any(p.match(path) for p in patterns)
 
         for stage in self.stages.values():
-            stage.preprocess(project_dir, is_output, write_files=write_files)
+            stage.preprocess(
+                project_dir,
+                is_output,
+                write_files=write_files,
+                is_exact_output=outputs.__contains__,
+            )
 
     def resolve_procedure_paths(self, procedures: dict) -> None:
         """Tell procedure stages where their procedure is written down.

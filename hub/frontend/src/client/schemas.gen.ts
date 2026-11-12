@@ -1134,7 +1134,7 @@ export const ContentsItemSchema = {
       ],
       title: "Dir Items",
     },
-    commit: {
+    commit_sha: {
       anyOf: [
         {
           type: "string",
@@ -1143,7 +1143,7 @@ export const ContentsItemSchema = {
           type: "null",
         },
       ],
-      title: "Commit",
+      title: "Commit Sha",
     },
   },
   type: "object",

@@ -237,7 +237,7 @@ def test_fetch_from_a_project_records_its_commit(tmp_dir, monkeypatch):
     calls = []
     response: dict = {
         "content": base64.b64encode(b"png bytes").decode(),
-        "commit": "a" * 40,
+        "commit_sha": "a" * 40,
         "calkit_object": {
             "kind": "figure",
             "path": "figures/a.png",
@@ -269,7 +269,7 @@ def test_fetch_from_a_project_records_its_commit(tmp_dir, monkeypatch):
     assert calls[-1] == ("/projects/o/p/contents/figures/a.png", None)
     assert lock["rev"] == "a" * 40
     # A hub that doesn't say what commit it read leaves it unrecorded
-    del response["commit"]
+    del response["commit_sha"]
     _, lock = fetch({"project": "o/p", "path": "figures/a.png"}, "c.png")
     assert "rev" not in lock
 
@@ -298,7 +298,7 @@ def test_get_imports_with_updates(tmp_dir, monkeypatch):
             raise ValueError("403")
         return {
             "content": base64.b64encode(served[name]).decode(),
-            "commit": served.get("commit", "b" * 40),
+            "commit_sha": served.get("commit_sha", "b" * 40),
         }
 
     monkeypatch.setattr(calkit.hub, "get", get)
@@ -324,7 +324,7 @@ def test_get_imports_with_updates(tmp_dir, monkeypatch):
     assert get_imports_with_updates(ck_info) == ["newer.png"]
     assert len(calls) == 3
     # A recorded commit the source is still at needs no comparing
-    served["commit"] = "a" * 40
+    served["commit_sha"] = "a" * 40
     assert get_imports_with_updates(ck_info) == []
     # Offline, checking stops at the first failure rather than waiting on
     # each import in turn

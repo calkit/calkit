@@ -642,9 +642,9 @@ export type ContentsItem = {
    */
   dir_items?: Array<ContentsItemBase> | null
   /**
-   * Commit
+   * Commit Sha
    */
-  commit?: string | null
+  commit_sha?: string | null
 }
 
 /**

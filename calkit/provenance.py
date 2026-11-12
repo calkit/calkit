@@ -380,7 +380,7 @@ def get_imports_with_updates(ck_info: dict) -> list[str]:
             except Exception:
                 continue
             # The same commit can't hold a different file
-            if lock.get("rev") and contents.get("commit") == lock["rev"]:
+            if lock.get("rev") and contents.get("commit_sha") == lock["rev"]:
                 continue
             content = contents.get("content")
             if content is None:
@@ -991,7 +991,7 @@ def fetch(
         except Exception as e:
             raise ValueError(f"Failed to fetch {src_path} from {project}: {e}")
         # Older hubs don't say what commit they read
-        project_rev = contents.get("commit")
+        project_rev = contents.get("commit_sha")
         if source_entry is not None and isinstance(
             contents.get("calkit_object"), dict
         ):

@@ -405,7 +405,7 @@ def test_import_figure_from_a_hub_project(tmp_dir, monkeypatch):
         ref = (params or {}).get("ref")
         return {
             "content": base64.b64encode(f"png at {ref}".encode()).decode(),
-            "commit": (ref or "head")[0] * 40,
+            "commit_sha": (ref or "head")[0] * 40,
             "calkit_object": {
                 "kind": "figure",
                 "path": "figures/a.png",

@@ -1968,7 +1968,7 @@ def get_project_contents(
         )
     )
     # With no ref, contents come from the live checkout, which is HEAD
-    item.commit = resolve_commit_sha(repo, ref)
+    item.commit_sha = resolve_commit_sha(repo, ref)
     return item
 
 

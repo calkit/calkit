@@ -663,6 +663,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
     email: str | None = None
+    # Who the user is, to prefill them as the first author of a release
+    first_name: str | None = None
+    last_name: str | None = None
+    affiliation: str | None = None
+    orcid: str | None = None
     # The hub commands target when no hub is otherwise specified; only
     # consulted from the base (unsuffixed) config file
     default_hub: str | None = None
@@ -746,6 +751,16 @@ class Settings(BaseSettings):
             # meaning "forget this credential"
             self._resolved_secrets.add(name)
         super().__setattr__(name, value)
+
+    @field_validator("orcid")
+    @classmethod
+    def _normalize_orcid(cls, v: str | None) -> str | None:
+        # Checked when set, rather than when a release is already underway
+        if v is None:
+            return v
+        from calkit.core import normalize_orcid
+
+        return normalize_orcid(v)
 
     @field_validator("default_hub")
     @classmethod

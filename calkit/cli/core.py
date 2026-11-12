@@ -216,3 +216,144 @@ def warn_app_control(
             f"{SMART_APP_CONTROL_DOCS_URL}",
             err=True,
         )
+
+
+def upload_release_file(
+    record_id: str, fpath: str, service: str, key: str | None = None
+) -> None:
+    """Upload a file to an InvenioRDM draft record with a progress bar."""
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        TextColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
+
+    import calkit.invenio
+
+    if key is None:
+        key = os.path.basename(fpath)
+    with Progress(
+        TextColumn("[bold]{task.description}"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        transient=False,
+    ) as bar:
+        task = bar.add_task(f"Uploading {key}", total=os.path.getsize(fpath))
+        calkit.invenio.upload_file(
+            record_id,
+            fpath,
+            key=key,
+            service=service,  # type: ignore[arg-type]
+            echo=bar.console.print,
+            progress=lambda done, total: bar.update(
+                task, completed=done, total=total
+            ),
+        )
+
+
+def prompt_authors() -> list[dict]:
+    """Prompt for a release's authors.
+
+    The first author defaults to the user, as recorded in the Calkit config,
+    or failing that their name from Git, since it's usually them releasing
+    their own work. What they enter there can be saved to the config, so
+    the next release only needs Enter pressed.
+    """
+    import calkit
+    from calkit.core import normalize_orcid
+
+    config = calkit.config.read()
+    me = {
+        "first_name": config.first_name,
+        "last_name": config.last_name,
+        "affiliation": config.affiliation,
+        "orcid": config.orcid,
+    }
+    if me["orcid"]:
+        me["orcid"] = me["orcid"].removeprefix("https://orcid.org/")
+    if not (me["first_name"] and me["last_name"]):
+        try:
+            git_name = (
+                calkit.git.get_repo()
+                .config_reader()
+                .get_value("user", "name", default="")
+            )
+        except Exception:
+            git_name = ""
+        first, _, last = str(git_name).strip().rpartition(" ")
+        if first and last:
+            me["first_name"] = me["first_name"] or first
+            me["last_name"] = me["last_name"] or last
+    authors = []
+    n = 0
+    while True:
+        n += 1
+        defaults = me if n == 1 else {}
+        author: dict = {}
+        author["first_name"] = typer.prompt(
+            f"Enter the first name of author {n}",
+            default=defaults.get("first_name"),
+        )
+        author["last_name"] = typer.prompt(
+            f"Enter the last name of author {n}",
+            default=defaults.get("last_name"),
+        )
+        affiliation = typer.prompt(
+            f"Enter the affiliation of author {n} (blank for none)",
+            default=defaults.get("affiliation") or "",
+            show_default=bool(defaults.get("affiliation")),
+        ).strip()
+        if affiliation:
+            author["affiliation"] = affiliation
+        default_orcid = defaults.get("orcid") or ""
+        while True:
+            orcid = typer.prompt(
+                f"Enter the ORCID of author {n} (blank for none)",
+                default=default_orcid,
+                show_default=bool(default_orcid),
+            ).strip()
+            if not orcid:
+                break
+            try:
+                # Releases want the bare identifier, which CITATION.cff
+                # turns back into a URL
+                author["orcid"] = normalize_orcid(orcid).removeprefix(
+                    "https://orcid.org/"
+                )
+                break
+            except ValueError as e:
+                typer.echo(str(e))
+        authors.append(author)
+        if n == 1:
+            _save_user_identity(config, author)
+        if not typer.confirm(
+            "Are there more authors to enter?", default=False
+        ):
+            break
+    return authors
+
+
+def _save_user_identity(config: Any, author: dict) -> None:
+    """Save the first author's details as the user's, if they've changed."""
+
+    from calkit.core import normalize_orcid
+
+    changed = False
+    for field in ["first_name", "last_name", "affiliation", "orcid"]:
+        value = author.get(field)
+        if value and field == "orcid":
+            # The config keeps the URL form, as calkit.yaml does
+            value = normalize_orcid(value)
+        if value and getattr(config, field) != value:
+            setattr(config, field, value)
+            changed = True
+    # Author 1 isn't always the person releasing, so ask before saving
+    if changed and typer.confirm(
+        "Save author 1 as you, to prefill future releases?", default=True
+    ):
+        config.write()

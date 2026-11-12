@@ -627,3 +627,10 @@ def test_secrets_round_trip_on_linux(fake_keyring, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "_secret_cache", {})
     assert config.get_secret("github_token") == "gh-secret"
     assert config.read().github_token == "gh-secret"
+
+
+def test_orcid_is_checked():
+    settings = config.Settings(orcid="0000-0002-1825-0097")
+    assert settings.orcid == "https://orcid.org/0000-0002-1825-0097"
+    with pytest.raises(ValueError, match="check digit"):
+        config.Settings(orcid="0000-0002-1825-0098")

@@ -14,6 +14,7 @@ from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import raise_error, warn
+from calkit.cli.core import upload_release_file
 
 if TYPE_CHECKING:
     import git
@@ -300,29 +301,10 @@ def update_release(
                     service=publisher.lower(),  # type: ignore
                     as_json=False,  # We only get a 204 back
                 )
-            typer.echo(f"Uploading {filename}")
-            fpath = os.path.join(release_files_dir, filename)
-            # First, initiate the file upload
-            calkit.invenio.post(
-                f"/records/{record_id}/draft/files",
-                json=[{"key": filename}],
-                service=publisher.lower(),  # type: ignore
-            )
-            # Then upload the file content
-            with open(fpath, "rb") as f:
-                file_data = f.read()
-                resp = calkit.invenio.put(
-                    f"/records/{record_id}/draft/files/{filename}/content",
-                    headers={"Content-Type": "application/octet-stream"},
-                    as_json=False,
-                    service=publisher.lower(),  # type: ignore
-                    data=file_data,
-                )
-                typer.echo(f"Status code: {resp.status_code}")
-            # Commit the file
-            calkit.invenio.post(
-                f"/records/{record_id}/draft/files/{filename}/commit",
-                service=publisher.lower(),  # type: ignore
+            upload_release_file(
+                record_id,
+                os.path.join(release_files_dir, filename),
+                service=publisher.lower(),
             )
     # TODO: Add ability to update metadata
 

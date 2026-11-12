@@ -685,13 +685,21 @@ def get_status(
         try:
             calkit.dvc.get_dvc_repo()
         except NotDvcRepoError:
-            typer.echo("Initializing DVC repository")
-            try:
-                result = calkit.dvc.init(quiet=True)
-                if result != 0:
-                    raise subprocess.CalledProcessError(result, "dvc init")
-            except subprocess.CalledProcessError as e:
-                raise_error(f"Failed to initialize DVC repository: {e}")
+            # Not for a project with nothing for DVC, e.g., a website
+            # showing imported results, which an editor checking its status
+            # would otherwise turn into a DVC repo
+            if (
+                (ck_info.get("pipeline") or {}).get("stages")
+                or ck_info.get("subprojects")
+                or os.path.isfile("dvc.yaml")
+            ):
+                typer.echo("Initializing DVC repository")
+                try:
+                    result = calkit.dvc.init(quiet=True)
+                    if result != 0:
+                        raise subprocess.CalledProcessError(result, "dvc init")
+                except subprocess.CalledProcessError as e:
+                    raise_error(f"Failed to initialize DVC repository: {e}")
         except Exception as e:
             # E.g., DVC's site cache dir isn't writable, which init can't fix
             raise_error(
@@ -1979,7 +1987,18 @@ def pull(
                     "conflicts in dvc.lock and stage run records"
                 )
             raise_error("Git pull failed")
-    if "dvc" in selected:
+    import dvc.repo
+    from dvc.exceptions import NotDvcRepoError
+
+    try:
+        dvc.repo.Repo.find_root()
+        has_dvc = True
+    except NotDvcRepoError:
+        # E.g., a project that keeps everything in Git
+        has_dvc = False
+    if targets and "dvc" in targets and not has_dvc:
+        typer.echo("This isn't a DVC repo, so there's nothing to DVC pull")
+    if "dvc" in selected and has_dvc:
         typer.echo("DVC pulling")
         if not no_check_auth:
             # Check that our dvc remotes all have our DVC token set for them
@@ -2003,24 +2022,37 @@ def pull(
         if result != 0:
             raise_error("DVC pull failed")
         calkit.dvc.zip.sync_all(direction="to-workspace")
-        if not no_recursive:
-            # Pull DVC in isolated subprojects (those with their own .dvc folder)
-            ck_info = calkit.load_calkit_info()
-            for sp in ck_info.get("subprojects", []):
-                if not isinstance(sp, dict) or not sp.get("path"):
-                    continue
-                sp_path = sp["path"]
-                if not os.path.isdir(os.path.join(sp_path, ".dvc")):
-                    continue
-                typer.echo(f"DVC pulling subproject: {sp_path}")
-                sp_result = calkit.dvc.run_dvc_command(
-                    ["pull"] + dvc_args,
-                    cwd=sp_path,
-                    lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
-                )
-                if sp_result != 0:
-                    raise_error(f"DVC pull failed in subproject: {sp_path}")
-                calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
+    if "dvc" in selected and not no_recursive:
+        # Pull DVC in isolated subprojects (those with their own .dvc folder)
+        ck_info = calkit.load_calkit_info()
+        for sp in ck_info.get("subprojects", []):
+            if not isinstance(sp, dict) or not sp.get("path"):
+                continue
+            sp_path = sp["path"]
+            if not os.path.isdir(os.path.join(sp_path, ".dvc")):
+                continue
+            typer.echo(f"DVC pulling subproject: {sp_path}")
+            sp_result = calkit.dvc.run_dvc_command(
+                ["pull"] + dvc_args,
+                cwd=sp_path,
+                lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
+            )
+            if sp_result != 0:
+                raise_error(f"DVC pull failed in subproject: {sp_path}")
+            calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
+    # Said, not done: an import only moves when asked to
+    from calkit.provenance import get_imports_with_updates
+
+    try:
+        updated = get_imports_with_updates(calkit.load_calkit_info())
+    except Exception:
+        updated = []
+    if updated:
+        typer.echo(
+            f"{len(updated)} import(s) have a newer version at their "
+            f"source: {', '.join(updated)}; run 'calkit sync import "
+            "<path>' to bring one in"
+        )
 
     # Presentations edited in Google Slides since they were exported
     ck_info = calkit.load_calkit_info()
@@ -2487,13 +2519,16 @@ def _inject_markdown_values() -> list[str]:
     import calkit.markdown
 
     ck_info = calkit.load_calkit_info()
+    results = calkit.markdown.results_by_name(ck_info)
     changed_paths = []
     for md_path in set(calkit.markdown.get_markdown_stages(ck_info).values()):
         if not os.path.isfile(md_path):
             continue
         with open(md_path, encoding="utf-8") as f:
             text = f.read()
-        new_text, changed = calkit.markdown.set_values(text, md_path)
+        new_text, changed = calkit.markdown.set_values(
+            text, md_path, results=results
+        )
         if changed:
             with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(new_text)
@@ -3541,27 +3576,62 @@ def run(
         # Initialize DVC repo if necessary
         from dvc.exceptions import NotDvcRepoError
 
+        # With nothing for DVC to run, e.g., a project with no pipeline
+        # whose Markdown only shows values, it needn't become a DVC repo
+        dvc_yaml_stages = dvc_stages
+        if dvc_stages is None and os.path.isfile("dvc.yaml"):
+            with open("dvc.yaml") as f:
+                dvc_yaml_stages = (calkit.ryaml.load(f) or {}).get("stages")
+        nothing_for_dvc = not (dvc_yaml_stages or ck_info.get("subprojects"))
         try:
             calkit.dvc.get_dvc_repo()
         except NotDvcRepoError:
-            step("Initializing DVC repo")
-            # DVC says what it's done, and what to do next
-            with paused():
-                result = calkit.dvc.init()
-            if result != 0:
-                raise_error("Failed to initialize DVC repo")
+            if not nothing_for_dvc:
+                step("Initializing DVC repo")
+                # DVC says what it's done, and what to do next
+                with paused():
+                    result = calkit.dvc.init()
+                if result != 0:
+                    raise_error("Failed to initialize DVC repo")
         except Exception as e:
             # E.g., DVC's site cache dir isn't writable, which 'dvc init'
             # can't fix
             raise_error(
                 f"Failed to open DVC repo: {e.__class__.__name__}: {e}"
             )
+        else:
+            # A DVC repo can hold pipelines Calkit doesn't declare, e.g., a
+            # nested dvc.yaml, which DVC still runs
+            nothing_for_dvc = False
         # The pipeline as just compiled can reach stages the last one
         # didn't, e.g., through an input just added
-        if gate_stage_names is not None:
+        if gate_stage_names is not None and not nothing_for_dvc:
             reached = calkit.pipeline.get_stages_to_gate(targets)
             if reached is None or reached - gate_stage_names:
                 gate(None if reached is None else reached - gate_stage_names)
+    if nothing_for_dvc:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        md_stages = calkit.markdown.get_markdown_stages(ck_info)
+        if target_inputs or target_outputs:
+            raise_error("No stages found to run")
+        unknown = [t for t in targets or [] if t not in md_stages]
+        if unknown:
+            raise_error(f"No stage(s) named: {', '.join(unknown)}")
+        try:
+            md_changed_paths = _inject_markdown_values()
+        except Exception as e:
+            raise_error(f"Failed to write values into markdown: {e}")
+        if not quiet:
+            for md_path in md_changed_paths:
+                typer.echo(f"Updated values in {md_path}")
+        calkit.echo("Pipeline completed successfully ✅")
+        if save_after_run or save_message is not None:
+            if save_message is None:
+                save_message = "Run pipeline"
+            if not quiet:
+                typer.echo("Saving the project after successful run")
+            save(save_all=True, message=save_message, no_push=no_push)
+        return {"dvc_stages": {}, "stage_run_info": {}}
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
     if dvc_stages is None:

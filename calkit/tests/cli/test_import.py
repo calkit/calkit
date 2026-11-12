@@ -386,3 +386,101 @@ def test_import_and_update_a_path(tmp_dir):
     )
     assert res.returncode != 0
     assert "Nothing recorded" in res.stdout + res.stderr
+
+
+def test_import_figure_from_a_hub_project(tmp_dir, monkeypatch):
+    import base64
+
+    import git as gitpy
+    from typer.testing import CliRunner
+
+    import calkit
+    from calkit.cli.main import app
+
+    runner = CliRunner()
+    calls = []
+
+    def get(path, params=None, **kwargs):
+        calls.append((path, params))
+        ref = (params or {}).get("ref")
+        return {
+            "content": base64.b64encode(f"png at {ref}".encode()).decode(),
+            "commit_sha": (ref or "head")[0] * 40,
+            "calkit_object": {
+                "kind": "figure",
+                "path": "figures/a.png",
+                "title": "Source title",
+                "description": "Source description",
+            },
+        }
+
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
+    monkeypatch.setattr(calkit.hub, "get", get)
+    gitpy.Repo.init(".")
+    with open("calkit.yaml", "w") as f:
+        f.write("name: blog\n")
+    # Linked as on the hub, pinned, and described as the source describes it
+    res = runner.invoke(
+        app,
+        [
+            "import",
+            "figure",
+            "calkit.io/o/p/figures/a.png",
+            "figures/p/a.png",
+            "--git-ref",
+            "b1",
+            "--no-commit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert calls[-1] == ("/projects/o/p/contents/figures/a.png", {"ref": "b1"})
+    with open("figures/p/a.png") as f:
+        assert f.read() == "png at b1"
+    entry = calkit.load_calkit_info()["figures"][0]
+    assert entry["title"] == "Source title"
+    assert entry["description"] == "Source description"
+    assert entry["imported_from"] == {
+        "project": "o/p",
+        "path": "figures/a.png",
+        "git_ref": "b1",
+    }
+    locks = calkit.provenance.read_import_locks()
+    assert locks["figures/p/a.png"]["rev"] == "b" * 40
+    # A title given here wins, and with no ref the commit is still locked
+    res = runner.invoke(
+        app,
+        [
+            "import",
+            "figure",
+            "o/p/figures/a.png",
+            "figures/p/b.png",
+            "--title",
+            "Mine",
+            "--no-commit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    entry = calkit.load_calkit_info()["figures"][1]
+    assert entry["title"] == "Mine"
+    assert "git_ref" not in entry["imported_from"]
+    locks = calkit.provenance.read_import_locks()
+    assert locks["figures/p/b.png"]["rev"] == "h" * 40
+    # Moving a project import to another ref is recorded for later refreshes
+    res = runner.invoke(
+        app,
+        [
+            "sync",
+            "import",
+            "figures/p/a.png",
+            "--git-ref",
+            "c2",
+            "--no-commit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    with open("figures/p/a.png") as f:
+        assert f.read() == "png at c2"
+    entry = calkit.load_calkit_info()["figures"][0]
+    assert entry["imported_from"]["git_ref"] == "c2"
+    locks = calkit.provenance.read_import_locks()
+    assert locks["figures/p/a.png"]["rev"] == "c" * 40

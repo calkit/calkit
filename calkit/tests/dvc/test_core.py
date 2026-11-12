@@ -992,6 +992,119 @@ def test_get_storage_problems(tmp_dir):
     assert "big.bin" not in large
 
 
+def test_get_unstored_output_files(tmp_dir: str) -> None:
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def get_unstored(
+        stages: list[str] | None = None, include_dvc: bool = True
+    ) -> dict:
+        dvc_repo = calkit.dvc.get_dvc_repo()
+        try:
+            return {
+                u["path"]: u
+                for u in calkit.dvc.get_unstored_output_files(
+                    dvc_repo=dvc_repo, stages=stages, include_dvc=include_dvc
+                )
+            }
+        finally:
+            dvc_repo.close()
+
+    def get_problems() -> dict:
+        return {
+            p["path"]: p
+            for p in calkit.dvc.get_storage_problems(large_mb=None)
+        }
+
+    subprocess.check_call(["calkit", "init"])
+    # Only the outputs are run, so nothing is staged by the run itself
+    subprocess.check_call(["dvc", "config", "core.autostage", "false"])
+    with open(".gitignore", "a") as f:
+        f.write("*.log\n*.tmp\n/whole/\n")
+    with open(".dvcignore", "a") as f:
+        f.write("*.tmp\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": (
+                    "mkdir -p logs/sub data/cache whole "
+                    "&& echo a > logs/a.txt && echo l > logs/sub/run.log "
+                    "&& echo s > logs/skip.tmp && echo l > single.log "
+                    "&& echo d > data/d.csv && echo t > data/t.tmp "
+                    "&& echo w > whole/w.txt && echo s > scratch.log"
+                ),
+                "outputs": [
+                    {"path": "logs", "storage": "git"},
+                    {"path": "single.log", "storage": "git"},
+                    {"path": "whole", "storage": "git"},
+                    # Untracked on purpose
+                    {"path": "scratch.log", "storage": None},
+                    "data",
+                ],
+            },
+            "other": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "mkdir -p other && echo o > other/o.log",
+                "outputs": [{"path": "other", "storage": "git"}],
+            },
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run"])
+    # Running un-ignores a file output stored in Git, so ignore it again
+    with open(".gitignore", "a") as f:
+        f.write("/single.log\n")
+    # Neither stores what Git ignores in an output stored in Git, unless
+    # .dvcignore excludes it too, nor what .dvcignore excludes in one DVC
+    # caches
+    unstored = get_unstored()
+    assert set(unstored) == {"logs", "single.log", "whole", "other", "data"}
+    assert unstored["logs"] == {
+        "path": "logs",
+        "stage": "make",
+        "storage": "git",
+        "files": ["logs/sub/run.log"],
+        "rules": ["'*.log' in .gitignore"],
+    }
+    assert unstored["single.log"]["files"] == ["single.log"]
+    assert unstored["whole"]["rules"] == ["'/whole/' in .gitignore"]
+    assert unstored["data"] == {
+        "path": "data",
+        "stage": "make",
+        "storage": "dvc",
+        "files": ["data/t.tmp"],
+        "rules": ["'*.tmp' in .dvcignore"],
+    }
+    # Only for the stages asked about, and only in Git if asked
+    assert set(get_unstored(stages=["other"])) == {"other"}
+    assert "data" not in get_unstored(include_dvc=False)
+    # As storage problems, an output ignored as a whole is that rather than
+    # files in it, and those .dvcignore excludes have nowhere to go
+    problems = get_problems()
+    assert problems["whole"]["kind"] == "ignored"
+    assert problems["single.log"]["kind"] == "ignored"
+    assert problems["logs"]["kind"] == "ignored-files"
+    assert problems["logs"]["store_in"] == "git"
+    assert problems["logs"]["files"] == ["logs/sub/run.log"]
+    assert problems["logs"]["message"] == (
+        "logs is stored in Git, but Git ignores 1 file in it: "
+        "logs/sub/run.log ('*.log' in .gitignore)"
+    )
+    assert problems["data"]["kind"] == "dvcignored"
+    assert problems["data"]["store_in"] is None
+    # Once in Git, they're stored
+    git("add", "-f", "logs", "single.log", "whole", "other")
+    unstored = get_unstored()
+    assert set(unstored) == {"data"}
+    os.remove("data/t.tmp")
+    assert get_unstored() == {}
+    assert get_problems() == {}
+
+
 def test_split_lock_stage_name():
     assert calkit.dvc.split_lock_stage_name("a") == (None, "a")
     assert calkit.dvc.split_lock_stage_name("sub/dvc.yaml:a") == ("sub", "a")

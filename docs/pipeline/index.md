@@ -97,6 +97,23 @@ An output's `storage` decides which system tracks it:
 | `dvc-zip` | Zip the directory and track the archive with DVC, for directories of many small files. See [large folders of many small files](../version-control.md#large-folders-of-many-small-files). |
 | null      | Leave the path untracked, i.e., produced but neither committed nor cached.                                                                                                               |
 
+<!-- TODO: needs human review -->
+
+An output stored in Git is committed whole,
+including files in it that a `.gitignore` rule would leave out,
+e.g., logs ignored by a generic `*.log` rule.
+Otherwise they'd be in neither Git nor DVC,
+so a fresh clone would have the output without them,
+and its stage, and everything downstream, would look stale.
+`calkit run` stages the Git-stored outputs of the stages it ran
+(when DVC's autostage is on, as Calkit sets it up),
+and it and `calkit add` force-add such files, saying which and why.
+DVC can't be told to cache what `.dvcignore` excludes,
+so files it excludes from an output stored with DVC are only reported.
+`calkit status` and `calkit check storage` list the files in outputs
+that neither system stores,
+and `calkit fix storage` adds those in outputs stored in Git.
+
 By default an output is removed before the stage runs,
 so each run starts from a clean slate
 rather than building on the previous run's file.

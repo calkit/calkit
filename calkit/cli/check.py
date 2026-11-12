@@ -1908,14 +1908,21 @@ def check_storage(
     """Check that paths are tracked where they're declared to be stored.
 
     That is, nothing is tracked by both Git and DVC, no pipeline output
-    stored in Git is ignored by it, and nothing in Git is too large for it.
+    stored in Git, or file in one, is ignored by it, and nothing in Git is
+    too large for it.
+    Files .dvcignore excludes from a pipeline output DVC caches, which
+    neither stores, and large files are only reported.
     With --fix, the pipeline's declarations, or a file's .dvc file, decide
     where each path belongs, and the changes are staged.
+    Files Git ignores in an output stored in Git are added in spite of the
+    rule, since the output being declared as stored in Git says to.
     """
     import calkit.dvc
     import calkit.git
     import calkit.pipeline
 
+    # Only reported, since there's no telling whether they're meant
+    advisory_kinds = ("large", "dvcignored")
     if fix and as_json:
         raise_error("--json can't be used with --fix")
     problems = calkit.dvc.get_storage_problems()
@@ -1925,7 +1932,7 @@ def check_storage(
         if not as_json:
             for problem in problems:
                 warn(problem["message"])
-        if any(p["kind"] != "large" for p in problems):
+        if any(p["kind"] not in advisory_kinds for p in problems):
             if not as_json:
                 typer.echo("Run 'calkit check storage --fix' to fix these")
             raise typer.Exit(1)
@@ -1946,6 +1953,10 @@ def check_storage(
             calkit.git.ensure_path_is_ignored(repo, path)
             if problem["kind"] == "both":
                 to_record.append(problem)
+        elif problem["kind"] == "ignored-files":
+            files = [os.path.abspath(p) for p in problem["files"]]
+            for i in range(0, len(files), 100):
+                repo.git.add("-f", "--", *files[i : i + 100])
         elif problem["store_in"] == "git":
             calkit.git.ensure_path_is_not_ignored(repo, path)
             repo.git.add("--", path)
@@ -1980,7 +1991,7 @@ def check_storage(
         warn(problem["message"])
     if fixed:
         typer.echo("Commit the staged changes")
-    if any(p["kind"] != "large" for p in unfixed):
+    if any(p["kind"] not in advisory_kinds for p in unfixed):
         raise typer.Exit(1)
 
 

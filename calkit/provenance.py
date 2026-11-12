@@ -141,12 +141,11 @@ def read_import_locks(wdir: str | None = None) -> dict:
     # ever read it, so it is treated as absent rather than migrated.
     if not isinstance(locks, dict):
         return {}
-    # Before entries had a 'kind', the commit was a bare 'rev', which now
-    # reads as the 'git_rev' those entries used once renamed
+    # Before entries recorded their source, the commit was a bare 'rev'
     for lock in locks.values():
         if (
             isinstance(lock, dict)
-            and "kind" not in lock
+            and "source" not in lock
             and "rev" in lock
             and "git_rev" not in lock
         ):
@@ -154,15 +153,48 @@ def read_import_locks(wdir: str | None = None) -> dict:
     return locks
 
 
-def get_locked_rev(lock: dict | None) -> str | None:
-    """The commit a lock entry says its import was fetched at.
+# The order a lock entry's fields are written in, so it reads source first
+# and diffs stay small; anything else follows, alphabetically
+_LOCK_FIELDS = (
+    "source",
+    "git_rev",
+    "etag",
+    "last_modified",
+    "hash",
+    "fetched",
+)
+_SOURCE_FIELDS = (
+    "kind",
+    "hub",
+    "project",
+    "repo_url",
+    "git_repo_url",
+    "url",
+    "path",
+    "ref",
+    "git_ref",
+)
 
-    A Git repo's is its ``rev``; a Calkit project, which isn't a Git repo,
-    records it as ``git_rev``, as does an entry from before lock entries had
-    a ``kind``.
-    """
-    lock = lock or {}
-    rev = lock.get("rev") if lock.get("kind") == "git" else lock.get("git_rev")
+
+def _ordered_lock(lock: object) -> object:
+    def ordered(d: dict, first: tuple[str, ...]) -> dict:
+        keys = [k for k in first if k in d] + sorted(
+            k for k in d if k not in first
+        )
+        return {k: d[k] for k in keys}
+
+    if not isinstance(lock, dict):
+        return lock
+    lock = ordered(lock, _LOCK_FIELDS)
+    if isinstance(lock.get("source"), dict):
+        lock["source"] = ordered(lock["source"], _SOURCE_FIELDS)
+    return lock
+
+
+def get_locked_rev(lock: dict | None) -> str | None:
+    """The commit a lock entry says its import was fetched at, from a Git
+    repo or from the one behind a Calkit project."""
+    rev = (lock or {}).get("git_rev")
     return rev if isinstance(rev, str) else None
 
 
@@ -175,10 +207,10 @@ def lock_matches_source(lock: dict | None, imported_from: dict) -> bool:
     """
     import calkit
 
-    lock = lock or {}
-    kind = lock.get("kind")
-    if kind is None:
+    lock = (lock or {}).get("source")
+    if not isinstance(lock, dict):
         return True
+    kind = lock.get("kind")
     if kind == "git":
         git = git_source(imported_from)
         return git is not None and (
@@ -234,7 +266,9 @@ def write_import_lock(
     # newline="\n" so the file is byte-identical on every platform; it is
     # committed, and CRLF on Windows would churn the diff for everyone else
     with open(fpath, "w", newline="\n") as f:
-        json.dump(locks, f, indent=2, sort_keys=True)
+        json.dump(
+            {p: _ordered_lock(locks[p]) for p in sorted(locks)}, f, indent=2
+        )
         f.write("\n")
     return fpath
 
@@ -1053,6 +1087,10 @@ def _with_state(lock: dict, dest_path: str) -> dict:
     from datetime import datetime, timezone
 
     lock = {k: v for k, v in lock.items() if v is not None}
+    if isinstance(lock.get("source"), dict):
+        lock["source"] = {
+            k: v for k, v in lock["source"].items() if v is not None
+        }
     checksum = hash_path(dest_path)
     if checksum is not None:
         lock["hash"] = checksum
@@ -1068,10 +1106,10 @@ def fetch(
     """Download what an ``imported_from`` entry points at, to ``dest_path``.
 
     Returns the entry as it should now be recorded, and separately what the
-    fetch resolved to: the source as it was used, under a ``kind`` of
-    ``git``, ``calkit``, or ``url``, what that source was at, e.g., the commit
-    a Git repo landed on or a URL's ``ETag``, a checksum of the file, and
-    when. The first belongs in ``calkit.yaml`` because a person wrote it;
+    fetch resolved to: the ``source`` as it was used, with a ``kind`` of
+    ``git``, ``calkit``, or ``url``, beside what it was at, e.g., the
+    ``git_rev`` a Git repo landed on or a URL's ``etag``, a checksum of the
+    file, and when. The first belongs in ``calkit.yaml`` because a person wrote it;
     the second belongs in ``.calkit/imports.json`` because the tool worked
     it out, like any lock file, which is why it repeats the source.
 
@@ -1184,11 +1222,13 @@ def fetch(
         git.pop("git_rev", None)
         imported_from.update({k: v for k, v in git.items() if v is not None})
         lock = {
-            "kind": "git",
-            "repo_url": repo_url,
-            "path": src_path,
-            "ref": target,
-            "rev": rev,
+            "source": {
+                "kind": "git",
+                "repo_url": repo_url,
+                "path": src_path,
+                "ref": target,
+            },
+            "git_rev": rev,
         }
         return imported_from, _with_state(lock, dest_path)
     if (url := imported_from.get("url")) is not None:
@@ -1209,8 +1249,7 @@ def fetch(
                 # What the server says identifies this version, so asking
                 # whether there's a newer one needn't download it
                 lock = {
-                    "kind": "url",
-                    "url": url,
+                    "source": {"kind": "url", "url": url},
                     "etag": resp.headers.get("ETag"),
                     "last_modified": resp.headers.get("Last-Modified"),
                 }
@@ -1249,12 +1288,14 @@ def fetch(
         except Exception as e:
             raise ValueError(f"Failed to fetch {src_path} from {project}: {e}")
         lock = {
-            "kind": "calkit",
-            "hub": calkit.hub.get_hub_url(),
-            "project": project,
-            "path": src_path,
-            "git_repo_url": git_repo_url,
-            "git_ref": project_ref,
+            "source": {
+                "kind": "calkit",
+                "hub": calkit.hub.get_hub_url(),
+                "project": project,
+                "path": src_path,
+                "git_repo_url": git_repo_url,
+                "git_ref": project_ref,
+            },
             # Older hubs don't say what commit they read
             "git_rev": contents.get("commit_sha"),
         }

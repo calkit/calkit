@@ -269,12 +269,14 @@ def test_fetch_from_a_project_records_its_commit(tmp_dir, monkeypatch):
     # The lock says where it came from too, including the hub and the repo
     # behind the project, so it stands on its own
     assert {k: v for k, v in lock.items() if k not in ("hash", "fetched")} == {
-        "kind": "calkit",
-        "hub": "https://calkit.io",
-        "project": "o/p",
-        "path": "figures/a.png",
-        "git_repo_url": "https://github.com/o/p",
-        "git_ref": "v1",
+        "source": {
+            "kind": "calkit",
+            "hub": "https://calkit.io",
+            "project": "o/p",
+            "path": "figures/a.png",
+            "git_repo_url": "https://github.com/o/p",
+            "git_ref": "v1",
+        },
         "git_rev": "a" * 40,
     }
     assert entry["title"] == "A figure"
@@ -389,33 +391,41 @@ def test_get_import_statuses(tmp_dir, monkeypatch):
     src.git.commit(m="one", author="T <t@x.org>")
     first = src.head.commit.hexsha
     src.create_tag("v1", message="Version 1")
-    hub = {"kind": "calkit", "hub": "https://calkit.io", "project": "o/p"}
+
+    def hub(path, git_ref=None, git_rev=first):
+        source = {
+            "kind": "calkit",
+            "hub": "https://calkit.io",
+            "project": "o/p",
+        }
+        source |= {"path": path} | ({"git_ref": git_ref} if git_ref else {})
+        return {"source": source, "git_rev": git_rev}
 
     def git_lock(ref, rev=first):
-        return {
+        source = {
             "kind": "git",
             "repo_url": "src",
             "path": "a.txt",
             "ref": ref,
-            "rev": rev,
         }
+        return {"source": source, "git_rev": rev}
 
     imports = {
         "same.png": (
             {"project": "o/p", "path": "same.png"},
-            hub | {"path": "same.png", "git_rev": first},
+            hub("same.png"),
         ),
         "newer.png": (
             {"project": "o/p", "path": "newer.png"},
-            hub | {"path": "newer.png", "git_rev": first},
+            hub("newer.png"),
         ),
         "pinned.png": (
             {"project": "o/p", "path": "x", "git_ref": first[:9]},
-            hub | {"path": "x", "git_ref": first[:9], "git_rev": first},
+            hub("x", git_ref=first[:9]),
         ),
         "moved.png": (
             {"project": "o/p", "path": "y"},
-            hub | {"path": "old/y"},
+            hub("old/y", git_rev=None),
         ),
         "edited.png": (
             {"project": "o/p", "path": "edited.png"},
@@ -439,11 +449,14 @@ def test_get_import_statuses(tmp_dir, monkeypatch):
         ),
         "web.csv": (
             {"url": "https://x.org/web.csv"},
-            {"kind": "url", "url": "https://x.org/web.csv", "etag": '"e1"'},
+            {
+                "source": {"kind": "url", "url": "https://x.org/web.csv"},
+                "etag": '"e1"',
+            },
         ),
         "bare.csv": (
             {"url": "https://x.org/bare.csv"},
-            {"kind": "url", "url": "https://x.org/bare.csv"},
+            {"source": {"kind": "url", "url": "https://x.org/bare.csv"}},
         ),
     }
     ck_info: dict = {"figures": []}
@@ -592,7 +605,7 @@ def test_fetch_resolves_a_slashed_ref(tmp_dir):
     assert out["git_ref"] == "feature/foo"
     assert out["path"] == "scripts/a.sh"
     # What it resolved to comes back separately, for the lock file
-    assert lock["rev"] and lock["hash"].startswith("sha256:")
+    assert lock["git_rev"] and lock["hash"].startswith("sha256:")
     with open("a.sh") as f:
         assert f.read() == "on-feature\n"
     # A ref that resolves as recorded is never widened, even when a longer

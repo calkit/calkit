@@ -82,18 +82,25 @@ def test_import_and_update_a_path(tmp_dir):
     assert "git_rev" not in source
     assert source["git_ref"] == "main"
     assert source["path"] == "setups/setup.sh"
-    assert locked("scripts/setup.sh")["rev"] == first_rev
+    assert locked("scripts/setup.sh")["git_rev"] == first_rev
     # The lock says where it came from too, so it stands on its own
     assert {
         k: v for k, v in locked("scripts/setup.sh").items() if k != "fetched"
     } == {
-        "kind": "git",
-        "repo_url": src,
-        "path": "setups/setup.sh",
-        "ref": "main",
-        "rev": first_rev,
+        "source": {
+            "kind": "git",
+            "repo_url": src,
+            "path": "setups/setup.sh",
+            "ref": "main",
+        },
+        "git_rev": first_rev,
         "hash": locked("scripts/setup.sh")["hash"],
     }
+    # Written source first, with its kind at the top, to read easily
+    with open(".calkit/imports.json") as f:
+        entry = json.load(f)["scripts/setup.sh"]
+    assert list(entry) == ["source", "git_rev", "hash", "fetched"]
+    assert list(entry["source"]) == ["kind", "repo_url", "path", "ref"]
     assert locked("scripts/setup.sh")["hash"].startswith("sha256:")
     # Importing over it again needs saying so
     res = subprocess.run(
@@ -155,7 +162,7 @@ def test_import_and_update_a_path(tmp_dir):
     )
     with open("scripts/setup.sh") as f:
         assert f.read() == "export FOO=2\n"
-    assert locked("scripts/setup.sh")["rev"] == second_rev
+    assert locked("scripts/setup.sh")["git_rev"] == second_rev
     # With no 'ref' recorded, refreshing takes the latest on the default
     # branch rather than re-reading the commit it last landed on
     ck_info = calkit.load_calkit_info()
@@ -170,7 +177,7 @@ def test_import_and_update_a_path(tmp_dir):
     )
     with open("scripts/setup.sh") as f:
         assert f.read() == "export FOO=3\n"
-    assert locked("scripts/setup.sh")["rev"] == third_rev
+    assert locked("scripts/setup.sh")["git_rev"] == third_rev
     # --git-ref changes what the entry follows, from now on rather than
     # just this once, so a later refresh stays on the tag
     src_repo.create_tag("v1", ref=second_rev)
@@ -190,7 +197,7 @@ def test_import_and_update_a_path(tmp_dir):
         assert f.read() == "export FOO=2\n"
     source = calkit.load_calkit_info()["misc"][0]["imported_from"]
     assert source["git_ref"] == "v1"
-    assert locked("scripts/setup.sh")["rev"] == second_rev
+    assert locked("scripts/setup.sh")["git_rev"] == second_rev
     subprocess.run(
         ["calkit", "sync", "import", "scripts/setup.sh", "--no-commit"],
         check=True,

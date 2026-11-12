@@ -2684,12 +2684,13 @@ Options:
 
 Import objects.
 
-| Command                                         | Description                                                 |
-| ----------------------------------------------- | ----------------------------------------------------------- |
-| [`dataset`](#subcommand-import-dataset)         | Import a dataset.                                           |
-| [`path`](#subcommand-import-path)               | Import a file from elsewhere, recording where it came from. |
-| [`environment`](#subcommand-import-environment) | Import an environment from another project.                 |
-| [`zenodo`](#subcommand-import-zenodo)           | Import files from a Zenodo record.                          |
+| Command                                         | Description                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------- |
+| [`dataset`](#subcommand-import-dataset)         | Import a dataset.                                             |
+| [`path`](#subcommand-import-path)               | Import a file from elsewhere, recording where it came from.   |
+| [`figure`](#subcommand-import-figure)           | Import a figure from elsewhere, e.g., another Calkit project. |
+| [`environment`](#subcommand-import-environment) | Import an environment from another project.                   |
+| [`zenodo`](#subcommand-import-zenodo)           | Import files from a Zenodo record.                            |
 
 <a id="subcommand-import-dataset"></a>
 
@@ -2738,22 +2739,54 @@ calkit import path [OPTIONS] SRC-PATH [DEST-PATH]
 
 Arguments:
 
-| Argument    | Type | Required | Default | Description                                                                                                                                                                                                                                              |
-| ----------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src_path`  | str  | yes      |         | Where to get the file: a URL, including a GitHub or GitLab link to a file, an SSH clone URL like git@github.com:owner/repo/path, a DOI, a Calkit project path like someone/some-project/scripts/setup.sh, or a path inside the repo named by --git-repo. |
-| `dest_path` | str  | no       |         | Path at which to save it in this project. Defaults to the path within the source project for a Calkit project source, and to the file's name for a Git repo, a URL, or anything else that has no project-relative path.                                  |
+| Argument    | Type | Required | Default | Description                                                                                                                                                                                                                                                                                                                                           |
+| ----------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src_path`  | str  | yes      |         | Where to get the file: a URL, including a GitHub or GitLab link to a file or a link to a file on the Calkit hub, e.g., calkit.io/someone/some-project/figures/plot.png, an SSH clone URL like git@github.com:owner/repo/path, a DOI, a Calkit project path like someone/some-project/scripts/setup.sh, or a path inside the repo named by --git-repo. |
+| `dest_path` | str  | no       |         | Path at which to save it in this project. Defaults to the path within the source project for a Calkit project source, and to the file's name for a Git repo, a URL, or anything else that has no project-relative path.                                                                                                                               |
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                           |
-| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--kind`            | str     | no       | misc    | What kind of artifact this is: 'dataset', 'figure', 'publication', or 'misc' (default), which is where a path that isn't one of the typed artifacts belongs.                                                                          |
-| `--git-repo`        | str     | no       |         | Clone URL of a Git repo to take the file from, for a repo that isn't a Calkit project.                                                                                                                                                |
-| `--git-ref`         | str     | no       |         | Branch, tag, or commit to follow, recorded so 'calkit sync import' knows where to look next time, and overriding one read out of the URL. Needed for a URL whose branch name contains a slash. Defaults to the repo's default branch. |
-| `--title`           | str     | no       |         | Title for the entry.                                                                                                                                                                                                                  |
-| `--description`     | str     | no       |         | Description for the entry.                                                                                                                                                                                                            |
-| `--overwrite`, `-f` | boolean | no       | False   | Replace an existing file or entry at this path.                                                                                                                                                                                       |
-| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                                                                                                                                                                        |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                                                                                        |
+| ------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--kind`            | str     | no       | misc    | What kind of artifact this is: 'dataset', 'figure', 'publication', or 'misc' (default), which is where a path that isn't one of the typed artifacts belongs.                                                                                                                                       |
+| `--git-repo`        | str     | no       |         | Clone URL of a Git repo to take the file from, for a repo that isn't a Calkit project.                                                                                                                                                                                                             |
+| `--git-ref`         | str     | no       |         | Branch, tag, or commit to follow, recorded so 'calkit sync import' knows where to look next time, and overriding one read out of the URL. Needed for a URL whose branch name contains a slash. Defaults to the default branch. Either way, the commit fetched is recorded in .calkit/imports.json. |
+| `--title`           | str     | no       |         | Title for the entry. Defaults to the source project's, for a Calkit project source.                                                                                                                                                                                                                |
+| `--description`     | str     | no       |         | Description for the entry. Defaults to the source project's, for a Calkit project source.                                                                                                                                                                                                          |
+| `--overwrite`, `-f` | boolean | no       | False   | Replace an existing file or entry at this path.                                                                                                                                                                                                                                                    |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                                                                                                                                                                                                                                     |
+
+<a id="subcommand-import-figure"></a>
+
+#### `calkit import figure`
+
+Import a figure from elsewhere, e.g., another Calkit project.
+
+The same as 'calkit import path --kind figure'.
+
+Usage:
+
+```text
+calkit import figure [OPTIONS] SRC-PATH [DEST-PATH]
+```
+
+Arguments:
+
+| Argument    | Type | Required | Default | Description                                                                                                                                                                                                                                                                                                                                           |
+| ----------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src_path`  | str  | yes      |         | Where to get the file: a URL, including a GitHub or GitLab link to a file or a link to a file on the Calkit hub, e.g., calkit.io/someone/some-project/figures/plot.png, an SSH clone URL like git@github.com:owner/repo/path, a DOI, a Calkit project path like someone/some-project/scripts/setup.sh, or a path inside the repo named by --git-repo. |
+| `dest_path` | str  | no       |         | Path at which to save it in this project. Defaults to the path within the source project for a Calkit project source, and to the file's name for a Git repo, a URL, or anything else that has no project-relative path.                                                                                                                               |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                                                                                        |
+| ------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--git-repo`        | str     | no       |         | Clone URL of a Git repo to take the file from, for a repo that isn't a Calkit project.                                                                                                                                                                                                             |
+| `--git-ref`         | str     | no       |         | Branch, tag, or commit to follow, recorded so 'calkit sync import' knows where to look next time, and overriding one read out of the URL. Needed for a URL whose branch name contains a slash. Defaults to the default branch. Either way, the commit fetched is recorded in .calkit/imports.json. |
+| `--title`           | str     | no       |         | Title for the entry. Defaults to the source project's, for a Calkit project source.                                                                                                                                                                                                                |
+| `--description`     | str     | no       |         | Description for the entry. Defaults to the source project's, for a Calkit project source.                                                                                                                                                                                                          |
+| `--overwrite`, `-f` | boolean | no       | False   | Replace an existing file or entry at this path.                                                                                                                                                                                                                                                    |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                                                                                                                                                                                                                                     |
 
 <a id="subcommand-import-environment"></a>
 
@@ -2984,6 +3017,7 @@ Update objects.
 | [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match this version of Calkit's recommendations. |
 | [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match this version of Calkit's recommendations. |
 | [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                         |
+| [`markdown`](#subcommand-update-markdown)             | Update the values Markdown files show, and check their imported images.              |
 | [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                             |
 | [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                             |
 | [`pixi-env`](#subcommand-update-pixi-env)             | Update a pixi environment.                                                           |
@@ -3131,6 +3165,34 @@ Options:
 | ----------- | ------- | -------- | ------- | ----------------------------------------------- |
 | `--set-env` | str     | no       |         | Environment name to associate with the notebook |
 | `--json`    | boolean | no       | False   | Output result as JSON.                          |
+
+<a id="subcommand-update-markdown"></a>
+
+#### `calkit update markdown`
+
+Update the values Markdown files show, and check their imported images.
+
+Each value marker's text, e.g., the 0.29 in '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is rewritten from the JSON, YAML, or TOML results file and key it names. A format written in brackets, 'ckvalue[.2f] ...', as LaTeX's \ckvalue takes one, is moved after the key. Nothing else in the file changes. This is the update 'calkit run' makes after running the pipeline, for a project without one, e.g., one whose results are imported.
+
+Each local image a file shows that calkit.yaml records as imported, including one written from the project root like /images/fig.png, is checked against what the import fetched: it should exist and not have been edited since. Images are only checked, never changed; 'calkit sync import' is what brings in a newer version.
+
+Usage:
+
+```text
+calkit update markdown [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                              |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------ |
+| `paths`  | str  | no       |         | Markdown files to update. Defaults to those declared as markdown stages. |
+
+Options:
+
+| Option    | Type    | Required | Default | Description                                                                                                                              |
+| --------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--check` | boolean | no       | False   | Change nothing, and fail if any file shows a value its results file no longer holds, or an imported image that doesn't match its import. |
 
 <a id="subcommand-update-agent-skills"></a>
 
@@ -5031,12 +5093,12 @@ Arguments:
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                                                                                                              |
-| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `--all`         | boolean | no       | False   | Refresh every imported object in the project, across all artifact kinds. Ones that can't be refreshed in place are reported and skipped. |
-| `--git-ref`     | str     | no       |         | Branch, tag, or commit to follow from now on, for a file imported from a Git repo. Recorded, so later refreshes keep using it.           |
-| `--force`, `-f` | boolean | no       | False   | Overwrite even if the file has been edited since it was imported.                                                                        |
-| `--no-commit`   | boolean | no       | False   | Do not commit changes to repo.                                                                                                           |
+| Option          | Type    | Required | Default | Description                                                                                                                                      |
+| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--all`         | boolean | no       | False   | Refresh every imported object in the project, across all artifact kinds. Ones that can't be refreshed in place are reported and skipped.         |
+| `--git-ref`     | str     | no       |         | Branch, tag, or commit to follow from now on, for a file imported from a Git repo or Calkit project. Recorded, so later refreshes keep using it. |
+| `--force`, `-f` | boolean | no       | False   | Overwrite even if the file has been edited since it was imported.                                                                                |
+| `--no-commit`   | boolean | no       | False   | Do not commit changes to repo.                                                                                                                   |
 
 <a id="subcommand-sync-overleaf"></a>
 

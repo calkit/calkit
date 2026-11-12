@@ -87,6 +87,12 @@ def test_source_from_location():
     }
     with pytest.raises(ValueError, match="Cannot tell where"):
         source_from_location("just-a-name")
+    # A ref given for a project is what it follows
+    assert source_from_location("o/p/figures/a.png", ref="v1") == {
+        "project": "o/p",
+        "path": "figures/a.png",
+        "git_ref": "v1",
+    }
     # Where each lands with no destination given
     assert (
         default_dest_path(source_from_location("https://x.org/a/b.csv"))
@@ -102,6 +108,54 @@ def test_source_from_location():
         default_dest_path(source_from_location("o/p/scripts/setup.sh"))
         == "scripts/setup.sh"
     )
+
+
+def test_project_sources_from_hub_links(monkeypatch):
+    from calkit.provenance import source_from_location
+
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
+    # Written short, with or without a scheme
+    for written in [
+        "calkit.io/o/p/figures/a.png",
+        "https://calkit.io/o/p/figures/a.png",
+    ]:
+        assert source_from_location(written) == {
+            "project": "o/p",
+            "path": "figures/a.png",
+        }, written
+    # As a file's page on the hub shows it, ref and all, which an explicit
+    # ref overrides
+    page = "https://calkit.io/o/p/files?path=figures/a.png&ref=abc1234"
+    assert source_from_location(page) == {
+        "project": "o/p",
+        "path": "figures/a.png",
+        "git_ref": "abc1234",
+    }
+    assert source_from_location(page, ref="v2")["git_ref"] == "v2"
+    assert source_from_location("calkit.io/o/p/a.png", ref="v2") == {
+        "project": "o/p",
+        "path": "a.png",
+        "git_ref": "v2",
+    }
+    # A link that names no file
+    for written in ["calkit.io/o/p", "https://calkit.io/o/p/files"]:
+        with pytest.raises(ValueError, match="not a file in it"):
+            source_from_location(written)
+    with pytest.raises(ValueError, match="doesn't name a project"):
+        source_from_location("https://calkit.io/o")
+    # Another built-in hub would be fetched from this one
+    with pytest.raises(ValueError, match="this project uses the hub"):
+        source_from_location("staging.calkit.io/o/p/a.png")
+    # Anything else is read as it was before
+    assert source_from_location("https://example.com/o/p/a.png") == {
+        "url": "https://example.com/o/p/a.png"
+    }
+    # A self-hosted hub's links are read the same way
+    monkeypatch.setenv("CALKIT_HUB", "https://hub.example.edu")
+    assert source_from_location("hub.example.edu/o/p/a.png") == {
+        "project": "o/p",
+        "path": "a.png",
+    }
 
 
 def test_source_from_ssh_clone_urls():
@@ -172,6 +226,112 @@ def test_fetch_rejects_doi():
 
     with pytest.raises(ValueError, match="calkit import zenodo"):
         fetch({"doi": "10.5281/zenodo.1"}, dest_path="x")
+
+
+def test_fetch_from_a_project_records_its_commit(tmp_dir, monkeypatch):
+    import base64
+
+    import calkit
+    from calkit.provenance import fetch
+
+    calls = []
+    response: dict = {
+        "content": base64.b64encode(b"png bytes").decode(),
+        "commit_sha": "a" * 40,
+        "calkit_object": {
+            "kind": "figure",
+            "path": "figures/a.png",
+            "title": "A figure",
+        },
+    }
+
+    def get(path, params=None, **kwargs):
+        calls.append((path, params))
+        return response
+
+    monkeypatch.setattr(calkit.hub, "get", get)
+    # A ref is asked for, and the commit it resolved to is recorded
+    entry: dict = {}
+    source, lock = fetch(
+        {"project": "o/p", "path": "figures/a.png", "git_ref": "v1"},
+        dest_path="figs/a.png",
+        source_entry=entry,
+    )
+    assert calls[-1] == ("/projects/o/p/contents/figures/a.png", {"ref": "v1"})
+    with open("figs/a.png", "rb") as f:
+        assert f.read() == b"png bytes"
+    assert source["git_ref"] == "v1"
+    assert lock["rev"] == "a" * 40
+    assert lock["hash"].startswith("sha256:")
+    assert entry["title"] == "A figure"
+    # With no ref, the default branch is read, and still pinned in the lock
+    _, lock = fetch({"project": "o/p", "path": "figures/a.png"}, "b.png")
+    assert calls[-1] == ("/projects/o/p/contents/figures/a.png", None)
+    assert lock["rev"] == "a" * 40
+    # A hub that doesn't say what commit it read leaves it unrecorded
+    del response["commit_sha"]
+    _, lock = fetch({"project": "o/p", "path": "figures/a.png"}, "c.png")
+    assert "rev" not in lock
+
+
+def test_get_imports_with_updates(tmp_dir, monkeypatch):
+    import base64
+
+    from requests.exceptions import ConnectionError
+
+    import calkit
+    from calkit.provenance import (
+        get_imports_with_updates,
+        hash_path,
+        write_import_lock,
+    )
+
+    served: dict = {}
+    calls = []
+
+    def get(path, params=None, **kwargs):
+        calls.append(path)
+        if served.get("offline"):
+            raise ConnectionError("offline")
+        name = path.rsplit("/", 1)[-1]
+        if name == "private.png":
+            raise ValueError("403")
+        return {
+            "content": base64.b64encode(served[name]).decode(),
+            "commit_sha": served.get("commit_sha", "b" * 40),
+        }
+
+    monkeypatch.setattr(calkit.hub, "get", get)
+    ck_info: dict = {"figures": [], "misc": []}
+    for name in ["same.png", "newer.png", "private.png", "pinned.png"]:
+        with open(name, "wb") as f:
+            f.write(b"v1")
+        ck_info["figures"].append(
+            {"path": name, "imported_from": {"project": "o/p", "path": name}}
+        )
+        write_import_lock(name, {"hash": hash_path(name), "rev": "a" * 40})
+    served.update({"same.png": b"v1", "newer.png": b"v2"})
+    # One from a Git repo can't be checked without cloning it
+    ck_info["misc"].append(
+        {
+            "path": "same.png",
+            "imported_from": {"git_repo_url": "https://x/r.git", "path": "a"},
+        }
+    )
+    # The source's commit moved, but only one file changed with it, and
+    # one that can't be read is skipped
+    ck_info["figures"] = ck_info["figures"][:3]
+    assert get_imports_with_updates(ck_info) == ["newer.png"]
+    assert len(calls) == 3
+    # A recorded commit the source is still at needs no comparing
+    served["commit_sha"] = "a" * 40
+    assert get_imports_with_updates(ck_info) == []
+    # Offline, checking stops at the first failure rather than waiting on
+    # each import in turn
+    served["offline"] = True
+    calls.clear()
+    assert get_imports_with_updates(ck_info) == []
+    assert len(calls) == 1
 
 
 def test_git_source_records_intent_not_resolved_state():

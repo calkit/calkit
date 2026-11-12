@@ -1959,12 +1959,17 @@ def get_project_contents(
         ref=ref,
         read_only=True,
     )
-    return app.projects.get_contents_from_repo(
-        project=project,
-        repo=repo,
-        path=path,
-        ref=ref,
+    item = ContentsItem.model_validate(
+        app.projects.get_contents_from_repo(
+            project=project,
+            repo=repo,
+            path=path,
+            ref=ref,
+        )
     )
+    # With no ref, contents come from the live checkout, which is HEAD
+    item.commit_sha = resolve_commit_sha(repo, ref)
+    return item
 
 
 class DvcOutput(BaseModel):

@@ -1134,6 +1134,17 @@ export const ContentsItemSchema = {
       ],
       title: "Dir Items",
     },
+    commit_sha: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Commit Sha",
+    },
   },
   type: "object",
   required: ["name", "path", "type", "size", "in_repo"],

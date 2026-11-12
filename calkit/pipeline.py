@@ -2960,11 +2960,13 @@ def to_dvc(
                 return f"{wdir_rel_posix}/{p}" if wdir_rel_posix != "." else p
 
             # Ensure we catch any Jupyter Notebook outputs
-            outputs = stage.outputs.copy()
+            outputs: list[str | PathOutput] = list(stage.outputs or [])
             if stage.kind == "jupyter-notebook":
                 outputs += stage.notebook_outputs
             elif stage.kind == "marimo-html-wasm":
                 outputs += stage.app_outputs
+            elif stage.kind == "references-check":
+                outputs += stage.check_outputs
             sched_log = stage.scheduler_log_output
             if sched_log is not None:
                 outputs.append(sched_log)

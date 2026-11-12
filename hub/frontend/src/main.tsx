@@ -8,7 +8,7 @@ import { StrictMode } from "react"
 import { client } from "./client/client.gen"
 import NotFound from "./components/Common/NotFound"
 import { initAnalytics, sensitivePropertyBlacklist } from "./lib/analytics"
-import { getValidAccessToken } from "./lib/auth"
+import { forceRefreshAccessToken, getValidAccessToken } from "./lib/auth"
 import { reloadOnStaleChunk } from "./lib/staleChunks"
 import { routeTree } from "./routeTree.gen"
 import theme from "./theme"
@@ -26,12 +26,25 @@ client.instance.interceptors.request.use(async (config) => {
   }
   return config
 })
+// Tokens from before sign-in sessions existed have none, so actions that
+// need one are refused until a refresh; refresh once and try again
+client.instance.interceptors.response.use(undefined, async (error) => {
+  const config = error.config
+  if (
+    error.response?.status === 403 &&
+    error.response.data?.detail === "This requires signing in, not a token" &&
+    config &&
+    !config._sessionRetried
+  ) {
+    config._sessionRetried = true
+    if (await forceRefreshAccessToken()) return client.instance(config)
+  }
+  throw error
+})
 
 const mixpanelToken = import.meta.env.VITE_MIXPANEL_TOKEN
 mixpanel.init(mixpanelToken, {
-  debug: String(import.meta.env.VITE_API_URL).startsWith(
-    "http://api.localhost",
-  ),
+  debug: String(import.meta.env.VITE_API_URL).startsWith("http://localhost"),
   // Page views are tracked in lib/analytics instead of automatically here, so
   // automated sessions can be tagged before any event is sent.
   track_pageview: false,

@@ -169,6 +169,9 @@ class PipelineStatus(BaseModel):
 
     has_pipeline: bool
     environment_checks: dict[str, dict] = Field(default_factory=dict)
+    # When environments aren't checked, what the record of their last checks
+    # says instead: when, whether it passed, and whether they've changed since
+    environment_states: dict[str, dict] = Field(default_factory=dict)
     cleaned_notebooks: list[str] = Field(default_factory=list)
     stale_stages: dict[str, "StaleStage"] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
@@ -1365,6 +1368,18 @@ def get_status(
             ]
             if failed_env_checks:
                 return PipelineStatus.model_validate(result)
+        else:
+            try:
+                result["environment_states"] = (
+                    calkit.environments.get_cached_env_states(
+                        ck_info=ck_info, targets=targets
+                    )
+                )
+            except Exception as e:
+                result["errors"].append(
+                    "Failed to read environment check records: "
+                    f"{e.__class__.__name__}: {e}"
+                )
         if compile_to_dvc and (
             ck_info.get("pipeline", {}).get("stages", {})
             or ck_info.get("subprojects")
@@ -1396,8 +1411,10 @@ def get_status(
                 )
                 return PipelineStatus.model_validate(result)
         import dvc.repo
+        from dvc.exceptions import NotDvcRepoError
         from dvc.lock import LockError
 
+        dvc_repo = None
         try:
             dvc_repo = calkit.dvc.get_dvc_repo()
             # calkit.dvc.core installs a filter on dvc.repo.status that drops
@@ -1460,6 +1477,23 @@ def get_status(
                     "finishes."
                 )
             return PipelineStatus.model_validate(result)
+        except NotDvcRepoError as e:
+            # Nothing can be stale in a pipeline that gives DVC nothing,
+            # e.g., a project with no pipeline
+            stages_for_dvc = None
+            if os.path.isfile("dvc.yaml"):
+                with open("dvc.yaml") as f:
+                    stages_for_dvc = (calkit.ryaml.load(f) or {}).get("stages")
+            if stages_for_dvc or ck_info.get("subprojects"):
+                result["errors"].append(
+                    "Failed to get pipeline status from DVC: "
+                    f"{e.__class__.__name__}: {e}"
+                )
+                return PipelineStatus.model_validate(result)
+            raw_status = {}
+            dvc_out_paths = []
+            dvc_data_status = None
+            storage_problems = None
         except Exception as e:
             result["errors"].append(
                 "Failed to get pipeline status from DVC: "
@@ -1752,7 +1786,7 @@ def get_status(
                     for out in dvc_out_paths
                 ):
                     continue
-                if dvc_repo.dvcignore.is_ignored_file(
+                if dvc_repo is not None and dvc_repo.dvcignore.is_ignored_file(
                     os.path.abspath(ignored_path)
                 ):
                     continue
@@ -1792,6 +1826,7 @@ def get_status(
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
             environment_checks=result["environment_checks"],
+            environment_states=result.get("environment_states", {}),
             cleaned_notebooks=result["cleaned_notebooks"],
             stale_stages=result["stale_stages"],
             errors=result["errors"],
@@ -1850,27 +1885,41 @@ def get_map_paths_source(stage: dict, path: str) -> str | None:
 
 
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
-    """Return the name of the pipeline stage that produces ``path``, if any."""
+    """Return the name of the pipeline stage that produces ``path``, if any.
+
+    A stage produces everything inside a directory it declares as an output
+    or writes into through ``map-paths``. A stage declaring the path itself
+    wins, then the one declaring the innermost directory that contains it.
+    """
     target = posixpath.normpath(Path(path).as_posix())
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if not isinstance(stages, dict):
         return None
+    containing: tuple[int, str] | None = None
     for name, stage in stages.items():
         if not isinstance(stage, dict):
             continue
         wdir = stage.get("wdir") or ""
-        for out in stage.get("outputs") or []:
-            out_path = out.get("path") if isinstance(out, dict) else out
-            if out_path and target == posixpath.normpath(
-                posixpath.join(wdir, Path(out_path).as_posix())
+        declared = [
+            out.get("path") if isinstance(out, dict) else out
+            for out in stage.get("outputs") or []
+        ]
+        outs = [
+            posixpath.normpath(posixpath.join(wdir, Path(p).as_posix()))
+            for p in declared
+            if p and isinstance(p, str)
+        ] + get_map_paths_outputs(stage)
+        for out in outs:
+            if target == out:
+                return str(name)
+            # Except the project root, which would claim every path
+            if (
+                out != "."
+                and target.startswith(out + "/")
+                and (containing is None or len(out) > containing[0])
             ):
-                return str(name)
-        for out in get_map_paths_outputs(stage):
-            # A directory mapping produces everything it writes into, except
-            # into the project root, which would claim every path
-            if target == out or (out != "." and target.startswith(out + "/")):
-                return str(name)
-    return None
+                containing = (len(out), str(name))
+    return containing[1] if containing else None
 
 
 def get_output_storage_map(
@@ -3045,7 +3094,9 @@ def to_dvc(
             }
         dvc_yaml["stages"] = written_stages
         dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
-        _dump_yaml_if_changed(dvc_yaml, dvc_yaml_fpath, verbose=verbose)
+        # A project with no stages for DVC needs no dvc.yaml to say so
+        if written_stages or os.path.isfile(dvc_yaml_fpath):
+            _dump_yaml_if_changed(dvc_yaml, dvc_yaml_fpath, verbose=verbose)
         _rename_lock_entries(lock_renames, wdir=wdir)
         # DVC errors out (FileIsGitIgnored) if dvc.lock is Git-ignored, so make
         # sure it isn't---this keeps both status and pipeline runs working

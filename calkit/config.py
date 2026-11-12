@@ -125,11 +125,13 @@ def normalize_hub_url(hub: str) -> str:
 _project_hub_cache: dict[tuple[str, int, int], str | None] = {}
 
 
-def _get_project_hub() -> str | None:
-    """Read the working directory project's declared ``hub``."""
+def _get_project_hub(wdir: str | None = None) -> str | None:
+    """Read the declared ``hub`` of the project in ``wdir``, or the working
+    directory.
+    """
     import yaml
 
-    fpath = os.path.join(os.getcwd(), "calkit.yaml")
+    fpath = os.path.abspath(os.path.join(wdir or os.getcwd(), "calkit.yaml"))
     try:
         st = os.stat(fpath)
     except OSError:
@@ -692,7 +694,8 @@ class Settings(BaseSettings):
     overleaf_token: KeyringOptionalSecret | None = None
     # Browser session cookie, for syncing without Overleaf's Git integration
     overleaf_session: KeyringOptionalSecret | None = None
-
+    # Default archival service for releases
+    default_archival_service: Literal["zenodo", "caltechdata"] = "zenodo"
     # Which fields have been resolved from the keyring, so a secret that
     # is genuinely absent isn't looked up again, and an assignment (even
     # of None) isn't overwritten by what's still stored
@@ -800,7 +803,17 @@ class Settings(BaseSettings):
                     if _secret_cache.get(stored, ...) == secret_val:
                         continue
                     if secret_val is not None:
-                        set_secret(key, secret_val)
+                        try:
+                            set_secret(key, secret_val)
+                        except keyring.errors.KeyringError as e:
+                            # E.g., a service started at boot can't reach
+                            # the login keychain, so it stays in this file,
+                            # as it would with no keyring at all
+                            warnings.warn(
+                                f"Couldn't store {key} in the keyring ({e}); "
+                                f"saving it in {fpath} instead"
+                            )
+                            cfg[key] = secret_val
                     else:
                         try:
                             delete_secret(key)

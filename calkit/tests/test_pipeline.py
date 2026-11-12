@@ -2118,6 +2118,13 @@ def test_get_status(tmp_dir):
     assert "get-data" in status.stale_stage_names
     assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
     assert status.stale_stages["get-data"].modified_outputs == []
+    # Without checking environments, it says what their last checks did
+    status = calkit.pipeline.get_status(
+        ck_info=ck_info, check_environments=False
+    )
+    assert status.environment_checks == {}
+    assert status.environment_states["py"]["success"]
+    assert "get-data" in status.stale_stage_names
     # Run the pipeline and check that status updates to up-to-date
     subprocess.check_call(["calkit", "run"])
     status = calkit.pipeline.get_status(ck_info=ck_info)
@@ -4265,6 +4272,40 @@ def test_get_stage_for_output_reads_map_paths_destinations():
     stages["copy"]["wdir"] = None
     stages["copy"]["paths"][2]["dest"] = "."
     assert get_stage_for_output("data/raw.csv", ck_info) is None
+    # A stage produces what's inside a directory it declares as an output,
+    # relative to its wdir, with the path itself, then the innermost
+    # directory, winning
+    stages["trace"] = {
+        "kind": "python-script",
+        "script_path": "trace.py",
+        "environment": "py",
+        "wdir": "results",
+        "outputs": ["trace", {"path": "trace/run-1/summary.md"}],
+    }
+    stages["runs"] = {
+        "kind": "python-script",
+        "script_path": "runs.py",
+        "environment": "py",
+        "outputs": [{"path": "results/trace/run-1"}],
+    }
+    stages["everything"] = {
+        "kind": "python-script",
+        "script_path": "all.py",
+        "environment": "py",
+        "outputs": ["."],
+    }
+    for path, stage in [
+        ("results/trace", "trace"),
+        ("results/trace/run-2/RESULTS.md", "trace"),
+        ("results/trace/run-1/RESULTS.md", "runs"),
+        ("results/trace/run-1/summary.md", "trace"),
+        ("results/tracer.md", None),
+        ("trace/run-2/RESULTS.md", None),
+        ("analysis/figures/a.png", "plot"),
+        # The project root doesn't claim every path
+        ("data/raw.csv", None),
+    ]:
+        assert get_stage_for_output(path, ck_info) == stage, path
     # A pipeline can be null
     assert get_stage_for_output("figures/a.png", {"pipeline": None}) is None
 

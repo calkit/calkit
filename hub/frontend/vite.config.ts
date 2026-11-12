@@ -10,6 +10,19 @@ export default defineConfig({
     host: true, // equivalent to 0.0.0.0
     port: 5173,
     strictPort: true,
+    // In local dev, the API is reached through this server, since browsers
+    // treat api.localhost and localhost as different sites, so they'd never
+    // send it the SameSite cookie the second factor is kept in
+    proxy: process.env.API_PROXY_TARGET
+      ? {
+          "/_api": {
+            target: process.env.API_PROXY_TARGET,
+            ws: true,
+            xfwd: true,
+            rewrite: (path) => path.replace(/^\/_api/, ""),
+          },
+        }
+      : undefined,
     // HMR generally works out-of-the-box when port is forwarded one-to-one.
     // If you run into websocket issues behind proxies, set explicit HMR host/port here.
     // hmr: { host: "localhost", port: 5173, protocol: "ws" },

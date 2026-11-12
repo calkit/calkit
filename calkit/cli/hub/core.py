@@ -9,12 +9,18 @@ import typer
 import calkit
 from calkit.cli import raise_error
 from calkit.cli.config import hub_config_app
+from calkit.cli.hub.link import link_app
 
 hub_app = typer.Typer(no_args_is_help=True)
 hub_app.add_typer(
     hub_config_app,
     name="config",
     help="Work with per-hub credentials (tokens).",
+)
+hub_app.add_typer(
+    link_app,
+    name="link",
+    help="Manage this machine's hub link, to work on it from a hub.",
 )
 
 _HUB_OPTION_HELP = (

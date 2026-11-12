@@ -60,6 +60,10 @@ def test_get_project_contents_forwards_ref(client: TestClient) -> None:
                 "dir_items": None,
             },
         ) as mock_get_contents,
+        patch(
+            "app.api.routes.projects.core.resolve_commit_sha",
+            return_value="a" * 40,
+        ) as mock_resolve_commit,
     ):
         response = client.get(
             (
@@ -69,6 +73,9 @@ def test_get_project_contents_forwards_ref(client: TestClient) -> None:
         )
     assert response.status_code == 200
     assert response.json()["path"] == "README.md"
+    # The commit the ref resolved to comes back, so an import can pin it
+    assert response.json()["commit_sha"] == "a" * 40
+    mock_resolve_commit.assert_called_once_with(fake_repo, "v1.2.3")
     mock_get_project.assert_called_once_with(
         owner_name="test-owner",
         project_name="test-project",
@@ -4454,6 +4461,17 @@ def test_question_evidence_values_documents_and_publications() -> None:
             "path": "results/summary.json",
             "values": {"avg2": "stats.mean", "gone": "stats.nope"},
         },
+        # With no kind, a key or values still makes it a result
+        {"path": "results/summary.json", "key": "stats.n"},
+        {
+            "kind": None,
+            "path": "results/summary.json",
+            "values": {"n": "stats.n"},
+        },
+        # Otherwise it's a plain file, at some lines or none
+        {"path": "logs/run.log", "lines": 8, "explanation": "It says so."},
+        {"kind": None, "path": "logs/run.log", "lines": " 8 - 12"},
+        {"path": "logs/gone.log"},
     ]
 
     def fake_contents(project, repo, path, ref):
@@ -4493,7 +4511,11 @@ def test_question_evidence_values_documents_and_publications() -> None:
                     dvc_lock={},
                     stage_statuses={},
                     frozen_stages=set(),
-                    present_paths={"docs/notes.md", "docs/draft.md"},
+                    present_paths={
+                        "docs/notes.md",
+                        "docs/draft.md",
+                        "logs/run.log",
+                    },
                 )
             },
             result_value_cache={},
@@ -4512,6 +4534,8 @@ def test_question_evidence_values_documents_and_publications() -> None:
         "total": 40,
         "failed": 13,
         "avg2": 2.5,
+        "stats.n": 40,
+        "n": 40,
     }
     assert [ev.kind for ev in evidence] == [
         "value",
@@ -4523,6 +4547,11 @@ def test_question_evidence_values_documents_and_publications() -> None:
         "value",
         "result",
         "result",
+        "result",
+        "result",
+        None,
+        None,
+        None,
     ]
     assert evidence[0].value == "2.5"
     assert evidence[0].name == "mean"
@@ -4547,6 +4576,65 @@ def test_question_evidence_values_documents_and_publications() -> None:
     # One value that can't be read is enough to call the card missing
     assert [v.value for v in evidence[8].values or []] == ["2.5", None]
     assert evidence[8].stale_reason == "missing"
+    assert evidence[9].value == "40"
+    assert [(v.name, v.value) for v in evidence[10].values or []] == [
+        ("n", "40")
+    ]
+    assert (evidence[11].path, evidence[11].lines) == ("logs/run.log", "8")
+    assert evidence[11].explanation == "It says so."
+    assert evidence[11].stale_reason is None
+    assert evidence[12].lines == "8-12"
+    assert evidence[12].stale_reason is None
+    assert evidence[13].lines is None
+    assert evidence[13].stale_reason == "missing"
+
+
+def test_cited_paths_are_present_by_tree_or_dvc_manifest() -> None:
+    from app.api.routes.projects.core import (
+        _get_present_paths,
+        _get_project_path,
+    )
+
+    # dvc.lock's paths are relative to each stage's wdir, matrix or not
+    stage_wdirs = {"trace": "results", "plot": ""}
+    assert _get_project_path("trace", "trace/a.md", stage_wdirs) == (
+        "results/trace/a.md"
+    )
+    assert _get_project_path("trace@1", "trace", stage_wdirs) == (
+        "results/trace"
+    )
+    assert _get_project_path("plot", "figures/a.png", stage_wdirs) == (
+        "figures/a.png"
+    )
+    assert _get_project_path("gone", "x.txt", stage_wdirs) == "x.txt"
+    # Expanded outs, keyed as dvc.lock writes them, with what the
+    # directory's manifest lists
+    dvc_lock_outs = {
+        "trace": {"type": "dir", "stage": "trace"},
+        "trace/run-1": {"type": "dir", "stage": "trace"},
+        "trace/run-1/RESULTS.md": {"type": "file", "stage": "trace"},
+        "figures/a.png": {"type": "file", "stage": "plot"},
+    }
+    tree = SimpleNamespace(
+        is_file=lambda p: p in {"notes/log.txt", "data/raw.csv.dvc"}
+    )
+    cited = {
+        "results/trace/run-1/RESULTS.md",
+        # Inside the directory, but not in its manifest
+        "results/trace/run-1/typo.md",
+        # As dvc.lock spells it, which isn't where it is
+        "trace/run-1/RESULTS.md",
+        "figures/a.png",
+        "notes/log.txt",
+        "data/raw.csv",
+        "notes/gone.txt",
+    }
+    assert _get_present_paths(cited, tree, dvc_lock_outs, stage_wdirs) == {
+        "results/trace/run-1/RESULTS.md",
+        "figures/a.png",
+        "notes/log.txt",
+        "data/raw.csv",
+    }
 
 
 def test_saving_a_question_keeps_names_sections_and_labels() -> None:
@@ -4586,6 +4674,12 @@ def test_saving_a_question_keeps_names_sections_and_labels() -> None:
                 key="stats.mean",
                 values={"avg": "stats.mean", "total": "stats.n"},
             ),
+            # A plain file has no kind to write, and keeps its lines
+            QuestionEvidencePost(
+                kind=None, path="logs/run.log", lines=" 8 ", key="x"
+            ),
+            QuestionEvidencePost(kind=None, path="logs/run.log", lines="8-12"),
+            QuestionEvidencePost(kind=None, path="logs/run.log"),
         ],
     )
     out = _apply_question_update("q?", req)
@@ -4611,7 +4705,23 @@ def test_saving_a_question_keeps_names_sections_and_labels() -> None:
             "path": "results/summary.json",
             "values": {"avg": "stats.mean", "total": "stats.n"},
         },
+        {"path": "logs/run.log", "lines": 8},
+        {"path": "logs/run.log", "lines": "8-12"},
+        {"path": "logs/run.log"},
     ]
+    # Lines that aren't a line or a range are refused
+    for lines in ("eight", "12-8", "0"):
+        bad = QuestionPut(
+            question="q?",
+            evidence=[
+                QuestionEvidencePost(
+                    kind=None, path="logs/run.log", lines=lines
+                )
+            ],
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            _apply_question_update("q?", bad)
+        assert exc_info.value.status_code == 422
 
 
 def test_delete_project_question(
@@ -4858,6 +4968,17 @@ def test_imported_from_info_reads_bare_strings() -> None:
     assert _imported_from_info("a colleague's USB stick") == {
         "description": "a colleague's USB stick"
     }
+    # Links that aren't http(s) are dropped, since they're rendered as hrefs
+    assert _imported_from_info(
+        {"url": "javascript:alert(1)", "date": "2026-01-02"}
+    ) == {"date": "2026-01-02"}
+    assert _imported_from_info(
+        {"git_repo_url": " JavaScript://github.com/%0Aalert(1)", "path": "a"}
+    ) == {"path": "a"}
+    # SSH clone URLs are kept
+    assert _imported_from_info({"git_repo_url": "git@github.com:a/b"}) == {
+        "git_repo_url": "git@github.com:a/b"
+    }
 
 
 def test_tables_listing_skips_map_paths_copies(tmp_path) -> None:
@@ -5046,6 +5167,80 @@ def test_post_project_empty_repo(client: TestClient, db: Session) -> None:
         }
     )
     assert resp.status_code == 400
+
+
+def test_post_project_git_repo_url_validation(
+    client: TestClient, db: Session
+) -> None:
+    suffix = uuid.uuid4().hex[:8]
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"repourl-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"repourl{suffix}",
+            github_username=f"repourl{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    # Stop at the repo create that follows validation
+    gh_get = SimpleNamespace(status_code=404, json=lambda: {}, text="")
+
+    def post(git_repo_url: str):
+        with (
+            patch(
+                "app.api.routes.projects.core.users.get_github_token",
+                return_value="gh-token",
+            ),
+            patch(
+                "app.api.routes.projects.core.requests.get",
+                return_value=gh_get,
+            ) as get,
+            patch(
+                "app.api.routes.projects.core.requests.post",
+                return_value=SimpleNamespace(
+                    status_code=500, json=lambda: {}, text="stop here"
+                ),
+            ),
+        ):
+            resp = client.post(
+                "/projects",
+                headers=headers,
+                json={
+                    "name": f"proj-{suffix}",
+                    "title": "Repo URL validation",
+                    "is_public": True,
+                    "git_repo_url": git_repo_url,
+                },
+            )
+        return resp, get
+
+    # Anything but an https github.com repo URL is rejected up front
+    for bad in [
+        f"javascript://github.com/%0Aalert(1)//repourl{suffix}/proj",
+        f"http://github.com/repourl{suffix}/proj",
+        f"https://github.com.evil.com/repourl{suffix}/proj",
+        f"https://user@github.com/repourl{suffix}/proj",
+        f"https://github.com/repourl{suffix}/proj/extra",
+        f"https://github.com/repourl{suffix}/proj?x=1",
+        "https://github.com/",
+    ]:
+        resp, get = post(bad)
+        assert resp.status_code == 400, bad
+        get.assert_not_called()
+    # A valid one is normalized before GitHub is asked about it
+    for good in [
+        f"https://www.github.com/repourl{suffix}/proj",
+        f"https://GitHub.com/repourl{suffix}/proj/",
+    ]:
+        resp, get = post(good)
+        assert resp.status_code != 400, resp.text
+        get.assert_called_once()
+        assert get.call_args.args[0] == (
+            f"https://api.github.com/repos/repourl{suffix}/proj"
+        )
 
 
 def test_post_project_org_repo_collaborator(

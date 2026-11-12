@@ -85,11 +85,6 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
     written to disk and the process's working directory is left alone.
     """
 
-    def quoted(text: str) -> str:
-        # Inside a quoted Mermaid label, so a project's names can't end it
-        # and add their own statements
-        return re.sub(r"[\r\n]+", " ", text.replace('"', "#quot;"))
-
     class RootedMemoryFileSystem(MemoryFileSystem):  # type: ignore[misc]
         # DVC resolves relative paths against this, so it has to be the
         # in-memory repo's root rather than the server's directory
@@ -129,6 +124,8 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
             ]
         graph = nx.relabel_nodes(graph, lambda stage: stage.name)
     # As DVC writes it, so node IDs and order match ``dvc dag --mermaid``,
+    # but with names escaped, since they come from the repo and could
+    # otherwise add Mermaid of their own, e.g., a click with a javascript: link,
     # with the arrows labeled by file name, a couple at most, unless there
     # are so many arrows that labels would bury the graph
     labeled = len(carried) <= MAX_LABELED_EDGES
@@ -139,17 +136,25 @@ def make_mermaid_diagram(pipeline: dict, params: dict | None = None) -> str:
         for node in sorted(str(x) for x in pipeline_graph.nodes):
             total_nodes += 1
             node_ids[node] = f"node{total_nodes}"
-            mermaid += f'\n\t{node_ids[node]}["{quoted(node)}"]'
+            mermaid += f'\n\t{node_ids[node]}["{escape_mermaid_label(node)}"]'
         edges = sorted((str(a), str(b)) for b, a in pipeline_graph.edges)
         for a, b in edges:
             names = [os.path.basename(p) or p for p in carried.get((a, b), [])]
-            label = "<br>".join(names[:2]) + (
-                f"<br>+{len(names) - 2} more" if len(names) > 2 else ""
-            )
-            label = quoted(label)
+            label = "<br>".join(
+                escape_mermaid_label(name) for name in names[:2]
+            ) + (f"<br>+{len(names) - 2} more" if len(names) > 2 else "")
             arrow = f'-->|"{label}"|' if labeled and label else "-->"
             mermaid += f"\n\t{node_ids[a]}{arrow}{node_ids[b]}"
     return mermaid
+
+
+def escape_mermaid_label(label: str) -> str:
+    """Write everything but plain name characters as Mermaid entity codes,
+    which it shows as the characters themselves.
+    """
+    return re.sub(
+        r"[^A-Za-z0-9 _.@/:+-]", lambda m: f"#{ord(m.group())};", label
+    )
 
 
 def output_from_pipeline(

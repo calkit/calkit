@@ -585,8 +585,10 @@ def get_status(
             "--category",
             "-c",
             help=(
-                "Status categories to show. By default, all categories are "
-                "shown. Can be specified multiple times."
+                "Status categories to show: project, questions, git, dvc, "
+                "pipeline, or imports. By default, all but imports are "
+                "shown, since checking imports asks each one's source. Can "
+                "be specified multiple times."
             ),
         ),
     ] = None,
@@ -685,19 +687,28 @@ def get_status(
         try:
             calkit.dvc.get_dvc_repo()
         except NotDvcRepoError:
-            typer.echo("Initializing DVC repository")
-            try:
-                result = calkit.dvc.init(quiet=True)
-                if result != 0:
-                    raise subprocess.CalledProcessError(result, "dvc init")
-            except subprocess.CalledProcessError as e:
-                raise_error(f"Failed to initialize DVC repository: {e}")
+            # Not for a project with nothing for DVC, e.g., a website
+            # showing imported results, which an editor checking its status
+            # would otherwise turn into a DVC repo
+            if (
+                (ck_info.get("pipeline") or {}).get("stages")
+                or ck_info.get("subprojects")
+                or os.path.isfile("dvc.yaml")
+            ):
+                typer.echo("Initializing DVC repository")
+                try:
+                    result = calkit.dvc.init(quiet=True)
+                    if result != 0:
+                        raise subprocess.CalledProcessError(result, "dvc init")
+                except subprocess.CalledProcessError as e:
+                    raise_error(f"Failed to initialize DVC repository: {e}")
         except Exception as e:
             # E.g., DVC's site cache dir isn't writable, which init can't fix
             raise_error(
                 f"Failed to open DVC repo: {e.__class__.__name__}: {e}"
             )
-    valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
+    default_categories = ["project", "questions", "git", "dvc", "pipeline"]
+    valid_categories = default_categories + ["imports"]
     if categories is not None:
         for category in categories:
             if category not in valid_categories:
@@ -706,7 +717,7 @@ def get_status(
                     f"{valid_categories}"
                 )
     else:
-        categories = valid_categories
+        categories = default_categories
     # Everything is worked out before anything is shown, which can take a
     # while, e.g., when environments are checked again, so a spinner shows
     # until then. It writes to its own copy of the terminal, since what the
@@ -737,6 +748,12 @@ def get_status(
     with spinner:
         pipeline_status = None
         running_status = None
+        import_statuses = None
+        if "imports" in categories:
+            from calkit.provenance import get_import_statuses
+
+            step("Checking imports against their sources")
+            import_statuses = get_import_statuses(ck_info)
         if "pipeline" in categories or "dvc" in categories:
             # If a run is in progress it holds the DVC lock, so computing
             # the full status would just error out (and would mutate files
@@ -892,6 +909,8 @@ def get_status(
                 status_dict["pipeline"] = pipeline_status.model_dump(
                     mode="json"
                 )
+        if import_statuses is not None:
+            status_dict["imports"] = import_statuses
         print(json.dumps(status_dict, indent=2, default=str))
         return
     if "project" in categories:
@@ -923,6 +942,38 @@ def get_status(
         calkit.echo(format_summary(questions_status))
         if not questions_status.ok:
             typer.echo("Run 'calkit check questions' for details.")
+        typer.echo()
+    if import_statuses is not None:
+        print_sep("Imports")
+        if not import_statuses:
+            typer.echo("Nothing is imported.")
+        labels = {
+            "up-to-date": ("up to date", "green"),
+            "update-available": ("update available", "yellow"),
+            "source-moved": ("source has moved on", "yellow"),
+            "source-changed": ("source changed in calkit.yaml", "yellow"),
+            "edited": ("edited since imported", "red"),
+            "missing": ("missing", "red"),
+            "unknown": ("can't tell", None),
+        }
+        for s in import_statuses:
+            label, color = labels[s["status"]]
+            detail = f" ({s['detail']})" if s["detail"] else ""
+            typer.echo(
+                f"{s['path']}: {typer.style(label, fg=color)}{detail}, "
+                f"from {s['source']}"
+            )
+        if any(
+            s["status"]
+            in (
+                "update-available",
+                "source-moved",
+                "source-changed",
+                "missing",
+            )
+            for s in import_statuses
+        ):
+            typer.echo("Run 'calkit sync import <path>' to bring one in.")
         typer.echo()
     if "git" in categories:
         print_sep("Git")
@@ -1936,7 +1987,16 @@ def pull(
                     "conflicts in dvc.lock and stage run records"
                 )
             raise_error("Git pull failed")
-    if not no_dvc:
+    import dvc.repo
+    from dvc.exceptions import NotDvcRepoError
+
+    try:
+        dvc.repo.Repo.find_root()
+        has_dvc = True
+    except NotDvcRepoError:
+        # E.g., a project that keeps everything in Git
+        has_dvc = False
+    if not no_dvc and has_dvc:
         typer.echo("DVC pulling")
         if not no_check_auth:
             # Check that our dvc remotes all have our DVC token set for them
@@ -1960,24 +2020,37 @@ def pull(
         if result != 0:
             raise_error("DVC pull failed")
         calkit.dvc.zip.sync_all(direction="to-workspace")
-        if not no_recursive:
-            # Pull DVC in isolated subprojects (those with their own .dvc folder)
-            ck_info = calkit.load_calkit_info()
-            for sp in ck_info.get("subprojects", []):
-                if not isinstance(sp, dict) or not sp.get("path"):
-                    continue
-                sp_path = sp["path"]
-                if not os.path.isdir(os.path.join(sp_path, ".dvc")):
-                    continue
-                typer.echo(f"DVC pulling subproject: {sp_path}")
-                sp_result = calkit.dvc.run_dvc_command(
-                    ["pull"] + dvc_args,
-                    cwd=sp_path,
-                    lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
-                )
-                if sp_result != 0:
-                    raise_error(f"DVC pull failed in subproject: {sp_path}")
-                calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
+    if not no_dvc and not no_recursive:
+        # Pull DVC in isolated subprojects (those with their own .dvc folder)
+        ck_info = calkit.load_calkit_info()
+        for sp in ck_info.get("subprojects", []):
+            if not isinstance(sp, dict) or not sp.get("path"):
+                continue
+            sp_path = sp["path"]
+            if not os.path.isdir(os.path.join(sp_path, ".dvc")):
+                continue
+            typer.echo(f"DVC pulling subproject: {sp_path}")
+            sp_result = calkit.dvc.run_dvc_command(
+                ["pull"] + dvc_args,
+                cwd=sp_path,
+                lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
+            )
+            if sp_result != 0:
+                raise_error(f"DVC pull failed in subproject: {sp_path}")
+            calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
+    # Said, not done: an import only moves when asked to
+    from calkit.provenance import get_imports_with_updates
+
+    try:
+        updated = get_imports_with_updates(calkit.load_calkit_info())
+    except Exception:
+        updated = []
+    if updated:
+        typer.echo(
+            f"{len(updated)} import(s) have a newer version at their "
+            f"source: {', '.join(updated)}; run 'calkit sync import "
+            "<path>' to bring one in"
+        )
 
 
 # What ``calkit push`` can send, in the order it sends them
@@ -2321,20 +2394,6 @@ def ignore(
             repo.git.commit(["-m", f"Ignore {path}"])
 
 
-@app.command(name="local-server")
-def run_local_server() -> None:
-    """Run the local server to interact over HTTP."""
-    import uvicorn
-
-    uvicorn.run(
-        "calkit.server:app",
-        port=8866,
-        host="localhost",
-        reload=True,
-        reload_dirs=[os.path.dirname(os.path.dirname(__file__))],
-    )
-
-
 # Stage output is teed into the run log and can look exactly like a DVC log
 # record (the "%(asctime)s - %(levelname)s - %(message)s" format is a common
 # one in user scripts), so it's bracketed by these and skipped when parsing.
@@ -2427,13 +2486,16 @@ def _inject_markdown_values() -> list[str]:
     import calkit.markdown
 
     ck_info = calkit.load_calkit_info()
+    results = calkit.markdown.results_by_name(ck_info)
     changed_paths = []
     for md_path in set(calkit.markdown.get_markdown_stages(ck_info).values()):
         if not os.path.isfile(md_path):
             continue
         with open(md_path, encoding="utf-8") as f:
             text = f.read()
-        new_text, changed = calkit.markdown.set_values(text, md_path)
+        new_text, changed = calkit.markdown.set_values(
+            text, md_path, results=results
+        )
         if changed:
             with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(new_text)
@@ -2624,6 +2686,8 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
     """
     from dvc.cli import main as dvc_cli_main
 
+    # A pull here sends the remotes' auth, so gate it as run_dvc_command does
+    calkit.dvc.clear_off_hub_auth()
     calkit.dvc.ensure_writable_site_cache()
     try:
         return int(dvc_cli_main(argv))
@@ -2660,30 +2724,50 @@ def _prune_run_logs(
             pass
 
 
-def _get_latest_run_log_content() -> str | None:
-    """Return the contents of the most recent run log, or ``None``.
+def _get_latest_run_log_content(wdir: str = ".") -> str | None:
+    """Return the contents of the most recent run log, or ``None``."""
+    latest = _get_latest_run_log_path(wdir)
+    if latest is None:
+        return None
+    # Only the end of a large one, which is read while a run goes, e.g., by
+    # a hub link at every check-in
+    try:
+        with open(latest, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 10_000_000))
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _get_latest_run_log_path(wdir: str = ".") -> str | None:
+    """Return the path of the most recent run log, or ``None``.
 
     Looks in the private ``.calkit/local/logs`` directory (always written)
     and the tracked ``.calkit/logs`` directory, choosing the latest ``.log``
     file across both by name (logs are named by start timestamp).
     """
     candidates = []
+    root = os.path.realpath(wdir)
     for d in [
-        os.path.join(".calkit", "local", "logs"),
-        os.path.join(".calkit", "logs"),
+        os.path.join(wdir, ".calkit", "local", "logs"),
+        os.path.join(wdir, ".calkit", "logs"),
     ]:
         if os.path.isdir(d):
             candidates += [
                 os.path.join(d, f) for f in os.listdir(d) if f.endswith(".log")
             ]
+    # A repo can commit a link named like a log to any file, e.g., an SSH
+    # key, which a hub link would send the hub
+    candidates = [
+        c
+        for c in candidates
+        if not os.path.islink(c)
+        and os.path.realpath(c).startswith(root + os.sep)
+    ]
     if not candidates:
         return None
-    latest = max(candidates, key=os.path.basename)
-    try:
-        with open(latest) as f:
-            return f.read()
-    except OSError:
-        return None
+    return max(candidates, key=os.path.basename)
 
 
 def _format_run_elapsed(start_iso: str) -> str:
@@ -2721,7 +2805,7 @@ def _stage_target_from_cmd(cmd: str) -> str | None:
     return targets[-1] if targets else None
 
 
-def _get_running_pipeline_status() -> dict | None:
+def _get_running_pipeline_status(wdir: str = ".") -> dict | None:
     """Return live pipeline run progress, or ``None`` if no run is running.
 
     A run is in progress when a live process holds DVC's rwlock. The most
@@ -2730,7 +2814,7 @@ def _get_running_pipeline_status() -> dict | None:
     their own processes before the run log exists, so their stage names are
     also recovered from the lock's command strings.
     """
-    processes = calkit.dvc.get_running_pipeline_processes()
+    processes = calkit.dvc.get_running_pipeline_processes(wdir)
     if not processes:
         return None
     # Stage targets in the lock commands identify concurrently-run scheduler
@@ -2750,7 +2834,7 @@ def _get_running_pipeline_status() -> dict | None:
             "stages": {},
             "running_stages": concurrent_stages,
         }
-    content = _get_latest_run_log_content()
+    content = _get_latest_run_log_content(wdir)
     stages = (
         _stage_run_info_from_log_content(content)
         if content is not None
@@ -3449,27 +3533,62 @@ def run(
         # Initialize DVC repo if necessary
         from dvc.exceptions import NotDvcRepoError
 
+        # With nothing for DVC to run, e.g., a project with no pipeline
+        # whose Markdown only shows values, it needn't become a DVC repo
+        dvc_yaml_stages = dvc_stages
+        if dvc_stages is None and os.path.isfile("dvc.yaml"):
+            with open("dvc.yaml") as f:
+                dvc_yaml_stages = (calkit.ryaml.load(f) or {}).get("stages")
+        nothing_for_dvc = not (dvc_yaml_stages or ck_info.get("subprojects"))
         try:
             calkit.dvc.get_dvc_repo()
         except NotDvcRepoError:
-            step("Initializing DVC repo")
-            # DVC says what it's done, and what to do next
-            with paused():
-                result = calkit.dvc.init()
-            if result != 0:
-                raise_error("Failed to initialize DVC repo")
+            if not nothing_for_dvc:
+                step("Initializing DVC repo")
+                # DVC says what it's done, and what to do next
+                with paused():
+                    result = calkit.dvc.init()
+                if result != 0:
+                    raise_error("Failed to initialize DVC repo")
         except Exception as e:
             # E.g., DVC's site cache dir isn't writable, which 'dvc init'
             # can't fix
             raise_error(
                 f"Failed to open DVC repo: {e.__class__.__name__}: {e}"
             )
+        else:
+            # A DVC repo can hold pipelines Calkit doesn't declare, e.g., a
+            # nested dvc.yaml, which DVC still runs
+            nothing_for_dvc = False
         # The pipeline as just compiled can reach stages the last one
         # didn't, e.g., through an input just added
-        if gate_stage_names is not None:
+        if gate_stage_names is not None and not nothing_for_dvc:
             reached = calkit.pipeline.get_stages_to_gate(targets)
             if reached is None or reached - gate_stage_names:
                 gate(None if reached is None else reached - gate_stage_names)
+    if nothing_for_dvc:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        md_stages = calkit.markdown.get_markdown_stages(ck_info)
+        if target_inputs or target_outputs:
+            raise_error("No stages found to run")
+        unknown = [t for t in targets or [] if t not in md_stages]
+        if unknown:
+            raise_error(f"No stage(s) named: {', '.join(unknown)}")
+        try:
+            md_changed_paths = _inject_markdown_values()
+        except Exception as e:
+            raise_error(f"Failed to write values into markdown: {e}")
+        if not quiet:
+            for md_path in md_changed_paths:
+                typer.echo(f"Updated values in {md_path}")
+        calkit.echo("Pipeline completed successfully ✅")
+        if save_after_run or save_message is not None:
+            if save_message is None:
+                save_message = "Run pipeline"
+            if not quiet:
+                typer.echo("Saving the project after successful run")
+            save(save_all=True, message=save_message, no_push=no_push)
+        return {"dvc_stages": {}, "stage_run_info": {}}
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
     if dvc_stages is None:
@@ -5341,38 +5460,78 @@ def merge_driver(
 
 @app.command(name="stash")
 def stash(
+    action: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "'push' to stash changes, which is the default, or 'pop' to "
+                "bring back the most recent stash."
+            )
+        ),
+    ] = "push",
+    message: Annotated[
+        str | None,
+        typer.Option(
+            "--message", "-m", help="A message to stash the changes with."
+        ),
+    ] = None,
     pop: Annotated[
-        bool, typer.Option("--pop", help="Pop the most recent stash.")
+        bool, typer.Option("--pop", help="Same as 'calkit stash pop'.")
     ] = False,
 ) -> None:
-    """Stash or restore workspace changes including dvc-zip tracked dirs.
+    """Stash workspace changes, including DVC-tracked data, or bring them
+    back.
 
-    Without --pop: zips any modified workspace dirs and commits any other
-    modified DVC-tracked paths into the DVC cache, then git-stashes (saving
-    the updated .dvc files and dvc.lock), checks out the committed DVC state,
-    and unzips it to the workspace.
-
-    With --pop: pops the git stash (restoring the saved .dvc files), checks
-    out the stashed DVC state, and unzips it to the workspace.
+    Stashing commits changed DVC-tracked data to the DVC cache, including
+    zipped folders, so the Git stash holds pointers to it, then checks out
+    the committed data. Popping restores the stash and checks out the data
+    it points to.
     """
     if pop:
+        action = "pop"
+    if action not in ("push", "pop"):
+        raise_error(f"Unknown action '{action}'; use 'push' or 'pop'")
+
+    def changed_data(deleted: bool = False) -> list[str]:
+        # DVC-tracked data that doesn't match what its pointers say
+        if not os.path.isdir(".dvc"):
+            return []
+        status = calkit.dvc.get_dvc_repo().data_status()
+        uncommitted = status.get("uncommitted", {})
+        paths = list(uncommitted.get("modified", []))
+        if deleted:
+            # Except what was never pulled, which can't be brought back
+            not_in_cache = status.get("not_in_cache", [])
+            paths += [
+                p
+                for p in uncommitted.get("deleted", [])
+                if p not in not_in_cache
+            ]
+        return paths
+
+    def check_out_changed_data() -> None:
+        for path in changed_data(deleted=True):
+            if calkit.dvc.run_dvc_command(["checkout", path, "--force"]):
+                raise_error(f"Failed to check out {path}")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+
+    if action == "pop":
         subprocess.check_call(["git", "stash", "pop"])
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
-    else:
-        # Zip any modified workspace dirs so their current state is in the DVC
-        # cache (the updated .dvc file will be captured by git stash)
-        calkit.dvc.zip.sync_all(direction="to-zip")
-        # Same for other modified DVC-tracked paths, which DVC would otherwise
-        # refuse to check out over since their data isn't in the cache
+        check_out_changed_data()
+        return
+    # Zipped folders go into their zips, and changed data into the cache, so
+    # the stash can point at both
+    calkit.dvc.zip.sync_all(direction="to-zip")
+    # Only outputs are committed, so a stage that was out of date stays so
+    modified = changed_data()
+    if modified:
         dvc_repo = calkit.dvc.get_dvc_repo()
-        uncommitted = dvc_repo.data_status()["uncommitted"]
-        for path in uncommitted.get("modified", []):
+        for path in modified:
             calkit.dvc.commit_path(dvc_repo, path, outs_only=True)
-        subprocess.check_call(["git", "stash"])
-        # Restore the committed zip versions and unzip them
-        calkit.dvc.run_dvc_command(["checkout"])
-        calkit.dvc.zip.sync_all(direction="to-workspace")
+    subprocess.check_call(
+        ["git", "stash", "push"] + (["-m", message] if message else [])
+    )
+    check_out_changed_data()
 
 
 @app.command(

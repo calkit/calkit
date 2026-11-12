@@ -276,7 +276,7 @@ def from_markdown(
         with open(src_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(
                 calkit.markdown.prepare_for_pdf(
-                    text, md_path, link=question_url
+                    text, md_path, link=question_url, results=results
                 )
             )
         prefix = Path(os.path.relpath(md_dir, build_dir)).as_posix()
@@ -323,6 +323,7 @@ def from_markdown(
     md_path = Path(rel).as_posix()
     md_dir = os.path.dirname(md_path) or "."
     ck_info = calkit.load_calkit_info()
+    results = calkit.markdown.results_by_name(ck_info)
     project_url = None
     if ck_info.get("owner") and ck_info.get("name"):
         hub = str(ck_info.get("hub") or "calkit.io").rstrip("/")
@@ -336,7 +337,9 @@ def from_markdown(
     with open(md_path, encoding="utf-8") as f:
         text = f.read()
     try:
-        text, changed = calkit.markdown.set_values(text, md_path)
+        text, changed = calkit.markdown.set_values(
+            text, md_path, results=results
+        )
     except calkit.markdown.MarkdownParseError as e:
         raise_error(str(e))
     if changed:
@@ -2517,10 +2520,16 @@ def to_docx(
     elif engine == "libreoffice":
         import shlex
 
-        if calkit.docx.find_soffice() is None:
+        soffice = calkit.docx.find_soffice()
+        if soffice is None:
             raise_error(
                 "Converting without Word requires LibreOffice; install it "
-                "from https://www.libreoffice.org"
+                "with 'calkit install libreoffice'"
+            )
+        if not calkit.docx.libreoffice_has_math(soffice):
+            raise_error(
+                "LibreOffice's Math component is missing, so equations would "
+                "come out empty; install it with 'calkit install libreoffice'"
             )
         typer.echo("Converting the source with TeX4ht and LibreOffice")
         # TeX4ht runs beside the source, since its ODT misses equations

@@ -1,22 +1,22 @@
 {
-  "date": "2026-11-07",
-  "hub_users": 139,
+  "date": "2026-11-11",
+  "hub_users": 140,
   "hub_projects": 53,
-  "hub_projects_worked_on": 18,
+  "hub_projects_worked_on": 19,
   "hub_project_owners": 37,
   "hub_excluded_accounts": [
     "calkit",
     "petebachant",
     "pwbachant"
   ],
-  "hub_monthly_active_users": 4,
+  "hub_monthly_active_users": 3,
   "hub_monthly_active_signed_in_users": 2,
   "hub_human_project_visits_last_30_days": 6,
   "hub_projects_viewed_last_30_days": 6,
   "github_stars": 62,
   "github_forks": 17,
   "pypi_downloads_last_month": 3616,
-  "releases": 343,
+  "releases": 348,
   "releases_per_week_last_90_days": 8.7,
   "papers_shipped": 5
 }

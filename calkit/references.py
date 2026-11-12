@@ -313,10 +313,10 @@ class Reference(BaseModel):
         exclude=True,
         description="The closest title a search found where none matched.",
     )
-    unanswered: Literal["offline", "unreachable"] | None = Field(
-        default=None,
+    unanswered: bool = Field(
+        default=False,
         exclude=True,
-        description="Why a lookup it needed got no answer, if one didn't.",
+        description="Whether a lookup it needed got no answer.",
     )
 
 
@@ -347,7 +347,7 @@ class DocumentCheck(BaseModel):
         return not self.blocking
 
 
-def output_path(document_path: str) -> str:
+def get_report_path(document_path: str) -> str:
     """Report path for a document.
 
     Parameters
@@ -365,7 +365,7 @@ def output_path(document_path: str) -> str:
     return f"{OUT_DIR}/{document_path}.json"
 
 
-def responses_path(report_path: str) -> str:
+def get_responses_path(report_path: str) -> str:
     """Where a report's service responses are recorded, beside it."""
     stem = report_path.removesuffix(".json")
     return f"{stem}.responses.json"
@@ -413,7 +413,7 @@ def normalize_title(value: str | None) -> str:
     return " ".join(re.sub(r"[^a-z0-9 ]+", " ", text.lower()).split())
 
 
-def first_author_surname(value: str | None) -> str | None:
+def get_first_author_surname(value: str | None) -> str | None:
     """Surname of the first name in a BibTeX author list.
 
     Parameters
@@ -432,10 +432,17 @@ def first_author_surname(value: str | None) -> str | None:
     if "," in first:
         return first.split(",")[0].strip() or None
     parts = first.split()
+    # A printed citation can put initials after the surname, e.g., Smith J,
+    # and a name of only initials can't say which part is the surname
+    initials = [re.fullmatch(r"(?:[A-Z]\.?-?){1,3}", p) for p in parts]
+    if parts and all(initials):
+        return None
+    if len(parts) > 1 and initials[-1] and not initials[0]:
+        return " ".join(parts[:-1])
     return parts[-1] if parts else None
 
 
-def similarity(left: str, right: str) -> float:
+def get_similarity(left: str, right: str) -> float:
     """Ratio between two normalized titles, from 0 to 1."""
     if not left or not right:
         return 0.0
@@ -472,7 +479,7 @@ def _fold_name(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
-def _joined(lines: list[Any]) -> tuple[str, list[int]]:
+def _join_lines(lines: list[Any]) -> tuple[str, list[int]]:
     """A flattened document as one text, citations being free to span
     lines, with each line's offset into it."""
     from calkit.latex import _strip_comments, is_markdown
@@ -514,7 +521,7 @@ def _joined(lines: list[Any]) -> tuple[str, list[int]]:
     return "\n".join(texts), starts
 
 
-def cited_keys(lines: list[Any]) -> dict[str, list[str]]:
+def find_cited_keys(lines: list[Any]) -> dict[str, list[str]]:
     """Citation keys in a flattened document, and where each appears.
 
     Parameters
@@ -535,7 +542,7 @@ def cited_keys(lines: list[Any]) -> dict[str, list[str]]:
 
     if not lines:
         return {}
-    text, starts = _joined(lines)
+    text, starts = _join_lines(lines)
     # flatten inputs nothing into Markdown, so a document is one or other
     markdown = is_markdown(lines[0].path)
     if markdown:
@@ -544,7 +551,7 @@ def cited_keys(lines: list[Any]) -> dict[str, list[str]]:
             lambda m: re.sub(r"[^\n]", " ", m.group()), text
         )
 
-    def where(offset: int) -> str:
+    def get_location(offset: int) -> str:
         line = lines[bisect.bisect_right(starts, offset) - 1]
         return f"{line.path}:{line.lineno}"
 
@@ -573,12 +580,12 @@ def cited_keys(lines: list[Any]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for offset, key in sorted(found):
         locations = out.setdefault(key, [])
-        if where(offset) not in locations:
-            locations.append(where(offset))
+        if get_location(offset) not in locations:
+            locations.append(get_location(offset))
     return out
 
 
-def defined_keys(lines: list[Any]) -> dict[str, str]:
+def find_defined_keys(lines: list[Any]) -> dict[str, str]:
     """Keys an inline ``thebibliography`` defines, and where.
 
     Parameters
@@ -591,18 +598,21 @@ def defined_keys(lines: list[Any]) -> dict[str, str]:
     dict
         Key to the path of the file whose ``\\bibitem`` defines it.
     """
-    from calkit.latex import _strip_comments, is_markdown
+    import bisect
 
+    from calkit.latex import is_markdown
+
+    # Joined, since a \bibitem's arguments can span lines
+    text, starts = _join_lines(lines)
     out: dict[str, str] = {}
-    for line in lines:
-        if is_markdown(line.path):
-            continue
-        for match in _BIBITEM_RE.finditer(_strip_comments(line.text)):
+    for match in _BIBITEM_RE.finditer(text):
+        line = lines[bisect.bisect_right(starts, match.start()) - 1]
+        if not is_markdown(line.path):
             out.setdefault(match.group(1).strip(), line.path)
     return out
 
 
-def document_collections(
+def get_named_collection_paths(
     document: str, lines: list[Any], wdir: str | Path | None = None
 ) -> list[str]:
     """The bibliographies a document names, in the order it names them.
@@ -629,9 +639,10 @@ def document_collections(
         the document names none, e.g., because pandoc is given them on its
         command line instead.
     """
+    import bisect
     import posixpath
 
-    from calkit.latex import _strip_comments, is_markdown
+    from calkit.latex import is_markdown
 
     base = Path(wdir or ".")
     named: list[tuple[str, str]] = []
@@ -661,10 +672,12 @@ def document_collections(
             named += [(str(v), document) for v in values if v]
         parents = [posixpath.dirname(document), ""]
     else:
-        for line in lines:
-            for match in _BIB_RE.finditer(_strip_comments(line.text)):
-                for name in match.group(1).split(","):
-                    named.append((name.strip(), line.path))
+        # Joined, since a declaration's arguments can span lines
+        text, starts = _join_lines(lines)
+        for match in _BIB_RE.finditer(text):
+            line = lines[bisect.bisect_right(starts, match.start()) - 1]
+            for name in match.group(1).split(","):
+                named.append((name.strip(), line.path))
         parents = [posixpath.dirname(document)]
     out: list[str] = []
     for name, named_in in named:
@@ -687,7 +700,7 @@ def document_collections(
     return out
 
 
-def declared_collections(ck_info: dict) -> list[str]:
+def get_declared_collection_paths(ck_info: dict) -> list[str]:
     """Paths of the collections ``calkit.yaml`` declares, in order."""
     out = []
     for item in ck_info.get("references") or []:
@@ -720,7 +733,7 @@ def load_collections(
 
     if paths is None:
         ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
-        paths = declared_collections(ck_info)
+        paths = get_declared_collection_paths(ck_info)
     out: dict[str, dict[str, dict]] = {}
     for path in paths:
         full = Path(wdir or ".") / path
@@ -740,7 +753,7 @@ def _fill_from_entry(reference: Reference, entry: dict) -> None:
     """Copy the fields the check needs out of a BibTeX entry."""
     reference.entry_type = entry.get("ENTRYTYPE")
     reference.title = clean_tex(entry.get("title", "")) or None
-    reference.first_author = first_author_surname(
+    reference.first_author = get_first_author_surname(
         entry.get("author") or entry.get("editor")
     )
     year = re.search(r"\d{4}", entry.get("year", "") or "")
@@ -794,14 +807,14 @@ def _fill_from_citation(reference: Reference, citation: str) -> None:
     year = (bracketed or [y for _, y in years] or [""])[0]
     reference.year = int(year) if year else None
     first = re.split(r"[,;]|\s+and\s+|\s+&\s+", rest, maxsplit=1)[0]
-    reference.first_author = first_author_surname(first)
+    reference.first_author = get_first_author_surname(first)
     url = re.search(r"https?://\S+", citation)
     reference.url = url.group().rstrip(".,;") if url else None
     lowered = citation.lower()
     reference.venue = next((v for v in THIN_VENUES if v in lowered), None)
 
 
-def citation_title(citation: str, title: str) -> str:
+def get_citation_title(citation: str, title: str) -> str:
     """The stretch of a citation most like a title, both normalized."""
     words = citation.split()
     n = len(title.split())
@@ -809,7 +822,7 @@ def citation_title(citation: str, title: str) -> str:
     for size in range(max(1, n - 2), n + 3):
         for start in range(max(1, len(words) - size + 1)):
             window = " ".join(words[start : start + size])
-            ratio = similarity(window, title)
+            ratio = get_similarity(window, title)
             if ratio > score:
                 best, score = window, ratio
     return best
@@ -834,17 +847,26 @@ def compare(reference: Reference, found: Found) -> Found:
 
     # A printed citation has no title field, so its title is the stretch
     # of it most like the record's
-    def ours_for(theirs: str) -> str:
+    def get_name_runs(name: str | None) -> set[str]:
+        parts = [_fold_name(p) for p in re.split(r"[\s,\-]+", name or "")]
+        parts = [p for p in parts if p]
+        return {
+            "".join(parts[i:j])
+            for i in range(len(parts))
+            for j in range(i + 1, len(parts) + 1)
+        }
+
+    def get_our_title(theirs: str) -> str:
         if reference.title or not reference.citation:
             return normalize_title(reference.title)
-        return citation_title(normalize_title(reference.citation), theirs)
+        return get_citation_title(normalize_title(reference.citation), theirs)
 
     # Compare against whichever of the record's titles and years is closest
     if found.alt_titles:
         found.title = max(
             [found.title or "", *found.alt_titles],
-            key=lambda t: similarity(
-                ours_for(normalize_title(t)), normalize_title(t)
+            key=lambda t: get_similarity(
+                get_our_title(normalize_title(t)), normalize_title(t)
             ),
         )
     want = reference.year
@@ -854,8 +876,8 @@ def compare(reference: Reference, found: Found) -> Found:
             key=lambda y: abs(y - want),
         )
     theirs = normalize_title(found.title)
-    ours = ours_for(theirs)
-    found.title_similarity = round(similarity(ours, theirs), 4)
+    ours = get_our_title(theirs)
+    found.title_similarity = round(get_similarity(ours, theirs), 4)
     if len(ours) < MIN_TITLE_CHARS or len(theirs) < MIN_TITLE_CHARS:
         found.title_matches = None
     else:
@@ -873,23 +895,20 @@ def compare(reference: Reference, found: Found) -> Found:
         found.year_matches = abs(reference.year - found.year) <= 1
     ours_author = _fold_name(reference.first_author)
     theirs_author = _fold_name(found.first_author)
-    # A record can give a whole name, in either order
-    theirs_names = {
-        _fold_name(part) for part in (found.first_author or "").split()
-    }
     if not ours_author or not theirs_author:
         found.author_matches = None
     else:
+        # Whole parts, so Li isn't Williams, but a surname can be any run
+        # of the other's, as a record can give a whole name in either order
         found.author_matches = (
-            ours_author in theirs_names
-            or similarity(ours_author, theirs_author) >= 0.85
-            or ours_author in theirs_author
-            or theirs_author in ours_author
+            ours_author in get_name_runs(found.first_author)
+            or theirs_author in get_name_runs(reference.first_author)
+            or get_similarity(ours_author, theirs_author) >= 0.85
         )
     return found
 
 
-def _evidence(reference: Reference, found: Found) -> Evidence:
+def _get_evidence(reference: Reference, found: Found) -> Evidence:
     """What a candidate record is evidence of, without copying it.
 
     Parameters
@@ -952,7 +971,7 @@ def classify(reference: Reference) -> None:
     def note_alternative() -> None:
         alt = reference.alternative
         if alt is not None:
-            where = _evidence(reference, alt).url or alt.source
+            where = _get_evidence(reference, alt).url or alt.source
             reference.notes.append(
                 f"a work matching the entry's title, authors, and year is at "
                 f"{where}, so the identifier is likely wrong"
@@ -988,7 +1007,7 @@ def classify(reference: Reference) -> None:
         return
     found = reference.found
     if found is not None:
-        reference.evidence = _evidence(reference, found)
+        reference.evidence = _get_evidence(reference, found)
         disagrees = [
             name
             for name, ok in (
@@ -1029,16 +1048,15 @@ def classify(reference: Reference) -> None:
             "cites a URL rather than a registered work, so there is nothing "
             "to look up; check the link by hand"
         )
-    elif reference.unanswered is not None:
+    elif reference.unanswered:
         # Not finding a work only means something if every service asked
         # gave an answer
         reference.status = "unchecked"
+        # The same either way, so a replay of recorded responses offline
+        # matches the run that recorded them
         reference.notes.append(
-            "not looked up, since the check ran offline and nothing is "
-            "cached for it"
-            if reference.unanswered == "offline"
-            else "a service could not be reached, so it could not be "
-            "looked up; run the check again to retry"
+            "not looked up, since a service gave no answer or the check ran "
+            "offline, and none is cached; run the check again online to retry"
         )
     elif reference.doi:
         reference.status = "not-found"
@@ -1053,7 +1071,7 @@ def classify(reference: Reference) -> None:
         reference.status = "not-found"
         near = reference.nearest
         if near is not None and near.title_matches:
-            where = _evidence(reference, near).url or near.source
+            where = _get_evidence(reference, near).url or near.source
             differs = [
                 f"{name} {value!r}"
                 for name, value, ok in (
@@ -1074,7 +1092,7 @@ def classify(reference: Reference) -> None:
                 "no work with this title was found in the services checked"
             )
         if near is not None and not near.title_matches:
-            where = _evidence(reference, near).url or near.source
+            where = _get_evidence(reference, near).url or near.source
             reference.notes.append(
                 f"the closest title found is {near.title!r}, at {where}"
             )
@@ -1087,7 +1105,7 @@ def classify(reference: Reference) -> None:
             )
 
 
-def source_document(path: str, wdir: str | Path | None = None) -> str:
+def get_source_path(path: str, wdir: str | Path | None = None) -> str:
     """The document a path's citations are read from.
 
     A PDF's are read from the source it's built from: the document of the
@@ -1153,7 +1171,7 @@ def source_document(path: str, wdir: str | Path | None = None) -> str:
     )
 
 
-def pdf_references(path: str | Path) -> dict[str, str]:
+def read_pdf_references(path: str | Path) -> dict[str, str]:
     """The reference list printed in a PDF, read from its text.
 
     For a PDF with no source to read, e.g., a manuscript sent for review.
@@ -1301,7 +1319,7 @@ def check_references(
         )
 
     try:
-        document = source_document(path, wdir=wdir)
+        document = get_source_path(path, wdir=wdir)
     except FileNotFoundError:
         # A PDF with no source, e.g., one sent for review, is checked
         # against the reference list printed in it
@@ -1320,7 +1338,7 @@ def check_references(
     cited: dict[str, list[str]] = {}
     inline: dict[str, str] = {}
     if document.lower().endswith(".pdf"):
-        printed = pdf_references(Path(wdir or ".") / document)
+        printed = read_pdf_references(Path(wdir or ".") / document)
         if not printed:
             raise ValueError(
                 f"No source builds {document}, and no reference list was "
@@ -1339,13 +1357,13 @@ def check_references(
         # The bibliographies the document names are the ones its citations
         # resolve against, and the declared ones only stand in for them
         ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
-        names = document_collections(
+        names = get_named_collection_paths(
             document, lines, wdir=wdir
-        ) or declared_collections(ck_info)
+        ) or get_declared_collection_paths(ck_info)
         sources = list(dict.fromkeys(line.path for line in lines))
         collections = load_collections(wdir=wdir, paths=names)
-        inline = defined_keys(lines)
-        cited = cited_keys(lines)
+        inline = find_defined_keys(lines)
+        cited = find_cited_keys(lines)
         # \nocite{*} puts every entry in the bibliography, so each is cited
         everything = cited.pop("*", None)
         if everything is not None:
@@ -1413,13 +1431,13 @@ def verify(reference: Reference, lookup: Lookup) -> None:
     if reference.doi:
         # Crossref and DataCite, e.g., Zenodo, register most DOIs, and
         # the handle system behind doi.org knows every one
-        by_id = lookup.crossref_doi(reference.doi) or lookup.datacite_doi(
+        by_id = lookup.get_crossref_record(
             reference.doi
-        )
+        ) or lookup.get_datacite_record(reference.doi)
         if by_id is None:
-            reference.doi_registered = lookup.doi_registered(reference.doi)
+            reference.doi_registered = lookup.is_doi_registered(reference.doi)
     if by_id is None and reference.arxiv:
-        by_id = lookup.arxiv(reference.arxiv)
+        by_id = lookup.get_arxiv_record(reference.arxiv)
     if by_id is not None:
         compare(reference, by_id)
     by_title: list[Found] = []
@@ -1428,34 +1446,33 @@ def verify(reference: Reference, lookup: Lookup) -> None:
     ):
         # Crossref takes a whole citation as a query, and OpenAlex doesn't
         hits = (
-            [
-                lookup.crossref_title(reference.title),
-                lookup.openalex_title(reference.title),
-            ]
+            lookup.search_crossref(reference.title)
+            + lookup.search_openalex(reference.title)
             if reference.title
-            else [lookup.crossref_title(reference.citation or "", True)]
+            else lookup.search_crossref(reference.citation or "")
         )
+        # Every hit is compared before one is chosen, since a reprint can
+        # come before the cited edition. A search always returns its nearest
+        # neighbors, so only a hit with the same title is the work; one that
+        # merely resembles it is a failed search, worth pointing at but not
+        # accusing with
         for hit in hits:
-            # A search always returns its nearest neighbor, so only a hit
-            # with the same title is the work; one that merely resembles it
-            # is a failed search, worth pointing at but not accusing with
-            if hit is not None:
-                compare(reference, hit)
-                if hit.title_matches:
-                    by_title.append(hit)
-                elif (hit.title_similarity or 0.0) >= TITLE_PLAUSIBLE and (
-                    reference.nearest is None
-                    or (hit.title_similarity or 0.0)
-                    > (reference.nearest.title_similarity or 0.0)
-                ):
-                    reference.nearest = hit
+            compare(reference, hit)
+            if hit.title_matches:
+                by_title.append(hit)
+            elif (hit.title_similarity or 0.0) >= TITLE_PLAUSIBLE and (
+                reference.nearest is None
+                or (hit.title_similarity or 0.0)
+                > (reference.nearest.title_similarity or 0.0)
+            ):
+                reference.nearest = hit
     # A work with the same title but another author or year may be
     # another edition, a reprint, or a review of it, so it's pointed at
     # rather than taken for the entry
     agreeing = [hit for hit in by_title if _agrees(hit)]
-    best_by_title = max(agreeing, key=_rank) if agreeing else None
+    best_by_title = max(agreeing, key=_get_rank) if agreeing else None
     if by_title and not agreeing:
-        reference.nearest = max(by_title, key=_rank)
+        reference.nearest = max(by_title, key=_get_rank)
     if by_id is not None:
         reference.found = by_id
     elif reference.doi_registered is not False:
@@ -1468,15 +1485,15 @@ def verify(reference: Reference, lookup: Lookup) -> None:
     if reference.found is not None:
         reference.nearest = None
     if reference.found is None and lookup.unanswered > unanswered:
-        reference.unanswered = "offline" if lookup.offline else "unreachable"
+        reference.unanswered = True
 
 
 def _agrees(found: Found) -> bool:
     """Whether no compared field disagrees."""
-    return _rank(found)[0] == 1
+    return _get_rank(found)[0] == 1
 
 
-def _rank(found: Found) -> tuple[int, float]:
+def _get_rank(found: Found) -> tuple[int, float]:
     """Sort key putting a fully agreeing candidate first."""
     agrees = all(
         ok is not False
@@ -1489,10 +1506,10 @@ def _rank(found: Found) -> tuple[int, float]:
     return (1 if agrees else 0, found.title_similarity or 0.0)
 
 
-def _from_crossref(item: dict, source: str = "crossref") -> Found:
+def _parse_crossref(item: dict, source: str = "crossref") -> Found:
     """A ``Found`` from a Crossref work record."""
 
-    def year_of(field: str) -> int | None:
+    def get_year(field: str) -> int | None:
         parts = (item.get(field) or {}).get("date-parts") or [[None]]
         year = parts[0][0] if parts and parts[0] else None
         return year if isinstance(year, int) else None
@@ -1512,10 +1529,10 @@ def _from_crossref(item: dict, source: str = "crossref") -> Found:
     alt_titles = [
         f"{title}: {clean(sub)}" for sub in item.get("subtitle") or []
     ]
-    year = year_of("issued")
+    year = get_year("issued")
     alt_years = [
         y
-        for y in (year_of("published-print"), year_of("published-online"))
+        for y in (get_year("published-print"), get_year("published-online"))
         if y is not None and y != year
     ]
     return Found(
@@ -1530,7 +1547,7 @@ def _from_crossref(item: dict, source: str = "crossref") -> Found:
     )
 
 
-def _from_openalex(item: dict) -> Found:
+def _parse_openalex(item: dict) -> Found:
     """A ``Found`` from an OpenAlex work record."""
     authorships = item.get("authorships") or []
     # The whole name, since which part is the surname isn't marked, and
@@ -1636,10 +1653,10 @@ class Lookup:
                 text = response.read().decode("utf-8", errors="replace")
             answered = True
         except urllib.error.HTTPError as e:
-            # An error status can still carry the answer: doi.org replies
-            # 404 with the JSON saying the handle doesn't exist. Being
-            # rate limited or a server error is no answer at all.
-            answered = e.code < 500 and e.code != 429
+            # Not found is an answer, and doi.org's 404 carries JSON saying
+            # the handle doesn't exist. Any other error, e.g., being denied
+            # or rate limited, is no answer at all.
+            answered = e.code in (404, 410)
             try:
                 text = e.read().decode("utf-8", errors="replace")
             except OSError:
@@ -1668,7 +1685,7 @@ class Lookup:
         except json.JSONDecodeError:
             return None
 
-    def crossref_doi(self, doi: str) -> Found | None:
+    def get_crossref_record(self, doi: str) -> Found | None:
         """The work Crossref has for a DOI, if any."""
         import urllib.parse
 
@@ -1676,9 +1693,9 @@ class Lookup:
         payload = self.get_json(f"https://api.crossref.org/works/{quoted}")
         if not payload or "message" not in payload:
             return None
-        return _from_crossref(payload["message"], source="crossref-doi")
+        return _parse_crossref(payload["message"], source="crossref-doi")
 
-    def datacite_doi(self, doi: str) -> Found | None:
+    def get_datacite_record(self, doi: str) -> Found | None:
         """The work DataCite has for a DOI, if any, e.g., a Zenodo one."""
         import urllib.parse
 
@@ -1707,7 +1724,7 @@ class Lookup:
             or creators[0].get("name"),
         )
 
-    def doi_registered(self, doi: str) -> bool | None:
+    def is_doi_registered(self, doi: str) -> bool | None:
         """Whether the handle system knows a DOI.
 
         Asked of doi.org rather than of a single registrar, so a DataCite
@@ -1739,10 +1756,8 @@ class Lookup:
             return True
         return False if code == 100 else None
 
-    def crossref_title(
-        self, title: str, citation: bool = False
-    ) -> Found | None:
-        """Crossref's closest bibliographic match for a title, or for a
+    def search_crossref(self, title: str) -> list[Found]:
+        """Crossref's closest bibliographic matches for a title, or for a
         whole citation as printed."""
         import urllib.parse
 
@@ -1756,12 +1771,10 @@ class Lookup:
         )
         payload = self.get_json(f"https://api.crossref.org/works?{query}")
         items = (payload or {}).get("message", {}).get("items") or []
-        return self._closest(
-            title, [_from_crossref(item) for item in items], citation
-        )
+        return [_parse_crossref(item) for item in items]
 
-    def openalex_title(self, title: str) -> Found | None:
-        """OpenAlex's closest title match."""
+    def search_openalex(self, title: str) -> list[Found]:
+        """OpenAlex's closest title matches."""
         import urllib.parse
 
         query = urllib.parse.urlencode(
@@ -1769,9 +1782,9 @@ class Lookup:
         )
         payload = self.get_json(f"https://api.openalex.org/works?{query}")
         results = (payload or {}).get("results") or []
-        return self._closest(title, [_from_openalex(item) for item in results])
+        return [_parse_openalex(item) for item in results]
 
-    def arxiv(self, eprint: str) -> Found | None:
+    def get_arxiv_record(self, eprint: str) -> Found | None:
         """The arXiv record for an eprint identifier.
 
         arXiv answers in Atom, so this reads the fields that matter out of
@@ -1780,7 +1793,7 @@ class Lookup:
         import urllib.parse
 
         url = (
-            "http://export.arxiv.org/api/query?id_list="
+            "https://export.arxiv.org/api/query?id_list="
             f"{urllib.parse.quote(eprint)}"
         )
         text = self.get_text(url) or ""
@@ -1801,23 +1814,6 @@ class Lookup:
             year=int(published.group(1)) if published else None,
             first_author=surname,
         )
-
-    @staticmethod
-    def _closest(
-        title: str, candidates: list[Found], citation: bool = False
-    ) -> Found | None:
-        """The candidate whose title is nearest the one searched for, or
-        nearest a stretch of the citation searched for."""
-        best, score = None, 0.0
-        for candidate in candidates:
-            theirs = normalize_title(candidate.title)
-            ours = normalize_title(title)
-            if citation:
-                ours = citation_title(ours, theirs)
-            ratio = similarity(ours, theirs)
-            if ratio > score:
-                best, score = candidate, ratio
-        return best
 
 
 def compact(value: Any) -> Any:
@@ -1957,12 +1953,12 @@ def format_check(
         lines += ["", rule]
     lines.append("")
 
-    def n(*statuses: str) -> int:
+    def count(*statuses: str) -> int:
         return sum(1 for r in references if r.status in statuses)
 
-    missing = n("missing-from-bib")
-    bad_doi = n("doi-not-registered")
-    mismatch = n("mismatch")
+    missing = count("missing-from-bib")
+    bad_doi = count("doi-not-registered")
+    mismatch = count("mismatch")
     lines.append(f"References checked: {len(references)}")
     # A PDF's printed list defines every entry it has
     if not document.path.lower().endswith(".pdf"):
@@ -1974,12 +1970,12 @@ def format_check(
         f"With a DOI that isn't registered: {bad_doi} {check_or_x(not bad_doi)}",
         f"Contradicting the record found for them: {mismatch} "
         f"{check_or_x(not mismatch)}",
-        f"Verified against a record: {n('verified')}/{len(references)}",
+        f"Verified against a record: {count('verified')}/{len(references)}",
     ]
     return "\n".join(lines)
 
 
-def document_inputs(
+def get_input_paths(
     document: str,
     project_dir: str | Path | None = None,
     is_output: Callable[[str], bool] | None = None,
@@ -2029,7 +2025,7 @@ def document_inputs(
     out = [document]
     # The run reports a PDF with no source, so here it's only depended on
     try:
-        document = source_document(document, wdir=base)
+        document = get_source_path(document, wdir=base)
     except FileNotFoundError:
         return out
     out.append(document)
@@ -2044,10 +2040,14 @@ def document_inputs(
             )
             if posixpath.splitext(p)[1] in (".tex", ".bib")
         ]
-    named = document_collections(document, flatten(document, read=read), base)
+    # What the check reads, e.g., through \import, which detect_inputs
+    # doesn't follow
+    lines = flatten(document, read=read)
+    out += [line.path for line in lines]
+    named = get_named_collection_paths(document, lines, base)
     if named:
         out += [p for p in named if is_input(p)]
     else:
         ck_info = calkit.load_calkit_info(wdir=base, read_only=True)
-        out += ["calkit.yaml"] + declared_collections(ck_info)
+        out += ["calkit.yaml"] + get_declared_collection_paths(ck_info)
     return list(dict.fromkeys(out))

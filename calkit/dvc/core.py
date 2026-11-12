@@ -1746,8 +1746,12 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
         if stage.scheduler_log_output is not None:
             outs.append(stage.scheduler_log_output)
         paths = [out.path for out in outs if out.storage == "git"]
-        # Generated LaTeX is stored in Git unless it says otherwise
-        if isinstance(stage, (JsonToLatexStage, QuestionsToLatexStage)):
+        # Generated LaTeX and reference reports are stored in Git unless
+        # they say otherwise
+        if isinstance(
+            stage,
+            (JsonToLatexStage, QuestionsToLatexStage, ReferencesCheckStage),
+        ):
             paths += [
                 out for out in stage.outputs or [] if isinstance(out, str)
             ]

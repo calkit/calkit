@@ -104,7 +104,7 @@ def test_keys_come_from_the_source_not_its_comments(tmp_dir: Path) -> None:
     )
     from calkit.latex import flatten
 
-    keys = refs.cited_keys(flatten("paper/main.tex"))
+    keys = refs.find_cited_keys(flatten("paper/main.tex"))
     assert "commented" not in keys
     assert set(keys) == {
         "real2020thing",
@@ -125,7 +125,7 @@ def test_keys_come_from_the_source_not_its_comments(tmp_dir: Path) -> None:
         "  e} \\autocites(all)[p.~1]{f}[2]{g}\n"
         "\\newcommand{\\mycite}[1]{\\cite{#1}} \\nocite{*}\n",
     )
-    keys = refs.cited_keys(flatten("paper/main.tex"))
+    keys = refs.find_cited_keys(flatten("paper/main.tex"))
     assert list(keys) == ["a", "b", "c", "d", "e", "f", "g", "*"]
     assert keys["e"] == ["paper/main.tex:4"]
 
@@ -257,14 +257,14 @@ def test_handle_responses_map_to_an_answer(
     lookup = refs.Lookup(offline=True)
     url = "https://doi.org/api/handles/10.1000/real"
     lookup.cache[url] = json.dumps({"responseCode": 1, "handle": "x"})
-    assert lookup.doi_registered("10.1000/real") is True
+    assert lookup.is_doi_registered("10.1000/real") is True
     lookup.cache[url] = json.dumps({"responseCode": 100, "handle": "x"})
-    assert lookup.doi_registered("10.1000/real") is False
+    assert lookup.is_doi_registered("10.1000/real") is False
     # Anything else is the service having trouble, not an answer.
     lookup.cache[url] = json.dumps({"responseCode": 2})
-    assert lookup.doi_registered("10.1000/real") is None
+    assert lookup.is_doi_registered("10.1000/real") is None
     lookup.cache[url] = None
-    assert lookup.doi_registered("10.1000/real") is None
+    assert lookup.is_doi_registered("10.1000/real") is None
     # No answer, e.g., without a network or when rate limited, isn't
     # cached, so the next run asks again
     import urllib.error
@@ -289,6 +289,19 @@ def test_handle_responses_map_to_an_answer(
     monkeypatch.setattr("urllib.request.urlopen", rate_limited)
     assert online.get_text("https://busy.example") is None
     assert "https://busy.example" not in online.cache
+    # Nor is being denied, but not found is an answer, and kept
+    for code, kept in [(403, False), (404, True)]:
+
+        def refuse(request: object, timeout: float, code: int = code) -> None:
+            raise urllib.error.HTTPError(
+                "https://x.example", code, "", Message(), io.BytesIO(b"{}")
+            )
+
+        monkeypatch.setattr("urllib.request.urlopen", refuse)
+        url = f"https://{code}.example"
+        online.get_text(url)
+        assert (url in online.cache) is kept
+    monkeypatch.setattr("urllib.request.urlopen", rate_limited)
     # Refreshing asks again, but keeps what this run didn't need
     refreshed = refs.Lookup(refresh=True)
     refreshed.cache = {"https://kept.example": "old", "https://a.example": "x"}
@@ -395,6 +408,26 @@ def test_comparison_forgives_only_what_it_should(tmp_dir: Path) -> None:
         ).title_matches
         is None
     )
+    # Names compare whole, in either order, so Li isn't Williams, and a
+    # printed name's initials can come after its surname
+    for ours, theirs, agree in [
+        ("Li", "Williams", False),
+        ("Li", "Qing Li", True),
+        ("Bossavit", "Bossavit Laurent", True),
+        ("Berg", "van der Berg", True),
+        ("Smith", "Smithson", False),
+    ]:
+        found = refs.compare(
+            refs.Reference(key="k", first_author=ours),
+            refs.Found(source="openalex", first_author=theirs),
+        )
+        assert found.author_matches is agree, (ours, theirs)
+    printed = refs.Reference(key="1")
+    refs._fill_from_citation(
+        printed, "Smith JA, Doe A. A study. Nature. 2020."
+    )
+    assert printed.first_author == "Smith"
+    assert refs.get_first_author_surname("J. A.") is None
 
 
 def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
@@ -423,23 +456,25 @@ def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
                 by_title,
             )
 
-        def crossref_doi(self, doi):
+        def get_crossref_record(self, doi):
             return self.by_doi
 
-        def datacite_doi(self, doi):
+        def get_datacite_record(self, doi):
             return self.datacite
 
-        def doi_registered(self, doi):
+        def is_doi_registered(self, doi):
             return True
 
-        def arxiv(self, eprint):
+        def get_arxiv_record(self, eprint):
             return None
 
-        def crossref_title(self, title):
-            return self.by_title
+        def search_crossref(self, title):
+            if isinstance(self.by_title, list):
+                return self.by_title
+            return [self.by_title] if self.by_title else []
 
-        def openalex_title(self, title):
-            return None
+        def search_openalex(self, title):
+            return []
 
     def entry():
         return refs.Reference(
@@ -505,6 +540,13 @@ def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
     assert reference.status == "not-found"
     assert reference.evidence is None
     assert any("another edition" in n and "2011" in n for n in reference.notes)
+    # But every hit is compared, so the cited edition is found even after
+    # a reprint
+    reference = entry()
+    reference.doi = None
+    refs.verify(reference, Stub(by_title=[edition, right()]))  # type: ignore[arg-type]
+    refs.classify(reference)
+    assert reference.status == "verified"
     # A whole name in either order agrees, as OpenAlex can give one
     reference = entry()
     reference.doi = None
@@ -514,7 +556,7 @@ def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
     refs.classify(reference)
     assert reference.status == "verified"
     # Crossref titles can carry markup, which isn't part of the title
-    found = refs._from_crossref(
+    found = refs._parse_crossref(
         {
             "title": [
                 "A Proof for the Queuing Formula:\n  <i>L</i>\n  = λ <i>W</i>"
@@ -531,14 +573,14 @@ def test_a_failed_title_search_is_not_a_disagreement(tmp_dir: Path) -> None:
     assert refs.compare(little, found).title_matches is True
     # A subtitle can be the title's second half or a short title, and an
     # issue can be printed years after the work went online
-    split = refs._from_crossref(
+    split = refs._parse_crossref(
         {
             "title": ["Graph Sparsity"],
             "subtitle": ["Methods for Very Large Networks"],
             "issued": {"date-parts": [[2015, 8, 10]]},
         }
     )
-    online_first = refs._from_crossref(
+    online_first = refs._parse_crossref(
         {
             "title": ["A parametric model of flow around obstacles"],
             "subtitle": ["Flow model for obstacles"],
@@ -606,9 +648,10 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
     assert "checked_at" not in payload
     text = refs.format_check(document)
     assert "ghost" in text and "Defined in a bibliography: 2/3 ❌" in text
-    # A document naming its bibliography uses it rather than the declared
-    # collections, and one that doesn't exist is reported, not skipped
-    _project(tmp_dir, "\\citep{real2020thing}\n\\bibliography{refs}\n")
+    # A document naming its bibliography, even over two lines, uses it
+    # rather than the declared collections, and one that doesn't exist is
+    # reported, not skipped
+    _project(tmp_dir, "\\citep{real2020thing}\n\\bibliography{\n  refs}\n")
     document = refs.check_references("paper/main.tex", offline=True)
     assert document.collections == ["paper/refs.bib"]
     assert document.references["real2020thing"].status == ("missing-from-bib")
@@ -658,11 +701,13 @@ def test_offline_check_reports_what_needs_no_network(tmp_dir: Path) -> None:
     assert document.references["real2020thing"].collection == (
         "paper/refs.bib"
     )
-    # \nocite{*} cites every entry, and \bibitem defines a key inline
+    # \nocite{*} cites every entry, and \bibitem defines a key inline,
+    # even with its arguments over two lines
     _project(
         tmp_dir,
         "\\nocite{*}\\cite{inline}\n"
-        "\\begin{thebibliography}{1}\\bibitem{inline} A. Book.\n"
+        "\\begin{thebibliography}{1}\\bibitem[Book, 2020]\n"
+        "{inline} A. Book.\n"
         "\\end{thebibliography}\n",
     )
     by_key = refs.check_references("paper/main.tex", offline=True).references
@@ -909,7 +954,7 @@ def test_a_pdf_with_no_source_is_checked_against_its_list(
             ],
         ],
     )
-    printed = refs.pdf_references(pdf)
+    printed = refs.read_pdf_references(pdf)
     assert list(printed) == ["1", "2", "3"]
     assert printed["1"] == (
         "Vega, A.; Bloom, L. A Study of Something Real. Journal 2020, 7, "
@@ -989,7 +1034,7 @@ def test_a_pdf_with_no_source_is_checked_against_its_list(
             ]
         ],
     )
-    assert list(refs.pdf_references(unnumbered).values()) == [
+    assert list(refs.read_pdf_references(unnumbered).values()) == [
         "van Dam, J. A first work that runs onto a Second line, which isn't "
         "an entry. Journal 2001.",
         "Smith, J. Another work. Journal 2002.",
@@ -1019,7 +1064,7 @@ def test_a_pdf_with_no_source_is_checked_against_its_list(
     make_pdf(tmp_dir / "paper" / "empty.pdf", [["No list here."]])
     with pytest.raises(ValueError, match="no reference list"):
         refs.check_references("paper/empty.pdf", offline=True)
-    assert refs.document_inputs("paper/review.pdf") == ["paper/review.pdf"]
+    assert refs.get_input_paths("paper/review.pdf") == ["paper/review.pdf"]
 
 
 def test_markdown_citations_are_found(tmp_dir: Path) -> None:
@@ -1056,7 +1101,7 @@ def test_markdown_citations_are_found(tmp_dir: Path) -> None:
     )
     from calkit.latex import flatten
 
-    keys = refs.cited_keys(flatten("paper/main.md"))
+    keys = refs.find_cited_keys(flatten("paper/main.md"))
     assert set(keys) == {
         "real2020thing",
         "thin2021venue",

@@ -1852,7 +1852,7 @@ class ReferencesCheckStage(Stage):
         names, including ones a stage makes that aren't there yet."""
         import calkit.references
 
-        self._found_paths = calkit.references.document_inputs(
+        self._found_paths = calkit.references.get_input_paths(
             self.target_path, project_dir=project_dir, is_output=is_output
         )
 
@@ -1863,16 +1863,9 @@ class ReferencesCheckStage(Stage):
         import calkit.references
 
         if not self.outputs:
-            return calkit.references.output_path(self.target_path)
+            return calkit.references.get_report_path(self.target_path)
         out = self.outputs[0]
         return out if isinstance(out, str) else out.path
-
-    @property
-    def responses_path(self) -> str:
-        """Where the services' responses are recorded: beside the report."""
-        import calkit.references
-
-        return calkit.references.responses_path(self.report_path)
 
     @property
     def check_outputs(self) -> list[PathOutput]:
@@ -1880,16 +1873,19 @@ class ReferencesCheckStage(Stage):
         respected: the report, in Git, and the responses it's based on, in
         DVC and kept between runs, since they're reused.
         """
+        import calkit.references
+
+        responses_path = calkit.references.get_responses_path(self.report_path)
         declared = {
             out if isinstance(out, str) else out.path for out in self.outputs
         }
         outs = []
         if not self.outputs:
             outs.append(PathOutput(path=self.report_path, storage="git"))
-        if self.responses_path not in declared:
+        if responses_path not in declared:
             outs.append(
                 PathOutput(
-                    path=self.responses_path,
+                    path=responses_path,
                     storage="dvc",
                     delete_before_run=False,
                 )
@@ -1898,14 +1894,18 @@ class ReferencesCheckStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
+        import calkit.references
+
+        responses_path = calkit.references.get_responses_path(self.report_path)
         cmd = (
             f"calkit check references {shlex.quote(self.target_path)}"
             f" --output {shlex.quote(self.report_path)}"
-            f" --responses {shlex.quote(self.responses_path)}"
+            f" --responses {shlex.quote(responses_path)}"
         )
         if self.offline:
             cmd += " --offline"
-        return cmd
+        # Empty for _system, but dispatches to a remote or scheduler env
+        return f"{self.xenv_cmd} {cmd}".strip()
 
     @property
     def dvc_deps(self) -> list[str]:

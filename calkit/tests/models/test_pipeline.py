@@ -1244,6 +1244,14 @@ def test_references_check_stage(tmp_path, monkeypatch):
         "paper/refs.bib",
         "paper/results.tex",
     ]
+    # A file \import brings in is read, so it's an input too
+    (tmp_path / "paper" / "sections").mkdir()
+    (tmp_path / "paper" / "sections" / "methods.tex").write_text("\\cite{b}\n")
+    (tmp_path / "paper" / "main.tex").write_text(
+        "\\import{sections/}{methods}\n\\bibliography{refs}\n"
+    )
+    stage.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert "paper/sections/methods.tex" in stage.dvc_deps
     # A document naming no bibliography falls back to the declared ones
     (tmp_path / "paper" / "main.tex").write_text("\\cite{a}\n")
     stage.preprocess(str(tmp_path), is_output=lambda p: False)
@@ -1298,6 +1306,13 @@ def test_references_check_stage(tmp_path, monkeypatch):
         {"checks/refs.json": dict(cache=False, persist=False)},
         {"checks/refs.responses.json": dict(cache=False, persist=True)},
     ]
+    # A named environment, e.g., a remote one, runs the check there
+    remote = ReferencesCheckStage(
+        kind="references-check", target_path="a.tex", environment="py"
+    )
+    assert remote.dvc_cmd.startswith(
+        "calkit xenv -n py --no-check -- calkit check references a.tex"
+    )
     # What the check writes is derived, not added to what's declared
     assert stage.outputs == []
     assert [out.path for out in stage.check_outputs] == [report, responses]

@@ -279,7 +279,7 @@ constraint-dependencies = ["chardet<6"]
 
 [tool.uv.sources.latex2arxiv]
 git = "https://github.com/rebeccamccabe/latex2arxiv"
-branch = "whitespace-suppression-comments"
+branch = "whitespace-empty-files"
 
 [tool.pytest.ini_options]
 env = [

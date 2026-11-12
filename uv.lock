@@ -1365,7 +1365,7 @@ requires-dist = [
     { name = "json2latex", specifier = ">=0.0.3" },
     { name = "jupyterlab", specifier = ">=4.4.5" },
     { name = "keyring" },
-    { name = "latex2arxiv", git = "https://github.com/rebeccamccabe/latex2arxiv?branch=whitespace-suppression-comments" },
+    { name = "latex2arxiv", git = "https://github.com/rebeccamccabe/latex2arxiv?branch=whitespace-empty-files" },
     { name = "nbconvert" },
     { name = "pandas", marker = "extra == 'data'", specifier = ">=2.2.3" },
     { name = "papermill", specifier = ">=2.6.0" },
@@ -4501,7 +4501,7 @@ wheels = [
 [[package]]
 name = "latex2arxiv"
 version = "1.3.3"
-source = { git = "https://github.com/rebeccamccabe/latex2arxiv?branch=whitespace-suppression-comments#b20558c74a58014a3133b9493e9cdb84d122fbce" }
+source = { git = "https://github.com/rebeccamccabe/latex2arxiv?branch=whitespace-empty-files#fa702786febf76b756d0c2eb3fd8a44e9d909292" }
 dependencies = [
     { name = "bibtexparser" },
     { name = "pillow" },

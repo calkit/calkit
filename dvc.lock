@@ -22,7 +22,7 @@ stages:
       size: 173896
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: f29fda0c0e1e9b177ed95a088edaee3d
+      md5: b0063e1c1dee1a53592e5331dc33e756
       size: 36443
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
@@ -229,8 +229,8 @@ stages:
       size: 5
     - path: calkit/latex.py
       hash: md5
-      md5: f5a05595989fd2b337ce10910e594b18
-      size: 127114
+      md5: 4bcd9e90383b51696b431c8502402328
+      size: 127740
     - path: uv.lock
       hash: md5
       md5: 8f02103230800fa5a3efcd7d57bc029d
@@ -405,8 +405,8 @@ stages:
       size: 97341
     - path: calkit/latex.py
       hash: md5
-      md5: f5a05595989fd2b337ce10910e594b18
-      size: 127114
+      md5: 4bcd9e90383b51696b431c8502402328
+      size: 127740
     - path: examples/latex-word/calkit.yaml
       hash: md5
       md5: d9c80531cea0141a4290d62a2880a991
@@ -450,5 +450,5 @@ stages:
       size: 173896
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: f29fda0c0e1e9b177ed95a088edaee3d
+      md5: b0063e1c1dee1a53592e5331dc33e756
       size: 36443

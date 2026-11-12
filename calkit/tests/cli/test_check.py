@@ -1951,3 +1951,47 @@ def test_check_storage(tmp_dir):
     assert result.returncode == 0, result.stderr
     assert "Run 'make'" in result.stdout
     assert not git("ls-files", "--", "out.txt").strip()
+
+
+def test_check_references(tmp_dir):
+    with open("main.tex", "w") as f:
+        f.write("\\citep{real}\n\\bibliography{refs}\n")
+    with open("refs.bib", "w") as f:
+        f.write(
+            "@article{real,\n  title = {A Real Thing},\n  year = {2020}\n}\n"
+        )
+    # `refs` is an alias, and offline nothing is looked up, so nothing fails
+    for name in ["references", "refs"]:
+        out = subprocess.check_output(
+            ["calkit", "check", name, "main.tex", "--offline", "--json"],
+            text=True,
+        )
+        document = json.loads(out)
+        assert document["references"]["real"]["status"] == "unchecked"
+    # Nothing is written unless asked
+    assert not os.path.exists(".calkit/reference-checks")
+    subprocess.check_call(
+        ["calkit", "check", "refs", "main.tex", "--offline", "-o", "out.json"]
+    )
+    with open("out.json") as f:
+        assert json.load(f)["path"] == "main.tex"
+    # Responses can be recorded in a file of their own, as a stage does
+    subprocess.check_call(
+        ["calkit", "check", "refs", "main.tex", "--offline"]
+        + ["--responses", "checks/responses.json"]
+    )
+    with open("checks/responses.json") as f:
+        assert json.load(f) == {}
+    # There's no default document to check
+    result = subprocess.run(["calkit", "check", "refs"], capture_output=True)
+    assert result.returncode != 0
+    # A citation missing from the bibliography fails
+    with open("main.tex", "a") as f:
+        f.write("\\citep{ghost}\n")
+    result = subprocess.run(
+        ["calkit", "check", "refs", "main.tex", "--offline"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "ghost" in result.stdout + result.stderr

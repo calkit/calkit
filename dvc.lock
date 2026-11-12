@@ -381,5 +381,5 @@ stages:
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 98b0c8bec15777d260ef2dae15a4c840
+      md5: 673996ee055c1d89c1fc63eeaaae702c
       size: 179495

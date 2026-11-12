@@ -1607,13 +1607,23 @@ def check_requirements(
                     described_as=described_as,
                 )
             continue
-        # Offer the registered native installer when we have one.
+        # Offer the project's own way to install it, or else the registered
+        # native installer when we have one
         from calkit import install as _install
 
-        if _install.get_installer(req_name) is not None:
+        setup_command = req.get("setup_command")
+        description = (req.get("description") or "").strip()
+        entry: _install.Installer | None = (
+            {"script": setup_command, "path_add": []}
+            if setup_command
+            else _install.get_installer(req_name)
+        )
+        if entry is not None:
             print(f"App '{req_name}' is not installed.")
+            if description and interactive:
+                print(f"  {description}")
             if _install.prompt_and_install(
-                req_name, interactive=interactive
+                req_name, interactive=interactive, entry=entry
             ) and check_dep_exists(req_name, "app", system_info=system_info):
                 if spec:
                     check_app_version(
@@ -1625,10 +1635,15 @@ def check_requirements(
                 continue
         # Some apps have no installer here but a known way in, e.g., a
         # system package manager on Linux
-        hint = _install.get_unsupported_message(req_name)
+        hint = (
+            None
+            if setup_command
+            else _install.get_unsupported_message(req_name)
+        )
         raise ValueError(
             f"app '{req_name}' not found on {described_as}"
             + (f"; {hint}" if hint else "")
+            + (f"\n  {description}" if description else "")
         )
     for req in buckets.get("_other", []):
         req_name = req["name"]

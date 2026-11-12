@@ -1538,7 +1538,7 @@ def test_values(tmp_path, monkeypatch):
 
 
 def test_heal_markers():
-    from calkit.markdown import extract_values, heal_markers
+    from calkit.markdown import extract_values, heal_markers, pdf_inputs
 
     results = {"metrics": "results.json"}
     text = (
@@ -1583,6 +1583,56 @@ def test_heal_markers():
     # One that can't be rewritten exactly is left for the error it gives
     unhealable = "<!-- calkit value key=rms -->?<!-- /calkit value -->\n"
     assert heal_markers(unhealable) == (unhealable, 0)
+    # A format holding '=' is quoted, so it isn't read as a keyword
+    healed, _ = heal_markers(
+        '<!-- calkit value key=n path=r.json format="n={value:,}" -->1'
+        "<!-- /calkit value -->\n"
+    )
+    assert healed == (
+        '<!-- ckvalue r.json n "n={value:,}" -->1<!-- /ckvalue -->\n'
+    )
+    assert extract_values(healed, "x.md")[0].format == "n={value:,}"
+    # A bracketed format after named arguments is named too
+    healed, _ = heal_markers(
+        "<!-- ckvalue[.4f] name=metrics key=rms -->0<!-- /ckvalue -->\n",
+        results=results,
+    )
+    assert healed == (
+        "<!-- ckvalue name=metrics key=rms format=.4f -->0<!-- /ckvalue -->\n"
+    )
+    assert extract_values(healed, "x.md", results=results)[0].format == (
+        "{:.4f}"
+    )
+    # Backticks in a marker's own format don't make it code, and its
+    # directive goes once nothing relies on it
+    healed, _ = heal_markers(
+        "<!-- calkit values path=r.json -->\n"
+        'A <!-- calkit value key=n format="`{value}`" -->1'
+        "<!-- /calkit value -->\n"
+    )
+    assert (
+        healed == "A <!-- ckvalue r.json n `{value}` -->1<!-- /ckvalue -->\n"
+    )
+    assert extract_values(healed, "x.md")[0].format == "`{value}`"
+    # A directive a marker left as it is still relies on stays
+    still_needed = (
+        "<!-- calkit values path=r.json -->\n"
+        "A <!-- calkit value key=n -->1<!-- /calkit value --> and "
+        "`<!-- calkit value key=m -->2<!-- /calkit value -->`\n"
+    )
+    healed, _ = heal_markers(still_needed)
+    assert healed.startswith("<!-- calkit values path=r.json -->\n")
+    assert "A <!-- ckvalue r.json n -->1<!-- /ckvalue -->" in healed
+    assert [v.path for v in extract_values(healed, "x.md")] == [
+        "r.json",
+        "r.json",
+    ]
+    # A PDF build depends on what a bracketed marker names, not '[.4f]'
+    assert pdf_inputs(
+        "<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n",
+        "x.md",
+        results=results,
+    ) == ["results.json"]
 
 
 def test_compact_value_markers(tmp_path, monkeypatch):

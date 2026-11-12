@@ -25,7 +25,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import ruamel.yaml
 from pydantic import BaseModel
@@ -2900,13 +2900,16 @@ def format_value(value: Any, fmt: str | None = None) -> str:
 # A compact marker with calkit.sty's bracketed option, e.g.,
 # ``ckvalue[.4f] metrics rms``, which reads naturally coming from LaTeX
 _BRACKET_CKVALUE_RE = re.compile(
-    r"<!--(?P<lead>\s*)ckvalue\[(?P<format>[^\]]*)\](?P<args>.*?)-->"
+    r"<!--(?P<lead>\s*)ckvalue\[(?P<bformat>[^\]]*)\](?P<bargs>.*?)-->"
 )
-# A 'calkit values' directive or a long marker, in document order
-_LONG_FORM_RE = re.compile(
+# What healing rewrites, in document order: a 'calkit values' directive, a
+# long marker, or a bracketed compact one
+_HEAL_RE = re.compile(
     _VALUES_RE.pattern.replace("(?P<attrs>", "(?P<dattrs>")
     + "|"
     + _VALUE_RE.pattern
+    + "|"
+    + _BRACKET_CKVALUE_RE.pattern
 )
 
 
@@ -2917,130 +2920,176 @@ def heal_markers(
 
     A long ``calkit value`` marker becomes a ``ckvalue`` naming its own
     source, taking it from a ``calkit values`` directive above it if it
-    named none, and the directives are then removed. A compact marker with
-    a bracketed format, as ``calkit.sty`` writes one, gets the format as its
-    third argument. Markers in code are examples and are left alone, as is a
-    long marker that can't be rewritten exactly, e.g., with no source.
-    Returns the new text and how many markers and directives were rewritten.
+    named none. A directive is removed once nothing still relies on it. A
+    compact marker with a bracketed format, as ``calkit.sty`` writes one,
+    gets the format as an argument. Markers in code are examples and are
+    left alone, as is a long marker that can't be rewritten exactly, e.g.,
+    with no source. Returns the new text and how many markers and
+    directives were rewritten.
     """
 
-    def compact_arg(arg: str) -> str:
-        return f'"{arg}"' if re.search(r"\s", arg) or not arg else arg
+    def compact_arg(arg: str) -> str | None:
+        # Quoted when it would otherwise read as more than one argument or
+        # as a keyword; None when no quote can hold it
+        if arg and not re.search(r"[\s=\"']", arg):
+            return arg
+        for quote in "\"'":
+            if quote not in arg:
+                return quote + arg + quote
+        return None
 
-    def long_to_compact(m: re.Match[str], default: str | None) -> str:
+    def long_to_compact(m: re.Match[str], default: str | None) -> str | None:
         try:
             attrs = parse_attrs(m.group("attrs"))
         except ValueError:
-            return m.group(0)
+            return None
         source = attrs.pop("path", default)
         key = attrs.pop("key", None)
         fmt = attrs.pop("format", None)
         if attrs or source is None or key is None:
-            return m.group(0)
+            return None
         source = str(source)
         # Positionally, a declared result's name would win over the path, so
         # it's named, and the arguments after it then have to be too
         looks_like_path = "/" in source or "." in Path(source).name
         named = not looks_like_path or bool(results and source in results)
-        args = [("path=" if named else "") + compact_arg(source)]
-        args.append(("key=" if named else "") + compact_arg(str(key)))
+        args = [("path=", source), ("key=", str(key))]
         if fmt is not None:
             spec = re.fullmatch(r"\{:([^{}]*)\}", str(fmt))
-            fmt_arg = compact_arg(spec.group(1) if spec else str(fmt))
-            args.append(("format=" if named else "") + fmt_arg)
+            args.append(("format=", spec.group(1) if spec else str(fmt)))
+        written = []
+        for name, value in args:
+            arg = compact_arg(value)
+            if arg is None:
+                return None
+            written.append((name if named else "") + arg)
         return (
-            f"<!-- ckvalue {' '.join(args)} -->{m.group('text')}"
+            f"<!-- ckvalue {' '.join(written)} -->{m.group('text')}"
             "<!-- /ckvalue -->"
         )
 
-    def bracket_to_args(m: re.Match[str]) -> str:
-        args = m.group("args").strip()
-        return (
-            f"<!--{m.group('lead')}ckvalue {args} "
-            f"{compact_arg(m.group('format').strip())} -->"
-        )
+    def bracket_to_args(m: re.Match[str]) -> str | None:
+        args = m.group("bargs").strip()
+        fmt = compact_arg(m.group("bformat").strip())
+        if fmt is None:
+            return None
+        # After a named argument, a positional one would be an error
+        if any(a.group("key") for a in _CKARG_RE.finditer(args)):
+            fmt = "format=" + fmt
+        return f"<!--{m.group('lead')}ckvalue {args} {fmt} -->"
 
-    def outside_code(line: str, fn: Callable[[str], str]) -> str:
-        # Code spans are examples, so only what's between them is rewritten
-        parts = []
-        pos = 0
-        for cm in _CODE_SPAN_RE.finditer(line):
-            parts.append(fn(line[pos : cm.start()]))
-            parts.append(cm.group(0))
-            pos = cm.end()
-        parts.append(fn(line[pos:]))
-        return "".join(parts)
-
-    out: list[str] = []
+    # Lines are kept as pieces, with each directive a placeholder, since
+    # whether it can go depends on the markers after it
+    lines: list[list[Any]] = []
+    eols: list[str] = []
+    directives: list[dict] = []
     n = 0
-    default: str | None = None
+    current: dict | None = None
     fence: str | None = None
-    dropped_directive = False
     for line in text.splitlines(keepends=True):
         bare = line.rstrip("\r\n")
-        eol = line[len(bare) :]
+        eols.append(line[len(bare) :])
         fm = _FENCE_RE.match(bare)
-        if fence is not None:
-            if (
+        if fence is not None or fm is not None:
+            if fence is None:
+                fence = fm.group("fence") if fm is not None else None
+            elif (
                 fm is not None
                 and fm.group("fence")[0] == fence[0]
                 and len(fm.group("fence")) >= len(fence)
                 and not fm.group("info").strip()
             ):
                 fence = None
-            out.append(line)
+            lines.append([bare])
             continue
-        if fm is not None:
-            fence = fm.group("fence")
-            out.append(line)
+        matches = list(_HEAL_RE.finditer(bare))
+        # A code span is found with the markers masked, so backticks inside
+        # one, e.g., in its format, don't count
+        masked = bare
+        for m in matches:
+            masked = (
+                masked[: m.start()]
+                + "x" * (m.end() - m.start())
+                + masked[m.end() :]
+            )
+        spans = [cm.span() for cm in _CODE_SPAN_RE.finditer(masked)]
+        pieces: list[Any] = []
+        pos = 0
+        for m in matches:
+            pieces.append(bare[pos : m.start()])
+            pos = m.end()
+            in_code = any(start <= m.start() < end for start, end in spans)
+            if m.group("dattrs") is not None:
+                try:
+                    attrs = parse_attrs(m.group("dattrs"))
+                except ValueError:
+                    attrs = {}
+                if in_code or set(attrs) != {"path"}:
+                    pieces.append(m.group(0))
+                    continue
+                current = {
+                    "text": m.group(0),
+                    "path": str(attrs["path"]),
+                    "needed": False,
+                }
+                directives.append(current)
+                pieces.append(current)
+                continue
+            if m.group("bformat") is not None:
+                new = None if in_code else bracket_to_args(m)
+            else:
+                new = (
+                    None
+                    if in_code
+                    else long_to_compact(
+                        m, current["path"] if current is not None else None
+                    )
+                )
+                if new is None and current is not None:
+                    # Still read with the directive's file unless it names
+                    # its own
+                    try:
+                        own = "path" in parse_attrs(m.group("attrs"))
+                    except ValueError:
+                        own = False
+                    if not own:
+                        current["needed"] = True
+            if new is None:
+                pieces.append(m.group(0))
+            else:
+                n += 1
+                pieces.append(new)
+        pieces.append(bare[pos:])
+        lines.append(pieces)
+    out: list[str] = []
+    dropped_line = False
+    for pieces, eol in zip(lines, eols):
+        written = []
+        removed = False
+        for piece in pieces:
+            if isinstance(piece, dict):
+                if piece["needed"]:
+                    written.append(piece["text"])
+                else:
+                    removed = True
+                    n += 1
+            else:
+                written.append(piece)
+        new_line = "".join(written)
+        # A line that held only directives goes, and so does a blank line
+        # that leaves doubled, or leading
+        if removed and not new_line.strip():
+            dropped_line = True
             continue
-        # A blank line left doubled, or leading, by removing a directive
-        # goes with it
         if (
-            dropped_directive
-            and not bare.strip()
+            dropped_line
+            and not new_line.strip()
             and (not out or not out[-1].strip())
         ):
-            dropped_directive = False
+            dropped_line = False
             continue
-        dropped_directive = False
-
-        def rewrite(segment: str) -> str:
-            nonlocal default, n
-            pieces = []
-            pos = 0
-            for m in _LONG_FORM_RE.finditer(segment):
-                pieces.append(segment[pos : m.start()])
-                pos = m.end()
-                if m.group("dattrs") is not None:
-                    try:
-                        directive = parse_attrs(m.group("dattrs"))
-                    except ValueError:
-                        pieces.append(m.group(0))
-                        continue
-                    if set(directive) != {"path"}:
-                        pieces.append(m.group(0))
-                        continue
-                    default = str(directive["path"])
-                    n += 1
-                    continue
-                new = long_to_compact(m, default)
-                n += new != m.group(0)
-                pieces.append(new)
-            pieces.append(segment[pos:])
-            segment = "".join(pieces)
-            segment, n_bracket = _BRACKET_CKVALUE_RE.subn(
-                bracket_to_args, segment
-            )
-            n += n_bracket
-            return segment
-
-        new = outside_code(bare, rewrite)
-        if new != bare and not new.strip():
-            # The line held only a directive
-            dropped_directive = True
-            continue
-        out.append(new + eol)
+        dropped_line = False
+        out.append(new_line + eol)
     return "".join(out), n
 
 
@@ -3226,6 +3275,8 @@ def pdf_inputs(
     """What building a Markdown file into a PDF reads besides the file:
     the results files its values come from and the images it shows, as
     paths from the project root."""
+    # As the build will read it, with older markers rewritten
+    text, _ = heal_markers(text, results=results)
     paths = [
         v.path for v in extract_values(text, markdown_path, results=results)
     ]

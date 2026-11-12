@@ -59,7 +59,16 @@ You can also use the `--description` flag to add more details.
 
 When this is called, Calkit will:
 
-- Compress and upload all files kept in Git and DVC to Zenodo,
+<!-- TODO: needs human review -->
+
+- Check the project's [requirements](requirements.md) are met,
+  offering to install missing apps as `calkit run` does,
+  and that the pipeline is up-to-date,
+  before anything is archived.
+- Compress all files kept in Git and DVC,
+  extract the archive and run its pipeline to check it reproduces on its
+  own,
+  then upload it to Zenodo,
   which will produce a DOI,
   ensuring the release can be accessed even if the repo is relocated.
 - Create a Git tag. This can be used to create a release on GitHub if desired.
@@ -216,6 +225,11 @@ and a `calkit.yaml`, `dvc.yaml`, and `dvc.lock` pruned to match.
 Stages that have nothing to do with the artifact are left out.
 Before the release goes out,
 the archive is extracted and run to check it reproduces on its own.
+
+<!-- TODO: needs human review -->
+
+Since running it needs the project's requirements met,
+those are checked first, before anything is archived.
 
 <!-- prettier-ignore -->
 !!! note

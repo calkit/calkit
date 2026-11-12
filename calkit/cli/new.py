@@ -3692,7 +3692,6 @@ def new_release(
             raise_error(str(e))
     # Check that the pipeline is up-to-date, limiting the check to the stage
     # that produces the released artifact when releasing a single path.
-    typer.echo("Checking pipeline is up-to-date for release")
     targets = None
     # The stage that builds the released path, whose upstream stages define
     # what a --pipeline release carries
@@ -3712,6 +3711,26 @@ def new_release(
         # A project release carries the whole pipeline already
         typer.echo("Project releases already include the pipeline")
         include_pipeline = False
+    # A release that carries its pipeline is checked by running it, which
+    # needs the project's requirements met, so check them as 'calkit run'
+    # does before anything slow, like building environments or archiving
+    if include_pipeline or (path == "." and not internal_release):
+        typer.echo("Checking project requirements")
+        for req_wdir, req_info in calkit.iter_projects(ck_info=ck_info):
+            try:
+                with calkit.in_project(req_wdir):
+                    # A dry run doesn't install anything
+                    calkit.check_requirements(
+                        ck_info=req_info,
+                        interactive=False if dry_run else None,
+                    )
+            except Exception as e:
+                raise_error(
+                    "Project requirements aren't met, so the release can't "
+                    "be checked by running its pipeline: "
+                    f"{calkit.describe_project(req_wdir)}{e}"
+                )
+    typer.echo("Checking pipeline is up-to-date for release")
     status = calkit.pipeline.get_status(
         ck_info=ck_info,
         targets=targets,

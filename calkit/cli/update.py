@@ -548,9 +548,8 @@ def update_markdown(
     Each value marker's text, e.g., the 0.29 in
     '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is
     rewritten from the JSON, YAML, or TOML results file and key it names.
-    Markers in an older form, 'calkit value' or 'ckvalue[.2f]', are
-    rewritten as above, and 'calkit values' directives removed. Nothing else
-    in the file changes. This is the update 'calkit run' makes after running
+    A format written in brackets, 'ckvalue[.2f] ...', as LaTeX's \\ckvalue
+    takes one, is moved after the key. Nothing else in the file changes. This is the update 'calkit run' makes after running
     the pipeline, for a project without one, e.g., one whose results are
     imported.
 
@@ -607,12 +606,6 @@ def update_markdown(
         if not changed:
             continue
         stale.append(path)
-        _, n_healed = calkit.markdown.heal_markers(text, results=results)
-        if n_healed:
-            typer.echo(
-                f"{path} has {n_healed} marker(s) or directive(s) in an older "
-                "form" + ("" if check else "; rewriting them as 'ckvalue'")
-            )
         if check:
             typer.echo(f"Values in {path} are out of date")
             continue

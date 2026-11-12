@@ -318,17 +318,48 @@ above it.
 It also survives the file being renamed, and says which stage produces
 the number.
 
-### Older markers
+### Many values from one file
 
 <!-- TODO: needs human review -->
 
-Markers in an earlier spelling, e.g.,
-`calkit value key=rms path=results.json format="{:.4f}"`, and
-`calkit values path=...` directives that set a file for the markers after
-them, are rewritten in the form above whenever their values are updated.
-So is a compact marker with its format in brackets, as LaTeX's
-`\ckvalue[.4f]` writes it.
-Markers in code are left as they are.
+A `calkit values` block sets the results file for the markers inside it,
+so each needs only its key:
+
+```md
+<!-- calkit values path=results.json -->
+
+The RMS is <!-- ckvalue rms .4f -->0.2933<!-- /ckvalue -->
+over <!-- ckvalue key=n -->401<!-- /ckvalue --> samples.
+
+<!-- /calkit values -->
+```
+
+Inside a block, a marker naming no source takes the block's, with its
+key given by name or as its only positional argument.
+One that names its own source keeps it.
+A block has to be ended with `/calkit values`, so where it stops is
+written down rather than guessed.
+
+### The longer form
+
+<!-- TODO: needs human review -->
+
+Markers can also be written with every argument named, with `format=` as a
+whole replacement field rather than a bare spec:
+
+```md
+The RMS is <!-- calkit value key=rms path=results.json format="{:.4f}" -->0.2933<!-- /calkit value -->
+```
+
+In a `calkit values` block, `path=` can be left out.
+
+### Formats in brackets
+
+<!-- TODO: needs human review -->
+
+A marker written with its format in brackets, as LaTeX's `\ckvalue[.4f]`
+takes one, e.g., `<!-- ckvalue[.4f] metrics rms -->`, has the format moved
+after the key whenever its value is updated.
 
 ## Running
 

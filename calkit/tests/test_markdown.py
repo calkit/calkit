@@ -516,7 +516,8 @@ def test_markdown_pdf(tmp_path, monkeypatch):
         "<!-- calkit values path=results/r.json -->\n"
         "It's <!-- calkit value key=gain -->1.0<!-- /calkit value -->x"
         " faster, see ![remote](https://example.org/a.png), ![plot][p],"
-        " ![Q] and `![inline](code.png)`.\n\n"
+        " ![Q] and `![inline](code.png)`.\n"
+        "<!-- /calkit values -->\n\n"
         "```md\n"
         "<!-- calkit value key=gain -->1.0<!-- /calkit value -->\n"
         "![example](missing.png)\n"
@@ -1454,6 +1455,7 @@ def test_values(tmp_path, monkeypatch):
         "Elsewhere: <!-- calkit value key=n path=other.json -->"
         "<!-- /calkit value -->, <!-- calkit value key=ok --><!-- /calkit value -->"
         ", <!-- calkit value key=label --><!-- /calkit value -->.\n\n"
+        "<!-- /calkit values -->\n\n"
         "````md\n"
         "<!-- calkit value key=rms -->example<!-- /calkit value -->\n"
         "````\n\n"
@@ -1473,22 +1475,20 @@ def test_values(tmp_path, monkeypatch):
     assert [b.name for b in parse_markdown(text)] == ["a"]
     new, changed = set_values(text, "README.md")
     assert changed
-    # Long markers are rewritten in the compact form, each naming its own
-    # source, and the directive they took one from is removed
-    assert new.startswith(
-        "# Title\n\nThe RMS is <!-- ckvalue results.json rms .4f -->0.2933"
-        "<!-- /ckvalue --> over <!-- ckvalue results.json n -->401"
-        "<!-- /ckvalue --> samples."
-    )
-    assert "calkit values" not in new
     assert (
-        "| leading coefficient | <!-- ckvalue results.json fit.coeffs.0 -->"
-        "1.974<!-- /ckvalue --> |"
+        'The RMS is <!-- calkit value key=rms format="{:.4f}" -->0.2933'
+        "<!-- /calkit value --> over <!-- calkit value key=n -->401"
+        "<!-- /calkit value --> samples."
     ) in new
     assert (
-        "Elsewhere: <!-- ckvalue other.json n -->7<!-- /ckvalue -->, "
-        "<!-- ckvalue results.json ok -->true<!-- /ckvalue -->, "
-        "<!-- ckvalue results.json label -->damped<!-- /ckvalue -->."
+        "| leading coefficient | <!-- calkit value key=fit.coeffs.0 -->1.974"
+        "<!-- /calkit value --> |"
+    ) in new
+    assert (
+        "Elsewhere: <!-- calkit value key=n path=other.json -->7"
+        "<!-- /calkit value -->, <!-- calkit value key=ok -->true"
+        "<!-- /calkit value -->, <!-- calkit value key=label -->damped"
+        "<!-- /calkit value -->."
     ) in new
     assert "<!-- calkit value key=rms -->example<!-- /calkit value -->" in new
     # Idempotent once in line with the results
@@ -1537,102 +1537,98 @@ def test_values(tmp_path, monkeypatch):
         set_values("<!-- ckvalue bad.toml n -->?<!-- /ckvalue -->\n", "x.md")
 
 
-def test_heal_markers():
-    from calkit.markdown import extract_values, heal_markers, pdf_inputs
+def test_value_blocks_and_brackets(tmp_path, monkeypatch):
+    from calkit.markdown import (
+        MarkdownParseError,
+        extract_values,
+        heal_markers,
+        pdf_inputs,
+        set_values,
+    )
 
+    monkeypatch.chdir(tmp_path)
     results = {"metrics": "results.json"}
+    # In a block, a marker naming no source takes the block's: a long one
+    # without 'path=', or a compact one giving only its key, by name or as
+    # its one positional argument. One naming its own keeps it.
     text = (
-        'Intro <!-- calkit value key=a path=r.json format="{:.1f}" -->1'
-        "<!-- /calkit value -->.\n\n"
-        "<!-- calkit values path=other.json -->\n\n"
-        "- <!-- calkit value key=b -->2<!-- /calkit value --> and "
-        '<!-- calkit value key=c format="{value:,} GB" -->3'
-        "<!-- /calkit value -->\n"
-        "- <!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n"
-        "- <!-- calkit value key=d path=metrics -->4<!-- /calkit value -->\n"
-        "- `<!-- calkit value key=x path=y.json -->5<!-- /calkit value -->`\n"
-        "\n```md\n<!-- calkit value key=z path=q.json -->6"
-        "<!-- /calkit value -->\n```\n"
+        "<!-- calkit values path=r.json -->\n\n"
+        "<!-- calkit value key=a -->1<!-- /calkit value -->, "
+        "<!-- ckvalue key=b -->2<!-- /ckvalue -->, "
+        "<!-- ckvalue c -->3<!-- /ckvalue -->, "
+        "<!-- ckvalue d format=.1f -->4<!-- /ckvalue -->, "
+        "<!-- ckvalue other.json e -->5<!-- /ckvalue -->, "
+        "<!-- ckvalue metrics f -->6<!-- /ckvalue -->\n\n"
+        "<!-- /calkit values -->\n\n"
+        "<!-- ckvalue other.json g -->7<!-- /ckvalue -->\n"
     )
-    healed, n = heal_markers(text, results=results)
-    assert n == 6
-    assert healed == (
-        "Intro <!-- ckvalue r.json a .1f -->1<!-- /ckvalue -->.\n\n"
-        "- <!-- ckvalue other.json b -->2<!-- /ckvalue --> and "
-        '<!-- ckvalue other.json c "{value:,} GB" -->3<!-- /ckvalue -->\n'
-        "- <!-- ckvalue metrics rms .4f -->0<!-- /ckvalue -->\n"
-        # A path that is also a result's name stays a path
-        "- <!-- ckvalue path=metrics key=d -->4<!-- /ckvalue -->\n"
-        # Code is an example, whether inline or fenced
-        "- `<!-- calkit value key=x path=y.json -->5<!-- /calkit value -->`\n"
-        "\n```md\n<!-- calkit value key=z path=q.json -->6"
-        "<!-- /calkit value -->\n```\n"
-    )
-    # Every value reads the same as before, apart from the inline-code one,
-    # which the bracketed form couldn't be read as at all
-    before = {
+    assert [
         (v.key, v.path, v.format)
         for v in extract_values(text, "x.md", results=results)
-    }
-    after = {
-        (v.key, v.path, v.format)
-        for v in extract_values(healed, "x.md", results=results)
-    }
-    assert after - before == {("rms", "results.json", "{:.4f}")}
-    assert heal_markers(healed, results=results) == (healed, 0)
-    # One that can't be rewritten exactly is left for the error it gives
-    unhealable = "<!-- calkit value key=rms -->?<!-- /calkit value -->\n"
-    assert heal_markers(unhealable) == (unhealable, 0)
-    # A format holding '=' is quoted, so it isn't read as a keyword
-    healed, _ = heal_markers(
-        '<!-- calkit value key=n path=r.json format="n={value:,}" -->1'
-        "<!-- /calkit value -->\n"
-    )
-    assert healed == (
-        '<!-- ckvalue r.json n "n={value:,}" -->1<!-- /ckvalue -->\n'
-    )
-    assert extract_values(healed, "x.md")[0].format == "n={value:,}"
-    # A bracketed format after named arguments is named too
-    healed, _ = heal_markers(
-        "<!-- ckvalue[.4f] name=metrics key=rms -->0<!-- /ckvalue -->\n",
-        results=results,
-    )
-    assert healed == (
-        "<!-- ckvalue name=metrics key=rms format=.4f -->0<!-- /ckvalue -->\n"
-    )
-    assert extract_values(healed, "x.md", results=results)[0].format == (
-        "{:.4f}"
-    )
-    # Backticks in a marker's own format don't make it code, and its
-    # directive goes once nothing relies on it
-    healed, _ = heal_markers(
-        "<!-- calkit values path=r.json -->\n"
-        'A <!-- calkit value key=n format="`{value}`" -->1'
-        "<!-- /calkit value -->\n"
-    )
-    assert (
-        healed == "A <!-- ckvalue r.json n `{value}` -->1<!-- /ckvalue -->\n"
-    )
-    assert extract_values(healed, "x.md")[0].format == "`{value}`"
-    # A directive a marker left as it is still relies on stays
-    still_needed = (
-        "<!-- calkit values path=r.json -->\n"
-        "A <!-- calkit value key=n -->1<!-- /calkit value --> and "
-        "`<!-- calkit value key=m -->2<!-- /calkit value -->`\n"
-    )
-    healed, _ = heal_markers(still_needed)
-    assert healed.startswith("<!-- calkit values path=r.json -->\n")
-    assert "A <!-- ckvalue r.json n -->1<!-- /ckvalue -->" in healed
-    assert [v.path for v in extract_values(healed, "x.md")] == [
-        "r.json",
-        "r.json",
+    ] == [
+        ("a", "r.json", None),
+        ("b", "r.json", None),
+        ("c", "r.json", None),
+        ("d", "r.json", "{:.1f}"),
+        ("e", "other.json", None),
+        ("f", "results.json", None),
+        ("g", "other.json", None),
     ]
-    # A PDF build depends on what a bracketed marker names, not '[.4f]'
-    assert pdf_inputs(
-        "<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n",
-        "x.md",
-        results=results,
-    ) == ["results.json"]
+    # A block must be ended, and an end must end something, with a hint
+    for bad, match, line in [
+        (
+            "<!-- calkit values path=r.json -->\n\n"
+            "<!-- calkit value key=a -->1<!-- /calkit value -->\n",
+            "add '<!-- /calkit values -->' after the last value",
+            1,
+        ),
+        ("Text.\n\n<!-- /calkit values -->\n", "ends no", 3),
+        # Outside a block, a compact marker still names its own source
+        ("<!-- ckvalue key=b -->2<!-- /ckvalue -->\n", "names no results", 1),
+    ]:
+        with pytest.raises(MarkdownParseError, match=match) as e:
+            extract_values(bad, "x.md")
+        assert e.value.line == line
+    # A bracketed format, as LaTeX's \\ckvalue takes one, can't be read
+    # as written, which is said with what to write instead...
+    bracketed = "<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n"
+    with pytest.raises(
+        MarkdownParseError, match="ckvalue results.json rms .4f"
+    ):
+        extract_values(bracketed, "x.md", results=results)
+    # ...and updating values moves it after the key, as named if the
+    # arguments before it are, and quoted if it would read as more than one
+    for written, healed in [
+        (bracketed, "<!-- ckvalue metrics rms .4f -->0<!-- /ckvalue -->\n"),
+        (
+            "<!-- ckvalue[.4f] name=metrics key=rms -->0<!-- /ckvalue -->\n",
+            "<!-- ckvalue name=metrics key=rms format=.4f -->0"
+            "<!-- /ckvalue -->\n",
+        ),
+        (
+            "<!-- ckvalue[n={value}] metrics rms -->0<!-- /ckvalue -->\n",
+            '<!-- ckvalue metrics rms "n={value}" -->0<!-- /ckvalue -->\n',
+        ),
+    ]:
+        assert heal_markers(written) == (healed, 1)
+        assert extract_values(healed, "x.md", results=results)
+    # Markers in code are examples, inline or fenced, but backticks inside
+    # a marker don't make it code
+    in_code = (
+        "`<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->`\n\n"
+        "```md\n<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n```\n"
+    )
+    assert heal_markers(in_code) == (in_code, 0)
+    assert heal_markers(
+        "<!-- ckvalue[`{value}`] metrics rms -->0<!-- /ckvalue -->\n"
+    ) == ("<!-- ckvalue metrics rms `{value}` -->0<!-- /ckvalue -->\n", 1)
+    # Updating values does it, and so does finding a PDF's inputs
+    (tmp_path / "results.json").write_text('{"rms": 0.29331}')
+    assert set_values(bracketed, "x.md", results=results) == (
+        "<!-- ckvalue metrics rms .4f -->0.2933<!-- /ckvalue -->\n",
+        True,
+    )
+    assert pdf_inputs(bracketed, "x.md", results=results) == ["results.json"]
 
 
 def test_compact_value_markers(tmp_path, monkeypatch):
@@ -1757,9 +1753,10 @@ def test_compact_value_markers(tmp_path, monkeypatch):
         "<!-- calkit values path=other.json -->\n"
         "L <!-- calkit value key=n -->?<!-- /calkit value --> "
         "C <!-- ckvalue results.json n -->?<!-- /ckvalue -->\n"
+        "<!-- /calkit values -->\n"
     )
     out, _ = set_values(mixed, "README.md")
-    assert "L <!-- ckvalue other.json n -->7<!-- /ckvalue -->" in out
+    assert "L <!-- calkit value key=n -->7<!-- /calkit value -->" in out
     assert "C <!-- ckvalue results.json n -->401<!-- /ckvalue -->" in out
     # The long form's default never applies to a compact marker
     assert extract_values(mixed, "README.md")[1].path == "results.json"

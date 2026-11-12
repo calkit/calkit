@@ -2541,6 +2541,7 @@ _VALUE_RE = re.compile(
     r"<!--\s*/calkit value\s*-->"
 )
 _VALUES_RE = re.compile(r"<!--\s*calkit values\b(?P<attrs>.*?)-->")
+_VALUES_END_RE = re.compile(r"<!--\s*/calkit values\s*-->")
 # The compact form, spelled to match calkit.sty's \ckvalue[opt]{source}{key}
 # so a project's LaTeX and Markdown read the same way. The source is a results
 # file path or a declared result's name, given on every marker: with a short
@@ -2576,6 +2577,16 @@ _ANY_VALUE_RE = re.compile(
     _VALUE_RE.pattern.replace("(?P<text>", "(?P<ltext>")
     + "|"
     + _CKVALUE_RE.pattern
+)
+
+
+# A block's start and end, and both marker forms, in document order
+_VALUE_TOKEN_RE = re.compile(
+    _VALUES_RE.pattern.replace("(?P<attrs>", "(?P<battrs>")
+    + "|(?P<bend>"
+    + _VALUES_END_RE.pattern
+    + ")|"
+    + _ANY_VALUE_RE.pattern
 )
 
 
@@ -2640,7 +2651,9 @@ def _unquote(text: str) -> str:
     return text
 
 
-def _ckvalue_args(args_text: str, path: str, line: int) -> dict:
+def _ckvalue_args(
+    args_text: str, path: str, line: int, block_source: str | None = None
+) -> dict:
     """A compact marker's arguments, by the rules a Python call follows.
 
     Positional arguments fill source, key and format in that order, and may
@@ -2648,6 +2661,15 @@ def _ckvalue_args(args_text: str, path: str, line: int) -> dict:
     twice, or a name that is not a parameter is an error rather than a
     silently dropped argument.
     """
+    if args_text.startswith("["):
+        option = args_text[1:].split("]", 1)[0]
+        raise MarkdownParseError(
+            "'ckvalue' takes its format after the key rather than in "
+            f"brackets as LaTeX's \\ckvalue does, e.g., 'ckvalue "
+            f"results.json rms {option or '.2f'}'",
+            path=path,
+            line=line,
+        )
     got: dict[str, str] = {}
     kind: str | None = None
     seen_keyword = False
@@ -2690,13 +2712,23 @@ def _ckvalue_args(args_text: str, path: str, line: int) -> dict:
                 )
             got[_CKVALUE_PARAMS[n_positional]] = _unquote(m.group("pos"))
             n_positional += 1
+    # In a 'calkit values' block, a marker naming no source takes the
+    # block's, and a lone positional argument is then its key
+    if block_source is not None and "key" not in got and n_positional == 1:
+        if kind is None:
+            got["key"] = got.pop("source")
     if "source" not in got:
-        raise MarkdownParseError(
-            "'ckvalue' names no results file; give one positionally or as "
-            "'path=results.json' or 'name=metrics'",
-            path=path,
-            line=line,
-        )
+        if block_source is not None:
+            got["source"] = block_source
+            kind = "path"
+        else:
+            raise MarkdownParseError(
+                "'ckvalue' names no results file; give one positionally or "
+                "as 'path=results.json' or 'name=metrics', or put it in a "
+                "'calkit values path=...' block",
+                path=path,
+                line=line,
+            )
     if "key" not in got:
         raise MarkdownParseError(
             f"'ckvalue {got['source']}' names no key; give one positionally "
@@ -2771,17 +2803,21 @@ def extract_values(
     source on the marker itself, as a results file path or as the name of
     a result the project declares, mirroring how ``\\ckvalue`` reads in
     LaTeX. The longer ``calkit value`` marker takes ``key=`` and
-    ``path=``, and a ``calkit values path=...`` directive sets the file
-    for the long markers after it, so a file drawing on one results file
-    needn't name it on every value; that default never applies to a
-    compact marker, which is always self-contained.
+    ``path=``.
+
+    A ``calkit values path=...`` block, ended by ``/calkit values``, sets
+    the file for the markers inside it that name none: a long marker
+    without ``path=``, or a compact one giving only its key, by name or as
+    its one positional argument. A block that isn't ended is an error, since
+    where it stops would otherwise have to be guessed.
 
     Markers inside fenced code are examples, not values, and are left
     alone.
     """
     path = Path(markdown_path).as_posix()
     values: list[MarkdownValue] = []
-    default_path: str | None = None
+    # Each open block's file, and the line it starts on
+    blocks: list[tuple[str, int]] = []
     fence: str | None = None
     for i, line in enumerate(text.splitlines()):
         fm = _FENCE_RE.match(line)
@@ -2797,21 +2833,32 @@ def extract_values(
         if fm is not None:
             fence = fm.group("fence")
             continue
-        for dm in _VALUES_RE.finditer(line):
-            attrs = _value_attrs(dm.group("attrs"), path, i + 1)
-            if set(attrs) != {"path"}:
-                raise MarkdownParseError(
-                    "'calkit values' takes only a 'path', e.g. "
-                    "'calkit values path=results.json'",
-                    path=path,
-                    line=i + 1,
-                )
-            default_path = Path(str(attrs["path"])).as_posix()
-        for m in _ANY_VALUE_RE.finditer(line):
+        for m in _VALUE_TOKEN_RE.finditer(line):
+            block_path = blocks[-1][0] if blocks else None
+            if m.group("battrs") is not None:
+                attrs = _value_attrs(m.group("battrs"), path, i + 1)
+                if set(attrs) != {"path"}:
+                    raise MarkdownParseError(
+                        "'calkit values' takes only a 'path', e.g. "
+                        "'calkit values path=results.json'",
+                        path=path,
+                        line=i + 1,
+                    )
+                blocks.append((Path(str(attrs["path"])).as_posix(), i + 1))
+                continue
+            if m.group("bend") is not None:
+                if not blocks:
+                    raise MarkdownParseError(
+                        "'/calkit values' ends no 'calkit values' block",
+                        path=path,
+                        line=i + 1,
+                    )
+                blocks.pop()
+                continue
             if m.group("ctext") is not None:
-                # The compact form names its source on the marker, so the
-                # 'calkit values' default does not apply to it.
-                got = _ckvalue_args(m.group("args"), path, i + 1)
+                got = _ckvalue_args(
+                    m.group("args"), path, i + 1, block_source=block_path
+                )
                 values.append(
                     MarkdownValue(
                         key=got["key"],
@@ -2838,12 +2885,12 @@ def extract_values(
                     path=path,
                     line=i + 1,
                 )
-            results_path = attrs.pop("path", default_path)
+            results_path = attrs.pop("path", block_path)
             if results_path is None:
                 raise MarkdownParseError(
                     f"Value '{key}' names no results file; set 'path=' on "
-                    "the marker or declare one with 'calkit values "
-                    "path=...' above it",
+                    "the marker or put it in a 'calkit values path=...' "
+                    "block",
                     path=path,
                     line=i + 1,
                 )
@@ -2864,6 +2911,13 @@ def extract_values(
                     line=i + 1,
                 )
             )
+    if blocks:
+        raise MarkdownParseError(
+            "'calkit values' is not ended; add '<!-- /calkit values -->' "
+            "after the last value it's for",
+            path=path,
+            line=blocks[-1][1],
+        )
     return values
 
 
@@ -2902,194 +2956,76 @@ def format_value(value: Any, fmt: str | None = None) -> str:
 _BRACKET_CKVALUE_RE = re.compile(
     r"<!--(?P<lead>\s*)ckvalue\[(?P<bformat>[^\]]*)\](?P<bargs>.*?)-->"
 )
-# What healing rewrites, in document order: a 'calkit values' directive, a
-# long marker, or a bracketed compact one
-_HEAL_RE = re.compile(
-    _VALUES_RE.pattern.replace("(?P<attrs>", "(?P<dattrs>")
-    + "|"
-    + _VALUE_RE.pattern
-    + "|"
-    + _BRACKET_CKVALUE_RE.pattern
-)
 
 
-def heal_markers(
-    text: str, results: dict[str, str] | None = None
-) -> tuple[str, int]:
-    """Rewrite older spellings of value markers in the compact form.
+def heal_markers(text: str) -> tuple[str, int]:
+    """Give compact markers written with a bracketed format, as LaTeX's
+    ``\\ckvalue`` takes one, the format as an argument instead.
 
-    A long ``calkit value`` marker becomes a ``ckvalue`` naming its own
-    source, taking it from a ``calkit values`` directive above it if it
-    named none. A directive is removed once nothing still relies on it. A
-    compact marker with a bracketed format, as ``calkit.sty`` writes one,
-    gets the format as an argument. Markers in code are examples and are
-    left alone, as is a long marker that can't be rewritten exactly, e.g.,
-    with no source. Returns the new text and how many markers and
-    directives were rewritten.
+    ``ckvalue[.4f] metrics rms`` becomes ``ckvalue metrics rms .4f``, or
+    ``format=.4f`` after named arguments. Markers in code are examples and
+    are left alone. Returns the new text and how many were rewritten.
     """
 
-    def compact_arg(arg: str) -> str | None:
-        # Quoted when it would otherwise read as more than one argument or
-        # as a keyword; None when no quote can hold it
-        if arg and not re.search(r"[\s=\"']", arg):
-            return arg
-        for quote in "\"'":
-            if quote not in arg:
-                return quote + arg + quote
-        return None
-
-    def long_to_compact(m: re.Match[str], default: str | None) -> str | None:
-        try:
-            attrs = parse_attrs(m.group("attrs"))
-        except ValueError:
-            return None
-        source = attrs.pop("path", default)
-        key = attrs.pop("key", None)
-        fmt = attrs.pop("format", None)
-        if attrs or source is None or key is None:
-            return None
-        source = str(source)
-        # Positionally, a declared result's name would win over the path, so
-        # it's named, and the arguments after it then have to be too
-        looks_like_path = "/" in source or "." in Path(source).name
-        named = not looks_like_path or bool(results and source in results)
-        args = [("path=", source), ("key=", str(key))]
-        if fmt is not None:
-            spec = re.fullmatch(r"\{:([^{}]*)\}", str(fmt))
-            args.append(("format=", spec.group(1) if spec else str(fmt)))
-        written = []
-        for name, value in args:
-            arg = compact_arg(value)
-            if arg is None:
+    def format_arg(fmt: str, args: str) -> str | None:
+        fmt = fmt.strip()
+        if not fmt or re.search(r"[\s=\"']", fmt):
+            for quote in "\"'":
+                if quote not in fmt:
+                    fmt = quote + fmt + quote
+                    break
+            else:
                 return None
-            written.append((name if named else "") + arg)
-        return (
-            f"<!-- ckvalue {' '.join(written)} -->{m.group('text')}"
-            "<!-- /ckvalue -->"
-        )
-
-    def bracket_to_args(m: re.Match[str]) -> str | None:
-        args = m.group("bargs").strip()
-        fmt = compact_arg(m.group("bformat").strip())
-        if fmt is None:
-            return None
         # After a named argument, a positional one would be an error
         if any(a.group("key") for a in _CKARG_RE.finditer(args)):
             fmt = "format=" + fmt
-        return f"<!--{m.group('lead')}ckvalue {args} {fmt} -->"
+        return fmt
 
-    # Lines are kept as pieces, with each directive a placeholder, since
-    # whether it can go depends on the markers after it
-    lines: list[list[Any]] = []
-    eols: list[str] = []
-    directives: list[dict] = []
+    out = []
     n = 0
-    current: dict | None = None
     fence: str | None = None
     for line in text.splitlines(keepends=True):
         bare = line.rstrip("\r\n")
-        eols.append(line[len(bare) :])
         fm = _FENCE_RE.match(bare)
-        if fence is not None or fm is not None:
-            if fence is None:
-                fence = fm.group("fence") if fm is not None else None
-            elif (
+        if fence is not None:
+            if (
                 fm is not None
                 and fm.group("fence")[0] == fence[0]
                 and len(fm.group("fence")) >= len(fence)
                 and not fm.group("info").strip()
             ):
                 fence = None
-            lines.append([bare])
+            out.append(line)
             continue
-        matches = list(_HEAL_RE.finditer(bare))
-        # A code span is found with the markers masked, so backticks inside
+        if fm is not None:
+            fence = fm.group("fence")
+            out.append(line)
+            continue
+        brackets = list(_BRACKET_CKVALUE_RE.finditer(bare))
+        if not brackets:
+            out.append(line)
+            continue
+        # Code spans are found with markers masked, so backticks inside
         # one, e.g., in its format, don't count
         masked = bare
-        for m in matches:
+        for m in list(_ANY_VALUE_RE.finditer(bare)) + brackets:
             masked = (
                 masked[: m.start()]
                 + "x" * (m.end() - m.start())
                 + masked[m.end() :]
             )
         spans = [cm.span() for cm in _CODE_SPAN_RE.finditer(masked)]
-        pieces: list[Any] = []
-        pos = 0
-        for m in matches:
-            pieces.append(bare[pos : m.start()])
-            pos = m.end()
-            in_code = any(start <= m.start() < end for start, end in spans)
-            if m.group("dattrs") is not None:
-                try:
-                    attrs = parse_attrs(m.group("dattrs"))
-                except ValueError:
-                    attrs = {}
-                if in_code or set(attrs) != {"path"}:
-                    pieces.append(m.group(0))
-                    continue
-                current = {
-                    "text": m.group(0),
-                    "path": str(attrs["path"]),
-                    "needed": False,
-                }
-                directives.append(current)
-                pieces.append(current)
+        for m in reversed(brackets):
+            if any(start <= m.start() < end for start, end in spans):
                 continue
-            if m.group("bformat") is not None:
-                new = None if in_code else bracket_to_args(m)
-            else:
-                new = (
-                    None
-                    if in_code
-                    else long_to_compact(
-                        m, current["path"] if current is not None else None
-                    )
-                )
-                if new is None and current is not None:
-                    # Still read with the directive's file unless it names
-                    # its own
-                    try:
-                        own = "path" in parse_attrs(m.group("attrs"))
-                    except ValueError:
-                        own = False
-                    if not own:
-                        current["needed"] = True
-            if new is None:
-                pieces.append(m.group(0))
-            else:
-                n += 1
-                pieces.append(new)
-        pieces.append(bare[pos:])
-        lines.append(pieces)
-    out: list[str] = []
-    dropped_line = False
-    for pieces, eol in zip(lines, eols):
-        written = []
-        removed = False
-        for piece in pieces:
-            if isinstance(piece, dict):
-                if piece["needed"]:
-                    written.append(piece["text"])
-                else:
-                    removed = True
-                    n += 1
-            else:
-                written.append(piece)
-        new_line = "".join(written)
-        # A line that held only directives goes, and so does a blank line
-        # that leaves doubled, or leading
-        if removed and not new_line.strip():
-            dropped_line = True
-            continue
-        if (
-            dropped_line
-            and not new_line.strip()
-            and (not out or not out[-1].strip())
-        ):
-            dropped_line = False
-            continue
-        dropped_line = False
-        out.append(new_line + eol)
+            args = m.group("bargs").strip()
+            fmt = format_arg(m.group("bformat"), args)
+            if fmt is None:
+                continue
+            new = f"<!--{m.group('lead')}ckvalue {args} {fmt} -->"
+            bare = bare[: m.start()] + new + bare[m.end() :]
+            n += 1
+        out.append(bare + line[len(line.rstrip("\r\n")) :])
     return "".join(out), n
 
 
@@ -3104,9 +3040,9 @@ def set_values(
     The results files are outputs of stages, so they are the truth about
     what was computed; the prose is brought into line with them rather
     than the other way round. Results files are read as YAML or TOML by
-    extension, and as JSON otherwise. Older spellings of markers are
-    rewritten in the compact form first; see ``heal_markers``. Returns the
-    new text and whether anything changed. A missing file or key raises
+    extension, and as JSON otherwise. A bracketed format is moved first;
+    see ``heal_markers``. Returns the new text and whether anything
+    changed. A missing file or key raises
     ``MarkdownParseError`` naming the line.
     """
     import json
@@ -3114,7 +3050,7 @@ def set_values(
     from calkit.questions import read_evidence_file
 
     original = text
-    text, _ = heal_markers(text, results=results)
+    text, _ = heal_markers(text)
     values = extract_values(text, markdown_path, results=results)
     if not values:
         return text, text != original
@@ -3275,8 +3211,8 @@ def pdf_inputs(
     """What building a Markdown file into a PDF reads besides the file:
     the results files its values come from and the images it shows, as
     paths from the project root."""
-    # As the build will read it, with older markers rewritten
-    text, _ = heal_markers(text, results=results)
+    # As the build will read it
+    text, _ = heal_markers(text)
     paths = [
         v.path for v in extract_values(text, markdown_path, results=results)
     ]

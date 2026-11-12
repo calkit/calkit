@@ -2009,6 +2009,9 @@ def to_arxiv(
     # latex2arxiv requires .gls files at root, so copy them
     copied = []
     for gls_file in Path(target_folder).rglob("*.gls"):
+        if gls_file.stat().st_size == 0:
+            # empty files will get deleted, add a comment to avoid that
+            gls_file.write_text("%\n", encoding="utf-8")
         if gls_file.parent == Path(target_folder):
             continue  # Already at root
         destination = Path(target_folder) / gls_file.name

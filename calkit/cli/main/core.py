@@ -4250,30 +4250,44 @@ def run(
     # dvc.lock records their hashes, along with any files Git ignores in
     # them, which would otherwise be in neither Git nor DVC, leaving the
     # output modified in a clone and its stage stale
-    ran_here = [
-        n for n in ran if calkit.dvc.split_lock_stage_name(n)[0] is None
-    ]
-    if ran_here and not dry:
+    # By the directory of the dvc.lock recording each, since a subproject's
+    # stages are declared in its own calkit.yaml, under their names there
+    ran_by_lock_dir: dict[str | None, list[str]] = {}
+    for stage_name in ran:
+        lock_dir, lock_name = calkit.dvc.split_lock_stage_name(stage_name)
+        ran_by_lock_dir.setdefault(lock_dir, []).append(lock_name)
+    if ran_by_lock_dir and not dry:
         try:
+            # Whether to stage a subproject's is this project's setting
             autostage = calkit.dvc.autostage_enabled()
-            run_dvc_repo = calkit.dvc.get_dvc_repo()
-            try:
-                if autostage:
-                    git_out_paths = [
-                        p
-                        for p, stage_name in calkit.dvc.get_git_output_paths(
-                            dvc_repo=run_dvc_repo
-                        ).items()
-                        if stage_name in ran_here and os.path.exists(p)
-                    ]
-                    # Chunked to stay under command line length limits
-                    for i in range(0, len(git_out_paths), 100):
-                        repo.git.add("-A", "--", *git_out_paths[i : i + 100])
-                unstored = calkit.dvc.get_unstored_output_files(
-                    dvc_repo=run_dvc_repo, stages=ran_here
-                )
-            finally:
-                run_dvc_repo.close()
+            unstored = []
+            for lock_dir, lock_names in ran_by_lock_dir.items():
+                run_dvc_repo = calkit.dvc.get_dvc_repo(lock_dir)
+                try:
+                    if autostage:
+                        git_out_paths = [
+                            p
+                            for p, n in calkit.dvc.get_git_output_paths(
+                                dvc_repo=run_dvc_repo, wdir=lock_dir
+                            ).items()
+                            if n in lock_names and os.path.exists(p)
+                        ]
+                        # Chunked to stay under command line length limits
+                        for i in range(0, len(git_out_paths), 100):
+                            repo.git.add(
+                                "-A", "--", *git_out_paths[i : i + 100]
+                            )
+                    for u in calkit.dvc.get_unstored_output_files(
+                        dvc_repo=run_dvc_repo, wdir=lock_dir, stages=lock_names
+                    ):
+                        # Relative to here rather than the subproject
+                        u["files"] = [
+                            Path(lock_dir or "", f).as_posix()
+                            for f in u["files"]
+                        ]
+                        unstored.append(u)
+                finally:
+                    run_dvc_repo.close()
             for storage in ["git", "dvc"]:
                 in_storage = [u for u in unstored if u["storage"] == storage]
                 files = [f for u in in_storage for f in u["files"]]

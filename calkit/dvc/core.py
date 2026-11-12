@@ -1714,7 +1714,8 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
     These are files Git ignores in an output stored in Git, unless
     .dvcignore excludes them too, so DVC doesn't hash them either, and, with
     ``include_dvc``, files .dvcignore excludes in a directory DVC caches,
-    which Git ignores along with the rest of it.
+    which Git ignores along with the rest of it, unless they were added to
+    Git anyway.
     Either way the output is complete here but not in a clone, and there one
     stored in Git doesn't match dvc.lock, so its stage looks stale.
 
@@ -1835,7 +1836,12 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
     for out in dvc_repo.index.outs:
         if not out.use_cache or out.stage.is_data_source:
             continue
-        if stages is not None and out.stage.name not in stages:
+        # The stages asked about are this directory's, not another's that
+        # shares its DVC repo, e.g., a subproject's
+        if stages is not None and (
+            out.stage.name not in stages
+            or Path(out.stage.path).resolve() != base / "dvc.yaml"
+        ):
             continue
         top = out.fs_path
         top_resolved = Path(top).resolve()
@@ -1872,6 +1878,20 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
                         rule += f" in {rel(Path(source).resolve())}"
                     rules.append(rule)
             dirnames[:] = kept_dirnames
+        # Unless Git stores them, e.g., added with 'git add -f'
+        if excluded_files:
+            tracked = {
+                (root / p).as_posix()
+                for p in repo.git.ls_files(
+                    "-z", "--", str(top_resolved)
+                ).split("\0")
+                if p
+            }
+            excluded_files = [
+                f
+                for f in excluded_files
+                if (top_resolved / f).as_posix() not in tracked
+            ]
         if excluded_files:
             unstored.append(
                 dict(
@@ -1914,9 +1934,11 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
 
     - ``both``: tracked by Git and cached by DVC, so it belongs in DVC,
       unless it was added on its own and differs from its ``.dvc`` file.
-    - ``ignored``: a pipeline output stored in Git that Git ignores.
+    - ``ignored``: a pipeline output stored in Git that Git ignores, with
+      the ``files`` in it Git ignores.
     - ``ignored-files``: a pipeline output stored in Git with ``files`` in
-      it that Git ignores, from ``get_unstored_output_files``.
+      it that Git ignores, from ``get_unstored_output_files``, so leaving out
+      those .dvcignore excludes too.
     - ``dvcignored``: a pipeline output cached by DVC with ``files`` in it
       that .dvcignore excludes, so neither stores them, which is only advice,
       since only the user can tell whether that's what they meant.
@@ -1929,6 +1951,7 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     be passed in.
     """
     import bisect
+    import itertools
 
     import calkit.dvc.zip
     import calkit.git
@@ -1967,6 +1990,22 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
                 continue
             if not out.use_cache or not in_git(path):
                 continue
+            # Files Git tracks in a directory that DVC excludes, e.g., added
+            # with 'git add -f', are only in Git
+            if path.is_dir():
+                prefix = path.as_posix() + "/"
+                n = bisect.bisect_left(tracked, prefix)
+                in_dir = itertools.takewhile(
+                    lambda p: p.startswith(prefix),
+                    itertools.islice(tracked, n, None),
+                )
+                if all(
+                    dvc_repo.dvcignore.is_ignored_file(
+                        os.path.join(out.fs_path, os.path.relpath(p, path))
+                    )
+                    for p in in_dir
+                ):
+                    continue
             message = f"{rel(path)} is tracked by both Git and DVC"
             problem = dict(
                 path=rel(path),
@@ -1998,7 +2037,7 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
             ).items()
             if Path(posix).exists() and not in_git(Path(posix))
         ]
-        ignored_out_paths = set()
+        ignored_problems: dict[str, dict] = {}
         if in_git_declared:
             ignored = set(
                 repo.ignored(
@@ -2010,24 +2049,27 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
             )
             for path, name in in_git_declared:
                 if path.relative_to(root).as_posix() in ignored:
-                    ignored_out_paths.add(rel(path))
-                    problems.append(
-                        dict(
-                            path=rel(path),
-                            kind="ignored",
-                            stage=name,
-                            dvc_file=None,
-                            store_in="git",
-                            message=f"{rel(path)} is stored in Git, but Git "
-                            "ignores it",
-                        )
+                    ignored_problems[rel(path)] = dict(
+                        path=rel(path),
+                        kind="ignored",
+                        stage=name,
+                        dvc_file=None,
+                        store_in="git",
+                        message=f"{rel(path)} is stored in Git, but Git "
+                        "ignores it",
                     )
+                    problems.append(ignored_problems[rel(path)])
         # Files in outputs that neither Git nor DVC stores
         for unstored in get_unstored_output_files(
             dvc_repo=dvc_repo, ck_info=ck_info, wdir=wdir
         ):
-            # An output ignored as a whole is reported as such
-            if unstored["path"] in ignored_out_paths:
+            # An output ignored as a whole is reported as such, with its
+            # files, since un-ignoring it can leave some ignored by other
+            # rules, e.g., '*.log' in a directory
+            if unstored["path"] in ignored_problems:
+                ignored_problems[unstored["path"]].update(
+                    files=unstored["files"], rules=unstored["rules"]
+                )
                 continue
             files = unstored["files"]
             files_txt = get_unstored_files_text(files, unstored["rules"])

@@ -3966,7 +3966,7 @@ Options:
 
 Check that paths are tracked where they're declared to be stored.
 
-That is, nothing is tracked by both Git and DVC, no pipeline output stored in Git, or file in one, is ignored by it, and nothing in Git is too large for it. Files .dvcignore excludes from a pipeline output DVC caches, which neither stores, and large files are only reported. With --fix, the pipeline's declarations, or a file's .dvc file, decide where each path belongs, and the changes are staged. Files Git ignores in an output stored in Git are added in spite of the rule, since the output being declared as stored in Git says to.
+That is, nothing is tracked by both Git and DVC, no pipeline output stored in Git, or file in one, is ignored by it, and nothing in Git is too large for it. Files .dvcignore excludes from a pipeline output DVC caches, which neither stores, and large files are only reported. With --fix, the pipeline's declarations, or a file's .dvc file, decide where each path belongs, and the changes are staged. Files Git ignores in an output stored in Git are added in spite of the rule, since the output being declared as stored in Git says to, unless .dvcignore excludes them too, so DVC doesn't hash them either.
 
 Usage:
 

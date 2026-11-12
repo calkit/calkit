@@ -1145,6 +1145,36 @@ def test_git_outputs_with_ignored_files(tmp_dir: str) -> None:
     assert "data/scratch.tmp" in out
     os.remove("data/scratch.tmp")
     assert get_storage_problems() == []
+    # A subproject's stages run from here are staged too, as declared in its
+    # own calkit.yaml
+    os.makedirs("sub")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "c": {
+                            "kind": "shell-command",
+                            "environment": "_system",
+                            "command": (
+                                "mkdir -p out && echo c > out/c.txt "
+                                "&& echo l > out/c.log"
+                            ),
+                            "outputs": [{"path": "out", "storage": "git"}],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info["subprojects"] = [{"path": "sub"}]
+    calkit.save_calkit_info(ck_info)
+    out = run("run")
+    assert "Force-added 1 file Git ignores" in out
+    assert "sub/out/c.log" in out
+    staged = git("diff", "--cached", "--name-only").split()
+    assert "sub/out/c.txt" in staged
+    assert "sub/out/c.log" in staged
 
 
 def test_save_to_git_with_all(tmp_dir):

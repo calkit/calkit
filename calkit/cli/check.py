@@ -1915,7 +1915,8 @@ def check_storage(
     With --fix, the pipeline's declarations, or a file's .dvc file, decide
     where each path belongs, and the changes are staged.
     Files Git ignores in an output stored in Git are added in spite of the
-    rule, since the output being declared as stored in Git says to.
+    rule, since the output being declared as stored in Git says to, unless
+    .dvcignore excludes them too, so DVC doesn't hash them either.
     """
     import calkit.dvc
     import calkit.git
@@ -1953,13 +1954,15 @@ def check_storage(
             calkit.git.ensure_path_is_ignored(repo, path)
             if problem["kind"] == "both":
                 to_record.append(problem)
-        elif problem["kind"] == "ignored-files":
-            files = [os.path.abspath(p) for p in problem["files"]]
+        elif problem["store_in"] == "git":
+            if problem["kind"] == "ignored":
+                calkit.git.ensure_path_is_not_ignored(repo, path)
+                repo.git.add("--", path)
+            # Files in it Git ignores are added in spite of the rule, which
+            # for an output ignored as a whole can be one besides its own
+            files = [os.path.abspath(p) for p in problem.get("files", [])]
             for i in range(0, len(files), 100):
                 repo.git.add("-f", "--", *files[i : i + 100])
-        elif problem["store_in"] == "git":
-            calkit.git.ensure_path_is_not_ignored(repo, path)
-            repo.git.add("--", path)
         else:
             unfixed.append(problem)
             continue

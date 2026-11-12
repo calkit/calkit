@@ -105,6 +105,9 @@ e.g., logs ignored by a generic `*.log` rule.
 Otherwise they'd be in neither Git nor DVC,
 so a fresh clone would have the output without them,
 and its stage, and everything downstream, would look stale.
+The exception is a file `.dvcignore` excludes too, e.g., `__pycache__/`:
+DVC doesn't hash it, so leaving it out of Git changes nothing,
+and listing a file in both is how to keep it out of an output.
 `calkit run` stages the Git-stored outputs of the stages it ran
 (when DVC's autostage is on, as Calkit sets it up),
 and it and `calkit add` force-add such files, saying which and why.

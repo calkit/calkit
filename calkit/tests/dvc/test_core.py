@@ -1096,11 +1096,11 @@ def test_get_unstored_output_files(tmp_dir: str) -> None:
     )
     assert problems["data"]["kind"] == "dvcignored"
     assert problems["data"]["store_in"] is None
-    # Once in Git, they're stored
+    # Once in Git, they're stored, even one in an output DVC caches
     git("add", "-f", "logs", "single.log", "whole", "other")
     unstored = get_unstored()
     assert set(unstored) == {"data"}
-    os.remove("data/t.tmp")
+    git("add", "-f", "data/t.tmp")
     assert get_unstored() == {}
     assert get_problems() == {}
 

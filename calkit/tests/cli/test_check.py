@@ -1944,3 +1944,28 @@ def test_check_storage(tmp_dir):
     assert result.returncode == 0, result.stderr
     assert "Run 'make'" in result.stdout
     assert not git("ls-files", "--", "out.txt").strip()
+    # An output ignored as a whole, with a file in it another rule ignores,
+    # is fixed in one pass
+    ck_info["pipeline"]["stages"]["whole"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "mkdir -p whole && echo w > whole/w.txt "
+        "&& echo l > whole/run.log",
+        "outputs": [{"path": "whole", "storage": "git"}],
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run", "whole"])
+    git("rm", "-r", "-q", "--cached", "whole")
+    with open(".gitignore", "a") as f:
+        f.write("\n/whole/\n*.log\n")
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "ignored"
+    assert sorted(problem["files"]) == ["whole/run.log", "whole/w.txt"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "whole").split() == [
+        "whole/run.log",
+        "whole/w.txt",
+    ]
+    result = check()
+    assert result.returncode == 0, result.stdout

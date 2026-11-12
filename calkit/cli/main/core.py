@@ -585,8 +585,10 @@ def get_status(
             "--category",
             "-c",
             help=(
-                "Status categories to show. By default, all categories are "
-                "shown. Can be specified multiple times."
+                "Status categories to show: project, questions, git, dvc, "
+                "pipeline, or imports. By default, all but imports are "
+                "shown, since checking imports asks each one's source. Can "
+                "be specified multiple times."
             ),
         ),
     ] = None,
@@ -705,7 +707,8 @@ def get_status(
             raise_error(
                 f"Failed to open DVC repo: {e.__class__.__name__}: {e}"
             )
-    valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
+    default_categories = ["project", "questions", "git", "dvc", "pipeline"]
+    valid_categories = default_categories + ["imports"]
     if categories is not None:
         for category in categories:
             if category not in valid_categories:
@@ -714,7 +717,7 @@ def get_status(
                     f"{valid_categories}"
                 )
     else:
-        categories = valid_categories
+        categories = default_categories
     # Everything is worked out before anything is shown, which can take a
     # while, e.g., when environments are checked again, so a spinner shows
     # until then. It writes to its own copy of the terminal, since what the
@@ -745,6 +748,12 @@ def get_status(
     with spinner:
         pipeline_status = None
         running_status = None
+        import_statuses = None
+        if "imports" in categories:
+            from calkit.provenance import get_import_statuses
+
+            step("Checking imports against their sources")
+            import_statuses = get_import_statuses(ck_info)
         if "pipeline" in categories or "dvc" in categories:
             # If a run is in progress it holds the DVC lock, so computing
             # the full status would just error out (and would mutate files
@@ -900,6 +909,8 @@ def get_status(
                 status_dict["pipeline"] = pipeline_status.model_dump(
                     mode="json"
                 )
+        if import_statuses is not None:
+            status_dict["imports"] = import_statuses
         print(json.dumps(status_dict, indent=2, default=str))
         return
     if "project" in categories:
@@ -931,6 +942,31 @@ def get_status(
         calkit.echo(format_summary(questions_status))
         if not questions_status.ok:
             typer.echo("Run 'calkit check questions' for details.")
+        typer.echo()
+    if import_statuses is not None:
+        print_sep("Imports")
+        if not import_statuses:
+            typer.echo("Nothing is imported.")
+        labels = {
+            "up-to-date": ("up to date", "green"),
+            "update-available": ("update available", "yellow"),
+            "source-moved": ("source has moved on", "yellow"),
+            "edited": ("edited since imported", "red"),
+            "missing": ("missing", "red"),
+            "unknown": ("can't tell", None),
+        }
+        for s in import_statuses:
+            label, color = labels[s["status"]]
+            detail = f" ({s['detail']})" if s["detail"] else ""
+            typer.echo(
+                f"{s['path']}: {typer.style(label, fg=color)}{detail}, "
+                f"from {s['source']}"
+            )
+        if any(
+            s["status"] in ("update-available", "source-moved", "missing")
+            for s in import_statuses
+        ):
+            typer.echo("Run 'calkit sync import <path>' to bring one in.")
         typer.echo()
     if "git" in categories:
         print_sep("Git")

@@ -484,3 +484,22 @@ def test_import_figure_from_a_hub_project(tmp_dir, monkeypatch):
     assert entry["imported_from"]["git_ref"] == "c2"
     locks = calkit.provenance.read_import_locks()
     assert locks["figures/p/a.png"]["git_rev"] == "c" * 40
+    # Status says where each import stands, but only when asked, since it
+    # has to ask each source
+    import json
+
+    res = runner.invoke(app, ["status", "-c", "imports", "--json"])
+    assert res.exit_code == 0, res.output
+    statuses = {
+        s["path"]: s["status"] for s in json.loads(res.output)["imports"]
+    }
+    # Each source is still at the commit it was fetched at
+    assert statuses == {
+        "figures/p/a.png": "up-to-date",
+        "figures/p/b.png": "up-to-date",
+    }
+    res = runner.invoke(app, ["status", "-c", "imports"])
+    assert res.exit_code == 0, res.output
+    assert "figures/p/a.png: up to date, from o/p/figures/a.png" in res.output
+    res = runner.invoke(app, ["status", "-c", "git", "--json"])
+    assert "imports" not in json.loads(res.output)

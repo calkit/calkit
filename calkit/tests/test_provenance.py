@@ -334,6 +334,99 @@ def test_get_imports_with_updates(tmp_dir, monkeypatch):
     assert len(calls) == 1
 
 
+def test_get_import_statuses(tmp_dir, monkeypatch):
+    import base64
+    import os
+
+    import git as gitpy
+
+    import calkit
+    from calkit.provenance import (
+        get_import_statuses,
+        hash_path,
+        write_import_lock,
+    )
+
+    def get(path, params=None, **kwargs):
+        name = path.rsplit("/", 1)[-1]
+        return {
+            "content": base64.b64encode(
+                b"v2" if name == "newer.png" else b"v1"
+            ).decode(),
+            "commit_sha": "b" * 40,
+        }
+
+    monkeypatch.setattr(calkit.hub, "get", get)
+    # A Git repo whose branch moves on after one import was fetched
+    src = gitpy.Repo.init("src", initial_branch="main")
+    with open("src/a.txt", "w") as f:
+        f.write("a\n")
+    src.git.add(A=True)
+    src.git.commit(m="one", author="T <t@x.org>")
+    first = src.head.commit.hexsha
+    entries = {
+        "same.png": {"project": "o/p", "path": "same.png"},
+        "newer.png": {"project": "o/p", "path": "newer.png"},
+        "pinned.png": {"project": "o/p", "path": "x", "git_ref": first[:9]},
+        "edited.png": {"project": "o/p", "path": "edited.png"},
+        "gone.png": {"project": "o/p", "path": "gone.png"},
+        "repo.txt": {
+            "git_repo_url": "src",
+            "path": "a.txt",
+            "git_ref": "main",
+        },
+        "web.csv": {"url": "https://example.org/web.csv"},
+    }
+    ck_info: dict = {"figures": []}
+    for path, source in entries.items():
+        with open(path, "wb") as f:
+            f.write(b"v1")
+        ck_info["figures"].append({"path": path, "imported_from": source})
+        write_import_lock(path, {"hash": hash_path(path), "git_rev": first})
+    with open("edited.png", "ab") as f:
+        f.write(b" changed")
+    os.remove("gone.png")
+
+    def statuses() -> dict:
+        return {
+            s["path"]: (s["status"], s["detail"])
+            for s in get_import_statuses(ck_info)
+        }
+
+    got = statuses()
+    assert got["same.png"] == ("up-to-date", None)
+    assert got["newer.png"] == ("update-available", "at bbbbbbbbb")
+    assert got["pinned.png"] == ("up-to-date", f"pinned to {first[:9]}")
+    assert got["edited.png"][0] == "edited"
+    assert got["gone.png"][0] == "missing"
+    assert got["repo.txt"] == ("up-to-date", None)
+    assert got["web.csv"] == (
+        "unknown",
+        "a URL would have to be downloaded to tell",
+    )
+    # A branch at a new commit may or may not have changed the file
+    with open("src/b.txt", "w") as f:
+        f.write("b\n")
+    src.git.add(A=True)
+    src.git.commit(m="two", author="T <t@x.org>")
+    second = src.head.commit.hexsha
+    assert statuses()["repo.txt"] == (
+        "source-moved",
+        f"main is at {second[:9]}",
+    )
+    # A quick check leaves Git repos alone
+    quick = get_import_statuses(ck_info, check_git=False)
+    assert [s["status"] for s in quick if s["path"] == "repo.txt"] == [
+        "unknown"
+    ]
+    # And so does one whose ref isn't there
+    entries["repo.txt"]["git_ref"] = "nope"
+    assert statuses()["repo.txt"] == (
+        "unknown",
+        "'nope' couldn't be found in the repo",
+    )
+
+
 def test_git_source_records_intent_not_resolved_state():
     # calkit.yaml says what to follow, which a person writes. Where
     # following it led -- the commit, the checksum -- goes in

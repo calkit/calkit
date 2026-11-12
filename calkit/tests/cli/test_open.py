@@ -115,10 +115,10 @@ def test_open_project(tmp_path, monkeypatch):
     assert "--yes" in result.output
     cloned = []
 
-    def fake_clone(url, location):
+    def fake_clone(url, location, hub=None):
         # The real clone moves into the repo, whose '.env' isn't trusted to
         # pick what runs
-        cloned.append((url, location))
+        cloned.append((url, location) + ((hub,) if hub else ()))
         make_project(location, "me", "new-proj")
         with open(os.path.join(location, ".env"), "w") as f:
             f.write("CALKIT_DEFAULT_EDITOR=cursor --evil\n")
@@ -137,6 +137,15 @@ def test_open_project(tmp_path, monkeypatch):
     assert cloned[-1] == (
         "calkit.example.edu/me/hub-proj",
         os.path.join(str(home), "calkit", "hub-proj"),
+    )
+    os.chdir(tmp_path)
+    # Or from one given as an option, whose project URL it looks up
+    result = run("me/local-proj", "--hub", "localhost", "--yes")
+    assert result.exit_code == 0, result.output
+    assert cloned[-1] == (
+        "me/local-proj",
+        os.path.join(str(home), "calkit", "local-proj"),
+        "localhost",
     )
     os.chdir(tmp_path)
     result = run("a/b/c/d")

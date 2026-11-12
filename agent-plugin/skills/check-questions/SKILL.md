@@ -38,6 +38,8 @@ Deterministic, done by `calkit check questions` — never re-derive by hand:
 - every clause of a conditional answer parses, names only evidence, and
   renders, including the clauses the current values don't select;
 - every publication `label` still exists in the LaTeX source;
+- every `lines` range on a plain file entry, one with no `kind`, is still
+  within the file;
 - no evidence has changed (Git history for Git-tracked outputs, `dvc.lock`
   for DVC-tracked ones) since the commit that last edited the question;
 - no verification is stale, i.e., neither the approach nor any of the
@@ -54,7 +56,8 @@ Deterministic, done by `calkit check questions` — never re-derive by hand:
   nothing computes is a magic number;
 - each other evidence path is produced by a pipeline stage, or declared
   with `imported_from` or `created_by`. This one is advisory: it is
-  reported as `unattributed` and does not fail the check.
+  reported as `unattributed` and does not fail the check. A file inside a
+  directory a stage lists as an output is produced by that stage.
 
 Judgment, done here — the check reads paths and hashes, and cannot read a
 sentence:
@@ -194,6 +197,10 @@ that is a false statement about the project, not a tidy-up.
   precision the claim needs: `{ratio:.1f}x`, `{error:.0%}`. When several
   come from one file, e.g., the outputs of one calculation, name them
   together in one `result` entry's `values`, a map of name to key.
+- To cite a file as it is, e.g., a log, a transcript excerpt, or a
+  script, give just its `path`, with no `kind`, and the `lines` that
+  matter, e.g., `lines: 8` or `lines: 12-20`. Don't use `document` for
+  these; that is for write-ups a Markdown stage builds.
 - A `value` entry must read a file a pipeline stage writes. A placeholder
   over a results file written by hand, including one you write, is a
   retyped number with extra steps, and the check fails it. If no stage

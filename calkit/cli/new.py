@@ -17,7 +17,6 @@ from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import AliasGroup, OptionalValueCommand, raise_error, warn
-from calkit.cli.core import prompt_authors, upload_release_file
 from calkit.core import ryaml
 
 new_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
@@ -4064,7 +4063,8 @@ def new_release(
             typer.echo(f"Read {len(authors)} author(s) from CITATION.cff")
         else:
             warn("No authors defined for the project")
-            authors = prompt_authors()
+            # A dry run changes nothing, the config included
+            authors = calkit.releases.prompt_authors(save_user=not dry_run)
             # Write authors out to CITATION.cff
             if not dry_run:
                 typer.echo("Writing authors to CITATION.cff")
@@ -4157,7 +4157,7 @@ def new_release(
                 record_id = invenio_dep["id"]
             files = os.listdir(release_files_dir)
             for filename in files:
-                upload_release_file(
+                calkit.invenio.upload_file_with_progress(
                     record_id,
                     os.path.join(release_files_dir, filename),
                     service=to,  # type: ignore

@@ -634,3 +634,21 @@ def test_orcid_is_checked():
     assert settings.orcid == "https://orcid.org/0000-0002-1825-0097"
     with pytest.raises(ValueError, match="check digit"):
         config.Settings(orcid="0000-0002-1825-0098")
+
+
+def test_get_user_author(monkeypatch):
+    settings = config.Settings(orcid="https://orcid.org/0000-0002-1825-0097")
+    monkeypatch.setattr(config, "read", lambda: settings)
+    monkeypatch.setattr(
+        config.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="Ada King Lovelace\n"),
+    )
+    # A name missing from the config comes from Git, split at the last space
+    assert config.get_user_author() == {
+        "first_name": "Ada King",
+        "last_name": "Lovelace",
+        "affiliation": None,
+        "orcid": "0000-0002-1825-0097",
+    }
+    assert config.get_user_author(git_fallback=False)["first_name"] is None

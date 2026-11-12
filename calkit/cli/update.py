@@ -14,7 +14,6 @@ from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import raise_error, warn
-from calkit.cli.core import upload_release_file
 
 if TYPE_CHECKING:
     import git
@@ -301,10 +300,10 @@ def update_release(
                     service=publisher.lower(),  # type: ignore
                     as_json=False,  # We only get a 204 back
                 )
-            upload_release_file(
+            calkit.invenio.upload_file_with_progress(
                 record_id,
                 os.path.join(release_files_dir, filename),
-                service=publisher.lower(),
+                service=publisher.lower(),  # type: ignore
             )
     # TODO: Add ability to update metadata
 

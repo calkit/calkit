@@ -347,3 +347,41 @@ def get_download_urls(
     for fname, url in zip(filenames, download_urls):
         urls[fname] = url
     return urls
+
+
+def upload_file_with_progress(
+    record_id: str,
+    fpath: str,
+    key: str | None = None,
+    service: ServiceName = DEFAULT_SERVICE,
+) -> None:
+    """Upload a file to a draft record, showing a progress bar."""
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        TextColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
+
+    if key is None:
+        key = os.path.basename(fpath)
+    with Progress(
+        TextColumn("[bold]{task.description}"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+    ) as bar:
+        task = bar.add_task(f"Uploading {key}", total=os.path.getsize(fpath))
+        upload_file(
+            record_id,
+            fpath,
+            key=key,
+            service=service,
+            echo=bar.console.print,
+            progress=lambda done, total: bar.update(
+                task, completed=done, total=total
+            ),
+        )

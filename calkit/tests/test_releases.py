@@ -518,3 +518,85 @@ def test_archive_docker_images(tmp_dir):
         assert find_archived_docker_image([]) is None
     finally:
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
+
+
+def test_prompt_authors(monkeypatch):
+    import typer
+    from typer.testing import CliRunner
+
+    saved = []
+    settings = calkit.config.Settings(
+        first_name="Ada",
+        last_name="Lovelace",
+        affiliation="Analytical Engines",
+        orcid="0000-0002-1825-0097",
+    )
+    monkeypatch.setattr(calkit.config, "read", lambda: settings)
+    monkeypatch.setattr(
+        calkit.config.Settings, "write", lambda self: saved.append(self)
+    )
+    app = typer.Typer()
+    authors = []
+    save_user = [True]
+
+    @app.command()
+    def main() -> None:
+        authors.clear()
+        authors.extend(calkit.releases.prompt_authors(save_user=save_user[0]))
+
+    runner = CliRunner()
+
+    def run(*answers: str) -> str:
+        result = runner.invoke(app, input="".join(a + "\n" for a in answers))
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    # The user is prefilled as author 1, so Enter accepts each field; a
+    # second author gets no defaults, and can go without an ORCID
+    output = run("", "", "", "", "y", "Charles", "Babbage", "", "", "n")
+    assert authors == [
+        {
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "affiliation": "Analytical Engines",
+            "orcid": "0000-0002-1825-0097",
+        },
+        {"first_name": "Charles", "last_name": "Babbage"},
+    ]
+    # Nothing changed, so there's nothing to save or ask about
+    assert not saved
+    assert "Save author 1" not in output
+    # A mistyped ORCID is caught and asked for again
+    output = run("", "", "", "0000-0002-1825-0098", "0000-0002-1825-0097", "n")
+    assert "check digit" in output
+    assert authors[0]["orcid"] == "0000-0002-1825-0097"
+    # A dry run doesn't offer to save a change
+    save_user[0] = False
+    output = run("", "", "Difference Engines", "", "n")
+    assert "Save author 1" not in output
+    assert not saved
+    save_user[0] = True
+    # A changed affiliation (and an ORCID given as a URL) is offered for
+    # saving, and saved when accepted
+    run(
+        "",
+        "",
+        "Difference Engines",
+        "https://orcid.org/0000-0002-1825-0097",
+        "y",
+        "n",
+    )
+    assert authors[0]["orcid"] == "0000-0002-1825-0097"
+    assert len(saved) == 1
+    assert settings.affiliation == "Difference Engines"
+    # A '-' leaves out a prefilled value
+    run("", "", "-", "", "n", "n")
+    assert "affiliation" not in authors[0]
+    assert authors[0]["orcid"] == "0000-0002-1825-0097"
+    # Someone else as author 1 doesn't inherit the user's affiliation or
+    # ORCID, and saving them as the user clears the ones left out
+    output = run("Grace", "Hopper", "", "", "y", "n")
+    assert authors == [{"first_name": "Grace", "last_name": "Hopper"}]
+    assert settings.first_name == "Grace"
+    assert settings.affiliation is None
+    assert settings.orcid is None

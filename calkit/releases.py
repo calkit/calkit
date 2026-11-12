@@ -890,3 +890,94 @@ def prune_for_stage(
         elif any(p_posix == n or p_posix.startswith(n + "/") for n in needed):
             paths.append(p)
     return overrides, paths
+
+
+def _prompt_optional(text: str, default: str | None) -> str | None:
+    """Prompt for a value that can be left out.
+
+    With no default, a blank answer leaves it out. With one, Enter keeps the
+    default, and a ``-`` leaves it out.
+    """
+    import typer
+
+    if default:
+        answer = typer.prompt(f"{text} ('-' for none)", default=default)
+    else:
+        answer = typer.prompt(
+            f"{text} (blank for none)", default="", show_default=False
+        )
+    answer = answer.strip()
+    return None if answer in ["", "-"] else answer
+
+
+def prompt_authors(save_user: bool = True) -> list[dict]:
+    """Prompt for a release's authors.
+
+    The first author defaults to the user, as recorded in the Calkit config,
+    or failing that their name from Git, since it's usually them releasing
+    their own work. With ``save_user``, what they enter there can be saved to
+    the config, so the next release only needs Enter pressed.
+    """
+    import typer
+
+    from calkit.core import normalize_orcid
+
+    me = calkit.config.get_user_author()
+    authors = []
+    n = 0
+    while True:
+        n += 1
+        author: dict = {}
+        author["first_name"] = typer.prompt(
+            f"Enter the first name of author {n}",
+            default=me["first_name"] if n == 1 else None,
+        )
+        author["last_name"] = typer.prompt(
+            f"Enter the last name of author {n}",
+            default=me["last_name"] if n == 1 else None,
+        )
+        # The user's affiliation and ORCID only prefill when author 1 is
+        # still them, not someone else whose name was typed over theirs
+        is_me = n == 1 and (author["first_name"], author["last_name"]) == (
+            me["first_name"],
+            me["last_name"],
+        )
+        affiliation = _prompt_optional(
+            f"Enter the affiliation of author {n}",
+            default=me["affiliation"] if is_me else None,
+        )
+        if affiliation:
+            author["affiliation"] = affiliation
+        while True:
+            orcid = _prompt_optional(
+                f"Enter the ORCID of author {n}",
+                default=me["orcid"] if is_me else None,
+            )
+            if orcid is None:
+                break
+            try:
+                # Releases want the bare identifier, which CITATION.cff
+                # turns back into a URL
+                author["orcid"] = normalize_orcid(orcid).removeprefix(
+                    "https://orcid.org/"
+                )
+                break
+            except ValueError as e:
+                typer.echo(str(e))
+        authors.append(author)
+        # Author 1 isn't always the person releasing, so ask before saving
+        if (
+            n == 1
+            and save_user
+            and calkit.config.differs_from_user_author(author)
+            and typer.confirm(
+                "Save author 1 as you, to prefill future releases?",
+                default=True,
+            )
+        ):
+            calkit.config.save_user_author(author)
+        if not typer.confirm(
+            "Are there more authors to enter?", default=False
+        ):
+            break
+    return authors

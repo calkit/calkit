@@ -68,7 +68,7 @@ When this is called, Calkit will:
 - Compress all files kept in Git and DVC,
   extract the archive and run its pipeline to check it reproduces on its
   own,
-  then upload it to Zenodo,
+  then upload it to an archival service like Zenodo,
   which will produce a DOI,
   ensuring the release can be accessed even if the repo is relocated.
 - Create a Git tag. This can be used to create a release on GitHub if desired.

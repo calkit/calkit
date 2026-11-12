@@ -565,14 +565,15 @@ vanishing and leaving the author thinking they recorded it.
 
 #### `_ImportedFromProject`
 
-| Parameter      | Type              | Required | Default | Description                                                                                      |
-| -------------- | ----------------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `project`      | str               | yes      |         |                                                                                                  |
-| `path`         | str \| None       | no       | null    |                                                                                                  |
-| `date`         | date \| None      | no       | null    | When the data was downloaded.                                                                    |
-| `git_rev`      | str \| None       | no       | null    | Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to. |
-| `filter_paths` | list[str] \| None | no       | null    |                                                                                                  |
-| `description`  | str \| None       | no       | null    | Where it came from, in words, for whatever the other fields can't say.                           |
+| Parameter      | Type              | Required | Default | Description                                                                                                                                                                                    |
+| -------------- | ----------------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project`      | str               | yes      |         |                                                                                                                                                                                                |
+| `path`         | str \| None       | no       | null    |                                                                                                                                                                                                |
+| `git_ref`      | str \| None       | no       | null    | Branch, tag, or commit to follow when refreshing this. Optional: an entry that names none follows the project's default branch. The commit it resolves to is recorded in .calkit/imports.json. |
+| `date`         | date \| None      | no       | null    | When the data was downloaded.                                                                                                                                                                  |
+| `git_rev`      | str \| None       | no       | null    | Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to.                                                                                               |
+| `filter_paths` | list[str] \| None | no       | null    |                                                                                                                                                                                                |
+| `description`  | str \| None       | no       | null    | Where it came from, in words, for whatever the other fields can't say.                                                                                                                         |
 
 #### `_ImportedFromUrl`
 

@@ -1841,28 +1841,6 @@ class ReferencesCheckStage(Stage):
     # What the check reads besides the document, set by preprocess
     _found_paths: list[str] = PrivateAttr(default_factory=list)
 
-    @model_validator(mode="after")
-    def _default_output(self) -> "ReferencesCheckStage":
-        """The report goes beside other generated files unless an output
-        is declared, and the responses beside the report, in DVC, unless
-        an output at their path says otherwise."""
-        import calkit.references
-
-        if not self.outputs:
-            path = calkit.references.output_path(self.target_path)
-            self.outputs = [PathOutput(path=path, storage="git")]
-        responses = self.responses_path
-        if not any(
-            (out if isinstance(out, str) else out.path) == responses
-            for out in self.outputs
-        ):
-            self.outputs.append(
-                PathOutput(
-                    path=responses, storage="dvc", delete_before_run=False
-                )
-            )
-        return self
-
     def preprocess(
         self,
         project_dir: str | None,
@@ -1880,7 +1858,12 @@ class ReferencesCheckStage(Stage):
 
     @property
     def report_path(self) -> str:
-        """Where the report is written: the first output."""
+        """Where the report is written: the first declared output, or
+        beside other generated files."""
+        import calkit.references
+
+        if not self.outputs:
+            return calkit.references.output_path(self.target_path)
         out = self.outputs[0]
         return out if isinstance(out, str) else out.path
 
@@ -1890,6 +1873,28 @@ class ReferencesCheckStage(Stage):
         import calkit.references
 
         return calkit.references.responses_path(self.report_path)
+
+    @property
+    def check_outputs(self) -> list[PathOutput]:
+        """What the check writes that isn't declared, so its storage can be
+        respected: the report, in Git, and the responses it's based on, in
+        DVC and kept between runs, since they're reused.
+        """
+        declared = {
+            out if isinstance(out, str) else out.path for out in self.outputs
+        }
+        outs = []
+        if not self.outputs:
+            outs.append(PathOutput(path=self.report_path, storage="git"))
+        if self.responses_path not in declared:
+            outs.append(
+                PathOutput(
+                    path=self.responses_path,
+                    storage="dvc",
+                    delete_before_run=False,
+                )
+            )
+        return outs
 
     @property
     def dvc_cmd(self) -> str:
@@ -1910,9 +1915,10 @@ class ReferencesCheckStage(Stage):
 
     @property
     def dvc_outs(self) -> list[str | dict]:
-        """Stored with Git by default, since a report is small text."""
+        """Declared outputs, stored with Git by default since a report is
+        small text, then what the check writes that isn't declared."""
         outs: list[str | dict] = []
-        for out in self.outputs:
+        for out in list(self.outputs) + list(self.check_outputs):
             if isinstance(out, str):
                 outs.append({out: dict(cache=False, persist=False)})
             elif isinstance(out, PathOutput):

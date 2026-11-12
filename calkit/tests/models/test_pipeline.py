@@ -1298,6 +1298,7 @@ def test_references_check_stage(tmp_path, monkeypatch):
         {"checks/refs.json": dict(cache=False, persist=False)},
         {"checks/refs.responses.json": dict(cache=False, persist=True)},
     ]
-    # Validating again doesn't add the responses twice
-    again = ReferencesCheckStage.model_validate(stage.model_dump())
-    assert len(again.outputs) == 2
+    # What the check writes is derived, not added to what's declared
+    assert stage.outputs == []
+    assert [out.path for out in stage.check_outputs] == [report, responses]
+    assert custom.check_outputs == []

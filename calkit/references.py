@@ -32,13 +32,17 @@ another work, which carries the record it disagrees with.
 
 A ``references-check`` stage writes one report per document, by default
 to ``.calkit/reference-checks``, so each is a pipeline output with its own
-dependencies. Reports carry no timestamp, so a report is a function of the
-sources that produced it and can be checked for staleness like any other
-output. Answers from the services are cached under ``.calkit/local``,
-which is not tracked, so a rerun needs no network and ``--offline`` still
-reports everything that does not. A request that fails, e.g., without a
-network, is not cached, and what it would have answered is reported as
-unchecked rather than as not found.
+dependencies. Reports carry no timestamp, or whether the check ran
+offline, so a report is a function of the sources and responses that
+produced it and can be checked for staleness like any other output. The
+services' answers change over time, so the stage also records the
+responses it used beside its report, kept between runs and reused, so a
+rerun anywhere reproduces the report and asks only about what's new. A
+check run by hand caches answers under ``.calkit/local`` instead, which
+is not tracked. Either way a rerun needs no network, and ``--offline``
+still reports everything that does not. A request that fails, e.g.,
+without a network, is not cached, and what it would have answered is
+reported as unchecked rather than as not found.
 """
 
 from __future__ import annotations
@@ -322,7 +326,6 @@ class DocumentCheck(BaseModel):
     path: str
     sources: list[str] = Field(default_factory=list)
     collections: list[str] = Field(default_factory=list)
-    offline: bool = False
     n_cited: int = 0
     n_by_status: dict[str, int] = Field(default_factory=dict)
     references: dict[str, Reference] = Field(
@@ -360,6 +363,12 @@ def output_path(document_path: str) -> str:
         own and goes stale on its own.
     """
     return f"{OUT_DIR}/{document_path}.json"
+
+
+def responses_path(report_path: str) -> str:
+    """Where a report's service responses are recorded, beside it."""
+    stem = report_path.removesuffix(".json")
+    return f"{stem}.responses.json"
 
 
 def clean_tex(value: str) -> str:
@@ -1248,6 +1257,7 @@ def check_references(
     wdir: str | Path | None = None,
     offline: bool = False,
     refresh: bool = False,
+    responses_path: str | None = None,
 ) -> DocumentCheck:
     """Check that every reference a document cites is real.
 
@@ -1263,6 +1273,9 @@ def check_references(
         Use only cached answers, and report the rest as unchecked.
     refresh : bool, optional
         Ignore the cache and ask the services again.
+    responses_path : str, optional
+        Project-relative file to reuse responses from and record the ones
+        this check used in, instead of the local cache.
 
     Returns
     -------
@@ -1297,7 +1310,12 @@ def check_references(
         document = path
     if not (Path(wdir or ".") / document).is_file():
         raise FileNotFoundError(f"No such file: {document}")
-    lookup = Lookup(wdir=wdir, offline=offline, refresh=refresh)
+    lookup = Lookup(
+        wdir=wdir,
+        offline=offline,
+        refresh=refresh,
+        responses_path=responses_path,
+    )
     printed: dict[str, str] = {}
     cited: dict[str, list[str]] = {}
     inline: dict[str, str] = {}
@@ -1334,9 +1352,7 @@ def check_references(
             for entries in collections.values():
                 for key in entries:
                     cited.setdefault(key, list(everything))
-    check = DocumentCheck(
-        path=document, sources=sources, collections=names, offline=offline
-    )
+    check = DocumentCheck(path=document, sources=sources, collections=names)
     for label, citation in printed.items():
         reference = Reference(key=label, collection=document)
         _fill_from_citation(reference, citation)
@@ -1540,6 +1556,11 @@ class Lookup:
     so a rerun needs no network. A request that gets no answer, e.g.,
     without a network, or one the service turns away, is not, so the next
     run asks again, and is counted in ``unanswered``.
+
+    By default the cache is the project's local one, which keeps every
+    answer. Given a ``responses_path`` instead, only the answers this run
+    used are kept there, so the file records what a check was based on,
+    e.g., as a pipeline stage's output, and a rerun reproduces it.
     """
 
     def __init__(
@@ -1547,11 +1568,14 @@ class Lookup:
         wdir: str | Path | None = None,
         offline: bool = False,
         refresh: bool = False,
+        responses_path: str | None = None,
     ) -> None:
         import json
 
         self.wdir = wdir
-        self.path = Path(wdir or ".") / CACHE_PATH
+        self.path = Path(wdir or ".") / (responses_path or CACHE_PATH)
+        self.records = responses_path is not None
+        self.used: set[str] = set()
         self.offline = offline
         # Refreshing asks again for what this run needs, keeping the rest
         self.refresh = refresh
@@ -1571,6 +1595,13 @@ class Lookup:
 
         from calkit.core import ensure_local_dir
 
+        # A record of responses is written even when unchanged, since it's
+        # an output, and has only what this run used
+        if self.records:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            used = {url: self.cache[url] for url in self.used}
+            self.path.write_text(json.dumps(used, indent=2, sort_keys=True))
+            return
         if not self.asked:
             return
         # Made via ensure_local_dir so it's ignored by Git
@@ -1590,6 +1621,7 @@ class Lookup:
         if fresh and (
             isinstance(cached, str) or (url in self.cache and cached is None)
         ):
+            self.used.add(url)
             return cached
         if self.offline:
             self.unanswered += 1
@@ -1620,6 +1652,7 @@ class Lookup:
             self.unanswered += 1
             return None
         self.asked.add(url)
+        self.used.add(url)
         self.cache[url] = text
         return text
 

@@ -2109,6 +2109,15 @@ def check_references(
             help="Ignore cached answers and ask the services again.",
         ),
     ] = False,
+    responses: Annotated[
+        str | None,
+        typer.Option(
+            "--responses",
+            help="Reuse the services' responses from this file instead of "
+            "the local cache, and record there the ones this check used, "
+            "so it can be reproduced.",
+        ),
+    ] = None,
 ) -> None:
     """Check that the references a document cites are real.
 
@@ -2126,8 +2135,9 @@ def check_references(
     venue that registers no DOIs looks the same and is named as such.
 
     Answers are cached, so a rerun needs no network. A references-check
-    pipeline stage runs this with --output, so its report is an output
-    that goes stale when the document or a bibliography changes.
+    pipeline stage runs this with --output and --responses, so its report
+    is an output that goes stale when the document or a bibliography
+    changes, and the responses it was based on are kept with it.
 
     Exits with an error if a key resolves to no entry, a DOI isn't
     registered, or an entry contradicts the record it was found in. A
@@ -2139,7 +2149,11 @@ def check_references(
 
     try:
         check = _check_references(
-            path, wdir=wdir, offline=offline, refresh=refresh
+            path,
+            wdir=wdir,
+            offline=offline,
+            refresh=refresh,
+            responses_path=responses,
         )
     except (FileNotFoundError, ValueError) as e:
         raise_error(str(e))

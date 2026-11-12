@@ -1,5 +1,6 @@
 """Tests for ``calkit.references``."""
 
+import io
 import json
 from pathlib import Path
 
@@ -298,6 +299,38 @@ def test_handle_responses_map_to_an_answer(
     refreshed.save()
     assert (tmp_dir / ".calkit" / "local" / ".gitignore").read_text() == "*\n"
     assert (tmp_dir / refs.CACHE_PATH).is_file()
+    # A record of responses reuses what it has, and keeps only what this
+    # run used, so it says what a check was based on
+    record = "checks/main.responses.json"
+    (tmp_dir / "checks").mkdir()
+    (tmp_dir / record).write_text(
+        json.dumps({"https://used.example": "a", "https://stale.example": "b"})
+    )
+
+    def answer(request: object, timeout: float) -> io.BytesIO:
+        return io.BytesIO(b"new")
+
+    monkeypatch.setattr("urllib.request.urlopen", answer)
+    recording = refs.Lookup(responses_path=record)
+    assert recording.get_text("https://used.example") == "a"
+    assert recording.get_text("https://new.example") == "new"
+    assert recording.calls == 1
+    recording.save()
+    assert json.loads((tmp_dir / record).read_text()) == {
+        "https://new.example": "new",
+        "https://used.example": "a",
+    }
+    # Run again offline, it gives the same answers, and is written even
+    # when nothing new was asked, since it's an output
+    (tmp_dir / record).write_text(json.dumps({"https://used.example": "a"}))
+    replay = refs.Lookup(offline=True, responses_path=record)
+    assert replay.get_text("https://used.example") == "a"
+    assert replay.unanswered == 0
+    (tmp_dir / record).unlink()
+    replay.save()
+    assert json.loads((tmp_dir / record).read_text()) == {
+        "https://used.example": "a"
+    }
 
 
 def test_comparison_forgives_only_what_it_should(tmp_dir: Path) -> None:
@@ -735,7 +768,6 @@ _DOCUMENT_KEYS = {
     "path",
     "sources",
     "collections",
-    "offline",
     "n_cited",
     "n_by_status",
     "references",

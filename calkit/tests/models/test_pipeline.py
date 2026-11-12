@@ -1215,17 +1215,23 @@ def test_references_check_stage(tmp_path, monkeypatch):
     (tmp_path / "calkit.yaml").write_text(
         "references:\n  - path: declared.bib\n"
     )
-    # No environment or output needed: it runs where Calkit is, and the
-    # report goes beside other generated files, stored with Git
+    # No environment or output needed: it runs where Calkit is, the report
+    # goes beside other generated files, stored with Git, and the
+    # responses it's based on beside it, in DVC, kept between runs
     stage = ReferencesCheckStage(
         kind="references-check", target_path="paper/main.tex"
     )
     assert stage.environment == "_system"
     report = ".calkit/reference-checks/paper/main.tex.json"
+    responses = ".calkit/reference-checks/paper/main.tex.responses.json"
     assert stage.dvc_cmd == (
         f"calkit check references paper/main.tex --output {report}"
+        f" --responses {responses}"
     )
-    assert stage.dvc_outs == [{report: dict(cache=False, persist=False)}]
+    assert stage.dvc_outs == [
+        {report: dict(cache=False, persist=False)},
+        {responses: dict(cache=True, persist=True)},
+    ]
     # A file a stage generates is an input before it's first made, so the
     # check runs after that stage, and the bibliography the document names
     # is used instead of the declared one, while a figure isn't an input
@@ -1269,16 +1275,29 @@ def test_references_check_stage(tmp_path, monkeypatch):
     )
     bib.preprocess(str(tmp_path), is_output=lambda p: False)
     assert bib.dvc_deps == ["paper/refs.bib"]
-    # A declared output is where the report goes
+    # A declared output is where the report goes, with the responses
+    # beside it, and declaring theirs too sets how they're stored
     custom = ReferencesCheckStage(
         kind="references-check",
         target_path="a b.tex",
         offline=True,
-        outputs=["checks/refs.json"],
+        outputs=[
+            "checks/refs.json",
+            PathOutput(
+                path="checks/refs.responses.json",
+                storage="git",
+                delete_before_run=False,
+            ),
+        ],
     )
     assert custom.dvc_cmd == (
-        "calkit check references 'a b.tex' --output checks/refs.json --offline"
+        "calkit check references 'a b.tex' --output checks/refs.json"
+        " --responses checks/refs.responses.json --offline"
     )
     assert custom.dvc_outs == [
-        {"checks/refs.json": dict(cache=False, persist=False)}
+        {"checks/refs.json": dict(cache=False, persist=False)},
+        {"checks/refs.responses.json": dict(cache=False, persist=True)},
     ]
+    # Validating again doesn't add the responses twice
+    again = ReferencesCheckStage.model_validate(stage.model_dump())
+    assert len(again.outputs) == 2

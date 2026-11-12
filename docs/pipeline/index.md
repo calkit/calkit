@@ -640,17 +640,20 @@ Whether the references a document cites are real.
 Its inputs are the target document, the files it inputs, and the
 bibliographies it names, or `calkit.yaml` and the collections it
 declares if it names none, all found when the pipeline is compiled.
-Its output is that document's report, by default under
-`.calkit/reference-checks`. One stage checks one document, so a
-project with two papers has one of these each and each goes out of
-date on its own.
+Its outputs are that document's report, by default under
+`.calkit/reference-checks`, and beside it the services' responses
+the report is based on. The responses are kept between runs and
+reused, since the services' answers change over time, so a rerun
+reproduces the report and asks only about what's new. One stage
+checks one document, so a project with two papers has one of these
+each and each goes out of date on its own.
 
-| Kind-specific parameter | Type | Required | Default    | Description                                                                                                                       |
-| ----------------------- | ---- | -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `environment`           | str  | no       | '\_system' | Where to run the check. Defaults to the system, which is where the Calkit running the pipeline already is.                        |
-| `wdir`                  | None | no       | null       | Not supported; the stage reads the project's calkit.yaml and documents from the project root.                                     |
-| `target_path`           | str  | yes      |            | What to check: a .tex or Markdown document, the PDF a stage builds from one, or a .bib file, whose every entry is checked.        |
-| `offline`               | bool | no       | False      | Use only cached answers instead of calling out to Crossref, OpenAlex, and arXiv, e.g., where the pipeline runs without a network. |
+| Kind-specific parameter | Type | Required | Default    | Description                                                                                                                                         |
+| ----------------------- | ---- | -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`           | str  | no       | '\_system' | Where to run the check. Defaults to the system, which is where the Calkit running the pipeline already is.                                          |
+| `wdir`                  | None | no       | null       | Not supported; the stage reads the project's calkit.yaml and documents from the project root.                                                       |
+| `target_path`           | str  | yes      |            | What to check: a .tex or Markdown document, the PDF a stage builds from one, or a .bib file, whose every entry is checked.                          |
+| `offline`               | bool | no       | False      | Use only the recorded responses instead of calling out to Crossref, DataCite, OpenAlex, and arXiv, e.g., where the pipeline runs without a network. |
 
 ### `sbatch`
 

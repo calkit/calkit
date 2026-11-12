@@ -1968,6 +1968,13 @@ def test_check_references(tmp_dir):
     )
     with open("out.json") as f:
         assert json.load(f)["path"] == "main.tex"
+    # Responses can be recorded in a file of their own, as a stage does
+    subprocess.check_call(
+        ["calkit", "check", "refs", "main.tex", "--offline"]
+        + ["--responses", "checks/responses.json"]
+    )
+    with open("checks/responses.json") as f:
+        assert json.load(f) == {}
     # There's no default document to check
     result = subprocess.run(["calkit", "check", "refs"], capture_output=True)
     assert result.returncode != 0

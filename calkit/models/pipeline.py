@@ -1804,10 +1804,13 @@ class ReferencesCheckStage(Stage):
     Its inputs are the target document, the files it inputs, and the
     bibliographies it names, or ``calkit.yaml`` and the collections it
     declares if it names none, all found when the pipeline is compiled.
-    Its output is that document's report, by default under
-    ``.calkit/reference-checks``. One stage checks one document, so a
-    project with two papers has one of these each and each goes out of
-    date on its own.
+    Its outputs are that document's report, by default under
+    ``.calkit/reference-checks``, and beside it the services' responses
+    the report is based on. The responses are kept between runs and
+    reused, since the services' answers change over time, so a rerun
+    reproduces the report and asks only about what's new. One stage
+    checks one document, so a project with two papers has one of these
+    each and each goes out of date on its own.
     """
 
     kind: Literal["references-check"] = "references-check"
@@ -1824,9 +1827,9 @@ class ReferencesCheckStage(Stage):
     offline: bool = Field(
         default=False,
         description=(
-            "Use only cached answers instead of calling out to Crossref, "
-            "OpenAlex, and arXiv, e.g., where the pipeline runs without a "
-            "network."
+            "Use only the recorded responses instead of calling out to "
+            "Crossref, DataCite, OpenAlex, and arXiv, e.g., where the "
+            "pipeline runs without a network."
         ),
     )
     wdir: None = Field(
@@ -1841,12 +1844,23 @@ class ReferencesCheckStage(Stage):
     @model_validator(mode="after")
     def _default_output(self) -> "ReferencesCheckStage":
         """The report goes beside other generated files unless an output
-        is declared."""
+        is declared, and the responses beside the report, in DVC, unless
+        an output at their path says otherwise."""
         import calkit.references
 
         if not self.outputs:
             path = calkit.references.output_path(self.target_path)
             self.outputs = [PathOutput(path=path, storage="git")]
+        responses = self.responses_path
+        if not any(
+            (out if isinstance(out, str) else out.path) == responses
+            for out in self.outputs
+        ):
+            self.outputs.append(
+                PathOutput(
+                    path=responses, storage="dvc", delete_before_run=False
+                )
+            )
         return self
 
     def preprocess(
@@ -1871,10 +1885,18 @@ class ReferencesCheckStage(Stage):
         return out if isinstance(out, str) else out.path
 
     @property
+    def responses_path(self) -> str:
+        """Where the services' responses are recorded: beside the report."""
+        import calkit.references
+
+        return calkit.references.responses_path(self.report_path)
+
+    @property
     def dvc_cmd(self) -> str:
         cmd = (
             f"calkit check references {shlex.quote(self.target_path)}"
             f" --output {shlex.quote(self.report_path)}"
+            f" --responses {shlex.quote(self.responses_path)}"
         )
         if self.offline:
             cmd += " --offline"

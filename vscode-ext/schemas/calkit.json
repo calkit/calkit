@@ -8668,7 +8668,7 @@
     },
     "ReferencesCheckStage": {
       "additionalProperties": false,
-      "description": "Whether the references a document cites are real.\n\nIts inputs are the target document, the files it inputs, and the\nbibliographies it names, or ``calkit.yaml`` and the collections it\ndeclares if it names none, all found when the pipeline is compiled.\nIts output is that document's report, by default under\n``.calkit/reference-checks``. One stage checks one document, so a\nproject with two papers has one of these each and each goes out of\ndate on its own.",
+      "description": "Whether the references a document cites are real.\n\nIts inputs are the target document, the files it inputs, and the\nbibliographies it names, or ``calkit.yaml`` and the collections it\ndeclares if it names none, all found when the pipeline is compiled.\nIts outputs are that document's report, by default under\n``.calkit/reference-checks``, and beside it the services' responses\nthe report is based on. The responses are kept between runs and\nreused, since the services' answers change over time, so a rerun\nreproduces the report and asks only about what's new. One stage\nchecks one document, so a project with two papers has one of these\neach and each goes out of date on its own.",
       "properties": {
         "always_run": {
           "default": false,
@@ -8781,7 +8781,7 @@
         },
         "offline": {
           "default": false,
-          "description": "Use only cached answers instead of calling out to Crossref, OpenAlex, and arXiv, e.g., where the pipeline runs without a network.",
+          "description": "Use only the recorded responses instead of calling out to Crossref, DataCite, OpenAlex, and arXiv, e.g., where the pipeline runs without a network.",
           "title": "Offline",
           "type": "boolean"
         },

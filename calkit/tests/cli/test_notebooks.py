@@ -21,6 +21,12 @@ def test_clean_notebook_outputs(tmp_dir):
     )
     shutil.copy(nb_fpath, "notebook.ipynb")
     subprocess.check_call(["calkit", "nb", "clean", "notebook.ipynb"])
+    # A stage depends on these bytes, so they must match across platforms
+    cleaned_fpath = calkit.notebooks.get_cleaned_notebook_path(
+        "notebook.ipynb"
+    )
+    with open(cleaned_fpath, "rb") as f:
+        assert b"\r\n" not in f.read()
 
 
 def test_clean_notebook_is_invariant_to_cell_ids():

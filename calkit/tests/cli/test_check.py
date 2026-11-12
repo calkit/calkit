@@ -400,7 +400,8 @@ def test_check_docker_env(tmp_dir):
     )
     with open("Dockerfile-lock.json", "rb") as f:
         assert f.read() == renamed_lock_bytes
-    # Now modify the image to fail to build and ensure the lock file is deleted
+    # A build that fails leaves the lock as it was, like a package manager
+    # whose resolve fails, rather than leaving the environment with none
     with open("Dockerfile", "w") as f:
         f.write("FROM non-existent-image:latest\n")
     with pytest.raises(subprocess.CalledProcessError):
@@ -416,7 +417,8 @@ def test_check_docker_env(tmp_dir):
                 "Dockerfile-lock.json",
             ]
         )
-    assert not os.path.exists("Dockerfile-lock.json")
+    with open("Dockerfile-lock.json", "rb") as f:
+        assert f.read() == renamed_lock_bytes
 
 
 @pytest.mark.skipif(
@@ -468,6 +470,52 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     assert "Pulling image by digest" in out
     with open(f"locks/{arch}.json", "rb") as f:
         assert f.read() == lock_bytes
+    # A locked digest that can't be pulled fails the check rather than
+    # pulling whatever the tag points at now and relocking to it
+    gone = dict(mine, RepoDigests=["sha256:" + "0" * 64])
+    with open(f"locks/{arch}.json", "w") as f:
+        json.dump(gone, f, indent=4)
+    with open(f"locks/{arch}.json", "rb") as f:
+        gone_bytes = f.read()
+    subprocess.check_call(["docker", "rmi", "-f", "alpine:3.18"])
+    result = subprocess.run(argv, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "locked to" in result.stderr
+    assert "--rebuild" in result.stderr
+    assert "Pulling image: alpine:3.18" not in result.stderr
+    with open(f"locks/{arch}.json", "rb") as f:
+        assert f.read() == gone_bytes
+    # Asking for it is what replaces the image and its lock
+    subprocess.check_call(argv + ["--rebuild"])
+    with open(f"locks/{arch}.json") as f:
+        assert json.load(f)["RepoDigests"] == mine["RepoDigests"]
+    # The image named is the spec, so naming another one relocks rather
+    # than failing to find the old digest in the new repo, or pulling it
+    # from the same repo under a different tag
+    assert mine["Image"] == "alpine:3.18"
+    try:
+        out = subprocess.check_output(
+            [a if a != "alpine:3.18" else "alpine:3.19" for a in argv],
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+        assert "Pulling image by digest" not in out
+        with open(f"locks/{arch}.json") as f:
+            relocked = json.load(f)
+        assert relocked["Image"] == "alpine:3.19"
+        assert relocked["RepoDigests"] != mine["RepoDigests"]
+    finally:
+        subprocess.run(["docker", "rmi", "alpine:3.19"], capture_output=True)
+    # A lock written before the image was recorded still pins it, and is
+    # left as it was rather than rewritten, which would rerun every stage
+    legacy = {k: v for k, v in mine.items() if k != "Image"}
+    with open(f"locks/{arch}.json", "w") as f:
+        json.dump(legacy, f, indent=4)
+    with open(f"locks/{arch}.json", "rb") as f:
+        legacy_bytes = f.read()
+    subprocess.check_call(argv)
+    with open(f"locks/{arch}.json", "rb") as f:
+        assert f.read() == legacy_bytes
 
 
 @pytest.mark.skipif(
@@ -598,19 +646,17 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         arch = calkit.environments.get_docker_arch()
         lock_fpath = f".calkit/env-locks/main/{arch}.json"
         # Checking builds the image and records the digest it will have in
-        # the registry. Where the image store keeps a manifest that digest
-        # is the build's own, and publishing is left to 'calkit push';
-        # where it doesn't, only a push can say what the digest is, so
-        # checking sends the image rather than leave the lock naming
-        # nothing to pull
-        digests_at_build = engine_records_build_digests()
+        # the registry, which is the build's own where the image store keeps
+        # a manifest. Publishing is left to 'calkit push' either way.
         out = subprocess.check_output(
             check_argv, text=True, stderr=subprocess.STDOUT
         )
-        if digests_at_build:
-            assert "Pushing image" not in out
-        else:
-            assert "Pushing image" in out
+        assert "Pushing image" not in out
+        if not engine_records_build_digests():
+            # Only a push could say what the digest is here, so the lock
+            # names nothing to pull, and checking says how to fix that
+            assert "containerd image store" in out
+            return
         with open(lock_fpath, "rb") as f:
             built_lock_bytes = f.read()
         built_lock = json.loads(built_lock_bytes)
@@ -622,12 +668,7 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         out = subprocess.check_output(
             ["calkit", "push", "--no-git", "--no-dvc"], text=True
         )
-        if digests_at_build:
-            assert "Pushing image for 'main'" in out
-        else:
-            # Checking already sent it, and pushing asks the registry rather
-            # than sending it a second time
-            assert "already in the registry" in out
+        assert "Pushing image for 'main'" in out
         assert "exporting layers" not in out
         with open(lock_fpath) as f:
             lock = json.load(f)
@@ -780,6 +821,18 @@ def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
         assert os.path.isfile(other_lock_fpath)
         with open(other_lock_fpath, "rb") as f:
             assert f.read() == other_lock_bytes
+        # A locked image the registry can't serve fails the check, which
+        # names the command that replaces it, and that command does
+        if engine_records_build_digests():
+            subprocess.check_call(["docker", "rmi", "-f", image])
+            check_argv = ["calkit", "check", "environment", "-n", "main"]
+            result = subprocess.run(check_argv, capture_output=True, text=True)
+            assert result.returncode != 0
+            assert "'calkit update env -n main --lock'" in result.stderr
+            subprocess.check_call(
+                ["calkit", "update", "env", "-n", "main", "--lock"]
+            )
+            assert os.path.isfile(f".calkit/env-locks/main/{arch}.json")
     finally:
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
 
@@ -856,6 +909,37 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
         )
         assert result.returncode != 0
         assert "Invalid target to push" in result.stderr
+        # A Git remote to push to, with everything so far already there
+        subprocess.check_call(["git", "init", "--bare", "-q", "remote.git"])
+        subprocess.check_call(["git", "remote", "add", "origin", "remote.git"])
+        subprocess.check_call(["git", "config", "push.default", "current"])
+        with open(".gitignore", "a") as f:
+            f.write("remote.git/\n")
+        subprocess.check_call(["calkit", "save", "-a", "-m", "Save"])
+        # An image that fails to push holds back the Git push, since the
+        # commit's lock would name an image nobody can pull
+        ck_info = calkit.load_calkit_info()
+        ck_info["environments"]["main"]["registry"] = "localhost:5999/nope"
+        calkit.save_calkit_info(ck_info)
+        git.Repo().git.commit(["-am", "Point at an unreachable registry"])
+        result = subprocess.run(
+            ["calkit", "push", "--no-dvc"], capture_output=True, text=True
+        )
+        assert result.returncode != 0
+        assert "not pushing to Git" in result.stderr
+        assert "Pushing to Git remote" not in result.stdout
+        # Saving still commits, since that happens before pushing
+        with open("notes.txt", "w") as f:
+            f.write("hi\n")
+        result = subprocess.run(
+            ["calkit", "save", "notes.txt", "-m", "Notes"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "not pushing to Git" in result.stderr
+        assert git.Repo().head.commit.message.strip() == "Notes"
+        assert "Pushing to Git remote" not in result.stdout
     finally:
         subprocess.run(["docker", "rm", "-f", container], capture_output=True)
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
@@ -887,18 +971,17 @@ def test_check_docker_env_does_not_push(tmp_dir):
         )
         with open("lock.json") as f:
             lock = json.load(f)
-        if not engine_records_build_digests():
-            # This image store gives a build no digest, so the only way to
-            # learn one is to push, and the registry isn't there. The lock
-            # still describes the image; it just can't say where to pull it
-            # from, which is reported rather than passed off as locked
-            assert "Failed to push image" in out
-            assert lock["RepoDigests"] == []
-            return
         # Publishing an image is 'calkit push', not something that happens
         # on the way to running a stage, so an unreachable registry is not
         # even contacted here
         assert "Pushing image" not in out
+        if not engine_records_build_digests():
+            # This image store gives a build no digest until it's pushed. The
+            # lock still describes the image; it just can't say where to pull
+            # it from, which is reported rather than passed off as locked
+            assert "containerd image store" in out
+            assert lock["RepoDigests"] == []
+            return
         # A manifest is content-addressed, so the digest this build has is
         # the one it will have once pushed. Recording it without contacting
         # the registry is what lets a clone pull rather than rebuild as soon
@@ -932,6 +1015,25 @@ def test_check_docker_env_does_not_push(tmp_dir):
             )
         )
         assert not [d for d in info if d.startswith("localhost:5999")]
+        # Deleting an image that was never pushed leaves nothing to pull
+        # the locked digest from, and a rebuild would lock a different
+        # image, so the check fails, says how to fix it, and keeps the lock
+        with open("lock.json", "rb") as f:
+            lock_bytes = f.read()
+        subprocess.check_call(["docker", "rmi", "-f", "calkit-unpushed-test"])
+        result = subprocess.run(argv, capture_output=True, text=True)
+        assert result.returncode != 0
+        assert "locked to" in result.stderr
+        assert "calkit push docker" in result.stderr
+        with open("lock.json", "rb") as f:
+            assert f.read() == lock_bytes
+        assert (
+            subprocess.run(
+                ["docker", "image", "inspect", "calkit-unpushed-test"],
+                capture_output=True,
+            ).returncode
+            != 0
+        )
     finally:
         subprocess.run(
             ["docker", "rmi", "-f", "calkit-unpushed-test"],
@@ -1749,7 +1851,7 @@ def test_check_env_locks_every_venv_platform(tmp_dir):
     assert recorded == calkit.environments.env_spec_hash("requirements.txt")
     # A matching lock with no record, e.g., from before records were kept, is
     # adopted without relocking other platforms
-    here = calkit.environments._conda_venv_platform() + ".txt"
+    here = calkit.environments.core._conda_venv_platform() + ".txt"
     sibling = os.path.join(lock_dir, next(f for f in locks if f != here))
     os.remove(sibling)
     os.remove(calkit.environments.ENV_SPEC_HASHES_FPATH)

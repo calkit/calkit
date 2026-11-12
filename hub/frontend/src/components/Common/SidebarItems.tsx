@@ -9,7 +9,6 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
 import type { IconType } from "react-icons"
-import { FaLaptop } from "react-icons/fa"
 import { FaCubes } from "react-icons/fa"
 import {
   FiBarChart2,
@@ -22,6 +21,7 @@ import {
   FiHome,
   FiImage,
   FiMonitor,
+  FiServer,
   FiTag,
   FiUsers,
 } from "react-icons/fi"
@@ -29,9 +29,8 @@ import { IoLibraryOutline } from "react-icons/io5"
 import { MdOutlineDashboard } from "react-icons/md"
 import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
-import { ProjectsService } from "../../client"
+import { MachinesService, ProjectsService } from "../../client"
 import useAuth from "../../hooks/useAuth"
-import { useLocalServer } from "../../hooks/useOnboarding"
 import { isRunGoing, useProjectPipelineRuns } from "../../hooks/useProject"
 import Tooltip from "./Tooltip"
 
@@ -68,9 +67,9 @@ export const projectNavItems: ProjectNavItem[] = [
   { icon: IoLibraryOutline, title: "References", path: "/references" },
   { icon: FiFolder, title: "All files", path: "/files" },
   {
-    icon: FaLaptop,
-    title: "Local machine",
-    path: "/local",
+    icon: FiServer,
+    title: "Workspaces",
+    path: "/workspaces",
     requiresLogin: true,
   },
 ]
@@ -93,10 +92,26 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     strict: false,
   }) as any
   const currentRef: string | undefined = layoutSearch?.ref
-  // Only controls the "running locally" icon color; the hook shares its
-  // query with the onboarding checklist so the page asks localhost once.
-  const { projectConnected } = useLocalServer(accountName, projectName)
-  const localMachineColor = projectConnected ? "ui.success" : "gray"
+  // Colors the Workspaces icon green when one of the user's machines is
+  // online with a workspace for this project, and says when the pipeline is
+  // running on one. Same key as the Workspaces and pipeline pages, so they
+  // share one request.
+  const workspacesQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "workspaces"],
+    queryFn: () =>
+      MachinesService.getProjectWorkspaces({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(user?.can_link_machines),
+    retry: false,
+    refetchOnWindowFocus: false,
+    // As often as machines check in
+    refetchInterval: 60000,
+  })
+  const workspacesColor = workspacesQuery.data?.some((ws) => ws.machine_online)
+    ? "ui.success"
+    : "default"
   // A pipeline that has run but no longer matches the code. The checklist
   // stops at "has it run at all", so this is where a project says its
   // results have drifted -- visible from any page, without reopening a
@@ -115,6 +130,10 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     refetchOnWindowFocus: false,
   })
   const pipelineIsStale = pipelineQuery.data?.status === "stale"
+  // Running on one of the user's machines, which says more than stale
+  const runningOn = (workspacesQuery.data ?? [])
+    .filter((ws) => ws.running)
+    .map((ws) => ws.machine_name)
   // Whether it's running somewhere, e.g., on GitHub Actions, shared with
   // the pipeline page
   const { runsRequest } = useProjectPipelineRuns(accountName, projectName, {
@@ -152,11 +171,24 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
       >
         <Icon
           as={icon}
-          color={title === "Local machine" ? localMachineColor : "default"}
+          color={title === "Workspaces" ? workspacesColor : "default"}
           alignSelf="center"
         />
         <Text ml={2}>{title}</Text>
-        {title === "Pipeline" && pipelineIsRunning ? (
+        {title === "Pipeline" && runningOn.length ? (
+          <Tooltip label={`Running on ${runningOn.join(", ")}`}>
+            <Box
+              ml="auto"
+              mr={1}
+              alignSelf="center"
+              display="flex"
+              role="img"
+              aria-label="Pipeline is running"
+            >
+              <Spinner size="xs" color="blue.400" />
+            </Box>
+          </Tooltip>
+        ) : title === "Pipeline" && pipelineIsRunning ? (
           <Tooltip label="The pipeline is running on GitHub Actions">
             <Spinner
               ml="auto"

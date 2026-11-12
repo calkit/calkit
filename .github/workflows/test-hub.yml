@@ -25,6 +25,7 @@ env:
   FIRST_SUPERUSER_GITHUB_USERNAME: test-user-for-ci
   FIRST_SUPERUSER_PASSWORD: test-password-for-ci
   SECRET_KEY: test-secret-key-for-ci
+  RELAY_SECRET_KEY: test-relay-secret-key-for-ci
   # Must be 32 url-safe base64-encoded bytes, i.e. a real Fernet key, since
   # tests encrypt credentials. This one decodes to a throwaway string.
   FERNET_KEY: Y2Fsa2l0LXRlc3QtZmVybmV0LWtleS1mb3ItY2khISE=

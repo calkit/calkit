@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 import calkit
 import calkit.docker
+import calkit.environments.docker
 import calkit.resources
 from calkit.cli.update import update_app
 
@@ -518,7 +519,7 @@ def test_update_docker_env_registry(tmp_dir):
     assert result.exit_code == 0, result.output
     env = calkit.load_calkit_info()["environments"]["main"]
     assert env["registry"] is None
-    assert calkit.docker.resolve_registry_prefix(env) is None
+    assert calkit.environments.docker.resolve_registry_prefix(env) is None
     with open("calkit.yaml") as f:
         assert "registry: none" not in f.read()
     # Nothing to update is a mistake worth reporting, not a no-op
@@ -560,15 +561,19 @@ def test_update_latex_image(tmp_dir, monkeypatch):
         },
     }
     calkit.save_calkit_info(ck_info)
-    lock_fpath = calkit.environments.get_all_docker_lock_fpaths("tex")[0]
+    lock_fpath = calkit.environments.docker.get_lock_fpaths("tex")[0]
     os.makedirs(os.path.dirname(lock_fpath))
     with open(lock_fpath, "w") as f:
         json.dump({"RepoDigests": ["sha256:old"]}, f)
     relocked = []
+    forced = []
     monkeypatch.setattr(
         calkit.cli.check,
         "check_environment",
-        lambda env_name, verbose=False: relocked.append(env_name),
+        lambda env_name, force=False, **kwargs: (
+            relocked.append(env_name),
+            forced.append(force),
+        ),
     )
     # Environments on Calkit's or TeX Live's image move to the pinned one and
     # are relocked, with stale locks removed so the old image isn't pulled
@@ -591,6 +596,12 @@ def test_update_latex_image(tmp_dir, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "No LaTeX environments to update" in result.output
     assert relocked == []
+    # Relocking a Docker env forces a rebuild, as 'update env --lock' does
+    forced.clear()
+    result = runner.invoke(update_app, ["docker-env", "-n", "tex", "--relock"])
+    assert result.exit_code == 0, result.output
+    assert relocked == ["tex"]
+    assert forced == [True]
 
 
 def test_update_imported_from_detects_the_kind(tmp_dir):
@@ -806,6 +817,7 @@ def test_update_env_lock(tmp_dir, monkeypatch):
             "path": "requirements.txt",
             "prefix": ".venv",
         },
+        "job": {"kind": "slurm", "host": "cluster.invalid"},
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -828,6 +840,28 @@ def test_update_env_lock(tmp_dir, monkeypatch):
     assert envs.read_system_env_lock(
         env_name="bench", env=env
     ) == envs.get_system_lock_data(["os", "cpu-count"])
+    # Any other kind is rebuilt from its spec, taking the newest versions it
+    # allows rather than the ones its lock pins
+    with open("requirements.txt", "w") as f:
+        f.write("six\n")
+    py_env = ck_info["environments"]["py"]
+    py_lock_fpath = envs.get_env_lock_fpath(
+        env=py_env, env_name="py", as_posix=False
+    )
+    assert py_lock_fpath is not None
+    os.makedirs(os.path.dirname(py_lock_fpath), exist_ok=True)
+    with open(py_lock_fpath, "w") as f:
+        f.write("six==1.15.0\n")
+    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
+    assert result.exit_code == 0, result.output
+    with open(py_lock_fpath) as f:
+        relocked = f.read()
+    assert "six==" in relocked
+    assert "six==1.15.0" not in relocked
+    # A scheduler env is locked to its config, so there's nothing to redo
+    result = runner.invoke(update_app, ["env", "-n", "job", "--lock"])
+    assert result.exit_code == 0, result.output
+    assert "nothing to relock" in result.output
     # A remote env is locked to the far end, not this machine
     monkeypatch.setattr(
         calkit.workspace,
@@ -847,8 +881,6 @@ def test_update_env_lock(tmp_dir, monkeypatch):
         assert json.load(f) == envs.get_system_lock_data(["os"])
     # Nothing to relock without machine properties or a machine
     result = runner.invoke(update_app, ["env", "-n", "plain", "--lock"])
-    assert result.exit_code != 0
-    result = runner.invoke(update_app, ["env", "-n", "py", "--lock"])
     assert result.exit_code != 0
     result = runner.invoke(update_app, ["env", "-n", "nope", "--lock"])
     assert result.exit_code != 0
@@ -1204,3 +1236,132 @@ def test_update_question(tmp_dir):
     assert q["validations"] == [{"by": ada}]
     assert q["verifications"][0]["notes"] == "Read the code."
     assert ProjectInfo.model_validate(calkit.load_calkit_info())
+
+
+def test_update_markdown(tmp_dir):
+    def run(*args):
+        return subprocess.run(
+            ["calkit", "update", "markdown", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    subprocess.run(["git", "init", "-q"], check=True)
+    with open("calkit.yaml", "w") as f:
+        f.write("name: blog\n")
+    os.makedirs("_posts")
+    os.makedirs("_data")
+    with open("_data/r.json", "w") as f:
+        json.dump({"summary": {"frac": 0.6}, "n": 15}, f)
+    post = (
+        "Only <!-- ckvalue _data/r.json summary.frac .0% -->?"
+        "<!-- /ckvalue --> of\n"
+        "<!-- ckvalue _data/r.json n -->?<!-- /ckvalue --> runs.\n"
+    )
+    with open("_posts/a.md", "w") as f:
+        f.write(post)
+    with open("_posts/b.md", "w") as f:
+        f.write("No values here.\n")
+    # With no files named and no markdown stages, there's nothing to do
+    res = run()
+    assert res.returncode != 0
+    assert "none are declared as markdown stages" in res.stdout + res.stderr
+    # Checking reports what's stale without writing it
+    res = run("--check", "_posts/a.md", "_posts/b.md")
+    assert res.returncode != 0
+    assert "Values in _posts/a.md are out of date" in res.stdout
+    with open("_posts/a.md") as f:
+        assert f.read() == post
+    # Updating writes only the file that shows values
+    res = run("_posts/a.md", "_posts/b.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert res.stdout.strip() == "Updated values in _posts/a.md"
+    with open("_posts/a.md") as f:
+        text = f.read()
+    assert "-->60%<!-- /ckvalue -->" in text
+    assert "n -->15<!-- /ckvalue -->" in text
+    assert run("--check", "_posts/a.md").returncode == 0
+    # A block that isn't ended fails with what to add, and a bracketed
+    # format, as LaTeX's \\ckvalue takes one, is moved after the key
+    with open("_posts/old.md", "w") as f:
+        f.write(
+            "<!-- calkit values path=_data/r.json -->\n\n"
+            "N is <!-- calkit value key=n -->15<!-- /calkit value -->.\n"
+        )
+    res = run("_posts/old.md")
+    assert res.returncode != 0
+    assert "_posts/old.md:1" in res.stdout + res.stderr
+    assert "add '<!-- /calkit values -->'" in res.stdout + res.stderr
+    with open("_posts/old.md", "w") as f:
+        f.write(
+            "N is <!-- ckvalue[.1f] _data/r.json n -->15<!-- /ckvalue -->\n"
+        )
+    assert run("--check", "_posts/old.md").returncode != 0
+    res = run("_posts/old.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("_posts/old.md") as f:
+        assert f.read() == (
+            "N is <!-- ckvalue _data/r.json n .1f -->15.0<!-- /ckvalue -->\n"
+        )
+    # A markdown stage's file is updated with no files named
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "name: blog\npipeline:\n  stages:\n    post:\n"
+            "      kind: markdown\n      target_path: _posts/a.md\n"
+        )
+    with open("_data/r.json", "w") as f:
+        json.dump({"summary": {"frac": 0.8}, "n": 15}, f)
+    res = run()
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("_posts/a.md") as f:
+        assert "-->80%<!-- /ckvalue -->" in f.read()
+    # A key the results file doesn't have is reported with its line
+    with open("_posts/a.md", "a") as f:
+        f.write("<!-- ckvalue _data/r.json missing -->?<!-- /ckvalue -->\n")
+    res = run("_posts/a.md")
+    assert res.returncode != 0
+    assert "_posts/a.md:3" in res.stdout + res.stderr
+    assert "no key 'missing'" in res.stdout + res.stderr
+    # Images are checked against their imports, whether written from the
+    # project root, as a website serves them, or relative to the file.
+    # Ones that weren't imported, or that only appear in code, are not.
+    os.makedirs("images/p")
+    for name in ["a.png", "b.png", "photo.jpg"]:
+        with open(f"images/p/{name}", "w") as f:
+            f.write(name)
+    ck_info = calkit.load_calkit_info()
+    ck_info["figures"] = [
+        {"path": f"images/p/{name}", "imported_from": {"project": "o/p"}}
+        for name in ["a.png", "b.png"]
+    ]
+    calkit.save_calkit_info(ck_info)
+    for name in ["a.png", "b.png"]:
+        path = f"images/p/{name}"
+        calkit.provenance.write_import_lock(
+            path, {"hash": calkit.provenance.hash_path(path)}
+        )
+    with open("_posts/c.md", "w") as f:
+        f.write(
+            "![A](/images/p/a.png)\n![B](../images/p/b.png)\n"
+            "![Photo](/images/p/photo.jpg)\n`![C](/images/p/c.png)`\n"
+        )
+    res = run("--check", "_posts/c.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("images/p/a.png", "a") as f:
+        f.write("edited")
+    os.remove("images/p/b.png")
+    res = run("_posts/c.md")
+    out = res.stdout + res.stderr
+    # Reported, but nothing to update, so not a failure unless checking
+    assert res.returncode == 0, out
+    assert "images/p/a.png, which has been edited since it was imported" in (
+        out
+    )
+    assert "images/p/b.png, imported from o/p, which does not exist" in out
+    assert "photo.jpg" not in out
+    assert "c.png" not in out
+    res = run("--check", "_posts/c.md")
+    assert res.returncode != 0
+    assert "2 imported image(s) don't match their imports" in (
+        res.stdout + res.stderr
+    )

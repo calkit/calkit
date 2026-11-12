@@ -22,6 +22,7 @@ import {
 } from "@chakra-ui/react"
 import LoadingSpinner from "./LoadingSpinner"
 import Tooltip from "./Tooltip"
+import { safeHref } from "../../lib/strings"
 import mixpanel from "mixpanel-browser"
 import type { PDFDocumentProxy } from "pdfjs-dist"
 import {
@@ -345,6 +346,10 @@ function PdfViewerInner({
 }: PdfViewerInnerProps) {
   const toolbarBg = useColorModeValue("ui.secondary", "ui.darkSlate")
   const borderColor = useColorModeValue("gray.200", "gray.600")
+  // Our own blob/data PDFs pass through; any other URL must be safe to open.
+  const openHref = /^(blob:|data:application\/pdf[;,])/.test(url)
+    ? url
+    : safeHref(url)
   // The 16:9-ish viewport box for paged ("carousel") mode; its height is
   // clamped to a single page so only one page shows at a time.
   const pdfBoxRef = useRef<HTMLDivElement>(null)
@@ -728,7 +733,7 @@ function PdfViewerInner({
         new Blob([data], { type: "application/pdf" }),
       )
     } catch {
-      window.open(url, "_blank", "noopener")
+      if (openHref) window.open(openHref, "_blank", "noopener")
       return
     }
     const iframe = document.createElement("iframe")
@@ -753,7 +758,7 @@ function PdfViewerInner({
       }, 60000)
     }
     document.body.appendChild(iframe)
-  }, [pdfDocument, url, source])
+  }, [pdfDocument, openHref, source])
 
   const submitPageInput = useCallback(() => {
     const n = Number.parseInt(pageInput, 10)
@@ -1178,7 +1183,7 @@ function PdfViewerInner({
               <Tooltip label="Open in new tab">
                 <IconButton
                   as={Link}
-                  href={url}
+                  href={openHref}
                   isExternal
                   aria-label="Open in new tab"
                   icon={<FiExternalLink />}
@@ -1195,7 +1200,7 @@ function PdfViewerInner({
             <Tooltip label="Download">
               <IconButton
                 as={Link}
-                href={url}
+                href={openHref}
                 download
                 aria-label="Download"
                 icon={<FiDownload />}

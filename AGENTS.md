@@ -78,15 +78,35 @@ write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
 
+Start function names with a verb, e.g., `get_evidence_kind` rather than
+`evidence_kind`.
+Name functions for what they return,
+e.g., `get_image_name` rather than `get_image`,
+which could just as well return an image.
+
+Name a value for what it holds, so the name tells its type:
+a commit hash is `commit_sha`, not `commit`, which reads as an object;
+a path is `*_path`; a count is `n_*`.
+
 No spaces on either side of en or em dashes used for ranges or pauses in prose,
 respectively.
 
 Never create `helpers` or `utils` modules or packages--tight coupling and
 low cohesion architecture.
 
+Keep a subclass in the module of the class it extends,
+so a class's variants are found where it's defined.
+The only exceptions are classes written to be subclassed,
+e.g., `calkit.models.base.Model` and `calkit.cli.core.OptionalValueCommand`,
+and classes from other packages, e.g., pydantic's `BaseModel`.
+
 Don't be verbose in comments. One sentence is usually fine, if anything at all.
 
-Agents should typically not be writing prose for human consumption.
-If some is needed, notify
-the human developer and ask them to write in a given file at a specified
-line and make a commit.
+Agents may make minor corrections to prose for human consumption,
+e.g., fixing a sentence a change made inaccurate, without changing what it
+argues.
+Major writing, e.g., a new section or explanation, needs the human
+developer's approval first.
+Flag any new prose an agent writes as needing human attention:
+put a `<!-- TODO: needs human review -->` comment above it in Markdown,
+and call it out in the PR description.

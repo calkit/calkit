@@ -520,6 +520,107 @@ def update_notebook(
         raise_error(f"Failed to update notebook: {e}")
 
 
+@update_app.command(name="markdown")
+def update_markdown(
+    paths: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Markdown files to update. Defaults to those declared as "
+                "markdown stages."
+            )
+        ),
+    ] = None,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help=(
+                "Change nothing, and fail if any file shows a value its "
+                "results file no longer holds, or an imported image that "
+                "doesn't match its import."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Update the values Markdown files show, and check their imported images.
+
+    Each value marker's text, e.g., the 0.29 in
+    '<!-- ckvalue results.json rms .2f -->0.29<!-- /ckvalue -->', is
+    rewritten from the JSON, YAML, or TOML results file and key it names.
+    A format written in brackets, 'ckvalue[.2f] ...', as LaTeX's \\ckvalue
+    takes one, is moved after the key. Nothing else in the file changes. This is the update 'calkit run' makes after running
+    the pipeline, for a project without one, e.g., one whose results are
+    imported.
+
+    Each local image a file shows that calkit.yaml records as imported,
+    including one written from the project root like /images/fig.png, is
+    checked against what the import fetched: it should exist and not have
+    been edited since. Images are only checked, never changed; 'calkit
+    sync import' is what brings in a newer version.
+    """
+    import calkit.markdown
+    import calkit.provenance
+
+    ck_info = calkit.load_calkit_info()
+    locks = calkit.provenance.read_import_locks()
+    if not paths:
+        paths = sorted(
+            set(calkit.markdown.get_markdown_stages(ck_info).values())
+        )
+    if not paths:
+        raise_error(
+            "No Markdown files given, and none are declared as markdown stages"
+        )
+    results = calkit.markdown.results_by_name(ck_info)
+    stale = []
+    problems = []
+    for path in paths:
+        if not os.path.isfile(path):
+            raise_error(f"{path} does not exist")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        for image in calkit.markdown.get_image_paths(text, path, rooted=True):
+            found = calkit.provenance.find_artifact(ck_info, image)
+            if found is None or not found[1].get("imported_from"):
+                continue
+            source = calkit.provenance.describe_source(
+                found[1]["imported_from"]
+            )
+            if not os.path.isfile(image):
+                problems.append(
+                    f"{path} shows {image}, imported from {source}, which "
+                    "does not exist; run 'calkit sync import' to fetch it"
+                )
+            elif calkit.provenance.local_edit(image, locks.get(image)):
+                problems.append(
+                    f"{path} shows {image}, which has been edited since it "
+                    f"was imported from {source}"
+                )
+        try:
+            new_text, changed = calkit.markdown.set_values(
+                text, path, results=results
+            )
+        except calkit.markdown.MarkdownParseError as e:
+            raise_error(str(e))
+        if not changed:
+            continue
+        stale.append(path)
+        if check:
+            typer.echo(f"Values in {path} are out of date")
+            continue
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(new_text)
+        typer.echo(f"Updated values in {path}")
+    for problem in problems:
+        warn(problem)
+    if check and (stale or problems):
+        raise_error(
+            f"{len(stale)} file(s) show out-of-date values and "
+            f"{len(problems)} imported image(s) don't match their imports"
+        )
+
+
 @update_app.command(name="agent-skills")
 def update_agent_skills(
     quiet: Annotated[
@@ -898,6 +999,7 @@ def update_docker_env(
         bool,
         typer.Option(
             "--lock",
+            "--relock",
             help=(
                 "Rebuild or repull the image and write fresh lock files for "
                 "every architecture."
@@ -906,11 +1008,6 @@ def update_docker_env(
     ] = False,
 ) -> None:
     """Update a docker environment."""
-    from calkit.environments import (
-        get_all_docker_lock_fpaths,
-        get_env_lock_fpath,
-    )
-
     ck_info, env = _load_env(env_name)
     if env.get("kind") != "docker":
         raise_error(f"Environment '{env_name}' is not a docker environment")
@@ -930,24 +1027,8 @@ def update_docker_env(
     if image is not None or registry is not None:
         calkit.save_calkit_info(ck_info)
         typer.echo(f"Updated docker environment '{env_name}'")
-    if not lock:
-        return
-    # Relocking throws away the existing lock files so the image is fetched or
-    # rebuilt from the environment's spec, which is the only way to pick up an
-    # image whose tag has been moved out from under a recorded digest
-    for lock_fpath in get_all_docker_lock_fpaths(env_name=env_name):
-        if os.path.isfile(lock_fpath):
-            typer.echo(f"Removing lock file: {lock_fpath}")
-            os.remove(lock_fpath)
-    legacy_lock_fpath = get_env_lock_fpath(
-        env=env, env_name=env_name, as_posix=False, legacy=True
-    )
-    if legacy_lock_fpath is not None and os.path.isfile(legacy_lock_fpath):
-        os.remove(legacy_lock_fpath)
-    from calkit.cli.check import check_environment
-
-    typer.echo(f"Relocking docker environment '{env_name}'")
-    check_environment(env_name=env_name, verbose=True)
+    if lock:
+        calkit.environments.relock(env_name=env_name, env=env)
 
 
 @update_app.command(name="latex-image")
@@ -1127,17 +1208,18 @@ def update_environment(
             "--lock",
             "--relock",
             help=(
-                "Record this machine's properties in a system "
-                "environment's lock file, replacing the machine it is "
-                "locked to. Invalidates every stage that depends on it."
+                "Rebuild the environment from its spec and lock it again, "
+                "taking the newest versions the spec allows, or for a "
+                "system environment, lock it to this machine. Reruns every "
+                "stage that depends on it."
             ),
         ),
     ] = False,
 ) -> None:
     """Update an environment.
 
-    Currently supports adding packages to Julia and Nix (flake) envs, and
-    re-locking a system environment to this machine.
+    Supports relocking any environment, and adding packages to Julia and
+    Nix (flake) envs.
     """
     from calkit.cli.main import run_in_env
 
@@ -1157,11 +1239,8 @@ def update_environment(
         env = found
         kind = env.get("kind")
         if kind not in ("system", calkit.environments.SWITCH_KIND):
-            raise_error(
-                f"Environment '{env_name}' is not a system or switch "
-                "environment, so it has no machine to lock; its lock file is "
-                "derived from its spec"
-            )
+            calkit.environments.relock(env_name=env_name, env=env)
+            return
         # A switch's lock describes the machine its pick runs on
         machine_name, machine_env = env_name, env
         if kind == calkit.environments.SWITCH_KIND:
@@ -1235,7 +1314,7 @@ def update_environment(
     if add_packages is None:
         raise_error(
             "No updates specified. Use --add to specify packages to add, or "
-            "--lock to re-lock a system environment to this machine."
+            "--lock to relock the environment."
         )
     env = found
     assert isinstance(add_packages, list)

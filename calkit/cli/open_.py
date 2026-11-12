@@ -65,6 +65,17 @@ def open_project(
             ),
         ),
     ] = None,
+    hub: Annotated[
+        str | None,
+        typer.Option(
+            "--hub",
+            help=(
+                "Hub to clone it from if it isn't here, e.g., "
+                "https://calkit.example.edu, or localhost for a development "
+                "hub. Defaults to calkit.io."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Open a project on this machine in its editor, from anywhere.
 
@@ -81,8 +92,8 @@ def open_project(
 
     # A hub only matters for cloning, since checkouts are found by owner and
     # name
-    hub, owner, name = ([""] * 2 + project.split("/"))[-3:]
-    if not name or project.count("/") > 2 or (hub and not owner):
+    named_hub, owner, name = ([""] * 2 + project.split("/"))[-3:]
+    if not name or project.count("/") > 2 or (named_hub and not owner):
         raise_error("Give the project as NAME, OWNER/NAME, or HUB/OWNER/NAME")
     # Read now, since cloning moves into the new repo, and a '.env' file
     # there must not get to choose what runs
@@ -147,7 +158,7 @@ def open_project(
                 raise typer.Exit(1)
         from calkit.cli.main.core import clone
 
-        clone(url=project, location=default_path)
+        clone(url=project, location=default_path, hub=hub)
         paths = [default_path]
     # With more than one checkout, e.g., Git worktrees, prefer the one in
     # ~/calkit, then the main checkout, whose .git is a folder rather than a

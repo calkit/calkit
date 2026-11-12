@@ -94,6 +94,7 @@ from app.core import (
     ryaml,
     title_from_path,
     utcnow,
+    web_url_or_none,
 )
 from app.dvc import (
     expand_dvc_lock_outs,
@@ -348,31 +349,7 @@ def get_projects(
         # opened the project won't appear until they do.
         where_clause = app.projects.writable_project_clause(current_user)
     else:
-        where_clause = or_(
-            Project.is_public,
-            Project.owner_account_id == current_user.account.id,
-            # A row in the unified access table with either a native Calkit
-            # grant (role_id, e.g. an invite redemption) or GitHub-derived
-            # access. A row with both null is a cached "no access" result.
-            and_(
-                UserProjectAccess.user_id == current_user.id,
-                or_(
-                    UserProjectAccess.role_id.is_not(None),  # type: ignore
-                    UserProjectAccess.github_access.is_not(None),  # type: ignore
-                ),
-            ),
-            Project.owner_account.has(  # type: ignore
-                and_(
-                    Account.org_id.is_not(None),  # type: ignore
-                    select(UserOrgMembership)
-                    .where(
-                        UserOrgMembership.user_id == current_user.id,
-                        UserOrgMembership.org_id == Account.org_id,
-                    )
-                    .exists(),
-                )
-            ),
-        )
+        where_clause = app.projects.readable_project_clause(current_user)
     if owner_name is not None:
         where_clause = and_(
             where_clause,
@@ -574,14 +551,19 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
 
 
 def _push_dvc_cache_to_storage(
-    repo_dir: str, owner_name: str, project_name: str
+    repo_dir: str,
+    owner_name: str,
+    project_name: str,
+    skip: set[str] | None = None,
 ) -> int:
     """Copy a repo's local DVC cache into this project's object storage.
 
     Walking the cache rather than reading each .dvc file covers directory
     outputs and their .dir objects the same way single files are covered,
     which is the difference between a pointer that resolves and one that
-    dangles. Returns how many objects were written.
+    dangles. Objects in ``skip``, named like ``ab/cdef...``, e.g., those
+    cached before something was added, aren't copied. Returns how many
+    objects were written.
     """
     cache_dir = os.path.join(repo_dir, ".dvc", "cache", "files", "md5")
     if not os.path.isdir(cache_dir):
@@ -594,7 +576,7 @@ def _push_dvc_cache_to_storage(
             continue
         for rest in sorted(os.listdir(idx_dir)):
             src = os.path.join(idx_dir, rest)
-            if not os.path.isfile(src):
+            if not os.path.isfile(src) or f"{idx}/{rest}" in (skip or ()):
                 continue
             fpath = make_data_fpath(
                 owner_name=owner_name,
@@ -769,8 +751,8 @@ def get_owned_projects(
 ) -> ProjectsPublic:
     where_clause = or_(
         Project.owner_account_id == current_user.account.id,
-        # A native Calkit grant (role_id), e.g. an invite redemption, the only
-        # access path for GitHub-less collaborators.
+        # A native Calkit grant (role_id), e.g., an invite redemption, the
+        # only access path for GitHub-less collaborators.
         Project.user_access_records.any(  # type: ignore
             and_(
                 UserProjectAccess.user_id == current_user.id,
@@ -924,13 +906,26 @@ def post_project(
             current_user=current_user,
             template=project_in.template,
         )
-    # Validate the git repo URL is on github.com to prevent SSRF
+    # Validate the git repo URL is an https github.com repo, to prevent SSRF
+    # and so it's safe to render as a link
     parsed_git_url = urlparse(project_in.git_repo_url)
-    if parsed_git_url.hostname not in ("github.com", "www.github.com"):
-        raise HTTPException(400, "Git repo URL must be on github.com")
+    is_github = parsed_git_url.netloc.lower() in (
+        "github.com",
+        "www.github.com",
+    )
+    if parsed_git_url.scheme != "https" or not is_github:
+        raise HTTPException(400, "Git repo URL must be on https://github.com")
     # Detect owner and repo name from Git repo URL
     # TODO: This should be generalized to not depend on GitHub?
-    owner_name, repo_name = project_in.git_repo_url.split("/")[-2:]
+    repo_match = re.fullmatch(
+        r"/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)/?", parsed_git_url.path
+    )
+    if repo_match is None or parsed_git_url.query or parsed_git_url.fragment:
+        raise HTTPException(
+            400, "Git repo URL must be https://github.com/<owner>/<repo>"
+        )
+    owner_name, repo_name = repo_match.groups()
+    project_in.git_repo_url = f"https://github.com/{owner_name}/{repo_name}"
     # Validate that the owner is either the current user or an org they belong
     # to before retrieving their GitHub token
     # This prevents users from using their token to make API calls for repos
@@ -1964,12 +1959,17 @@ def get_project_contents(
         ref=ref,
         read_only=True,
     )
-    return app.projects.get_contents_from_repo(
-        project=project,
-        repo=repo,
-        path=path,
-        ref=ref,
+    item = ContentsItem.model_validate(
+        app.projects.get_contents_from_repo(
+            project=project,
+            repo=repo,
+            path=path,
+            ref=ref,
+        )
     )
+    # With no ref, contents come from the live checkout, which is HEAD
+    item.commit_sha = resolve_commit_sha(repo, ref)
+    return item
 
 
 class DvcOutput(BaseModel):
@@ -2444,11 +2444,12 @@ class _EvidenceLookups(NamedTuple):
     results_by_path: dict[tuple[str, str | None], Result]
     tables_by_path: dict[str, Result]
     publications_by_path: dict[str, Publication]
+    # With its outs' paths relative to the project, not each stage's wdir
     dvc_lock: dict[str, Any]
     stage_statuses: dict[str, PipelineStageStatus]
     frozen_stages: set[str]
-    # Cited documents and publications present in the tree or dvc.lock,
-    # since those need not be declared to be cited
+    # Cited documents, publications, and plain files present in the tree or
+    # dvc.lock, since those need not be declared to be cited
     present_paths: set[str] = set()
 
 
@@ -2480,6 +2481,40 @@ def _evidence_ref(ev: dict, ref: str | None) -> str | None:
     return _declared_git_ref(ev) or ref
 
 
+def _get_project_path(
+    stage_name: str, path: str, stage_wdirs: dict[str, str]
+) -> str:
+    """A ``dvc.lock`` path, which is relative to its stage's ``wdir``, as a
+    path relative to the project, like an evidence path."""
+    wdir = stage_wdirs.get(str(stage_name).split("@")[0]) or ""
+    return posixpath.normpath(posixpath.join(wdir, path)) if wdir else path
+
+
+def _get_present_paths(
+    paths: set[str],
+    tree: Any,
+    dvc_lock_outs: dict[str, Any],
+    stage_wdirs: dict[str, str],
+) -> set[str]:
+    """The cited ``paths`` that are in the tree or DVC-tracked.
+
+    ``dvc_lock_outs`` is expanded, so a file inside a DVC-tracked directory
+    counts only if the directory's manifest lists it.
+    """
+    dvc_paths = {
+        _get_project_path(str(out.get("stage") or ""), key, stage_wdirs)
+        for key, out in dvc_lock_outs.items()
+        if isinstance(out, dict)
+    }
+    return {
+        path
+        for path in paths
+        if tree.is_file(path)
+        or tree.is_file(path + ".dvc")
+        or path in dvc_paths
+    }
+
+
 def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
     """Whether the citation resolves to anything the reader can look at.
 
@@ -2494,7 +2529,7 @@ def _evidence_missing(item: QuestionEvidence, present_paths: set[str]) -> bool:
         return item.figure is None
     if item.kind == "publication":
         return item.publication is None and item.path not in present_paths
-    if item.kind == "document":
+    if item.kind in ("document", None):
         return item.path not in present_paths
     # A value is the number itself, so without a key there's nothing to show
     if item.kind == "value":
@@ -2590,16 +2625,34 @@ def _build_question_evidence(
     evidence cites; a ref missing from it is one that could not be read, and
     its evidence comes back unresolved rather than failing the question.
     """
+
+    def lines_of(ev: dict[str, Any]) -> str | None:
+        # As "8" or "8-12", or as written if it's neither, so it still shows
+        lines = _optional_str(ev.get("lines"))
+        if lines is None:
+            return None
+        try:
+            first, last = calkit.questions.parse_lines(lines)
+        except ValueError:
+            return lines
+        return str(first) if first == last else f"{first}-{last}"
+
     empty = _EvidenceLookups({}, {}, {}, {}, {}, {}, set(), set())
     evidence = []
     for ev in evidence_ck:
-        if not isinstance(ev, dict) or ev.get("kind") not in (
+        if not isinstance(ev, dict):
+            continue
+        # No kind at all is a plain file, or a result written before results
+        # had to say so
+        kind = calkit.questions.get_evidence_kind(ev)
+        if kind not in (
             "figure",
             "result",
             "value",
             "table",
             "publication",
             "document",
+            None,
         ):
             continue
         path = ev.get("path", "")
@@ -2609,12 +2662,13 @@ def _build_question_evidence(
             ev.get("explanation")
         )
         item = QuestionEvidence(
-            kind=ev["kind"],
+            kind=kind,
             path=path,
             key=ev.get("key"),
             name=_optional_str(ev.get("name")),
             section=_optional_str(ev.get("section")),
             label=_optional_str(ev.get("label")),
+            lines=lines_of(ev) if kind is None else None,
             explanation=explanation,
             explanation_path=explanation_path,
             # What the entry declares, not what it resolved at: this is the
@@ -2760,14 +2814,16 @@ def _build_questions_public(
         ev_ref: str | None, entries: list[dict]
     ) -> _EvidenceLookups:
         """Resolve everything ``entries`` cites, all of it at ``ev_ref``."""
-        kinds = {ev.get("kind") for ev in entries}
+        kinds = {calkit.questions.get_evidence_kind(ev) for ev in entries}
         figures_by_path: dict[str, Figure] = {}
         if "figure" in kinds:
             # Only the figures actually cited as evidence need their content
             # resolved; resolving every figure in the project would make this
             # scale with the project rather than with the questions.
             evidence_fig_paths = {
-                ev.get("path") for ev in entries if ev.get("kind") == "figure"
+                ev.get("path")
+                for ev in entries
+                if calkit.questions.get_evidence_kind(ev) == "figure"
             }
             fig_ctx = _discover_figures(project=project, repo=repo, ref=ev_ref)
             cited = [
@@ -2813,13 +2869,13 @@ def _build_questions_public(
             }
         # Staleness is best-effort: never let it block the questions.
         dvc_lock: dict[str, Any] = {}
+        dvc_yaml: dict[str, Any] = {}
         stage_statuses: dict[str, PipelineStageStatus] = {}
         frozen_stages: set[str] = set()
         try:
             tree = get_repo_tree_for_ref(repo, ev_ref)
             if tree.is_file("dvc.lock"):
                 dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
-            dvc_yaml: dict[str, Any] = {}
             if tree.is_file("dvc.yaml"):
                 dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
             stage_statuses = compute_stage_statuses(
@@ -2839,30 +2895,53 @@ def _build_questions_public(
                 f"Failed to compute pipeline status for questions at "
                 f"{ev_ref}: {e}"
             )
+        # dvc.lock's paths are relative to each stage's wdir, which only
+        # dvc.yaml records, and evidence paths to the project
+        stage_wdirs = {
+            str(name): str(st.get("wdir") or "")
+            for name, st in (dvc_yaml.get("stages") or {}).items()
+            if isinstance(st, dict)
+        }
+        evidence_lock = {
+            "stages": {
+                name: {
+                    **st,
+                    "outs": [
+                        {
+                            **out,
+                            "path": _get_project_path(
+                                name, str(out["path"]), stage_wdirs
+                            ),
+                        }
+                        if isinstance(out, dict) and out.get("path")
+                        else out
+                        for out in st.get("outs") or []
+                    ],
+                }
+                if isinstance(st, dict)
+                else st
+                for name, st in (dvc_lock.get("stages") or {}).items()
+            }
+        }
         present_paths: set[str] = set()
         cited_paths = {
             ev["path"]
             for ev in entries
-            if ev.get("kind") in ("document", "publication")
+            if calkit.questions.get_evidence_kind(ev)
+            in ("document", "publication", None)
             and isinstance(ev.get("path"), str)
         }
         if cited_paths:
             try:
                 tree = get_repo_tree_for_ref(repo, ev_ref)
-                dvc_outs = {
-                    out.get("path")
-                    for stage in (dvc_lock.get("stages") or {}).values()
-                    if isinstance(stage, dict)
-                    for out in stage.get("outs") or []
-                    if isinstance(out, dict)
-                }
-                present_paths = {
-                    path
-                    for path in cited_paths
-                    if tree.is_file(path)
-                    or tree.is_file(path + ".dvc")
-                    or path in dvc_outs
-                }
+                present_paths = _get_present_paths(
+                    cited_paths,
+                    tree,
+                    app.projects.get_ck_info_and_dvc_outs_from_tree(
+                        project, tree
+                    ).dvc_lock_outs,
+                    stage_wdirs,
+                )
             except Exception as e:
                 logger.warning(
                     f"Failed to find cited documents at {ev_ref}: {e}"
@@ -2872,7 +2951,7 @@ def _build_questions_public(
             results_by_path=results_by_path,
             tables_by_path=tables_by_path,
             publications_by_path=publications_by_path,
-            dvc_lock=dvc_lock,
+            dvc_lock=evidence_lock,
             stage_statuses=stage_statuses,
             frozen_stages=frozen_stages,
             present_paths=present_paths,
@@ -3116,7 +3195,12 @@ def _apply_question_update(
         question["answer"] = req.answer
     evidence = []
     for ev in req.evidence:
-        entry: dict = {"kind": ev.kind, "path": ev.path}
+        # A plain file is written without a kind, which is how it's spelled
+        entry: dict = (
+            {"path": ev.path}
+            if ev.kind is None
+            else {"kind": ev.kind, "path": ev.path}
+        )
         if ev.kind == "result" and ev.values:
             entry["values"] = dict(ev.values)
         elif ev.kind in ("result", "value") and ev.key:
@@ -3127,6 +3211,13 @@ def _apply_question_update(
             entry["section"] = ev.section
         if ev.kind == "publication" and ev.label:
             entry["label"] = ev.label
+        if ev.kind is None and ev.lines:
+            try:
+                first, last = calkit.questions.parse_lines(ev.lines)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            # As it would be written by hand, e.g., 8 or 8-12
+            entry["lines"] = first if first == last else f"{first}-{last}"
         if ev.explanation_path:
             entry["explanation"] = {"path": ev.explanation_path}
         elif ev.explanation:
@@ -5063,13 +5154,28 @@ def _imported_from_info(value: Any) -> dict[str, Any] | None:
     schema does, so ``imported_from: https://doi.org/...`` is a DOI here too.
     """
     if isinstance(value, dict):
-        return value
-    if isinstance(value, str) and value.strip():
+        info = dict(value)
+    elif isinstance(value, str) and value.strip():
         try:
-            return calkit.provenance.source_from_location(value)
+            info = calkit.provenance.source_from_location(value)
         except ValueError:
             return {"description": value}
-    return None
+    else:
+        return None
+    # These are rendered as links, so drop any that aren't http(s), keeping
+    # SSH clone URLs, e.g., git@github.com:owner/repo, which calkit accepts
+    if "url" in info and web_url_or_none(info["url"]) is None:
+        del info["url"]
+    repo_url = info.get("git_repo_url")
+    if repo_url is not None and not (
+        web_url_or_none(repo_url)
+        or (
+            isinstance(repo_url, str)
+            and re.fullmatch(r"(ssh://|[\w.-]+@[\w.-]+:)\S+", repo_url)
+        )
+    ):
+        del info["git_repo_url"]
+    return info
 
 
 @router.get("/projects/{owner_name}/{project_name}/datasets/{path:path}")
@@ -8053,10 +8159,11 @@ def get_project_pipeline(
     # commit identifies it. Building the diagram walks the whole graph
     # through DVC, which is over a second on a pipeline of any size.
     commit_sha = resolve_commit_sha(repo, ref)
-    # Versioned, so diagrams drawn before arrows were labeled go
+    # Versioned, so diagrams drawn before arrows were labeled, or with
+    # unescaped labels, go
     mermaid_key = (
         cache.make_key(
-            "mermaid-v2", f"{owner_name}/{project_name}".lower(), commit_sha
+            "mermaid-v3", f"{owner_name}/{project_name}".lower(), commit_sha
         )
         if commit_sha
         else None

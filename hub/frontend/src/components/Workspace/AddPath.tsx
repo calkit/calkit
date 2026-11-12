@@ -16,16 +16,14 @@ import {
   ModalOverlay,
   useDisclosure,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
-import axios from "axios"
+import { useMutation } from "@tanstack/react-query"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import type { AxiosError } from "axios"
 import useCustomToast from "../../hooks/useCustomToast"
-import { handleError } from "../../lib/errors"
 
 interface AddPathProps {
+  request: (type: string, fields?: object) => Promise<any>
+  onDone: () => void
   path: string
 }
 
@@ -35,11 +33,8 @@ interface AddPost {
   push: boolean
 }
 
-const AddPath = ({ path }: AddPathProps) => {
-  const queryClient = useQueryClient()
+const AddPath = ({ path, request, onDone }: AddPathProps) => {
   const showToast = useCustomToast()
-  const routeApi = getRouteApi("/_layout/$accountName/$projectName")
-  const { accountName, projectName } = routeApi.useParams()
   const {
     register,
     handleSubmit,
@@ -53,31 +48,21 @@ const AddPath = ({ path }: AddPathProps) => {
   const modalDisclosure = useDisclosure()
   const mutation = useMutation({
     mutationFn: (data: AddPost) => {
-      const url = `http://localhost:8866/projects/${accountName}/${projectName}/calkit/add`
-      const postData = {
+      return request("workspace.save", {
         paths: [path],
-        commit: true,
-        commit_message: data.commit_message,
+        message: data.commit_message,
         push: data.push,
-      }
-      return axios.post(url, postData)
+      })
     },
     onSuccess: () => {
       showToast("Success!", "Paths added.", "success")
       reset()
       modalDisclosure.onClose()
     },
-    onError: (err: AxiosError) => {
-      handleError(err, showToast)
+    onError: (err: Error) => {
+      showToast("Error", err.message, "error")
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "status"],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "pipeline"],
-      })
-    },
+    onSettled: onDone,
   })
   const onSubmit: SubmitHandler<AddPost> = (data) => {
     mutation.mutate(data)

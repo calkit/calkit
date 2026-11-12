@@ -96,6 +96,63 @@ def test_question_accepts_publication_evidence():
     assert q.evidence[1].explanation == "See Table 1."
 
 
+def test_question_evidence_kinds():
+    from calkit.models.core import (
+        DocumentEvidence,
+        FileEvidence,
+        ResultsEvidence,
+    )
+
+    def evidence(*entries: dict) -> list:
+        q = Question.model_validate(
+            {"question": "Q?", "answer": "A.", "evidence": list(entries)}
+        )
+        return q.evidence or []
+
+    # A plain file has no kind, or a null one, and can cite lines
+    parsed = evidence(
+        {"path": "results/run/RESULTS.md", "lines": 8},
+        {"kind": None, "path": "logs/agent.txt", "lines": "8-12"},
+        {"path": "scripts/fit.py", "explanation": "The fit."},
+        {"kind": "document", "path": "docs/write-up.md"},
+    )
+    assert [type(ev) for ev in parsed] == [
+        FileEvidence,
+        FileEvidence,
+        FileEvidence,
+        DocumentEvidence,
+    ]
+    assert [ev.lines for ev in parsed[:3]] == [8, "8-12", None]
+    assert parsed[0].kind is None
+    # Without a kind, a key or values still make it a result
+    parsed = evidence(
+        {"path": "results/fit.json", "key": "E"},
+        {"kind": None, "path": "results/fit.json", "values": {"nu": "nu"}},
+    )
+    assert [type(ev) for ev in parsed] == [ResultsEvidence] * 2
+    assert [ev.kind for ev in parsed] == ["result"] * 2
+    # Lines are a line or a range of them, and a file has no kind to name
+    for bad in [
+        {"path": "a.txt", "lines": "12-8"},
+        {"path": "a.txt", "lines": 0},
+        {"path": "a.txt", "lines": "eight"},
+        {"path": "a.txt", "lines": True},
+        {"path": "a.txt", "kind": "file"},
+        {"path": "a.txt", "kind": "nope"},
+    ]:
+        with pytest.raises(ValidationError):
+            evidence(bad)
+    # The published schema can't use oneOf, which a bare path would match
+    # several times over
+    schema = Question.model_json_schema()
+    items = schema["properties"]["evidence"]["anyOf"][0]["items"]
+    assert "oneOf" not in items
+    assert {"$ref": "#/$defs/FileEvidence"} in items["anyOf"]
+    file_schema = schema["$defs"]["FileEvidence"]
+    assert file_schema["required"] == ["path"]
+    assert file_schema["properties"]["kind"]["type"] == "null"
+
+
 def test_apps():
     info = ProjectInfo.model_validate(
         {

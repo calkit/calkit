@@ -31,6 +31,32 @@ def get_repo(path: str | None = None) -> git.Repo:
     return git.Repo(path, search_parent_directories=True)
 
 
+def get_main_worktree_dir(repo: git.Repo) -> str | None:
+    """Return the directory of the main checkout among ``repo``'s worktrees,
+    or None if there isn't one, e.g., the repo is bare.
+
+    Not from ``git worktree list``, which gives a submodule's Git dir, nor
+    the common Git dir's parent, which is the superproject's ``.git`` there.
+    """
+    common = os.path.abspath(repo.common_dir)
+    if os.path.realpath(repo.git_dir) == os.path.realpath(common):
+        tree = repo.working_tree_dir
+        return None if tree is None else str(tree)
+    main = git.Repo(common)
+    if main.bare:
+        return None
+    # A submodule's Git dir records its checkout
+    worktree = main.config_reader("repository").get_value(
+        "core", "worktree", ""
+    )
+    if worktree:
+        return os.path.normpath(os.path.join(common, str(worktree)))
+    if os.path.basename(common) == ".git":
+        return os.path.dirname(common)
+    # E.g., from 'git init --separate-git-dir', which records none
+    return None
+
+
 def get_default_branch(repo: git.Repo) -> str | None:
     """The name of the project's default branch, e.g., ``main``.
 

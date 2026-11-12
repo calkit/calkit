@@ -31,6 +31,7 @@ This guide will help you get started.
    - [Juliaup](https://github.com/JuliaLang/juliaup)
    - [R](https://www.r-project.org/)
    - [Node.js](https://nodejs.org/)
+   - [gh](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)
 1. **Create the virtual environment:**
    ```bash
    uv sync --all-packages
@@ -92,6 +93,9 @@ This guide will help you get started.
   - No blank lines inside functions/methods
   - Type hints required for all functions
   - NumPy-style docstrings
+  - A subclass lives in the module of the class it extends, unless that
+    class is written to be subclassed, e.g., `calkit.models.base.Model`,
+    or comes from another package
 - Commit your changes
   (use the imperative mood and capitalize the first letter,
   but don't use punctuation):

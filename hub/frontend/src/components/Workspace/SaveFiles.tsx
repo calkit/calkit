@@ -14,15 +14,15 @@ import {
   ModalHeader,
   ModalOverlay,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
-import axios from "axios"
-import { useEffect } from "react"
+import { useMutation } from "@tanstack/react-query"
+import { useEffect, useRef } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import useCustomToast from "../../hooks/useCustomToast"
 
 interface SaveFilesProps {
+  request: (type: string, fields?: object) => Promise<any>
+  onDone: () => void
   isOpen: boolean
   onClose: () => void
   changedFiles: string[]
@@ -40,12 +40,12 @@ const SaveFiles = ({
   onClose,
   changedFiles,
   stagedFiles,
+  request,
+  onDone,
 }: SaveFilesProps) => {
-  const allPaths = changedFiles.concat(stagedFiles)
-  const queryClient = useQueryClient()
+  // A key, since the lists are new arrays on each render
+  const pathsKey = changedFiles.concat(stagedFiles).join("\n")
   const showToast = useCustomToast()
-  const routeApi = getRouteApi("/_layout/$accountName/$projectName")
-  const { accountName, projectName } = routeApi.useParams()
   const {
     register,
     handleSubmit,
@@ -56,33 +56,39 @@ const SaveFiles = ({
   } = useForm<CommitPost>({
     mode: "onBlur",
     criteriaMode: "all",
-    defaultValues: {
-      paths: allPaths,
-      commit_message: `Update ${allPaths}`,
-      push: true,
-    },
+    defaultValues: { paths: [], commit_message: "", push: true },
   })
+  // Everything selected on opening, and once the status loads if it opens
+  // first, e.g., from a link, but not as it refreshes while open, which
+  // would undo the user's choices
+  const initialized = useRef(false)
+  useEffect(() => {
+    if (!isOpen) {
+      initialized.current = false
+      return
+    }
+    if (initialized.current) return
+    const paths = pathsKey ? pathsKey.split("\n") : []
+    reset({ paths, commit_message: `Update ${paths.join(", ")}`, push: true })
+    initialized.current = paths.length > 0
+  }, [isOpen, pathsKey, reset])
   const mutation = useMutation({
     mutationFn: (data: CommitPost) => {
-      const url = `http://localhost:8866/projects/${accountName}/${projectName}/calkit/add-and-commit`
-      return axios.post(url, data)
+      return request("workspace.save", {
+        paths: data.paths,
+        message: data.commit_message,
+        push: data.push,
+      })
     },
     onSuccess: () => {
       showToast("Success!", "Committed.", "success")
       reset()
       onClose()
     },
-    onError: (err: any) => {
-      showToast("Error", String(err.response.data.detail), "error")
+    onError: (err: Error) => {
+      showToast("Error", err.message, "error")
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "status"],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ["local-server-main", accountName, projectName, "pipeline"],
-      })
-    },
+    onSettled: onDone,
   })
   const onSubmit: SubmitHandler<CommitPost> = (data) => {
     mutation.mutate(data)

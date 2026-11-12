@@ -7,7 +7,7 @@ import logging
 import os
 import time
 import uuid
-from datetime import timedelta
+from datetime import UTC, timedelta
 from typing import Annotated, Any, Literal
 
 import requests
@@ -39,6 +39,7 @@ from app.models import (
     Dataset,
     DiscountCode,
     DiscountCodePost,
+    Machine,
     Message,
     Notification,
     Org,
@@ -286,9 +287,25 @@ class AnalyticsStats(BaseModel):
     )
 
 
+class MachineStats(BaseModel):
+    # Linked and not revoked, and the distinct users they belong to
+    linked: int
+    users: int
+    users_online: ActiveCounts = Field(
+        description="Users with a linked machine that checked in"
+    )
+    users_connected: ActiveCounts = Field(
+        description=(
+            "Users who connected to one of their machines from the browser, "
+            "so last_30_days is the feature's MAU"
+        )
+    )
+
+
 class HubStats(BaseModel):
     users: UserStats
     projects: ProjectStats
+    machines: MachineStats | None = None
     excluded_accounts: list[str]
     analytics: AnalyticsStats | None = Field(
         default=None,
@@ -379,6 +396,32 @@ def get_hub_stats(
             *project_filter
         )
     ).one()
+    # Machines, by when each user's last checked in and was connected to
+    machine_filter = [
+        col(Machine.is_active),
+        col(Machine.user_id).not_in(excluded_user_ids),
+    ]
+    online: dict[str, float] = {}
+    connected: dict[str, float] = {}
+    n_machines = 0
+    for user_id, last_seen, last_used in session.exec(
+        select(Machine.user_id, Machine.last_seen, Machine.last_used).where(
+            *machine_filter
+        )
+    ):
+        n_machines += 1
+        key = str(user_id)
+        online.setdefault(key, 0.0)
+        for times, when in [(online, last_seen), (connected, last_used)]:
+            if when is not None:
+                ts = when.replace(tzinfo=UTC).timestamp()
+                times[key] = max(ts, times.get(key, 0.0))
+    machines = MachineStats(
+        linked=n_machines,
+        users=len(online),
+        users_online=count_active(online),
+        users_connected=count_active(connected),
+    )
     # Analytics, counting users only if they're likely human and visitors
     # only on days they looked like a person
     analytics = None
@@ -451,6 +494,7 @@ def get_hub_stats(
                 col(Project.updated) >= utcnow() - timedelta(days=90)
             ),
         ),
+        machines=machines,
         excluded_accounts=[a.name for a in excluded_accounts],
         analytics=analytics,
     )

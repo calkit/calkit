@@ -2300,6 +2300,182 @@ def test_release_detached_head(tmp_dir):
     assert res.exit_code == 0, res.stdout
 
 
+def test_new_workspace(tmp_dir):
+    def git_out(*args: str, input: str | None = None) -> str:
+        return subprocess.run(
+            ["git", *args],
+            input=input,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def cache_dir(path: str) -> str:
+        # Normalized, since Git gives paths on Windows with forward slashes
+        with open(os.path.join(path, ".dvc", "config.local")) as f:
+            for line in f:
+                if line.strip().startswith("dir ="):
+                    return os.path.normpath(line.split("=", 1)[1].strip())
+        return ""
+
+    subprocess.check_call(["calkit", "init"])
+    with open("data.csv", "w") as f:
+        f.write("a,b\n")
+    subprocess.check_call(["calkit", "dvc", "add", "-q", "data.csv"])
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-qm", "Add data"])
+    # A remote's settings, e.g., its auth, live in the local config
+    with open(".dvc/config.local", "a") as f:
+        f.write("[core]\n    autostage = true\n")
+    root = os.getcwd()
+    # It's a worktree beside this one on a new branch, using this one's DVC
+    # cache, so its data is there without pulling
+    subprocess.check_call(["calkit", "new", "workspace", "fix/axes"])
+    path = f"{root}-fix-axes"
+    repo = git.Repo(path)
+    assert repo.active_branch.name == "fix/axes"
+    assert os.path.normpath(
+        repo.git.rev_parse("--git-common-dir")
+    ) == os.path.join(root, ".git")
+    with open(os.path.join(path, "data.csv")) as f:
+        assert f.read() == "a,b\n"
+    local_config = open(os.path.join(path, ".dvc", "config.local")).read()
+    assert "autostage = true" in local_config
+    assert cache_dir(path) == os.path.join(root, ".dvc", "cache")
+    assert not os.path.exists(os.path.join(path, ".dvc", "cache"))
+    # One made from a worktree made some other way, without the main
+    # checkout's cache, is still named after it and uses its cache
+    manual = os.path.join(os.path.dirname(root), "manual")
+    git.Repo(root).git.worktree("add", "-b", "manual", manual)
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "from-manual"], cwd=manual
+    )
+    path = f"{root}-from-manual"
+    with open(os.path.join(path, "data.csv")) as f:
+        assert f.read() == "a,b\n"
+    local_config = open(os.path.join(path, ".dvc", "config.local")).read()
+    assert "autostage = true" in local_config
+    assert cache_dir(path) == os.path.join(root, ".dvc", "cache")
+    # An existing branch is checked out rather than created, and a path
+    # that's taken is refused
+    git.Repo(root).git.branch("other")
+    other = os.path.join(os.path.dirname(root), "elsewhere")
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "other", "--path", other]
+    )
+    assert git.Repo(other).active_branch.name == "other"
+    result = subprocess.run(
+        ["calkit", "new", "workspace", "third", "--path", other],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0 and "already exists" in result.stderr
+    # What to start from is never taken as an option
+    flagged = os.path.join(os.path.dirname(root), "flagged")
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "workspace",
+            "flagged",
+            "--path",
+            flagged,
+            "--from=--quiet",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0 and not os.path.exists(flagged)
+    # A branch from before DVC was set up gets no DVC config
+    blob = git_out("hash-object", "-w", "--stdin", input="hi\n")
+    # NUL-terminated, since text mode on Windows would make the name end in \r
+    tree = git_out("mktree", "-z", input=f"100644 blob {blob}\tREADME.md\0")
+    git_out("branch", "before-dvc", git_out("commit-tree", tree, "-m", "Old"))
+    old = os.path.join(os.path.dirname(root), "old")
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "before-dvc", "--path", old]
+    )
+    assert not os.path.exists(os.path.join(old, ".dvc"))
+    # Nor does one whose .dvc is a link, which could point anywhere
+    target = os.path.join(os.path.dirname(root), "linked-target")
+    os.mkdir(target)
+    link_blob = git_out(
+        "hash-object", "-w", "--stdin", input="../linked-target"
+    )
+    tree = git_out("mktree", "-z", input=f"120000 blob {link_blob}\t.dvc\0")
+    git_out("branch", "linked", git_out("commit-tree", tree, "-m", "Link"))
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "workspace",
+            "linked",
+            "--path",
+            os.path.join(os.path.dirname(root), "linked"),
+        ]
+    )
+    assert os.listdir(target) == []
+    # A branch only on a remote tracks it, preferring origin's, rather than
+    # starting over from here
+    parent = os.path.dirname(root)
+    head = git_out("rev-parse", "HEAD")
+    feat = git_out("commit-tree", "HEAD^{tree}", "-p", head, "-m", "Feat")
+    up_feat = git_out("commit-tree", "HEAD^{tree}", "-p", head, "-m", "Up")
+    for name, sha in [("origin", feat), ("upstream", up_feat)]:
+        url = os.path.join(parent, f"{name}.git")
+        git_out("init", "-q", "--bare", url)
+        git_out("remote", "add", name, url)
+        git_out("push", "-q", name, f"{sha}:refs/heads/feat")
+        git_out("push", "-q", name, f"{sha}:refs/heads/{name}-only")
+        git_out("fetch", "-q", name)
+    for branch, sha, upstream in [
+        ("feat", feat, "origin/feat"),
+        ("upstream-only", up_feat, "upstream/upstream-only"),
+    ]:
+        dest = os.path.join(parent, f"ws-{branch}")
+        subprocess.check_call(
+            ["calkit", "new", "workspace", branch, "--path", dest]
+        )
+        ws = git.Repo(dest)
+        assert ws.head.commit.hexsha == sha
+        tracking = ws.active_branch.tracking_branch()
+        assert tracking is not None and tracking.name == upstream
+    # Unless told where to start from
+    dest = os.path.join(parent, "ws-origin-only")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "workspace",
+            "origin-only",
+            "--path",
+            dest,
+            "--from",
+            head,
+        ]
+    )
+    ws = git.Repo(dest)
+    assert ws.head.commit.hexsha == head
+    assert ws.active_branch.tracking_branch() is None
+    # In a submodule, it goes beside the submodule's checkout, not inside
+    # the superproject's .git
+    sub_src = os.path.join(parent, "sub-src")
+    git_out("init", "-q", sub_src)
+    git_out("-C", sub_src, "commit", "-q", "--allow-empty", "-m", "Init")
+    git_out(
+        "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub_src
+    )
+    sub = os.path.join(root, "sub-src")
+    subprocess.check_call(["calkit", "new", "workspace", "s1"], cwd=sub)
+    assert git.Repo(f"{sub}-s1").active_branch.name == "s1"
+    # Also from one of its workspaces
+    subprocess.check_call(
+        ["calkit", "new", "workspace", "s2"], cwd=f"{sub}-s1"
+    )
+    assert git.Repo(f"{sub}-s2").active_branch.name == "s2"
+    assert not os.path.exists(os.path.join(root, ".git", "modules-s1"))
+
+
 def test_new_comment(tmp_dir):
     def ck(*args: str) -> str:
         return subprocess.run(

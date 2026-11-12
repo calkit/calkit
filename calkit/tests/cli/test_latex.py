@@ -1531,7 +1531,8 @@ def test_comments(tmp_dir):
             "<!-- calkit values path=r.json -->\n"
             "\n"
             "Some **bold** text with a [link](https://x.org),\n"
-            "it's <!-- calkit value key=a -->2<!-- /calkit value -->x.\n"
+            "it's <!-- calkit value key=a -->2<!-- /calkit value -->x."
+            " <!-- /calkit values -->\n"
             "\n"
             "<!-- calkit stage name=s -->\n"
             "```python\n"
@@ -1652,6 +1653,7 @@ def test_from_markdown(tmp_dir):
             "<!-- calkit values path=results/r.json -->\n"
             "It's <!-- calkit value key=gain -->1.0<!-- /calkit value -->x"
             " faster.\n"
+            "<!-- /calkit values -->\n"
         )
     with open("template.tex", "w") as f:
         f.write("$body$\nBuilt by $calkit-version$ from $project$.\n")

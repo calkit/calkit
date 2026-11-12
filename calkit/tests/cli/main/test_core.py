@@ -3811,6 +3811,131 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
         assert f.read().split() == ["second", "second"]
 
 
+def test_run_offers_requirements_of_stages_that_would_run(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    import calkit.core
+
+    subprocess.check_call(["calkit", "init"])
+    token = {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+    ck_info: dict = {
+        "environments": {
+            "lab": {"kind": "system", "requirements": [token]},
+        },
+        "pipeline": {
+            "stages": {
+                "fetch": {
+                    "kind": "shell-command",
+                    "command": "printenv CK_TEST_TOKEN > data.txt",
+                    "environment": "lab",
+                    "outputs": [{"path": "data.txt", "storage": "git"}],
+                },
+                # Shares the requirement, through its own list
+                "fetch2": {
+                    "kind": "shell-command",
+                    "command": "printenv CK_TEST_TOKEN > data2.txt",
+                    "environment": "_system",
+                    "requirements": [token],
+                    "outputs": [{"path": "data2.txt", "storage": "git"}],
+                },
+                # Up to date, but runs after one that isn't
+                "report": {
+                    "kind": "shell-command",
+                    "command": "cat data.txt > report.txt",
+                    "environment": "_system",
+                    "requirements": [
+                        {"kind": "env-var", "name": "CK_TEST_REPORT"}
+                    ],
+                    "inputs": ["data.txt"],
+                    "outputs": [{"path": "report.txt", "storage": "git"}],
+                },
+                "settled": {
+                    "kind": "shell-command",
+                    "command": "echo done > settled.txt",
+                    "environment": "_system",
+                    "requirements": [
+                        {"kind": "env-var", "name": "CK_TEST_SETTLED"}
+                    ],
+                    "outputs": [{"path": "settled.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    env = dict(os.environ) | {
+        "CK_TEST_TOKEN": "first",
+        "CK_TEST_REPORT": "r",
+        "CK_TEST_SETTLED": "s",
+    }
+    subprocess.check_call(["calkit", "run"], env=env)
+    for name in ("CK_TEST_TOKEN", "CK_TEST_REPORT", "CK_TEST_SETTLED"):
+        monkeypatch.setenv(name, "unset")
+        monkeypatch.delenv(name)
+
+    def make_stale() -> None:
+        with open("calkit.yaml") as f:
+            info = calkit.ryaml.load(f)
+        for name in ("fetch", "fetch2"):
+            info["pipeline"]["stages"][name]["command"] += " && echo again"
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(info, f)
+
+    # On a terminal, what the stages that would run need is asked for,
+    # once however many share it, and not for one that's up to date
+    make_stale()
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    runner = CliRunner()
+    res = runner.invoke(calkit_app, ["run"], input="second\nrep\n")
+    assert res.exit_code == 0, res.output
+    assert res.output.count("Missing env var 'CK_TEST_TOKEN'") == 1
+    assert "Stage 'fetch' is out of date, but this machine" in res.output
+    assert "Stage 'fetch2' is out of date" not in res.output
+    assert "Missing env var 'CK_TEST_REPORT'" in res.output
+    assert "CK_TEST_SETTLED" not in res.output
+    for path, value in [
+        ("data.txt", "second"),
+        ("data2.txt", "second"),
+        ("report.txt", "second"),
+        ("settled.txt", "done"),
+    ]:
+        with open(path) as f:
+            assert f.read().strip() == value
+    # Declining skips them, as without a terminal, and asking for one by
+    # name, or for all with --strict, still fails
+    os.remove(".env")
+    monkeypatch.delenv("CK_TEST_TOKEN")
+    make_stale()
+    res = runner.invoke(calkit_app, ["run"], input="\n")
+    assert res.exit_code == 0, res.output
+    assert res.output.count("Missing env var 'CK_TEST_TOKEN'") == 1
+    assert "skipping 2 out-of-date stage" in res.output
+    assert "'calkit check reqs --stale'" in res.output
+    with open("data.txt") as f:
+        assert f.read().strip() == "second"
+    for args in (["run", "fetch"], ["run", "--strict"]):
+        res = runner.invoke(calkit_app, args, input="\n")
+        assert res.exit_code != 0
+        assert "'fetch' is out of date and couldn't run" in res.output
+    # Without a terminal nothing is asked
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    res = runner.invoke(calkit_app, ["run"], input="third\n")
+    assert res.exit_code == 0, res.output
+    assert "Missing env var" not in res.output
+    assert "skipping 2 out-of-date stage" in res.output
+    # Status says where to get what's missing
+    out = subprocess.check_output(
+        ["calkit", "status"], text=True, stdin=subprocess.DEVNULL
+    )
+    assert (
+        "can't run on this machine: env-var 'CK_TEST_TOKEN' not found; "
+        "'calkit check reqs --stale' offers to install or set up what's "
+        "missing"
+    ) in out
+
+
 def test_run_reruns_when_an_env_var_input_changes(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = {

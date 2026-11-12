@@ -1483,6 +1483,11 @@ def get_version_checked_app_names(
     return list(dict.fromkeys(names))
 
 
+def get_requirement_key(req: Any) -> str:
+    """Identify a requirement however it's written, e.g., to cache its check."""
+    return json.dumps(_normalize_requirement(req), sort_keys=True, default=str)
+
+
 def check_requirements(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -1491,6 +1496,7 @@ def check_requirements(
     use_cache: bool = True,
     requirements: list | None = None,
     described_as: str = "this machine",
+    checked: dict[str, str | None] | None = None,
 ) -> None:
     """Check that a project's declared requirements are satisfied.
 
@@ -1498,6 +1504,11 @@ def check_requirements(
     which describes the host -- the built-in ``_system`` environment. A
     ``system`` environment passes its own list here instead, for the
     machine it names.
+
+    With ``checked``, each requirement is checked once across calls: its
+    outcome, None or what's wrong, is kept there under
+    :func:`get_requirement_key` and reused, so one many stages share is only
+    asked about once.
 
     ``setup`` requirements are verified via
     :func:`calkit.requirements.check_setup_dep`, which runs the
@@ -1553,6 +1564,37 @@ def check_requirements(
             buckets.setdefault("_other", []).append(req)
         else:
             buckets[kind].append(req)
+    if checked is not None:
+        # One at a time, in the order below, so each outcome is known
+        if buckets["_property"] and system_info is None:
+            system_info = get_machine_properties()
+        for bucket in (
+            "_property",
+            "env-var",
+            "app",
+            "_other",
+            "setup",
+            "aws-credentials",
+        ):
+            for req in buckets.get(bucket, []):
+                key = get_requirement_key(req)
+                if key not in checked:
+                    try:
+                        check_requirements(
+                            wdir=wdir,
+                            system_info=system_info,
+                            interactive=interactive,
+                            use_cache=use_cache,
+                            requirements=[req],
+                            described_as=described_as,
+                        )
+                        checked[key] = None
+                    except ValueError as e:
+                        checked[key] = str(e)
+                problem = checked[key]
+                if problem is not None:
+                    raise ValueError(problem)
+        return
     if buckets["_property"]:
         # Read the machine only when something asks about it; describing a
         # system shells out for a version from every package manager it can

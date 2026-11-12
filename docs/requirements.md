@@ -195,8 +195,36 @@ It stays out of date in `calkit status`, which says why it can't run
 there, and the run ends by listing the out-of-date stages it skipped.
 Requirements of an environment on another machine, e.g., a `system`
 environment with a `host`, are checked on that machine by `calkit run`.
-`calkit status` doesn't connect to other machines,
-so it doesn't check those.
+`calkit status` and `calkit check reqs` don't connect to other machines,
+so they don't check those.
+
+<!-- TODO: needs human review -->
+
+On a terminal, before skipping a stage for requirements this machine
+doesn't meet, `calkit run` offers what's missing if the stage would run,
+i.e., it's out of date, follows one that is, or is forced,
+the same way it does for the project's requirements:
+installing an app, running a setup command, or asking for a variable.
+A stage that's up to date is never asked about,
+and a requirement many stages share is asked about once per run.
+This comes after the environments of the other stages are checked,
+since checking one can put a stage out of date.
+The environments of a stage whose requirements weren't met can't be
+checked until they are, so a stage is judged out of date on what they
+last recorded, and they're checked once its requirements are met.
+If that puts another stage using them out of date, it's offered next.
+Declining, or an install that fails, skips the stage as before,
+as does running without a terminal, e.g., in CI.
+
+<!-- TODO: needs human review -->
+
+`calkit check reqs` checks everything a machine needs to run the whole
+project: the project's requirements, and those of every stage and
+environment, reporting each one that isn't met by where it's declared.
+With `--stale`, it only checks what `calkit run` needs now:
+the project's requirements, and those of the stages `calkit status`
+lists as out of date and of their environments.
+Both cover subprojects too.
 
 Some skips still fail the run, after the stages that can run have run:
 

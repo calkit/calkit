@@ -3231,6 +3231,8 @@ def run(
                 system_info=system_info,
                 interactive=False if spinner else None,
                 manual=can_ask,
+                requirements_by_stage=unmet_requirements,
+                blocked_by=blocked_by,
             )
             # A machine that couldn't be reached may only need asking about,
             # e.g., for its host
@@ -3355,6 +3357,10 @@ def run(
     # their environments aren't checked
     gated_stages: dict[str, str] = {}
     gate_errors: dict[str, str] = {}
+    # Those skipped for requirements, with them, which are offered for each
+    # one that would run, and those skipped for another's missing output
+    unmet_requirements: dict[str, list] = {}
+    blocked_by: dict[str, set[str]] = {}
     # Filled in by the run with the skipped stages that were out of date
     skipped_stale: dict[str, str] = {}
     # Getting ready to run takes a step per project, so one spinner says
@@ -3566,6 +3572,76 @@ def run(
             reached = calkit.pipeline.get_stages_to_gate(targets)
             if reached is None or reached - gate_stage_names:
                 gate(None if reached is None else reached - gate_stage_names)
+        # Now that it's known which would run, what they need is offered
+        # for them, as the project's is. Their environments couldn't be
+        # checked until it was met, and checking one now can put another
+        # stage using it out of date, so that one is offered next.
+        offered = [
+            name
+            for name in unmet_requirements
+            if name in gated_stages
+            # Only the stages named run with --single-item
+            and not (
+                single_item
+                and name not in {t.split("@")[0] for t in targets or []}
+            )
+        ]
+        # Each requirement is asked about once, however many stages share it
+        asked: dict[str, str | None] = {}
+        while offered and can_ask and not dry and not nothing_for_dvc:
+            try:
+                would_run = calkit.pipeline.get_stages_that_would_run(
+                    offered, force=force
+                )
+            except Exception as e:
+                os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+                raise_error(f"Failed to find which stages would run: {e}")
+            met = []
+            with paused():
+                for gated_name in offered:
+                    if gated_name not in would_run:
+                        continue
+                    reqs = unmet_requirements[gated_name]
+                    if any(
+                        calkit.get_requirement_key(r) not in asked
+                        for r in reqs
+                    ):
+                        typer.echo(
+                            f"Stage '{gated_name}' is out of date, but this "
+                            "machine doesn't meet its requirements yet"
+                        )
+                    try:
+                        calkit.check_requirements(
+                            requirements=reqs,
+                            system_info=system_info,
+                            interactive=True,
+                            checked=asked,
+                        )
+                    except ValueError:
+                        continue
+                    met.append(gated_name)
+            if not met:
+                break
+            for gated_name in met:
+                del gated_stages[gated_name]
+            # As can the stages waiting on their outputs
+            freed = True
+            while freed:
+                freed = False
+                for gated_name, upstream in blocked_by.items():
+                    if gated_name in gated_stages and not (
+                        upstream & set(gated_stages)
+                    ):
+                        del gated_stages[gated_name]
+                        met.append(gated_name)
+                        freed = True
+            step("Checking environments", "📦")
+            try:
+                check_envs(ck_info, targets=met)
+            except calkit.docker.DockerNotReadyError as e:
+                os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+                raise_error(str(e))
+            offered = [n for n in offered if n not in would_run]
     if nothing_for_dvc:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         md_stages = calkit.markdown.get_markdown_stages(ck_info)

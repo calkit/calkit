@@ -141,6 +141,11 @@ def read_import_locks(wdir: str | None = None) -> dict:
     # ever read it, so it is treated as absent rather than migrated.
     if not isinstance(locks, dict):
         return {}
+    # The commit was recorded as 'rev' before it was named for what it is;
+    # read under its current name, and written that way next time
+    for lock in locks.values():
+        if isinstance(lock, dict) and "rev" in lock and "git_rev" not in lock:
+            lock["git_rev"] = lock.pop("rev")
     return locks
 
 
@@ -380,7 +385,10 @@ def get_imports_with_updates(ck_info: dict) -> list[str]:
             except Exception:
                 continue
             # The same commit can't hold a different file
-            if lock.get("rev") and contents.get("commit_sha") == lock["rev"]:
+            if (
+                lock.get("git_rev")
+                and contents.get("commit_sha") == lock["git_rev"]
+            ):
                 continue
             content = contents.get("content")
             if content is None:
@@ -815,12 +823,14 @@ def _ref_and_path_resolve(repo_dir: str, ref: str, path: str) -> bool:
     return False
 
 
-def _with_state(lock: dict, dest_path: str, rev: str | None = None) -> dict:
+def _with_state(
+    lock: dict, dest_path: str, git_rev: str | None = None
+) -> dict:
     """Fill in what a fetch resolved to: the commit, checksum, and when."""
     from datetime import datetime, timezone
 
-    if rev is not None:
-        lock["rev"] = rev
+    if git_rev is not None:
+        lock["git_rev"] = git_rev
     checksum = hash_path(dest_path)
     if checksum is not None:
         lock["hash"] = checksum
@@ -843,7 +853,7 @@ def fetch(
 
     What gets fetched is the source's ``ref``---a branch, a tag, or a
     commit---or the repo's default branch when it names none. The recorded
-    ``rev`` is the answer, never the question: refreshing an import is
+    ``git_rev`` is the answer, never the question: refreshing an import is
     asking where the thing it follows is now, and reading the last answer
     back would make that a no-op.
 
@@ -872,7 +882,7 @@ def fetch(
                 "Git source has no 'path'; importing a whole repo is what a "
                 "Git submodule is for"
             )
-        # What to check out. Not 'rev': that records what a previous fetch
+        # What to check out. Not 'git_rev': that records what a previous fetch
         # returned, so using it here would make every refresh return the
         # same thing it did last time. Nothing named means the repo's
         # default branch.
@@ -949,7 +959,7 @@ def fetch(
         # says what to follow, this says where that led.
         git.pop("git_rev", None)
         imported_from.update({k: v for k, v in git.items() if v is not None})
-        return imported_from, _with_state(lock, dest_path, rev=rev)
+        return imported_from, _with_state(lock, dest_path, git_rev=rev)
     if (url := imported_from.get("url")) is not None:
         import requests
 
@@ -1000,7 +1010,9 @@ def fetch(
         if content is not None:
             with open(dest_path, "wb") as f:
                 f.write(base64.b64decode(content))
-            return imported_from, _with_state(lock, dest_path, rev=project_rev)
+            return imported_from, _with_state(
+                lock, dest_path, git_rev=project_rev
+            )
         download_url = contents.get("url")
         if download_url is None:
             raise ValueError(f"Could not fetch {src_path} from {project}")
@@ -1008,7 +1020,7 @@ def fetch(
         # URL branch above finishes the job. The entry still records the
         # project, since that is where the file came from.
         fetch({"url": download_url}, dest_path=dest_path)
-        return imported_from, _with_state(lock, dest_path, rev=project_rev)
+        return imported_from, _with_state(lock, dest_path, git_rev=project_rev)
     if imported_from.get("doi") is not None:
         raise ValueError(
             "Fetching by DOI is not supported here, since a DOI resolves to "

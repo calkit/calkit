@@ -352,7 +352,7 @@ def import_path(
         )
     # Kinds are singular where a person types one; the lists are plural
     kind_list = artifact_kind_to_list(kind)
-    # Where it came from, in the shape the entry records it. 'rev' is
+    # Where it came from, in the shape the entry records it. 'git_rev' is
     # filled in from what the fetch actually checked out, so a source
     # naming a branch still ends up pinned to a commit.
     try:

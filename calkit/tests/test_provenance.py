@@ -261,17 +261,17 @@ def test_fetch_from_a_project_records_its_commit(tmp_dir, monkeypatch):
     with open("figs/a.png", "rb") as f:
         assert f.read() == b"png bytes"
     assert source["git_ref"] == "v1"
-    assert lock["rev"] == "a" * 40
+    assert lock["git_rev"] == "a" * 40
     assert lock["hash"].startswith("sha256:")
     assert entry["title"] == "A figure"
     # With no ref, the default branch is read, and still pinned in the lock
     _, lock = fetch({"project": "o/p", "path": "figures/a.png"}, "b.png")
     assert calls[-1] == ("/projects/o/p/contents/figures/a.png", None)
-    assert lock["rev"] == "a" * 40
+    assert lock["git_rev"] == "a" * 40
     # A hub that doesn't say what commit it read leaves it unrecorded
     del response["commit_sha"]
     _, lock = fetch({"project": "o/p", "path": "figures/a.png"}, "c.png")
-    assert "rev" not in lock
+    assert "git_rev" not in lock
 
 
 def test_get_imports_with_updates(tmp_dir, monkeypatch):
@@ -309,7 +309,7 @@ def test_get_imports_with_updates(tmp_dir, monkeypatch):
         ck_info["figures"].append(
             {"path": name, "imported_from": {"project": "o/p", "path": name}}
         )
-        write_import_lock(name, {"hash": hash_path(name), "rev": "a" * 40})
+        write_import_lock(name, {"hash": hash_path(name), "git_rev": "a" * 40})
     served.update({"same.png": b"v1", "newer.png": b"v2"})
     # One from a Git repo can't be checked without cloning it
     ck_info["misc"].append(
@@ -407,7 +407,7 @@ def test_fetch_resolves_a_slashed_ref(tmp_dir):
     assert out["git_ref"] == "feature/foo"
     assert out["path"] == "scripts/a.sh"
     # What it resolved to comes back separately, for the lock file
-    assert lock["rev"] and lock["hash"].startswith("sha256:")
+    assert lock["git_rev"] and lock["hash"].startswith("sha256:")
     with open("a.sh") as f:
         assert f.read() == "on-feature\n"
     # A ref that resolves as recorded is never widened, even when a longer
@@ -523,12 +523,23 @@ def test_import_lock_store(tmp_dir):
     )
 
     assert read_import_locks() == {}
-    write_import_lock("b.txt", {"rev": "abc1234"})
-    write_import_lock("a.txt", {"rev": "def5678"})
+    write_import_lock("b.txt", {"git_rev": "abc1234"})
+    write_import_lock("a.txt", {"git_rev": "def5678"})
     assert list(read_import_locks()) == ["a.txt", "b.txt"]
     # Dropping one leaves the rest
     write_import_lock("b.txt", None)
     assert list(read_import_locks()) == ["a.txt"]
+    # A commit recorded as 'rev', as earlier versions named it, reads as
+    # 'git_rev', and is written that way from then on
+    with open(IMPORT_LOCK_FPATH, "w") as f:
+        json.dump({"a.txt": {"rev": "def5678"}, "e.txt": {"git_rev": "1"}}, f)
+    assert read_import_locks()["a.txt"] == {"git_rev": "def5678"}
+    write_import_lock("e.txt", {"git_rev": "2"})
+    with open(IMPORT_LOCK_FPATH) as f:
+        assert json.load(f) == {
+            "a.txt": {"git_rev": "def5678"},
+            "e.txt": {"git_rev": "2"},
+        }
     # An older version appended a list of Zenodo events here; it is read as
     # absent rather than crashing, since nothing ever consumed it
     with open(IMPORT_LOCK_FPATH, "w") as f:
@@ -544,7 +555,7 @@ def test_import_lock_store(tmp_dir):
         f.write("edited\n")
     assert local_edit("f.txt", lock)
     assert not local_edit("f.txt", None)
-    assert not local_edit("f.txt", {"rev": "abc1234"})
+    assert not local_edit("f.txt", {"git_rev": "abc1234"})
     # A hash written by a version using a different algorithm is not
     # mistaken for an edited file; it just can't be compared
     assert not local_edit("f.txt", {"hash": "blake3:" + "0" * 64})
@@ -568,11 +579,11 @@ def test_import_lock_store(tmp_dir):
     # 'fetched' says when this version arrived, not when it was last
     # checked for, so re-recording the same state leaves the file alone --
     # otherwise every refresh would be a commit
-    write_import_lock("c.txt", {"rev": "abc1234", "fetched": "2026-01-01"})
-    write_import_lock("c.txt", {"rev": "abc1234", "fetched": "2026-06-30"})
+    write_import_lock("c.txt", {"git_rev": "abc1234", "fetched": "2026-01-01"})
+    write_import_lock("c.txt", {"git_rev": "abc1234", "fetched": "2026-06-30"})
     assert read_import_locks()["c.txt"]["fetched"] == "2026-01-01"
     # A different revision is a new version, so the time moves
-    write_import_lock("c.txt", {"rev": "def5678", "fetched": "2026-06-30"})
+    write_import_lock("c.txt", {"git_rev": "def5678", "fetched": "2026-06-30"})
     assert read_import_locks()["c.txt"]["fetched"] == "2026-06-30"
 
 

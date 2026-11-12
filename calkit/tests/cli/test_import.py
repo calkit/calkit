@@ -79,10 +79,10 @@ def test_import_and_update_a_path(tmp_dir):
     source = entries[0]["imported_from"]
     # A branch was named, so that is what calkit.yaml records -- the
     # commit it resolved to goes in the lock file
-    assert "rev" not in source
+    assert "git_rev" not in source
     assert source["git_ref"] == "main"
     assert source["path"] == "setups/setup.sh"
-    assert locked("scripts/setup.sh")["rev"] == first_rev
+    assert locked("scripts/setup.sh")["git_rev"] == first_rev
     assert locked("scripts/setup.sh")["hash"].startswith("sha256:")
     # Importing over it again needs saying so
     res = subprocess.run(
@@ -144,7 +144,7 @@ def test_import_and_update_a_path(tmp_dir):
     )
     with open("scripts/setup.sh") as f:
         assert f.read() == "export FOO=2\n"
-    assert locked("scripts/setup.sh")["rev"] == second_rev
+    assert locked("scripts/setup.sh")["git_rev"] == second_rev
     # With no 'ref' recorded, refreshing takes the latest on the default
     # branch rather than re-reading the commit it last landed on
     ck_info = calkit.load_calkit_info()
@@ -159,7 +159,7 @@ def test_import_and_update_a_path(tmp_dir):
     )
     with open("scripts/setup.sh") as f:
         assert f.read() == "export FOO=3\n"
-    assert locked("scripts/setup.sh")["rev"] == third_rev
+    assert locked("scripts/setup.sh")["git_rev"] == third_rev
     # --git-ref changes what the entry follows, from now on rather than
     # just this once, so a later refresh stays on the tag
     src_repo.create_tag("v1", ref=second_rev)
@@ -179,7 +179,7 @@ def test_import_and_update_a_path(tmp_dir):
         assert f.read() == "export FOO=2\n"
     source = calkit.load_calkit_info()["misc"][0]["imported_from"]
     assert source["git_ref"] == "v1"
-    assert locked("scripts/setup.sh")["rev"] == second_rev
+    assert locked("scripts/setup.sh")["git_rev"] == second_rev
     subprocess.run(
         ["calkit", "sync", "import", "scripts/setup.sh", "--no-commit"],
         check=True,
@@ -445,7 +445,7 @@ def test_import_figure_from_a_hub_project(tmp_dir, monkeypatch):
         "git_ref": "b1",
     }
     locks = calkit.provenance.read_import_locks()
-    assert locks["figures/p/a.png"]["rev"] == "b" * 40
+    assert locks["figures/p/a.png"]["git_rev"] == "b" * 40
     # A title given here wins, and with no ref the commit is still locked
     res = runner.invoke(
         app,
@@ -464,7 +464,7 @@ def test_import_figure_from_a_hub_project(tmp_dir, monkeypatch):
     assert entry["title"] == "Mine"
     assert "git_ref" not in entry["imported_from"]
     locks = calkit.provenance.read_import_locks()
-    assert locks["figures/p/b.png"]["rev"] == "h" * 40
+    assert locks["figures/p/b.png"]["git_rev"] == "h" * 40
     # Moving a project import to another ref is recorded for later refreshes
     res = runner.invoke(
         app,
@@ -483,4 +483,4 @@ def test_import_figure_from_a_hub_project(tmp_dir, monkeypatch):
     entry = calkit.load_calkit_info()["figures"][0]
     assert entry["imported_from"]["git_ref"] == "c2"
     locks = calkit.provenance.read_import_locks()
-    assert locks["figures/p/a.png"]["rev"] == "c" * 40
+    assert locks["figures/p/a.png"]["git_rev"] == "c" * 40

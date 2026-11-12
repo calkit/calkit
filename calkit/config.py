@@ -694,7 +694,8 @@ class Settings(BaseSettings):
     overleaf_token: KeyringOptionalSecret | None = None
     # Browser session cookie, for syncing without Overleaf's Git integration
     overleaf_session: KeyringOptionalSecret | None = None
-
+    # Default archival service for releases
+    default_archival_service: Literal["zenodo", "caltechdata"] = "zenodo"
     # Which fields have been resolved from the keyring, so a secret that
     # is genuinely absent isn't looked up again, and an assignment (even
     # of None) isn't overwritten by what's still stored

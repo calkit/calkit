@@ -174,3 +174,52 @@ def add_slides_presentation(
         repo.git.commit(
             ["calkit.yaml", edit_time_path, "-m", f"Add presentation {path}"]
         )
+
+
+def add_slide_figure(
+    ck_info: dict, url: str, path: str, stage_name: str | None
+) -> str:
+    """Have the stage exporting a presentation export a slide, given its
+    URL, to the figure at ``path``, adding the stage if needed, and return
+    the stage's name.
+    """
+    import calkit.google
+
+    try:
+        presentation_id = calkit.google.get_slides_presentation_id(url)
+        calkit.google.get_slide_export_format(path)
+    except ValueError as e:
+        raise_error(str(e))
+    slide_id = calkit.google.get_slide_id(url)
+    if slide_id is None:
+        raise_error(
+            "That URL doesn't say which slide; open the slide in Google "
+            "Slides and copy the URL, which ends with '#slide=id.' and its ID"
+        )
+    api_path = f"/user/google/presentations/{presentation_id}"
+    try:
+        info = get_hub_response("get", api_path)
+        layout = get_hub_response("get", f"{api_path}/slides")
+    except Exception as e:
+        raise_error(f"Failed to open the presentation: {e}")
+    slide = next((s for s in layout["slides"] if s["id"] == slide_id), None)
+    if slide is None:
+        raise_error(f"The presentation has no slide '{slide_id}'")
+    if stage_name is None:
+        stage_name = calkit.google.get_slides_stage_name(
+            ck_info, presentation_id, info.get("title")
+        )
+    try:
+        calkit.google.add_slide_figure(
+            ck_info, info, slide_id, path, stage_name=stage_name
+        )
+    except ValueError as e:
+        raise_error(str(e))
+    calkit.google.write_edit_time(
+        calkit.google.get_edit_time_path(presentation_id),
+        info["modified_time"],
+    )
+    typer.echo(f"Stage '{stage_name}' exports slide {slide_id} to {path}")
+    if slide["bounds"] is None:
+        typer.echo("Nothing is drawn on the slide yet")
+    return stage_name

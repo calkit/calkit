@@ -144,8 +144,37 @@ def test_googleslidesexportstage():
     edit_time_path = "../.calkit/google/1AbCdEfGhIjKlMnOpQrStUv.json"
     assert s.dvc_deps == [edit_time_path]
     assert s.dvc_cmd.endswith(f"--edit-time-path {edit_time_path}")
+    # Slides exported as figures are outputs too, and all are kept while it
+    # runs, so an unchanged export can be left alone
+    s = GoogleSlidesExportStage(
+        name="export-figures",
+        presentation_url=url,
+        inputs=["figures/rates.png"],
+        slides={"figures/setup.pdf": "g2c3_0_12", "figures/setup.png": "p"},
+    )
+    sd = s.to_dvc()
+    assert sd["outs"] == [
+        {"figures/setup.pdf": {"persist": True}},
+        {"figures/setup.png": {"persist": True}},
+    ]
+    assert sd["cmd"].endswith(
+        "--figure figures/rates.png --slide figures/setup.pdf=g2c3_0_12 "
+        "--slide figures/setup.png=p"
+    )
     for kwargs, match in [
         (dict(presentation_url="https://example.com"), "Google Slides URL"),
+        (
+            dict(presentation_url=url, slides={"f.svg": "p"}),
+            ".pdf or .png",
+        ),
+        (
+            dict(
+                presentation_url=url,
+                inputs=["f.png"],
+                slides={"f.png": "p"},
+            ),
+            "both put in",
+        ),
         (dict(presentation_url=url, outputs=[]), "needs an output"),
         (dict(presentation_url=url, outputs=["p.docx"]), ".pdf or .pptx"),
     ]:

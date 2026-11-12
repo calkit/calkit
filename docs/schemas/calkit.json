@@ -1562,6 +1562,69 @@
       "title": "FigureEvidence",
       "type": "object"
     },
+    "FileEvidence": {
+      "description": "Evidence in the form of a file cited as-is by its path, e.g., a log,\na transcript excerpt, a script, or a raw output, optionally at specific\nlines.\n\nIt has no ``kind``. An entry without one that has a ``key`` or\n``values`` is a ``result``, which is how those used to be written.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git reference (branch, tag, or commit hash) pointing to the version of the repository where the file can be found.",
+          "title": "Git Ref"
+        },
+        "kind": {
+          "default": null,
+          "description": "Left out, or null, for a file cited by its path.",
+          "title": "Kind",
+          "type": "null"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*\\d+\\s*([-\u2013]\\s*\\d+\\s*)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Line or inclusive range of lines in the file where the evidence is, e.g., 8 or '8-12'. Checked against the file, so a citation of lines that are no longer there is an error.",
+          "title": "Lines"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FileEvidence",
+      "type": "object"
+    },
     "Formula": {
       "properties": {
         "description": {
@@ -1891,7 +1954,7 @@
     },
     "GoogleSlidesExportStage": {
       "additionalProperties": false,
-      "description": "A Google Slides presentation exported as a PDF, or as a PowerPoint\ncopy kept in the project.\n\nThe images among its inputs, i.e., PNG, JPEG, or GIF figures, are put\nin first: each replaces the images whose alt text title is 'calkit:'\nand its path, e.g., 'calkit:figures/rates.png', keeping their place and\nsize, or, if there are none, is added to the first slide with that\ntitle.\n\nIt goes out of date when an input changes, or when the presentation is\nedited, which 'calkit status', 'calkit run', and 'calkit pull' check\nfor.",
+      "description": "A Google Slides presentation exported as a PDF, or as a PowerPoint\ncopy kept in the project, and its slides exported as figures, e.g., a\ndiagram drawn on one.\n\nThe images among its inputs, i.e., PNG, JPEG, or GIF figures, are put\nin first: each replaces the images whose alt text title is 'calkit:'\nand its path, e.g., 'calkit:figures/rates.png', keeping their place and\nsize, or, if there are none, is added to the first slide with that\ntitle.\n\nIt goes out of date when an input changes, or when the presentation is\nedited, which 'calkit status', 'calkit run', and 'calkit pull' check\nfor.",
       "properties": {
         "always_run": {
           "default": false,
@@ -2097,6 +2160,15 @@
           "default": null,
           "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
+        },
+        "slides": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Figures exported from slides, each a PDF or PNG cropped to what's drawn on its slide, by the ID of the slide, which is the end of its URL after 'slide=id.'.",
+          "title": "Slides",
+          "type": "object"
         },
         "slurm": {
           "anyOf": [
@@ -8097,6 +8169,9 @@
                   },
                   {
                     "$ref": "#/$defs/DocumentEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/FileEvidence"
                   }
                 ]
               },
@@ -9392,10 +9467,17 @@
           "title": "Key"
         },
         "kind": {
-          "const": "result",
+          "anyOf": [
+            {
+              "const": "result",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": "result",
-          "title": "Kind",
-          "type": "string"
+          "title": "Kind"
         },
         "path": {
           "title": "Path",
@@ -12393,6 +12475,19 @@
           ],
           "default": null,
           "title": "Filter Paths"
+        },
+        "git_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Branch, tag, or commit to follow when refreshing this. Optional: an entry that names none follows the project's default branch. The commit it resolves to is recorded in .calkit/imports.json.",
+          "title": "Git Ref"
         },
         "git_rev": {
           "anyOf": [

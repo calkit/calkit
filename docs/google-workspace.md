@@ -113,6 +113,41 @@ so a figure can be shown in more than one place by copying it.
 If no image has that title, e.g., because it was deleted,
 the next run adds the figure to the first slide again.
 
+## Making figures in Google Slides
+
+A slide can also be a figure,
+e.g., a diagram or a composite figure drawn in Google Slides,
+exported to the project like any other, e.g., for a paper on Overleaf.
+Open the slide in Google Slides, copy its URL,
+which ends with `#slide=id.` and the slide's ID, and run:
+
+```sh
+calkit new figure figures/setup.pdf --title "Setup" \
+    --google-slide "https://docs.google.com/presentation/d/.../edit#slide=id.g2c3a1b9_0_12"
+```
+
+The stage that exports the presentation, or a new one if there isn't one,
+then exports the slide too:
+
+```yaml
+pipeline:
+  stages:
+    export-diagrams:
+      kind: google-slides-export
+      presentation_url: https://docs.google.com/presentation/d/.../edit
+      slides:
+        figures/setup.pdf: g2c3a1b9_0_12
+```
+
+- The figure is cropped to what's drawn on the slide, plus a small margin.
+- It can be a PDF, or a PNG at 300 DPI.
+- The slide's speaker notes say which figure it is, e.g.,
+  `calkit:figures/setup.pdf`, so whoever edits the presentation can tell.
+- Slides can be reordered, since they're found by ID.
+  If the slide is deleted, the export says so,
+  and names a slide whose notes still say which figure it is, e.g., a copy.
+- A skipped slide can't be exported, since Google leaves it out of exports.
+
 ## Keeping the export up to date
 
 Run the pipeline as usual:

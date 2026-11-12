@@ -2224,6 +2224,24 @@ def test_user_google_presentations(
             calls.append(("figure", path, [fs.cat(p) for p in held], url))
             return {"replaced": 2, "added": False, "modified_time": "t2"}
 
+        def get_slides(self, presentation_id):
+            return {
+                "page_size": [720.0, 405.0],
+                "slides": [
+                    {
+                        "id": "p",
+                        "notes": "",
+                        "notes_id": "n1",
+                        "is_skipped": False,
+                        "bounds": [1.0, 2.0, 3.0, 4.0],
+                    }
+                ],
+            }
+
+        def tag_slides(self, presentation_id, tags):
+            calls.append(("tags", tags))
+            return len(tags)
+
         def export_presentation(self, presentation_id, mime_type):
             if mime_type == gs.SLIDES_EXPORT_MIME_TYPES[".pptx"]:
                 raise gs.GoogleError("Google is down", 503)
@@ -2308,6 +2326,17 @@ def test_user_google_presentations(
         )
         assert r.status_code == 422
         assert calls[-1][0] == "figure" and calls[-1][1].endswith(".png")
+        r = client.get(
+            f"{base}/{pid}/slides", headers=normal_user_token_headers
+        )
+        assert r.json()["slides"][0]["bounds"] == [1.0, 2.0, 3.0, 4.0]
+        r = client.post(
+            f"{base}/{pid}/slide-tags",
+            headers=normal_user_token_headers,
+            json={"tags": {"figures/setup.pdf": "p"}},
+        )
+        assert r.json() == {"tagged": 1}
+        assert calls[-1] == ("tags", {"figures/setup.pdf": "p"})
         r = client.get(
             f"{base}/{pid}/export",
             headers=normal_user_token_headers,

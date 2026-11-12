@@ -1228,6 +1228,60 @@ def post_user_google_presentation_figure(
     return GoogleFigurePut.model_validate(resp)
 
 
+class GoogleSlide(BaseModel):
+    id: str
+    notes: str
+    notes_id: str | None
+    is_skipped: bool
+    bounds: list[float] | None
+
+
+class GoogleSlides(BaseModel):
+    page_size: list[float]
+    slides: list[GoogleSlide]
+
+
+class GoogleSlideTagsPost(BaseModel):
+    tags: dict[str, str]
+
+
+class GoogleSlideTagsResponse(BaseModel):
+    tagged: int
+
+
+@router.get("/user/google/presentations/{presentation_id}/slides")
+def get_user_google_presentation_slides(
+    presentation_id: str, session: SessionDep, current_user: CurrentUser
+) -> GoogleSlides:
+    """Get a Google Slides presentation's slides, in order, with what's
+    drawn on each, for exporting them as figures.
+    """
+    client = users.get_google_slides_client(session=session, user=current_user)
+    try:
+        slides = client.get_slides(presentation_id)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    return GoogleSlides.model_validate(slides)
+
+
+@router.post("/user/google/presentations/{presentation_id}/slide-tags")
+def post_user_google_presentation_slide_tags(
+    presentation_id: str,
+    req: GoogleSlideTagsPost,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> GoogleSlideTagsResponse:
+    """Say in slides' speaker notes which figures they're exported to,
+    given slide IDs by figure path.
+    """
+    client = users.get_google_slides_client(session=session, user=current_user)
+    try:
+        tagged = client.tag_slides(presentation_id, req.tags)
+    except calkit.google.GoogleError as e:
+        users.raise_google_error(e)
+    return GoogleSlideTagsResponse(tagged=tagged)
+
+
 @router.get("/user/google/presentations/{presentation_id}/export")
 def get_user_google_presentation_export(
     presentation_id: str,

@@ -1147,6 +1147,17 @@ export const ContentsItemSchema = {
       ],
       title: "Dir Items",
     },
+    commit_sha: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Commit Sha",
+    },
   },
   type: "object",
   required: ["name", "path", "type", "size", "in_repo"],
@@ -3817,6 +3828,100 @@ export const GooglePresentationPostSchema = {
   type: "object",
   required: ["title"],
   title: "GooglePresentationPost",
+} as const
+
+export const GoogleSlideSchema = {
+  properties: {
+    id: {
+      type: "string",
+      title: "Id",
+    },
+    notes: {
+      type: "string",
+      title: "Notes",
+    },
+    notes_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Notes Id",
+    },
+    is_skipped: {
+      type: "boolean",
+      title: "Is Skipped",
+    },
+    bounds: {
+      anyOf: [
+        {
+          items: {
+            type: "number",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Bounds",
+    },
+  },
+  type: "object",
+  required: ["id", "notes", "notes_id", "is_skipped", "bounds"],
+  title: "GoogleSlide",
+} as const
+
+export const GoogleSlideTagsPostSchema = {
+  properties: {
+    tags: {
+      additionalProperties: {
+        type: "string",
+      },
+      type: "object",
+      title: "Tags",
+    },
+  },
+  type: "object",
+  required: ["tags"],
+  title: "GoogleSlideTagsPost",
+} as const
+
+export const GoogleSlideTagsResponseSchema = {
+  properties: {
+    tagged: {
+      type: "integer",
+      title: "Tagged",
+    },
+  },
+  type: "object",
+  required: ["tagged"],
+  title: "GoogleSlideTagsResponse",
+} as const
+
+export const GoogleSlidesSchema = {
+  properties: {
+    page_size: {
+      items: {
+        type: "number",
+      },
+      type: "array",
+      title: "Page Size",
+    },
+    slides: {
+      items: {
+        $ref: "#/components/schemas/GoogleSlide",
+      },
+      type: "array",
+      title: "Slides",
+    },
+  },
+  type: "object",
+  required: ["page_size", "slides"],
+  title: "GoogleSlides",
 } as const
 
 export const GoogleSlidesPresentationPostSchema = {
@@ -9136,8 +9241,22 @@ export const QuestionSchema = {
 export const QuestionEvidenceSchema = {
   properties: {
     kind: {
-      type: "string",
-      enum: ["figure", "result", "value", "table", "publication", "document"],
+      anyOf: [
+        {
+          type: "string",
+          enum: [
+            "figure",
+            "result",
+            "value",
+            "table",
+            "publication",
+            "document",
+          ],
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Kind",
     },
     path: {
@@ -9201,6 +9320,17 @@ export const QuestionEvidenceSchema = {
         },
       ],
       title: "Label",
+    },
+    lines: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Lines",
     },
     explanation: {
       anyOf: [
@@ -9318,8 +9448,22 @@ export const QuestionEvidenceSchema = {
 export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
-      type: "string",
-      enum: ["figure", "result", "value", "table", "publication", "document"],
+      anyOf: [
+        {
+          type: "string",
+          enum: [
+            "figure",
+            "result",
+            "value",
+            "table",
+            "publication",
+            "document",
+          ],
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Kind",
     },
     path: {
@@ -9383,6 +9527,17 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Label",
+    },
+    lines: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Lines",
     },
     explanation: {
       anyOf: [

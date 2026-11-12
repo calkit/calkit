@@ -378,7 +378,8 @@ Model class: `DockerCommandStage`
 Model class: `GoogleSlidesExportStage`
 
 A Google Slides presentation exported as a PDF, or as a PowerPoint
-copy kept in the project.
+copy kept in the project, and its slides exported as figures, e.g., a
+diagram drawn on one.
 
 The images among its inputs, i.e., PNG, JPEG, or GIF figures, are put
 in first: each replaces the images whose alt text title is 'calkit:'
@@ -390,10 +391,11 @@ It goes out of date when an input changes, or when the presentation is
 edited, which 'calkit status', 'calkit run', and 'calkit pull' check
 for.
 
-| Kind-specific parameter | Type | Required | Default    | Description                                         |
-| ----------------------- | ---- | -------- | ---------- | --------------------------------------------------- |
-| `environment`           | str  | no       | '\_system' | Name of the environment in which to run this stage. |
-| `presentation_url`      | str  | yes      |            | URL of the Google Slides presentation.              |
+| Kind-specific parameter | Type           | Required | Default    | Description                                                                                                                                                  |
+| ----------------------- | -------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `environment`           | str            | no       | '\_system' | Name of the environment in which to run this stage.                                                                                                          |
+| `presentation_url`      | str            | yes      |            | URL of the Google Slides presentation.                                                                                                                       |
+| `slides`                | dict[str, str] | no       |            | Figures exported from slides, each a PDF or PNG cropped to what's drawn on its slide, by the ID of the slide, which is the end of its URL after 'slide=id.'. |
 
 ### `json-to-latex`
 

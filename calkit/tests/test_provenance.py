@@ -247,9 +247,12 @@ def test_fetch_from_a_project_records_its_commit(tmp_dir, monkeypatch):
 
     def get(path, params=None, **kwargs):
         calls.append((path, params))
+        if path == "/projects/o/p":
+            return {"git_repo_url": "https://github.com/o/p"}
         return response
 
     monkeypatch.setattr(calkit.hub, "get", get)
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
     # A ref is asked for, and the commit it resolved to is recorded
     entry: dict = {}
     source, lock = fetch(
@@ -263,6 +266,17 @@ def test_fetch_from_a_project_records_its_commit(tmp_dir, monkeypatch):
     assert source["git_ref"] == "v1"
     assert lock["git_rev"] == "a" * 40
     assert lock["hash"].startswith("sha256:")
+    # The lock says where it came from too, including the hub and the repo
+    # behind the project, so it stands on its own
+    assert {k: v for k, v in lock.items() if k not in ("hash", "fetched")} == {
+        "kind": "calkit",
+        "hub": "https://calkit.io",
+        "project": "o/p",
+        "path": "figures/a.png",
+        "git_repo_url": "https://github.com/o/p",
+        "git_ref": "v1",
+        "git_rev": "a" * 40,
+    }
     assert entry["title"] == "A figure"
     # With no ref, the default branch is read, and still pinned in the lock
     _, lock = fetch({"project": "o/p", "path": "figures/a.png"}, "b.png")
@@ -337,8 +351,11 @@ def test_get_imports_with_updates(tmp_dir, monkeypatch):
 def test_get_import_statuses(tmp_dir, monkeypatch):
     import base64
     import os
+    import subprocess
+    from types import SimpleNamespace
 
     import git as gitpy
+    import requests
 
     import calkit
     from calkit.provenance import (
@@ -356,33 +373,86 @@ def test_get_import_statuses(tmp_dir, monkeypatch):
             "commit_sha": "b" * 40,
         }
 
+    served_etag = {"value": '"e1"'}
+
+    def head(url, **kwargs):
+        return SimpleNamespace(ok=True, headers={"ETag": served_etag["value"]})
+
     monkeypatch.setattr(calkit.hub, "get", get)
-    # A Git repo whose branch moves on after one import was fetched
+    monkeypatch.setattr(requests, "head", head)
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
+    # A Git repo with an annotated tag, whose branch moves on later
     src = gitpy.Repo.init("src", initial_branch="main")
     with open("src/a.txt", "w") as f:
         f.write("a\n")
     src.git.add(A=True)
     src.git.commit(m="one", author="T <t@x.org>")
     first = src.head.commit.hexsha
-    entries = {
-        "same.png": {"project": "o/p", "path": "same.png"},
-        "newer.png": {"project": "o/p", "path": "newer.png"},
-        "pinned.png": {"project": "o/p", "path": "x", "git_ref": first[:9]},
-        "edited.png": {"project": "o/p", "path": "edited.png"},
-        "gone.png": {"project": "o/p", "path": "gone.png"},
-        "repo.txt": {
-            "git_repo_url": "src",
+    src.create_tag("v1", message="Version 1")
+    hub = {"kind": "calkit", "hub": "https://calkit.io", "project": "o/p"}
+
+    def git_lock(ref, rev=first):
+        return {
+            "kind": "git",
+            "repo_url": "src",
             "path": "a.txt",
-            "git_ref": "main",
-        },
-        "web.csv": {"url": "https://example.org/web.csv"},
+            "ref": ref,
+            "rev": rev,
+        }
+
+    imports = {
+        "same.png": (
+            {"project": "o/p", "path": "same.png"},
+            hub | {"path": "same.png", "git_rev": first},
+        ),
+        "newer.png": (
+            {"project": "o/p", "path": "newer.png"},
+            hub | {"path": "newer.png", "git_rev": first},
+        ),
+        "pinned.png": (
+            {"project": "o/p", "path": "x", "git_ref": first[:9]},
+            hub | {"path": "x", "git_ref": first[:9], "git_rev": first},
+        ),
+        "moved.png": (
+            {"project": "o/p", "path": "y"},
+            hub | {"path": "old/y"},
+        ),
+        "edited.png": (
+            {"project": "o/p", "path": "edited.png"},
+            {"git_rev": first},
+        ),
+        "gone.png": (
+            {"project": "o/p", "path": "gone.png"},
+            {"git_rev": first},
+        ),
+        "main.txt": (
+            {"git_repo_url": "src", "path": "a.txt", "git_ref": "main"},
+            git_lock("main"),
+        ),
+        "tag.txt": (
+            {"git_repo_url": "src", "path": "a.txt", "git_ref": "v1"},
+            git_lock("v1"),
+        ),
+        "unlocked.txt": (
+            {"git_repo_url": "src", "path": "a.txt", "git_ref": "main"},
+            git_lock("main", rev=None),
+        ),
+        "web.csv": (
+            {"url": "https://x.org/web.csv"},
+            {"kind": "url", "url": "https://x.org/web.csv", "etag": '"e1"'},
+        ),
+        "bare.csv": (
+            {"url": "https://x.org/bare.csv"},
+            {"kind": "url", "url": "https://x.org/bare.csv"},
+        ),
     }
     ck_info: dict = {"figures": []}
-    for path, source in entries.items():
+    for path, (source, lock) in imports.items():
         with open(path, "wb") as f:
             f.write(b"v1")
         ck_info["figures"].append({"path": path, "imported_from": source})
-        write_import_lock(path, {"hash": hash_path(path), "git_rev": first})
+        lock = {k: v for k, v in lock.items() if v is not None}
+        write_import_lock(path, lock | {"hash": hash_path(path)})
     with open("edited.png", "ab") as f:
         f.write(b" changed")
     os.remove("gone.png")
@@ -397,33 +467,55 @@ def test_get_import_statuses(tmp_dir, monkeypatch):
     assert got["same.png"] == ("up-to-date", None)
     assert got["newer.png"] == ("update-available", "at bbbbbbbbb")
     assert got["pinned.png"] == ("up-to-date", f"pinned to {first[:9]}")
+    # calkit.yaml was edited to name another file, and not synced since
+    assert got["moved.png"] == (
+        "source-changed",
+        "calkit.yaml names a different source",
+    )
     assert got["edited.png"][0] == "edited"
     assert got["gone.png"][0] == "missing"
-    assert got["repo.txt"] == ("up-to-date", None)
-    assert got["web.csv"] == (
+    assert got["main.txt"] == ("up-to-date", None)
+    # An annotated tag is compared by the commit it points to
+    assert got["tag.txt"] == ("up-to-date", None)
+    # With no commit recorded, there's nothing to say it moved from
+    assert got["unlocked.txt"] == (
         "unknown",
-        "a URL would have to be downloaded to tell",
+        "no commit was recorded when it was fetched",
     )
+    # A URL is asked whether it still has the same version, not downloaded
+    assert got["web.csv"] == ("up-to-date", None)
+    assert got["bare.csv"] == ("unknown", "its server gave nothing to compare")
+    served_etag["value"] = '"e2"'
+    assert statuses()["web.csv"] == ("update-available", "its ETag changed")
     # A branch at a new commit may or may not have changed the file
     with open("src/b.txt", "w") as f:
         f.write("b\n")
     src.git.add(A=True)
     src.git.commit(m="two", author="T <t@x.org>")
     second = src.head.commit.hexsha
-    assert statuses()["repo.txt"] == (
-        "source-moved",
-        f"main is at {second[:9]}",
-    )
+    got = statuses()
+    assert got["main.txt"] == ("source-moved", f"main is at {second[:9]}")
+    assert got["tag.txt"] == ("up-to-date", None)
     # A quick check leaves Git repos alone
     quick = get_import_statuses(ck_info, check_git=False)
-    assert [s["status"] for s in quick if s["path"] == "repo.txt"] == [
+    assert [s["status"] for s in quick if s["path"] == "main.txt"] == [
         "unknown"
     ]
-    # And so does one whose ref isn't there
-    entries["repo.txt"]["git_ref"] = "nope"
-    assert statuses()["repo.txt"] == (
-        "unknown",
-        "'nope' couldn't be found in the repo",
+    # A Git repo that doesn't answer stops the rest being asked, rather than
+    # each waiting out its own timeout
+    calls = []
+
+    def timeout(*args, **kwargs):
+        calls.append(args)
+        raise subprocess.TimeoutExpired(args[0], 30)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    got = statuses()
+    assert len(calls) == 1
+    assert (
+        got["main.txt"][1]
+        == got["tag.txt"][1]
+        == ("the source couldn't be reached")
     )
 
 
@@ -500,7 +592,7 @@ def test_fetch_resolves_a_slashed_ref(tmp_dir):
     assert out["git_ref"] == "feature/foo"
     assert out["path"] == "scripts/a.sh"
     # What it resolved to comes back separately, for the lock file
-    assert lock["git_rev"] and lock["hash"].startswith("sha256:")
+    assert lock["rev"] and lock["hash"].startswith("sha256:")
     with open("a.sh") as f:
         assert f.read() == "on-feature\n"
     # A ref that resolves as recorded is never widened, even when a longer

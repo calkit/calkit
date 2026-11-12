@@ -951,6 +951,7 @@ def get_status(
             "up-to-date": ("up to date", "green"),
             "update-available": ("update available", "yellow"),
             "source-moved": ("source has moved on", "yellow"),
+            "source-changed": ("source changed in calkit.yaml", "yellow"),
             "edited": ("edited since imported", "red"),
             "missing": ("missing", "red"),
             "unknown": ("can't tell", None),
@@ -963,7 +964,13 @@ def get_status(
                 f"from {s['source']}"
             )
         if any(
-            s["status"] in ("update-available", "source-moved", "missing")
+            s["status"]
+            in (
+                "update-available",
+                "source-moved",
+                "source-changed",
+                "missing",
+            )
             for s in import_statuses
         ):
             typer.echo("Run 'calkit sync import <path>' to bring one in.")

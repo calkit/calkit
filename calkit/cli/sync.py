@@ -256,7 +256,7 @@ def sync_import(
     written to '.calkit/imports.json' rather than to 'calkit.yaml', which
     keeps only what a person declared. To pin an import, write the commit
     hash as its 'ref'. An entry written before that split carries its
-    'rev' in 'calkit.yaml'; refreshing it moves that across, so nothing has
+    'git_rev' in 'calkit.yaml'; refreshing it moves that across, so nothing has
     to be migrated by hand.
 
     With '--all', every imported object is refreshed instead, whichever

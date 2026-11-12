@@ -141,7 +141,94 @@ def read_import_locks(wdir: str | None = None) -> dict:
     # ever read it, so it is treated as absent rather than migrated.
     if not isinstance(locks, dict):
         return {}
+    # Before entries recorded their source, the commit was a bare 'rev'
+    for lock in locks.values():
+        if (
+            isinstance(lock, dict)
+            and "source" not in lock
+            and "rev" in lock
+            and "git_rev" not in lock
+        ):
+            lock["git_rev"] = lock.pop("rev")
     return locks
+
+
+# The order a lock entry's fields are written in, so it reads source first
+# and diffs stay small; anything else follows, alphabetically
+_LOCK_FIELDS = (
+    "source",
+    "git_rev",
+    "etag",
+    "last_modified",
+    "hash",
+    "fetched",
+)
+_SOURCE_FIELDS = (
+    "kind",
+    "hub",
+    "project",
+    "repo_url",
+    "git_repo_url",
+    "url",
+    "path",
+    "ref",
+    "git_ref",
+)
+
+
+def _ordered_lock(lock: object) -> object:
+    def ordered(d: dict, first: tuple[str, ...]) -> dict:
+        keys = [k for k in first if k in d] + sorted(
+            k for k in d if k not in first
+        )
+        return {k: d[k] for k in keys}
+
+    if not isinstance(lock, dict):
+        return lock
+    lock = ordered(lock, _LOCK_FIELDS)
+    if isinstance(lock.get("source"), dict):
+        lock["source"] = ordered(lock["source"], _SOURCE_FIELDS)
+    return lock
+
+
+def get_locked_rev(lock: dict | None) -> str | None:
+    """The commit a lock entry says its import was fetched at, from a Git
+    repo or from the one behind a Calkit project."""
+    rev = (lock or {}).get("git_rev")
+    return rev if isinstance(rev, str) else None
+
+
+def lock_matches_source(lock: dict | None, imported_from: dict) -> bool:
+    """Whether a lock entry was fetched from what ``imported_from`` names
+    now, so an edited source can be told from one that was synced.
+
+    An entry from before lock entries recorded their source can't be
+    compared, and is taken to match.
+    """
+    import calkit
+
+    lock = (lock or {}).get("source")
+    if not isinstance(lock, dict):
+        return True
+    kind = lock.get("kind")
+    if kind == "git":
+        git = git_source(imported_from)
+        return git is not None and (
+            git.get("git_repo_url"),
+            git.get("path"),
+            git.get("git_ref"),
+        ) == (lock.get("repo_url"), lock.get("path"), lock.get("ref"))
+    if kind == "calkit":
+        return (
+            imported_from.get("project"),
+            imported_from.get("path"),
+            imported_from.get("git_ref"),
+        ) == (lock.get("project"), lock.get("path"), lock.get("git_ref")) and (
+            lock.get("hub") in (None, calkit.hub.get_hub_url())
+        )
+    if kind == "url":
+        return imported_from.get("url") == lock.get("url")
+    return True
 
 
 def write_import_lock(
@@ -179,7 +266,9 @@ def write_import_lock(
     # newline="\n" so the file is byte-identical on every platform; it is
     # committed, and CRLF on Windows would churn the diff for everyone else
     with open(fpath, "w", newline="\n") as f:
-        json.dump(locks, f, indent=2, sort_keys=True)
+        json.dump(
+            {p: _ordered_lock(locks[p]) for p in sorted(locks)}, f, indent=2
+        )
         f.write("\n")
     return fpath
 
@@ -333,62 +422,239 @@ def how_to_define_origin(path: str) -> str:
     )
 
 
-def get_imports_with_updates(ck_info: dict) -> list[str]:
-    """Paths of files imported from Calkit projects whose source now has a
-    different version than was fetched.
+def get_import_statuses(ck_info: dict, check_git: bool = True) -> list[dict]:
+    """Say, for each imported file, whether it's as imported and whether its
+    source has moved on.
 
-    Only project sources are checked, since telling for a Git repo means
-    cloning it, and only files the hub sends inline. Anything that can't be
-    checked, e.g., when offline, is left out rather than reported: this is
-    a courtesy, and refreshing is what 'calkit sync import' is for.
+    Each status is a dict with the file's ``path``, a description of its
+    ``source``, the ``git_rev`` it was fetched at, if recorded, and one of
+    these ``status`` values, with a ``detail`` saying more where there is
+    more to say:
+
+    - ``missing``: the file isn't there;
+    - ``edited``: it's been changed since it was fetched;
+    - ``source-changed``: calkit.yaml names a different source than the one
+      it was fetched from;
+    - ``up-to-date``: the source has the same file, or is pinned to the
+      commit it was fetched at;
+    - ``update-available``: a Calkit project has a different file there, or
+      a URL's server says its file has changed;
+    - ``source-moved``: a Git repo's branch or tag is at a different commit,
+      which may or may not have changed the file, since telling would mean
+      fetching it;
+    - ``unknown``: it couldn't be told, e.g., for a URL whose server gave
+      nothing to compare, or when offline.
+
+    ``check_git=False`` leaves Git repos as ``unknown`` rather than asking
+    them, for a check that should be quick.
     """
     import base64
     import hashlib
+    import subprocess
 
+    import requests
     from requests.exceptions import ConnectionError, Timeout
 
     import calkit
 
+    unreachable = "the source couldn't be reached"
     locks = read_import_locks()
-    paths: list[str] = []
+    statuses: list[dict] = []
+    offline = False
     for kind in get_artifact_types_with_imports():
         entries = ck_info.get(kind)
         for entry in entries if isinstance(entries, list) else []:
             source = (
                 entry.get("imported_from") if isinstance(entry, dict) else None
             )
-            if not isinstance(source, dict):
+            if not isinstance(source, dict) or not entry.get("path"):
                 continue
-            if not source.get("project") or not source.get("path"):
-                continue
-            lock = locks.get(entry.get("path")) or {}
-            recorded = lock.get("hash")
-            if not isinstance(recorded, str):
-                continue
+            path = str(entry["path"])
+            lock = locks.get(path) or {}
+            git_rev = get_locked_rev(lock)
+            status = {
+                "path": path,
+                "source": describe_source(source),
+                "git_rev": git_rev,
+                "status": "unknown",
+                "detail": None,
+            }
+            statuses.append(status)
             ref = source.get("git_ref")
-            try:
-                contents = calkit.hub.get(
-                    f"/projects/{source['project']}/contents/{source['path']}",
-                    params={"ref": ref} if ref else None,
-                    max_retries=0,
-                    allow_login=False,
-                    timeout=(5, 30),
+            git = git_source(source)
+            if not os.path.exists(path):
+                status["status"] = "missing"
+                continue
+            if local_edit(path, lock):
+                status["status"] = "edited"
+                continue
+            if not lock_matches_source(lock, source):
+                status["status"] = "source-changed"
+                status["detail"] = "calkit.yaml names a different source"
+                continue
+            # A commit can't move, so an import pinned to one is current
+            if (
+                isinstance(ref, str)
+                and git_rev is not None
+                and re.fullmatch(r"[0-9a-f]{7,40}", ref)
+                and git_rev.startswith(ref)
+            ):
+                status["status"] = "up-to-date"
+                status["detail"] = f"pinned to {ref}"
+                continue
+            if offline:
+                status["detail"] = unreachable
+                continue
+            if source.get("project") and source.get("path"):
+                try:
+                    contents = calkit.hub.get(
+                        f"/projects/{source['project']}/contents/"
+                        f"{source['path']}",
+                        params={"ref": ref} if ref else None,
+                        max_retries=0,
+                        allow_login=False,
+                        timeout=(5, 30),
+                    )
+                except (ConnectionError, Timeout):
+                    # The rest would fail the same way, one timeout at a time
+                    offline = True
+                    status["detail"] = unreachable
+                    continue
+                except Exception as e:
+                    status["detail"] = f"the source couldn't be read: {e}"
+                    continue
+                latest = contents.get("commit_sha")
+                # The same commit can't hold a different file
+                if git_rev and latest == git_rev:
+                    status["status"] = "up-to-date"
+                    continue
+                content = contents.get("content")
+                recorded = lock.get("hash")
+                if content is None or not isinstance(recorded, str):
+                    status["detail"] = (
+                        "nothing recorded to compare against"
+                        if content is not None
+                        else "the source serves it as a link to download"
+                    )
+                    continue
+                digest = hashlib.sha256(base64.b64decode(content)).hexdigest()
+                same = f"{HASH_ALGORITHM}:{digest}" == recorded
+                status["status"] = "up-to-date" if same else "update-available"
+                if not same and latest:
+                    status["detail"] = f"at {latest[:9]}"
+                continue
+            if git is not None:
+                if not check_git:
+                    continue
+                if git_rev is None:
+                    status["detail"] = (
+                        "no commit was recorded when it was fetched"
+                    )
+                    continue
+                wanted = ref or "HEAD"
+                try:
+                    # The peeled ref too, so an annotated tag gives the commit
+                    # it points to rather than the tag object
+                    out = subprocess.run(
+                        [
+                            "git",
+                            "ls-remote",
+                            str(git["git_repo_url"]),
+                            wanted,
+                            wanted + "^{}",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=os.environ | {"GIT_TERMINAL_PROMPT": "0"},
+                    )
+                except (subprocess.TimeoutExpired, OSError):
+                    offline = True
+                    status["detail"] = unreachable
+                    continue
+                # Each line is a commit and the ref it's at
+                refs: dict[str, str] = {}
+                for line in out.stdout.splitlines():
+                    sha, _, name = line.partition("\t")
+                    if name:
+                        refs[name] = sha
+                peeled = [
+                    sha for name, sha in refs.items() if name.endswith("^{}")
+                ]
+                if out.returncode != 0 or not refs:
+                    status["detail"] = (
+                        f"'{wanted}' couldn't be found in the repo"
+                    )
+                    continue
+                latest = peeled[0] if peeled else next(iter(refs.values()))
+                if latest == git_rev:
+                    status["status"] = "up-to-date"
+                else:
+                    status["status"] = "source-moved"
+                    status["detail"] = f"{wanted} is at {latest[:9]}"
+                continue
+            if source.get("url"):
+                etag = lock.get("etag")
+                modified = lock.get("last_modified")
+                if not etag and not modified:
+                    status["detail"] = "its server gave nothing to compare"
+                    continue
+                try:
+                    resp = requests.head(
+                        str(source["url"]),
+                        allow_redirects=True,
+                        timeout=(5, 30),
+                    )
+                except (ConnectionError, Timeout):
+                    offline = True
+                    status["detail"] = unreachable
+                    continue
+                except requests.RequestException as e:
+                    status["detail"] = f"the source couldn't be read: {e}"
+                    continue
+                now = (
+                    ("ETag", resp.headers.get("ETag"), etag)
+                    if etag
+                    else (
+                        "Last-Modified",
+                        resp.headers.get("Last-Modified"),
+                        modified,
+                    )
                 )
-            except (ConnectionError, Timeout):
-                # The rest would fail the same way, one timeout at a time
-                return paths
-            except Exception:
+                if not resp.ok or now[1] is None:
+                    status["detail"] = f"its server no longer gives a {now[0]}"
+                elif now[1] == now[2]:
+                    status["status"] = "up-to-date"
+                else:
+                    status["status"] = "update-available"
+                    status["detail"] = f"its {now[0]} changed"
                 continue
-            # The same commit can't hold a different file
-            if lock.get("rev") and contents.get("commit_sha") == lock["rev"]:
-                continue
-            content = contents.get("content")
-            if content is None:
-                continue
-            digest = hashlib.sha256(base64.b64decode(content)).hexdigest()
-            if f"{HASH_ALGORITHM}:{digest}" != recorded:
-                paths.append(entry["path"])
-    return paths
+            status["detail"] = "it can't be fetched again"
+    return statuses
+
+
+def get_imports_with_updates(ck_info: dict) -> list[str]:
+    """Paths of files imported from Calkit projects whose source now has a
+    different version than was fetched, for a quick check that says nothing
+    when it can't tell."""
+    # Only project imports are looked at, so nothing else is hashed
+    projects_only = {
+        kind: [
+            entry
+            for entry in entries
+            if isinstance(entry, dict)
+            and isinstance(entry.get("imported_from"), dict)
+            and entry["imported_from"].get("project")
+        ]
+        for kind, entries in ck_info.items()
+        if kind in get_artifact_types_with_imports()
+        and isinstance(entries, list)
+    }
+    return [
+        s["path"]
+        for s in get_import_statuses(projects_only, check_git=False)
+        if s["status"] == "update-available"
+    ]
 
 
 def has_provenance(artifact: dict, ck_info: dict | None = None) -> bool:
@@ -822,12 +1088,16 @@ def _ref_and_path_resolve(repo_dir: str, ref: str, path: str) -> bool:
     return False
 
 
-def _with_state(lock: dict, dest_path: str, rev: str | None = None) -> dict:
-    """Fill in what a fetch resolved to: the commit, checksum, and when."""
+def _with_state(lock: dict, dest_path: str) -> dict:
+    """Finish a lock entry with what every kind records: a checksum of what
+    was fetched, and when. Fields with nothing to say are left out."""
     from datetime import datetime, timezone
 
-    if rev is not None:
-        lock["rev"] = rev
+    lock = {k: v for k, v in lock.items() if v is not None}
+    if isinstance(lock.get("source"), dict):
+        lock["source"] = {
+            k: v for k, v in lock["source"].items() if v is not None
+        }
     checksum = hash_path(dest_path)
     if checksum is not None:
         lock["hash"] = checksum
@@ -843,14 +1113,16 @@ def fetch(
     """Download what an ``imported_from`` entry points at, to ``dest_path``.
 
     Returns the entry as it should now be recorded, and separately what the
-    fetch resolved to: the commit a Git source landed on, a checksum of the
-    file, and when. The first belongs in ``calkit.yaml`` because a person
-    wrote it; the second belongs in ``.calkit/imports.json`` because the
-    tool worked it out.
+    fetch resolved to: the ``source`` as it was used, with a ``kind`` of
+    ``git``, ``calkit``, or ``url``, beside what it was at, e.g., the
+    ``git_rev`` a Git repo landed on or a URL's ``etag``, a checksum of the
+    file, and when. The first belongs in ``calkit.yaml`` because a person wrote it;
+    the second belongs in ``.calkit/imports.json`` because the tool worked
+    it out, like any lock file, which is why it repeats the source.
 
     What gets fetched is the source's ``ref``---a branch, a tag, or a
     commit---or the repo's default branch when it names none. The recorded
-    ``rev`` is the answer, never the question: refreshing an import is
+    commit is the answer, never the question: refreshing an import is
     asking where the thing it follows is now, and reading the last answer
     back would make that a no-op.
 
@@ -879,7 +1151,7 @@ def fetch(
                 "Git source has no 'path'; importing a whole repo is what a "
                 "Git submodule is for"
             )
-        # What to check out. Not 'rev': that records what a previous fetch
+        # What to check out. Not 'git_rev': that records what a previous fetch
         # returned, so using it here would make every refresh return the
         # same thing it did last time. Nothing named means the repo's
         # default branch.
@@ -956,7 +1228,16 @@ def fetch(
         # says what to follow, this says where that led.
         git.pop("git_rev", None)
         imported_from.update({k: v for k, v in git.items() if v is not None})
-        return imported_from, _with_state(lock, dest_path, rev=rev)
+        lock = {
+            "source": {
+                "kind": "git",
+                "repo_url": repo_url,
+                "path": src_path,
+                "ref": target,
+            },
+            "git_rev": rev,
+        }
+        return imported_from, _with_state(lock, dest_path)
     if (url := imported_from.get("url")) is not None:
         import requests
 
@@ -972,6 +1253,13 @@ def fetch(
                 with open(part_path, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=8192):
                         f.write(chunk)
+                # What the server says identifies this version, so asking
+                # whether there's a newer one needn't download it
+                lock = {
+                    "source": {"kind": "url", "url": url},
+                    "etag": resp.headers.get("ETag"),
+                    "last_modified": resp.headers.get("Last-Modified"),
+                }
             os.replace(part_path, dest_path)
         except requests.RequestException as e:
             raise ValueError(f"Failed to download {url}: {e}")
@@ -990,6 +1278,15 @@ def fetch(
         if not src_path:
             raise ValueError("Project source has no 'path' to fetch")
         project_ref = imported_from.get("git_ref")
+        # The repo behind the project, so the lock says where the commit is
+        # a commit of; not needed to fetch, so not having it is no failure
+        try:
+            info = calkit.hub.get(f"/projects/{project}")
+            git_repo_url = (
+                info.get("git_repo_url") if isinstance(info, dict) else None
+            )
+        except Exception:
+            git_repo_url = None
         try:
             contents: dict = calkit.hub.get(
                 f"/projects/{project}/contents/{src_path}",
@@ -997,8 +1294,18 @@ def fetch(
             )
         except Exception as e:
             raise ValueError(f"Failed to fetch {src_path} from {project}: {e}")
-        # Older hubs don't say what commit they read
-        project_rev = contents.get("commit_sha")
+        lock = {
+            "source": {
+                "kind": "calkit",
+                "hub": calkit.hub.get_hub_url(),
+                "project": project,
+                "path": src_path,
+                "git_repo_url": git_repo_url,
+                "git_ref": project_ref,
+            },
+            # Older hubs don't say what commit they read
+            "git_rev": contents.get("commit_sha"),
+        }
         if source_entry is not None and isinstance(
             contents.get("calkit_object"), dict
         ):
@@ -1007,7 +1314,7 @@ def fetch(
         if content is not None:
             with open(dest_path, "wb") as f:
                 f.write(base64.b64decode(content))
-            return imported_from, _with_state(lock, dest_path, rev=project_rev)
+            return imported_from, _with_state(lock, dest_path)
         download_url = contents.get("url")
         if download_url is None:
             raise ValueError(f"Could not fetch {src_path} from {project}")
@@ -1015,7 +1322,7 @@ def fetch(
         # URL branch above finishes the job. The entry still records the
         # project, since that is where the file came from.
         fetch({"url": download_url}, dest_path=dest_path)
-        return imported_from, _with_state(lock, dest_path, rev=project_rev)
+        return imported_from, _with_state(lock, dest_path)
     if imported_from.get("doi") is not None:
         raise ValueError(
             "Fetching by DOI is not supported here, since a DOI resolves to "

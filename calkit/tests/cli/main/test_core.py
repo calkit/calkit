@@ -1320,6 +1320,20 @@ def test_no_dvc_repo(tmp_dir, tmp_path):
     out = subprocess.check_output(["calkit", "pull"], text=True)
     assert "DVC" not in out
     assert_no_dvc()
+    # In a DVC repo, a pipeline Calkit doesn't declare still runs
+    subprocess.check_call(["dvc", "init", "-q"])
+    os.makedirs("analysis")
+    with open("analysis/dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "build": {"cmd": "echo hi > out.txt", "outs": ["out.txt"]}
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run", "--all-pipelines"])
+    assert os.path.isfile("analysis/out.txt")
     # Once there's something for DVC to run, a run makes it a DVC repo
     ck_info = {
         "name": "site",

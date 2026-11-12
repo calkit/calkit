@@ -3513,6 +3513,10 @@ def run(
             raise_error(
                 f"Failed to open DVC repo: {e.__class__.__name__}: {e}"
             )
+        else:
+            # A DVC repo can hold pipelines Calkit doesn't declare, e.g., a
+            # nested dvc.yaml, which DVC still runs
+            nothing_for_dvc = False
         # The pipeline as just compiled can reach stages the last one
         # didn't, e.g., through an input just added
         if gate_stage_names is not None and not nothing_for_dvc:

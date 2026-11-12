@@ -786,8 +786,9 @@ def test_xr_markdown(tmp_dir):
     assert "stale" not in readme
     # Values in the prose come from the results file the stage wrote
     assert (
-        "There are <!-- calkit value key=n path=results.json -->401"
-        "<!-- /calkit value --> samples." in readme
+        # Written in the long form, so the run also rewrites it as compact
+        "There are <!-- ckvalue results.json n -->401<!-- /ckvalue --> "
+        "samples." in readme
     )
     assert ck_info["environments"]["readme"]["kind"] == "uv"
     assert os.path.isfile(".calkit/envs/readme/pyproject.toml")

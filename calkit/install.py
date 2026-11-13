@@ -244,6 +244,19 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "path_add": "%ProgramFiles%\\Docker\\Docker\\resources\\bin",
         },
     },
+    # Runs Docker in a VM without Docker Desktop, which is no use without
+    # the Docker CLI, so that comes too unless one is already on PATH,
+    # e.g., from Docker Desktop
+    "colima": {
+        "mac": {
+            "script": (
+                "brew install colima && "
+                "{ command -v docker >/dev/null || brew install docker; }"
+            ),
+            "path_add": _BREW_BINS,
+            "requires": ["brew"],
+        },
+    },
     "code": {
         # VS Code's own download, unzipped where its installer would put it,
         # so it doesn't take Homebrew
@@ -351,6 +364,18 @@ _PLATFORM_UNSUPPORTED: dict[str, dict[Platform, str]] = {
         "linux": (
             "Install Git with your system package manager, e.g., "
             "'sudo apt install git'."
+        ),
+    },
+    "colima": {
+        "linux": (
+            "Colima isn't needed on Linux, where Docker runs natively; "
+            "install Docker Engine with 'calkit install docker', or, to "
+            "install Colima anyway, see "
+            "https://github.com/abiosoft/colima/blob/main/docs/INSTALL.md."
+        ),
+        "windows": (
+            "Colima doesn't run on Windows; install Docker Desktop with "
+            "'calkit install docker' instead."
         ),
     },
     "code": {
@@ -537,16 +562,18 @@ def add_vscode_recs(code: str) -> None:
         json.dump(recommended | current, f, indent=2)
 
 
-def install(app: str) -> bool:
+def install(app: str, entry: Installer | None = None) -> bool:
     """Run the registered install script for ``app`` and update ``PATH``.
 
-    Anything the entry ``requires`` is installed first. Returns True iff
-    the install command exits 0 AND the binary is then findable on
-    ``PATH`` (after prepending the installer's known output directory).
-    Both must hold -- exiting 0 isn't enough if the binary landed
-    somewhere we still can't see.
+    ``entry`` is used in place of the registered one, e.g., for a project
+    that says how it gets the app. Anything the entry ``requires`` is
+    installed first. Returns True iff the install command exits 0 AND the
+    binary is then findable on ``PATH`` (after prepending the installer's
+    known output directory). Both must hold -- exiting 0 isn't enough if
+    the binary landed somewhere we still can't see.
     """
-    entry = get_installer(app)
+    if entry is None:
+        entry = get_installer(app)
     if entry is None:
         return False
     for req in entry.get("requires", []):
@@ -564,14 +591,20 @@ def install(app: str) -> bool:
     return ok
 
 
-def prompt_and_install(app: str, *, interactive: bool) -> bool:
+def prompt_and_install(
+    app: str, *, interactive: bool, entry: Installer | None = None
+) -> bool:
     """Ask the user (if on a TTY) whether to install ``app`` and do it.
 
-    Returns True iff the app is installed and on ``PATH`` afterward.
-    Non-interactive callers always get False here -- they're expected to
-    surface the missing dep so the user can install it themselves.
+    ``entry`` is used in place of the registered one, as for
+    :func:`install`. Returns True iff the app is installed and on ``PATH``
+    afterward. Non-interactive callers always get False here -- they're
+    expected to surface the missing dep so the user can install it
+    themselves.
     """
-    entry = get_installer(app)
+    registered = entry is None
+    if entry is None:
+        entry = get_installer(app)
     if entry is None:
         return False
     if not interactive:
@@ -608,9 +641,11 @@ def prompt_and_install(app: str, *, interactive: bool) -> bool:
     except EOFError:
         answer = "n"
     if answer not in ("", "y", "yes"):
-        print(f"  Skipped. Run 'calkit install {app}' when you want it.")
+        # Only the registry's way can be run later by name
+        later = f"calkit install {app}" if registered else entry["script"]
+        print(f"  Skipped. Run '{later}' when you want it.")
         return False
-    ok = install(app)
+    ok = install(app, entry=entry)
     if not ok:
         print(
             f"  Install ran but '{app}' is still not on PATH; restart your "

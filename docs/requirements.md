@@ -282,6 +282,7 @@ Apps currently in the registry:
 | `conda`, `mamba`     | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                 |
 | `git`                | Homebrew on macOS, `winget` on Windows                                                             |
 | `docker`             | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows                             |
+| `colima`             | Homebrew on macOS, with the Docker CLI unless one is already installed                             |
 | `code`               | Homebrew cask on macOS, `winget` on Windows                                                        |
 | `R`, `Rscript`       | Homebrew cask on macOS, `winget` on Windows                                                        |
 | `node`, `npm`, `npx` | `pixi global install nodejs`, so `pixi` first; also `calkit install nodejs`                        |
@@ -291,6 +292,13 @@ Apps currently in the registry:
 Run `calkit list installers` for the live list.
 On Linux, Git, VS Code, and R come from the system package manager,
 so those entries print what to run rather than guessing which one.
+
+<!-- TODO: needs human review -->
+
+Colima isn't needed on Linux, where Docker runs natively,
+so there it points to Docker Engine instead,
+and it doesn't run on Windows, so there it points to Docker Desktop.
+After installing it, `colima start` starts its VM.
 
 Some entries depend on another, e.g., Git on macOS is installed with
 Homebrew.
@@ -313,6 +321,25 @@ Every app Calkit installs is recorded in `~/.calkit/installed.json`,
 with the date and the command that was run,
 and `calkit list installers` marks those entries.
 That way there's always a record of what Calkit changed on the machine.
+
+<!-- TODO: needs human review -->
+
+A project can say how to install an app itself with a `setup_command`,
+which is offered the same way,
+in place of any installer in the registry,
+e.g., for an app the registry doesn't have:
+
+```yaml
+requirements:
+  - kind: app
+    name: gh
+    setup_command: brew install gh
+    description: Downloads the raw data from the lab's GitHub releases.
+```
+
+A missing app's `description`, if it has one,
+is shown when Calkit asks to install it and in the error if it's still
+missing.
 
 ## Setup requirements
 
@@ -400,8 +427,8 @@ requirements in four phases regardless of the order they appear in
    read newly-set variables.
 3. **`app`**: Environment managers like `pixi` and `uv` must exist before
    any setup step that runs inside one of those environments. Missing
-   apps with a registered installer trigger the auto-install prompt
-   here.
+   apps with a `setup_command` or a registered installer trigger the
+   auto-install prompt here.
 4. **`setup`**: Last, since `check_command` typically wraps
    `calkit xenv` and depends on both apps and env vars.
 

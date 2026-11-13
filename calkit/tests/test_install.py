@@ -258,18 +258,35 @@ def test_platform_entries_prerequisites_and_record(
         assert git is not None and git.get("requires") == ["brew"]
         assert install.get_installer("choco") is None
         assert "Windows-only" in str(install.get_unsupported_message("choco"))
+        # Colima comes with the Docker CLI it's no use without, unless
+        # there's one already, e.g., from Docker Desktop
+        colima = install.get_installer("colima")
+        assert colima is not None and colima.get("requires") == ["brew"]
+        assert colima["script"] == (
+            "brew install colima && "
+            "{ command -v docker >/dev/null || brew install docker; }"
+        )
     # Linux has no single package manager, so Git says what to run
     with mock.patch("calkit.install.sys.platform", "linux"):
         assert install.get_installer("git") is None
         assert "package manager" in str(install.get_unsupported_message("git"))
         assert install.get_installer("docker") is not None
         assert install.get_installer("brew") is None
+        # Docker runs natively there, so Colima points to Docker Engine
+        assert install.get_installer("colima") is None
+        assert "Docker runs natively" in str(
+            install.get_unsupported_message("colima")
+        )
     with mock.patch("calkit.install.sys.platform", "win32"):
         choco = install.get_installer("choco")
         assert choco is not None and "chocolatey" in choco["script"]
         assert install.get_installer("brew") is None
         r = install.get_installer("R")
         assert r is not None and "*" in str(r["path_add"])
+        assert install.get_installer("colima") is None
+        assert "Docker Desktop" in str(
+            install.get_unsupported_message("colima")
+        )
     # Aliases share entries by reference
     assert install.INSTALLERS["mamba"] is install.INSTALLERS["conda"]
     assert install.INSTALLERS["Rscript"] is install.INSTALLERS["R"]

@@ -1642,13 +1642,33 @@ def check_requirements(
                     described_as=described_as,
                 )
             continue
-        # Offer the registered native installer when we have one.
+        # Offer the project's own way to install it, or else the registered
+        # native installer when we have one
         from calkit import install as _install
 
-        if _install.get_installer(req_name) is not None:
+        setup_command = req.get("setup_command")
+        description = (req.get("description") or "").strip()
+        registered = _install.get_installer(req_name)
+        # Only the project's own command is an override; the registered
+        # installer goes through by name, so declining it points at
+        # 'calkit install' rather than its raw script
+        override: _install.Installer | None = None
+        if setup_command:
+            override = {"script": setup_command, "path_add": []}
+            if registered is not None:
+                # The app tends to land in the same place however it's
+                # installed, e.g., ~/.local/bin, so keep where to look for
+                # it, but not the registry's prerequisites, which the
+                # project's command may not need
+                override["path_add"] = registered["path_add"]
+                if "binary" in registered:
+                    override["binary"] = registered["binary"]
+        if override is not None or registered is not None:
             print(f"App '{req_name}' is not installed.")
+            if description and interactive:
+                print(f"  {description}")
             if _install.prompt_and_install(
-                req_name, interactive=interactive
+                req_name, interactive=interactive, entry=override
             ) and check_dep_exists(req_name, "app", system_info=system_info):
                 if spec:
                     check_app_version(
@@ -1660,10 +1680,15 @@ def check_requirements(
                 continue
         # Some apps have no installer here but a known way in, e.g., a
         # system package manager on Linux
-        hint = _install.get_unsupported_message(req_name)
+        hint = (
+            None
+            if setup_command
+            else _install.get_unsupported_message(req_name)
+        )
         raise ValueError(
             f"app '{req_name}' not found on {described_as}"
             + (f"; {hint}" if hint else "")
+            + (f"\n  {description}" if description else "")
         )
     for req in buckets.get("_other", []):
         req_name = req["name"]

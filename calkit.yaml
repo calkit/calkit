@@ -158,6 +158,10 @@ pipeline:
       kind: python-script
       script_path: scripts/plot-latex-word-round-trip.py
       environment: dev
+      requirements:
+        - name: libreoffice
+          check_command: which("soffice") || which("libreoffice")
+          setup_command: calkit install libreoffice
       inputs:
         - calkit/docx.py
         - results/latex-word-round-trip/original.pdf

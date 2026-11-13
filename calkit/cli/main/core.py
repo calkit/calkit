@@ -3593,7 +3593,8 @@ def run(
         offered = [
             name
             for name in unmet_requirements
-            if name in gated_stages and (named is None or name in named)
+            if name in gated_stages
+            and (named is None or name.split("@")[0] in named)
         ]
         # Each requirement is asked about once, however many stages share it
         asked: dict[str, str | None] = {}

@@ -609,6 +609,128 @@ def _name_table_items(
     return {"foreach": items, "do": body}, renames
 
 
+def get_iteration_items(
+    stage: dict, params: dict | None = None
+) -> dict[str, dict]:
+    """An iterated stage's items, by the name DVC gives each, and its values.
+
+    The names are those after the stage's in ``stage@item``, from the same
+    matrix compiling the stage gives DVC.
+    """
+    from dvc.parsing.interpolate import to_str
+
+    from calkit.models.pipeline import StageIteration
+
+    matrix = {}
+    for n, raw in enumerate(stage.get("iterate_over") or []):
+        iteration = StageIteration.model_validate(raw)
+        key = f"_arg{n}" if isinstance(iteration.arg_name, list) else None
+        matrix[key or str(iteration.arg_name)] = iteration.expand_values(
+            params=expand_project_parameters(params or {})
+        )
+    if not matrix:
+        return {}
+    named, _ = _name_table_items({"matrix": matrix})
+    items: dict[str, dict] = named.get("foreach") or {}
+    if items:
+        return items
+    # A table row DVC names by its position
+    keys = list(matrix)
+    for combination in itertools.product(
+        *[list(enumerate(matrix[k])) for k in keys]
+    ):
+        values: dict = {}
+        fragments = []
+        for key, (i, value) in zip(keys, combination):
+            if isinstance(value, dict):
+                fragments.append(f"{key}{i}")
+                values |= value
+            else:
+                fragments.append(to_str(value))
+                values[key] = value
+        items["-".join(fragments)] = values
+    return items
+
+
+def fill_item_values(obj: Any, values: dict) -> Any:
+    """Fill an item's values into strings, e.g., ``{engine}``, in ``obj``.
+
+    Only the item's own names are filled in, so other braces, e.g., awk's
+    or a shell's ``${HOME}``, stay as they are.
+    """
+    from dvc.parsing.interpolate import to_str
+
+    if isinstance(obj, str):
+        return re.sub(
+            r"\{(\w+)\}",
+            lambda m: (
+                to_str(values[m.group(1)])
+                if m.group(1) in values
+                else m.group(0)
+            ),
+            obj,
+        )
+    if isinstance(obj, list):
+        return [fill_item_values(o, values) for o in obj]
+    if isinstance(obj, dict):
+        return {
+            fill_item_values(k, values): fill_item_values(v, values)
+            for k, v in obj.items()
+        }
+    return obj
+
+
+def get_stage_requirements(
+    stage_name: str, stage: dict, params: dict | None = None
+) -> dict[str, list]:
+    """A stage's own requirements, keyed by what they apply to.
+
+    That's the stage, unless it iterates and its requirements use its
+    values, e.g., ``- "{engine}"``, which fills them in for each item,
+    keyed by the name DVC runs it under, e.g., ``stage@word``.
+    """
+    import json
+
+    def check_quoted(obj: Any) -> None:
+        # YAML reads an unquoted {var} as a mapping, {var: null}, which
+        # would otherwise pass for an app named 'var'
+        if isinstance(obj, dict):
+            keys = list(obj)
+            if (
+                len(keys) == 1
+                and keys[0] in arg_names
+                and obj[keys[0]] is None
+            ):
+                raise ValueError(
+                    f"Stage '{stage_name}' has {{{keys[0]}}} unquoted in its "
+                    "requirements, which YAML reads as a mapping; quote it, "
+                    f'e.g., "{{{keys[0]}}}"'
+                )
+            for value in obj.values():
+                check_quoted(value)
+        elif isinstance(obj, list):
+            for value in obj:
+                check_quoted(value)
+
+    requirements = list(stage.get("requirements") or [])
+    if not stage.get("iterate_over"):
+        return {stage_name: requirements}
+    arg_names = set()
+    for raw in stage["iterate_over"]:
+        arg_name = raw.get("arg_name") if isinstance(raw, dict) else None
+        arg_names |= set(
+            arg_name if isinstance(arg_name, list) else [arg_name]
+        )
+    check_quoted(requirements)
+    used = set(re.findall(r"\{(\w+)\}", json.dumps(requirements, default=str)))
+    if not used & arg_names:
+        return {stage_name: requirements}
+    return {
+        f"{stage_name}@{item_name}": fill_item_values(requirements, values)
+        for item_name, values in get_iteration_items(stage, params).items()
+    }
+
+
 def _rename_lock_entries(
     renames: dict[str, str], wdir: str | None = None
 ) -> bool:
@@ -944,6 +1066,11 @@ def get_gated_stages(
         interactive = is_tty()
     envs = ck_info.get("environments", {})
     stages = ck_info.get("pipeline", {}).get("stages", {})
+    # An item of an iterated stage, e.g., one being retried, is checked
+    # with its stage, which is otherwise what these name
+    requested = set(stage_names) if stage_names is not None else set()
+    if stage_names is not None:
+        stage_names = {name.split("@")[0] for name in stage_names}
     gated: dict[str, str] = {}
     errors: dict[str, str] = {}
     cache: dict[str, tuple[str | None, bool]] = {}
@@ -1087,12 +1214,25 @@ def get_gated_stages(
                 out.append(Path(path).as_posix().rstrip("/"))
         return out
 
+    def get_skipped_outputs(skipped: str) -> list[str]:
+        """The literal paths a skipped stage, or item of one, would make."""
+        stage_name, _, item_name = skipped.partition("@")
+        outputs = stages[stage_name].get("outputs") or []
+        if item_name:
+            values = get_iteration_items(
+                stages[stage_name], params=ck_info.get("parameters")
+            ).get(item_name)
+            if values is not None:
+                outputs = fill_item_values(outputs, values)
+        return paths(outputs)
+
     def get_missing_outputs(stage: dict) -> list[tuple[str, str]]:
         """Skipped stages, and their outputs this stage needs but lacks."""
         found = []
+        skipped = list(gated) + list(errors)
         for input_path in paths(stage.get("inputs") or []):
-            for upstream in list(gated) + list(errors):
-                for output in paths(stages[upstream].get("outputs") or []):
+            for upstream in skipped:
+                for output in get_skipped_outputs(upstream):
                     related = (
                         input_path == output
                         or input_path.startswith(output + "/")
@@ -1106,15 +1246,32 @@ def get_gated_stages(
                 if isinstance(item, dict)
                 else ""
             )
-            if source in gated or source in errors:
-                for output in paths(stages[source].get("outputs") or []):
+            for upstream in skipped:
+                if upstream.split("@")[0] != source:
+                    continue
+                for output in get_skipped_outputs(upstream):
                     if not os.path.exists(output):
-                        found.append((source, output))
+                        found.append((upstream, output))
         return found
 
-    for name, stage in stages.items():
-        if stage_names is not None and name not in stage_names:
+    # An iterated stage whose requirements use its values is gated an item
+    # at a time, with them filled in
+    targets: dict[str, dict] = {}
+    for stage_name, stage in stages.items():
+        if stage_names is not None and stage_name not in stage_names:
             continue
+        items = {
+            target: dict(stage) | {"requirements": requirements}
+            for target, requirements in get_stage_requirements(
+                stage_name, stage, params=ck_info.get("parameters")
+            ).items()
+        }
+        # Only the items named, unless the stage is
+        named = {k for k in requested if k.startswith(stage_name + "@")}
+        if named and stage_name not in requested:
+            items = {k: v for k, v in items.items() if k in named} or items
+        targets |= items
+    for name, stage in targets.items():
         if stage.get("frozen"):
             continue
         if not manual and stage.get("kind") == "manual-step":
@@ -1278,7 +1435,11 @@ def get_gated_stages(
         offered = {n for n in requirements_by_stage or {} if n in gated}
         for name in waiting | offered:
             upstream_names = {
-                u for u, _ in get_missing_outputs(stages[name]) if u != name
+                u
+                for u, _ in get_missing_outputs(
+                    targets.get(name) or stages[name]
+                )
+                if u != name
             }
             if upstream_names:
                 blocked_by[name] = upstream_names
@@ -1873,7 +2034,9 @@ def get_status(
                 ignored_files_in_inputs.setdefault(name, {})[dep_path] = files
         gated_stages = result.get("gated_stages", {})
         for display_name, stale_stage in ordered_stale_stages.items():
-            reason = gated_stages.get(display_name.split("@")[0])
+            reason = gated_stages.get(
+                display_name, gated_stages.get(display_name.split("@")[0])
+            )
             if reason is not None:
                 stale_stage.cannot_run_here = reason
         result["stale_stages"] = ordered_stale_stages

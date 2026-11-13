@@ -10,6 +10,7 @@ import git
 import pytest
 
 import calkit
+import calkit.docx
 import calkit.install
 
 
@@ -647,6 +648,16 @@ def test_check_dep_exists_conda_off_path(monkeypatch):
     # When neither is findable, it should report missing.
     monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
     assert not calkit.check_dep_exists("conda", "app")
+    # Word and LibreOffice aren't run by their names
+    for found in [True, False]:
+        monkeypatch.setattr(calkit.docx, "word_installed", lambda: found)
+        monkeypatch.setattr(
+            calkit.docx,
+            "find_soffice",
+            lambda: "/bin/soffice" if found else None,
+        )
+        assert calkit.check_dep_exists("word", "app") is found
+        assert calkit.check_dep_exists("libreoffice", "app") is found
 
 
 def test_get_md5(tmp_dir):
@@ -947,3 +958,11 @@ def test_get_version_checked_app_names():
     ck_info["environments"]["ml"]["requirements"] = [{"app": "sbatch"}]
     with pytest.raises(ValueError, match="list an app by name"):
         calkit.get_version_checked_app_names(ck_info)
+    # So does one whose name isn't text, e.g., an unquoted {var} in YAML
+    for req in [
+        {"kind": "app", "name": {"var": None}, "version_spec": ">=1"},
+        {"name": {"var": None}},
+    ]:
+        ck_info["environments"]["ml"]["requirements"] = [req]
+        with pytest.raises(ValueError, match="'name' must be text"):
+            calkit.get_version_checked_app_names(ck_info)

@@ -32,6 +32,23 @@ Environmental variables are useful for configuration of a project that
 needs to be unique on each user's machine,
 which can also be used to avoid committing secrets to the repo.
 
+<!-- TODO: needs human review -->
+
+Requirements are what has to exist outside a project's environments:
+on the machine a stage runs on, e.g., an app installed system-wide or a
+number of CPUs, or in the session there, e.g., an env var or a login.
+Calkit builds and locks environments,
+but only checks requirements, at most offering to install or set them up.
+Where a requirement is declared says which stages need it:
+the project's apply to every stage,
+a machine environment's, i.e., a `system`, `slurm` or `pbs` environment's,
+to every stage that runs on that machine,
+and a stage's to that stage alone.
+A stage's and its machine environment's are checked on the machine where
+the stage runs, which is the one running `calkit run` unless the stage
+runs in a machine environment with a `host`.
+The project's are checked on the machine running `calkit run`.
+
 <!-- prettier-ignore -->
 !!! note
 
@@ -237,6 +254,31 @@ Some skips still fail the run, after the stages that can run have run:
 - Any stage is out of date and can't run, with `calkit run --strict`,
   e.g., in CI for a project whose stages should all run there.
   The `calkit/run` action takes it as `run_args: --strict`.
+
+<!-- TODO: needs human review -->
+
+A stage that [iterates](pipeline/index.md#iteration) can use its values
+in its requirements, so each item only needs what it uses,
+and an item whose requirements aren't met is skipped on its own.
+Quote a value in braces, since YAML reads `{engine}` alone as a mapping:
+
+```yaml
+pipeline:
+  stages:
+    round-trip:
+      kind: python-script
+      script_path: scripts/round-trip.py
+      args:
+        - --engine={engine}
+      iterate_over:
+        - arg_name: engine
+          values: [word, libreoffice]
+      requirements:
+        - "{engine}"
+```
+
+Calkit finds Microsoft Word and LibreOffice where they install,
+so `word` and `libreoffice` work as app requirements.
 
 ## Pinning the Calkit CLI version
 

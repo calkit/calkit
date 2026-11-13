@@ -1097,6 +1097,15 @@ def check_dep_exists(
 
         exe = find_conda_exe() if name == "conda" else find_mamba_exe()
         return exe is not None
+    # Apps that aren't run by their name, or not on every OS
+    if name == "word":
+        from calkit.docx import word_installed
+
+        return word_installed()
+    if name == "libreoffice":
+        from calkit.docx import find_soffice
+
+        return find_soffice() is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":
@@ -1226,11 +1235,12 @@ def _normalize_requirement(req) -> dict:
     if not isinstance(req, dict):
         raise malformed()
     keys = list(req.keys())
-    # Flat form with explicit kind: only requires ``name`` for kinds where
-    # name is the identity (app, env-var). Setup requirements may omit it,
-    # and property requirements have none to give.
-    if "kind" in keys:
+    # Flat form, an app unless it gives a kind: only requires ``name`` for
+    # kinds where name is the identity (app, env-var). Setup requirements
+    # may omit it, and property requirements have none to give.
+    if "kind" in keys or "name" in keys:
         out = dict(req)
+        out.setdefault("kind", "app")
         if "name" not in out:
             kind = out["kind"]
             if kind in system_property_requirement_kinds():
@@ -1252,10 +1262,12 @@ def _normalize_requirement(req) -> dict:
                 )
             else:
                 raise ValueError(f"Requirement missing required 'name': {req}")
-        return out
-    if "name" in keys:
-        out = dict(req)
-        out.setdefault("kind", "app")
+        # YAML reads an unquoted name in braces, e.g., {var}, as a mapping
+        if not isinstance(out["name"], str):
+            raise ValueError(
+                f"Malformed requirement {req!r}; its 'name' must be text, "
+                'so quote it if it\'s in braces, e.g., name: "{var}"'
+            )
         return out
     if len(keys) != 1:
         raise malformed()
@@ -1477,6 +1489,7 @@ def get_version_checked_app_names(
         SWITCH_KIND,
         runs_elsewhere,
     )
+    from calkit.pipeline import get_stage_requirements
 
     envs = ck_info.get("environments") or {}
     reqs = list(get_requirements(ck_info))
@@ -1503,7 +1516,11 @@ def get_version_checked_app_names(
                     if isinstance(o, dict)
                 ]
                 stage_envs += [o for o in options if not runs_elsewhere(o)]
-        reqs += stage.get("requirements") or []
+        # With each item's values, when they use them
+        for item_reqs in get_stage_requirements(
+            name, stage, params=ck_info.get("parameters")
+        ).values():
+            reqs += item_reqs
         for env in stage_envs:
             reqs += env.get("requirements") or []
     names = []

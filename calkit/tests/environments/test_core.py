@@ -214,6 +214,22 @@ def test_check_all_in_pipeline(tmp_dir, capfd):
     assert set(res) == {"py1", "far", "nope", "py3"}
     assert not res["nope"]["success"]
     assert not os.path.isdir(".venv2")
+    # Nor that of a stage whose items are all skipped, unlike one with an
+    # item left to run
+    iterated = dict(
+        stages["skipped"],
+        iterate_over=[{"arg_name": "app", "values": ["a", "b"]}],
+        requirements=["{app}"],
+    )
+    info = {**ck_info, "pipeline": {"stages": {"skipped": iterated}}}
+    for skip, expected in [
+        (["skipped@a", "skipped@b"], []),
+        (["skipped@a"], ["py2"]),
+    ]:
+        names, _, _ = calkit.environments.get_pipeline_env_names(
+            info, skip_stages=skip
+        )
+        assert names == expected
 
     # Quiet discards what the checks and their tools print, and leaves the
     # terminal's handles intact, since on Windows Click keeps its own. Nobody

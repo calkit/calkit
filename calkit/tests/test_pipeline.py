@@ -4403,6 +4403,91 @@ def test_table_iteration_names(tmp_dir):
         assert "matrix" in calkit.ryaml.load(f)["stages"]["ev"]
 
 
+def test_get_stage_requirements(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    requirements = [
+        "{engine}",
+        {"kind": "setup", "check_command": "awk '{print $1}' {seed}.txt"},
+    ]
+    stages = {
+        # Rows named by their values, by their positions when that would be
+        # ambiguous, and a plain list
+        "rows": {
+            "kind": "shell-command",
+            "environment": "_system",
+            "command": "echo {engine} {seed}",
+            "iterate_over": [
+                {
+                    "arg_name": ["engine", "n"],
+                    "values": [["word", 1], ["", 2]],
+                },
+                {"arg_name": "seed", "values": [1, 2]},
+            ],
+            "requirements": requirements,
+        },
+        "ambiguous": {
+            "kind": "shell-command",
+            "environment": "_system",
+            "command": "echo {engine}",
+            "iterate_over": [
+                {
+                    "arg_name": ["engine", "x"],
+                    "values": [["a", ""], ["", "a"]],
+                },
+                {"arg_name": "seed", "values": [1]},
+            ],
+            "requirements": requirements,
+        },
+        "plain": {
+            "kind": "shell-command",
+            "environment": "_system",
+            "command": "echo {engine}",
+            "iterate_over": [
+                {"arg_name": "engine", "values": ["word", "libreoffice"]},
+                {"arg_name": "seed", "values": [1]},
+            ],
+            "requirements": requirements,
+        },
+    }
+    calkit.pipeline.to_dvc(
+        ck_info={"pipeline": {"stages": stages}}, write=True
+    )
+    names = subprocess.check_output(
+        ["dvc", "stage", "list", "--name-only"], text=True
+    ).split()
+    # Each item is keyed by the name DVC runs it under
+    by_item = {}
+    for name, stage in stages.items():
+        by_item |= calkit.pipeline.get_stage_requirements(name, stage)
+    assert sorted(by_item) == sorted(names)
+    # Only the item's own names are filled in, leaving other braces
+    assert by_item["plain@libreoffice-1"] == [
+        "libreoffice",
+        {"kind": "setup", "check_command": "awk '{print $1}' 1.txt"},
+    ]
+    assert by_item["rows@word-1-2"][0] == "word"
+    # A stage that doesn't iterate, or whose requirements don't use its
+    # values, is one thing to check
+    assert calkit.pipeline.get_stage_requirements(
+        "s", {"requirements": ["{engine}"]}
+    ) == {"s": ["{engine}"]}
+    assert calkit.pipeline.get_stage_requirements(
+        "s", stages["plain"] | {"requirements": ["git"]}
+    ) == {"s": ["git"]}
+    # YAML reads an unquoted {engine} as a mapping, which is an error rather
+    # than an app named 'engine'
+    for unquoted in [
+        [{"engine": None}],
+        [{"name": {"engine": None}}],
+        [{"kind": "setup", "check_command": {"engine": None}}],
+    ]:
+        with pytest.raises(ValueError, match="quote it"):
+            calkit.pipeline.get_stage_requirements(
+                "plain", stages["plain"] | {"requirements": unquoted}
+            )
+
+
 def test_switch_env_compiles(tmp_dir):
     environments = {
         "cluster": {
@@ -4865,6 +4950,54 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         ck_info, stage_names=["drawn"], interactive=False
     )
     assert gated == {} and errors == {}
+    # Requirements filled in with an item's values skip only that item
+    ck_info["pipeline"]["stages"]["engines"] = {
+        "kind": "shell-command",
+        "command": "echo {engine}",
+        "iterate_over": [
+            {"arg_name": "engine", "values": ["git", "calkit-no-such-app"]}
+        ],
+        "requirements": ["{engine}"],
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["engines"], interactive=False
+    )
+    assert gated == {
+        "engines@calkit-no-such-app": (
+            "app 'calkit-no-such-app' not found on this machine; 'calkit "
+            "check reqs --stale' offers to install or set up what's missing"
+        )
+    }
+    assert errors == {}
+    # What needs a skipped item's output is skipped too, whether it names
+    # the path or the stage, but not what needs another item's
+    stages = ck_info["pipeline"]["stages"]
+    stages["engines"]["outputs"] = ["made/{engine}.txt"]
+    for name, needs in [
+        ("uses-path", "made/calkit-no-such-app.txt"),
+        ("uses-stage", {"from_stage_outputs": "engines"}),
+        ("uses-other", "made/git.txt"),
+    ]:
+        stages[name] = {
+            "kind": "shell-command",
+            "command": "ls made",
+            "inputs": [needs],
+        }
+    names = ["engines", "uses-path", "uses-stage", "uses-other"]
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=names, interactive=False
+    )
+    assert set(gated) == {
+        "engines@calkit-no-such-app",
+        "uses-path",
+        "uses-stage",
+    }
+    assert "'made/calkit-no-such-app.txt'" in gated["uses-stage"]
+    # Naming an item, e.g., to retry it, checks its stage
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["engines@calkit-no-such-app"], interactive=False
+    )
+    assert set(gated) == {"engines@calkit-no-such-app"}
 
 
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(

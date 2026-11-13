@@ -2199,3 +2199,111 @@ def check_questions(
         calkit.echo(format_status(status, verbose=verbose))
     if not status.ok:
         raise typer.Exit(1)
+
+
+@check_app.command(name="references|refs")
+def check_references(
+    path: Annotated[
+        str,
+        typer.Argument(
+            help="What to check: a .tex or Markdown document, a PDF (via "
+            "its source, or its printed reference list if it has none), or "
+            "a .bib file, whose every entry is checked.",
+        ),
+    ],
+    wdir: Annotated[
+        str, typer.Option("--wdir", help="Project working directory.")
+    ] = ".",
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="List every cited reference, not only the ones needing "
+            "attention.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output the report as JSON.")
+    ] = False,
+    output: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Also write the report as JSON to this path.",
+        ),
+    ] = None,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="Use only cached answers instead of calling out to "
+            "Crossref, DataCite, OpenAlex, and arXiv.",
+        ),
+    ] = False,
+    refresh: Annotated[
+        bool,
+        typer.Option(
+            "--refresh",
+            help="Ignore cached answers and ask the services again.",
+        ),
+    ] = False,
+    responses: Annotated[
+        str | None,
+        typer.Option(
+            "--responses",
+            help="Reuse the services' responses from this file instead of "
+            "the local cache, and record there the ones this check used, "
+            "so it can be reproduced.",
+        ),
+    ] = None,
+) -> None:
+    """Check that the references a document cites are real.
+
+    Reads citation keys from the document and the files it inputs, or,
+    for a PDF, from the .tex or Markdown file it's built from, then
+    resolves each against the bibliographies the document names, or the
+    collections calkit.yaml declares if it names none. A .bib file has
+    each of its entries checked instead, and so does the reference list
+    printed in a PDF with no source, e.g., a manuscript sent for review.
+    Each entry is looked up in Crossref, DataCite, OpenAlex, and arXiv.
+    Reports, worst first: a key defined in no bibliography, so the citation
+    cannot resolve; a DOI that isn't registered; an entry whose identifier
+    resolves to a different work than it describes; and an entry no
+    service has, which is what a fabricated citation looks like, though a
+    venue that registers no DOIs looks the same and is named as such.
+
+    Answers are cached, so a rerun needs no network. A references-check
+    pipeline stage runs this with --output and --responses, so its report
+    is an output that goes stale when the document or a bibliography
+    changes, and the responses it was based on are kept with it.
+
+    Exits with an error if a key resolves to no entry, a DOI isn't
+    registered, or an entry contradicts the record it was found in. A
+    reference that simply isn't indexed anywhere is reported but doesn't
+    fail the check.
+    """
+    from calkit.references import check_references as _check_references
+    from calkit.references import compact, format_check, write_report
+
+    try:
+        check = _check_references(
+            path,
+            wdir=wdir,
+            offline=offline,
+            refresh=refresh,
+            responses_path=responses,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        raise_error(str(e))
+    if output is not None:
+        write_report(check, output, wdir=wdir)
+    if json_output:
+        calkit.echo(
+            json.dumps(compact(check.model_dump(mode="json")), indent=2)
+        )
+    else:
+        calkit.echo(format_check(check, verbose=verbose))
+    if not check.ok:
+        raise typer.Exit(1)

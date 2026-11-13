@@ -23,6 +23,7 @@ from pydantic import (
 from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
+from calkit.core import normalize_orcid
 from calkit.models.base import Model
 from calkit.models.io import EnvVarInput
 from calkit.models.iteration import ParametersType
@@ -302,30 +303,7 @@ class _Person(Model):
         # RO-Crate both want, so neither has to guess at a bare identifier.
         if v is None:
             return v
-        match = re.fullmatch(
-            r"(?:(?:https?://)?(?:www\.)?orcid\.org/)?"
-            r"(\d{4}-\d{4}-\d{4}-\d{3}[\dXx])",
-            v.strip(),
-        )
-        if match is None:
-            raise ValueError(
-                f"orcid must look like 0000-0002-1825-0097 (got {v!r})"
-            )
-        bare = match.group(1).upper()
-        # The last character is an ISO 7064 MOD 11-2 check digit over the
-        # other 15, so a typo is caught here rather than by whoever later
-        # finds the identifier resolves to a stranger, or to nobody.
-        total = 0
-        for digit in bare[:-1].replace("-", ""):
-            total = (total + int(digit)) * 2
-        result = (12 - total % 11) % 11
-        expected = "X" if result == 10 else str(result)
-        if bare[-1] != expected:
-            raise ValueError(
-                f"orcid {v!r} has check digit {bare[-1]} but its other "
-                f"digits call for {expected}, so one of them is mistyped"
-            )
-        return f"https://orcid.org/{bare}"
+        return normalize_orcid(v)
 
     @model_validator(mode="after")
     def _check_identifiable(self) -> _Person:

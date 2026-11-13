@@ -2,12 +2,15 @@
 
 import os
 import subprocess
+import sys
+from pathlib import Path
 from unittest import mock
 
 import git
 import pytest
 
 import calkit
+import calkit.install
 
 
 def test_set_env_vars_keeps_user_home(monkeypatch, tmp_path):
@@ -124,6 +127,29 @@ def test_encode_safe() -> None:
     assert not unsafe, "Use calkit.echo for non-ASCII text: " + ", ".join(
         unsafe
     )
+
+
+def test_is_wsl(monkeypatch: pytest.MonkeyPatch) -> None:
+    wsl = "Linux version 6.6.87.2-microsoft-standard-WSL2"
+    for platform, version, container, expected in [
+        ("linux", wsl, False, True),
+        (
+            "linux",
+            "Linux version 6.8.0-45-generic (buildd@lcy02)",
+            False,
+            False,
+        ),
+        # A container on a Windows host has the WSL kernel too
+        ("linux", wsl, True, False),
+        # Only Linux reads /proc at all
+        ("darwin", "microsoft", False, False),
+    ]:
+        monkeypatch.setattr("sys.platform", platform)
+        with (
+            mock.patch("builtins.open", mock.mock_open(read_data=version)),
+            mock.patch("os.path.exists", return_value=container),
+        ):
+            assert calkit.core.is_wsl() is expected, (version, container)
 
 
 def test_is_mintty() -> None:
@@ -412,6 +438,126 @@ def test_check_requirements_checks_machine_properties(tmp_dir):
     )
     # check_system_deps is the old name for the same function
     assert calkit.check_system_deps is calkit.check_requirements
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Fakes an app with a shell script"
+)
+def test_check_requirements_offers_an_apps_setup_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}/usr/bin:/bin")
+    log_path = tmp_path / "installed.json"
+    monkeypatch.setattr(
+        "calkit.install.get_install_log_path", lambda: str(log_path)
+    )
+    # The project's way in beats the registry's
+    monkeypatch.setattr(
+        "calkit.install.get_installer",
+        lambda app: {"script": "exit 1", "path_add": []},
+    )
+    exe = fake_bin / "calkit-fake-app"
+    setup_command = f"printf '#!/bin/sh\\n' > {exe} && chmod +x {exe}"
+    req = {
+        "kind": "app",
+        "name": "calkit-fake-app",
+        "setup_command": setup_command,
+        "description": "Makes the fake things.",
+    }
+    # Without a terminal, it says how to install it and what it's for
+    with pytest.raises(ValueError) as e:
+        calkit.check_requirements(requirements=[req], interactive=False)
+    assert str(e.value) == (
+        "app 'calkit-fake-app' not found on this machine\n"
+        "  Makes the fake things."
+    )
+    assert f"to install, run:  {setup_command}" in capsys.readouterr().out
+    assert not exe.exists()
+    # On one, declining says how to do it later
+    with (
+        mock.patch("builtins.input", return_value="n"),
+        pytest.raises(ValueError, match="not found on this machine"),
+    ):
+        calkit.check_requirements(requirements=[req], interactive=True)
+    out = capsys.readouterr().out
+    assert "  Makes the fake things.\n" in out
+    assert f"Skipped. Run '{setup_command}' when you want it." in out
+    assert not exe.exists()
+    # Agreeing runs it, and it's recorded like any install
+    with mock.patch("builtins.input", return_value="y"):
+        calkit.check_requirements(requirements=[req], interactive=True)
+    assert exe.exists()
+    log = calkit.install.read_install_log()
+    assert [(r["app"], r["script"]) for r in log] == [
+        ("calkit-fake-app", setup_command)
+    ]
+    # Without a way in, a platform hint and the description still show
+    monkeypatch.setattr("calkit.install.get_installer", lambda app: None)
+    with (
+        mock.patch("calkit.install.sys.platform", "linux"),
+        pytest.raises(ValueError) as e,
+    ):
+        calkit.check_requirements(
+            requirements=[
+                {"kind": "app", "name": "colima", "description": "VMs"}
+            ],
+            interactive=True,
+        )
+    assert str(e.value).startswith(
+        "app 'colima' not found on this machine; Colima isn't needed on Linux"
+    )
+    assert str(e.value).endswith("\n  VMs")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Fakes an app with a shell script"
+)
+def test_check_requirements_setup_command_with_registered_installer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    # Where the registered installer puts the app, which isn't on PATH yet,
+    # as ~/.local/bin isn't on a fresh machine
+    hidden = tmp_path / "hidden"
+    hidden.mkdir()
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}/usr/bin:/bin")
+    monkeypatch.setattr(
+        "calkit.install.get_install_log_path",
+        lambda: str(tmp_path / "installed.json"),
+    )
+    registered: dict = {"script": "exit 1", "path_add": str(hidden)}
+    monkeypatch.setattr(
+        "calkit.install.get_installer",
+        lambda app: registered if app == "calkit-fake-app" else None,
+    )
+    # Declining the registered installer points at it by name, which is
+    # what handles its prerequisites and records the install
+    req = {"kind": "app", "name": "calkit-fake-app"}
+    with (
+        mock.patch("builtins.input", return_value="n"),
+        pytest.raises(ValueError, match="not found on this machine"),
+    ):
+        calkit.check_requirements(requirements=[req], interactive=True)
+    out = capsys.readouterr().out
+    assert "Skipped. Run 'calkit install calkit-fake-app'" in out
+    # The project's own command keeps where the registry says the app
+    # lands, so installing it there is found, but not the registry's
+    # prerequisites, which its command may not need
+    registered["requires"] = ["calkit-missing-prereq"]
+    exe = hidden / "calkit-fake-app"
+    req["setup_command"] = f"printf '#!/bin/sh\\n' > {exe} && chmod +x {exe}"
+    with mock.patch("builtins.input", return_value="y") as answer:
+        calkit.check_requirements(requirements=[req], interactive=True)
+    assert answer.call_count == 1
+    assert exe.exists()
+    assert "calkit-missing-prereq" not in capsys.readouterr().out
 
 
 def test_check_app_version():

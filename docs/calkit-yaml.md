@@ -275,9 +275,12 @@ Keys above whose type is a named object, like `Figure`, hold the properties desc
 
 #### `RangeIteration`
 
-| Parameter | Type                 | Required | Default | Description                                |
-| --------- | -------------------- | -------- | ------- | ------------------------------------------ |
-| `range`   | RangeIterationParams | yes      |         | Bounds of the range over which to iterate. |
+| Parameter | Type             | Required | Default | Description                                    |
+| --------- | ---------------- | -------- | ------- | ---------------------------------------------- |
+| `kind`    | Literal['range'] | yes      |         | A range of numbers.                            |
+| `start`   | int \| float     | yes      |         | First value in the range, which is included.   |
+| `stop`    | int \| float     | yes      |         | Value at which to stop, which is not included. |
+| `step`    | int \| float     | no       | 1       | Amount by which to increment each value.       |
 
 #### `Figure`
 
@@ -539,14 +542,6 @@ Configuration for syncing a directory with an Overleaf project.
 | `url`        | str \| None       | no       | null    | URL of the Overleaf project.                      |
 | `sync_paths` | list[str] \| None | no       | null    | Paths synced in both directions with Overleaf.    |
 | `push_paths` | list[str] \| None | no       | null    | Paths only pushed to Overleaf, never pulled back. |
-
-#### `RangeIterationParams`
-
-| Parameter | Type         | Required | Default | Description                                    |
-| --------- | ------------ | -------- | ------- | ---------------------------------------------- |
-| `start`   | int \| float | yes      |         | First value in the range, which is included.   |
-| `stop`    | int \| float | yes      |         | Value at which to stop, which is not included. |
-| `step`    | int \| float | no       | 1       | Amount by which to increment each value.       |
 
 #### `_Person`
 

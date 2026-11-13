@@ -680,20 +680,22 @@ def fill_item_values(obj: Any, values: dict) -> Any:
     return obj
 
 
-def get_stage_requirements(
+def get_stage_items(
     stage_name: str, stage: dict, params: dict | None = None
-) -> dict[str, list]:
-    """A stage's own requirements, keyed by what they apply to.
+) -> dict[str, dict]:
+    """A stage, or its items when what it runs in or needs depends on them.
 
-    That's the stage, unless it iterates and its requirements use its
-    values, e.g., ``- "{engine}"``, which fills them in for each item,
-    keyed by the name DVC runs it under, e.g., ``stage@word``.
+    That's the stage alone, keyed by its name, unless it iterates and its
+    ``environment`` or ``requirements`` use its values, e.g.,
+    ``environment: "{env}"`` or ``- "{engine}"``. Then it's each item, keyed
+    by the name DVC runs it under, e.g., ``stage@word``, with those values
+    filled in.
     """
     import json
 
-    def check_quoted(obj: Any) -> None:
+    def check_quoted(obj: Any, field: str) -> None:
         # YAML reads an unquoted {var} as a mapping, {var: null}, which
-        # would otherwise pass for an app named 'var'
+        # would otherwise pass for, e.g., an app named 'var'
         if isinstance(obj, dict):
             keys = list(obj)
             if (
@@ -703,30 +705,36 @@ def get_stage_requirements(
             ):
                 raise ValueError(
                     f"Stage '{stage_name}' has {{{keys[0]}}} unquoted in its "
-                    "requirements, which YAML reads as a mapping; quote it, "
+                    f"{field}, which YAML reads as a mapping; quote it, "
                     f'e.g., "{{{keys[0]}}}"'
                 )
             for value in obj.values():
-                check_quoted(value)
+                check_quoted(value, field)
         elif isinstance(obj, list):
             for value in obj:
-                check_quoted(value)
+                check_quoted(value, field)
 
-    requirements = list(stage.get("requirements") or [])
     if not stage.get("iterate_over"):
-        return {stage_name: requirements}
+        return {stage_name: stage}
     arg_names = set()
     for raw in stage["iterate_over"]:
         arg_name = raw.get("arg_name") if isinstance(raw, dict) else None
         arg_names |= set(
             arg_name if isinstance(arg_name, list) else [arg_name]
         )
-    check_quoted(requirements)
-    used = set(re.findall(r"\{(\w+)\}", json.dumps(requirements, default=str)))
+    fields = {
+        field: stage[field]
+        for field in ("environment", "requirements")
+        if stage.get(field) is not None
+    }
+    for field, value in fields.items():
+        check_quoted(value, field)
+    used = set(re.findall(r"\{(\w+)\}", json.dumps(fields, default=str)))
     if not used & arg_names:
-        return {stage_name: requirements}
+        return {stage_name: stage}
     return {
-        f"{stage_name}@{item_name}": fill_item_values(requirements, values)
+        f"{stage_name}@{item_name}": dict(stage)
+        | fill_item_values(fields, values)
         for item_name, values in get_iteration_items(stage, params).items()
     }
 
@@ -1254,18 +1262,15 @@ def get_gated_stages(
                         found.append((upstream, output))
         return found
 
-    # An iterated stage whose requirements use its values is gated an item
-    # at a time, with them filled in
+    # An iterated stage whose environment or requirements depend on its
+    # values is gated an item at a time
     targets: dict[str, dict] = {}
     for stage_name, stage in stages.items():
         if stage_names is not None and stage_name not in stage_names:
             continue
-        items = {
-            target: dict(stage) | {"requirements": requirements}
-            for target, requirements in get_stage_requirements(
-                stage_name, stage, params=ck_info.get("parameters")
-            ).items()
-        }
+        items = get_stage_items(
+            stage_name, stage, params=ck_info.get("parameters")
+        )
         # Only the items named, unless the stage is
         named = {k for k in requested if k.startswith(stage_name + "@")}
         if named and stage_name not in requested:
@@ -2653,6 +2658,7 @@ def to_dvc(
     import calkit.markdown
     import calkit.questions
     from calkit.environments import (
+        COMPOSITE_ENV_SEP,
         SWITCH_KIND,
         get_env,
         get_env_input_env_vars,
@@ -2805,6 +2811,41 @@ def to_dvc(
         pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
         raise ValueError(f"Pipeline is not defined properly: {e}")
+    # An iterated stage's environment may depend on its items' values, as
+    # long as only the runtime does, since a machine or a switch changes
+    # the command the items share
+    for stage_name, stage in pipeline.stages.items():
+        items = get_stage_items(
+            stage_name,
+            raw_stages.get(stage_name) or {},
+            params=ck_info.get("parameters"),
+        )
+        if list(items) == [stage_name] or "{" not in stage.environment:
+            continue
+        if stage.outer_environment != stage.inner_environment and (
+            "{" in stage.outer_environment
+        ):
+            raise ValueError(
+                f"Stage '{stage_name}' has environment "
+                f"'{stage.environment}', whose outer environment depends on "
+                "its items' values; only the inner one can"
+            )
+        for item_name, item in items.items():
+            env_name = str(item["environment"]).split(COMPOSITE_ENV_SEP)[-1]
+            env = ck_info.get("environments", {}).get(env_name)
+            if env is None:
+                raise ValueError(
+                    f"Stage '{item_name}' has environment '{env_name}', "
+                    "which is not defined in environments"
+                )
+            if env.get("kind") in ("system", "slurm", "pbs", SWITCH_KIND):
+                raise ValueError(
+                    f"Stage '{item_name}' has environment '{env_name}' of "
+                    f"kind '{env.get('kind')}', but an environment that "
+                    "depends on an item's values must be a runtime, e.g., "
+                    "'uv' or 'conda', not a machine or a switch"
+                )
+            stage._item_environments.append(env_name)
     conflicts = set(wrapper_stages) & set(pipeline.stages)
     if conflicts:
         raise ValueError(
@@ -2834,8 +2875,7 @@ def to_dvc(
     # picked up when used as the outer env in a composite environment.
     used_envs: set[str] = set()
     for stage in pipeline.stages.values():
-        used_envs.add(stage.inner_environment)
-        used_envs.add(stage.outer_environment)
+        used_envs.update(stage.environment_names)
     env_lock_fpaths: dict[str, list[str]] = {}
     environments = ck_info.get("environments", {})
     for env_name, env in environments.items():
@@ -2932,9 +2972,7 @@ def to_dvc(
     # Env vars each stage depends on, its own and its environments'
     for stage in pipeline.stages.values():
         names = [i.name for i in stage.inputs if isinstance(i, EnvVarInput)]
-        for env_name in dict.fromkeys(
-            [stage.outer_environment, stage.inner_environment]
-        ):
+        for env_name in stage.environment_names:
             env = environments.get(env_name) or {}
             names += get_env_input_env_vars(env)
             if env.get("kind") == SWITCH_KIND:

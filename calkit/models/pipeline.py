@@ -548,7 +548,10 @@ class Stage(Model):
     # Env vars whose values this stage depends on, from its own inputs and
     # its environments', resolved when the pipeline is compiled
     _env_var_names: list[str] = PrivateAttr(default_factory=list)
-
+    # The runtime environment each item of an iterated stage uses, when its
+    # environment depends on their values, resolved when the pipeline is
+    # compiled
+    _item_environments: list[str] = PrivateAttr(default_factory=list)
     # Declared so the published schema accepts what the validator below
     # already migrates; without it an editor flags a ``slurm:`` stage that
     # runs fine.
@@ -662,6 +665,13 @@ class Stage(Model):
                 f"composite environment separator '{COMPOSITE_ENV_SEP}'"
             )
         return self.environment
+
+    @property
+    def environment_names(self) -> list[str]:
+        """The environments this stage uses, inner first, with its items'."""
+        names = [self.inner_environment, self.outer_environment]
+        names += self._item_environments
+        return [n for n in dict.fromkeys(names) if "{" not in n]
 
     @property
     def dvc_cmd(self) -> str:
@@ -3232,6 +3242,21 @@ class Pipeline(Model):
         }
         for stage in self.stages.values():
             env_name = stage.outer_environment
+            # An item's runtime, checked when the pipeline was compiled, which
+            # has nowhere to run setup commands
+            if (
+                stage._item_environments
+                and env_name == stage.inner_environment
+            ):
+                if stage.setup or stage.env_default_setup != "replace":
+                    raise ValueError(
+                        f"Stage '{stage.name}' sets 'setup' commands but "
+                        f"runs in environment '{env_name}', which its items "
+                        "pick among runtimes that have no setup step to run "
+                        "them in; run it inside a 'system', 'slurm', or "
+                        f"'pbs' environment, e.g., 'machine:{env_name}'"
+                    )
+                continue
             if env_name != "_system" and env_name not in environments:
                 raise ValueError(
                     f"Stage '{stage.name}' has outer environment "
@@ -3289,7 +3314,10 @@ class Pipeline(Model):
                     stage.setup,
                     stage.env_default_setup,
                 )
-                if stage.inner_environment == stage.outer_environment:
+                if (
+                    stage.inner_environment == stage.outer_environment
+                    or stage._item_environments
+                ):
                     continue
                 inner_env = environments.get(stage.inner_environment)
                 if inner_env is None:
@@ -3316,7 +3344,10 @@ class Pipeline(Model):
             scheduler_label = (
                 "machine switch" if is_machine_switch else str(kind).upper()
             )
-            if stage.kind not in plain_ok_kinds:
+            if (
+                stage.kind not in plain_ok_kinds
+                and not stage._item_environments
+            ):
                 if stage.inner_environment == stage.outer_environment:
                     raise ValueError(
                         f"Stage '{stage.name}' has kind '{stage.kind}' but "
@@ -3403,6 +3434,7 @@ class Pipeline(Model):
                 else StageSchedulerOptions(),
                 **stage_setup,
             )
+            new_stage._item_environments = stage._item_environments
             self.stages[name] = new_stage
             calkit_yaml_stage: dict = {
                 "kind": "shell-script",
@@ -3544,14 +3576,48 @@ class Pipeline(Model):
 
         Both the stage's inner and outer environments are considered, so a
         SLURM/PBS env used as the outer half of a composite environment
-        contributes its files as stage dependencies.
+        contributes its files as stage dependencies, as do those its items
+        use, when they depend on their values.
         """
+
+        def get_templated_fpath(
+            fpath: str, env_name: str, template: str
+        ) -> str:
+            # The environment's name put back as it's written, e.g., '{env}'
+            parts = fpath.split("/")
+            for i, part in enumerate(parts):
+                if part == env_name or part.startswith(env_name + "."):
+                    parts[i] = template + part[len(env_name) :]
+            return "/".join(parts)
+
         for _, stage in self.stages.items():
-            for env_name in (
-                stage.inner_environment,
-                stage.outer_environment,
-            ):
-                for fpath in env_lock_fpaths.get(env_name, []):
-                    fpath = stage.path_from_wdir(fpath)
-                    if fpath not in stage.inputs:
-                        stage.inputs.append(fpath)
+            fpaths = [
+                fpath
+                for env_name in (
+                    stage.inner_environment,
+                    stage.outer_environment,
+                )
+                for fpath in env_lock_fpaths.get(env_name, [])
+            ]
+            # An item only depends on its own environment's files when
+            # they're named after it, as they usually are, so a skipped
+            # item's needn't exist; otherwise on all of them
+            templated = {
+                tuple(
+                    get_templated_fpath(p, n, stage.inner_environment)
+                    for p in env_lock_fpaths.get(n, [])
+                )
+                for n in stage._item_environments
+            }
+            if len(templated) == 1:
+                fpaths += templated.pop()
+            else:
+                fpaths += [
+                    fpath
+                    for env_name in stage._item_environments
+                    for fpath in env_lock_fpaths.get(env_name, [])
+                ]
+            for fpath in fpaths:
+                fpath = stage.path_from_wdir(fpath)
+                if fpath not in stage.inputs:
+                    stage.inputs.append(fpath)

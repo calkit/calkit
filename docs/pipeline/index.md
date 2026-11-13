@@ -340,6 +340,38 @@ would put every item out of date each time.
 Kept in Git, the fingerprints' history is a record of how the source
 changed.
 
+### In different environments
+
+<!-- TODO: needs human review -->
+
+A stage's `environment` can use its values too,
+e.g., to run the same script with two versions of a package,
+each in its own environment:
+
+```yaml
+pipeline:
+  stages:
+    fit:
+      kind: python-script
+      script_path: scripts/fit.py
+      environment: "{env}"
+      args:
+        - "--out=results/{env}.csv"
+      iterate_over:
+        - arg_name: env
+          values: [py-old, py-new]
+      outputs:
+        - results/{env}.csv
+```
+
+Quote it, since YAML reads `{env}` alone as a mapping.
+Each value has to be a runtime environment, e.g., `uv-venv` or `conda`,
+rather than a machine or a `switch`,
+though it can run inside one, e.g., `cluster:{env}`.
+Each item is rerun when its own environment changes,
+as long as the environment's lock files are named after it,
+as they usually are; otherwise, it's rerun when any of them do.
+
 ## Automatic stage and environment detection
 
 The `calkit xr` command, which stands for "execute and record,"

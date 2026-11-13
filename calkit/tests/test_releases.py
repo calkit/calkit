@@ -460,6 +460,7 @@ def test_zip_paths(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_archive_docker_images(tmp_dir):
     import calkit
     from calkit.releases import (

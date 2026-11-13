@@ -1022,6 +1022,12 @@ def _status_target_matches(
     return any(_paths_overlap(norm_target, p) for p in candidate_paths)
 
 
+# Where to go for requirements a stage needs that this machine doesn't meet
+REQUIREMENTS_FIX_HINT = (
+    "'calkit check reqs --stale' offers to install or set up what's missing"
+)
+
+
 def get_gated_stages(
     ck_info: dict,
     stage_names: list[str] | set[str] | None = None,
@@ -1029,6 +1035,8 @@ def get_gated_stages(
     system_info: dict | None = None,
     remote: bool = True,
     manual: bool = True,
+    requirements_by_stage: dict[str, list] | None = None,
+    blocked_by: dict[str, set[str]] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -1045,6 +1053,13 @@ def get_gated_stages(
     connecting to a machine may prompt. Without ``remote``, nothing is
     checked on another machine, which would take connecting to it. Without
     ``manual``, nobody is there to do a manual step, so those can't run.
+
+    Each stage skipped only for requirements this machine doesn't meet,
+    i.e., not also for a machine lock, is added to ``requirements_by_stage``
+    with its own and its environments' requirements, which may be offered
+    later, e.g., by ``calkit run`` for a stage it would run. Each of those,
+    and each stage skipped for an output a skipped stage hasn't made, that
+    needs such an output is added to ``blocked_by`` with those stages.
     """
     import contextlib
     import json
@@ -1067,6 +1082,8 @@ def get_gated_stages(
     gated: dict[str, str] = {}
     errors: dict[str, str] = {}
     cache: dict[str, tuple[str | None, bool]] = {}
+    # Each requirement checked here, so one many stages share is checked once
+    checked: dict[str, str | None] = {}
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
     # The app each export kind needs
@@ -1149,8 +1166,20 @@ def get_gated_stages(
                 requirements=requirements,
                 interactive=False,
                 system_info=system_info,
+                checked=checked,
             )
         except ValueError as e:
+            from calkit.core import _normalize_requirement
+
+            # A machine property can't be installed, but the rest may be
+            kinds = [
+                _normalize_requirement(r)["kind"]
+                for r in requirements
+                if checked.get(calkit.get_requirement_key(r))
+            ]
+            property_kinds = calkit.system_property_requirement_kinds()
+            if kinds and not any(k in property_kinds for k in kinds):
+                return f"{e}; {REQUIREMENTS_FIX_HINT}", False
             return str(e), False
         return None, False
 
@@ -1205,8 +1234,9 @@ def get_gated_stages(
                 outputs = fill_item_values(outputs, values)
         return paths(outputs)
 
-    def missing_output(stage: dict) -> tuple[str, str] | None:
-        """A skipped stage, and its output this stage needs but lacks."""
+    def get_missing_outputs(stage: dict) -> list[tuple[str, str]]:
+        """Skipped stages, and their outputs this stage needs but lacks."""
+        found = []
         skipped = list(gated) + list(errors)
         for input_path in paths(stage.get("inputs") or []):
             for upstream in skipped:
@@ -1217,7 +1247,7 @@ def get_gated_stages(
                         or output.startswith(input_path + "/")
                     )
                     if related and not os.path.exists(output):
-                        return upstream, output
+                        found.append((upstream, output))
         for item in stage.get("inputs") or []:
             source = (
                 item.get("from_stage_outputs", "")
@@ -1229,8 +1259,8 @@ def get_gated_stages(
                     continue
                 for output in get_skipped_outputs(upstream):
                     if not os.path.exists(output):
-                        return upstream, output
-        return None
+                        found.append((upstream, output))
+        return found
 
     # An iterated stage whose environment or requirements depend on its
     # values is gated an item at a time
@@ -1312,6 +1342,8 @@ def get_gated_stages(
             machine_name, machine = env_name, env
         if machine_name is not None and not remote and reason is None:
             continue
+        # Requirements that, once met here, would let the stage run
+        unmet = None
         if reason is None:
             requirements = list(stage.get("requirements") or [])
             for _, env in resolved:
@@ -1322,6 +1354,8 @@ def get_gated_stages(
                     requirements, machine_name, machine
                 ),
             )
+            if reason is not None and not is_error and machine_name is None:
+                unmet = requirements
             # A machine that is only described here could run its stages
             # from here if Calkit knew how to reach it
             local_machines = [
@@ -1352,23 +1386,32 @@ def get_gated_stages(
                     f"; giving environment '{local_machines[0]}' a 'host' "
                     "would let its stages run there from here over SSH"
                 )
-        if reason is None:
+        # Locks are checked for a stage that only lacks requirements too,
+        # since meeting them wouldn't let it run if a lock rules it out
+        wants_unmet = unmet is not None and requirements_by_stage is not None
+        if reason is None or wants_unmet:
             locks = [
                 (n, env, n, env)
                 for n, env in resolved
                 if env.get("kind") == "system"
             ] + switch_locks
             for lock_name, lock_env, m_name, m_env in locks:
-                reason, is_error = check(
+                lock_reason, lock_is_error = check(
                     ["lock", lock_name],
                     lambda: lock_problem(lock_name, lock_env, m_name, m_env),
                 )
-                if reason is not None:
+                if lock_reason is not None:
+                    unmet = None
+                    if reason is None:
+                        reason, is_error = lock_reason, lock_is_error
                     break
+        if unmet is not None and requirements_by_stage is not None:
+            requirements_by_stage[name] = unmet
         if reason is not None:
             (errors if is_error else gated)[name] = reason
     # A stage that needs an output a skipped stage hasn't made can't run
     # either, and nor can the stages after it
+    waiting: set[str] = set()
     added = True
     while added:
         added = False
@@ -1380,16 +1423,31 @@ def get_gated_stages(
                 or stage.get("frozen")
             ):
                 continue
-            found = missing_output(stage)
-            if found is None:
+            found = get_missing_outputs(stage)
+            if not found:
                 continue
-            upstream, output = found
+            upstream, output = found[0]
+            waiting.add(name)
             (errors if upstream in errors else gated)[name] = (
                 f"it needs '{output}' from stage '{upstream}', which "
                 "can't run here and hasn't made it; if it was made "
                 "elsewhere, 'calkit pull' gets it"
             )
             added = True
+    # What each is waiting on, once every skipped stage is known, including
+    # those offered their requirements, which need these too
+    if blocked_by is not None:
+        offered = {n for n in requirements_by_stage or {} if n in gated}
+        for name in waiting | offered:
+            upstream_names = {
+                u
+                for u, _ in get_missing_outputs(
+                    targets.get(name) or stages[name]
+                )
+                if u != name
+            }
+            if upstream_names:
+                blocked_by[name] = upstream_names
     return gated, errors
 
 
@@ -3599,6 +3657,37 @@ def get_stages_to_gate(targets: list[str] | None) -> set[str] | None:
         # E.g., a stage that isn't compiled yet
         return None
     return names
+
+
+def get_stages_that_would_run(
+    stage_names: Iterable[str], force: bool = False, single_item: bool = False
+) -> set[str]:
+    """Of these stages, the ones a run would reproduce, by name.
+
+    That's every one with ``force``, or else those out of date, or after
+    one that is, since a stage that runs may change what they read, unless
+    ``single_item`` says the stages before them won't run.
+    """
+    from dvc.exceptions import DvcException
+
+    import calkit.dvc
+
+    stage_names = set(stage_names)
+    if force or not stage_names:
+        return stage_names
+    repo = calkit.dvc.get_dvc_repo()
+    # A stage DVC doesn't have, e.g., one not compiled, can't run
+    upstream = {}
+    for name in stage_names:
+        try:
+            stages = repo.stage.collect(name, with_deps=not single_item)
+        except DvcException:
+            continue
+        upstream[name] = {s.addressing for s in stages}
+    if not upstream:
+        return set()
+    stale = set(repo.status(targets=list(upstream), with_deps=not single_item))
+    return {name for name, found in upstream.items() if found & stale}
 
 
 def stages_by_output(

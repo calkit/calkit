@@ -137,6 +137,22 @@ def _non_glob_prefix(path: str) -> str:
     return "/".join(kept)
 
 
+def _remove_period_file(period_dir: str, stop: str) -> None:
+    """Remove a date-range period's ``period.json``, if it has one, and the
+    directories it leaves empty, up to ``stop``.
+    """
+    fpath = os.path.join(period_dir, "period.json")
+    if not os.path.isfile(fpath):
+        return
+    os.remove(fpath)
+    dpath = period_dir
+    while os.path.normpath(dpath) != os.path.normpath(stop) and not (
+        os.listdir(dpath)
+    ):
+        os.rmdir(dpath)
+        dpath = os.path.dirname(dpath)
+
+
 class StageIteration(Model):
     """A model for the ``iterate_over`` key in a stage definition.
 
@@ -196,9 +212,7 @@ class StageIteration(Model):
     def _one_state_storage(self) -> StageIteration:
         # Every item depends on its period's directory, so all must have one
         storage = {
-            v.date_range.state_storage
-            if isinstance(v, DateRangeIteration)
-            else None
+            v.state_storage if isinstance(v, DateRangeIteration) else None
             for v in self.values
         }
         if len(storage) > 1:
@@ -206,6 +220,21 @@ class StageIteration(Model):
                 f"Values of '{self.arg_name}' must all be date ranges with "
                 "the same state_storage, or none may have one"
             )
+        # Each period is an item, so no two ranges can share one
+        spans = [
+            v.span for v in self.values if isinstance(v, DateRangeIteration)
+        ]
+        for n, (unit, first, end) in enumerate(spans):
+            for other_unit, other_first, other_end in spans[n + 1 :]:
+                if (
+                    unit == other_unit
+                    and (other_end is None or first < other_end)
+                    and (end is None or other_first < end)
+                ):
+                    raise ValueError(
+                        f"Date ranges of '{self.arg_name}' overlap, so "
+                        "they'd share periods"
+                    )
         return self
 
     @property
@@ -213,51 +242,71 @@ class StageIteration(Model):
         """Where the state of each date-range period is kept, if anywhere."""
         first = self.values[0] if self.values else None
         if isinstance(first, DateRangeIteration):
-            return first.date_range.state_storage
+            return first.state_storage
         return None
 
     def write_date_range_state(
         self, stage_name: str, wdir: str | None = None
-    ) -> None:
+    ) -> str | None:
         """Write each period's ``period.json``, if it changed, and remove
-        those of periods no longer iterated over.
+        those of periods no longer iterated over, returning the directory
+        the periods are in.
 
         Only ``period.json`` is removed, since whatever else is in a
-        period's directory was written there by something else.
+        period's directory was written there by something else. A closed
+        period's window can't change while the range doesn't, so one
+        already checked on this machine isn't read again.
         """
-        from calkit.core import ensure_local_dir
+        import datetime
+
+        from calkit.core import ensure_local_dir, write_if_changed
 
         if self.state_storage is None:
-            return
-        if self.state_storage == "local":
-            ensure_local_dir(wdir=wdir)
-        root = os.path.join(
-            wdir or ".",
-            get_date_range_state_dir(stage_name, self.state_storage),
+            return None
+        local_dir = ensure_local_dir(wdir=wdir)
+        state_dir = get_date_range_state_dir(stage_name, self.state_storage)
+        root = os.path.join(wdir or ".", state_dir)
+        ranges = [v for v in self.values if isinstance(v, DateRangeIteration)]
+        periods = {p["period"]: p for v in ranges for p in v.periods}
+        # Closed periods ending by 'closed_before' were checked for ranges
+        # written as 'ranges'
+        check_fpath = os.path.join(
+            local_dir, "date-range-checks", f"{stage_name}.json"
         )
-        periods = {}
-        for v in self.values:
-            if isinstance(v, DateRangeIteration):
-                periods |= {p["period"]: p for p in v.periods}
+        key = [v.model_dump(mode="json") for v in ranges]
+        try:
+            with open(check_fpath) as f:
+                check = json.load(f)
+        except (OSError, ValueError):
+            check = {}
+        checked_before = (
+            check.get("closed_before", "")
+            if check.get("ranges") == key
+            else ""
+        )
+        closed_before = ""
+        one_day = datetime.timedelta(days=1)
         for name, period in periods.items():
             fpath = os.path.join(root, name, "period.json")
-            content = json.dumps(period, indent=2) + "\n"
-            try:
-                with open(fpath) as f:
-                    if f.read() == content:
-                        continue
-            except OSError:
-                pass
-            os.makedirs(os.path.dirname(fpath), exist_ok=True)
-            with open(fpath, "w", newline="\n") as f:
-                f.write(content)
-        for name in os.listdir(root):
-            fpath = os.path.join(root, name, "period.json")
-            if name in periods or not os.path.isfile(fpath):
+            last_day = datetime.date.fromisoformat(period["end"]) - one_day
+            closed = period["through"] == last_day.isoformat()
+            if closed:
+                closed_before = max(closed_before, period["end"])
+            if (
+                closed
+                and period["end"] <= checked_before
+                and os.path.isfile(fpath)
+            ):
                 continue
-            os.remove(fpath)
-            if not os.listdir(os.path.dirname(fpath)):
-                os.rmdir(os.path.dirname(fpath))
+            write_if_changed(fpath, json.dumps(period, indent=2) + "\n")
+        write_if_changed(
+            check_fpath,
+            json.dumps({"ranges": key, "closed_before": closed_before}) + "\n",
+        )
+        for name in os.listdir(root) if os.path.isdir(root) else []:
+            if name not in periods:
+                _remove_period_file(os.path.join(root, name), stop=root)
+        return state_dir
 
     def expand_values(
         self, params: ParametersType | ExpandedParametersType
@@ -670,18 +719,14 @@ class Stage(Model):
         rel_path = self.setup_file_path
         if rel_path is None:
             return None
+        from calkit.core import write_if_changed
+
         fpath = os.path.join(wdir, rel_path) if wdir else rel_path
-        os.makedirs(os.path.dirname(fpath), exist_ok=True)
-        content = json.dumps(self._system_env_setup, indent=2) + "\n"
-        if os.path.isfile(fpath):
-            with open(fpath) as f:
-                if f.read() == content:
-                    return rel_path
-        # newline="\n" so the file is byte-identical on every platform:
-        # text mode writes CRLF on Windows, and this is a DVC dep, so the
-        # stage would rerun purely from switching machine
-        with open(fpath, "w", newline="\n") as f:
-            f.write(content)
+        # Byte-identical on every platform, since it's a DVC dep, so the
+        # stage would otherwise rerun purely from switching machine
+        write_if_changed(
+            fpath, json.dumps(self._system_env_setup, indent=2) + "\n"
+        )
         return rel_path
 
     @property
@@ -3397,6 +3442,27 @@ class Pipeline(Model):
                 ]
             converted[name] = calkit_yaml_stage
         return converted
+
+    def write_date_range_state(self, wdir: str | None = None) -> None:
+        """Write the state of each stage's date-range periods, and remove
+        what's left of those of stages that were renamed, deleted, or no
+        longer keep any.
+        """
+        kept = set()
+        for name, stage in self.stages.items():
+            for iteration in stage.iterate_over or []:
+                state_dir = iteration.write_date_range_state(name, wdir=wdir)
+                if state_dir is not None:
+                    kept.add(
+                        os.path.normpath(os.path.join(wdir or ".", state_dir))
+                    )
+        for root in [".calkit/date-ranges", ".calkit/local/date-ranges"]:
+            root_path = os.path.normpath(os.path.join(wdir or ".", root))
+            for dirpath, dirnames, filenames in os.walk(root_path):
+                if os.path.normpath(dirpath) in kept:
+                    dirnames.clear()
+                elif "period.json" in filenames:
+                    _remove_period_file(dirpath, stop=root_path)
 
     def preprocess_stages(
         self, project_dir: str | None, write_files: bool = False

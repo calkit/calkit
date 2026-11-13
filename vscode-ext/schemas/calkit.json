@@ -648,21 +648,14 @@
       "type": "object"
     },
     "DateRangeIteration": {
-      "properties": {
-        "date_range": {
-          "$ref": "#/$defs/DateRangeIterationParams",
-          "description": "A range of dates, iterated over one period at a time."
-        }
-      },
-      "required": [
-        "date_range"
-      ],
-      "title": "DateRangeIteration",
-      "type": "object"
-    },
-    "DateRangeIterationParams": {
       "additionalProperties": false,
       "properties": {
+        "kind": {
+          "const": "date-range",
+          "description": "A range of dates, iterated over one period at a time.",
+          "title": "Kind",
+          "type": "string"
+        },
         "start": {
           "anyOf": [
             {
@@ -727,9 +720,10 @@
         }
       },
       "required": [
+        "kind",
         "start"
       ],
-      "title": "DateRangeIterationParams",
+      "title": "DateRangeIteration",
       "type": "object"
     },
     "DerivedFromProject": {
@@ -8654,19 +8648,12 @@
     },
     "RangeIteration": {
       "properties": {
-        "range": {
-          "$ref": "#/$defs/RangeIterationParams",
-          "description": "Bounds of the range over which to iterate."
-        }
-      },
-      "required": [
-        "range"
-      ],
-      "title": "RangeIteration",
-      "type": "object"
-    },
-    "RangeIterationParams": {
-      "properties": {
+        "kind": {
+          "const": "range",
+          "description": "A range of numbers.",
+          "title": "Kind",
+          "type": "string"
+        },
         "start": {
           "anyOf": [
             {
@@ -8706,10 +8693,11 @@
         }
       },
       "required": [
+        "kind",
         "start",
         "stop"
       ],
-      "title": "RangeIterationParams",
+      "title": "RangeIteration",
       "type": "object"
     },
     "ReferenceCollection": {

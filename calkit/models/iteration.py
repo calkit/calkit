@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import datetime
-from typing import Literal
+from functools import cached_property
+from typing import Any, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from calkit.models.base import Model
 
 
-class RangeIterationParams(Model):
+class RangeIteration(Model):
+    kind: Literal["range"] = Field(description="A range of numbers.")
     start: int | float = Field(
         description="First value in the range, which is included."
     )
@@ -21,11 +23,17 @@ class RangeIterationParams(Model):
         default=1, description="Amount by which to increment each value."
     )
 
-
-class RangeIteration(Model):
-    range: RangeIterationParams = Field(
-        description="Bounds of the range over which to iterate."
-    )
+    @model_validator(mode="before")
+    @classmethod
+    def _unnest_range(cls, data: Any) -> Any:
+        # Ranges were written nested under 'range' before they had a kind
+        if (
+            isinstance(data, dict)
+            and "kind" not in data
+            and isinstance(data.get("range"), dict)
+        ):
+            return {"kind": "range"} | data["range"]
+        return data
 
     @property
     def values(self) -> list[int | float]:
@@ -34,15 +42,15 @@ class RangeIteration(Model):
             return len(str(num).split(".")[-1]) if "." in str(num) else 0
 
         max_precision = max(
-            get_decimal_places(self.range.start),
-            get_decimal_places(self.range.stop),
-            get_decimal_places(self.range.step),
+            get_decimal_places(self.start),
+            get_decimal_places(self.stop),
+            get_decimal_places(self.step),
         )
         vals = []
-        current = self.range.start
-        while current < self.range.stop:
+        current = self.start
+        while current < self.stop:
             vals.append(round(current, max_precision))
-            current += self.range.step
+            current += self.step
         return vals
 
 
@@ -83,13 +91,25 @@ def get_date_range_state_dir(stage_name: str, storage: str) -> str:
     """Where a stage's date-range periods keep their state, relative to the
     project.
     """
+    # The name becomes a path, which mustn't leave the state directory
+    parts = stage_name.split("/")
+    if any(c in stage_name for c in "\\:") or any(
+        part in ("", ".", "..") for part in parts
+    ):
+        raise ValueError(
+            f"Stage '{stage_name}' can't keep date-range state, since its "
+            "name isn't a relative path within the project"
+        )
     if storage == "local":
         return f".calkit/local/date-ranges/{stage_name}"
     return f".calkit/date-ranges/{stage_name}"
 
 
-class DateRangeIterationParams(Model):
+class DateRangeIteration(Model):
     model_config = ConfigDict(extra="forbid")
+    kind: Literal["date-range"] = Field(
+        description="A range of dates, iterated over one period at a time."
+    )
     start: str | int | datetime.date = Field(
         description="When the range starts, either a day, e.g., "
         "'2024-03-22', or a period, e.g., '2024-03', '2024Q1', or 2024; "
@@ -141,13 +161,13 @@ class DateRangeIterationParams(Model):
     @field_validator("timezone")
     @classmethod
     def _known_timezone(cls, value: str) -> str:
-        from calkit.models.io import get_now
+        from calkit.models.io import get_tzinfo
 
-        get_now(value)
+        get_tzinfo(value)
         return value
 
     @model_validator(mode="after")
-    def _readable_bounds(self) -> DateRangeIterationParams:
+    def _readable_bounds(self) -> DateRangeIteration:
         start = _parse_date_bound(self.start)
         if self.stop == "today":
             return self
@@ -158,20 +178,31 @@ class DateRangeIterationParams(Model):
             )
         return self
 
-
-class DateRangeIteration(Model):
-    date_range: DateRangeIterationParams = Field(
-        description="A range of dates, iterated over one period at a time."
-    )
-
     @property
+    def span(self) -> tuple[str, datetime.datetime, datetime.datetime | None]:
+        """The step's unit, and when the first period starts and the last
+        ends, which is ``None`` for a range that runs to today.
+        """
+        from calkit.models.io import floor_period, next_period, parse_period
+
+        count, unit = parse_period(self.step)
+        first = floor_period(_parse_date_bound(self.start), count, unit)
+        if self.stop == "today":
+            return unit, first, None
+        last_day = _parse_date_bound(self.stop) - datetime.timedelta(days=1)
+        last = floor_period(last_day, count, unit)
+        return unit, first, next_period(last, count, unit)
+
+    @cached_property
     def periods(self) -> list[dict[str, str]]:
         """Each period with at least one full day, as its name, its window
         within the range, and its last full day.
 
         ``start`` is included and ``end`` is not, while ``through`` is the
         window's last day that is over, so a period still open has a
-        ``through`` before its last day.
+        ``through`` before its last day. Worked out once, so everything a
+        compile writes agrees on what day it is. Empty before the range has
+        a full day, which leaves its stage out of the pipeline until then.
         """
         from calkit.models.io import (
             floor_period,
@@ -181,23 +212,26 @@ class DateRangeIteration(Model):
             parse_period,
         )
 
-        p = self.date_range
-        count, unit = parse_period(p.step)
-        now = get_now(p.timezone)
+        count, unit = parse_period(self.step)
+        now = get_now(self.timezone)
         today = datetime.datetime(now.year, now.month, now.day)
-        start = _parse_date_bound(p.start)
-        end = None if p.stop == "today" else _parse_date_bound(p.stop)
+        start = _parse_date_bound(self.start)
+        end = None if self.stop == "today" else _parse_date_bound(self.stop)
         limit = today if end is None else min(end, today)
         one_day = datetime.timedelta(days=1)
         periods = []
         current = floor_period(start, count, unit)
         while current < limit:
+            # Only the first window can start after its period does
+            window_start = max(current, start)
+            if window_start >= limit:
+                break
             following = next_period(current, count, unit)
             window_end = following if end is None else min(following, end)
             periods.append(
                 {
                     "period": format_period(current, unit),
-                    "start": max(current, start).date().isoformat(),
+                    "start": window_start.date().isoformat(),
                     "end": window_end.date().isoformat(),
                     "through": (min(window_end, today) - one_day)
                     .date()
@@ -205,10 +239,6 @@ class DateRangeIteration(Model):
                 }
             )
             current = following
-        if not periods:
-            raise ValueError(
-                f"date range from '{p.start}' has no full day yet"
-            )
         return periods
 
     @property

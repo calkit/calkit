@@ -8,27 +8,29 @@ from pydantic import ValidationError
 from calkit.models.iteration import (
     DateRangeIteration,
     RangeIteration,
-    RangeIterationParams,
+    get_date_range_state_dir,
 )
 
 
 def test_rangeiteration():
-    r = RangeIteration(range=RangeIterationParams(start=0, stop=10, step=2))
-    assert r.values == [0, 2, 4, 6, 8]
-    r = RangeIteration(
-        range=RangeIterationParams(start=0.05, stop=0.25, step=0.1)
-    )
-    assert r.values == [0.05, 0.15]
-    r = RangeIteration(range=RangeIterationParams(start=0.5, stop=1, step=0.2))
-    assert r.values == [0.5, 0.7, 0.9]
-    r = RangeIteration(range=RangeIterationParams(start=0, stop=1, step=0.2))
-    assert r.values == [0.0, 0.2, 0.4, 0.6, 0.8]
+    def values(**params) -> list[int | float]:
+        return RangeIteration.model_validate({"kind": "range"} | params).values
+
+    assert values(start=0, stop=10, step=2) == [0, 2, 4, 6, 8]
+    assert values(start=0.05, stop=0.25, step=0.1) == [0.05, 0.15]
+    assert values(start=0.5, stop=1, step=0.2) == [0.5, 0.7, 0.9]
+    assert values(start=0, stop=1, step=0.2) == [0.0, 0.2, 0.4, 0.6, 0.8]
+    # Ranges written nested under 'range', as before they had a kind
+    nested = {"range": {"start": 0, "stop": 3}}
+    assert RangeIteration.model_validate(nested).values == [0, 1, 2]
+    with pytest.raises(ValidationError):
+        RangeIteration.model_validate({"start": 0, "stop": 3})
 
 
 def test_daterangeiteration(monkeypatch):
     def periods(**params) -> list[dict]:
         return DateRangeIteration.model_validate(
-            {"date_range": params}
+            {"kind": "date-range"} | params
         ).periods
 
     monkeypatch.setenv("CALKIT_NOW", "2026-11-10T08:00:00Z")
@@ -85,8 +87,33 @@ def test_daterangeiteration(monkeypatch):
         {"start": "last year"},
         {"start": "2026-11", "timezone": "Mars/Olympus"},
         {"start": "2026-11", "state_storage": "dvc"},
+        {"date_range": {"start": "2026-11"}},
     ]:
         with pytest.raises(ValidationError):
-            DateRangeIteration.model_validate({"date_range": bad})
-    with pytest.raises(ValueError, match="no full day"):
-        periods(start="2027-03-01")
+            DateRangeIteration.model_validate({"kind": "date-range"} | bad)
+    # The time zone is checked without reading the clock
+    monkeypatch.setenv("CALKIT_NOW", "yesterday")
+    DateRangeIteration.model_validate({"kind": "date-range", "start": 2026})
+    # A range with no full day yet has no periods, including one starting
+    # today, or later in the current period
+    monkeypatch.setenv("CALKIT_NOW", "2026-11-10T08:00:00Z")
+    assert periods(start="2027-03-01") == []
+    assert periods(start="2026-11-10") == []
+    assert periods(start="2026-11-25", step="1 quarter") == []
+    assert periods(start="2026-11-09")[0]["through"] == "2026-11-09"
+    # The span of periods, which is open-ended when running to today
+    span = DateRangeIteration.model_validate(
+        {"kind": "date-range", "start": "2026-03-10", "stop": "2026-05-01"}
+    ).span
+    assert span == (
+        "month",
+        datetime.datetime(2026, 3, 1),
+        datetime.datetime(2026, 5, 1),
+    )
+    # A stage's name becomes the state's path, which can't leave the project
+    assert get_date_range_state_dir("one/pdf", "git") == (
+        ".calkit/date-ranges/one/pdf"
+    )
+    for name in ["../../victim", "/abs", "a//b", "a/./b", "C:x", "a\\b"]:
+        with pytest.raises(ValueError, match="relative path"):
+            get_date_range_state_dir(name, "local")

@@ -235,14 +235,13 @@ pipeline:
       iterate_over:
         - arg_name: thresh
           values:
-            - range:
-                start: 0
-                stop: 20
-                step: 0.5
-            - range:
-                start: 30
-                stop: 35
-                step: 1
+            - kind: range
+              start: 0
+              stop: 20
+              step: 0.5
+            - kind: range
+              start: 30
+              stop: 35
             - 41
       inputs:
         - data/raw
@@ -252,7 +251,9 @@ pipeline:
 
 ### Over date ranges
 
-A `date_range` iterates over periods of time,
+<!-- TODO: needs human review -->
+
+A `date-range` iterates over periods of time,
 e.g., to fetch a source's data one month at a time.
 Each item is named as its period starts,
 e.g., `2026-11-10` for a day, `2026-W46` for a week, `2026-11` for a month,
@@ -269,10 +270,10 @@ pipeline:
       iterate_over:
         - arg_name: quarter
           values:
-            - date_range:
-                start: 2024-03-22
-                step: 1 quarter
-                state_storage: git
+            - kind: date-range
+              start: 2024-03-22
+              step: 1 quarter
+              state_storage: git
       outputs:
         - data/raw/{quarter}
 ```
@@ -282,6 +283,8 @@ pipeline:
 `stop`, which isn't included, defaults to `today`,
 so an item is added once a new period has a full day,
 and the range keeps growing without editing `calkit.yaml`.
+Until a range has a full day, its stage has no items,
+so it's left out of the pipeline.
 Multiples of a step, e.g., `2 months`, are counted from 1970,
 and days start in `timezone`, which defaults to UTC.
 
@@ -323,9 +326,9 @@ list-source:
   iterate_over:
     - arg_name: quarter
       values:
-        - date_range:
-            start: 2024-03-22
-            step: 1 quarter
+        - kind: date-range
+          start: 2024-03-22
+          step: 1 quarter
   outputs:
     - path: .calkit/date-ranges/fetch/{quarter}/listing.json
       storage: git
@@ -1119,38 +1122,28 @@ versions are pinned with it.
 
 #### `RangeIteration`
 
-| Parameter | Type                 | Required | Default | Description                                |
-| --------- | -------------------- | -------- | ------- | ------------------------------------------ |
-| `range`   | RangeIterationParams | yes      |         | Bounds of the range over which to iterate. |
+| Parameter | Type             | Required | Default | Description                                    |
+| --------- | ---------------- | -------- | ------- | ---------------------------------------------- |
+| `kind`    | Literal['range'] | yes      |         | A range of numbers.                            |
+| `start`   | int \| float     | yes      |         | First value in the range, which is included.   |
+| `stop`    | int \| float     | yes      |         | Value at which to stop, which is not included. |
+| `step`    | int \| float     | no       | 1       | Amount by which to increment each value.       |
 
 #### `DateRangeIteration`
 
-| Parameter    | Type                     | Required | Default | Description                                           |
-| ------------ | ------------------------ | -------- | ------- | ----------------------------------------------------- |
-| `date_range` | DateRangeIterationParams | yes      |         | A range of dates, iterated over one period at a time. |
+| Parameter       | Type                            | Required | Default   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------- | ------------------------------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | Literal['date-range']           | yes      |           | A range of dates, iterated over one period at a time.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `start`         | str \| int \| date              | yes      |           | When the range starts, either a day, e.g., '2024-03-22', or a period, e.g., '2024-03', '2024Q1', or 2024; the first item is the period containing it.                                                                                                                                                                                                                                                                                                            |
+| `stop`          | str \| int \| date              | no       | 'today'   | When the range stops, which is not included, written like 'start'. The default, 'today', runs to the last full day, so an item is added once a new period has one, as are items for a later date when it comes.                                                                                                                                                                                                                                                  |
+| `step`          | str                             | no       | '1 month' | The length of each period, e.g., '1 day', '1 week', '1 month', '1 quarter', or '1 year', which names it as it starts, e.g., '2026-11-10', '2026-W46', '2026-11', '2026Q4', or '2026'. Multiples are counted from 1970, so '2 months' always start in an odd month.                                                                                                                                                                                               |
+| `timezone`      | str                             | no       | 'UTC'     | Time zone days start in, e.g., 'America/New_York'.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `state_storage` | Literal['git', 'local'] \| None | no       | null      | Keep a directory for each period that its item depends on, holding the period's window and last full day in 'period.json', so an item whose period is still open reruns daily and once more when it closes. Anything else written there, e.g., a fingerprint of a source's data for the period, reruns the item when it changes. 'git' keeps the directories in '.calkit/date-ranges/<stage>/<period>', 'local' in '.calkit/local/date-ranges/<stage>/<period>'. |
 
 #### `ParameterIteration`
 
 | Parameter   | Type | Required | Default | Description                                                       |
 | ----------- | ---- | -------- | ------- | ----------------------------------------------------------------- |
 | `parameter` | str  | yes      |         | Name of a project parameter whose list of values to iterate over. |
-
-#### `RangeIterationParams`
-
-| Parameter | Type         | Required | Default | Description                                    |
-| --------- | ------------ | -------- | ------- | ---------------------------------------------- |
-| `start`   | int \| float | yes      |         | First value in the range, which is included.   |
-| `stop`    | int \| float | yes      |         | Value at which to stop, which is not included. |
-| `step`    | int \| float | no       | 1       | Amount by which to increment each value.       |
-
-#### `DateRangeIterationParams`
-
-| Parameter       | Type                            | Required | Default   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| --------------- | ------------------------------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start`         | str \| int \| date              | yes      |           | When the range starts, either a day, e.g., '2024-03-22', or a period, e.g., '2024-03', '2024Q1', or 2024; the first item is the period containing it.                                                                                                                                                                                                                                                                                                            |
-| `stop`          | str \| int \| date              | no       | 'today'   | When the range stops, which is not included, written like 'start'. The default, 'today', runs to the last full day, so an item is added once a new period has one, as are items for a later date when it comes.                                                                                                                                                                                                                                                  |
-| `step`          | str                             | no       | '1 month' | The length of each period, e.g., '1 day', '1 week', '1 month', '1 quarter', or '1 year', which names it as it starts, e.g., '2026-11-10', '2026-W46', '2026-11', '2026Q4', or '2026'. Multiples are counted from 1970, so '2 months' always start in an odd month.                                                                                                                                                                                               |
-| `timezone`      | str                             | no       | 'UTC'     | Time zone days start in, e.g., 'America/New_York'.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `state_storage` | Literal['git', 'local'] \| None | no       | null      | Keep a directory for each period that its item depends on, holding the period's window and last full day in 'period.json', so an item whose period is still open reruns daily and once more when it closes. Anything else written there, e.g., a fingerprint of a source's data for the period, reruns the item when it changes. 'git' keeps the directories in '.calkit/date-ranges/<stage>/<period>', 'local' in '.calkit/local/date-ranges/<stage>/<period>'. |
 
 <!-- AUTO-GENERATED: PIPELINE-STAGE-KINDS:END -->

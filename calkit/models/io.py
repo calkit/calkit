@@ -30,7 +30,7 @@ class EnvVarInput(Model):
     name: str = Field(description="Name of the environment variable.")
 
 
-def _get_tzinfo(name: str) -> Any:
+def get_tzinfo(name: str) -> Any:
     """The time zone named, without needing tzdata for UTC, e.g., on Windows."""
     import datetime
     import zoneinfo
@@ -83,7 +83,7 @@ def get_now(timezone: str) -> Any:
     """The time now in a time zone, or the time ``CALKIT_NOW`` names."""
     import datetime
 
-    tz = _get_tzinfo(timezone)
+    tz = get_tzinfo(timezone)
     override = os.environ.get("CALKIT_NOW")
     if not override:
         return datetime.datetime.now(tz)
@@ -157,7 +157,7 @@ def format_period(start: Any, unit: str) -> str:
         "day": "%Y-%m-%d",
         "week": "%G-W%V",
     }
-    return start.strftime(formats[unit])
+    return str(start.strftime(formats[unit]))
 
 
 class ScheduleInput(Model):
@@ -197,7 +197,7 @@ class ScheduleInput(Model):
     @field_validator("timezone")
     @classmethod
     def _known_timezone(cls, value: str) -> str:
-        _get_tzinfo(value)
+        get_tzinfo(value)
         return value
 
     @property
@@ -216,20 +216,11 @@ class ScheduleInput(Model):
 
     def write_period_file(self, wdir: str | None = None) -> str:
         """Write the current period, if it changed, and return the path."""
-        from calkit.core import ensure_local_dir
+        from calkit.core import ensure_local_dir, write_if_changed
 
         ensure_local_dir(wdir=wdir)
         fpath = os.path.join(wdir or ".", self.period_file_path)
-        content = self.get_current_period() + "\n"
-        try:
-            with open(fpath) as f:
-                if f.read() == content:
-                    return self.period_file_path
-        except OSError:
-            pass
-        os.makedirs(os.path.dirname(fpath), exist_ok=True)
-        with open(fpath, "w", newline="\n") as f:
-            f.write(content)
+        write_if_changed(fpath, self.get_current_period() + "\n")
         return self.period_file_path
 
 

@@ -836,6 +836,27 @@ def ensure_local_dir(wdir: str | None = None) -> str:
     return base
 
 
+def write_if_changed(path: str, content: str | bytes) -> bool:
+    """Write a file only if its content differs, returning whether it did,
+    so whatever goes by its content or timestamp, e.g., DVC or latexmk,
+    doesn't rerun for nothing.
+
+    Text is written as UTF-8 bytes, so it's byte-identical on every
+    platform, where text mode would write CRLF on Windows.
+    """
+    data = content.encode("utf-8") if isinstance(content, str) else content
+    try:
+        with open(path, "rb") as f:
+            if f.read() == data:
+                return False
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return True
+
+
 NOTEBOOK_STAGE_OUT_FORMATS = ["pickle", "parquet", "json", "yaml", "csv"]
 
 

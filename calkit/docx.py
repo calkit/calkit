@@ -1492,7 +1492,6 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                     doc.Close(False)
                 if started:
                     word.Quit()
-                    return True
         else:  # Linux
             # check for WSL
             res = subprocess.run(
@@ -1500,7 +1499,6 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
             )
             username = res.stdout
             if "microsoft" in username.lower():  # WSL detected
-                print("WSL detected")
                 POWERSHELL_SCRIPT = r"""
 
 $PdfPath = $env:PDF_PATH

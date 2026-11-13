@@ -1735,15 +1735,52 @@ def check_project_requirements(
         except Exception as e:
             problems.append(f"{where}: {e}")
 
+    def add_env(
+        env_name: str, envs: dict, env_names: list[str], where: str
+    ) -> list[str]:
+        """Add an environment to check, and what it picks if a switch,
+        returning them."""
+        env = envs.get(env_name)
+        if not isinstance(env, dict):
+            return []
+        used = [env_name]
+        if env.get("kind") == envs_mod.SWITCH_KIND:
+            try:
+                picked = envs_mod.resolve_switch(env_name, envs)
+            except ValueError as e:
+                problems.append(f"{where}: {e}")
+                picked = None
+            if picked is not None:
+                used.append(picked)
+        env_names.extend(n for n in used if n not in env_names)
+        return used
+
     typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
         calkit.requirements.cache_clear()
+    # Each requirement is checked once, however many declare it
+    checked: dict[str, str | None] = {}
+    problems: list[str] = []
+    projects = list(calkit.iter_projects())
+    # The projects' own first, since what's out of date can't be known
+    # until, e.g., the apps its environments are checked with are here
+    for wdir, info in projects:
+        with calkit.in_project(wdir):
+            check(
+                "the project" if wdir == "." else f"subproject '{wdir}'",
+                ck_info=info,
+            )
     # Which stages are out of date is asked as 'calkit status' asks it,
     # which doesn't check the environments of stages whose requirements
     # aren't met, so nothing here can change the answer
     stale: set[str] | None = None
     if stale_only:
+        if problems:
+            raise_error(
+                "This machine doesn't meet these requirements:\n"
+                + "\n".join(f"  {p}" for p in problems)
+            )
         status = calkit.pipeline.get_status()
         if status.errors or status.failed_environment_checks:
             raise_error(
@@ -1757,15 +1794,8 @@ def check_project_requirements(
                 )
             )
         stale = {name.split("@")[0] for name in status.stale_stage_names}
-    # Each requirement is checked once, however many declare it
-    checked: dict[str, str | None] = {}
-    problems: list[str] = []
-    for wdir, info in calkit.iter_projects():
+    for wdir, info in projects:
         with calkit.in_project(wdir):
-            check(
-                "the project" if wdir == "." else f"subproject '{wdir}'",
-                ck_info=info,
-            )
             try:
                 info = calkit.markdown.expand_ck_info(info).ck_info
             except Exception as e:
@@ -1775,22 +1805,11 @@ def check_project_requirements(
                 )
             envs = info.get("environments") or {}
             stages = (info.get("pipeline") or {}).get("stages") or {}
-            # The environments to check, and the stages, with any of their
+            # The environments to check, i.e., those the stages use, with
+            # what a switch picks here, and the stages, with any of their
             # environments that's another machine
             env_names: list[str] = []
             remote_env_by_stage: dict[str, str | None] = {}
-            if stale is None:
-                for name, env in envs.items():
-                    if not isinstance(env, dict):
-                        continue
-                    env_names.append(name)
-                    # A switch's option defined in place is named for where
-                    # it is
-                    for n, option in enumerate(env.get("switch") or [], 1):
-                        if isinstance(option, dict) and isinstance(
-                            option.get("use"), dict
-                        ):
-                            env_names.append(f"{name}.{n}")
             for name, stage in stages.items():
                 qualified = calkit.qualify_with_project(wdir, name)
                 if not isinstance(stage, dict) or (
@@ -1801,18 +1820,9 @@ def check_project_requirements(
                 for env_name in str(stage.get("environment") or "").split(
                     envs_mod.COMPOSITE_ENV_SEP
                 ):
-                    env = envs.get(env_name)
-                    if env is None:
-                        continue
-                    used.append(env_name)
-                    if env.get("kind") == envs_mod.SWITCH_KIND:
-                        try:
-                            picked = envs_mod.resolve_switch(env_name, envs)
-                        except ValueError as e:
-                            problems.append(f"stage '{qualified}': {e}")
-                            continue
-                        if picked is not None:
-                            used.append(picked)
+                    used += add_env(
+                        env_name, envs, env_names, f"stage '{qualified}'"
+                    )
                 remote_env_names = [
                     n
                     for n in used
@@ -1821,8 +1831,31 @@ def check_project_requirements(
                 remote_env_by_stage[name] = (
                     remote_env_names[0] if remote_env_names else None
                 )
-                if stale is not None:
-                    env_names += [n for n in used if n not in env_names]
+            # Without --stale, those no stage uses too, except a switch's
+            # options it doesn't pick here, which nothing needs
+            if stale is None:
+                options: set[str] = set()
+                for env_name, env in envs.items():
+                    if (
+                        isinstance(env, dict)
+                        and env.get("kind") == envs_mod.SWITCH_KIND
+                    ):
+                        try:
+                            options.update(
+                                envs_mod.get_switch_options(env_name, envs)
+                            )
+                        except ValueError:
+                            # Said when what it picks is resolved
+                            pass
+                for env_name in envs:
+                    if env_name not in options:
+                        add_env(
+                            env_name,
+                            envs,
+                            env_names,
+                            "environment "
+                            f"'{calkit.qualify_with_project(wdir, env_name)}'",
+                        )
             for env_name in env_names:
                 env = envs_mod.get_env(env_name, envs) or {}
                 if not env.get("requirements"):

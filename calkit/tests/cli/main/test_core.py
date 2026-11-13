@@ -3672,6 +3672,7 @@ def test_run_skips_stages_that_cant_run_here(tmp_dir):
                     "kind": "shell-command",
                     "command": "printenv CK_TEST_TOKEN > data.txt",
                     "environment": "lab",
+                    "inputs": [{"kind": "env-var", "name": "CK_TEST_TOKEN"}],
                     "outputs": [{"path": "data.txt", "storage": "git"}],
                 },
                 "use": {
@@ -3842,6 +3843,7 @@ def test_run_offers_requirements_of_stages_that_would_run(
                     "kind": "shell-command",
                     "command": "printenv CK_TEST_TOKEN > data.txt",
                     "environment": "lab",
+                    "inputs": [{"kind": "env-var", "name": "CK_TEST_TOKEN"}],
                     "outputs": [{"path": "data.txt", "storage": "git"}],
                 },
                 # Shares the requirement, through its own list
@@ -3915,6 +3917,11 @@ def test_run_offers_requirements_of_stages_that_would_run(
     ]:
         with open(path) as f:
             assert f.read().strip() == value
+    # What's entered is in the stage's inputs as it ran, so it's up to date
+    out = subprocess.check_output(
+        ["calkit", "status"], text=True, stdin=subprocess.DEVNULL
+    )
+    assert "Pipeline is up to date" in out, out
     # Declining skips them, as without a terminal, and asking for one by
     # name, or for all with --strict, still fails
     os.remove(".env")
@@ -3946,6 +3953,65 @@ def test_run_offers_requirements_of_stages_that_would_run(
         "'calkit check reqs --stale' offers to install or set up what's "
         "missing"
     ) in out
+    # With --single-item, a stage before the one named that's out of date
+    # won't run, so doesn't put it out of date
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    monkeypatch.delenv("CK_TEST_REPORT", raising=False)
+    res = runner.invoke(
+        calkit_app, ["run", "--single-item", "report"], input="\n"
+    )
+    assert res.exit_code == 0, res.output
+    assert "CK_TEST_REPORT" not in res.output
+    # A stage waiting on one whose requirements were declined isn't asked
+    # about or run, even with its own met
+    monkeypatch.setenv("CK_TEST_TOKEN", "third")
+    monkeypatch.setenv("CK_TEST_REPORT", "r")
+    with open("calkit.yaml") as f:
+        info = calkit.ryaml.load(f)
+    for name, extra in [
+        ("up", {}),
+        ("down", {"inputs": ["up.txt"]}),
+    ]:
+        info["pipeline"]["stages"][name] = {
+            "kind": "shell-command",
+            "command": f"echo {name} > {name}.txt",
+            "environment": "_system",
+            "requirements": [
+                {"kind": "env-var", "name": f"CK_TEST_{name.upper()}"}
+            ],
+            "outputs": [{"path": f"{name}.txt", "storage": "git"}],
+        } | extra
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(info, f)
+    monkeypatch.setenv("CK_TEST_DOWN", "d")
+    monkeypatch.delenv("CK_TEST_DOWN")
+    res = runner.invoke(calkit_app, ["run"], input="\nd\n")
+    assert res.exit_code == 0, res.output
+    assert "Missing env var 'CK_TEST_UP'" in res.output
+    assert "Missing env var 'CK_TEST_DOWN'" not in res.output
+    assert not os.path.exists("down.txt")
+    # A Markdown stage named with --single-item is offered as its blocks
+    with open("doc.md", "w") as f:
+        f.write(
+            "```sh calkit stage name=one environment=_system "
+            "requirements=[{kind: env-var, name: CK_TEST_DOC}] "
+            "outputs=[{path: one.txt, storage: git}]\n"
+            "printenv CK_TEST_DOC > one.txt\n"
+            "```\n"
+        )
+    info["pipeline"]["stages"]["doc"] = {
+        "kind": "markdown",
+        "target_path": "doc.md",
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(info, f)
+    res = runner.invoke(
+        calkit_app, ["run", "--single-item", "doc"], input="docs\n"
+    )
+    assert res.exit_code == 0, res.output
+    assert "Missing env var 'CK_TEST_DOC'" in res.output
+    with open("one.txt") as f:
+        assert f.read().strip() == "docs"
 
 
 def test_run_reruns_when_an_env_var_input_changes(tmp_dir):

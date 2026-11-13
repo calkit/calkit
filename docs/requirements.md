@@ -220,7 +220,8 @@ as does running without a terminal, e.g., in CI.
 
 `calkit check reqs` checks everything a machine needs to run the whole
 project: the project's requirements, and those of every stage and
-environment, reporting each one that isn't met by where it's declared.
+environment, except a switch's options it doesn't pick here,
+reporting each one that isn't met by where it's declared.
 With `--stale`, it only checks what `calkit run` needs now:
 the project's requirements, and those of the stages `calkit status`
 lists as out of date and of their environments.

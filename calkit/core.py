@@ -1518,9 +1518,16 @@ def get_version_checked_app_names(
     return list(dict.fromkeys(names))
 
 
-def get_requirement_key(req: Any) -> str:
-    """Identify a requirement however it's written, e.g., to cache its check."""
-    return json.dumps(_normalize_requirement(req), sort_keys=True, default=str)
+def get_requirement_key(req: Any, wdir: str | None = None) -> str:
+    """Identify a requirement however it's written, e.g., to cache its check.
+
+    One checked by running something in the project, e.g., a setup step's
+    ``check_command``, is identified by that project's directory too.
+    """
+    normalized = _normalize_requirement(req)
+    if normalized["kind"] in ("setup", "aws-credentials"):
+        normalized = normalized | {"_wdir": os.path.abspath(wdir or ".")}
+    return json.dumps(normalized, sort_keys=True, default=str)
 
 
 def check_requirements(
@@ -1543,7 +1550,9 @@ def check_requirements(
     With ``checked``, each requirement is checked once across calls: its
     outcome, None or what's wrong, is kept there under
     :func:`get_requirement_key` and reused, so one many stages share is only
-    asked about once.
+    asked about once. Every requirement of a kind is then checked, and what
+    isn't met reported together, but not those of later kinds, which may
+    depend on them.
 
     ``setup`` requirements are verified via
     :func:`calkit.requirements.check_setup_dep`, which runs the
@@ -1611,8 +1620,9 @@ def check_requirements(
             "setup",
             "aws-credentials",
         ):
+            problems = []
             for req in buckets.get(bucket, []):
-                key = get_requirement_key(req)
+                key = get_requirement_key(req, wdir=wdir)
                 if key not in checked:
                     try:
                         check_requirements(
@@ -1628,7 +1638,9 @@ def check_requirements(
                         checked[key] = str(e)
                 problem = checked[key]
                 if problem is not None:
-                    raise ValueError(problem)
+                    problems.append(problem)
+            if problems:
+                raise ValueError("; ".join(problems))
         return
     if buckets["_property"]:
         # Read the machine only when something asks about it; describing a

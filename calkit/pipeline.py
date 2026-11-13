@@ -924,11 +924,12 @@ def get_gated_stages(
     checked on another machine, which would take connecting to it. Without
     ``manual``, nobody is there to do a manual step, so those can't run.
 
-    Each stage skipped for requirements this machine doesn't meet is added
-    to ``requirements_by_stage`` with its own and its environments'
-    requirements, which may be offered later, e.g., by ``calkit run`` for a
-    stage it would run. Each stage skipped for an output a skipped stage
-    hasn't made is added to ``blocked_by`` with those stages.
+    Each stage skipped only for requirements this machine doesn't meet,
+    i.e., not also for a machine lock, is added to ``requirements_by_stage``
+    with its own and its environments' requirements, which may be offered
+    later, e.g., by ``calkit run`` for a stage it would run. Each of those,
+    and each stage skipped for an output a skipped stage hasn't made, that
+    needs such an output is added to ``blocked_by`` with those stages.
     """
     import contextlib
     import json
@@ -1179,6 +1180,8 @@ def get_gated_stages(
             machine_name, machine = env_name, env
         if machine_name is not None and not remote and reason is None:
             continue
+        # Requirements that, once met here, would let the stage run
+        unmet = None
         if reason is None:
             requirements = list(stage.get("requirements") or [])
             for _, env in resolved:
@@ -1189,13 +1192,8 @@ def get_gated_stages(
                     requirements, machine_name, machine
                 ),
             )
-            if (
-                reason is not None
-                and not is_error
-                and machine_name is None
-                and requirements_by_stage is not None
-            ):
-                requirements_by_stage[name] = requirements
+            if reason is not None and not is_error and machine_name is None:
+                unmet = requirements
             # A machine that is only described here could run its stages
             # from here if Calkit knew how to reach it
             local_machines = [
@@ -1226,23 +1224,32 @@ def get_gated_stages(
                     f"; giving environment '{local_machines[0]}' a 'host' "
                     "would let its stages run there from here over SSH"
                 )
-        if reason is None:
+        # Locks are checked for a stage that only lacks requirements too,
+        # since meeting them wouldn't let it run if a lock rules it out
+        wants_unmet = unmet is not None and requirements_by_stage is not None
+        if reason is None or wants_unmet:
             locks = [
                 (n, env, n, env)
                 for n, env in resolved
                 if env.get("kind") == "system"
             ] + switch_locks
             for lock_name, lock_env, m_name, m_env in locks:
-                reason, is_error = check(
+                lock_reason, lock_is_error = check(
                     ["lock", lock_name],
                     lambda: lock_problem(lock_name, lock_env, m_name, m_env),
                 )
-                if reason is not None:
+                if lock_reason is not None:
+                    unmet = None
+                    if reason is None:
+                        reason, is_error = lock_reason, lock_is_error
                     break
+        if unmet is not None and requirements_by_stage is not None:
+            requirements_by_stage[name] = unmet
         if reason is not None:
             (errors if is_error else gated)[name] = reason
     # A stage that needs an output a skipped stage hasn't made can't run
     # either, and nor can the stages after it
+    waiting: set[str] = set()
     added = True
     while added:
         added = False
@@ -1258,14 +1265,23 @@ def get_gated_stages(
             if not found:
                 continue
             upstream, output = found[0]
-            if blocked_by is not None:
-                blocked_by[name] = {u for u, _ in found}
+            waiting.add(name)
             (errors if upstream in errors else gated)[name] = (
                 f"it needs '{output}' from stage '{upstream}', which "
                 "can't run here and hasn't made it; if it was made "
                 "elsewhere, 'calkit pull' gets it"
             )
             added = True
+    # What each is waiting on, once every skipped stage is known, including
+    # those offered their requirements, which need these too
+    if blocked_by is not None:
+        offered = {n for n in requirements_by_stage or {} if n in gated}
+        for name in waiting | offered:
+            upstream_names = {
+                u for u, _ in get_missing_outputs(stages[name]) if u != name
+            }
+            if upstream_names:
+                blocked_by[name] = upstream_names
     return gated, errors
 
 
@@ -3443,12 +3459,13 @@ def get_stages_to_gate(targets: list[str] | None) -> set[str] | None:
 
 
 def get_stages_that_would_run(
-    stage_names: Iterable[str], force: bool = False
+    stage_names: Iterable[str], force: bool = False, single_item: bool = False
 ) -> set[str]:
     """Of these stages, the ones a run would reproduce, by name.
 
     That's every one with ``force``, or else those out of date, or after
-    one that is, since a stage that runs may change what they read.
+    one that is, since a stage that runs may change what they read, unless
+    ``single_item`` says the stages before them won't run.
     """
     from dvc.exceptions import DvcException
 
@@ -3462,13 +3479,13 @@ def get_stages_that_would_run(
     upstream = {}
     for name in stage_names:
         try:
-            stages = repo.stage.collect(name, with_deps=True)
+            stages = repo.stage.collect(name, with_deps=not single_item)
         except DvcException:
             continue
         upstream[name] = {s.addressing for s in stages}
     if not upstream:
         return set()
-    stale = set(repo.status(targets=list(upstream), with_deps=True))
+    stale = set(repo.status(targets=list(upstream), with_deps=not single_item))
     return {name for name, found in upstream.items() if found & stale}
 
 

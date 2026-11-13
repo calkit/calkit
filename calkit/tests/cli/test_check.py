@@ -205,7 +205,7 @@ def test_check_env_vars(tmp_dir):
         )
 
 
-def test_check_reqs(tmp_dir: Path) -> None:
+def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     subprocess.check_call(["calkit", "init"])
 
     def env_var(name: str) -> dict:
@@ -327,6 +327,71 @@ def test_check_reqs(tmp_dir: Path) -> None:
     assert res.returncode != 0
     assert "stage 'sub:s': env-var 'CK_SUB' not found" in res.stderr
     assert check(env=every | {"CK_SUB": "s"}).returncode == 0
+    # Each unmet requirement of a declaration is reported, and a switch's
+    # option it doesn't pick here isn't checked
+    ck_info["pipeline"]["stages"]["b"]["requirements"].append(env_var("CK_B2"))
+    ck_info["environments"]["pick"] = {
+        "kind": "switch",
+        "switch": [
+            {
+                "when": [{"env_var_set": "CK_NOT_SET"}],
+                "use": {
+                    "kind": "system",
+                    "requirements": [env_var("CK_UNPICKED")],
+                },
+            },
+            {"use": "lab"},
+        ],
+    }
+    ck_info["pipeline"]["stages"]["a"]["environment"] = "pick"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = check(env={k: v for k, v in every.items() if k != "CK_B"})
+    assert res.returncode != 0
+    assert (
+        "stage 'b': env-var 'CK_B' not found; env-var 'CK_B2' not found"
+    ) in res.stderr
+    assert "CK_UNPICKED" not in res.stdout + res.stderr
+    assert "CK_LAB" not in res.stderr
+    # A setup step is checked in each project that declares it
+    exists = (
+        f'"{sys.executable}" -c '
+        "\"import os, sys; sys.exit(not os.path.exists('ready'))\""
+    )
+    ready = {"kind": "setup", "name": "ready", "check_command": exists}
+    ck_info["requirements"].append(ready)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open(os.path.join("sub", "calkit.yaml")) as f:
+        sub_info = calkit.ryaml.load(f)
+    sub_info["requirements"] = [ready]
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(sub_info, f)
+    with open("ready", "w") as f:
+        f.write("")
+    every = every | {"CK_SUB": "s", "CK_B2": "b"}
+    res = check(env=every)
+    assert res.returncode != 0
+    assert "subproject 'sub': setup requirement 'ready'" in res.stderr
+    assert "the project:" not in res.stderr
+    with open(os.path.join("sub", "ready"), "w") as f:
+        f.write("")
+    assert check(env=every).returncode == 0, check(env=every).stderr
+    # With --stale, the projects' own are checked before what's out of date
+    # is, which checks environments that may need them
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app as calkit_app
+
+    def fail_status(*args: object, **kwargs: object) -> None:
+        raise AssertionError("status asked before project requirements")
+
+    monkeypatch.setattr(calkit.pipeline, "get_status", fail_status)
+    monkeypatch.delenv("CK_PROJECT", raising=False)
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs", "--stale"])
+    assert result.exit_code != 0
+    assert "the project: env-var 'CK_PROJECT' not found" in result.output
 
 
 @pytest.mark.skipif(

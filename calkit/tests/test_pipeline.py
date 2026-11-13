@@ -4764,6 +4764,56 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         "after-that": {"uses-cluster"},
         "uses-far": {"far-away"},
     }
+    # One locked to another machine isn't offered its requirements, since
+    # meeting them wouldn't let it run, and what each waits on is known
+    # once every skipped stage is, including one offered its requirements
+    token = {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+
+    def make_stage(env: str, **kwargs: object) -> dict:
+        return (
+            {"kind": "shell-command", "command": "true"}
+            | {"environment": env}
+            | kwargs
+        )
+
+    by_requirements, blocked_by = {}, {}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        {
+            "environments": ck_info["environments"],
+            "pipeline": {
+                "stages": {
+                    "pinned-token": make_stage("pinned", requirements=[token]),
+                    "lab-maker": make_stage("lab", outputs=["lab.txt"]),
+                    "needs-two": make_stage(
+                        "here", inputs=["lab.txt", "late.txt"]
+                    ),
+                    "token-after": make_stage(
+                        "here", requirements=[token], inputs=["lab.txt"]
+                    ),
+                    "late": make_stage(
+                        "here", inputs=["lab.txt"], outputs=["late.txt"]
+                    ),
+                }
+            },
+        },
+        interactive=False,
+        requirements_by_stage=by_requirements,
+        blocked_by=blocked_by,
+    )
+    assert set(gated) == {
+        "pinned-token",
+        "lab-maker",
+        "needs-two",
+        "token-after",
+        "late",
+    }
+    assert "CK_TEST_TOKEN" in gated["pinned-token"]
+    assert set(by_requirements) == {"lab-maker", "token-after"}
+    assert blocked_by == {
+        "needs-two": {"lab-maker", "late"},
+        "token-after": {"lab-maker"},
+        "late": {"lab-maker"},
+    }
     # Meeting the requirement lets the stages run
     monkeypatch.setenv("CK_TEST_TOKEN", "x")
     monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")

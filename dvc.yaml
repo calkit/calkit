@@ -1,67 +1,32 @@
 stages:
-  test:
-    foreach:
-      word-asdf:
-        engine: word
-        engine_cmd: asdf
-    do:
-      cmd: calkit xenv -n dev --no-check -- bash --noprofile --norc -c "echo
-        \"${item.engine} can be tested with ${item.engine_cmd}\""
-      deps:
-        - uv.lock
-        - .python-version
-      outs: []
-      desc: Automatically generated from the 'test' stage in calkit.yaml.
-        Changes made here will be overwritten.
-  my-iter-stage:
-    foreach:
-      some-model-5:
-        var1: some-model
-        var2: 5
-      some-other-model-7:
-        var1: some-other-model
-        var2: 7
-    do:
-      cmd: calkit xenv -n dev --no-check -- python scripts/my-script.py
-        ${item.var1} ${item.var2}
-      deps:
-        - scripts/my-script.py
-        - data/raw
-        - uv.lock
-        - .python-version
-      outs:
-        - models/${item.var1}-${item.var2}.h5
-      desc: Automatically generated from the 'my-iter-stage' stage in
-        calkit.yaml. Changes made here will be overwritten.
   latex-word-round-trip:
-    foreach:
-      word-asdf:
-        engine: word
-        engine_cmd: asdf
-    do:
-      cmd: calkit xenv -n dev --no-check -- python
-        scripts/latex-word-round-trip.py --engine=${item.engine}
-      deps:
-        - scripts/latex-word-round-trip.py
-        - calkit/cli/latex.py
-        - calkit/docx.py
-        - calkit/latex.py
-        - examples/latex-word/calkit.yaml
-        - examples/latex-word/paper/main.tex
-        - examples/latex-word/paper/methods.tex
-        - examples/latex-word/paper/refs.bib
-        - examples/latex-word/scripts/plot-wake.py
-        - uv.lock
-        - .python-version
-      outs:
-        - results/latex-word-round-trip/${item.engine}/original.pdf
-        - results/latex-word-round-trip/${item.engine}/review.docx
-        - results/latex-word-round-trip/${item.engine}/rebuilt.pdf
-        - results/latex-word-round-trip-${item.engine}.json:
-            cache: false
-            persist: false
-      desc: Automatically generated from the 'latex-word-round-trip' stage in
-        calkit.yaml. Changes made here will be overwritten.
+    cmd: calkit xenv -n dev --no-check -- python
+      scripts/latex-word-round-trip.py --engine=${item.engine}
+    deps:
+      - scripts/latex-word-round-trip.py
+      - calkit/cli/latex.py
+      - calkit/docx.py
+      - calkit/latex.py
+      - examples/latex-word/calkit.yaml
+      - examples/latex-word/paper/main.tex
+      - examples/latex-word/paper/methods.tex
+      - examples/latex-word/paper/refs.bib
+      - examples/latex-word/scripts/plot-wake.py
+      - uv.lock
+      - .python-version
+    outs:
+      - results/latex-word-round-trip/${item.engine}/original.pdf
+      - results/latex-word-round-trip/${item.engine}/review.docx
+      - results/latex-word-round-trip/${item.engine}/rebuilt.pdf
+      - results/latex-word-round-trip-${item.engine}.json:
+          cache: false
+          persist: false
+    matrix:
+      engine:
+        - word
+        - libreoffice
+    desc: Automatically generated from the 'latex-word-round-trip' stage in
+      calkit.yaml. Changes made here will be overwritten.
   latex-word-round-trip-figure:
     cmd: calkit xenv -n dev --no-check -- python
       scripts/plot-latex-word-round-trip.py

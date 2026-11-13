@@ -2229,7 +2229,8 @@ def get_pipeline_env_names(
     items: dict[str, dict] = {}
     for name, stage in stages.items():
         items |= get_stage_items(name, stage, params=ck_info.get("parameters"))
-    # Stages that can't run here don't need their environments
+    # Stages that can't run here don't need their environments, so nor do
+    # those whose items are all skipped
     skip = set(skip_stages or [])
     stages = {
         k: v

@@ -1107,7 +1107,9 @@ def test_git_outputs_with_ignored_files(
     # What 'ignore' leaves out isn't part of the output, so a clone has
     # everything that is
     clone_dir = str(tmp_path_factory.mktemp("clone"))
-    git("clone", "-q", ".", clone_dir)
+    # Without converting line endings, which Windows runners do by default,
+    # and which a project settles for itself
+    git("clone", "-q", "-c", "core.autocrlf=false", ".", clone_dir)
     result = subprocess.run(
         ["dvc", "status", "rebuild"],
         cwd=clone_dir,

@@ -1613,17 +1613,27 @@ def check_requirements(
 
         setup_command = req.get("setup_command")
         description = (req.get("description") or "").strip()
-        entry: _install.Installer | None = (
-            {"script": setup_command, "path_add": []}
-            if setup_command
-            else _install.get_installer(req_name)
-        )
-        if entry is not None:
+        registered = _install.get_installer(req_name)
+        # Only the project's own command is an override; the registered
+        # installer goes through by name, so declining it points at
+        # 'calkit install' rather than its raw script
+        override: _install.Installer | None = None
+        if setup_command:
+            override = {"script": setup_command, "path_add": []}
+            if registered is not None:
+                # The app tends to land in the same place however it's
+                # installed, e.g., ~/.local/bin, so keep where to look for
+                # it, but not the registry's prerequisites, which the
+                # project's command may not need
+                override["path_add"] = registered["path_add"]
+                if "binary" in registered:
+                    override["binary"] = registered["binary"]
+        if override is not None or registered is not None:
             print(f"App '{req_name}' is not installed.")
             if description and interactive:
                 print(f"  {description}")
             if _install.prompt_and_install(
-                req_name, interactive=interactive, entry=entry
+                req_name, interactive=interactive, entry=override
             ) and check_dep_exists(req_name, "app", system_info=system_info):
                 if spec:
                     check_app_version(

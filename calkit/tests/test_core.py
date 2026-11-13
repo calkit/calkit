@@ -490,6 +490,50 @@ def test_check_requirements_offers_an_apps_setup_command(
     assert str(e.value).endswith("\n  VMs")
 
 
+def test_check_requirements_setup_command_with_registered_installer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    # Where the registered installer puts the app, which isn't on PATH yet,
+    # as ~/.local/bin isn't on a fresh machine
+    hidden = tmp_path / "hidden"
+    hidden.mkdir()
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}/usr/bin:/bin")
+    monkeypatch.setattr(
+        "calkit.install.get_install_log_path",
+        lambda: str(tmp_path / "installed.json"),
+    )
+    registered: dict = {"script": "exit 1", "path_add": str(hidden)}
+    monkeypatch.setattr(
+        "calkit.install.get_installer",
+        lambda app: registered if app == "calkit-fake-app" else None,
+    )
+    # Declining the registered installer points at it by name, which is
+    # what handles its prerequisites and records the install
+    req = {"kind": "app", "name": "calkit-fake-app"}
+    with (
+        mock.patch("builtins.input", return_value="n"),
+        pytest.raises(ValueError, match="not found on this machine"),
+    ):
+        calkit.check_requirements(requirements=[req], interactive=True)
+    out = capsys.readouterr().out
+    assert "Skipped. Run 'calkit install calkit-fake-app'" in out
+    # The project's own command keeps where the registry says the app
+    # lands, so installing it there is found, but not the registry's
+    # prerequisites, which its command may not need
+    registered["requires"] = ["calkit-missing-prereq"]
+    exe = hidden / "calkit-fake-app"
+    req["setup_command"] = f"printf '#!/bin/sh\\n' > {exe} && chmod +x {exe}"
+    with mock.patch("builtins.input", return_value="y") as answer:
+        calkit.check_requirements(requirements=[req], interactive=True)
+    assert answer.call_count == 1
+    assert exe.exists()
+    assert "calkit-missing-prereq" not in capsys.readouterr().out
+
+
 def test_check_app_version():
     from calkit.core import check_app_version, extract_version
 

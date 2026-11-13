@@ -1658,6 +1658,7 @@ finally {
                         input=POWERSHELL_SCRIPT.replace("\n", "\r\n")
                         + "\r\n",  # windows line endings
                         env=env,
+                        timeout=60, # timeout in case of Word dialog not OK'd
                     )
                 except subprocess.CalledProcessError as e:
                     details = "\n".join(

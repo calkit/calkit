@@ -3926,6 +3926,102 @@ def test_run_reruns_once_per_schedule_period(tmp_dir):
         assert f.read().split() == ["2026-10-20", "2026-10-21"]
 
 
+def test_run_date_range_periods(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    state = ".calkit/date-ranges/fetch/{q}"
+    quarters = {"kind": "date-range", "start": "2026Q3", "step": "1 quarter"}
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                # Fingerprints the source, which reruns only the quarters
+                # whose fingerprint changed
+                "probe": {
+                    "kind": "shell-command",
+                    "command": f"cp src/{{q}}.txt {state}/listing.txt",
+                    "environment": "_system",
+                    "iterate_over": [{"arg_name": "q", "values": [quarters]}],
+                    "inputs": ["src"],
+                    "outputs": [
+                        {"path": f"{state}/listing.txt", "storage": "git"}
+                    ],
+                },
+                "fetch": {
+                    "kind": "shell-command",
+                    "command": f"cp {state}/period.json out-{{q}}.json && "
+                    "echo {q} >> runs.txt",
+                    "environment": "_system",
+                    "iterate_over": [
+                        {
+                            "arg_name": "q",
+                            "values": [quarters | {"state_storage": "git"}],
+                        }
+                    ],
+                    # runs.txt only records which items ran, so isn't an output
+                    "outputs": [{"path": "out-{q}.json", "storage": "git"}],
+                },
+                # Has no items until its range has a full day
+                "later": {
+                    "kind": "shell-command",
+                    "command": "echo later-{q} | tee -a runs.txt > later-{q}.txt",
+                    "environment": "_system",
+                    "iterate_over": [
+                        {
+                            "arg_name": "q",
+                            "values": [
+                                quarters
+                                | {"start": "2026-11-25", "step": "1 month"}
+                            ],
+                        }
+                    ],
+                    "outputs": [{"path": "later-{q}.txt", "storage": "git"}],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    os.makedirs("src")
+    for q in ["2026Q3", "2026Q4", "2027Q1"]:
+        with open(f"src/{q}.txt", "w") as f:
+            f.write("a\n")
+    env = dict(os.environ) | {"CALKIT_NOW": "2026-11-10T08:00:00Z"}
+
+    def run(now: str) -> list[str]:
+        env["CALKIT_NOW"] = now
+        subprocess.check_call(["calkit", "run"], env=env)
+        if not os.path.exists("runs.txt"):
+            return []
+        with open("runs.txt") as f:
+            runs = f.read().split()
+        os.remove("runs.txt")
+        return runs
+
+    assert run("2026-11-10T08:00:00Z") == ["2026Q3", "2026Q4"]
+    with open("out-2026Q4.json") as f:
+        assert json.load(f)["through"] == "2026-11-09"
+    with open("dvc.yaml") as f:
+        deps = yaml.safe_load(f)["stages"]["fetch"]["deps"]
+    assert deps == [".calkit/date-ranges/fetch/${item.q}"]
+    # A preview compile writes no state, since it can be committed
+    shutil.rmtree(".calkit/date-ranges")
+    calkit.pipeline.to_dvc(write=True)
+    assert not os.path.exists(".calkit/date-ranges")
+    subprocess.check_call(["calkit", "status"], env=env)
+    assert os.path.isfile(".calkit/date-ranges/fetch/2026Q4/period.json")
+    # Only the open quarter goes out of date the next day
+    assert run("2026-11-11T08:00:00Z") == ["2026Q4"]
+    # A closed quarter reruns when its fingerprint changes
+    with open("src/2026Q3.txt", "w") as f:
+        f.write("b\n")
+    assert run("2026-11-11T09:00:00Z") == ["2026Q3"]
+    assert sorted(run("2026-11-26T08:00:00Z")) == ["2026Q4", "later-2026-11"]
+    # A quarter is added once it has a full day, the day the last closes
+    assert sorted(run("2027-01-01T08:00:00Z")) == ["2026Q4", "later-2026-12"]
+    assert sorted(run("2027-01-02T08:00:00Z")) == ["2027Q1", "later-2027-01"]
+    with open("out-2026Q4.json") as f:
+        assert json.load(f)["through"] == "2026-12-31"
+
+
 def test_merge(tmp_dir):
     def write(path: str, text: str) -> None:
         with open(path, "w") as f:

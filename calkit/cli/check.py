@@ -2118,14 +2118,21 @@ def check_storage(
     to_record = []
     for problem in problems:
         path = os.path.abspath(problem["path"])
-        if problem["store_in"] == "dvc":
+        if problem["kind"] == "excluded-tracked":
+            # Left out of the output, so stored in neither, as declared
+            calkit.dvc.untrack_files(repo, problem["files"])
+        elif problem["store_in"] == "dvc":
             # Only those in both, if a directory has others only in Git
             to_untrack = [
                 os.path.abspath(p) for p in problem.get("files", [])
             ] or [path]
             for i in range(0, len(to_untrack), 100):
                 repo.git.rm(
-                    "-r", "-q", "--cached", "--", *to_untrack[i : i + 100]
+                    "-r",
+                    "-q",
+                    "--cached",
+                    "--",
+                    *[f":(literal){p}" for p in to_untrack[i : i + 100]],
                 )
             calkit.git.ensure_path_is_ignored(repo, path)
             if problem["kind"] == "both":

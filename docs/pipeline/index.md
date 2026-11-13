@@ -124,7 +124,9 @@ outputs:
 ```
 
 Changing `ignore` changes what counts as the output,
-so its stage will run again.
+so its stage will run again,
+and files Git already has that it now leaves out
+are removed from Git, but kept on disk.
 
 `calkit status` and `calkit check storage` list files in outputs
 that are stored nowhere,

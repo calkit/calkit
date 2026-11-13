@@ -574,15 +574,22 @@ def ensure_path_is_not_ignored(
     return True
 
 
-def get_dirty_gitignores(repo: git.Repo) -> dict[str, str]:
-    """Each .gitignore with changes not yet committed, relative to the repo
-    root, and what it holds.
+def get_dirty_gitignores(
+    repo: git.Repo, fnames: tuple[str, ...] = (".gitignore",)
+) -> dict[str, str]:
+    """Each .gitignore, or file named one of ``fnames``, with changes not yet
+    committed, relative to the repo root, and what it holds.
     """
-    status = repo.git.status("--porcelain", "--untracked-files=all")
+    status = repo.git.status(
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        *[f":(top,glob)**/{fname}" for fname in fnames],
+    )
     dirty = {}
     for line in status.splitlines():
         path = line[3:].strip('"')
-        if path.endswith(".gitignore"):
+        if path.rsplit("/", 1)[-1] in fnames:
             fpath = os.path.join(repo.working_dir, path)
             exists = os.path.isfile(fpath)
             dirty[path] = open(fpath).read() if exists else ""
@@ -590,17 +597,19 @@ def get_dirty_gitignores(repo: git.Repo) -> dict[str, str]:
 
 
 def stage_gitignores(
-    repo: git.Repo, dirty_before: dict[str, str]
+    repo: git.Repo,
+    dirty_before: dict[str, str],
+    fnames: tuple[str, ...] = (".gitignore",),
 ) -> list[str]:
-    """Stage each .gitignore changed since ``dirty_before`` was taken with
-    ``get_dirty_gitignores``.
+    """Stage each .gitignore, or file named one of ``fnames``, changed since
+    ``dirty_before`` was taken with ``get_dirty_gitignores``.
 
     One that already had changes isn't staged, since that would commit
     them too, though DVC may have staged it already if it autostages.
     Returns a warning for each that couldn't be staged cleanly.
     """
     messages = []
-    for gitignore, text in sorted(get_dirty_gitignores(repo).items()):
+    for gitignore, text in sorted(get_dirty_gitignores(repo, fnames).items()):
         if gitignore in dirty_before:
             if text == dirty_before[gitignore]:
                 continue

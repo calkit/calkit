@@ -2188,6 +2188,20 @@ def test_check_storage(tmp_dir):
     assert git("ls-files", "--", "dir").split() == ["dir/t.tmp"]
     result = check()
     assert result.returncode == 0, result.stdout
+    # A file an output's 'ignore' leaves out, but Git still tracks, is
+    # removed from Git
+    ck_info["pipeline"]["stages"]["whole"]["outputs"][0]["ignore"] = ["*.log"]
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "status"], stdout=subprocess.DEVNULL)
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "excluded-tracked"
+    assert problem["files"] == ["whole/run.log"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "whole").split() == ["whole/w.txt"]
+    assert os.path.isfile("whole/run.log")
+    result = check()
+    assert result.returncode == 0, result.stdout
 
 
 def test_check_references(tmp_dir):

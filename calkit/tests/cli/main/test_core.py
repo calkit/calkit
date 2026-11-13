@@ -1097,8 +1097,10 @@ def test_git_outputs_with_ignored_files(
         assert f"runs/{agent}/write.log" in staged
         assert f"runs/{agent}/x.bak" not in staged
         assert f"runs/{agent}/__pycache__/c.pyc" not in staged
-    # With what .dvcignore leaves out, which dvc.lock's hashes depend on
+    # With the ignore files compiling and running changed, e.g., what
+    # .dvcignore leaves out, which dvc.lock's hashes depend on
     assert ".dvcignore" in staged
+    assert ".gitignore" in staged
     git("add", "-A")
     git("commit", "-qm", "Run")
     assert get_storage_problems() == []
@@ -1120,11 +1122,21 @@ def test_git_outputs_with_ignored_files(
         "*.txt",
     ]
     calkit.save_calkit_info(ck_info)
-    run("run")
+    # Which takes files it now leaves out out of Git
+    out = run("run")
+    assert (
+        "Removed 2 files from Git that outputs stored in it leave out: "
+        "runs/one/a.txt, runs/two/a.txt"
+    ) in out
     run("save", "runs", "-m", "Ignore text", "--no-push")
     committed = git("show", "--name-only", "--format=", "HEAD").split()
     assert ".dvcignore" in committed
     assert "dvc.lock" in committed
+    assert "runs/one/a.txt" in committed
+    assert not git("ls-files", "--", "runs/one/a.txt").strip()
+    # What else was staged stays staged, and out of the commit
+    assert ".calkit/stage-runs.json" not in committed
+    assert ".calkit/stage-runs.json" in git("diff", "--cached", "--name-only")
     git("add", "-A")
     git("commit", "-qm", "Save the rest")
     # Without autostaging, nothing is staged, so it's only said

@@ -1669,8 +1669,9 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
     except Exception:
         stages = {}
     git_out_paths: dict[str, str] = {}
-    # Iterated stages' path templates as patterns, by stage name
-    templates: dict[str, list[re.Pattern]] = {}
+    # Iterated stages' outputs stored in Git, by their positions among its
+    # DVC outs, by stage name, since their paths are templates
+    iterated: dict[str, list[int]] = {}
     for name, stage in stages.items():
         outs = [o for o in stage.outputs or [] if isinstance(o, PathOutput)]
         if isinstance(stage, JupyterNotebookStage):
@@ -1703,29 +1704,37 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
                     (path, calkit.latex.get_diff_stage_name(name, *pair))
                     for pair, path in zip(stage.diff_pairs, stage.diff_paths)
                 ]
+        if stage.iterate_over:
+            # Matching paths to templates could match another output's
+            try:
+                dvc_out_paths = [
+                    out if isinstance(out, str) else next(iter(out))
+                    for out in stage.to_dvc().get("outs", [])
+                ]
+            except Exception:
+                dvc_out_paths = []
+            template_paths = {posixpath.normpath(p) for p, _ in paths}
+            iterated[name] = [
+                i
+                for i, out_path in enumerate(dvc_out_paths)
+                if posixpath.normpath(out_path) in template_paths
+            ]
+            continue
         for p, stage_name in paths:
             path = Path(os.path.normpath(base / (stage.wdir or "") / p))
-            if stage.iterate_over:
-                # Each {arg} stands for whatever value it takes
-                pattern = re.sub(
-                    r"\\\{[^/]*?\\\}", ".+", re.escape(path.as_posix())
-                )
-                templates.setdefault(name, []).append(re.compile(pattern))
-            else:
-                git_out_paths[path.as_posix()] = stage_name
-    if templates and dvc_repo is not None:
+            git_out_paths[path.as_posix()] = stage_name
+    if any(iterated.values()) and dvc_repo is not None:
         dvc_yaml_path = base / "dvc.yaml"
-        for out in dvc_repo.index.outs:
-            if out.use_cache or out.stage.is_data_source:
+        for dvc_stage in dvc_repo.index.stages:
+            positions = iterated.get(dvc_stage.name.split("@")[0])
+            if not positions:
                 continue
-            patterns = templates.get(out.stage.name.split("@")[0])
-            if not patterns:
+            if Path(dvc_stage.path).resolve() != dvc_yaml_path:
                 continue
-            if Path(out.stage.path).resolve() != dvc_yaml_path:
-                continue
-            posix = Path(out.fs_path).resolve().as_posix()
-            if any(p.fullmatch(posix) for p in patterns):
-                git_out_paths[posix] = out.stage.name
+            for i in positions:
+                if i < len(dvc_stage.outs):
+                    out_path = Path(dvc_stage.outs[i].fs_path).resolve()
+                    git_out_paths[out_path.as_posix()] = dvc_stage.name
     # An inline subproject's stages are run from here, but an isolated one,
     # with its own DVC repo, runs on its own
     for subproject in ck_info.get("subprojects") or []:
@@ -1749,6 +1758,7 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
     ck_info: dict | None = None,
     wdir: str | None = None,
     stages: Container[str] | None = None,
+    tracked: bool = False,
 ) -> list[dict]:
     """Find files in pipeline outputs stored in Git that neither Git nor DVC
     stores.
@@ -1757,6 +1767,8 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
     by the output's ``ignore``, so DVC doesn't hash them either.
     The output is then complete here but not in a clone, where it doesn't
     match dvc.lock, so its stage looks stale.
+    With ``tracked``, they're instead files Git tracks that both ignore, so
+    DVC doesn't hash them, but Git stores them anyway.
 
     Each has the output's ``path``, the ``stage`` that makes it, as DVC
     names it, the ``files``, and the ``rules`` that ignore them, e.g.,
@@ -1777,17 +1789,9 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
     def rel(path: str | Path) -> str:
         return Path(os.path.relpath(path, base)).as_posix()
 
-    def is_dvcignored(path: str) -> bool:
-        if dvc_repo is None:
-            return False
-        # DVC's root may not be resolved, e.g., a temporary directory on
-        # macOS, and it only knows paths under it as it is
-        dvc_root = Path(dvc_repo.root_dir)
-        dvc_path = dvc_root / os.path.relpath(path, dvc_root.resolve())
-        return bool(dvc_repo.dvcignore.is_ignored_file(str(dvc_path)))
-
     unstored: list[dict] = []
-    # Files Git ignores in outputs stored in Git
+    if tracked and dvc_repo is None:
+        return unstored
     git_out_paths = {
         path: stage
         for path, stage in get_git_output_paths(
@@ -1805,31 +1809,51 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
             if out.use_cache
         }
     )
-    files_by_out: dict[str, list[str]] = {}
+    # Whether each path is in an output DVC caches, and the output stored in
+    # Git it's in, if any, worked out with strings and saved per directory,
+    # since an output can have many files
+    containing: dict[str, tuple[bool, str | None]] = {}
+
+    def get_containing(path: str) -> tuple[bool, str | None]:
+        if path not in containing:
+            parent = posixpath.dirname(path)
+            in_cached, out_path = (
+                (False, None) if parent == path else get_containing(parent)
+            )
+            if path in cached_out_paths:
+                in_cached = True
+            if path in git_out_paths:
+                out_path = path
+            containing[path] = (in_cached, out_path)
+        return containing[path]
+
+    # Files Git ignores in outputs stored in Git, with the output of each
+    out_path_by_file: dict[str, str] = {}
+    root_posix = root.as_posix()
     out_paths = list(git_out_paths)
     # Chunked to stay under command line length limits
     for i in range(0, len(out_paths), 100):
         listing = repo.git.ls_files(
             "-z",
-            "--others",
+            "--cached" if tracked else "--others",
             "--ignored",
             "--exclude-standard",
             "--",
-            *out_paths[i : i + 100],
+            *[f":(literal){p}" for p in out_paths[i : i + 100]],
         )
         for git_path in listing.split("\0"):
             if not git_path:
                 continue
-            path = (root / git_path).as_posix()
+            path = posixpath.join(root_posix, git_path)
             # Within its output, or the output itself, if it's a file
-            parents = [path] + [p.as_posix() for p in Path(path).parents]
-            if any(p in cached_out_paths for p in parents):
-                continue
-            if is_dvcignored(path):
-                continue
-            out_path = next((p for p in parents if p in git_out_paths), None)
-            if out_path is not None:
-                files_by_out.setdefault(out_path, []).append(path)
+            in_cached, out_path = get_containing(path)
+            if out_path is not None and not in_cached:
+                out_path_by_file[path] = out_path
+    dvcignored = _get_dvcignored_paths(dvc_repo, list(out_path_by_file))
+    files_by_out: dict[str, list[str]] = {}
+    for path, out_path in out_path_by_file.items():
+        if (path in dvcignored) == tracked:
+            files_by_out.setdefault(out_path, []).append(path)
     if files_by_out:
         # What ignores each, in one call
         all_files = [
@@ -1867,6 +1891,56 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
                 )
             )
     return unstored
+
+
+def _get_dvcignored_paths(  # type: ignore[no-any-unimported]
+    dvc_repo: dvc.repo.Repo | None, paths: list[str]
+) -> set[str]:
+    """Get which of ``paths``, absolute and posix, .dvcignore excludes.
+
+    Checked a directory at a time, since an output can have many.
+    """
+    if dvc_repo is None or not paths:
+        return set()
+    dvcignore = dvc_repo.dvcignore
+    # DVC's root may not be resolved, e.g., a temporary directory on macOS,
+    # and it only knows paths under it as it is
+    dvc_root = Path(dvc_repo.root_dir)
+    dvc_root_resolved = dvc_root.resolve()
+
+    def to_dvc_path(path: str) -> str:
+        return str(dvc_root / os.path.relpath(path, dvc_root_resolved))
+
+    dir_is_ignored: dict[str, bool] = {}
+
+    def is_dir_ignored(dir_path: str) -> bool:
+        # DVC doesn't look inside an excluded directory
+        if dir_path not in dir_is_ignored:
+            path = Path(dir_path)
+            if path == dvc_root_resolved or not path.is_relative_to(
+                dvc_root_resolved
+            ):
+                dir_is_ignored[dir_path] = False
+            else:
+                dir_is_ignored[dir_path] = is_dir_ignored(
+                    path.parent.as_posix()
+                ) or dvcignore.is_ignored_dir(to_dvc_path(dir_path))
+        return dir_is_ignored[dir_path]
+
+    names_by_dir: dict[str, list[str]] = {}
+    for path in paths:
+        names_by_dir.setdefault(posixpath.dirname(path), []).append(
+            posixpath.basename(path)
+        )
+    ignored: set[str] = set()
+    for dir_path, names in names_by_dir.items():
+        if is_dir_ignored(dir_path):
+            excluded = set(names)
+        else:
+            _, kept = dvcignore(to_dvc_path(dir_path), [], list(names))
+            excluded = set(names) - set(kept)
+        ignored.update(posixpath.join(dir_path, name) for name in excluded)
+    return ignored
 
 
 def get_unstored_files_text(files: list[str], rules: list[str]) -> str:
@@ -1908,7 +1982,9 @@ def force_add_ignored_files(
     )
     # Chunked to stay under command line length limits
     for i in range(0, len(to_add), 100):
-        repo.git.add("-f", "--", *to_add[i : i + 100])
+        repo.git.add(
+            "-f", "--", *[f":(literal){p}" for p in to_add[i : i + 100]]
+        )
     return too_large
 
 
@@ -1923,6 +1999,7 @@ def stage_git_outputs(
     staged.
     """
     root = Path(repo.working_dir)
+    literal_paths = [f":(literal){p}" for p in paths]
 
     def list_files(*args: str) -> list[str]:
         # Chunked to stay under command line length limits
@@ -1930,7 +2007,7 @@ def stage_git_outputs(
             p
             for i in range(0, len(paths), 100)
             for p in repo.git.ls_files(
-                "-z", *args, "--", *paths[i : i + 100]
+                "-z", *args, "--", *literal_paths[i : i + 100]
             ).split("\0")
             if p
         ]
@@ -1949,7 +2026,7 @@ def stage_git_outputs(
     )
     excludes = [f":(top,literal,exclude){p}" for p in too_large]
     for i in range(0, len(paths), 100):
-        repo.git.add("-A", "--", *paths[i : i + 100], *excludes)
+        repo.git.add("-A", "--", *literal_paths[i : i + 100], *excludes)
     return too_large
 
 
@@ -1965,6 +2042,19 @@ def _ensure_notebooks_are_not_filtered(
     for path in paths:
         if path.endswith(".ipynb"):
             calkit.git.ensure_path_is_not_filtered(repo, path)
+
+
+def untrack_files(repo: git.Repo, paths: list[str]) -> None:
+    """Remove files from Git, keeping them in the working tree."""
+    abs_paths = [os.path.abspath(p) for p in paths]
+    # Chunked to stay under command line length limits
+    for i in range(0, len(abs_paths), 100):
+        repo.git.rm(
+            "-q",
+            "--cached",
+            "--",
+            *[f":(literal){p}" for p in abs_paths[i : i + 100]],
+        )
 
 
 def get_too_large_text(paths: list[str]) -> str:
@@ -2002,6 +2092,9 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     - ``ignored-files``: a pipeline output stored in Git with ``files`` in
       it that Git ignores, from ``get_unstored_output_files``, so leaving out
       those .dvcignore excludes too.
+    - ``excluded-tracked``: a pipeline output stored in Git with ``files``
+      in it Git still tracks that both it and .dvcignore leave out, e.g., by
+      the output's ``ignore``, so DVC doesn't hash them.
     - ``zipped``: stored zipped with DVC, but tracked by Git too.
     - ``large``: tracked by Git, and larger than ``large_mb``, which is only
       advice; None skips this check.
@@ -2154,6 +2247,29 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
                     ),
                     files=files,
                     rules=unstored["rules"],
+                )
+            )
+        # Files Git stores in outputs stored in Git that DVC doesn't hash
+        for excluded in get_unstored_output_files(
+            dvc_repo=dvc_repo, ck_info=ck_info, wdir=wdir, tracked=True
+        ):
+            files = excluded["files"]
+            files_txt = get_unstored_files_text(files, [])
+            n_files_txt = f"{len(files)} file{'s' if len(files) > 1 else ''}"
+            problems.append(
+                dict(
+                    path=excluded["path"],
+                    kind="excluded-tracked",
+                    stage=excluded["stage"],
+                    dvc_file=None,
+                    store_in=None,
+                    message=(
+                        f"{excluded['path']} is stored in Git, but Git still "
+                        f"tracks {n_files_txt} in it that it and .dvcignore "
+                        f"leave out: {files_txt}"
+                    ),
+                    files=files,
+                    rules=excluded["rules"],
                 )
             )
     finally:

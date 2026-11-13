@@ -18,6 +18,7 @@ from dvc_objects.fs import known_implementations
 
 import calkit
 import calkit.latex
+import calkit.pipeline
 from calkit.dvc import register_ck_scheme
 from calkit.dvc.core import _tolerate_lock_release_failures
 
@@ -1009,11 +1010,13 @@ def test_get_storage_problems(tmp_dir):
 
 
 def test_get_git_output_paths(tmp_dir: str) -> None:
-    def get_paths() -> dict[str, str]:
+    def get_paths(dvc_repo: dvc.repo.Repo | None = None) -> dict[str, str]:
         base = Path(".").resolve()
         return {
             Path(path).relative_to(base).as_posix(): name
-            for path, name in calkit.dvc.get_git_output_paths().items()
+            for path, name in calkit.dvc.get_git_output_paths(
+                dvc_repo=dvc_repo
+            ).items()
         }
 
     subprocess.check_call(["calkit", "init"])
@@ -1039,6 +1042,18 @@ def test_get_git_output_paths(tmp_dir: str) -> None:
             },
             # Blocks of Markdown are stages of their own
             "README.md": {"kind": "markdown", "target_path": "README.md"},
+            # Only an iterated stage's outputs stored in Git, though another's
+            # path would match its template
+            "it": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo {v}",
+                "iterate_over": [{"arg_name": "v", "values": ["a", "b"]}],
+                "outputs": [
+                    {"path": "data/{v}.csv", "storage": "git"},
+                    {"path": "data/{v}.full.csv", "storage": None},
+                ],
+            },
             # As is each diff of a LaTeX document
             "paper": {
                 "kind": "latex",
@@ -1075,26 +1090,39 @@ def test_get_git_output_paths(tmp_dir: str) -> None:
     ck_info["subprojects"] = [{"path": "sub"}, {"path": "iso"}]
     calkit.save_calkit_info(ck_info)
     diff_path = calkit.latex.get_diff_path("paper/paper.tex", "v1", "HEAD")
-    assert get_paths() == {
+    expected = {
         "results": "make",
         "figures": "README.md/plot",
         "paper/paper.pdf": "paper",
         diff_path: calkit.latex.get_diff_stage_name("paper", "v1", "HEAD"),
         "sub/out": "sub/dvc.yaml:c",
     }
+    # An iterated stage's are found in DVC's index, once compiled
+    assert get_paths() == expected
+    calkit.pipeline.to_dvc(write=True)
+    dvc_repo = calkit.dvc.get_dvc_repo()
+    try:
+        assert get_paths(dvc_repo) == expected | {
+            "data/a.csv": "it@a",
+            "data/b.csv": "it@b",
+        }
+    finally:
+        dvc_repo.close()
 
 
 def test_get_unstored_output_files(tmp_dir: str) -> None:
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], text=True)
 
-    def get_unstored(stages: list[str] | None = None) -> dict:
+    def get_unstored(
+        stages: list[str] | None = None, tracked: bool = False
+    ) -> dict:
         dvc_repo = calkit.dvc.get_dvc_repo()
         try:
             return {
                 u["path"]: u
                 for u in calkit.dvc.get_unstored_output_files(
-                    dvc_repo=dvc_repo, stages=stages
+                    dvc_repo=dvc_repo, stages=stages, tracked=tracked
                 )
             }
         finally:
@@ -1175,9 +1203,15 @@ def test_get_unstored_output_files(tmp_dir: str) -> None:
         "logs/sub/run.log ('*.log' in .gitignore)"
     )
     assert "data" not in problems
-    # Once in Git, they're stored
+    # Once in Git, they're stored, though one that both leave out shouldn't
+    # be
     git("add", "-f", "logs", "single.log", "whole", "other")
     assert get_unstored() == {}
+    (problem,) = get_problems().values()
+    assert problem["kind"] == "excluded-tracked"
+    assert problem["files"] == ["logs/skip.tmp"]
+    assert get_unstored(tracked=True)["logs"]["files"] == ["logs/skip.tmp"]
+    git("rm", "-q", "--cached", "logs/skip.tmp")
     assert get_problems() == {}
     # A file DVC leaves out of a directory it caches, but Git tracks anyway,
     # isn't tracked by both, though the rest of the directory can be
@@ -1223,6 +1257,15 @@ def test_stage_git_outputs(tmp_dir: str) -> None:
             f.write("output\n")
     calkit.dvc.stage_git_outputs(repo, ["out"])
     calkit.dvc.force_add_ignored_files(repo, ["ignored/n.ipynb"])
+    # Paths are only themselves, not patterns
+    for fname in ["d[1].csv", "d1.csv"]:
+        with open(os.path.join("ignored", fname), "w") as f:
+            f.write("d")
+    calkit.dvc.force_add_ignored_files(repo, ["ignored/d[1].csv"])
+    assert repo.git.ls_files("ignored").split() == [
+        "ignored/d[1].csv",
+        "ignored/n.ipynb",
+    ]
     for dname in ["out", "ignored"]:
         assert repo.git.show(f":{dname}/n.ipynb") == "output"
 

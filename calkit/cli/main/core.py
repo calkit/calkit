@@ -1858,6 +1858,7 @@ def commit(
         [path == "dvc.lock" or path.endswith(".dvc") for path in commit_paths]
     )
     cmd = ["-m", message]
+    modified: list[str] = []
     if restrict:
         # A commit restricted to certain paths takes their contents from the
         # working tree rather than the index, so say so if those differ
@@ -1868,9 +1869,42 @@ def commit(
         ]
         if modified:
             warn(f"Committing unstaged changes in {modified}")
-        cmd += ["--"] + commit_paths
+    # Committing paths takes them from the working tree, which would put back
+    # a file taken out of Git but kept on disk, e.g., one an output's
+    # 'ignore' now leaves out, so then the commit is made from an index of
+    # its own, holding only what's staged for those paths
+    kept_removals = [
+        f["path"]
+        for f in staged_status
+        if restrict
+        and f["path"] in commit_paths
+        and f["status"] == "D"
+        and os.path.lexists(repo_root / f["path"])
+    ]
     try:
-        output = repo.git.commit(cmd)
+        if kept_removals and repo.head.is_valid():
+            import shutil
+            import tempfile
+
+            if modified:
+                repo.git.add("--", *modified)
+            others = [p for p in staged_paths if p not in commit_paths]
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                index_path = os.path.join(tmp_dir, "index")
+                shutil.copy(os.path.join(repo.git_dir, "index"), index_path)
+                with repo.git.custom_environment(GIT_INDEX_FILE=index_path):
+                    # Chunked to stay under command line length limits
+                    for i in range(0, len(others), 100):
+                        repo.git.reset(
+                            "-q",
+                            "--",
+                            *[f":(literal){p}" for p in others[i : i + 100]],
+                        )
+                    output = repo.git.commit(cmd)
+        else:
+            if restrict:
+                cmd += ["--"] + commit_paths
+            output = repo.git.commit(cmd)
     except GitCommandError as e:
         raise_error(f"Git commit failed: {(e.stderr or str(e)).strip()}")
     if output:
@@ -3630,6 +3664,17 @@ def run(
                     allow_stale=True,
                     no_build=True,
                 )
+        # The ignore files compiling and running change are staged with what
+        # they decide, unless they had changes already, which aren't ours to
+        # commit
+        ignore_files_before = None
+        if not dry and calkit.dvc.autostage_enabled():
+            try:
+                ignore_files_before = calkit.git.get_dirty_gitignores(
+                    calkit.git.get_repo(), fnames=(".gitignore", ".dvcignore")
+                )
+            except Exception:
+                pass
         # Compile the DVC pipeline (and subproject pipelines)
         dvc_stages = None
         if ck_info.get("pipeline", {}) or ck_info.get("subprojects"):
@@ -4439,24 +4484,13 @@ def run(
                     too_large = calkit.dvc.stage_git_outputs(
                         repo, git_out_paths
                     )
-                    # What .dvcignore excludes decides the hashes dvc.lock
-                    # records, so it's committed with it
-                    dvcignores = [
-                        p
-                        for p in repo.git.ls_files(
-                            "-z",
-                            "--modified",
-                            "--others",
-                            "--exclude-standard",
-                            "--",
-                            ":(glob)**/.dvcignore",
-                        ).split("\0")
-                        if p
-                    ]
-                    if dvcignores:
-                        repo.git.add("--", *dvcignores)
                 unstored = calkit.dvc.get_unstored_output_files(
                     dvc_repo=run_dvc_repo, stages=ran_names
+                )
+                # Left out of the outputs, e.g., by their 'ignore', but
+                # still in Git, which doesn't match what DVC hashed
+                excluded = calkit.dvc.get_unstored_output_files(
+                    dvc_repo=run_dvc_repo, stages=ran_names, tracked=True
                 )
             finally:
                 run_dvc_repo.close()
@@ -4485,6 +4519,35 @@ def run(
                 )
             if too_large:
                 warn(calkit.dvc.get_too_large_text(too_large))
+            excluded_files = [f for u in excluded for f in u["files"]]
+            if excluded_files:
+                n_files_txt = (
+                    f"{len(excluded_files)} file"
+                    f"{'s' if len(excluded_files) > 1 else ''}"
+                )
+                files_txt = calkit.dvc.get_unstored_files_text(
+                    excluded_files, []
+                )
+                if autostage:
+                    calkit.dvc.untrack_files(repo, excluded_files)
+                    warn(
+                        f"Removed {n_files_txt} from Git that outputs stored "
+                        f"in it leave out: {files_txt}"
+                    )
+                else:
+                    warn(
+                        f"Git still tracks {n_files_txt} that outputs stored "
+                        f"in it leave out: {files_txt}; run 'calkit fix "
+                        "storage' to remove them from Git"
+                    )
+            # What .dvcignore excludes decides the hashes dvc.lock records
+            if ignore_files_before is not None:
+                for message in calkit.git.stage_gitignores(
+                    repo,
+                    ignore_files_before,
+                    fnames=(".gitignore", ".dvcignore"),
+                ):
+                    warn(message)
         except Exception as e:
             warn(f"Couldn't check where the stages' outputs are stored: {e}")
     if failed:

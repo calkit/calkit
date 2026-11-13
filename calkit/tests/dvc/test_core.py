@@ -1210,6 +1210,21 @@ def test_stage_git_outputs(tmp_dir: str) -> None:
         "A",
         "out/new.txt",
     ]
+    # A notebook goes into Git as DVC hashes it, not as a clean filter like
+    # nbstripout would leave it, whether added or force-added
+    repo.git.config("filter.strip.clean", "sed s/output//")
+    with open(".gitattributes", "w") as f:
+        f.write("*.ipynb filter=strip\n")
+    with open(".gitignore", "w") as f:
+        f.write("ignored/\n")
+    for dname in ["out", "ignored"]:
+        os.makedirs(dname, exist_ok=True)
+        with open(os.path.join(dname, "n.ipynb"), "w") as f:
+            f.write("output\n")
+    calkit.dvc.stage_git_outputs(repo, ["out"])
+    calkit.dvc.force_add_ignored_files(repo, ["ignored/n.ipynb"])
+    for dname in ["out", "ignored"]:
+        assert repo.git.show(f":{dname}/n.ipynb") == "output"
 
 
 def test_split_lock_stage_name():

@@ -1898,13 +1898,23 @@ def force_add_ignored_files(
     if dry_run:
         return too_large
     to_add = [os.path.abspath(p) for p in paths if p not in too_large]
+    root = os.path.realpath(repo.working_dir)
+    _ensure_notebooks_are_not_filtered(
+        repo,
+        [
+            Path(os.path.relpath(os.path.realpath(p), root)).as_posix()
+            for p in to_add
+        ],
+    )
     # Chunked to stay under command line length limits
     for i in range(0, len(to_add), 100):
         repo.git.add("-f", "--", *to_add[i : i + 100])
     return too_large
 
 
-def stage_git_outputs(repo: git.Repo, paths: list[str]) -> list[str]:
+def stage_git_outputs(
+    repo: git.Repo, paths: list[str], dry_run: bool = False
+) -> list[str]:
     """Stage pipeline outputs stored in Git, deletions included, except files
     Git doesn't track yet that are larger than ``LARGE_MB``, since Git
     history keeps them for good.
@@ -1913,23 +1923,48 @@ def stage_git_outputs(repo: git.Repo, paths: list[str]) -> list[str]:
     staged.
     """
     root = Path(repo.working_dir)
-    too_large = []
-    # Chunked to stay under command line length limits
-    for i in range(0, len(paths), 100):
-        listing = repo.git.ls_files(
-            "-z", "--others", "--exclude-standard", "--", *paths[i : i + 100]
-        )
-        too_large += [
+
+    def list_files(*args: str) -> list[str]:
+        # Chunked to stay under command line length limits
+        return [
             p
-            for p in listing.split("\0")
+            for i in range(0, len(paths), 100)
+            for p in repo.git.ls_files(
+                "-z", *args, "--", *paths[i : i + 100]
+            ).split("\0")
             if p
-            and os.path.isfile(root / p)
-            and os.path.getsize(root / p) > LARGE_MB * 1024**2
         ]
+
+    new_paths = list_files("--others", "--exclude-standard")
+    too_large = [
+        p
+        for p in new_paths
+        if os.path.isfile(root / p)
+        and os.path.getsize(root / p) > LARGE_MB * 1024**2
+    ]
+    if dry_run:
+        return too_large
+    _ensure_notebooks_are_not_filtered(
+        repo, new_paths + list_files("--modified")
+    )
     excludes = [f":(top,literal,exclude){p}" for p in too_large]
     for i in range(0, len(paths), 100):
         repo.git.add("-A", "--", *paths[i : i + 100], *excludes)
     return too_large
+
+
+def _ensure_notebooks_are_not_filtered(
+    repo: git.Repo, paths: list[str]
+) -> None:
+    """Exempt notebooks among ``paths``, relative to the repo's root, from a
+    clean filter like nbstripout, which would store different bytes in Git
+    than DVC hashes.
+    """
+    import calkit.git
+
+    for path in paths:
+        if path.endswith(".ipynb"):
+            calkit.git.ensure_path_is_not_filtered(repo, path)
 
 
 def get_too_large_text(paths: list[str]) -> str:

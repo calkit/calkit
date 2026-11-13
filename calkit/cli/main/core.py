@@ -1240,10 +1240,33 @@ def add(
         to the working directory, which is what someone running this from
         a subdirectory means.
         """
+        # Resolved here, since GitPython runs Git from the repo's root while
+        # these paths are relative to the working directory
+        abs_paths = [os.path.abspath(p) for p in paths_to_add]
         try:
-            # Resolved here, since GitPython runs Git from the repo's root
-            # while these paths are relative to the working directory
-            repo.git.add(*[os.path.abspath(p) for p in paths_to_add])
+            # Outputs stored in Git in or under them are staged as a run
+            # stages them, leaving out new files too large for Git
+            targets = []
+            for path in abs_paths:
+                posix = Path(path).resolve().as_posix()
+                for out_path in git_out_paths:
+                    if posix == out_path or posix.startswith(out_path + "/"):
+                        targets.append(posix)
+                        break
+                    if out_path.startswith(posix.rstrip("/") + "/"):
+                        if os.path.exists(out_path):
+                            targets.append(out_path)
+            too_large = []
+            if targets:
+                too_large = calkit.dvc.stage_git_outputs(
+                    repo, list(dict.fromkeys(targets))
+                )
+                if too_large:
+                    warn(calkit.dvc.get_too_large_text(too_large))
+            repo.git.add(
+                *abs_paths,
+                *[f":(top,literal,exclude){p}" for p in too_large],
+            )
         except GitCommandError as e:
             # GitPython labels and quotes what Git wrote; what it wrote is
             # the part worth reading
@@ -1251,6 +1274,8 @@ def add(
             reason = reason.removeprefix("stderr: ").strip("'")
             warn(f"Failed to add {', '.join(paths_to_add)} to Git: {reason}")
 
+    # Absolute and posix, found once DVC's repo is open
+    git_out_paths: list[str] = []
     if dry_run:
         typer.echo("Dry run: No files will be added")
     if auto_commit_message:
@@ -1332,6 +1357,13 @@ def add(
         else:
             typer.echo(f"Un-ignoring {out} since it's stored in Git")
             calkit.git.ensure_path_is_not_ignored(repo, out)
+    if dvc_repo is not None:
+        try:
+            git_out_paths = list(
+                calkit.dvc.get_git_output_paths(dvc_repo=dvc_repo)
+            )
+        except Exception as e:
+            warn(f"Couldn't find the pipeline's outputs stored in Git: {e}")
     # Files in them a rule ignores, e.g., a generic '*.log', would be left
     # out of everything below, and so be in neither Git nor DVC, so they're
     # added in spite of it, since the output is declared as stored in Git
@@ -1770,8 +1802,10 @@ def commit(
             # These are shared bookkeeping files Calkit writes on behalf of
             # whatever is being added, so they ride along if they're staged
             candidates.update(["dvc.lock", calkit.dvc.zip.PATH_MAP_PATH])
+            # What .dvcignore excludes decides the hashes in dvc.lock
             for parent in [Path(path)] + list(Path(path).parents):
                 candidates.add((parent / ".gitignore").as_posix())
+                candidates.add((parent / ".dvcignore").as_posix())
             return [p for p in staged_paths if p in candidates]
 
         commit_paths = []

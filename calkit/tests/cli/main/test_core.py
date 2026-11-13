@@ -1113,6 +1113,20 @@ def test_git_outputs_with_ignored_files(
         text=True,
     )
     assert "up to date" in result.stdout, result.stdout
+    # Saving an output takes .dvcignore with dvc.lock, whose hashes depend on
+    # what it excludes
+    ck_info["pipeline"]["stages"]["rebuild"]["outputs"][0]["ignore"] = [
+        "*.bak",
+        "*.txt",
+    ]
+    calkit.save_calkit_info(ck_info)
+    run("run")
+    run("save", "runs", "-m", "Ignore text", "--no-push")
+    committed = git("show", "--name-only", "--format=", "HEAD").split()
+    assert ".dvcignore" in committed
+    assert "dvc.lock" in committed
+    git("add", "-A")
+    git("commit", "-qm", "Save the rest")
     # Without autostaging, nothing is staged, so it's only said
     subprocess.check_call(["dvc", "config", "core.autostage", "false"])
     git("rm", "-q", "--cached", "runs/one/write.log")
@@ -1151,15 +1165,22 @@ def test_git_outputs_with_ignored_files(
     assert "runs/one/new.log" in staged
     assert "other.log" not in staged
     git("commit", "-qm", "Add")
-    # One too large for Git is only reported
-    with open("runs/one/big.log", "wb") as f:
-        f.truncate(51 * 1024**2)
+    # One too large for Git is only reported, whether Git ignores it or not
+    for fname in ["big.log", "big.bin"]:
+        with open(os.path.join("runs", "one", fname), "wb") as f:
+            f.truncate(51 * 1024**2)
     out = run("add", "runs")
-    assert (
-        "Not adding 1 file in outputs stored in Git to it, since they're "
-        "larger than 50 MB: runs/one/big.log"
-    ) in out
-    assert "runs/one/big.log" not in git("diff", "--cached", "--name-only")
+    for fname in ["big.log", "big.bin"]:
+        assert (
+            "Not adding 1 file in outputs stored in Git to it, since they're "
+            f"larger than 50 MB: runs/one/{fname}"
+        ) in out
+    staged = git("diff", "--cached", "--name-only")
+    assert "runs/one/big.log" not in staged
+    assert "runs/one/big.bin" not in staged
+    out = run("add", "--to", "git", "runs/one/big.bin")
+    assert "runs/one/big.bin" not in git("diff", "--cached", "--name-only")
+    os.remove("runs/one/big.bin")
     result = subprocess.run(
         ["calkit", "fix", "storage"], capture_output=True, text=True
     )

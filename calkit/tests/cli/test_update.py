@@ -687,8 +687,16 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
 
     existing: set[str] = set()
     on_hub: dict[str, dict] = {}
+    # What looking up the user raises, and whether each lookup could log in
+    user_error: dict[str, Exception | None] = {"error": None}
+    login_allowed: list[bool] = []
 
-    def get(path, params=None, **kwargs):
+    def get(path, params=None, allow_login=True, **kwargs):
+        if path == "/user":
+            login_allowed.append(allow_login)
+            if user_error["error"] is not None:
+                raise user_error["error"]
+            return {"github_username": "someone"}
         if path == "/projects":
             found = on_hub.get(params["github_repo"].lower())
             return {
@@ -707,9 +715,6 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
 
     monkeypatch.setattr(calkit.hub, "post", post)
     monkeypatch.setattr(calkit.hub, "get", get)
-    monkeypatch.setattr(
-        calkit.hub, "get_current_user", lambda: {"github_username": "someone"}
-    )
     monkeypatch.setattr(calkit.hub, "get_hub_url", lambda: "https://hub.test")
     monkeypatch.setattr(calkit.dvc, "configure_remote", configure_remote)
     monkeypatch.setattr(
@@ -751,6 +756,12 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     existing.add("/projects/someone/my-project")
     n_posted = len(posted)
     git("remote", "set-url", "origin", remote["url"])
+    # Nor is anything pushed to it meanwhile, e.g., by a collaborator,
+    # dropped from the history, where a push would be refused instead
+    other = str(tmp_path_factory.mktemp("other"))
+    git("clone", "-q", remote["url"], other)
+    git("commit", "-q", "--allow-empty", "-m", "Meanwhile", cwd=other)
+    git("push", "-q", "origin", "main", cwd=other)
     with open("calkit.yaml", "w") as f:
         f.write("name: my-project\ntitle: My project\n")
     git("commit", "-q", "-am", "Disconnect")
@@ -759,13 +770,16 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert "already exists" in result.output
     assert len(posted) == n_posted
     assert calkit.load_calkit_info()["hub"] == "https://hub.test"
+    assert "Meanwhile" not in git("log", "--format=%s")
     # An org's repo already on the hub is found by its URL, and the remote
     # is named for the account that owns it there, which is lowercase
     on_hub["acme-lab/widget"] = {
         "owner_account_name": "acme-lab",
         "name": "widget",
     }
-    git("remote", "set-url", "origin", "git@github.com:Acme-Lab/widget.git")
+    # A remote not named 'origin' is used if it's the only one
+    git("remote", "rename", "origin", "github")
+    git("remote", "set-url", "github", "git@github.com:Acme-Lab/widget.git")
     with open("calkit.yaml", "w") as f:
         f.write("title: Widget\n")
     result = runner.invoke(
@@ -790,24 +804,28 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
     assert posted[-1]["git_repo_url"] == "https://github.com/Acme-Lab/widget"
     assert remote_names[-1] == "acme-lab/widget"
     assert calkit.load_calkit_info()["owner"] == "acme-lab"
-    # Someone not logged in is offered the login, then connected
+    # Someone not logged in is offered the login, then connected, but the
+    # lookup never logs in on its own, so declining is possible
     import calkit.core
 
-    logged_in = {"yes": False}
-
-    def get_current_user():
-        if not logged_in["yes"]:
-            raise RuntimeError("401: Not authenticated")
-        return {"github_username": "someone"}
-
     def run_device_flow():
-        logged_in["yes"] = True
+        user_error["error"] = None
         return "token"
 
-    monkeypatch.setattr(calkit.hub, "get_current_user", get_current_user)
     monkeypatch.setattr(calkit.hub, "run_device_flow", run_device_flow)
-    for answer, tty in [("n\n", True), ("", False), ("y\n", True)]:
+    for answer, tty, no_login, error in [
+        ("n\n", True, False, ValueError("No token")),
+        ("", False, False, ValueError("No token")),
+        ("", True, True, ValueError("No token")),
+        ("", True, False, RuntimeError("503: Unavailable")),
+        ("y\n", True, False, ValueError("No token")),
+    ]:
         monkeypatch.setattr(calkit.core, "is_tty", lambda tty=tty: tty)
+        if no_login:
+            monkeypatch.setenv("CALKIT_NO_INTERACTIVE_LOGIN", "1")
+        else:
+            monkeypatch.delenv("CALKIT_NO_INTERACTIVE_LOGIN", raising=False)
+        user_error["error"] = error
         on_hub.clear()
         with open("calkit.yaml", "w") as f:
             f.write("name: widget\ntitle: Widget\n")
@@ -816,16 +834,22 @@ def test_update_hub_creates_repo(tmp_dir, tmp_path_factory, monkeypatch):
             ["hub", "https://hub.test", "--no-commit"],
             input=answer,
         )
+        asked = "Log in now?" in result.output
         if answer == "y\n":
             assert result.exit_code == 0, result.output
-            assert logged_in["yes"]
+            assert user_error["error"] is None
             assert calkit.load_calkit_info()["owner"] == "acme-lab"
+        elif isinstance(error, RuntimeError):
+            # Logging in can't fix a hub that's down
+            assert result.exit_code != 0
+            assert "Failed to reach" in result.output
+            assert not asked
         else:
-            # Declining, or with no terminal to ask in, says how to log in
+            # Declining, or with no way to ask, says how to log in
             assert result.exit_code != 0
             assert "calkit hub login" in result.output
-            assert not logged_in["yes"]
-        assert ("Log in now?" in result.output) == tty
+            assert asked == (tty and not no_login)
+    assert login_allowed and not any(login_allowed)
 
 
 def test_update_env_lock(tmp_dir, monkeypatch):

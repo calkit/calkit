@@ -76,6 +76,16 @@ def uses_link(base_url: str) -> bool:
     )
 
 
+def is_interactive_login_allowed(base_url: str | None = None) -> bool:
+    """Whether the device login may be offered, terminal aside: not if the
+    user opted out, nor in a hub link's session for its hub, whose tokens
+    come from the link.
+    """
+    if os.environ.get("CALKIT_NO_INTERACTIVE_LOGIN"):
+        return False
+    return not uses_link(base_url or get_base_url())
+
+
 def ask_link(request: dict) -> dict:
     """Ask the hub link whose session this runs in for a credential, which
     it gets from its hub over HTTPS.
@@ -493,10 +503,7 @@ def _request(
     # the user hasn't opted out via the env var, nor in a hub link's session
     # for its hub, whose tokens come from the link.
     can_prompt = (
-        auth
-        and allow_login
-        and not os.environ.get("CALKIT_NO_INTERACTIVE_LOGIN")
-        and not uses_link(base_url)
+        auth and allow_login and is_interactive_login_allowed(base_url)
     )
     if can_prompt:
         try:

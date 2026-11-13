@@ -160,8 +160,8 @@ stages:
       size: 5
     - path: calkit/docx.py
       hash: md5
-      md5: b0a7560528427af7eb2c5ff896b82301
-      size: 97341
+      md5: 0beb5befbc89274dafd825454b7a195a
+      size: 101252
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: 570c437a70ca9bc83a398cc7d69b364c
@@ -172,8 +172,8 @@ stages:
       size: 173888
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 8867d6f2f2723fef5cb528e3942b9adb
-      size: 37025
+      md5: 6c0ace28872550af37274a1eb685d5b3
+      size: 28843
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
       md5: 53cbdd1fe8da4d6897b3b0856b749857
@@ -185,8 +185,8 @@ stages:
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: 3d5ffeb9b6f9d396c3e1d15d3e9185fa
-      size: 277494
+      md5: 16345aff70e898129247a918998ebe88
+      size: 250333
   one-pager-font:
     cmd: calkit xenv -n tex --no-check -- sh 
       .calkit/stage-commands/one-pager-font.sh
@@ -247,8 +247,8 @@ stages:
       size: 185753
     - path: calkit/docx.py
       hash: md5
-      md5: 1054d32730d37757e94a29de0019839f
-      size: 102800
+      md5: 0beb5befbc89274dafd825454b7a195a
+      size: 101252
     - path: calkit/latex.py
       hash: md5
       md5: f5a05595989fd2b337ce10910e594b18
@@ -296,8 +296,8 @@ stages:
       size: 173888
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: 4941340ab3c251d2daf6933a13c206a7
-      size: 29476
+      md5: 6c0ace28872550af37274a1eb685d5b3
+      size: 28843
   latex-image-readme/sizes:
     cmd: calkit xenv -n dev --no-check -- python 
       .calkit/markdown/images/latex/README.md/sizes.py
@@ -336,8 +336,8 @@ stages:
       nfiles: 2
     - path: calkit.yaml
       hash: md5
-      md5: 4675f0054b2da9203227e6dab35ed370
-      size: 13376
+      md5: 0899f4cda948b42bc83d46d89b90f71e
+      size: 13655
     - path: docs/img/2027-budget.png
       hash: md5
       md5: f4cebb77c9a0a98fa433ac90258bc0cd
@@ -405,7 +405,7 @@ stages:
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 59eec917676acae6b9b41c32630232e7
+      md5: 47831b9ff8f74399947751b556713b5d
       size: 11
     - path: .python-version
       hash: md5
@@ -422,14 +422,14 @@ stages:
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 2eeb771590c0bdb1b01380d35baaeaeb
-      size: 11745
+      md5: c450683cc8364034155458e942225790
+      size: 11920
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 59eec917676acae6b9b41c32630232e7
+      md5: 47831b9ff8f74399947751b556713b5d
       size: 11
     - path: .python-version
       hash: md5
@@ -437,8 +437,8 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 2eeb771590c0bdb1b01380d35baaeaeb
-      size: 11745
+      md5: c450683cc8364034155458e942225790
+      size: 11920
     - path: scripts/find-calkit-papers.py
       hash: md5
       md5: 47c5738cb38a674825999afa124c74c8

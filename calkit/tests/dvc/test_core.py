@@ -1270,6 +1270,23 @@ def test_stage_git_outputs(tmp_dir: str) -> None:
         assert repo.git.show(f":{dname}/n.ipynb") == "output"
 
 
+def test_autostage_enabled(tmp_dir: str) -> None:
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "dvc", "remote", "add", "-f", "calkit", "ck://a/b"]
+    )
+    assert calkit.dvc.autostage_enabled()
+    # Read before anything else opens the repo, which then accepts the 'ck'
+    # remote, in a process of its own, since what's registered is global
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-c",
+            "import calkit.dvc as d; d.autostage_enabled(); d.get_dvc_repo()",
+        ]
+    )
+
+
 def test_split_lock_stage_name():
     assert calkit.dvc.split_lock_stage_name("a") == (None, "a")
     assert calkit.dvc.split_lock_stage_name("sub/dvc.yaml:a") == ("sub", "a")

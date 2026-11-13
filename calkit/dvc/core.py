@@ -1115,7 +1115,9 @@ def autostage_enabled(wdir: str | None = None) -> bool:
     dvc_dir = os.path.join(wdir or "", ".dvc")
     if not os.path.isdir(dvc_dir):
         return False
-    # Unvalidated, since the 'ck' remote scheme may not be registered
+    # Registered first, since DVC keeps the schema it builds for the first
+    # config it reads, and every repo opened after would reject 'ck' remotes
+    register_ck_scheme()
     value = Config(dvc_dir=dvc_dir, validate=False)["core"].get("autostage")
     return str(value).lower() in ("true", "yes", "1")
 

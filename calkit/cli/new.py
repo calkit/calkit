@@ -4063,31 +4063,8 @@ def new_release(
             typer.echo(f"Read {len(authors)} author(s) from CITATION.cff")
         else:
             warn("No authors defined for the project")
-            still_entering_authors = True
-            n = 0
-            while still_entering_authors:
-                n += 1
-                author = dict()
-                author["first_name"] = typer.prompt(
-                    f"Enter the first name of author {n}"
-                )
-                author["last_name"] = typer.prompt(
-                    f"Enter the last name of author {n}"
-                )
-                author["affiliation"] = typer.prompt(
-                    f"Enter the affiliation of author {n}"
-                )
-                has_orcid = typer.confirm(
-                    f"Does author {n} have an ORCID?", default=False
-                )
-                if has_orcid:
-                    author["orcid"] = typer.prompt(
-                        f"Enter the ORCID of author {n}"
-                    )
-                authors.append(author)
-                still_entering_authors = typer.confirm(
-                    "Are there more authors to enter?", default=True
-                )
+            # A dry run changes nothing, the config included
+            authors = calkit.releases.prompt_authors(save_user=not dry_run)
             # Write authors out to CITATION.cff
             if not dry_run:
                 typer.echo("Writing authors to CITATION.cff")
@@ -4180,28 +4157,9 @@ def new_release(
                 record_id = invenio_dep["id"]
             files = os.listdir(release_files_dir)
             for filename in files:
-                typer.echo(f"Uploading {filename}")
-                fpath = os.path.join(release_files_dir, filename)
-                # First, initiate the file upload
-                calkit.invenio.post(
-                    f"/records/{record_id}/draft/files",
-                    json=[{"key": filename}],
-                    service=to,  # type: ignore
-                )
-                # Then upload the file content
-                with open(fpath, "rb") as f:
-                    file_data = f.read()
-                    resp = calkit.invenio.put(
-                        f"/records/{record_id}/draft/files/{filename}/content",
-                        headers={"Content-Type": "application/octet-stream"},
-                        as_json=False,
-                        service=to,  # type: ignore
-                        data=file_data,
-                    )
-                    typer.echo(f"Status code: {resp.status_code}")
-                # Commit the file
-                calkit.invenio.post(
-                    f"/records/{record_id}/draft/files/{filename}/commit",
+                calkit.invenio.upload_file_with_progress(
+                    record_id,
+                    os.path.join(release_files_dir, filename),
                     service=to,  # type: ignore
                 )
             # Reserve a DOI on the draft before publishing. The publish action's

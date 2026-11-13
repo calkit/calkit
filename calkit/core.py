@@ -2202,3 +2202,35 @@ def set_env_vars(ck_info: dict, cli: bool = True) -> None:
         os.environ[str(k)] = str(v)
     if os.path.expanduser("~") != home:
         os.environ.setdefault(USER_HOME_ENV_VAR, home)
+
+
+def normalize_orcid(orcid: str) -> str:
+    """Check an ORCID, bare or as a URL, and return it as its URL.
+
+    Raises ``ValueError`` if it isn't shaped like one or its check digit
+    doesn't match the rest.
+    """
+    match = re.fullmatch(
+        r"(?:(?:https?://)?(?:www\.)?orcid\.org/)?"
+        r"(\d{4}-\d{4}-\d{4}-\d{3}[\dXx])",
+        orcid.strip(),
+    )
+    if match is None:
+        raise ValueError(
+            f"orcid must look like 0000-0002-1825-0097 (got {orcid!r})"
+        )
+    bare = match.group(1).upper()
+    # The last character is an ISO 7064 MOD 11-2 check digit over the
+    # other 15, so a typo is caught here rather than by whoever later
+    # finds the identifier resolves to a stranger, or to nobody.
+    total = 0
+    for digit in bare[:-1].replace("-", ""):
+        total = (total + int(digit)) * 2
+    result = (12 - total % 11) % 11
+    expected = "X" if result == 10 else str(result)
+    if bare[-1] != expected:
+        raise ValueError(
+            f"orcid {orcid!r} has check digit {bare[-1]} but its other "
+            f"digits call for {expected}, so one of them is mistyped"
+        )
+    return f"https://orcid.org/{bare}"

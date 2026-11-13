@@ -1606,11 +1606,14 @@ def get_cached_out_paths(wdir: str | None = None) -> set[str]:
     paths relative to the project root.
     """
     repo = get_dvc_repo(wdir)
-    return {
-        Path(os.path.relpath(out.fs_path, repo.root_dir)).as_posix()
-        for out in repo.index.outs
-        if out.use_scm_ignore
-    }
+    try:
+        return {
+            Path(os.path.relpath(out.fs_path, repo.root_dir)).as_posix()
+            for out in repo.index.outs
+            if out.use_scm_ignore
+        }
+    finally:
+        repo.close()
 
 
 def restore_output_ignores(wdir: str | None = None) -> list[str]:

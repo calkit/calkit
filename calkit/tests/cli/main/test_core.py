@@ -3547,6 +3547,11 @@ def test_save_offers_hub_before_committing(
     def connect():
         events.append("connect")
         subprocess.check_call(["git", "remote", "add", "origin", bare])
+        # As update_hub does, the connection is committed on its own
+        with open("connection.txt", "a") as f:
+            f.write("x\n")
+        subprocess.check_call(["git", "add", "connection.txt"])
+        subprocess.check_call(["git", "commit", "-q", "-m", "Connect"])
 
     real_add = core.add
 
@@ -3577,6 +3582,102 @@ def test_save_offers_hub_before_committing(
     assert events == ["add"]
     assert repo.head.commit.message.strip() == "Add b"
     assert git.Repo(bare).head.commit.message.strip() == "Add a"
+    # Connecting can leave nothing else to commit, and is pushed anyway
+    result = runner.invoke(calkit_app, ["save", "-am", "None"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert repo.head.commit.message.strip() == "Connect"
+    assert git.Repo(bare).head.commit.hexsha == repo.head.commit.hexsha
+
+
+def test_save_offers_dvc_storage_for_data_with_nowhere_to_go(
+    tmp_dir, tmp_path_factory, monkeypatch
+):
+    from typer.testing import CliRunner
+
+    import calkit.cli.update
+    import calkit.core
+
+    git_config = tmp_path_factory.mktemp("git") / "config"
+    git_config.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+    for role in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Calkit Test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@calkit.org")
+    subprocess.check_call(["calkit", "init"])
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
+    bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
+    subprocess.check_call(["git", "init", "-q", "--bare", bare])
+    subprocess.check_call(["git", "remote", "add", "origin", bare])
+    storage = str(tmp_path_factory.mktemp("storage"))
+    events: list[str] = []
+    declined_path = ".calkit/local/declined-dvc-storage"
+    runner = CliRunner()
+
+    def connect():
+        events.append("connect")
+        subprocess.check_call(["dvc", "remote", "add", "-d", "store", storage])
+
+    def fail():
+        events.append("fail")
+        calkit.cli.raise_error("Hub unreachable")
+
+    def save(name: str, input: str = "", to: str = "dvc") -> str:
+        with open(name, "w") as f:
+            f.write(name)
+        result = runner.invoke(
+            calkit_app,
+            ["save", name, "--to", to, "-m", f"Add {name}"],
+            input=input,
+        )
+        assert result.exit_code == 0, result.output
+        assert git.Repo(bare).head.commit.message.strip() == f"Add {name}"
+        return result.output
+
+    monkeypatch.setattr(calkit.cli.update, "update_hub", connect)
+    # Code alone doesn't ask: its Git remote is somewhere to push it
+    assert "no DVC remote" not in save("a.txt", to="git")
+    # Data does, and declining still pushes the code, and is remembered
+    output = save("data1.bin", input="n\n")
+    assert "no DVC remote" in output
+    assert "not asking again" in output
+    assert not os.listdir(storage)
+    assert "no DVC remote" not in save("data2.bin")
+    os.remove(declined_path)
+    # A code-only commit doesn't ask, though data is here, but a push of
+    # everything does
+    assert "no DVC remote" not in save("b.txt", to="git")
+    result = runner.invoke(calkit_app, ["push"], input="n\n")
+    assert result.exit_code == 0, result.output
+    assert "Skipping DVC push" in result.output
+    os.remove(declined_path)
+    # Without pushing there's nothing to ask about
+    with open("c.txt", "w") as f:
+        f.write("c")
+    result = runner.invoke(calkit_app, ["save", "-am", "Add c", "--no-push"])
+    assert result.exit_code == 0, result.output
+    assert "no DVC remote" not in result.output
+    # Failing to connect still pushes the code
+    monkeypatch.setattr(calkit.cli.update, "update_hub", fail)
+    assert "connecting failed" in save("data3.bin", input="y\n")
+    assert events == ["fail"]
+    assert not os.path.exists(declined_path)
+    # Accepting connects, then pushes the data that was already here too
+    monkeypatch.setattr(calkit.cli.update, "update_hub", connect)
+    save("data4.bin", input="y\n")
+    assert events == ["fail", "connect"]
+    assert "in sync" in subprocess.check_output(
+        ["dvc", "status", "--cloud"], text=True
+    )
+    # Once there's a remote, nothing asks again
+    assert "no DVC remote" not in save("data5.bin")
+    assert events == ["fail", "connect"]
+    # Without a terminal to ask in, it says how to connect instead
+    subprocess.check_call(["dvc", "remote", "remove", "store"])
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    result = runner.invoke(calkit_app, ["push"])
+    assert result.exit_code == 0, result.output
+    assert "calkit update hub" in result.output
+    assert events == ["fail", "connect"]
 
 
 def test_outputs_stay_out_of_git_after_failed_run(tmp_dir):

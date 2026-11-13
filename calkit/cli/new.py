@@ -3713,9 +3713,17 @@ def new_release(
         include_pipeline = False
     # A release that carries its pipeline is checked by running it, which
     # needs the project's requirements met, so check them as 'calkit run'
-    # does before anything slow, like building environments or archiving
-    if include_pipeline or (path == "." and not internal_release):
+    # does before anything slow, like building environments or archiving.
+    # A project archive with no pipeline isn't run, as in
+    # check_project_release_archive, so its requirements don't matter here.
+    has_pipeline = bool(ck_info.get("pipeline")) or os.path.isfile("dvc.yaml")
+    if include_pipeline or (
+        path == "." and not internal_release and has_pipeline
+    ):
         typer.echo("Checking project requirements")
+        # Variables the project sets itself can meet its requirements, as
+        # they do for 'calkit run'
+        calkit.set_env_vars(ck_info=ck_info)
         for req_wdir, req_info in calkit.iter_projects(ck_info=ck_info):
             try:
                 with calkit.in_project(req_wdir):

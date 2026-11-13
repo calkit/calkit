@@ -138,8 +138,8 @@ pipeline:
       args:
         - --engine={engine}
       requirements:
+        - name: word
         - name: libreoffice
-          check_command: which("soffice") || which("libreoffice")
       environment: dev
       description: >-
         Export the LaTeX/Word example to Word and merge it back, with no

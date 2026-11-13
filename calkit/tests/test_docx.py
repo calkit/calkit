@@ -1429,6 +1429,45 @@ def test_libreoffice_has_math(tmp_path, monkeypatch):
     assert calkit.docx.libreoffice_has_math(str(soffice))
 
 
+def test_wsl_helpers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append((cmd, kw))
+        if cmd == ["uname", "-r"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, "5.15.167.4-microsoft-standard-WSL2\n", ""
+            )
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(calkit.docx.sys, "platform", "linux")
+    monkeypatch.setattr(calkit.docx.subprocess, "run", run)
+    assert calkit.docx._is_wsl()
+    calkit.docx.wsl_run_powershell_cmd(
+        "Write-Host ok", {"PDF_PATH": str(tmp_path / "a.pdf")}
+    )
+    env = calls[-1][1]["env"]
+    assert isinstance(env, dict)
+    assert env["PDF_PATH"] == str(tmp_path / "a.pdf")
+    assert "PDF_PATH/p" in env["WSLENV"]
+    monkeypatch.setattr(calkit.docx.sys, "platform", "darwin")
+    with pytest.raises(NotImplementedError):
+        calkit.docx.wsl_run_powershell_cmd("Write-Host ok")
+
+
+def test_pdf_to_docx_linux_word_not_implemented(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pdf = tmp_path / "paper.pdf"
+    out = tmp_path / "paper.docx"
+    pdf.write_bytes(b"%PDF")
+    monkeypatch.setattr(calkit.docx.sys, "platform", "linux")
+    monkeypatch.setattr(calkit.docx, "_is_wsl", lambda: False)
+    monkeypatch.setattr(calkit.docx, "flatten_heavy_figures", lambda *_: False)
+    with pytest.raises(RuntimeError):
+        calkit.docx.pdf_to_docx(str(pdf), str(out))
+
+
 def test_flatten_heavy_figures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

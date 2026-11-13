@@ -12,7 +12,7 @@ from matplotlib.patches import FancyArrowPatch
 
 import calkit.docx
 
-IN = "results/latex-word-round-trip"
+IN = "results/latex-word-round-trip/libreoffice"
 PANELS = [
     ("original.pdf", "LaTeX (PDF)"),
     ("review.docx", "Word (.docx)"),

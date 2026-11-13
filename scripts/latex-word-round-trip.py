@@ -20,8 +20,6 @@ from pathlib import Path
 import calkit.docx
 import calkit.latex
 
-OUT = Path("results/latex-word-round-trip")
-
 
 def calkit_cmd(cwd: Path, *args: str) -> None:
     subprocess.run(
@@ -46,7 +44,7 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-
+OUT = Path(f"results/latex-word-round-trip/{args.engine}")
 OUT.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory() as tmp:
     proj = Path(tmp, "latex-word")
@@ -152,7 +150,7 @@ with tempfile.TemporaryDirectory() as tmp:
 results["pdf_unchanged"] = (OUT / "original.pdf").read_bytes() == (
     OUT / "rebuilt.pdf"
 ).read_bytes()
-with open("results/latex-word-round-trip.json", "w") as f:
+with open(f"results/latex-word-round-trip-{args.engine}.json", "w") as f:
     json.dump(results, f, indent=2)
     f.write("\n")
 print(json.dumps(results, indent=2))

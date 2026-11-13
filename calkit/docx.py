@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from calkit.windows import is_wsl, wsl_run_powershell_cmd
+
 # XML namespaces, named by the prefixes Word gives them: w is the main
 # WordprocessingML namespace, w14 and w15 are Word 2010 and 2013
 # extensions (paragraph IDs, comment threads), r and the package
@@ -1159,6 +1161,20 @@ def word_installed() -> bool:
                 continue
             return True
         return False
+    if is_wsl():
+        script = r"""
+$paths = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Winword.exe",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Winword.exe"
+)
+foreach ($path in $paths) {
+    if (Test-Path -LiteralPath $path) {
+        exit 0
+    }
+}
+exit 1
+"""
+        return wsl_run_powershell_cmd(script, check=False).returncode == 0
     return False
 
 
@@ -1465,7 +1481,7 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                     "Word could not convert the PDF: "
                     + res.stderr.strip().split(": ", 1)[-1]
                 )
-        elif sys.platform == "win32":
+        elif sys.platform == "win32":  # standard Windows
             import win32com.client  # type: ignore[import-not-found]
 
             # Reuse a running Word rather than quitting one the user has open
@@ -1492,10 +1508,129 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                     doc.Close(False)
                 if started:
                     word.Quit()
-        else:
-            raise RuntimeError(
-                "Converting PDF to Word requires Word on macOS or Windows"
-            )
+        else:  # Linux
+            if is_wsl():
+                POWERSHELL_SCRIPT = r"""
+$PdfPath = $env:PDF_PATH
+$OutputPath = $env:OUTPUT_PATH
+
+$word = $null
+$doc = $null
+$started = $false
+$ErrorActionPreference = 'Stop'
+
+Write-Host "Connecting to Word..."
+try {
+    $registryPath = "HKCU:\Software\Microsoft\Office\16.0\Word\Options"
+
+    New-Item -Path $registryPath -Force | Out-Null
+
+    New-ItemProperty `
+        -Path $registryPath `
+        -Name "DisableConvertPdfWarning" `
+        -PropertyType DWord `
+        -Value 1 `
+        -Force
+    Get-ItemPropertyValue `
+        -Path $registryPath `
+        -Name "DisableConvertPdfWarning"
+    try {
+        $word = [System.Runtime.InteropServices.Marshal]::GetActiveObject(
+            "Word.Application"
+        )
+    }
+    catch {
+        $word = New-Object -ComObject Word.Application
+        $started = $true
+    }
+
+    $word.DisplayAlerts = 0
+    if ($started) {
+        $word.Visible = $false
+        $word.ScreenUpdating = $false
+    }
+
+    # Suppress the PDF conversion confirmation where supported.
+    $word.Options.ConfirmConversions = $false
+    $word.Options.DoNotPromptForConvert = $true
+
+    try {
+        # Copy PDF to Windows temp
+        $LocalPdfPath = Join-Path $env:TEMP (
+            "calkit-word-" + [guid]::NewGuid().ToString() + ".pdf"
+        )
+        Copy-Item -LiteralPath $PdfPath -Destination $LocalPdfPath -Force
+        $file = Get-Item -LiteralPath $LocalPdfPath
+
+        # Open PDF (ConfirmConversions = False).
+        $missing = [Type]::Missing
+        $doc = $word.Documents.Open(
+            $LocalPdfPath,
+            $false,          # ConfirmConversions
+            $false,          # ReadOnly
+            $false,          # AddToRecentFiles
+            $missing,        # PasswordDocument
+            $missing,        # PasswordTemplate
+            $false,          # Revert
+            $missing,        # WritePasswordDocument
+            $missing,        # WritePasswordTemplate
+            0,               # Format
+            $missing,        # Encoding
+            $true            # Visible
+        )
+        Write-Host "Opened doc"
+
+        # wdNoProtection = -1
+        if ($doc.ProtectionType -ne -1) {
+            $doc.Unprotect()
+        }
+
+        $doc.Final = $false
+        $doc.ReadOnlyRecommended = $false
+
+        # wdFormatXMLDocument = 12
+        $doc.SaveAs2($OutputPath, 12)
+    }
+    finally {
+        if ($null -ne $doc) {
+            $doc.Close($false)
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($doc) |
+                Out-Null
+        }
+    }
+    exit 0
+}
+catch {
+    Write-Host "POWERSHELL WORD ERROR OCCURRED:"
+    Write-Host $_.Exception.Message
+    Write-Host $_.ScriptStackTrace
+    Write-Host $_.InvocationInfo.PositionMessage
+    exit 1
+}
+finally {
+    if ($null -ne $word) {
+        try {
+            if ($started) {
+                $word.Quit()
+            }
+        }
+        finally {
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) |
+                Out-Null
+        }
+    }
+}
+"""
+                wsl_run_powershell_cmd(
+                    POWERSHELL_SCRIPT,
+                    {"PDF_PATH": str(pdf_path), "OUTPUT_PATH": str(tmp_path)},
+                    timeout=60,
+                )
+            else:
+                raise RuntimeError(
+                    "Word PDF conversion on Linux is only implemented on WSL."
+                    "Use `--engine=libreoffice` instead."
+                )
     finally:
         os.remove(light_path)
     os.replace(tmp_path, docx_path)

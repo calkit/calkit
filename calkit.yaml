@@ -131,8 +131,16 @@ pipeline:
     latex-word-round-trip:
       kind: python-script
       script_path: scripts/latex-word-round-trip.py
+      iterate_over:
+        - arg_name: engine
+          values:
+            - word
+            - libreoffice
       args:
-        - --engine=libreoffice
+        - --engine={engine}
+      requirements:
+        - name: word
+        - name: libreoffice
       environment: dev
       description: >-
         Export the LaTeX/Word example to Word and merge it back, with no
@@ -147,20 +155,24 @@ pipeline:
         - examples/latex-word/paper/refs.bib
         - examples/latex-word/scripts/plot-wake.py
       outputs:
-        - results/latex-word-round-trip/original.pdf
-        - results/latex-word-round-trip/review.docx
-        - results/latex-word-round-trip/rebuilt.pdf
-        - path: results/latex-word-round-trip.json
+        - results/latex-word-round-trip/{engine}/original.pdf
+        - results/latex-word-round-trip/{engine}/review.docx
+        - results/latex-word-round-trip/{engine}/rebuilt.pdf
+        - path: results/latex-word-round-trip-{engine}.json
           storage: git
     latex-word-round-trip-figure:
       kind: python-script
       script_path: scripts/plot-latex-word-round-trip.py
       environment: dev
+      requirements:
+        - name: libreoffice
+          check_command: which("soffice") || which("libreoffice")
+          setup_command: calkit install libreoffice
       inputs:
         - calkit/docx.py
-        - results/latex-word-round-trip/original.pdf
-        - results/latex-word-round-trip/review.docx
-        - results/latex-word-round-trip/rebuilt.pdf
+        - results/latex-word-round-trip/libreoffice/original.pdf
+        - results/latex-word-round-trip/libreoffice/review.docx
+        - results/latex-word-round-trip/libreoffice/rebuilt.pdf
       outputs:
         - path: docs/img/latex-word-round-trip.png
           storage: git

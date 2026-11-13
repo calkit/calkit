@@ -1,7 +1,7 @@
 stages:
   latex-word-round-trip:
     cmd: calkit xenv -n dev --no-check -- python
-      scripts/latex-word-round-trip.py --engine=libreoffice
+      scripts/latex-word-round-trip.py --engine=${item.engine}
     deps:
       - scripts/latex-word-round-trip.py
       - calkit/cli/latex.py
@@ -15,12 +15,16 @@ stages:
       - uv.lock
       - .python-version
     outs:
-      - results/latex-word-round-trip/original.pdf
-      - results/latex-word-round-trip/review.docx
-      - results/latex-word-round-trip/rebuilt.pdf
-      - results/latex-word-round-trip.json:
+      - results/latex-word-round-trip/${item.engine}/original.pdf
+      - results/latex-word-round-trip/${item.engine}/review.docx
+      - results/latex-word-round-trip/${item.engine}/rebuilt.pdf
+      - results/latex-word-round-trip-${item.engine}.json:
           cache: false
           persist: false
+    matrix:
+      engine:
+        - word
+        - libreoffice
     desc: Automatically generated from the 'latex-word-round-trip' stage in
       calkit.yaml. Changes made here will be overwritten.
   latex-word-round-trip-figure:
@@ -29,9 +33,9 @@ stages:
     deps:
       - scripts/plot-latex-word-round-trip.py
       - calkit/docx.py
-      - results/latex-word-round-trip/original.pdf
-      - results/latex-word-round-trip/review.docx
-      - results/latex-word-round-trip/rebuilt.pdf
+      - results/latex-word-round-trip/libreoffice/original.pdf
+      - results/latex-word-round-trip/libreoffice/review.docx
+      - results/latex-word-round-trip/libreoffice/rebuilt.pdf
       - uv.lock
       - .python-version
     outs:

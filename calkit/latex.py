@@ -1298,7 +1298,11 @@ LOCAL_DOCX_MERGES_DIR = os.path.join(LOCAL_DIR, "docx-merges")
 DOCX_BUILD_DIR = os.path.join(LOCAL_DIR, "latex-docx-build")
 # Word bookmark names: 40 chars max, letters/digits/underscores
 _INCLUDE_RE = re.compile(
-    r"^\s*\\(input|include|subfile|import)\{([^}]*)\}(?:\{([^}]*)\})?"
+    r"^\s*\\(input|include|subfile|import)\s*\{([^}]*)\}(?:\s*\{([^}]*)\})?"
+)
+# An include anywhere in a line, e.g., after text
+_INLINE_INCLUDE_RE = re.compile(
+    r"\\(input|include|subfile|import)\s*\{([^}]*)\}(?:\s*\{([^}]*)\})?"
 )
 _BLOCK_START_RE = re.compile(
     r"^\s*\\(begin|end|section|subsection|subsubsection|chapter|part|item|"
@@ -1623,8 +1627,19 @@ def flatten(
             return
         seen.add(key)
         for i, line in enumerate(text.split("\n"), 1):
-            m = None if markdown else _INCLUDE_RE.match(_strip_comments(line))
-            if m:
+            matches = (
+                []
+                if markdown
+                else list(_INLINE_INCLUDE_RE.finditer(_strip_comments(line)))
+            )
+            if not matches:
+                out.append(SourceLine(rel, i, line))
+                continue
+            # Text around an include is kept, on the line it's on
+            pos = 0
+            for m in matches:
+                if line[pos : m.start()].strip():
+                    out.append(SourceLine(rel, i, line[pos : m.start()]))
                 cmd, a, b = m.groups()
                 target = Path(b) if cmd == "import" and b else Path(a)
                 start = base / a if cmd == "import" else base
@@ -1634,8 +1649,9 @@ def flatten(
                 # TeX reads \input paths from where it compiles, and only
                 # \import moves that to the imported file's folder
                 visit(child, child.parent if cmd == "import" else base)
-                continue
-            out.append(SourceLine(rel, i, line))
+                pos = m.end()
+            if line[pos:].strip():
+                out.append(SourceLine(rel, i, line[pos:]))
 
     visit(main, main.parent)
     return out

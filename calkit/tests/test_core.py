@@ -129,6 +129,29 @@ def test_encode_safe() -> None:
     )
 
 
+def test_is_wsl(monkeypatch: pytest.MonkeyPatch) -> None:
+    wsl = "Linux version 6.6.87.2-microsoft-standard-WSL2"
+    for platform, version, container, expected in [
+        ("linux", wsl, False, True),
+        (
+            "linux",
+            "Linux version 6.8.0-45-generic (buildd@lcy02)",
+            False,
+            False,
+        ),
+        # A container on a Windows host has the WSL kernel too
+        ("linux", wsl, True, False),
+        # Only Linux reads /proc at all
+        ("darwin", "microsoft", False, False),
+    ]:
+        monkeypatch.setattr("sys.platform", platform)
+        with (
+            mock.patch("builtins.open", mock.mock_open(read_data=version)),
+            mock.patch("os.path.exists", return_value=container),
+        ):
+            assert calkit.core.is_wsl() is expected, (version, container)
+
+
 def test_is_mintty() -> None:
     import sys
 

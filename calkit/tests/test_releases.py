@@ -207,6 +207,12 @@ def test_parse_bibtex(monkeypatch):
     assert parsed[0]["ENTRYTYPE"] == "misc"
     assert parsed[0]["doi"] == "10.5281/zenodo.999"
     assert parsed[0]["title"] == "New release"
+    # biblatex's types, e.g., what Zenodo and GitHub export for software,
+    # aren't dropped
+    parsed = parse_bibtex("@software{tool, title = {Tool}}")
+    assert [(e["ID"], e["ENTRYTYPE"]) for e in parsed] == [
+        ("tool", "software")
+    ]
     # Version 2 dropped `loads` in favor of `parse_string` and returns
     # objects, which is what broke releases before this was normalized
     import types
@@ -454,6 +460,7 @@ def test_zip_paths(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_archive_docker_images(tmp_dir):
     import calkit
     from calkit.releases import (

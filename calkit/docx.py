@@ -1159,7 +1159,73 @@ def word_installed() -> bool:
                 continue
             return True
         return False
+    if _is_wsl():
+        script = r"""
+$paths = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Winword.exe",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Winword.exe"
+)
+foreach ($path in $paths) {
+    if (Test-Path -LiteralPath $path) {
+        exit 0
+    }
+}
+exit 1
+"""
+        return wsl_run_powershell_cmd(script, check=False).returncode == 0
     return False
+
+
+def _is_wsl() -> bool:
+    if not sys.platform.startswith("linux"):
+        return False
+    res = subprocess.run(
+        ["uname", "-r"], capture_output=True, text=True, check=False
+    )
+    return "microsoft" in res.stdout.lower()
+
+
+def wsl_run_powershell_cmd(
+    script: str,
+    env_vars: dict[str, str] | None = None,
+    *,
+    timeout: int | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    if not _is_wsl():
+        raise NotImplementedError(
+            "Running PowerShell from Linux is only implemented on WSL"
+        )
+    env = os.environ.copy()
+    if env_vars:
+        env.update(env_vars)
+        wslenv = env.get("WSLENV", "")
+        converted = [f"{name}/p" for name in env_vars]
+        env["WSLENV"] = ":".join(filter(None, [wslenv, *converted]))
+    res = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "-",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        input=script.replace("\n", "\r\n") + "\r\n",
+        env=env,
+        timeout=timeout,
+    )
+    if check and res.returncode != 0:
+        details = "\n".join(
+            part.strip() for part in (res.stdout, res.stderr) if part
+        )
+        raise RuntimeError(
+            f"Converting PDF to Word failed: {details or res.returncode}"
+        )
+    return res
 
 
 def find_soffice() -> str | None:
@@ -1493,12 +1559,7 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                 if started:
                     word.Quit()
         else:  # Linux
-            # check for WSL
-            res = subprocess.run(
-                ["uname", "-r"], capture_output=True, text=True
-            )
-            username = res.stdout
-            if "microsoft" in username.lower():  # WSL detected
+            if _is_wsl():
                 POWERSHELL_SCRIPT = r"""
 
 $PdfPath = $env:PDF_PATH
@@ -1617,59 +1678,14 @@ finally {
     }
 }
 """
-
-                def wsl_to_windows_path(path_in: str) -> str:
-                    path_out = subprocess.check_output(
-                        ["wslpath", "-w", str(path_in)],
-                        text=True,
-                    )
-                    return path_out.strip()
-
-                try:
-                    env = os.environ.copy()
-                    # Pass the original WSL paths (not wslpath-converted paths).
-                    env["PDF_PATH"] = str(pdf_path)
-                    env["OUTPUT_PATH"] = str(tmp_path)
-
-                    # Tell WSL to propagate these variables and convert their paths.
-                    wslenv = env.get("WSLENV", "")
-                    env["WSLENV"] = ":".join(
-                        filter(
-                            None,
-                            [
-                                wslenv,
-                                "PDF_PATH/p",
-                                "OUTPUT_PATH/p",
-                            ],
-                        )
-                    )
-                    subprocess.run(
-                        [
-                            "powershell.exe",
-                            "-NoProfile",
-                            "-ExecutionPolicy",
-                            "Bypass",
-                            "-Command",
-                            "-",
-                        ],
-                        text=True,
-                        capture_output=True,
-                        check=True,
-                        input=POWERSHELL_SCRIPT.replace("\n", "\r\n")
-                        + "\r\n",  # windows line endings
-                        env=env,
-                        timeout=60, # timeout in case of Word dialog not OK'd
-                    )
-                except subprocess.CalledProcessError as e:
-                    details = "\n".join(
-                        part.strip() for part in (e.stdout, e.stderr) if part
-                    )
-                    raise RuntimeError(
-                        "Converting PDF to Word failed: " + (details or str(e))
-                    ) from e
+                wsl_run_powershell_cmd(
+                    POWERSHELL_SCRIPT,
+                    {"PDF_PATH": str(pdf_path), "OUTPUT_PATH": str(tmp_path)},
+                    timeout=60,
+                )
             else:
-                raise RuntimeError(
-                    "Converting PDF to Word requires Word on macOS or Windows"
+                raise NotImplementedError(
+                    "Word PDF conversion on Linux is only implemented on WSL"
                 )
     finally:
         os.remove(light_path)

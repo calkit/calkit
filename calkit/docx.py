@@ -1193,8 +1193,8 @@ def wsl_run_powershell_cmd(
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     if not _is_wsl():
-        raise NotImplementedError(
-            "Running PowerShell from Linux is only implemented on WSL"
+        raise RuntimeError(
+            "Running PowerShell from Linux is only supported via WSL"
         )
     env = os.environ.copy()
     if env_vars:
@@ -1223,7 +1223,7 @@ def wsl_run_powershell_cmd(
             part.strip() for part in (res.stdout, res.stderr) if part
         )
         raise RuntimeError(
-            f"Converting PDF to Word failed: {details or res.returncode}"
+            f"Running powershell script from WSL failed: {details or res.returncode}"
         )
     return res
 
@@ -1684,8 +1684,9 @@ finally {
                     timeout=60,
                 )
             else:
-                raise NotImplementedError(
-                    "Word PDF conversion on Linux is only implemented on WSL"
+                raise RuntimeError(
+                    "Word PDF conversion on Linux is only implemented on WSL."
+                    "Use `--engine=libreoffice` instead."
                 )
     finally:
         os.remove(light_path)

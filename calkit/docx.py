@@ -1501,7 +1501,7 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
             username = res.stdout
             if "microsoft" in username.lower():  # WSL detected
                 print("WSL detected")
-                POWERSHELL_SCRIPT = """
+                POWERSHELL_SCRIPT = r"""
 
 $PdfPath = $env:PDF_PATH
 $OutputPath = $env:OUTPUT_PATH
@@ -1540,8 +1540,10 @@ try {
     }
 
     $word.DisplayAlerts = 0
-    $word.Visible = $false
-    $word.ScreenUpdating = $false
+    if ($started) {
+        $word.Visible = $false
+        $word.ScreenUpdating = $false
+    }
 
     # Suppress the PDF conversion confirmation where supported.
     $word.Options.ConfirmConversions = $false
@@ -1549,7 +1551,9 @@ try {
 
     try {
         # Copy PDF to Windows temp
-        $LocalPdfPath = Join-Path $env:TEMP "word-conversion-test.pdf"
+        $LocalPdfPath = Join-Path $env:TEMP (
+            "calkit-word-" + [guid]::NewGuid().ToString() + ".pdf"
+        )
         Copy-Item -LiteralPath $PdfPath -Destination $LocalPdfPath -Force
         $file = Get-Item -LiteralPath $LocalPdfPath
 
@@ -1592,11 +1596,6 @@ try {
         }
     }
 
-    # Match the original behavior: only quit Word if we started it.
-    if ($started) {
-        $word.Quit()
-    }
-
     exit 0
 }
 catch {
@@ -1608,8 +1607,15 @@ catch {
 }
 finally {
     if ($null -ne $word) {
-        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) |
-            Out-Null
+        try {
+            if ($started) {
+                $word.Quit()
+            }
+        }
+        finally {
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) |
+                Out-Null
+        }
     }
 }
 """
@@ -1656,18 +1662,19 @@ finally {
                         env=env,
                     )
                 except subprocess.CalledProcessError as e:
-                    raise RuntimeError("Converting PDF to Word failed." + e)
+                    details = "\n".join(
+                        part.strip() for part in (e.stdout, e.stderr) if part
+                    )
+                    raise RuntimeError(
+                        "Converting PDF to Word failed: " + (details or str(e))
+                    ) from e
             else:
                 raise RuntimeError(
                     "Converting PDF to Word requires Word on macOS or Windows"
                 )
     finally:
         os.remove(light_path)
-    try:
-        os.replace(tmp_path, docx_path)
-    except FileNotFoundError:
-        print(f"tmp_path exists: {os.path.exists(tmp_path)}")
-        print(f"docx_path exists: {os.path.exists(docx_path)}")
+    os.replace(tmp_path, docx_path)
 
 
 def pdf_to_png(pdf_path: str, png_path: str, dpi: int = 200) -> bool:

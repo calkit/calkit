@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
+from unittest import mock
 
 import git
 import pytest
@@ -2298,6 +2300,132 @@ def test_release_detached_head(tmp_dir):
         ],
     )
     assert res.exit_code == 0, res.stdout
+
+
+def test_release_checks_requirements_first(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ck_info = {
+        "title": "Test",
+        "description": "Test",
+        "requirements": [
+            {"kind": "app", "name": "calkit-test-missing-app"},
+        ],
+        "publications": [
+            {"path": "out.txt", "kind": "journal-article", "title": "Out"}
+        ],
+        "pipeline": {
+            "stages": {
+                "make": {
+                    "kind": "command",
+                    "command": "echo hi > out.txt",
+                    "outputs": ["out.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("out.txt", "w") as f:
+        f.write("hi\n")
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.email", "test@test.com"])
+    subprocess.check_call(["git", "config", "user.name", "Test"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(["dvc", "config", "core.analytics", "false"])
+    subprocess.check_call(["git", "add", "."])
+    subprocess.check_call(["git", "commit", "-m", "init"])
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
+    zip_paths = mock.Mock()
+    get_status = mock.Mock(
+        return_value=mock.Mock(
+            errors=[],
+            failed_environment_checks=[],
+            stale_stage_names=[],
+            is_stale=False,
+        )
+    )
+    monkeypatch.setattr(calkit.releases, "zip_paths", zip_paths)
+    monkeypatch.setattr(calkit.pipeline, "get_status", get_status)
+    # Releases that get checked by running their pipeline stop on an unmet
+    # requirement before checking environments or archiving anything
+    for args in [
+        ["-n", "v1", "--to", "zenodo", "--no-push", "."],
+        ["-n", "v1", "--to", "zenodo", "--no-push", "--dry-run", "."],
+        ["-n", "v1", "--internal", "--no-push", "--pipeline", "out.txt"],
+    ]:
+        res = runner.invoke(app, ["new", "release"] + args)
+        assert res.exit_code != 0
+        output = res.stdout + str(res.stderr)
+        assert "Project requirements aren't met" in output
+        assert "app 'calkit-test-missing-app' not found" in output
+        zip_paths.assert_not_called()
+        get_status.assert_not_called()
+    # A subproject's requirements are the host's too
+    ck_info["requirements"] = []
+    ck_info["subprojects"] = [{"path": "sub"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    os.makedirs("sub")
+    with open("sub/calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"requirements": ["calkit-test-missing-app"]}, f)
+    res = runner.invoke(
+        app, ["new", "release", "-n", "v1", "--to", "zenodo", "--no-push", "."]
+    )
+    assert res.exit_code != 0
+    assert "subproject 'sub': app 'calkit-test-missing-app'" in (
+        res.stdout + str(res.stderr)
+    )
+    zip_paths.assert_not_called()
+    get_status.assert_not_called()
+    # A release that isn't checked by running it doesn't need them met
+    res = runner.invoke(
+        app,
+        ["new", "release", "-n", "v2", "--internal", "--no-push", "out.txt"],
+    )
+    assert res.exit_code == 0, res.stdout
+    assert "Checking project requirements" not in res.stdout
+    get_status.assert_called_once()
+    zip_paths.assert_not_called()
+    # Nor does a project archive with no pipeline, which isn't run either
+    get_status.reset_mock()
+    no_pipeline = {
+        k: v
+        for k, v in ck_info.items()
+        if k not in ["pipeline", "subprojects"]
+    }
+    no_pipeline["requirements"] = [
+        {"kind": "app", "name": "calkit-test-missing-app"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(no_pipeline, f)
+    assert not os.path.isfile("dvc.yaml")
+    res = runner.invoke(
+        app,
+        ["new", "release", "-n", "v3", "--to", "zenodo", "--dry-run", "."],
+    )
+    assert "Checking project requirements" not in res.stdout, res.stdout
+    get_status.assert_called_once()
+    # A variable the project sets in calkit.yaml meets a requirement for
+    # it, as it does for 'calkit run'. Set and removed through monkeypatch
+    # so the value the release sets doesn't outlive this test.
+    get_status.reset_mock()
+    var = "CALKIT_TEST_RELEASE_VAR"
+    monkeypatch.setenv(var, "")
+    monkeypatch.delenv(var)
+    ck_info["subprojects"] = []
+    ck_info["requirements"] = [{"kind": "env-var", "name": var}]
+    ck_info["env_vars"] = {var: "from-yaml"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    res = runner.invoke(
+        app,
+        ["new", "release", "-n", "v4", "--to", "zenodo", "--dry-run", "."],
+    )
+    output = res.stdout + str(res.stderr)
+    assert "Checking project requirements" in output
+    assert "Project requirements aren't met" not in output, output
+    get_status.assert_called_once()
 
 
 def test_new_workspace(tmp_dir):

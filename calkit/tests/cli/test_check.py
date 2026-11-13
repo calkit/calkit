@@ -2141,6 +2141,67 @@ def test_check_storage(tmp_dir):
     assert result.returncode == 0, result.stderr
     assert "Run 'make'" in result.stdout
     assert not git("ls-files", "--", "out.txt").strip()
+    # An output ignored as a whole, with a file in it another rule ignores,
+    # is fixed in one pass
+    ck_info["pipeline"]["stages"]["whole"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "mkdir -p whole && echo w > whole/w.txt "
+        "&& echo l > whole/run.log",
+        "outputs": [{"path": "whole", "storage": "git"}],
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run", "whole"])
+    git("rm", "-r", "-q", "--cached", "whole")
+    with open(".gitignore", "a") as f:
+        f.write("\n/whole/\n*.log\n")
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "ignored"
+    assert sorted(problem["files"]) == ["whole/run.log", "whole/w.txt"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "whole").split() == [
+        "whole/run.log",
+        "whole/w.txt",
+    ]
+    result = check()
+    assert result.returncode == 0, result.stdout
+    # A directory tracked by both, with a file DVC leaves out of it that's
+    # only in Git, keeps that one in Git
+    git("commit", "-qm", "Fix")
+    with open(".dvcignore", "a") as f:
+        f.write("*.tmp\n")
+    ck_info["pipeline"]["stages"]["dir"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "mkdir -p dir && echo d > dir/d.csv && echo t > dir/t.tmp",
+        "outputs": ["dir"],
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run", "dir"])
+    git("add", "-f", "dir")
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "both"
+    assert problem["files"] == ["dir/d.csv"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "dir").split() == ["dir/t.tmp"]
+    result = check()
+    assert result.returncode == 0, result.stdout
+    # A file an output's 'ignore' leaves out, but Git still tracks, is
+    # removed from Git
+    ck_info["pipeline"]["stages"]["whole"]["outputs"][0]["ignore"] = ["*.log"]
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "status"], stdout=subprocess.DEVNULL)
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "excluded-tracked"
+    assert problem["files"] == ["whole/run.log"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "whole").split() == ["whole/w.txt"]
+    assert os.path.isfile("whole/run.log")
+    result = check()
+    assert result.returncode == 0, result.stdout
 
 
 def test_check_references(tmp_dir):

@@ -3968,7 +3968,7 @@ Options:
 
 Check that paths are tracked where they're declared to be stored.
 
-That is, nothing is tracked by both Git and DVC, no pipeline output stored in Git is ignored by it, and nothing in Git is too large for it. With --fix, the pipeline's declarations, or a file's .dvc file, decide where each path belongs, and the changes are staged.
+That is, nothing is tracked by both Git and DVC, no pipeline output stored in Git, or file in one, is ignored by it, and nothing in Git is too large for it. Large files are only reported. With --fix, the pipeline's declarations, or a file's .dvc file, decide where each path belongs, and the changes are staged. Files Git ignores in an output stored in Git are added in spite of the rule, unless they're in the output's 'ignore' list or too large.
 
 Usage:
 

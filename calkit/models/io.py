@@ -287,8 +287,47 @@ class PathOutput(Model):
         default=True,
         description="Delete this output before the stage runs.",
     )
+    ignore: list[str] | None = Field(
+        default=None,
+        description="Files to leave out of this output directory (neither "
+        "stored nor hashed), as .gitignore patterns relative to it.",
+    )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def check_ignore_storage(self) -> "PathOutput":
+        if self.ignore and self.storage not in ("git", "dvc"):
+            raise ValueError(
+                "'ignore' only applies to outputs stored with Git or DVC"
+            )
+        return self
+
+    def get_ignore_patterns(self, wdir: str | None = None) -> list[str]:
+        """Get ``ignore`` as patterns for the .gitignore or .dvcignore in the
+        directory that ``wdir``, the stage's, is relative to.
+
+        An iterated stage's ``{arg}`` matches any one directory.
+        """
+        import re
+
+        out_path = os.path.normpath(os.path.join(wdir or "", self.path))
+        out_path = out_path.replace(os.sep, "/").strip("/")
+        # Glob characters in the path match only themselves
+        out_path = re.sub(r"([*?\[\\])", r"\\\1", out_path)
+        out_path = re.sub(r"\{[^/]*?\}", "*", out_path)
+        patterns = []
+        for pattern in self.ignore or []:
+            negate = pattern.startswith("!")
+            pattern = pattern.removeprefix("!")
+            if pattern.startswith("/") or "/" in pattern.rstrip("/"):
+                # Relative to the output
+                pattern = f"/{out_path}/{pattern.lstrip('/')}"
+            else:
+                # At any depth in it
+                pattern = f"/{out_path}/**/{pattern}"
+            patterns.append(("!" if negate else "") + pattern)
+        return patterns
 
 
 class DatabaseTableOutput(Model):

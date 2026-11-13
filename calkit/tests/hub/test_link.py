@@ -2346,6 +2346,10 @@ def test_trim_status():
             "uncommitted": {"modified": paths, "deleted": paths[:2]},
             "committed": {},
         },
+        "storage": [
+            {"path": "data", "kind": "ignored-files", "files": paths},
+            {"path": "big.csv", "kind": "large"},
+        ],
     }
     # What isn't shown is dropped and long lists shortened to a count
     hub_link.trim_status(status)
@@ -2364,6 +2368,9 @@ def test_trim_status():
     assert dvc["not_in_cache_count"] == 500
     assert len(dvc["uncommitted"]["modified"]) == hub_link.MAX_CHANGED_PATHS
     assert dvc["uncommitted"]["deleted"] == paths[:2]
+    assert status["storage"][0]["files"] == paths[: hub_link.MAX_STALE_PATHS]
+    assert status["storage"][0]["files_count"] == 500
+    assert status["storage"][1] == {"path": "big.csv", "kind": "large"}
     # Too large even so, why stages are stale goes, but not which are
     hub_link.trim_status(status, max_bytes=100)
     assert status["pipeline"]["stale_stages"] == {}

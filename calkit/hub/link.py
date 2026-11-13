@@ -1546,6 +1546,10 @@ def trim_status(
                 "stale_outputs",
             ):
                 shorten(detail, key, MAX_STALE_PATHS)
+    # Files stored nowhere are listed per output, and can be many
+    for problem in status.get("storage") or []:
+        if isinstance(problem, dict):
+            shorten(problem, "files", MAX_STALE_PATHS)
     dvc = status.get("dvc")
     if isinstance(dvc, dict):
         dvc.pop("unchanged", None)

@@ -1026,6 +1026,224 @@ def test_add_pipeline_output_storage(tmp_dir):
     assert "dvc.lock" in calkit.git.get_staged_files()
 
 
+def test_git_outputs_with_ignored_files(
+    tmp_dir: str, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], text=True)
+
+    def run(*args: str) -> str:
+        result = subprocess.run(
+            ["calkit", *args], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout + result.stderr
+
+    def get_storage_problems() -> list[dict]:
+        out = subprocess.check_output(
+            ["calkit", "status", "--json", "-c", "dvc"], text=True
+        )
+        problems: list[dict] = json.loads(out)["storage"]
+        return problems
+
+    subprocess.check_call(["calkit", "init"])
+    # Outputs ignored as a whole, and files in them by a general rule
+    with open(".gitignore", "a") as f:
+        f.write("runs/\n*.log\n__pycache__/\n")
+    with open(".dvcignore", "a") as f:
+        f.write("__pycache__/\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            # An iterated stage, whose output paths are templates
+            "rebuild": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": (
+                    "mkdir -p runs/{agent}/__pycache__ "
+                    "&& echo a > runs/{agent}/a.txt "
+                    "&& echo l > runs/{agent}/write.log "
+                    "&& echo b > runs/{agent}/x.bak "
+                    "&& echo c > runs/{agent}/__pycache__/c.pyc"
+                ),
+                "iterate_over": [
+                    {"arg_name": "agent", "values": ["one", "two"]}
+                ],
+                "outputs": [
+                    {
+                        "path": "runs/{agent}",
+                        "storage": "git",
+                        "ignore": ["*.bak"],
+                    }
+                ],
+            },
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    git("add", "-A")
+    git("commit", "-qm", "Set up")
+    # Running stages their outputs stored in Git, and with them the files
+    # Git ignores, but not what the output's 'ignore' leaves out, nor what
+    # .dvcignore excludes too, which DVC doesn't hash either
+    out = run("run")
+    assert (
+        "Force-added 2 files Git ignores in outputs stored in Git, which "
+        "would otherwise be in neither Git nor DVC: runs/one/write.log, "
+        "runs/two/write.log ('*.log' in .gitignore)"
+    ) in out
+    staged = git("diff", "--cached", "--name-only").split()
+    for agent in ["one", "two"]:
+        assert f"runs/{agent}/a.txt" in staged
+        assert f"runs/{agent}/write.log" in staged
+        assert f"runs/{agent}/x.bak" not in staged
+        assert f"runs/{agent}/__pycache__/c.pyc" not in staged
+    # With the ignore files compiling and running changed, e.g., what
+    # .dvcignore leaves out, which dvc.lock's hashes depend on
+    assert ".dvcignore" in staged
+    assert ".gitignore" in staged
+    git("add", "-A")
+    git("commit", "-qm", "Run")
+    assert get_storage_problems() == []
+    # What 'ignore' leaves out isn't part of the output, so a clone has
+    # everything that is
+    clone_dir = str(tmp_path_factory.mktemp("clone"))
+    # Without converting line endings, which Windows runners do by default,
+    # and which a project settles for itself
+    git("clone", "-q", "-c", "core.autocrlf=false", ".", clone_dir)
+    result = subprocess.run(
+        ["dvc", "status", "rebuild"],
+        cwd=clone_dir,
+        capture_output=True,
+        text=True,
+    )
+    assert "up to date" in result.stdout, result.stdout
+    # Saving an output takes .dvcignore with dvc.lock, whose hashes depend on
+    # what it excludes
+    ck_info["pipeline"]["stages"]["rebuild"]["outputs"][0]["ignore"] = [
+        "*.bak",
+        "*.txt",
+    ]
+    calkit.save_calkit_info(ck_info)
+    # Which takes files it now leaves out out of Git
+    out = run("run")
+    assert (
+        "Removed 2 files from Git that outputs stored in it leave out: "
+        "runs/one/a.txt, runs/two/a.txt"
+    ) in out
+    run("save", "runs", "-m", "Ignore text", "--no-push")
+    committed = git("show", "--name-only", "--format=", "HEAD").split()
+    assert ".dvcignore" in committed
+    assert "dvc.lock" in committed
+    assert "runs/one/a.txt" in committed
+    assert not git("ls-files", "--", "runs/one/a.txt").strip()
+    # What else was staged stays staged, and out of the commit
+    assert ".calkit/stage-runs.json" not in committed
+    assert ".calkit/stage-runs.json" in git("diff", "--cached", "--name-only")
+    git("add", "-A")
+    git("commit", "-qm", "Save the rest")
+    # Without autostaging, nothing is staged, so it's only said
+    subprocess.check_call(["dvc", "config", "core.autostage", "false"])
+    git("rm", "-q", "--cached", "runs/one/write.log")
+    git("commit", "-qm", "Drop the log")
+    out = run("run", "--force", "rebuild@one")
+    assert "will be in neither Git nor DVC" in out
+    assert "'calkit fix storage'" in out
+    assert not git("diff", "--cached", "--name-only").strip()
+    out = run("fix", "storage")
+    assert "runs/one/write.log" in git("diff", "--cached", "--name-only")
+    git("add", "-A")
+    git("commit", "-qm", "Fix")
+    subprocess.check_call(["dvc", "config", "core.autostage", "true"])
+    # A new ignored file in an output is found by status, and adding it, or
+    # what it's in, adds it, but not an ignored file elsewhere
+    with open("runs/one/new.log", "w") as f:
+        f.write("n")
+    with open("other.log", "w") as f:
+        f.write("o")
+    out = run("status", "-c", "dvc")
+    assert (
+        "runs/one is stored in Git, but Git ignores 1 file in it: "
+        "runs/one/new.log ('*.log' in .gitignore)"
+    ) in out
+    assert "'calkit fix storage'" in out
+    (problem,) = get_storage_problems()
+    assert problem["kind"] == "ignored-files"
+    assert problem["files"] == ["runs/one/new.log"]
+    assert problem["stage"] == "rebuild@one"
+    out = run("add", "--dry-run", "runs")
+    assert "Would force-add 1 file Git ignores" in out
+    assert not git("diff", "--cached", "--name-only").strip()
+    out = run("add", ".")
+    assert "Force-added 1 file Git ignores" in out
+    staged = git("diff", "--cached", "--name-only").split()
+    assert "runs/one/new.log" in staged
+    assert "other.log" not in staged
+    git("commit", "-qm", "Add")
+    # One too large for Git is only reported, whether Git ignores it or not
+    for fname in ["big.log", "big.bin"]:
+        with open(os.path.join("runs", "one", fname), "wb") as f:
+            f.truncate(51 * 1024**2)
+    out = run("add", "runs")
+    for fname in ["big.log", "big.bin"]:
+        assert (
+            "Not adding 1 file in outputs stored in Git to it, since they're "
+            f"larger than 50 MB: runs/one/{fname}"
+        ) in out
+    staged = git("diff", "--cached", "--name-only")
+    assert "runs/one/big.log" not in staged
+    assert "runs/one/big.bin" not in staged
+    out = run("add", "--to", "git", "runs/one/big.bin")
+    assert "runs/one/big.bin" not in git("diff", "--cached", "--name-only")
+    os.remove("runs/one/big.bin")
+    result = subprocess.run(
+        ["calkit", "fix", "storage"], capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "Not adding 1 file" in result.stdout + result.stderr
+    assert "runs/one/big.log" not in git("diff", "--cached", "--name-only")
+    os.remove("runs/one/big.log")
+    # A subproject's stages run from here are staged too, as declared in its
+    # own calkit.yaml
+    os.makedirs("sub")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "c": {
+                            "kind": "shell-command",
+                            "environment": "_system",
+                            "command": (
+                                "mkdir -p out && echo c > out/c.txt "
+                                "&& echo l > out/c.log"
+                            ),
+                            "outputs": [{"path": "out", "storage": "git"}],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info["subprojects"] = [{"path": "sub"}]
+    calkit.save_calkit_info(ck_info)
+    out = run("run")
+    assert "Force-added 1 file Git ignores" in out
+    assert "sub/out/c.log" in out
+    staged = git("diff", "--cached", "--name-only").split()
+    assert "sub/out/c.txt" in staged
+    assert "sub/out/c.log" in staged
+    git("add", "-A")
+    git("commit", "-qm", "Run sub")
+    # And found from here, with the name it's run by
+    with open(os.path.join("sub", "out", "new.log"), "w") as f:
+        f.write("n")
+    (problem,) = get_storage_problems()
+    assert problem["path"] == "sub/out"
+    assert problem["stage"] == "sub/dvc.yaml:c"
+    run("fix", "storage")
+    assert "sub/out/new.log" in git("diff", "--cached", "--name-only")
+
+
 def test_save_to_git_with_all(tmp_dir):
     """Test that ``save --to git -a`` respects the ``--to`` flag.
 

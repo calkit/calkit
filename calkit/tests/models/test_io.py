@@ -3,7 +3,7 @@
 import pydantic
 import pytest
 
-from calkit.models.io import ScheduleInput, parse_period
+from calkit.models.io import PathOutput, ScheduleInput, parse_period
 
 
 def test_schedule_input(monkeypatch, tmp_path):
@@ -113,3 +113,30 @@ def test_schedule_input(monkeypatch, tmp_path):
         ScheduleInput(kind="schedule", period="fortnight")
     with pytest.raises(pydantic.ValidationError):
         ScheduleInput(kind="schedule", period="1d", start="2026-01-01")
+
+
+def test_path_output_ignore():
+    out = PathOutput(
+        path="results",
+        storage="git",
+        ignore=["*.log", "/scratch/", "sub/*.tmp", "!keep.log", "cache/"],
+    )
+    assert out.get_ignore_patterns() == [
+        "/results/**/*.log",
+        "/results/scratch/",
+        "/results/sub/*.tmp",
+        "!/results/**/keep.log",
+        "/results/**/cache/",
+    ]
+    # Relative to the stage's directory, with an iterated stage's args
+    # matching any directory, and glob characters in the path escaped
+    out = PathOutput(path="./runs/{agent}/[a]", storage="dvc", ignore=["*.x"])
+    assert out.get_ignore_patterns(wdir="sim") == ["/sim/runs/*/\\[a]/**/*.x"]
+    assert (
+        PathOutput(path="results", storage="git").get_ignore_patterns() == []
+    )
+    # Only where something stores the rest
+    for storage in [None, "dvc-zip"]:
+        with pytest.raises(pydantic.ValidationError):
+            PathOutput(path="results", storage=storage, ignore=["*.log"])
+    assert PathOutput(path="results", storage=None, ignore=[]).ignore == []

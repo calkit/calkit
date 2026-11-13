@@ -14,7 +14,7 @@ import threading
 from collections.abc import Container, Iterator
 from itertools import groupby
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import dvc.repo
 from configobj import ConfigObj
@@ -27,6 +27,9 @@ import calkit
 from calkit.cli import warn
 from calkit.config import get_app_name
 
+if TYPE_CHECKING:
+    import git
+
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
@@ -34,6 +37,8 @@ USE_CK_REMOTE_BY_DEFAULT = True
 # Whether projects have what Calkit and DVC write staged in Git as it's
 # written, e.g., dvc.lock and env locks, so they're committed together
 AUTOSTAGE = True
+# Size in MB of a file too large for Git
+LARGE_MB = 50
 
 
 class _FrozenStageWarningFilter(logging.Filter):
@@ -1707,21 +1712,18 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
     ck_info: dict | None = None,
     wdir: str | None = None,
     stages: Container[str] | None = None,
-    include_dvc: bool = True,
 ) -> list[dict]:
-    """Find files in pipeline outputs that neither Git nor DVC stores.
+    """Find files in pipeline outputs stored in Git that neither Git nor DVC
+    stores.
 
-    These are files Git ignores in an output stored in Git, unless
-    .dvcignore excludes them too, so DVC doesn't hash them either, and, with
-    ``include_dvc``, files .dvcignore excludes in a directory DVC caches,
-    which Git ignores along with the rest of it, unless they were added to
-    Git anyway.
-    Either way the output is complete here but not in a clone, and there one
-    stored in Git doesn't match dvc.lock, so its stage looks stale.
+    These are files Git ignores, unless .dvcignore excludes them too, e.g.,
+    by the output's ``ignore``, so DVC doesn't hash them either.
+    The output is then complete here but not in a clone, where it doesn't
+    match dvc.lock, so its stage looks stale.
 
     Each has the output's ``path``, the ``stage`` that makes it, as DVC
-    names it, its ``storage``, ``git`` or ``dvc``, the ``files``, and the
-    ``rules`` that exclude them, e.g., ``'*.log' in .gitignore``.
+    names it, the ``files``, and the ``rules`` that ignore them, e.g.,
+    ``'*.log' in .gitignore``.
     Paths are relative to ``wdir``.
     ``stages`` limits it to the outputs of those.
     Without a ``dvc_repo``, iterated stages' outputs and what DVC tracks or
@@ -1819,87 +1821,12 @@ def get_unstored_output_files(  # type: ignore[no-any-unimported]
                 dict(
                     path=rel(out_path),
                     stage=git_out_paths[out_path],
-                    storage="git",
                     files=[rel(p) for p in files],
                     rules=list(
                         dict.fromkeys(
                             rule_by_path[p] for p in files if p in rule_by_path
                         )
                     ),
-                )
-            )
-    if not include_dvc or dvc_repo is None:
-        return unstored
-    # Files .dvcignore excludes in directories DVC caches, walked as DVC
-    # knows them, i.e., under its root as it is
-    dvcignore = dvc_repo.dvcignore
-    for out in dvc_repo.index.outs:
-        if not out.use_cache or out.stage.is_data_source:
-            continue
-        # The stages asked about are this directory's, not another's that
-        # shares its DVC repo, e.g., a subproject's
-        if stages is not None and (
-            out.stage.name not in stages
-            or Path(out.stage.path).resolve() != base / "dvc.yaml"
-        ):
-            continue
-        top = out.fs_path
-        top_resolved = Path(top).resolve()
-        if not top_resolved.is_relative_to(base) or not os.path.isdir(top):
-            continue
-        # Relative to the output
-        excluded_files: list[str] = []
-        rules = []
-        for dirpath, dirnames, filenames in os.walk(top):
-            kept_dirnames, kept_filenames = dvcignore(
-                dirpath, list(dirnames), list(filenames)
-            )
-            excluded = [
-                (n, True) for n in dirnames if n not in kept_dirnames
-            ] + [(n, False) for n in filenames if n not in kept_filenames]
-            for name, is_dir in excluded:
-                path = os.path.join(dirpath, name)
-                if is_dir:
-                    excluded_files += [
-                        os.path.relpath(os.path.join(sub_dirpath, f), top)
-                        for sub_dirpath, _, sub_filenames in os.walk(path)
-                        for f in sub_filenames
-                    ]
-                else:
-                    excluded_files.append(os.path.relpath(path, top))
-                matched = dvcignore.check_ignore(path).pattern_infos
-                if matched:
-                    # As 'path:line:pattern'
-                    pattern = matched[-1].patterns
-                    source = matched[-1].file_info.removesuffix(f":{pattern}")
-                    source = source.rsplit(":", 1)[0]
-                    rule = f"'{pattern}'"
-                    if source:
-                        rule += f" in {rel(Path(source).resolve())}"
-                    rules.append(rule)
-            dirnames[:] = kept_dirnames
-        # Unless Git stores them, e.g., added with 'git add -f'
-        if excluded_files:
-            tracked = {
-                (root / p).as_posix()
-                for p in repo.git.ls_files(
-                    "-z", "--", str(top_resolved)
-                ).split("\0")
-                if p
-            }
-            excluded_files = [
-                f
-                for f in excluded_files
-                if (top_resolved / f).as_posix() not in tracked
-            ]
-        if excluded_files:
-            unstored.append(
-                dict(
-                    path=rel(top_resolved),
-                    stage=out.stage.name,
-                    storage="dvc",
-                    files=[rel(top_resolved / f) for f in excluded_files],
-                    rules=list(dict.fromkeys(rules)),
                 )
             )
     return unstored
@@ -1918,9 +1845,44 @@ def get_unstored_files_text(files: list[str], rules: list[str]) -> str:
     return text
 
 
+def force_add_ignored_files(
+    repo: git.Repo, paths: list[str], dry_run: bool = False
+) -> list[str]:
+    """Add files to Git in spite of the rules that ignore them, unless
+    they're larger than ``LARGE_MB``, since Git history keeps them for good.
+
+    Returns those too large, which aren't added.
+    """
+    too_large = [
+        p
+        for p in paths
+        if os.path.isfile(p) and os.path.getsize(p) > LARGE_MB * 1024**2
+    ]
+    if dry_run:
+        return too_large
+    to_add = [os.path.abspath(p) for p in paths if p not in too_large]
+    # Chunked to stay under command line length limits
+    for i in range(0, len(to_add), 100):
+        repo.git.add("-f", "--", *to_add[i : i + 100])
+    return too_large
+
+
+def get_too_large_text(paths: list[str]) -> str:
+    """Get what to say about files Git ignores in outputs stored in Git that
+    are too large to add to it.
+    """
+    n_files_txt = f"{len(paths)} file{'s' if len(paths) > 1 else ''}"
+    return (
+        f"Not adding {n_files_txt} Git ignores in outputs stored in Git, "
+        f"since they're larger than {LARGE_MB} MB: "
+        f"{get_unstored_files_text(paths, [])}; add them to the output's "
+        "'ignore' list, or store it with DVC"
+    )
+
+
 def get_storage_problems(  # type: ignore[no-any-unimported]
     wdir: str | None = None,
-    large_mb: float | None = 50,
+    large_mb: float | None = LARGE_MB,
     dvc_repo: dvc.repo.Repo | None = None,
     ck_info: dict | None = None,
 ) -> list[dict]:
@@ -1939,9 +1901,6 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     - ``ignored-files``: a pipeline output stored in Git with ``files`` in
       it that Git ignores, from ``get_unstored_output_files``, so leaving out
       those .dvcignore excludes too.
-    - ``dvcignored``: a pipeline output cached by DVC with ``files`` in it
-      that .dvcignore excludes, so neither stores them, which is only advice,
-      since only the user can tell whether that's what they meant.
     - ``zipped``: stored zipped with DVC, but tracked by Git too.
     - ``large``: tracked by Git, and larger than ``large_mb``, which is only
       advice; None skips this check.
@@ -2059,7 +2018,7 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
                         "ignores it",
                     )
                     problems.append(ignored_problems[rel(path)])
-        # Files in outputs that neither Git nor DVC stores
+        # Files in outputs stored in Git that neither Git nor DVC stores
         for unstored in get_unstored_output_files(
             dvc_repo=dvc_repo, ck_info=ck_info, wdir=wdir
         ):
@@ -2074,29 +2033,17 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
             files = unstored["files"]
             files_txt = get_unstored_files_text(files, unstored["rules"])
             n_files_txt = f"{len(files)} file{'s' if len(files) > 1 else ''}"
-            if unstored["storage"] == "git":
-                kind = "ignored-files"
-                store_in = "git"
-                message = (
-                    f"{unstored['path']} is stored in Git, but Git ignores "
-                    f"{n_files_txt} in it: {files_txt}"
-                )
-            else:
-                kind = "dvcignored"
-                store_in = None
-                message = (
-                    f"{unstored['path']} is stored with DVC, but .dvcignore "
-                    f"excludes {n_files_txt} in it, which neither Git nor DVC "
-                    f"stores: {files_txt}"
-                )
             problems.append(
                 dict(
                     path=unstored["path"],
-                    kind=kind,
+                    kind="ignored-files",
                     stage=unstored["stage"],
                     dvc_file=None,
-                    store_in=store_in,
-                    message=message,
+                    store_in="git",
+                    message=(
+                        f"{unstored['path']} is stored in Git, but Git "
+                        f"ignores {n_files_txt} in it: {files_txt}"
+                    ),
                     files=files,
                     rules=unstored["rules"],
                 )

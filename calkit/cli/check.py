@@ -1910,20 +1910,16 @@ def check_storage(
     That is, nothing is tracked by both Git and DVC, no pipeline output
     stored in Git, or file in one, is ignored by it, and nothing in Git is
     too large for it.
-    Files .dvcignore excludes from a pipeline output DVC caches, which
-    neither stores, and large files are only reported.
+    Large files are only reported.
     With --fix, the pipeline's declarations, or a file's .dvc file, decide
     where each path belongs, and the changes are staged.
     Files Git ignores in an output stored in Git are added in spite of the
-    rule, since the output being declared as stored in Git says to, unless
-    .dvcignore excludes them too, so DVC doesn't hash them either.
+    rule, unless they're in the output's 'ignore' list or too large.
     """
     import calkit.dvc
     import calkit.git
     import calkit.pipeline
 
-    # Only reported, since there's no telling whether they're meant
-    advisory_kinds = ("large", "dvcignored")
     if fix and as_json:
         raise_error("--json can't be used with --fix")
     problems = calkit.dvc.get_storage_problems()
@@ -1933,7 +1929,7 @@ def check_storage(
         if not as_json:
             for problem in problems:
                 warn(problem["message"])
-        if any(p["kind"] not in advisory_kinds for p in problems):
+        if any(p["kind"] != "large" for p in problems):
             if not as_json:
                 typer.echo("Run 'calkit check storage --fix' to fix these")
             raise typer.Exit(1)
@@ -1960,9 +1956,13 @@ def check_storage(
                 repo.git.add("--", path)
             # Files in it Git ignores are added in spite of the rule, which
             # for an output ignored as a whole can be one besides its own
-            files = [os.path.abspath(p) for p in problem.get("files", [])]
-            for i in range(0, len(files), 100):
-                repo.git.add("-f", "--", *files[i : i + 100])
+            too_large = calkit.dvc.force_add_ignored_files(
+                repo, problem.get("files", [])
+            )
+            if too_large:
+                warn(calkit.dvc.get_too_large_text(too_large))
+                unfixed.append(problem)
+                continue
         else:
             unfixed.append(problem)
             continue
@@ -1994,7 +1994,7 @@ def check_storage(
         warn(problem["message"])
     if fixed:
         typer.echo("Commit the staged changes")
-    if any(p["kind"] not in advisory_kinds for p in unfixed):
+    if any(p["kind"] != "large" for p in unfixed):
         raise typer.Exit(1)
 
 

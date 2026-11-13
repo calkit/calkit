@@ -6380,6 +6380,22 @@
           "title": "Delete Before Run",
           "type": "boolean"
         },
+        "ignore": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files to leave out of this output directory (neither stored nor hashed), as .gitignore patterns relative to it.",
+          "title": "Ignore"
+        },
         "path": {
           "description": "Path to the output file or directory.",
           "title": "Path",

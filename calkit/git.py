@@ -497,7 +497,8 @@ def ensure_path_is_not_ignored(
                 lines.remove(no_ignore_line)
             lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
-        f.write("\n".join(lines))
+        # Ending in a newline, so a rule appended later stays its own
+        f.write("".join(line + "\n" for line in lines))
     # If the path is still ignored after updating this gitignore file (e.g.,
     # because a subdirectory .gitignore also contains a matching rule), fix
     # that file as well. Depth-limit guards against pathological gitignore

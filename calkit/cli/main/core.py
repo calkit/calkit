@@ -1022,10 +1022,7 @@ def get_status(
                 warn(
                     f"...and {len(storage_problems) - n_shown} more", prefix=""
                 )
-            if any(
-                p["kind"] not in ("large", "dvcignored")
-                for p in storage_problems or []
-            ):
+            if any(p["kind"] != "large" for p in storage_problems or []):
                 typer.echo(
                     "Run 'calkit check storage' for detail, or 'calkit fix "
                     "storage' to fix them.\n"
@@ -1344,7 +1341,7 @@ def add(
         rules: list[str] = []
         try:
             unstored_outputs = calkit.dvc.get_unstored_output_files(
-                dvc_repo=dvc_repo, include_dvc=False
+                dvc_repo=dvc_repo
             )
         except Exception as e:
             warn(
@@ -1364,6 +1361,10 @@ def add(
             if files:
                 ignored_files += files
                 rules += [r for r in unstored["rules"] if r not in rules]
+        too_large = calkit.dvc.force_add_ignored_files(
+            repo, ignored_files, dry_run=dry_run
+        )
+        ignored_files = [f for f in ignored_files if f not in too_large]
         if ignored_files:
             n_files_txt = (
                 f"{len(ignored_files)} file"
@@ -1379,12 +1380,17 @@ def add(
                 )
             else:
                 warn(
-                    f"Force-adding {n_files_txt} Git ignores in outputs "
+                    f"Force-added {n_files_txt} Git ignores in outputs "
                     "stored in Git, which would otherwise be in neither Git "
-                    f"nor DVC: {files_txt}"
+                    f"nor DVC: {files_txt}; to leave them out of the output "
+                    "instead, add them to its 'ignore' list"
                 )
-                for i in range(0, len(ignored_files), 100):
-                    repo.git.add("-f", "--", *ignored_files[i : i + 100])
+        if too_large:
+            warn(
+                calkit.dvc.get_too_large_text(
+                    [os.path.relpath(f) for f in too_large]
+                )
+            )
     untracked_git_files = repo.untracked_files
     if existing_only:
         # Swap each path for the changed files Git tracks within it, so an
@@ -4254,25 +4260,39 @@ def run(
     # stages are declared in its own calkit.yaml, under their names there
     ran_by_lock_dir: dict[str | None, list[str]] = {}
     for stage_name in ran:
+        if stage_name is None:
+            continue
         lock_dir, lock_name = calkit.dvc.split_lock_stage_name(stage_name)
         ran_by_lock_dir.setdefault(lock_dir, []).append(lock_name)
     if ran_by_lock_dir and not dry:
         try:
             # Whether to stage a subproject's is this project's setting
             autostage = calkit.dvc.autostage_enabled()
+            root = Path(repo.working_dir).resolve()
             unstored = []
             for lock_dir, lock_names in ran_by_lock_dir.items():
                 run_dvc_repo = calkit.dvc.get_dvc_repo(lock_dir)
                 try:
+                    git_out_paths = [
+                        Path(p).relative_to(root).as_posix()
+                        for p, n in calkit.dvc.get_git_output_paths(
+                            dvc_repo=run_dvc_repo, wdir=lock_dir
+                        ).items()
+                        if n in lock_names and os.path.exists(p)
+                    ]
+                    # An iterated stage's outputs, e.g., can be ignored as a
+                    # whole, since compiling only un-ignores literal paths
+                    # Chunked to stay under command line length limits
+                    ignored_out_paths = [
+                        p
+                        for i in range(0, len(git_out_paths), 100)
+                        for p in calkit.git.get_ignored_by_rule(
+                            repo, *git_out_paths[i : i + 100]
+                        )
+                    ]
+                    for path in ignored_out_paths:
+                        calkit.git.ensure_path_is_not_ignored(repo, path)
                     if autostage:
-                        git_out_paths = [
-                            p
-                            for p, n in calkit.dvc.get_git_output_paths(
-                                dvc_repo=run_dvc_repo, wdir=lock_dir
-                            ).items()
-                            if n in lock_names and os.path.exists(p)
-                        ]
-                        # Chunked to stay under command line length limits
                         for i in range(0, len(git_out_paths), 100):
                             repo.git.add(
                                 "-A", "--", *git_out_paths[i : i + 100]
@@ -4288,46 +4308,32 @@ def run(
                         unstored.append(u)
                 finally:
                     run_dvc_repo.close()
-            for storage in ["git", "dvc"]:
-                in_storage = [u for u in unstored if u["storage"] == storage]
-                files = [f for u in in_storage for f in u["files"]]
-                if not files:
-                    continue
-                files_txt = calkit.dvc.get_unstored_files_text(
-                    files,
-                    list(
-                        dict.fromkeys(
-                            r for u in in_storage for r in u["rules"]
-                        )
-                    ),
+            files = [f for u in unstored for f in u["files"]]
+            rules = list(
+                dict.fromkeys(r for u in unstored for r in u["rules"])
+            )
+            too_large = []
+            if files and autostage:
+                too_large = calkit.dvc.force_add_ignored_files(repo, files)
+                files = [f for f in files if f not in too_large]
+            n_files_txt = f"{len(files)} file{'s' if len(files) > 1 else ''}"
+            files_txt = calkit.dvc.get_unstored_files_text(files, rules)
+            if files and autostage:
+                warn(
+                    f"Force-added {n_files_txt} Git ignores in outputs "
+                    "stored in Git, which would otherwise be in neither "
+                    f"Git nor DVC: {files_txt}; to leave them out of the "
+                    "output instead, add them to its 'ignore' list"
                 )
-                n_files_txt = (
-                    f"{len(files)} file{'s' if len(files) > 1 else ''}"
+            elif files:
+                warn(
+                    f"{n_files_txt} Git ignores in outputs stored in Git "
+                    f"will be in neither Git nor DVC: {files_txt}; run "
+                    "'calkit fix storage' to add them, or add them to the "
+                    "output's 'ignore' list"
                 )
-                if storage == "dvc":
-                    warn(
-                        f"{n_files_txt} .dvcignore excludes in outputs "
-                        f"stored with DVC will be in neither Git nor DVC: "
-                        f"{files_txt}"
-                    )
-                elif autostage:
-                    for i in range(0, len(files), 100):
-                        repo.git.add(
-                            "-f",
-                            "--",
-                            *[os.path.abspath(f) for f in files[i : i + 100]],
-                        )
-                    warn(
-                        f"Force-added {n_files_txt} Git ignores in outputs "
-                        "stored in Git, which would otherwise be in neither "
-                        f"Git nor DVC: {files_txt}"
-                    )
-                else:
-                    warn(
-                        f"{n_files_txt} Git ignores in outputs stored in Git "
-                        f"will be in neither Git nor DVC: {files_txt}; run "
-                        "'calkit fix storage' to add them"
-                    )
+            if too_large:
+                warn(calkit.dvc.get_too_large_text(too_large))
         except Exception as e:
             warn(f"Couldn't check where the stages' outputs are stored: {e}")
     if failed:

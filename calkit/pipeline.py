@@ -2310,10 +2310,12 @@ def _write_markdown_environments(
 def _write_managed_gitignore_block(
     gitignore_path: str, marker: str, lines: list[str]
 ) -> bool:
-    """Create or update a marker-delimited block in a ``.gitignore`` file.
+    """Create or update a marker-delimited block in a ``.gitignore`` file, or
+    one written like it, e.g., ``.dvcignore``.
 
     The block is replaced in place if it already exists (so it stays free of
-    duplicate/stale entries across recompiles) and appended otherwise.
+    duplicate/stale entries across recompiles) and appended otherwise, unless
+    it would be empty.
     Returns True if the file was modified.
     """
     begin = f"# >>> {marker} (managed by calkit) >>>"
@@ -2333,6 +2335,9 @@ def _write_managed_gitignore_block(
         with open(gitignore_path, "w") as f:
             f.write(updated)
         return True
+    # Nothing to add
+    if not lines:
+        return False
     parent = os.path.dirname(gitignore_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -2821,6 +2826,8 @@ def to_dvc(
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages
+    output_dvcignores: list[str] = []
+    output_gitignores: list[str] = []
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
@@ -3006,6 +3013,13 @@ def to_dvc(
                         repo, path=_repo_rel(out.path)
                     )
                     calkit.dvc.zip.add(out.path, is_stage_output=True)
+        # What's left out of outputs, by DVC, and by Git for those it stores
+        for out in stage.outputs or []:
+            if isinstance(out, PathOutput) and out.ignore:
+                patterns = out.get_ignore_patterns(wdir=stage.wdir)
+                output_dvcignores += patterns
+                if out.storage == "git":
+                    output_gitignores += patterns
         # For LaTeX stages, warn on a latexmkrc/output_dir mismatch and keep
         # the generated aux files out of Git via a managed .gitignore block.
         # Globs (not per-file git check-ignore) keep this cheap for large
@@ -3014,6 +3028,18 @@ def to_dvc(
             _warn_on_latexmkrc_out_dir_mismatch(stage, wdir=wdir)
             if manage_gitignore:
                 _ensure_latex_aux_gitignore(stage, wdir=wdir)
+    # Written whenever compiling writes, even for a status check, since what
+    # .dvcignore excludes changes the outputs' hashes
+    if write:
+        for fname, lines in [
+            (".dvcignore", output_dvcignores),
+            (".gitignore", output_gitignores),
+        ]:
+            _write_managed_gitignore_block(
+                os.path.join(wdir or ".", fname),
+                marker="calkit output ignores",
+                lines=lines,
+            )
     # Now process any inputs from stage outputs
     for stage_name, stage in pipeline.stages.items():
         stage_output_paths: list[str] = []

@@ -136,6 +136,9 @@ outputs:
   - path: results/summary.txt
     storage: git
     delete_before_run: false # don't delete before re-running
+  - path: results/runs
+    storage: git
+    ignore: ["*.log"] # neither stored nor part of the output
 ```
 
 ### Declaring dependencies between stages

@@ -1024,7 +1024,9 @@ def test_add_pipeline_output_storage(tmp_dir):
     assert "dvc.lock" in calkit.git.get_staged_files()
 
 
-def test_git_outputs_with_ignored_files(tmp_dir: str) -> None:
+def test_git_outputs_with_ignored_files(
+    tmp_dir: str, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], text=True)
 
@@ -1043,10 +1045,11 @@ def test_git_outputs_with_ignored_files(tmp_dir: str) -> None:
         return problems
 
     subprocess.check_call(["calkit", "init"])
+    # Outputs ignored as a whole, and files in them by a general rule
     with open(".gitignore", "a") as f:
-        f.write("*.log\n__pycache__/\n")
+        f.write("runs/\n*.log\n__pycache__/\n")
     with open(".dvcignore", "a") as f:
-        f.write("*.tmp\n__pycache__/\n")
+        f.write("__pycache__/\n")
     ck_info = calkit.load_calkit_info()
     ck_info["pipeline"] = {
         "stages": {
@@ -1058,21 +1061,19 @@ def test_git_outputs_with_ignored_files(tmp_dir: str) -> None:
                     "mkdir -p runs/{agent}/__pycache__ "
                     "&& echo a > runs/{agent}/a.txt "
                     "&& echo l > runs/{agent}/write.log "
+                    "&& echo b > runs/{agent}/x.bak "
                     "&& echo c > runs/{agent}/__pycache__/c.pyc"
                 ),
                 "iterate_over": [
                     {"arg_name": "agent", "values": ["one", "two"]}
                 ],
-                "outputs": [{"path": "runs/{agent}", "storage": "git"}],
-            },
-            "data": {
-                "kind": "shell-command",
-                "environment": "_system",
-                "command": (
-                    "mkdir -p data && echo x > data/x.csv "
-                    "&& echo t > data/scratch.tmp"
-                ),
-                "outputs": ["data"],
+                "outputs": [
+                    {
+                        "path": "runs/{agent}",
+                        "storage": "git",
+                        "ignore": ["*.bak"],
+                    }
+                ],
             },
         }
     }
@@ -1080,26 +1081,34 @@ def test_git_outputs_with_ignored_files(tmp_dir: str) -> None:
     git("add", "-A")
     git("commit", "-qm", "Set up")
     # Running stages their outputs stored in Git, and with them the files
-    # Git ignores, but not what .dvcignore excludes too, which DVC doesn't
-    # hash either
+    # Git ignores, but not what the output's 'ignore' leaves out, nor what
+    # .dvcignore excludes too, which DVC doesn't hash either
     out = run("run")
     assert (
         "Force-added 2 files Git ignores in outputs stored in Git, which "
         "would otherwise be in neither Git nor DVC: runs/one/write.log, "
         "runs/two/write.log ('*.log' in .gitignore)"
     ) in out
-    assert (
-        "1 file .dvcignore excludes in outputs stored with DVC will be in "
-        "neither Git nor DVC: data/scratch.tmp ('*.tmp' in .dvcignore)"
-    ) in out
     staged = git("diff", "--cached", "--name-only").split()
     for agent in ["one", "two"]:
         assert f"runs/{agent}/a.txt" in staged
         assert f"runs/{agent}/write.log" in staged
+        assert f"runs/{agent}/x.bak" not in staged
         assert f"runs/{agent}/__pycache__/c.pyc" not in staged
-    assert "data/scratch.tmp" not in staged
     git("add", "-A")
     git("commit", "-qm", "Run")
+    assert get_storage_problems() == []
+    # What 'ignore' leaves out isn't part of the output, so a clone has
+    # everything that is
+    clone_dir = str(tmp_path_factory.mktemp("clone"))
+    git("clone", "-q", ".", clone_dir)
+    result = subprocess.run(
+        ["dvc", "status", "rebuild"],
+        cwd=clone_dir,
+        capture_output=True,
+        text=True,
+    )
+    assert "up to date" in result.stdout, result.stdout
     # Without autostaging, nothing is staged, so it's only said
     subprocess.check_call(["dvc", "config", "core.autostage", "false"])
     git("rm", "-q", "--cached", "runs/one/write.log")
@@ -1125,26 +1134,35 @@ def test_git_outputs_with_ignored_files(tmp_dir: str) -> None:
         "runs/one/new.log ('*.log' in .gitignore)"
     ) in out
     assert "'calkit fix storage'" in out
-    (problem,) = [
-        p for p in get_storage_problems() if p["kind"] == "ignored-files"
-    ]
+    (problem,) = get_storage_problems()
+    assert problem["kind"] == "ignored-files"
     assert problem["files"] == ["runs/one/new.log"]
     assert problem["stage"] == "rebuild@one"
     out = run("add", "--dry-run", "runs")
     assert "Would force-add 1 file Git ignores" in out
     assert not git("diff", "--cached", "--name-only").strip()
     out = run("add", ".")
-    assert "Force-adding 1 file Git ignores" in out
+    assert "Force-added 1 file Git ignores" in out
     staged = git("diff", "--cached", "--name-only").split()
     assert "runs/one/new.log" in staged
     assert "other.log" not in staged
     git("commit", "-qm", "Add")
-    # Which leaves only what .dvcignore excludes, which is only reported
-    assert [p["kind"] for p in get_storage_problems()] == ["dvcignored"]
-    out = run("check", "storage")
-    assert "data/scratch.tmp" in out
-    os.remove("data/scratch.tmp")
-    assert get_storage_problems() == []
+    # One too large for Git is only reported
+    with open("runs/one/big.log", "wb") as f:
+        f.truncate(51 * 1024**2)
+    out = run("add", "runs")
+    assert (
+        "Not adding 1 file Git ignores in outputs stored in Git, since "
+        "they're larger than 50 MB: runs/one/big.log"
+    ) in out
+    assert "runs/one/big.log" not in git("diff", "--cached", "--name-only")
+    result = subprocess.run(
+        ["calkit", "fix", "storage"], capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "Not adding 1 file" in result.stdout + result.stderr
+    assert "runs/one/big.log" not in git("diff", "--cached", "--name-only")
+    os.remove("runs/one/big.log")
     # A subproject's stages run from here are staged too, as declared in its
     # own calkit.yaml
     os.makedirs("sub")

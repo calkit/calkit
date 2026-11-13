@@ -1696,6 +1696,77 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     assert repo.ignored("B_sparsity_plot.pdf")
 
 
+def test_to_dvc_output_ignores(tmp_dir):
+    def read(fname: str) -> str:
+        if not os.path.isfile(fname):
+            return ""
+        with open(fname) as f:
+            return f.read()
+
+    subprocess.check_call(["calkit", "init"])
+    with open(".dvcignore", "a") as f:
+        f.write("# Mine\n*.tmp\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "a": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo",
+                "outputs": [
+                    {"path": "results", "storage": "git", "ignore": ["*.log"]},
+                    {"path": "data", "ignore": ["/cache/"]},
+                    "other",
+                ],
+            },
+        }
+    }
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    begin = "# >>> calkit output ignores (managed by calkit) >>>"
+    end = "# <<< calkit output ignores <<<"
+    # DVC leaves out what either declares, and Git what one it stores does
+    dvcignore = read(".dvcignore")
+    assert "# Mine\n*.tmp\n" in dvcignore
+    assert f"{begin}\n/results/**/*.log\n/data/cache/\n{end}" in dvcignore
+    assert f"{begin}\n/results/**/*.log\n{end}" in read(".gitignore")
+    # Rewritten in place, and emptied when nothing's ignored
+    ck_info["pipeline"]["stages"]["a"]["outputs"][0]["ignore"] = ["x/"]
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert read(".dvcignore").count(begin) == 1
+    assert "/results/**/x/" in read(".dvcignore")
+    assert "*.log" not in read(".dvcignore")
+    for out in ck_info["pipeline"]["stages"]["a"]["outputs"][:2]:
+        del out["ignore"]
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert f"{begin}\n{end}" in read(".dvcignore")
+    assert f"{begin}\n{end}" in read(".gitignore")
+    # Not added where there's nothing to ignore, e.g., a subproject
+    os.makedirs("sub")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "b": {
+                            "kind": "shell-command",
+                            "environment": "_system",
+                            "command": "echo",
+                            "outputs": ["out"],
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info["subprojects"] = [{"path": "sub"}]
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert begin not in read(os.path.join("sub", ".dvcignore"))
+    # Nor without writing
+    ck_info["pipeline"]["stages"]["a"]["outputs"][0]["ignore"] = ["*.log"]
+    calkit.pipeline.to_dvc(ck_info=ck_info)
+    assert "*.log" not in read(".dvcignore")
+
+
 def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     repo = git.Repo.init()
     subprocess.check_call(["calkit", "init"])

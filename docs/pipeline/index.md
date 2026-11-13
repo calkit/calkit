@@ -99,23 +99,36 @@ An output's `storage` decides which system tracks it:
 
 <!-- TODO: needs human review -->
 
-An output stored in Git is committed whole,
-including files in it that a `.gitignore` rule would leave out,
-e.g., logs ignored by a generic `*.log` rule.
-Otherwise they'd be in neither Git nor DVC,
-so a fresh clone would have the output without them,
-and its stage, and everything downstream, would look stale.
-The exception is a file `.dvcignore` excludes too, e.g., `__pycache__/`:
-DVC doesn't hash it, so leaving it out of Git changes nothing,
-and listing a file in both is how to keep it out of an output.
-`calkit run` stages the Git-stored outputs of the stages it ran
-(when DVC's autostage is on, as Calkit sets it up),
-and it and `calkit add` force-add such files, saying which and why.
-DVC can't be told to cache what `.dvcignore` excludes,
-so files it excludes from an output stored with DVC are only reported.
-`calkit status` and `calkit check storage` list the files in outputs
-that neither system stores,
-and `calkit fix storage` adds those in outputs stored in Git.
+Everything a stage writes into an output is part of it,
+so an output stored in Git is committed whole,
+even files a `.gitignore` rule would leave out,
+e.g., logs matched by a general `*.log` rule.
+Otherwise a fresh copy of the project would be missing them,
+and the stage, and everything after it, would look out of date.
+`calkit run` stages the outputs stored in Git of the stages it ran,
+and it and `calkit add` say which ignored files they added.
+Files larger than 50 MB aren't added to Git;
+they're reported instead.
+
+To leave files out of an output, so they're neither stored nor
+counted as part of it, list them under `ignore`,
+written like `.gitignore` patterns, relative to the output:
+
+```yaml
+outputs:
+  - path: results
+    storage: git
+    ignore:
+      - "*.log"
+      - /scratch/
+```
+
+Changing `ignore` changes what counts as the output,
+so its stage will run again.
+
+`calkit status` and `calkit check storage` list files in outputs
+that are stored nowhere,
+and `calkit fix storage` adds them.
 
 By default an output is removed before the stage runs,
 so each run starts from a clean slate
@@ -760,11 +773,12 @@ since a stage rewritten back to calkit.yaml (see
 
 #### `PathOutput`
 
-| Parameter           | Type                                     | Required | Default | Description                                                 |
-| ------------------- | ---------------------------------------- | -------- | ------- | ----------------------------------------------------------- |
-| `path`              | str                                      | yes      |         | Path to the output file or directory.                       |
-| `storage`           | Literal['git', 'dvc', 'dvc-zip'] \| None | no       | 'dvc'   | Where to store this output. Use null to leave it untracked. |
-| `delete_before_run` | bool                                     | no       | True    | Delete this output before the stage runs.                   |
+| Parameter           | Type                                     | Required | Default | Description                                                                                                     |
+| ------------------- | ---------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `path`              | str                                      | yes      |         | Path to the output file or directory.                                                                           |
+| `storage`           | Literal['git', 'dvc', 'dvc-zip'] \| None | no       | 'dvc'   | Where to store this output. Use null to leave it untracked.                                                     |
+| `delete_before_run` | bool                                     | no       | True    | Delete this output before the stage runs.                                                                       |
+| `ignore`            | list[str] \| None                        | no       | null    | Files to leave out of this output directory (neither stored nor hashed), as .gitignore patterns relative to it. |
 
 #### `StageIteration`
 

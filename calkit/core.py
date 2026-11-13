@@ -1097,6 +1097,15 @@ def check_dep_exists(
 
         exe = find_conda_exe() if name == "conda" else find_mamba_exe()
         return exe is not None
+    # Apps that aren't run by their name, or not on every OS
+    if name == "word":
+        from calkit.docx import word_installed
+
+        return word_installed()
+    if name == "libreoffice":
+        from calkit.docx import find_soffice
+
+        return find_soffice() is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":
@@ -1480,6 +1489,7 @@ def get_version_checked_app_names(
         SWITCH_KIND,
         runs_elsewhere,
     )
+    from calkit.pipeline import get_stage_requirements
 
     envs = ck_info.get("environments") or {}
     reqs = list(get_requirements(ck_info))
@@ -1506,7 +1516,11 @@ def get_version_checked_app_names(
                     if isinstance(o, dict)
                 ]
                 stage_envs += [o for o in options if not runs_elsewhere(o)]
-        reqs += stage.get("requirements") or []
+        # With each item's values, when they use them
+        for item_reqs in get_stage_requirements(
+            name, stage, params=ck_info.get("parameters")
+        ).values():
+            reqs += item_reqs
         for env in stage_envs:
             reqs += env.get("requirements") or []
     names = []

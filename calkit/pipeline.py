@@ -609,6 +609,106 @@ def _name_table_items(
     return {"foreach": items, "do": body}, renames
 
 
+def get_stage_requirements(
+    stage_name: str, stage: dict, params: dict | None = None
+) -> dict[str, list]:
+    """A stage's own requirements, keyed by what they apply to.
+
+    That's the stage, unless it iterates and its requirements use its
+    values, e.g., ``- "{engine}"``, which fills them in for each item,
+    keyed by the name DVC runs it under, e.g., ``stage@word``. Only an
+    item's own names are filled in, so other braces, e.g., awk's, stay.
+    """
+    import json
+
+    from dvc.parsing.interpolate import to_str
+
+    from calkit.models.pipeline import StageIteration
+
+    def check_quoted(obj: Any) -> None:
+        # YAML reads an unquoted {var} as a mapping, {var: null}, which
+        # would otherwise pass for an app named 'var'
+        if isinstance(obj, dict):
+            keys = list(obj)
+            if (
+                len(keys) == 1
+                and keys[0] in arg_names
+                and obj[keys[0]] is None
+            ):
+                raise ValueError(
+                    f"Stage '{stage_name}' has {{{keys[0]}}} unquoted in its "
+                    "requirements, which YAML reads as a mapping; quote it, "
+                    f'e.g., "{{{keys[0]}}}"'
+                )
+            for value in obj.values():
+                check_quoted(value)
+        elif isinstance(obj, list):
+            for value in obj:
+                check_quoted(value)
+
+    def fill(obj: Any, values: dict) -> Any:
+        if isinstance(obj, str):
+            return placeholder.sub(
+                lambda m: (
+                    to_str(values[m.group(1)])
+                    if m.group(1) in values
+                    else m.group(0)
+                ),
+                obj,
+            )
+        if isinstance(obj, list):
+            return [fill(o, values) for o in obj]
+        if isinstance(obj, dict):
+            return {fill(k, values): fill(v, values) for k, v in obj.items()}
+        return obj
+
+    requirements = list(stage.get("requirements") or [])
+    if not stage.get("iterate_over"):
+        return {stage_name: requirements}
+    arg_names = set()
+    for raw in stage["iterate_over"]:
+        arg_name = raw.get("arg_name") if isinstance(raw, dict) else None
+        arg_names |= set(
+            arg_name if isinstance(arg_name, list) else [arg_name]
+        )
+    check_quoted(requirements)
+    placeholder = re.compile(r"\{(\w+)\}")
+    used = set(placeholder.findall(json.dumps(requirements, default=str)))
+    if not used & arg_names:
+        return {stage_name: requirements}
+    # The matrix compiling the stage gives DVC, which names its items
+    matrix = {}
+    for n, raw in enumerate(stage["iterate_over"]):
+        iteration = StageIteration.model_validate(raw)
+        key = f"_arg{n}" if isinstance(iteration.arg_name, list) else None
+        matrix[key or str(iteration.arg_name)] = iteration.expand_values(
+            params=expand_project_parameters(params or {})
+        )
+    named, _ = _name_table_items({"matrix": matrix})
+    items = named.get("foreach")
+    if items is None:
+        # A table row DVC names by its position
+        items = {}
+        keys = list(matrix)
+        for combination in itertools.product(
+            *[list(enumerate(matrix[k])) for k in keys]
+        ):
+            values: dict = {}
+            fragments = []
+            for key, (i, value) in zip(keys, combination):
+                if isinstance(value, dict):
+                    fragments.append(f"{key}{i}")
+                    values |= value
+                else:
+                    fragments.append(to_str(value))
+                    values[key] = value
+            items["-".join(fragments)] = values
+    return {
+        f"{stage_name}@{item_name}": fill(requirements, values)
+        for item_name, values in items.items()
+    }
+
+
 def _rename_lock_entries(
     renames: dict[str, str], wdir: str | None = None
 ) -> bool:
@@ -1062,7 +1162,9 @@ def get_gated_stages(
         """A skipped stage, and its output this stage needs but lacks."""
         for input_path in paths(stage.get("inputs") or []):
             for upstream in list(gated) + list(errors):
-                for output in paths(stages[upstream].get("outputs") or []):
+                # An item of an iterated stage has its stage's outputs
+                upstream_stage = stages[upstream.split("@")[0]]
+                for output in paths(upstream_stage.get("outputs") or []):
                     related = (
                         input_path == output
                         or input_path.startswith(output + "/")
@@ -1150,16 +1252,12 @@ def get_gated_stages(
             machine_name, machine = env_name, env
         if machine_name is not None and not remote and reason is None:
             continue
+        # The items that can't run, when requirements are filled in for each
+        skipped_items: dict[str, tuple[str, bool]] = {}
         if reason is None:
-            requirements = list(stage.get("requirements") or [])
-            for _, env in resolved:
-                requirements += machine_requirements(env)
-            reason, is_error = check(
-                ["requirements", machine_name, requirements],
-                lambda: requirements_problem(
-                    requirements, machine_name, machine
-                ),
-            )
+            env_requirements = [
+                r for _, env in resolved for r in machine_requirements(env)
+            ]
             # A machine that is only described here could run its stages
             # from here if Calkit knew how to reach it
             local_machines = [
@@ -1169,27 +1267,48 @@ def get_gated_stages(
                 and not env.get("host")
                 and machine_requirements(env)
             ]
-            if (
-                reason is not None
-                and not is_error
-                and machine_name is None
-                and local_machines
-                and check(
-                    ["requirements", None, dict(resolved)[local_machines[0]]],
+            for target, stage_requirements in get_stage_requirements(
+                name, stage, params=ck_info.get("parameters")
+            ).items():
+                requirements = stage_requirements + env_requirements
+                target_reason, target_is_error = check(
+                    ["requirements", machine_name, requirements],
                     lambda: requirements_problem(
-                        machine_requirements(
-                            dict(resolved)[local_machines[0]]
-                        ),
-                        None,
-                        {},
+                        requirements, machine_name, machine
                     ),
-                )[0]
-                is not None
-            ):
-                reason += (
-                    f"; giving environment '{local_machines[0]}' a 'host' "
-                    "would let its stages run there from here over SSH"
                 )
+                if (
+                    target_reason is not None
+                    and not target_is_error
+                    and machine_name is None
+                    and local_machines
+                    and check(
+                        [
+                            "requirements",
+                            None,
+                            dict(resolved)[local_machines[0]],
+                        ],
+                        lambda: requirements_problem(
+                            machine_requirements(
+                                dict(resolved)[local_machines[0]]
+                            ),
+                            None,
+                            {},
+                        ),
+                    )[0]
+                    is not None
+                ):
+                    target_reason += (
+                        f"; giving environment '{local_machines[0]}' a "
+                        "'host' would let its stages run there from here "
+                        "over SSH"
+                    )
+                if target_reason is None:
+                    continue
+                if target == name:
+                    reason, is_error = target_reason, target_is_error
+                else:
+                    skipped_items[target] = (target_reason, target_is_error)
         if reason is None:
             locks = [
                 (n, env, n, env)
@@ -1205,6 +1324,9 @@ def get_gated_stages(
                     break
         if reason is not None:
             (errors if is_error else gated)[name] = reason
+            continue
+        for item_name, (item_reason, item_is_error) in skipped_items.items():
+            (errors if item_is_error else gated)[item_name] = item_reason
     # A stage that needs an output a skipped stage hasn't made can't run
     # either, and nor can the stages after it
     added = True
@@ -1819,7 +1941,9 @@ def get_status(
                 ignored_files_in_inputs.setdefault(name, {})[dep_path] = files
         gated_stages = result.get("gated_stages", {})
         for display_name, stale_stage in ordered_stale_stages.items():
-            reason = gated_stages.get(display_name.split("@")[0])
+            reason = gated_stages.get(
+                display_name, gated_stages.get(display_name.split("@")[0])
+            )
             if reason is not None:
                 stale_stage.cannot_run_here = reason
         result["stale_stages"] = ordered_stale_stages

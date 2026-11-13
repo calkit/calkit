@@ -209,6 +209,31 @@ Some skips still fail the run, after the stages that can run have run:
   e.g., in CI for a project whose stages should all run there.
   The `calkit/run` action takes it as `run_args: --strict`.
 
+<!-- TODO: needs human review -->
+
+A stage that [iterates](pipeline/index.md#iteration) can use its values
+in its requirements, so each item only needs what it uses,
+and an item whose requirements aren't met is skipped on its own.
+Quote a value in braces, since YAML reads `{engine}` alone as a mapping:
+
+```yaml
+pipeline:
+  stages:
+    round-trip:
+      kind: python-script
+      script_path: scripts/round-trip.py
+      args:
+        - --engine={engine}
+      iterate_over:
+        - arg_name: engine
+          values: [word, libreoffice]
+      requirements:
+        - "{engine}"
+```
+
+Calkit finds Microsoft Word and LibreOffice where they install,
+so `word` and `libreoffice` work as app requirements.
+
 ## Pinning the Calkit CLI version
 
 A project can declare which version of the Calkit CLI it needs by

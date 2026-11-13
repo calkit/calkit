@@ -2507,9 +2507,6 @@ def to_docx(
     bare = Path(output).with_suffix(".bare.docx").as_posix()
     if engine == "word":
         typer.echo("Converting the PDF with Word")
-        typer.echo(
-            "If calkit gets stuck at this step, you may need to minimize all your windows and confirm a dialog box from Word."
-        )
         try:
             calkit.docx.pdf_to_docx(pdf_path, bare)
         except RuntimeError as e:

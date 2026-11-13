@@ -186,6 +186,7 @@ def test_from_json_keys(tmp_dir):
 
 
 @skipif_windows_docker
+@pytest.mark.needs("docker")
 def test_build(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("paper", exist_ok=True)
@@ -224,6 +225,7 @@ def test_build(tmp_dir):
 
 
 @skipif_windows_docker
+@pytest.mark.needs("docker")
 def test_build_ck_components(tmp_dir):
     import struct
     import zlib
@@ -484,6 +486,7 @@ def test_build_ck_components(tmp_dir):
 
 
 @skipif_windows_docker
+@pytest.mark.needs("docker")
 def test_build_output_and_aux_dirs(tmp_dir):
     # --output-dir / --aux-dir are given relative to the current directory but
     # latexmk runs with -cd, so the build command must translate them to the
@@ -1133,6 +1136,7 @@ def test_marked_up_digest_ignores_the_header():
 
 
 @skipif_windows_docker
+@pytest.mark.needs("docker")
 def test_latex_diff_of_one_revision_against_itself(tmp_dir):
     # Two revisions that resolve to the same commit is what a pull request
     # diff looks like from the default branch. The pipeline resolves both

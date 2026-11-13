@@ -836,6 +836,27 @@ def ensure_local_dir(wdir: str | None = None) -> str:
     return base
 
 
+def write_if_changed(path: str, content: str | bytes) -> bool:
+    """Write a file only if its content differs, returning whether it did,
+    so whatever goes by its content or timestamp, e.g., DVC or latexmk,
+    doesn't rerun for nothing.
+
+    Text is written as UTF-8 bytes, so it's byte-identical on every
+    platform, where text mode would write CRLF on Windows.
+    """
+    data = content.encode("utf-8") if isinstance(content, str) else content
+    try:
+        with open(path, "rb") as f:
+            if f.read() == data:
+                return False
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return True
+
+
 NOTEBOOK_STAGE_OUT_FORMATS = ["pickle", "parquet", "json", "yaml", "csv"]
 
 
@@ -982,6 +1003,20 @@ def is_tty() -> bool:
     try:
         return sys.stdin.isatty() and sys.stdout.isatty()
     except (AttributeError, ValueError):
+        return False
+
+
+def is_wsl() -> bool:
+    """Whether this is Linux running under the Windows Subsystem for Linux."""
+    if not sys.platform.startswith("linux"):
+        return False
+    # A container on a Windows host shares the WSL kernel, but it isn't WSL
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        return False
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
         return False
 
 
@@ -1607,13 +1642,33 @@ def check_requirements(
                     described_as=described_as,
                 )
             continue
-        # Offer the registered native installer when we have one.
+        # Offer the project's own way to install it, or else the registered
+        # native installer when we have one
         from calkit import install as _install
 
-        if _install.get_installer(req_name) is not None:
+        setup_command = req.get("setup_command")
+        description = (req.get("description") or "").strip()
+        registered = _install.get_installer(req_name)
+        # Only the project's own command is an override; the registered
+        # installer goes through by name, so declining it points at
+        # 'calkit install' rather than its raw script
+        override: _install.Installer | None = None
+        if setup_command:
+            override = {"script": setup_command, "path_add": []}
+            if registered is not None:
+                # The app tends to land in the same place however it's
+                # installed, e.g., ~/.local/bin, so keep where to look for
+                # it, but not the registry's prerequisites, which the
+                # project's command may not need
+                override["path_add"] = registered["path_add"]
+                if "binary" in registered:
+                    override["binary"] = registered["binary"]
+        if override is not None or registered is not None:
             print(f"App '{req_name}' is not installed.")
+            if description and interactive:
+                print(f"  {description}")
             if _install.prompt_and_install(
-                req_name, interactive=interactive
+                req_name, interactive=interactive, entry=override
             ) and check_dep_exists(req_name, "app", system_info=system_info):
                 if spec:
                     check_app_version(
@@ -1625,10 +1680,15 @@ def check_requirements(
                 continue
         # Some apps have no installer here but a known way in, e.g., a
         # system package manager on Linux
-        hint = _install.get_unsupported_message(req_name)
+        hint = (
+            None
+            if setup_command
+            else _install.get_unsupported_message(req_name)
+        )
         raise ValueError(
             f"app '{req_name}' not found on {described_as}"
             + (f"; {hint}" if hint else "")
+            + (f"\n  {description}" if description else "")
         )
     for req in buckets.get("_other", []):
         req_name = req["name"]
@@ -2188,3 +2248,35 @@ def set_env_vars(ck_info: dict, cli: bool = True) -> None:
         os.environ[str(k)] = str(v)
     if os.path.expanduser("~") != home:
         os.environ.setdefault(USER_HOME_ENV_VAR, home)
+
+
+def normalize_orcid(orcid: str) -> str:
+    """Check an ORCID, bare or as a URL, and return it as its URL.
+
+    Raises ``ValueError`` if it isn't shaped like one or its check digit
+    doesn't match the rest.
+    """
+    match = re.fullmatch(
+        r"(?:(?:https?://)?(?:www\.)?orcid\.org/)?"
+        r"(\d{4}-\d{4}-\d{4}-\d{3}[\dXx])",
+        orcid.strip(),
+    )
+    if match is None:
+        raise ValueError(
+            f"orcid must look like 0000-0002-1825-0097 (got {orcid!r})"
+        )
+    bare = match.group(1).upper()
+    # The last character is an ISO 7064 MOD 11-2 check digit over the
+    # other 15, so a typo is caught here rather than by whoever later
+    # finds the identifier resolves to a stranger, or to nobody.
+    total = 0
+    for digit in bare[:-1].replace("-", ""):
+        total = (total + int(digit)) * 2
+    result = (12 - total % 11) % 11
+    expected = "X" if result == 10 else str(result)
+    if bare[-1] != expected:
+        raise ValueError(
+            f"orcid {orcid!r} has check digit {bare[-1]} but its other "
+            f"digits call for {expected}, so one of them is mistyped"
+        )
+    return f"https://orcid.org/{bare}"

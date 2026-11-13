@@ -1,5 +1,7 @@
 """Tests for ``calkit.models.pipeline``."""
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -21,6 +23,7 @@ from calkit.models.pipeline import (
     Pipeline,
     PythonScriptStage,
     QuartoStage,
+    ReferencesCheckStage,
     ShellScriptStage,
     StageIteration,
     WordToPdfStage,
@@ -402,7 +405,7 @@ def test_jupyternotebookstage():
     ) in dvc_stage["cmd"]
 
 
-def test_stageiteration():
+def test_stageiteration(monkeypatch, tmp_path):
     StageIteration(
         arg_name="param1",
         values=[1, 2, 3],
@@ -413,6 +416,153 @@ def test_stageiteration():
     i.values
     exp_vals = i.expand_values(params={})
     assert exp_vals == [{"param1": 1, "param2": 2}, {"param1": 3, "param2": 4}]
+    # Date ranges expand to their periods' names
+    monkeypatch.setenv("CALKIT_NOW", "2026-11-10T08:00:00Z")
+    quarters = {"kind": "date-range", "start": "2026Q3", "step": "1 quarter"}
+    i = StageIteration(arg_name="q", values=[quarters])
+    assert i.expand_values(params={}) == ["2026Q3", "2026Q4"]
+    assert i.state_storage is None
+    # Numeric ranges can be written with a kind or nested, as before
+    for r in [
+        {"kind": "range", "start": 0, "stop": 2},
+        {"range": {"start": 0, "stop": 2}},
+    ]:
+        i = StageIteration(arg_name="n", values=[r, 5])
+        assert i.expand_values(params={}) == [0, 1, 5]
+    # Every item depends on its period's directory, so none can lack one
+    stateful = quarters | {"state_storage": "git"}
+    for values in [
+        [stateful, "2027Q1"],
+        [stateful, {"kind": "date-range", "start": "2027Q1"}],
+    ]:
+        with pytest.raises(ValidationError, match="same state_storage"):
+            StageIteration(arg_name="q", values=values)
+    # Ranges sharing a period would give two items the same name
+    march = {"kind": "date-range", "start": "2026-03-01", "stop": "2026-03-10"}
+    for other in [
+        march | {"start": "2026-03-20", "stop": "2026-04-02"},
+        march | {"start": "2025-12", "stop": "today"},
+    ]:
+        with pytest.raises(ValidationError, match="overlap"):
+            StageIteration(arg_name="m", values=[march, other])
+    StageIteration(
+        arg_name="m",
+        values=[
+            march,
+            march | {"start": "2026-04", "stop": "today"},
+            march | {"step": "1 day"},
+        ],
+    )
+    with pytest.raises(ValidationError):
+        StageIteration(arg_name=["q", "x"], values=[stateful])
+    with pytest.raises(ValidationError, match="Only one iteration"):
+        PythonScriptStage(
+            kind="python-script",
+            script_path="fetch.py",
+            environment="py",
+            iterate_over=[
+                {"arg_name": "q", "values": [stateful]},
+                {"arg_name": "r", "values": [stateful]},
+            ],
+        )
+    stage = PythonScriptStage(
+        name="fetch",
+        kind="python-script",
+        script_path="fetch.py",
+        environment="py",
+        iterate_over=[
+            {"arg_name": "q", "values": [stateful]},
+            {"arg_name": "turbine", "values": [1, 2]},
+        ],
+    )
+    assert ".calkit/date-ranges/fetch/{q}" in stage.dvc_deps
+    # Each period's window is written, and rewritten only when it changes
+    wdir = str(tmp_path)
+    StageIteration(arg_name="q", values=[stateful]).write_date_range_state(
+        "fetch", wdir=wdir
+    )
+    root = tmp_path / ".calkit" / "date-ranges" / "fetch"
+    open_q = root / "2026Q4" / "period.json"
+    assert json.loads(open_q.read_text())["through"] == "2026-11-09"
+    closed_q = root / "2026Q3" / "period.json"
+    mtime = closed_q.stat().st_mtime_ns
+    monkeypatch.setenv("CALKIT_NOW", "2026-11-11T08:00:00Z")
+    i = StageIteration(arg_name="q", values=[stateful])
+    i.write_date_range_state("fetch", wdir=wdir)
+    assert json.loads(open_q.read_text())["through"] == "2026-11-10"
+    assert closed_q.stat().st_mtime_ns == mtime
+    # A closed period already checked isn't read again, unless the range
+    # changes or its file is gone
+    closed_q.write_text("edited\n")
+    i = StageIteration(arg_name="q", values=[stateful])
+    i.write_date_range_state("fetch", wdir=wdir)
+    assert closed_q.read_text() == "edited\n"
+    closed_q.unlink()
+    i = StageIteration(arg_name="q", values=[stateful])
+    i.write_date_range_state("fetch", wdir=wdir)
+    assert json.loads(closed_q.read_text())["start"] == "2026-07-01"
+    closed_q.write_text("edited\n")
+    clipped = stateful | {"start": "2026-08-15"}
+    i = StageIteration(arg_name="q", values=[clipped])
+    i.write_date_range_state("fetch", wdir=wdir)
+    assert json.loads(closed_q.read_text())["start"] == "2026-08-15"
+    # The open period becomes closed when it ends, and is then rewritten
+    monkeypatch.setenv("CALKIT_NOW", "2027-01-02T08:00:00Z")
+    i = StageIteration(arg_name="q", values=[stateful])
+    i.write_date_range_state("fetch", wdir=wdir)
+    assert json.loads(open_q.read_text())["through"] == "2026-12-31"
+    monkeypatch.setenv("CALKIT_NOW", "2026-11-11T08:00:00Z")
+    # A period no longer iterated over loses its window but keeps what
+    # something else wrote there
+    (root / "2026Q3" / "listing.json").write_text("{}")
+    later = quarters | {"start": "2026Q4", "state_storage": "git"}
+    i = StageIteration(arg_name="q", values=[later])
+    i.write_date_range_state("fetch", wdir=wdir)
+    assert sorted(p.name for p in (root / "2026Q3").iterdir()) == [
+        "listing.json"
+    ]
+    # A range with no full day yet has no periods, and so writes none
+    (root / "2026Q3" / "listing.json").unlink()
+    i = StageIteration(arg_name="q", values=[later | {"start": "2026-12-01"}])
+    assert i.expand_values(params={}) == []
+    i.write_date_range_state("fetch", wdir=wdir)
+    assert sorted(p.name for p in root.iterdir()) == ["2026Q3"]
+    # Local state is kept out of version control
+    local = later | {"state_storage": "local"}
+    StageIteration(arg_name="q", values=[local]).write_date_range_state(
+        "fetch", wdir=wdir
+    )
+    assert (tmp_path / ".calkit/local/date-ranges/fetch/2026Q4").is_dir()
+    assert (tmp_path / ".calkit/local/.gitignore").read_text() == "*\n"
+    # The pipeline removes the state of stages that were renamed, deleted,
+    # or no longer keep any, but not what else was written there
+    git_root = tmp_path / ".calkit" / "date-ranges"
+    for name in ["fetch", "old/pdf"]:
+        (git_root / name / "2026Q4").mkdir(parents=True, exist_ok=True)
+        (git_root / name / "2026Q4" / "period.json").write_text("{}")
+    (git_root / "fetch" / "2026Q4" / "listing.json").write_text("{}")
+    stages = {
+        "fetch": {
+            "kind": "python-script",
+            "script_path": "fetch.py",
+            "environment": "py",
+            "iterate_over": [{"arg_name": "q", "values": [local]}],
+        },
+        "new": {
+            "kind": "python-script",
+            "script_path": "new.py",
+            "environment": "py",
+            "iterate_over": [{"arg_name": "q", "values": [later]}],
+        },
+    }
+    Pipeline.model_validate({"stages": stages}).write_date_range_state(
+        wdir=wdir
+    )
+    assert sorted(
+        str(p.relative_to(git_root)) for p in git_root.rglob("*.json")
+    ) == ["fetch/2026Q4/listing.json", "new/2026Q4/period.json"]
+    assert not (git_root / "old").exists()
+    assert (tmp_path / ".calkit/local/date-ranges/fetch/2026Q4").is_dir()
 
 
 def test_juliacommandstage():
@@ -1199,3 +1349,120 @@ def test_markdownstage():
     assert s.outputs is None
     assert s.dvc_outs == []
     assert s.dvc_out_paths == []
+
+
+def test_references_check_stage(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "paper").mkdir()
+    (tmp_path / "paper" / "main.tex").write_text(
+        "\\input{results}\n\\input{intro}\n\\bibliography{refs}\n"
+        "\\includegraphics{fig}\n"
+    )
+    (tmp_path / "paper" / "intro.tex").write_text("\\cite{a}\n")
+    (tmp_path / "paper" / "refs.bib").write_text("")
+    (tmp_path / "paper" / "fig.png").write_text("")
+    (tmp_path / "calkit.yaml").write_text(
+        "references:\n  - path: declared.bib\n"
+    )
+    # No environment or output needed: it runs where Calkit is, the report
+    # goes beside other generated files, stored with Git, and the
+    # responses it's based on beside it, in DVC, kept between runs
+    stage = ReferencesCheckStage(
+        kind="references-check", target_path="paper/main.tex"
+    )
+    assert stage.environment == "_system"
+    report = ".calkit/reference-checks/paper/main.tex.json"
+    responses = ".calkit/reference-checks/paper/main.tex.responses.json"
+    assert stage.dvc_cmd == (
+        f"calkit check references paper/main.tex --output {report}"
+        f" --responses {responses}"
+    )
+    assert stage.dvc_outs == [
+        {report: dict(cache=False, persist=False)},
+        {responses: dict(cache=True, persist=True)},
+    ]
+    # A file a stage generates is an input before it's first made, so the
+    # check runs after that stage, and the bibliography the document names
+    # is used instead of the declared one, while a figure isn't an input
+    stage.preprocess(
+        str(tmp_path), is_output=lambda p: p == "paper/results.tex"
+    )
+    assert stage.dvc_deps == [
+        "paper/main.tex",
+        "paper/intro.tex",
+        "paper/refs.bib",
+        "paper/results.tex",
+    ]
+    # A file \import brings in is read, so it's an input too
+    (tmp_path / "paper" / "sections").mkdir()
+    (tmp_path / "paper" / "sections" / "methods.tex").write_text("\\cite{b}\n")
+    (tmp_path / "paper" / "main.tex").write_text(
+        "\\import{sections/}{methods}\n\\bibliography{refs}\n"
+    )
+    stage.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert "paper/sections/methods.tex" in stage.dvc_deps
+    # A document naming no bibliography falls back to the declared ones
+    (tmp_path / "paper" / "main.tex").write_text("\\cite{a}\n")
+    stage.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert stage.dvc_deps == ["paper/main.tex", "calkit.yaml", "declared.bib"]
+    # A PDF depends on the source a stage builds it from, and a .bib on
+    # nothing else
+    (tmp_path / "calkit.yaml").write_text(
+        "pipeline:\n"
+        "  stages:\n"
+        "    paper:\n"
+        "      kind: latex\n"
+        "      target_path: paper/main.tex\n"
+        "      environment: tex\n"
+        "references:\n"
+        "  - path: declared.bib\n"
+    )
+    pdf = ReferencesCheckStage(
+        kind="references-check", target_path="paper/main.pdf"
+    )
+    pdf.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert pdf.dvc_deps == [
+        "paper/main.pdf",
+        "paper/main.tex",
+        "calkit.yaml",
+        "declared.bib",
+    ]
+    bib = ReferencesCheckStage(
+        kind="references-check", target_path="paper/refs.bib"
+    )
+    bib.preprocess(str(tmp_path), is_output=lambda p: False)
+    assert bib.dvc_deps == ["paper/refs.bib"]
+    # A declared output is where the report goes, with the responses
+    # beside it, and declaring theirs too sets how they're stored
+    custom = ReferencesCheckStage(
+        kind="references-check",
+        target_path="a b.tex",
+        offline=True,
+        outputs=[
+            "checks/refs.json",
+            PathOutput(
+                path="checks/refs.responses.json",
+                storage="git",
+                delete_before_run=False,
+            ),
+        ],
+    )
+    assert custom.dvc_cmd == (
+        "calkit check references 'a b.tex' --output checks/refs.json"
+        " --responses checks/refs.responses.json --offline"
+    )
+    assert custom.dvc_outs == [
+        {"checks/refs.json": dict(cache=False, persist=False)},
+        {"checks/refs.responses.json": dict(cache=False, persist=True)},
+    ]
+    # A named environment, e.g., a remote one, runs the check there
+    remote = ReferencesCheckStage(
+        kind="references-check", target_path="a.tex", environment="py"
+    )
+    assert remote.dvc_cmd.startswith(
+        "calkit xenv -n py --no-check -- calkit check references a.tex"
+    )
+    # What the check writes is derived, not added to what's declared
+    assert stage.outputs == []
+    assert [out.path for out in stage.check_outputs] == [report, responses]
+    assert custom.check_outputs == []

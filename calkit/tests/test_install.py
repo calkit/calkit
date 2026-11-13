@@ -116,6 +116,17 @@ def test_prompt_and_install(monkeypatch):
         mock.patch("calkit.install.install", return_value=True),
     ):
         assert install.prompt_and_install("pixi", interactive=True) is True
+    # Under WSL, Docker Desktop on Windows is offered as the alternative to
+    # installing Docker Engine, but nowhere else
+    for wsl in [True, False]:
+        monkeypatch.setattr("calkit.core.is_wsl", lambda: wsl)
+        with (
+            mock.patch("builtins.input", return_value="n"),
+            mock.patch("builtins.print") as m_print,
+        ):
+            install.prompt_and_install("docker", interactive=True)
+        printed = " ".join(str(c.args[0]) for c in m_print.call_args_list)
+        assert ("WSL integration" in printed) is wsl
     # Unknown app -> no installer -> False.
     monkeypatch.setattr("calkit.install.get_installer", lambda app: None)
     assert install.prompt_and_install("nope", interactive=True) is False
@@ -217,6 +228,11 @@ def test_install_cli_command(monkeypatch):
         assert result.exit_code == 0
         m_install.assert_called_once_with("pixi")
         m_prompt.assert_not_called()
+    # Node's package is called nodejs, but node is the binary it provides
+    with mock.patch("calkit.install.install", return_value=True) as m_install:
+        result = runner.invoke(calkit_app, ["install", "nodejs", "--yes"])
+        assert result.exit_code == 0
+        m_install.assert_called_once_with("node")
     # Default path delegates to ``prompt_and_install``; a False return
     # value surfaces as a non-zero exit.
     with mock.patch(
@@ -242,21 +258,54 @@ def test_platform_entries_prerequisites_and_record(
         assert git is not None and git.get("requires") == ["brew"]
         assert install.get_installer("choco") is None
         assert "Windows-only" in str(install.get_unsupported_message("choco"))
+        # Colima comes with the Docker CLI it's no use without, unless
+        # there's one already, e.g., from Docker Desktop
+        colima = install.get_installer("colima")
+        assert colima is not None and colima.get("requires") == ["brew"]
+        assert colima["script"] == (
+            "brew install colima && "
+            "{ command -v docker >/dev/null || brew install docker; }"
+        )
     # Linux has no single package manager, so Git says what to run
     with mock.patch("calkit.install.sys.platform", "linux"):
         assert install.get_installer("git") is None
         assert "package manager" in str(install.get_unsupported_message("git"))
         assert install.get_installer("docker") is not None
         assert install.get_installer("brew") is None
+        # Docker runs natively there, so Colima points to Docker Engine
+        assert install.get_installer("colima") is None
+        assert "Docker runs natively" in str(
+            install.get_unsupported_message("colima")
+        )
     with mock.patch("calkit.install.sys.platform", "win32"):
         choco = install.get_installer("choco")
         assert choco is not None and "chocolatey" in choco["script"]
         assert install.get_installer("brew") is None
         r = install.get_installer("R")
         assert r is not None and "*" in str(r["path_add"])
+        assert install.get_installer("colima") is None
+        assert "Docker Desktop" in str(
+            install.get_unsupported_message("colima")
+        )
     # Aliases share entries by reference
     assert install.INSTALLERS["mamba"] is install.INSTALLERS["conda"]
     assert install.INSTALLERS["Rscript"] is install.INSTALLERS["R"]
+    assert install.INSTALLERS["npm"] is install.INSTALLERS["node"]
+    assert install.INSTALLERS["npx"] is install.INSTALLERS["node"]
+    # Node comes through pixi everywhere
+    for platform in ["darwin", "linux", "win32"]:
+        with mock.patch("calkit.install.sys.platform", platform):
+            node = install.get_installer("node")
+            assert node is not None and node.get("requires") == ["pixi"]
+    # Without pixi, Node asks about pixi first, and declining installs neither
+    with (
+        mock.patch("calkit.install.shutil.which", return_value=None),
+        mock.patch("builtins.input", return_value="n") as m_input,
+        mock.patch("calkit.install.install") as m_install,
+    ):
+        assert install.prompt_and_install("node", interactive=True) is False
+    assert "'pixi'" in m_input.call_args.args[0]
+    m_install.assert_not_called()
     # LibreOffice is found by its soffice command, and on Linux comes with
     # the Math component distributions package separately
     assert install.INSTALLERS["soffice"] is install.INSTALLERS["libreoffice"]

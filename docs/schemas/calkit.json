@@ -145,7 +145,7 @@
             }
           ],
           "default": null,
-          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'app', it installs it, e.g., 'brew install colima', in place of any installer Calkit has for it. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -645,6 +645,85 @@
         "path"
       ],
       "title": "Dataset",
+      "type": "object"
+    },
+    "DateRangeIteration": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "date-range",
+          "description": "A range of dates, iterated over one period at a time.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "format": "date",
+              "type": "string"
+            }
+          ],
+          "description": "When the range starts, either a day, e.g., '2024-03-22', or a period, e.g., '2024-03', '2024Q1', or 2024; the first item is the period containing it.",
+          "title": "Start"
+        },
+        "state_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "local"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Keep a directory for each period that its item depends on, holding the period's window and last full day in 'period.json', so an item whose period is still open reruns daily and once more when it closes. Anything else written there, e.g., a fingerprint of a source's data for the period, reruns the item when it changes. 'git' keeps the directories in '.calkit/date-ranges/<stage>/<period>', 'local' in '.calkit/local/date-ranges/<stage>/<period>'.",
+          "title": "State Storage"
+        },
+        "step": {
+          "default": "1 month",
+          "description": "The length of each period, e.g., '1 day', '1 week', '1 month', '1 quarter', or '1 year', which names it as it starts, e.g., '2026-11-10', '2026-W46', '2026-11', '2026Q4', or '2026'. Multiples are counted from 1970, so '2 months' always start in an odd month.",
+          "title": "Step",
+          "type": "string"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "format": "date",
+              "type": "string"
+            }
+          ],
+          "default": "today",
+          "description": "When the range stops, which is not included, written like 'start'. The default, 'today', runs to the last full day, so an item is added once a new period has one, as are items for a later date when it comes.",
+          "title": "Stop"
+        },
+        "timezone": {
+          "default": "UTC",
+          "description": "Time zone days start in, e.g., 'America/New_York'.",
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "start"
+      ],
+      "title": "DateRangeIteration",
       "type": "object"
     },
     "DerivedFromProject": {
@@ -6438,6 +6517,7 @@
                 "quarto": "#/$defs/QuartoStage",
                 "questions-to-latex": "#/$defs/QuestionsToLatexStage",
                 "r-script": "#/$defs/RScriptStage",
+                "references-check": "#/$defs/ReferencesCheckStage",
                 "sbatch": "#/$defs/SBatchStage",
                 "shell-command": "#/$defs/ShellCommandStage",
                 "shell-script": "#/$defs/ShellScriptStage",
@@ -6460,6 +6540,9 @@
               },
               {
                 "$ref": "#/$defs/QuestionsToLatexStage"
+              },
+              {
+                "$ref": "#/$defs/ReferencesCheckStage"
               },
               {
                 "$ref": "#/$defs/MatlabScriptStage"
@@ -8565,19 +8648,12 @@
     },
     "RangeIteration": {
       "properties": {
-        "range": {
-          "$ref": "#/$defs/RangeIterationParams",
-          "description": "Bounds of the range over which to iterate."
-        }
-      },
-      "required": [
-        "range"
-      ],
-      "title": "RangeIteration",
-      "type": "object"
-    },
-    "RangeIterationParams": {
-      "properties": {
+        "kind": {
+          "const": "range",
+          "description": "A range of numbers.",
+          "title": "Kind",
+          "type": "string"
+        },
         "start": {
           "anyOf": [
             {
@@ -8617,10 +8693,11 @@
         }
       },
       "required": [
+        "kind",
         "start",
         "stop"
       ],
-      "title": "RangeIterationParams",
+      "title": "RangeIteration",
       "type": "object"
     },
     "ReferenceCollection": {
@@ -8660,6 +8737,248 @@
         "key"
       ],
       "title": "ReferenceFile",
+      "type": "object"
+    },
+    "ReferencesCheckStage": {
+      "additionalProperties": false,
+      "description": "Whether the references a document cites are real.\n\nIts inputs are the target document, the files it inputs, and the\nbibliographies it names, or ``calkit.yaml`` and the collections it\ndeclares if it names none, all found when the pipeline is compiled.\nIts outputs are that document's report, by default under\n``.calkit/reference-checks``, and beside it the services' responses\nthe report is based on. The responses are kept between runs and\nreused, since the services' answers change over time, so a rerun\nreproduces the report and asks only about what's new. One stage\nchecks one document, so a project with two papers has one of these\neach and each goes out of date on its own.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "environment": {
+          "default": "_system",
+          "description": "Where to run the check. Defaults to the system, which is where the Calkit running the pipeline already is.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/EnvVarInput"
+                  },
+                  {
+                    "$ref": "#/$defs/ScheduleInput"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted, an 'env-var' entry makes the stage depend on an environment variable's value, and a 'schedule' entry makes it run once per period, e.g., once a day.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "references-check",
+          "default": "references-check",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "offline": {
+          "default": false,
+          "description": "Use only the recorded responses instead of calling out to Crossref, DataCite, OpenAlex, and arXiv, e.g., where the pipeline runs without a network.",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "requirements": {
+          "default": [],
+          "description": "What must be true where this stage runs, in addition to its environments' requirements. On a machine where they aren't met, the stage is skipped and keeps its outputs.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/AwsCredentialsRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "target_path": {
+          "description": "What to check: a .tex or Markdown document, the PDF a stage builds from one, or a .bib file, whose every entry is checked.",
+          "title": "Target Path",
+          "type": "string"
+        },
+        "wdir": {
+          "default": null,
+          "description": "Not supported; the stage reads the project's calkit.yaml and documents from the project root.",
+          "title": "Wdir",
+          "type": "null"
+        }
+      },
+      "required": [
+        "target_path"
+      ],
+      "title": "ReferencesCheckStage",
       "type": "object"
     },
     "Release": {
@@ -8820,7 +9139,7 @@
       "type": "object"
     },
     "Requirement": {
-      "description": "Something that must be true of a machine before the project runs.\n\nFive kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n  ``setup_command`` says how to get a value, e.g., a login flow that\n  prints a token, and is offered before the value is asked for.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``aws-credentials``: valid AWS credentials, optionally for a given\n  ``account_id`` and ``profile``, checked with\n  ``aws sts get-caller-identity``.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
+      "description": "Something that must be true of a machine before the project runs.\n\nFive kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``. ``setup_command`` says how to install\n  it, and is offered in place of any installer Calkit has for it.\n- ``env-var``: an environmental variable that must be defined.\n  ``setup_command`` says how to get a value, e.g., a login flow that\n  prints a token, and is offered before the value is asked for.\n- ``setup``: a per-machine precondition that isn't a file---e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --``.\n  ``cache_ttl`` skips re-probing slow checks.\n- ``aws-credentials``: valid AWS credentials, optionally for a given\n  ``account_id`` and ``profile``, checked with\n  ``aws sts get-caller-identity``.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed, e.g., how many CPUs\nit has or what OS it runs, are constrained by giving the property as\nthe ``kind`` instead, e.g., ``kind: cpu-count`` with a ``min``.",
       "properties": {
         "account_id": {
           "anyOf": [
@@ -8937,7 +9256,7 @@
             }
           ],
           "default": null,
-          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'app', it installs it, e.g., 'brew install colima', in place of any installer Calkit has for it. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -9552,7 +9871,7 @@
           "type": "string"
         },
         "period": {
-          "description": "How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, and years; 'm' is a minute and 'mo' a month.",
+          "description": "How often the stage runs, i.e., once per this period, e.g., '1 day', '1d', '6 hours', '2w', or 'monthly'. Units are minutes, hours, days, weeks (starting on Monday), months, quarters, and years; 'm' is a minute and 'mo' a month.",
           "title": "Period",
           "type": "string"
         },
@@ -9690,7 +10009,7 @@
             }
           ],
           "default": null,
-          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
+          "description": "Command that sets the requirement up, offered on a terminal and printed as the fix otherwise. For an 'app', it installs it, e.g., 'brew install colima', in place of any installer Calkit has for it. For an 'env-var', it's run before the value is asked for, e.g., 'claude setup-token'.",
           "title": "Setup Command"
         },
         "version_spec": {
@@ -10582,6 +10901,9 @@
               },
               {
                 "$ref": "#/$defs/RangeIteration"
+              },
+              {
+                "$ref": "#/$defs/DateRangeIteration"
               },
               {
                 "$ref": "#/$defs/ParameterIteration"

@@ -1046,6 +1046,7 @@ def test_new_matlab_script_stage(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+@pytest.mark.needs("juliaup")
 def test_new_julia_env(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     # Note we use Example, the registry's trivial test package, since nothing

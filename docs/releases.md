@@ -188,6 +188,20 @@ When creating a release, Calkit reads the authors from `CITATION.cff`; if
 none are defined yet, it will prompt you to enter them and write them to
 `CITATION.cff` (existing author entries are always preserved).
 
+The first author is prefilled with your own details, so that releasing your
+own work only takes pressing Enter.
+These come from your Calkit config, which you can set ahead of time with:
+
+```sh
+calkit config set first_name Ada
+calkit config set last_name Lovelace
+calkit config set affiliation "Analytical Engines"
+calkit config set orcid 0000-0002-1825-0097
+```
+
+If they aren't set, the name is taken from Git's `user.name`, and whatever
+you enter for the first author can be saved to the config for next time.
+
 ## Releasing other types of artifacts individually
 
 To release only one artifact, e.g., a dataset or publication,
@@ -253,3 +267,5 @@ calkit config set caltechdata_token {paste CaltechDATA token here}
 
 Then, in the `new release` command, simply add the `--to caltechdata`
 option.
+Large files are uploaded in parts straight to CaltechDATA's storage, since a
+single request that big would be refused by the proxy in front of its API.

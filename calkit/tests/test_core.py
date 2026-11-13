@@ -947,3 +947,11 @@ def test_get_version_checked_app_names():
     ck_info["environments"]["ml"]["requirements"] = [{"app": "sbatch"}]
     with pytest.raises(ValueError, match="list an app by name"):
         calkit.get_version_checked_app_names(ck_info)
+    # So does one whose name isn't text, e.g., an unquoted {var} in YAML
+    for req in [
+        {"kind": "app", "name": {"var": None}, "version_spec": ">=1"},
+        {"name": {"var": None}},
+    ]:
+        ck_info["environments"]["ml"]["requirements"] = [req]
+        with pytest.raises(ValueError, match="'name' must be text"):
+            calkit.get_version_checked_app_names(ck_info)

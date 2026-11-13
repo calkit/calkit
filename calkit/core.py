@@ -1226,11 +1226,12 @@ def _normalize_requirement(req) -> dict:
     if not isinstance(req, dict):
         raise malformed()
     keys = list(req.keys())
-    # Flat form with explicit kind: only requires ``name`` for kinds where
-    # name is the identity (app, env-var). Setup requirements may omit it,
-    # and property requirements have none to give.
-    if "kind" in keys:
+    # Flat form, an app unless it gives a kind: only requires ``name`` for
+    # kinds where name is the identity (app, env-var). Setup requirements
+    # may omit it, and property requirements have none to give.
+    if "kind" in keys or "name" in keys:
         out = dict(req)
+        out.setdefault("kind", "app")
         if "name" not in out:
             kind = out["kind"]
             if kind in system_property_requirement_kinds():
@@ -1252,10 +1253,12 @@ def _normalize_requirement(req) -> dict:
                 )
             else:
                 raise ValueError(f"Requirement missing required 'name': {req}")
-        return out
-    if "name" in keys:
-        out = dict(req)
-        out.setdefault("kind", "app")
+        # YAML reads an unquoted name in braces, e.g., {var}, as a mapping
+        if not isinstance(out["name"], str):
+            raise ValueError(
+                f"Malformed requirement {req!r}; its 'name' must be text, "
+                'so quote it if it\'s in braces, e.g., name: "{var}"'
+            )
         return out
     if len(keys) != 1:
         raise malformed()

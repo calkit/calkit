@@ -264,7 +264,7 @@ stages:
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 2d6248f81ed82eb868210762b5dd238e
+      md5: 47831b9ff8f74399947751b556713b5d
       size: 11
     - path: .python-version
       hash: md5
@@ -285,14 +285,14 @@ stages:
     outs:
     - path: results/traction.json
       hash: md5
-      md5: 93a195cddaf527aee2b97f47a257346c
-      size: 539
+      md5: 54162458b2f56d81192c2403feb64bbb
+      size: 551
   find-calkit-projects:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 2d6248f81ed82eb868210762b5dd238e
+      md5: 47831b9ff8f74399947751b556713b5d
       size: 11
     - path: .python-version
       hash: md5
@@ -309,14 +309,14 @@ stages:
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 40608319c954e588f9816ec4e97fe733
-      size: 11745
+      md5: 8d442d6aaddf24930b1b6a275868e76d
+      size: 11920
   find-calkit-papers:
     cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 2d6248f81ed82eb868210762b5dd238e
+      md5: 47831b9ff8f74399947751b556713b5d
       size: 11
     - path: .python-version
       hash: md5
@@ -324,8 +324,8 @@ stages:
       size: 5
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: 40608319c954e588f9816ec4e97fe733
-      size: 11745
+      md5: 8d442d6aaddf24930b1b6a275868e76d
+      size: 11920
     - path: scripts/find-calkit-papers.py
       hash: md5
       md5: 47c5738cb38a674825999afa124c74c8
@@ -429,7 +429,7 @@ stages:
       size: 50359
     - path: docs/one-pager/main.md
       hash: md5
-      md5: 7f1ea820ae3b8b98f4551151e7cc65ee
+      md5: e9f67f14339f9b2557b94a02e62737a4
       size: 4743
     - path: docs/one-pager/one-pager.lua
       hash: md5
@@ -445,10 +445,10 @@ stages:
       size: 2007
     - path: results/traction.json
       hash: md5
-      md5: 93a195cddaf527aee2b97f47a257346c
-      size: 539
+      md5: 54162458b2f56d81192c2403feb64bbb
+      size: 551
     outs:
     - path: docs/one-pager/main.pdf
       hash: md5
-      md5: 1871469a5c165c923cbc47c4414d138b
-      size: 179495
+      md5: 891078150c3f078afe6046775618c1a5
+      size: 179845

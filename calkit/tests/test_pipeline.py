@@ -19,7 +19,7 @@ import calkit.git
 import calkit.notebooks
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
-from calkit.models.pipeline import LatexStage
+from calkit.models.pipeline import LatexStage, Pipeline
 from calkit.pipeline import (
     StaleStage,
     _ensure_latex_aux_gitignore,
@@ -4530,13 +4530,27 @@ def test_iterated_environment(tmp_dir):
         },
     }
     stage = calkit.pipeline.to_dvc(ck_info=ck_info)["fit"]
-    # Each item runs in its own environment, and is rerun when any of the
-    # environments its items use changes
+    # Each item runs in its own environment, and is rerun when it changes,
+    # since its lock file is named after it
     assert stage["cmd"].startswith("calkit xenv -n ${item.env} --no-check")
     assert [d for d in stage["deps"] if "env-locks" in d] == [
-        ".calkit/env-locks/py-a",
-        ".calkit/env-locks/py-b",
+        ".calkit/env-locks/${item.env}"
     ]
+    # Otherwise, it's rerun when any of them changes
+    for lock_fpaths, expected in [
+        (
+            {"py-a": ["locks/py-a.json"], "py-b": ["locks/py-b.json"]},
+            ["locks/{env}.json"],
+        ),
+        (
+            {"py-a": ["a.lock"], "py-b": ["b.lock"]},
+            ["a.lock", "b.lock"],
+        ),
+    ]:
+        pipeline = Pipeline.model_validate(ck_info["pipeline"])
+        pipeline.stages["fit"]._item_environments = ["py-a", "py-b"]
+        pipeline.ensure_env_lock_paths_are_inputs(lock_fpaths)
+        assert pipeline.stages["fit"].inputs == expected
     # Inside a machine, only the runtime can depend on an item
     fit = ck_info["pipeline"]["stages"]["fit"]
     fit["environment"] = "lab:{env}"
@@ -4551,15 +4565,43 @@ def test_iterated_environment(tmp_dir):
         fit["iterate_over"][0]["values"] = values
         with pytest.raises(ValueError, match=match):
             calkit.pipeline.to_dvc(ck_info=ck_info)
-    # Its environments are those its items use, less those skipped
+    # Setup commands need a machine to run them in
     fit["environment"] = "{env}"
     fit["iterate_over"][0]["values"] = ["py-a", "py-b"]
+    fit["setup"] = ["echo hi"]
+    with pytest.raises(ValueError, match="'machine:{env}'"):
+        calkit.pipeline.to_dvc(ck_info=ck_info)
+    fit["environment"] = "lab:{env}"
+    calkit.pipeline.to_dvc(ck_info=ck_info)
+    del fit["setup"]
+    # A legacy sbatch stage keeps its items' environments when converted
+    ck_info["environments"]["cluster"] = {"kind": "slurm"}
+    ck_info["pipeline"]["stages"]["job"] = {
+        "kind": "sbatch",
+        "script_path": "job.sh",
+        "environment": "cluster:{env}",
+        "iterate_over": [{"arg_name": "env", "values": ["py-a", "py-b"]}],
+    }
+    stage = calkit.pipeline.to_dvc(ck_info=ck_info)["job"]
+    assert ".calkit/env-locks/${item.env}" in stage["deps"]
+    del ck_info["pipeline"]["stages"]["job"]
+    # Its environments are those its items use, less those skipped, and
+    # only a named item's
+    fit["environment"] = "{env}"
     env_names, _, _ = calkit.environments.get_pipeline_env_names(ck_info)
     assert env_names == ["py-a", "py-b"]
     env_names, _, _ = calkit.environments.get_pipeline_env_names(
         ck_info, skip_stages=["fit@py-b"]
     )
     assert env_names == ["py-a"]
+    env_names, _, _ = calkit.environments.get_pipeline_env_names(
+        ck_info, targets=["fit@py-b"]
+    )
+    assert env_names == ["py-b"]
+    env_names, _, _ = calkit.environments.get_pipeline_env_names(
+        ck_info, targets=["fit"]
+    )
+    assert env_names == ["py-a", "py-b"]
     # Nothing is gated for an environment it doesn't define
     gated, errors = calkit.pipeline.get_gated_stages(
         ck_info, interactive=False
@@ -4995,11 +5037,15 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         "uses-stage",
     }
     assert "'made/calkit-no-such-app.txt'" in gated["uses-stage"]
-    # Naming an item, e.g., to retry it, checks its stage
-    gated, errors = calkit.pipeline.get_gated_stages(
-        ck_info, stage_names=["engines@calkit-no-such-app"], interactive=False
-    )
-    assert set(gated) == {"engines@calkit-no-such-app"}
+    # Naming an item, e.g., to retry it, checks only that item
+    for item, expected in [
+        ("engines@calkit-no-such-app", {"engines@calkit-no-such-app"}),
+        ("engines@git", set()),
+    ]:
+        gated, errors = calkit.pipeline.get_gated_stages(
+            ck_info, stage_names=[item], interactive=False
+        )
+        assert set(gated) == expected
 
 
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(

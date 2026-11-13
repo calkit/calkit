@@ -1060,7 +1060,8 @@ def get_gated_stages(
     envs = ck_info.get("environments", {})
     stages = ck_info.get("pipeline", {}).get("stages", {})
     # An item of an iterated stage, e.g., one being retried, is checked
-    # with its stage
+    # with its stage, which is otherwise what these name
+    requested = set(stage_names) if stage_names is not None else set()
     if stage_names is not None:
         stage_names = {name.split("@")[0] for name in stage_names}
     gated: dict[str, str] = {}
@@ -1235,10 +1236,16 @@ def get_gated_stages(
     # values is gated an item at a time
     targets: dict[str, dict] = {}
     for stage_name, stage in stages.items():
-        if stage_names is None or stage_name in stage_names:
-            targets |= get_stage_items(
-                stage_name, stage, params=ck_info.get("parameters")
-            )
+        if stage_names is not None and stage_name not in stage_names:
+            continue
+        items = get_stage_items(
+            stage_name, stage, params=ck_info.get("parameters")
+        )
+        # Only the items named, unless the stage is
+        named = {k for k in requested if k.startswith(stage_name + "@")}
+        if named and stage_name not in requested:
+            items = {k: v for k, v in items.items() if k in named} or items
+        targets |= items
     for name, stage in targets.items():
         if stage.get("frozen"):
             continue

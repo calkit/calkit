@@ -368,7 +368,9 @@ Quote it, since YAML reads `{env}` alone as a mapping.
 Each value has to be a runtime environment, e.g., `uv-venv` or `conda`,
 rather than a machine or a `switch`,
 though it can run inside one, e.g., `cluster:{env}`.
-Each item is rerun when any of the environments the stage uses changes.
+Each item is rerun when its own environment changes,
+as long as the environment's lock files are named after it,
+as they usually are; otherwise, it's rerun when any of them do.
 
 ## Automatic stage and environment detection
 

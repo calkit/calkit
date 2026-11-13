@@ -2172,6 +2172,7 @@ def get_pipeline_env_names(
     """
     import calkit
     import calkit.markdown
+    from calkit.pipeline import get_stage_items
 
     @functools.cache
     def outer_runs_elsewhere(env_name: str) -> bool:
@@ -2197,6 +2198,9 @@ def get_pipeline_env_names(
         for k, v in stages.items()
         if not (isinstance(v, dict) and v.get("frozen"))
     }
+    # An item named runs in its own environment, not its siblings'
+    item_targets = {t for t in targets or [] if "@" in t}
+    stage_targets = set(targets or []) - item_targets
     if targets:
         # Split targets by "@" to handle sub-stages from iterations
         targets = [t.split("@")[0] for t in targets]
@@ -2224,11 +2228,17 @@ def get_pipeline_env_names(
         }
     # An iterated stage whose environment depends on its values uses each
     # item's
-    from calkit.pipeline import get_stage_items
-
     items: dict[str, dict] = {}
     for name, stage in stages.items():
-        items |= get_stage_items(name, stage, params=ck_info.get("parameters"))
+        stage_items = get_stage_items(
+            name, stage, params=ck_info.get("parameters")
+        )
+        named = {t for t in item_targets if t.startswith(name + "@")}
+        if named and name not in stage_targets:
+            stage_items = {
+                k: v for k, v in stage_items.items() if k in named
+            } or stage_items
+        items |= stage_items
     # Stages that can't run here don't need their environments, so nor do
     # those whose items are all skipped
     skip = set(skip_stages or [])

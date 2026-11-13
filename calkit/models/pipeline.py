@@ -398,6 +398,7 @@ class Stage(Model):
         "markdown-pdf",
         "procedure",
         "questions-to-latex",
+        "references-check",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -1891,6 +1892,141 @@ class QuestionsToLatexStage(Stage):
         return outs
 
 
+class ReferencesCheckStage(Stage):
+    """Whether the references a document cites are real.
+
+    Its inputs are the target document, the files it inputs, and the
+    bibliographies it names, or ``calkit.yaml`` and the collections it
+    declares if it names none, all found when the pipeline is compiled.
+    Its outputs are that document's report, by default under
+    ``.calkit/reference-checks``, and beside it the services' responses
+    the report is based on. The responses are kept between runs and
+    reused, since the services' answers change over time, so a rerun
+    reproduces the report and asks only about what's new. One stage
+    checks one document, so a project with two papers has one of these
+    each and each goes out of date on its own.
+    """
+
+    kind: Literal["references-check"] = "references-check"
+    target_path: str = Field(
+        description="What to check: a .tex or Markdown document, the PDF "
+        "a stage builds from one, or a .bib file, whose every entry is "
+        "checked."
+    )
+    environment: str = Field(
+        default="_system",
+        description="Where to run the check. Defaults to the system, "
+        "which is where the Calkit running the pipeline already is.",
+    )
+    offline: bool = Field(
+        default=False,
+        description=(
+            "Use only the recorded responses instead of calling out to "
+            "Crossref, DataCite, OpenAlex, and arXiv, e.g., where the "
+            "pipeline runs without a network."
+        ),
+    )
+    wdir: None = Field(
+        default=None,
+        description="Not supported; the stage reads the project's "
+        "calkit.yaml and documents from the project root.",
+    )
+
+    # What the check reads besides the document, set by preprocess
+    _found_paths: list[str] = PrivateAttr(default_factory=list)
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
+    ) -> None:
+        """Find the files the document inputs and the bibliographies it
+        names, including ones a stage makes that aren't there yet."""
+        import calkit.references
+
+        self._found_paths = calkit.references.get_input_paths(
+            self.target_path, project_dir=project_dir, is_output=is_output
+        )
+
+    @property
+    def report_path(self) -> str:
+        """Where the report is written: the first declared output, or
+        beside other generated files."""
+        import calkit.references
+
+        if not self.outputs:
+            return calkit.references.get_report_path(self.target_path)
+        out = self.outputs[0]
+        return out if isinstance(out, str) else out.path
+
+    @property
+    def check_outputs(self) -> list[PathOutput]:
+        """What the check writes that isn't declared, so its storage can be
+        respected: the report, in Git, and the responses it's based on, in
+        DVC and kept between runs, since they're reused.
+        """
+        import calkit.references
+
+        responses_path = calkit.references.get_responses_path(self.report_path)
+        declared = {
+            out if isinstance(out, str) else out.path for out in self.outputs
+        }
+        outs = []
+        if not self.outputs:
+            outs.append(PathOutput(path=self.report_path, storage="git"))
+        if responses_path not in declared:
+            outs.append(
+                PathOutput(
+                    path=responses_path,
+                    storage="dvc",
+                    delete_before_run=False,
+                )
+            )
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        import calkit.references
+
+        responses_path = calkit.references.get_responses_path(self.report_path)
+        cmd = (
+            f"calkit check references {shlex.quote(self.target_path)}"
+            f" --output {shlex.quote(self.report_path)}"
+            f" --responses {shlex.quote(responses_path)}"
+        )
+        if self.offline:
+            cmd += " --offline"
+        # Empty for _system, but dispatches to a remote or scheduler env
+        return f"{self.xenv_cmd} {cmd}".strip()
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return _unique_paths(
+            [self.target_path] + super().dvc_deps + self._found_paths
+        )
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        """Declared outputs, stored with Git by default since a report is
+        small text, then what the check writes that isn't declared."""
+        outs: list[str | dict] = []
+        for out in list(self.outputs) + list(self.check_outputs):
+            if isinstance(out, str):
+                outs.append({out: dict(cache=False, persist=False)})
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=out.storage == "dvc",
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
+
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
     script_path: RelativeChildPathString = Field(
@@ -2960,6 +3096,7 @@ class Pipeline(Model):
                 | QuartoStage
                 | JsonToLatexStage
                 | QuestionsToLatexStage
+                | ReferencesCheckStage
                 | MatlabScriptStage
                 | MatlabCommandStage
                 | ShellCommandStage

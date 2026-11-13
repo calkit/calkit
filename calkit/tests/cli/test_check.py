@@ -310,6 +310,7 @@ def test_check_julia_env_repairs_stale_manifest(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env(tmp_dir):
     # First create a Dockerfile with a known base image
     with open("Dockerfile", "w") as f:
@@ -424,6 +425,7 @@ def test_check_docker_env(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_locks_every_platform(tmp_dir):
     from calkit.environments import get_docker_arch
 
@@ -520,6 +522,7 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
     def get_layers() -> list[str]:
         layers: list[str] = json.loads(
@@ -582,6 +585,7 @@ def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
     container = "calkit-test-registry"
     registry = "localhost:5678"
@@ -760,6 +764,7 @@ def test_push_does_not_reach_a_registry_with_nothing_to_send(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
     image = "calkit-unreachable-registry-test"
     subprocess.check_call(["calkit", "init"])
@@ -836,6 +841,7 @@ def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_push_sends_docker_images_to_their_registry(tmp_dir):
     container = "calkit-test-registry-push"
     registry = "localhost:5679"
@@ -943,6 +949,7 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+@pytest.mark.needs("docker")
 def test_check_docker_env_does_not_push(tmp_dir):
     with open("Dockerfile", "w") as f:
         f.write("FROM alpine:3.18\nRUN echo unpushed > /hi.txt\n")
@@ -1944,3 +1951,47 @@ def test_check_storage(tmp_dir):
     assert result.returncode == 0, result.stderr
     assert "Run 'make'" in result.stdout
     assert not git("ls-files", "--", "out.txt").strip()
+
+
+def test_check_references(tmp_dir):
+    with open("main.tex", "w") as f:
+        f.write("\\citep{real}\n\\bibliography{refs}\n")
+    with open("refs.bib", "w") as f:
+        f.write(
+            "@article{real,\n  title = {A Real Thing},\n  year = {2020}\n}\n"
+        )
+    # `refs` is an alias, and offline nothing is looked up, so nothing fails
+    for name in ["references", "refs"]:
+        out = subprocess.check_output(
+            ["calkit", "check", name, "main.tex", "--offline", "--json"],
+            text=True,
+        )
+        document = json.loads(out)
+        assert document["references"]["real"]["status"] == "unchecked"
+    # Nothing is written unless asked
+    assert not os.path.exists(".calkit/reference-checks")
+    subprocess.check_call(
+        ["calkit", "check", "refs", "main.tex", "--offline", "-o", "out.json"]
+    )
+    with open("out.json") as f:
+        assert json.load(f)["path"] == "main.tex"
+    # Responses can be recorded in a file of their own, as a stage does
+    subprocess.check_call(
+        ["calkit", "check", "refs", "main.tex", "--offline"]
+        + ["--responses", "checks/responses.json"]
+    )
+    with open("checks/responses.json") as f:
+        assert json.load(f) == {}
+    # There's no default document to check
+    result = subprocess.run(["calkit", "check", "refs"], capture_output=True)
+    assert result.returncode != 0
+    # A citation missing from the bibliography fails
+    with open("main.tex", "a") as f:
+        f.write("\\citep{ghost}\n")
+    result = subprocess.run(
+        ["calkit", "check", "refs", "main.tex", "--offline"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "ghost" in result.stdout + result.stderr

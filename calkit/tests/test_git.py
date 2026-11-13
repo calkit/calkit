@@ -577,6 +577,68 @@ def test_check_branch_is_current(tmp_dir):
     assert f"'origin/{default_branch}'" in msg
 
 
+def test_get_set_upstream_args(tmp_dir: Path) -> None:
+    repo = git.Repo.init()
+    # Without push.autoSetupRemote, a plain push of a new branch fails
+    repo.git.config("push.autoSetupRemote", "false")
+    repo.git.config("push.default", "simple")
+    Path("a.txt").write_text("a")
+    repo.git.add("a.txt")
+    repo.git.commit(["-m", "First commit"])
+    branch = repo.active_branch.name
+    # Nowhere to push yet
+    assert calkit.git.get_set_upstream_args(repo) == []
+    # A lone remote is used whatever its name, so the first push works
+    git.Repo.init("remote.git", bare=True)
+    repo.git.remote(["add", "hub", "remote.git"])
+    args = calkit.git.get_set_upstream_args(repo)
+    assert args == ["--set-upstream", "hub", branch]
+    # Several remotes are ambiguous unless one is origin
+    git.Repo.init("other.git", bare=True)
+    repo.git.remote(["add", "other", "other.git"])
+    assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.remote(["rename", "other", "origin"])
+    args = calkit.git.get_set_upstream_args(repo)
+    assert args == ["--set-upstream", "origin", branch]
+    # Naming where to push leaves that to the caller, but flags don't
+    assert calkit.git.get_set_upstream_args(repo, ["hub"]) == []
+    assert calkit.git.get_set_upstream_args(repo, ["--force"]) == args
+    # Flags that pick their own refs would push the branch too, and a
+    # remote named with --repo would lose to the one added
+    for flag in ["--tags", "--all", "--mirror", "--delete", "--repo=hub"]:
+        assert calkit.git.get_set_upstream_args(repo, [flag]) == []
+    # Nor is the branch named where Git wouldn't push it alone
+    for push_default in ["nothing", "matching"]:
+        repo.git.config("push.default", push_default)
+        assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.config("push.default", "simple")
+    # The branch's own remote comes before origin
+    repo.git.config(f"branch.{branch}.remote", "hub")
+    hub_args = ["--set-upstream", "hub", branch]
+    assert calkit.git.get_set_upstream_args(repo) == hub_args
+    # Git pushes to a push remote it doesn't pull from without an upstream,
+    # and setting one would change where the branch pulls from
+    repo.git.config("--unset", f"branch.{branch}.remote")
+    repo.git.config("remote.pushDefault", "hub")
+    assert calkit.git.get_set_upstream_args(repo) == []
+    # Whatever case its key is written in, as Git reads it
+    repo.git.config("--unset", "remote.pushDefault")
+    repo.git.config("remote.pushdefault", "hub")
+    assert calkit.git.get_set_upstream_args(repo) == []
+    # But not to the one it does pull from
+    repo.git.config(f"branch.{branch}.pushRemote", "origin")
+    assert calkit.git.get_set_upstream_args(repo) == args
+    repo.git.config("--unset", f"branch.{branch}.pushRemote")
+    repo.git.config("--unset", "remote.pushDefault")
+    repo.git.push(*args)
+    # Once the branch tracks one, a plain push is fine
+    assert calkit.git.get_set_upstream_args(repo) == []
+    repo.git.push()
+    # A detached HEAD has no branch to set up
+    repo.git.checkout(["--detach"])
+    assert calkit.git.get_set_upstream_args(repo) == []
+
+
 def _install_stripping_filter(repo: git.Repo, pattern: str = "*.ipynb"):
     """Configure a clean filter that mangles content, the way nbstripout does.
 

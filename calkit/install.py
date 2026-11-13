@@ -132,6 +132,18 @@ _R_INSTALLER: dict[Platform, Installer] = {
     },
 }
 
+# Through pixi everywhere: Linux packages of Node are often old, and version
+# managers like nvm only put it on PATH in shells set up for them
+_NODE_VIA_PIXI: Installer = {
+    "script": "pixi global install nodejs",
+    "path_add": "~/.pixi/bin",
+    "requires": ["pixi"],
+}
+_NODE_INSTALLER: dict[Platform, Installer] = {
+    "unix": _NODE_VIA_PIXI,
+    "windows": _NODE_VIA_PIXI,
+}
+
 
 # name -> platform -> Installer
 INSTALLERS: dict[str, dict[Platform, Installer]] = {
@@ -218,9 +230,13 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "requires": ["brew"],
         },
         "linux": {
-            # Docker's convenience script; it needs root, and afterward the
-            # user may still need adding to the docker group
-            "script": "curl -fsSL https://get.docker.com | sudo sh",
+            # Docker's convenience script, which needs root, then joining
+            # the docker group so Docker can be used without it
+            "script": (
+                "curl -fsSL https://get.docker.com | sudo sh "
+                # $USER isn't always set, e.g., in a container
+                '&& sudo usermod -aG docker "$(id -un)"'
+            ),
             "path_add": "/usr/bin",
         },
         "windows": {
@@ -252,6 +268,7 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "conda": _MINIFORGE_INSTALLER,
     "R": _R_INSTALLER,
+    "node": _NODE_INSTALLER,
     # Converts LaTeX documents to Word without Word, with its Math
     # component, which Linux distributions package separately and without
     # which equations come out empty
@@ -301,6 +318,11 @@ INSTALLERS["cargo"] = _RUSTUP_INSTALLER
 INSTALLERS["julia"] = _JULIAUP_INSTALLER
 INSTALLERS["mamba"] = _MINIFORGE_INSTALLER
 INSTALLERS["Rscript"] = _R_INSTALLER
+INSTALLERS["npm"] = _NODE_INSTALLER
+INSTALLERS["npx"] = _NODE_INSTALLER
+# Names an app goes by that aren't a binary it provides, which is what an
+# install is checked for afterward
+NAME_ALIASES = {"nodejs": "node"}
 
 
 # Apps that are known to be unsupported on a given platform, mapped to the
@@ -564,6 +586,19 @@ def prompt_and_install(app: str, *, interactive: bool) -> bool:
             print(f"'{app}' is installed with '{req}', which is missing.")
             if not prompt_and_install(req, interactive=interactive):
                 return False
+    if app == "docker":
+        from calkit.core import is_wsl
+
+        # Docker Desktop on Windows can serve WSL too, and then the same
+        # Docker works on both sides
+        if is_wsl():
+            print(
+                "  Docker Desktop on Windows can also provide Docker here: "
+                "install it in Windows, then enable this distro in its "
+                "Settings > Resources > WSL integration. "
+                "Otherwise, Docker Engine can be installed in WSL, "
+                "which needs systemd enabled."
+            )
     # Shown before the question rather than after a refusal: agreeing to a
     # command you haven't been shown isn't agreeing to much, and this is
     # often the first thing Calkit asks anyone

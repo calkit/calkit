@@ -969,6 +969,21 @@ def test_get_storage_problems(tmp_dir):
         f.write("/values.tex\n")
     assert problems()["values.tex"]["kind"] == "ignored"
     os.remove("values.tex")
+    # And a declared reference report
+    ck_info["pipeline"]["stages"]["refs"] = {
+        "kind": "references-check",
+        "target_path": "main.tex",
+        "outputs": ["refs.json"],
+    }
+    calkit.save_calkit_info(ck_info)
+    with open("refs.json", "w") as f:
+        f.write("{}")
+    with open(".gitignore", "a") as f:
+        f.write("/refs.json\n")
+    assert problems()["refs.json"]["kind"] == "ignored"
+    os.remove("refs.json")
+    del ck_info["pipeline"]["stages"]["refs"]
+    calkit.save_calkit_info(ck_info)
     # A path stored zipped and tracked by Git
     os.makedirs("zipped")
     with open("zipped/a.txt", "w") as f:

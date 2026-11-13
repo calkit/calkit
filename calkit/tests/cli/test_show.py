@@ -293,6 +293,11 @@ def test_show_question(tmp_dir):
                     "path": "results/metrics.json",
                     "values": {"acc": "accuracy", "f1": "scores.f1"},
                 },
+                {
+                    "path": "results/metrics.json",
+                    "lines": 1,
+                    "explanation": "The raw output.",
+                },
             ],
             "verifications": [
                 {
@@ -333,6 +338,8 @@ def test_show_question(tmp_dir):
         "  - `acc` at `accuracy` = 0.9\n"
         "  - `f1` at `scores.f1` = 0.8\n"
     ) in out
+    # A file without a kind is cited as is, at its lines
+    assert "- File `results/metrics.json`, line 1: The raw output.\n" in out
     assert (
         "## Verifications\n\n- Ada (with Claude Opus 5), 2026-10-04 "
         "*(current: not yet committed"

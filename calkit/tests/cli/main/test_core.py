@@ -186,6 +186,7 @@ def test_init(tmp_dir):
 
 
 @skipif_windows_docker
+@pytest.mark.needs("docker")
 def test_run_in_env(tmp_dir):
     # If running on Windows we need to set stdin for the subprocesses to
     # ensure sys.stdin.isatty() is False, otherwise we will run docker with
@@ -421,6 +422,7 @@ def test_run_in_venv(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+@pytest.mark.needs("juliaup")
 def test_run_in_julia_env(tmp_dir):
     subprocess.check_call("calkit init", shell=True)
     subprocess.check_call(
@@ -1293,6 +1295,67 @@ def test_status(tmp_dir):
     assert [p["path"] for p in status_json["storage"]] == ["data.csv"]
 
 
+def test_no_dvc_repo(tmp_dir, tmp_path):
+    # A project with no pipeline, e.g., a website showing imported results,
+    # needn't become a DVC repo to run or pull
+    git_remote = tmp_path / "git_remote"
+    subprocess.check_call(["git", "init", "--bare", str(git_remote)])
+    repo = git.Repo.init()
+    repo.create_remote("origin", str(git_remote))
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"name": "site"}, f)
+    repo.git.add(A=True)
+    repo.git.commit(m="Add project")
+    repo.git.push("-u", "origin", "HEAD")
+
+    def assert_no_dvc() -> None:
+        for path in [".dvc", ".dvcignore", "dvc.yaml"]:
+            assert not os.path.exists(path), path
+
+    # Not even checking status, as an editor does when the project opens
+    subprocess.check_call(["calkit", "status", "--json", "-c", "pipeline"])
+    assert_no_dvc()
+    subprocess.check_call(["calkit", "run"])
+    assert_no_dvc()
+    # A stage that isn't there is still an error
+    assert subprocess.run(["calkit", "run", "nope"]).returncode != 0
+    out = subprocess.check_output(["calkit", "pull"], text=True)
+    assert "DVC" not in out
+    assert_no_dvc()
+    # In a DVC repo, a pipeline Calkit doesn't declare still runs
+    subprocess.check_call(["dvc", "init", "-q"])
+    os.makedirs("analysis")
+    with open("analysis/dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "build": {"cmd": "echo hi > out.txt", "outs": ["out.txt"]}
+                }
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run", "--all-pipelines"])
+    assert os.path.isfile("analysis/out.txt")
+    # Once there's something for DVC to run, a run makes it a DVC repo
+    ck_info = {
+        "name": "site",
+        "pipeline": {
+            "stages": {
+                "echo": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo hi",
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    assert os.path.isdir(".dvc")
+    assert os.path.isfile("dvc.yaml")
+
+
 def test_save(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     repo = git.Repo()
@@ -1429,6 +1492,7 @@ def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "stage", "--help"])
 
 
+@pytest.mark.needs("juliaup")
 def test_run(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -1627,8 +1691,25 @@ def test_status_in_subdir_uses_the_parent_dvc_repo(tmp_dir):
     assert not os.path.exists(os.path.join("sub", ".dvc"))
     assert not os.path.exists(os.path.join("sub", ".dvcignore"))
     assert os.path.isfile(os.path.join(".dvc", "config"))
-    # With no DVC repo anywhere above it, one is still created
+    # With no DVC repo anywhere above it, one is still created for a
+    # pipeline
     shutil.rmtree(".dvc")
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "sub",
+                "pipeline": {
+                    "stages": {
+                        "echo": {
+                            "kind": "command",
+                            "environment": "_system",
+                            "command": "echo hi",
+                        }
+                    }
+                },
+            },
+            f,
+        )
     proc = subprocess.run(
         ["calkit", "status"], cwd="sub", capture_output=True, text=True
     )
@@ -3231,6 +3312,14 @@ def test_save_offers_hub_before_committing(
     import calkit.cli.update
     import calkit.core
 
+    # The first push must work without push.autoSetupRemote, which CI sets
+    # globally, and which no other config can turn back off
+    git_config = tmp_path_factory.mktemp("git") / "config"
+    git_config.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
+    for role in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Calkit Test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@calkit.org")
     subprocess.check_call(["calkit", "init"])
     monkeypatch.setattr(calkit.core, "is_tty", lambda: True)
     bare = str(tmp_path_factory.mktemp("remote") / "repo.git")
@@ -3393,6 +3482,7 @@ def test_save_new_files_in_git_stored_output_dir(tmp_dir):
 
 
 @skipif_windows_docker
+@pytest.mark.needs("docker")
 def test_xenv_env_var(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = calkit.load_calkit_info()

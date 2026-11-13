@@ -3572,15 +3572,17 @@ def new_release(
         ),
     ] = False,
     to: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--to",
             help=(
                 "Archival service to use for external releases (zenodo or "
-                "caltechdata); ignored for --internal releases."
+                "caltechdata); ignored for --internal releases. "
+                "If not specified, default_archival_service from the config "
+                "will be used."
             ),
         ),
-    ] = "zenodo",
+    ] = None,
     draft_only: Annotated[
         bool,
         typer.Option(
@@ -3613,6 +3615,8 @@ def new_release(
 
     import calkit.pipeline
 
+    if to is None:
+        to = calkit.config.read().default_archival_service
     to = to.lower()
     dotenv.load_dotenv()
     ck_info = calkit.load_calkit_info()

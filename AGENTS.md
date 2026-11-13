@@ -78,9 +78,15 @@ write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
 
+Start function names with a verb, e.g., `get_evidence_kind` rather than
+`evidence_kind`.
 Name functions for what they return,
 e.g., `get_image_name` rather than `get_image`,
 which could just as well return an image.
+
+Name a value for what it holds, so the name tells its type:
+a commit hash is `commit_sha`, not `commit`, which reads as an object;
+a path is `*_path`; a count is `n_*`.
 
 No spaces on either side of en or em dashes used for ranges or pauses in prose,
 respectively.

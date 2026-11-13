@@ -405,6 +405,7 @@ def test_update_conda_env(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
 )
+@pytest.mark.needs("juliaup")
 def test_update_environment(tmp_dir):
     # Test we can update an environment
     subprocess.check_call(["calkit", "init"])
@@ -1235,3 +1236,132 @@ def test_update_question(tmp_dir):
     assert q["validations"] == [{"by": ada}]
     assert q["verifications"][0]["notes"] == "Read the code."
     assert ProjectInfo.model_validate(calkit.load_calkit_info())
+
+
+def test_update_markdown(tmp_dir):
+    def run(*args):
+        return subprocess.run(
+            ["calkit", "update", "markdown", *args],
+            capture_output=True,
+            text=True,
+        )
+
+    subprocess.run(["git", "init", "-q"], check=True)
+    with open("calkit.yaml", "w") as f:
+        f.write("name: blog\n")
+    os.makedirs("_posts")
+    os.makedirs("_data")
+    with open("_data/r.json", "w") as f:
+        json.dump({"summary": {"frac": 0.6}, "n": 15}, f)
+    post = (
+        "Only <!-- ckvalue _data/r.json summary.frac .0% -->?"
+        "<!-- /ckvalue --> of\n"
+        "<!-- ckvalue _data/r.json n -->?<!-- /ckvalue --> runs.\n"
+    )
+    with open("_posts/a.md", "w") as f:
+        f.write(post)
+    with open("_posts/b.md", "w") as f:
+        f.write("No values here.\n")
+    # With no files named and no markdown stages, there's nothing to do
+    res = run()
+    assert res.returncode != 0
+    assert "none are declared as markdown stages" in res.stdout + res.stderr
+    # Checking reports what's stale without writing it
+    res = run("--check", "_posts/a.md", "_posts/b.md")
+    assert res.returncode != 0
+    assert "Values in _posts/a.md are out of date" in res.stdout
+    with open("_posts/a.md") as f:
+        assert f.read() == post
+    # Updating writes only the file that shows values
+    res = run("_posts/a.md", "_posts/b.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert res.stdout.strip() == "Updated values in _posts/a.md"
+    with open("_posts/a.md") as f:
+        text = f.read()
+    assert "-->60%<!-- /ckvalue -->" in text
+    assert "n -->15<!-- /ckvalue -->" in text
+    assert run("--check", "_posts/a.md").returncode == 0
+    # A block that isn't ended fails with what to add, and a bracketed
+    # format, as LaTeX's \\ckvalue takes one, is moved after the key
+    with open("_posts/old.md", "w") as f:
+        f.write(
+            "<!-- calkit values path=_data/r.json -->\n\n"
+            "N is <!-- calkit value key=n -->15<!-- /calkit value -->.\n"
+        )
+    res = run("_posts/old.md")
+    assert res.returncode != 0
+    assert "_posts/old.md:1" in res.stdout + res.stderr
+    assert "add '<!-- /calkit values -->'" in res.stdout + res.stderr
+    with open("_posts/old.md", "w") as f:
+        f.write(
+            "N is <!-- ckvalue[.1f] _data/r.json n -->15<!-- /ckvalue -->\n"
+        )
+    assert run("--check", "_posts/old.md").returncode != 0
+    res = run("_posts/old.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("_posts/old.md") as f:
+        assert f.read() == (
+            "N is <!-- ckvalue _data/r.json n .1f -->15.0<!-- /ckvalue -->\n"
+        )
+    # A markdown stage's file is updated with no files named
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "name: blog\npipeline:\n  stages:\n    post:\n"
+            "      kind: markdown\n      target_path: _posts/a.md\n"
+        )
+    with open("_data/r.json", "w") as f:
+        json.dump({"summary": {"frac": 0.8}, "n": 15}, f)
+    res = run()
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("_posts/a.md") as f:
+        assert "-->80%<!-- /ckvalue -->" in f.read()
+    # A key the results file doesn't have is reported with its line
+    with open("_posts/a.md", "a") as f:
+        f.write("<!-- ckvalue _data/r.json missing -->?<!-- /ckvalue -->\n")
+    res = run("_posts/a.md")
+    assert res.returncode != 0
+    assert "_posts/a.md:3" in res.stdout + res.stderr
+    assert "no key 'missing'" in res.stdout + res.stderr
+    # Images are checked against their imports, whether written from the
+    # project root, as a website serves them, or relative to the file.
+    # Ones that weren't imported, or that only appear in code, are not.
+    os.makedirs("images/p")
+    for name in ["a.png", "b.png", "photo.jpg"]:
+        with open(f"images/p/{name}", "w") as f:
+            f.write(name)
+    ck_info = calkit.load_calkit_info()
+    ck_info["figures"] = [
+        {"path": f"images/p/{name}", "imported_from": {"project": "o/p"}}
+        for name in ["a.png", "b.png"]
+    ]
+    calkit.save_calkit_info(ck_info)
+    for name in ["a.png", "b.png"]:
+        path = f"images/p/{name}"
+        calkit.provenance.write_import_lock(
+            path, {"hash": calkit.provenance.hash_path(path)}
+        )
+    with open("_posts/c.md", "w") as f:
+        f.write(
+            "![A](/images/p/a.png)\n![B](../images/p/b.png)\n"
+            "![Photo](/images/p/photo.jpg)\n`![C](/images/p/c.png)`\n"
+        )
+    res = run("--check", "_posts/c.md")
+    assert res.returncode == 0, res.stdout + res.stderr
+    with open("images/p/a.png", "a") as f:
+        f.write("edited")
+    os.remove("images/p/b.png")
+    res = run("_posts/c.md")
+    out = res.stdout + res.stderr
+    # Reported, but nothing to update, so not a failure unless checking
+    assert res.returncode == 0, out
+    assert "images/p/a.png, which has been edited since it was imported" in (
+        out
+    )
+    assert "images/p/b.png, imported from o/p, which does not exist" in out
+    assert "photo.jpg" not in out
+    assert "c.png" not in out
+    res = run("--check", "_posts/c.md")
+    assert res.returncode != 0
+    assert "2 imported image(s) don't match their imports" in (
+        res.stdout + res.stderr
+    )

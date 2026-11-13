@@ -44,81 +44,266 @@ logger.setLevel(logging.INFO)
 
 
 class _FoldedPlainStr(str):
-    """A plain scalar read from several lines, remembering where they broke.
+    """A scalar read from a file, remembering where its lines broke.
 
-    ``fold_pos`` holds the index of each space that was a line break, so
-    the value can be written back the way it was wrapped rather than
-    re-folded at whatever width ruamel is set to, which rewrote every
-    paragraph of a file wrapped any other way.
+    ``fold_pos`` holds the index of each space that was a line break, none
+    if it was on one line, so the value can be written back the way it was
+    wrapped rather than re-folded at whatever width ruamel is set to, which
+    rewrote every paragraph of a file wrapped any other way, and broke
+    every line longer than the width.
+
+    Plain scalars are loaded as one, and double-quoted ones are written out
+    as one.
     """
 
     fold_pos: list[int]
+    #: Whether it started a line, e.g., below its key, which is kept too
+    own_line: bool
+    #: Where it started, so an item of a wrapped flow list starts there again
+    column: int
+
+
+class _SourceDoubleQuotedStr(
+    ruamel.yaml.scalarstring.DoubleQuotedScalarString
+):
+    """A double-quoted scalar read from a file, remembering where its lines
+    broke, as ``_FoldedPlainStr`` does."""
+
+    __slots__ = ("fold_pos", "own_line", "column")
+
+
+class _SourceFoldedStr(str):
+    """A folded block scalar's text, as read from a file, on its way out.
+
+    Its line breaks are the ones it was read with, which ruamel marks, so
+    the emitter adds none of its own at the width.
+    """
 
 
 class _FoldPreservingConstructor(ruamel.yaml.constructor.RoundTripConstructor):
     def construct_scalar(self, node: Any) -> Any:
+        from ruamel.yaml.scalarstring import (
+            DoubleQuotedScalarString,
+            FoldedScalarString,
+        )
+
         value = super().construct_scalar(node)
-        if (
-            type(value) is not str
-            or node.style is not None
-            or node.start_mark.line == node.end_mark.line
-        ):
+        # ruamel records a folded block's breaks only if it has some, and
+        # one without is otherwise taken for one made in code
+        if isinstance(value, FoldedScalarString):
+            if not hasattr(value, "fold_pos"):
+                value.fold_pos = []  # type: ignore[attr-defined]
+            return value
+        quoted = type(value) is DoubleQuotedScalarString
+        if not quoted and (type(value) is not str or node.style is not None):
             return value
         # Only text loaded from a string has its source in the marks
         buffer = getattr(node.start_mark, "buffer", None)
         if buffer is None:
             return value
         source = buffer[node.start_mark.index : node.end_mark.index]
-        lines = [line.strip() for line in source.split("\n")]
-        # Blank lines are newlines in the value, which the emitter handles
-        if "" in lines or " ".join(lines) != value:
+        lines = source.split("\n")
+        if quoted:
+            # A break in quotes can be escaped, or follow spaces that are
+            # kept, and these are left to ruamel
+            if len(lines) > 1 and "\\" in source:
+                return value
+            lines[0] = lines[0].removeprefix('"')
+            lines[-1] = lines[-1].removesuffix('"')
+            lines = (
+                [lines[0]]
+                if len(lines) == 1
+                else [
+                    lines[0].rstrip(),
+                    *(line.strip() for line in lines[1:-1]),
+                    lines[-1].lstrip(),
+                ]
+            )
+        else:
+            lines = [line.strip() for line in lines]
+        # Blank lines are newlines in the value, which the emitter handles.
+        # Quotes on one line can hold escapes, but have no breaks to find.
+        if len(lines) > 1 and ("" in lines or " ".join(lines) != value):
             return value
-        out = _FoldedPlainStr(value)
+        if len(lines) == 1 and not quoted and lines[0] != value:
+            return value
+        out: Any = (
+            _SourceDoubleQuotedStr(value, anchor=node.anchor)
+            if quoted
+            else _FoldedPlainStr(value)
+        )
         out.fold_pos = []
         pos = -1
         for line in lines[:-1]:
             pos += len(line) + 1
             out.fold_pos.append(pos)
+        i = node.start_mark.index - 1
+        while i >= 0 and buffer[i] in " \t":
+            i -= 1
+        out.own_line = i < 0 or buffer[i] == "\n"
+        out.column = node.start_mark.column
         return out
 
 
 class _FoldPreservingRepresenter(ruamel.yaml.representer.RoundTripRepresenter):
-    pass
+    def represent_folded_scalarstring(self, data: Any) -> Any:
+        node = super().represent_folded_scalarstring(data)
+        if hasattr(data, "fold_pos"):
+            node.value = _SourceFoldedStr(node.value)
+        return node
+
+    def represent_source_double_quoted(self, data: Any) -> Any:
+        node = self.represent_double_quoted_scalarstring(data)
+        # One given a new value in code has nothing to keep, since ruamel
+        # keeps the type of the value it replaced
+        if not hasattr(data, "fold_pos"):
+            return node
+        node.value = _FoldedPlainStr(node.value)
+        node.value.fold_pos = data.fold_pos
+        node.value.own_line = data.own_line
+        node.value.column = data.column
+        return node
 
 
+# Values read from calkit.yaml end up in files other dumpers write, e.g.,
+# DVC writing dvc.yaml, which would otherwise refuse them
+for _representer in (
+    ruamel.yaml.representer.SafeRepresenter,
+    ruamel.yaml.representer.RoundTripRepresenter,
+    _FoldPreservingRepresenter,
+):
+    _representer.add_representer(
+        _FoldedPlainStr, ruamel.yaml.representer.SafeRepresenter.represent_str
+    )
+ruamel.yaml.representer.RoundTripRepresenter.add_representer(
+    _SourceDoubleQuotedStr,
+    ruamel.yaml.representer.RoundTripRepresenter.represent_double_quoted_scalarstring,
+)
 _FoldPreservingRepresenter.add_representer(
-    _FoldedPlainStr, ruamel.yaml.representer.RoundTripRepresenter.represent_str
+    _SourceDoubleQuotedStr,
+    _FoldPreservingRepresenter.represent_source_double_quoted,
+)
+_FoldPreservingRepresenter.add_representer(
+    ruamel.yaml.scalarstring.FoldedScalarString,
+    _FoldPreservingRepresenter.represent_folded_scalarstring,
 )
 
 
 class _FoldPreservingEmitter(ruamel.yaml.emitter.Emitter):
+    def _write(self, data: str) -> None:
+        self.column += len(data)
+        self.stream.write(
+            data.encode(self.encoding) if self.encoding else data
+        )
+
+    def _flow_item_from_source(self) -> bool:
+        """Whether the next item of a flow sequence was read from a file,
+        and if so, start it on a new line if it was on one."""
+        if not hasattr(getattr(self.event, "value", None), "fold_pos"):
+            return False
+        if self.event.value.own_line:
+            self.write_indent()
+            self._write(" " * (self.event.value.column - self.column))
+        self.states.append(self.expect_flow_sequence_item)
+        self.expect_node(sequence=True)
+        return True
+
+    def expect_first_flow_sequence_item(self) -> None:
+        if not self._flow_item_from_source():
+            super().expect_first_flow_sequence_item()
+
+    def expect_flow_sequence_item(self) -> None:
+        from ruamel.yaml.events import SequenceEndEvent
+
+        if isinstance(self.event, SequenceEndEvent) or not hasattr(
+            getattr(self.event, "value", None), "fold_pos"
+        ):
+            return super().expect_flow_sequence_item()
+        self.write_indicator(self.flow_seq_separator, False)
+        self._flow_item_from_source()
+
+    def write_folded(self, text: Any, comment: Any) -> None:
+        if not isinstance(text, _SourceFoldedStr):
+            return super().write_folded(text, comment)
+        best_width = self.best_width
+        self.best_width = sys.maxsize
+        try:
+            super().write_folded(text, comment)
+        finally:
+            self.best_width = best_width
+
+    def write_double_quoted(self, text: Any, split: Any = True) -> None:
+        fold_pos = getattr(text, "fold_pos", None)
+        if self.root_context or fold_pos is None:
+            return super().write_double_quoted(text, split)
+
+        def escaped(s: str) -> str:
+            # The same escapes as the parent's
+            out = []
+            for ch in s:
+                if ch in '"\\\x85  ﻿' or not (
+                    "\x20" <= ch <= "\x7e"
+                    or (
+                        self.allow_unicode
+                        and (
+                            "\xa0" <= ch <= "퟿"
+                            or "" <= ch <= "�"
+                            or "\U00010000" <= ch <= "\U0010ffff"
+                        )
+                    )
+                ):
+                    if ch in self.ESCAPE_REPLACEMENTS:
+                        ch = "\\" + self.ESCAPE_REPLACEMENTS[ch]
+                    elif ch <= "\xff":
+                        ch = "\\x%02X" % ord(ch)
+                    elif ch <= "￿":
+                        ch = "\\u%04X" % ord(ch)
+                    else:
+                        ch = "\\U%08X" % ord(ch)
+                out.append(ch)
+            return "".join(out)
+
+        # Breaking where the source did, each break reading as the space
+        # it replaced
+        self.write_indicator('"', True)
+        start = 0
+        for pos in fold_pos if split else []:
+            self._write(escaped(text[start:pos]))
+            self.write_indent()
+            start = pos + 1
+        self._write(escaped(text[start:]))
+        self.write_indicator('"', False)
+
     def write_plain(self, text: Any, split: Any = True) -> None:
         fold_pos = getattr(text, "fold_pos", None)
-        if self.root_context or not text or (split and not fold_pos):
+        if self.root_context or not text or (split and fold_pos is None):
             return super().write_plain(text, split)
-
-        def write(data: str) -> None:
-            self.column += len(data)
-            self.stream.write(
-                data.encode(self.encoding) if self.encoding else data
-            )
-
         # The same bookkeeping as the parent's, breaking where the source
-        # did instead of where the width says to
+        # did instead of where the width says to. A value on one line stays
+        # on one line, however long.
         if not self.whitespace:
-            write(" ")
+            if (
+                split
+                and not self.flow_level
+                and getattr(text, "own_line", False)
+                and self.indent is not None
+                and self.column > self.indent
+            ):
+                self.write_indent()
+            else:
+                self._write(" ")
         self.whitespace = False
         self.indention = False
         # A simple key gets no breaks: ruamel still wraps one past the width,
         # but a key can't span lines
         start = 0
-        for pos in fold_pos if split and fold_pos else []:
-            write(text[start:pos])
+        for pos in fold_pos if split and fold_pos is not None else []:
+            self._write(text[start:pos])
             self.write_indent()
             self.whitespace = False
             self.indention = False
             start = pos + 1
-        write(text[start:])
+        self._write(text[start:])
 
 
 class _ThreadLocalYAML(threading.local):
@@ -578,13 +763,16 @@ def save_calkit_info(
     wdir: str | PathLike | None = None,
 ) -> None:
     """Save Calkit project information to ``calkit.yaml``."""
+    from pathlib import Path
+
     fpath = "calkit.yaml"
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
-    # Always write as UTF-8; on Windows the default open() encoding is cp1252,
-    # which mangles non-ASCII content (e.g., Greek letters) into mojibake.
-    with open(fpath, "w", encoding="utf-8") as f:
-        ryaml.dump(info, f)
+    # Written as UTF-8, since on Windows the default open() encoding is
+    # cp1252, which mangles non-ASCII content (e.g., Greek letters) into
+    # mojibake, and only once the dump has succeeded, so a failure can't
+    # leave the file empty
+    ryaml.dump(info, Path(fpath))
 
 
 def load_calkit_info_object(wdir: str | None = None) -> ProjectInfo:
@@ -794,6 +982,20 @@ def is_tty() -> bool:
     try:
         return sys.stdin.isatty() and sys.stdout.isatty()
     except (AttributeError, ValueError):
+        return False
+
+
+def is_wsl() -> bool:
+    """Whether this is Linux running under the Windows Subsystem for Linux."""
+    if not sys.platform.startswith("linux"):
+        return False
+    # A container on a Windows host shares the WSL kernel, but it isn't WSL
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        return False
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
         return False
 
 

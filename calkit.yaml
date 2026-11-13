@@ -139,8 +139,7 @@ pipeline:
       args:
         - --engine={engine}
       requirements:
-        - name: word
-        - name: libreoffice
+        - name: "{engine}"
       environment: dev
       description: >-
         Export the LaTeX/Word example to Word and merge it back, with no
@@ -166,7 +165,6 @@ pipeline:
       environment: dev
       requirements:
         - name: libreoffice
-          check_command: which("soffice") || which("libreoffice")
           setup_command: calkit install libreoffice
       inputs:
         - calkit/docx.py

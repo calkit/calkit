@@ -64,10 +64,7 @@ def app_control_blocked(
 def is_wsl() -> bool:
     if not sys.platform.startswith("linux"):
         return False
-    res = subprocess.run(
-        ["uname", "-r"], capture_output=True, text=True, check=False
-    )
-    return "microsoft" in res.stdout.lower()
+    return "microsoft" in os.uname().release.lower()
 
 
 def wsl_run_powershell_cmd(

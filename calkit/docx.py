@@ -1594,6 +1594,7 @@ try {
     finally {
         if ($null -ne $doc) {
             $doc.Close($false)
+            Remove-Item $LocalPdfPath
             [System.Runtime.InteropServices.Marshal]::ReleaseComObject($doc) |
                 Out-Null
         }
@@ -1624,11 +1625,10 @@ finally {
                 wsl_run_powershell_cmd(
                     POWERSHELL_SCRIPT,
                     {"PDF_PATH": str(pdf_path), "OUTPUT_PATH": str(tmp_path)},
-                    timeout=60,
                 )
             else:
                 raise RuntimeError(
-                    "Word PDF conversion on Linux is only implemented on WSL."
+                    "Word PDF conversion on Linux is only implemented on WSL. "
                     "Use `--engine=libreoffice` instead."
                 )
     finally:

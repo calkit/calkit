@@ -32,6 +32,23 @@ Environmental variables are useful for configuration of a project that
 needs to be unique on each user's machine,
 which can also be used to avoid committing secrets to the repo.
 
+<!-- TODO: needs human review -->
+
+Requirements are what has to exist outside a project's environments:
+on the machine a stage runs on, e.g., an app installed system-wide or a
+number of CPUs, or in the session there, e.g., an env var or a login.
+Calkit builds and locks environments,
+but only checks requirements, at most offering to install or set them up.
+Where a requirement is declared says which stages need it:
+the project's apply to every stage,
+a machine environment's, i.e., a `system`, `slurm` or `pbs` environment's,
+to every stage that runs on that machine,
+and a stage's to that stage alone.
+A stage's and its machine environment's are checked on the machine where
+the stage runs, which is the one running `calkit run` unless the stage
+runs in a machine environment with a `host`.
+The project's are checked on the machine running `calkit run`.
+
 <!-- prettier-ignore -->
 !!! note
 

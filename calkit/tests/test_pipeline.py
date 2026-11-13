@@ -4892,6 +4892,35 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
         )
     }
     assert errors == {}
+    # What needs a skipped item's output is skipped too, whether it names
+    # the path or the stage, but not what needs another item's
+    stages = ck_info["pipeline"]["stages"]
+    stages["engines"]["outputs"] = ["made/{engine}.txt"]
+    for name, needs in [
+        ("uses-path", "made/calkit-no-such-app.txt"),
+        ("uses-stage", {"from_stage_outputs": "engines"}),
+        ("uses-other", "made/git.txt"),
+    ]:
+        stages[name] = {
+            "kind": "shell-command",
+            "command": "ls made",
+            "inputs": [needs],
+        }
+    names = ["engines", "uses-path", "uses-stage", "uses-other"]
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=names, interactive=False
+    )
+    assert set(gated) == {
+        "engines@calkit-no-such-app",
+        "uses-path",
+        "uses-stage",
+    }
+    assert "'made/calkit-no-such-app.txt'" in gated["uses-stage"]
+    # Naming an item, e.g., to retry it, checks its stage
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["engines@calkit-no-such-app"], interactive=False
+    )
+    assert set(gated) == {"engines@calkit-no-such-app"}
 
 
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(

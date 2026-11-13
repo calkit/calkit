@@ -1564,7 +1564,6 @@ try {
 
         # Open PDF (ConfirmConversions = False).
         $missing = [Type]::Missing
-        # fixme: hangs on the line below until user clicks on word dialog to confirm!
         $doc = $word.Documents.Open(
             $LocalPdfPath,
             $false,          # ConfirmConversions

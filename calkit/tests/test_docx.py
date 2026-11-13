@@ -1464,7 +1464,7 @@ def test_pdf_to_docx_linux_word_not_implemented(
     monkeypatch.setattr(calkit.docx.sys, "platform", "linux")
     monkeypatch.setattr(calkit.docx, "_is_wsl", lambda: False)
     monkeypatch.setattr(calkit.docx, "flatten_heavy_figures", lambda *_: False)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError):
         calkit.docx.pdf_to_docx(str(pdf), str(out))
 
 

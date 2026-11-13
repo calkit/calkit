@@ -21,6 +21,8 @@ def test_schedule_input(monkeypatch, tmp_path):
         "weekly": (1, "week"),
         "1mo": (1, "month"),
         "3 months": (3, "month"),
+        "1 quarter": (1, "quarter"),
+        "quarterly": (1, "quarter"),
         "1y": (1, "year"),
         "annually": (1, "year"),
     }.items():
@@ -49,6 +51,8 @@ def test_schedule_input(monkeypatch, tmp_path):
         "1mo": "2026-10",
         "3 months": "2026-10",
         "2 months": "2026-09",
+        "1 quarter": "2026Q4",
+        "2q": "2026Q3",
         "1y": "2026",
         "5y": "2025",
         "3 years": "2024",

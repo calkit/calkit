@@ -1653,6 +1653,7 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
         PathOutput,
         Pipeline,
         QuestionsToLatexStage,
+        ReferencesCheckStage,
     )
 
     base = Path(wdir or ".").resolve()
@@ -1671,11 +1672,17 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
             outs += stage.notebook_outputs
         elif isinstance(stage, MarimoHtmlWasmStage):
             outs += stage.app_outputs
+        elif isinstance(stage, ReferencesCheckStage):
+            outs += stage.check_outputs
         if stage.scheduler_log_output is not None:
             outs.append(stage.scheduler_log_output)
         paths = [out.path for out in outs if out.storage == "git"]
-        # Generated LaTeX is stored in Git unless it says otherwise
-        if isinstance(stage, (JsonToLatexStage, QuestionsToLatexStage)):
+        # Generated LaTeX and reference reports are stored in Git unless
+        # they say otherwise
+        if isinstance(
+            stage,
+            (JsonToLatexStage, QuestionsToLatexStage, ReferencesCheckStage),
+        ):
             paths += [
                 out for out in stage.outputs or [] if isinstance(out, str)
             ]

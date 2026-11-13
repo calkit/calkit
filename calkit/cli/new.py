@@ -3692,7 +3692,6 @@ def new_release(
             raise_error(str(e))
     # Check that the pipeline is up-to-date, limiting the check to the stage
     # that produces the released artifact when releasing a single path.
-    typer.echo("Checking pipeline is up-to-date for release")
     targets = None
     # The stage that builds the released path, whose upstream stages define
     # what a --pipeline release carries
@@ -3712,6 +3711,34 @@ def new_release(
         # A project release carries the whole pipeline already
         typer.echo("Project releases already include the pipeline")
         include_pipeline = False
+    # A release that carries its pipeline is checked by running it, which
+    # needs the project's requirements met, so check them as 'calkit run'
+    # does before anything slow, like building environments or archiving.
+    # A project archive with no pipeline isn't run, as in
+    # check_project_release_archive, so its requirements don't matter here.
+    has_pipeline = bool(ck_info.get("pipeline")) or os.path.isfile("dvc.yaml")
+    if include_pipeline or (
+        path == "." and not internal_release and has_pipeline
+    ):
+        typer.echo("Checking project requirements")
+        # Variables the project sets itself can meet its requirements, as
+        # they do for 'calkit run'
+        calkit.set_env_vars(ck_info=ck_info)
+        for req_wdir, req_info in calkit.iter_projects(ck_info=ck_info):
+            try:
+                with calkit.in_project(req_wdir):
+                    # A dry run doesn't install anything
+                    calkit.check_requirements(
+                        ck_info=req_info,
+                        interactive=False if dry_run else None,
+                    )
+            except Exception as e:
+                raise_error(
+                    "Project requirements aren't met, so the release can't "
+                    "be checked by running its pipeline: "
+                    f"{calkit.describe_project(req_wdir)}{e}"
+                )
+    typer.echo("Checking pipeline is up-to-date for release")
     status = calkit.pipeline.get_status(
         ck_info=ck_info,
         targets=targets,
@@ -4063,31 +4090,8 @@ def new_release(
             typer.echo(f"Read {len(authors)} author(s) from CITATION.cff")
         else:
             warn("No authors defined for the project")
-            still_entering_authors = True
-            n = 0
-            while still_entering_authors:
-                n += 1
-                author = dict()
-                author["first_name"] = typer.prompt(
-                    f"Enter the first name of author {n}"
-                )
-                author["last_name"] = typer.prompt(
-                    f"Enter the last name of author {n}"
-                )
-                author["affiliation"] = typer.prompt(
-                    f"Enter the affiliation of author {n}"
-                )
-                has_orcid = typer.confirm(
-                    f"Does author {n} have an ORCID?", default=False
-                )
-                if has_orcid:
-                    author["orcid"] = typer.prompt(
-                        f"Enter the ORCID of author {n}"
-                    )
-                authors.append(author)
-                still_entering_authors = typer.confirm(
-                    "Are there more authors to enter?", default=True
-                )
+            # A dry run changes nothing, the config included
+            authors = calkit.releases.prompt_authors(save_user=not dry_run)
             # Write authors out to CITATION.cff
             if not dry_run:
                 typer.echo("Writing authors to CITATION.cff")
@@ -4180,28 +4184,9 @@ def new_release(
                 record_id = invenio_dep["id"]
             files = os.listdir(release_files_dir)
             for filename in files:
-                typer.echo(f"Uploading {filename}")
-                fpath = os.path.join(release_files_dir, filename)
-                # First, initiate the file upload
-                calkit.invenio.post(
-                    f"/records/{record_id}/draft/files",
-                    json=[{"key": filename}],
-                    service=to,  # type: ignore
-                )
-                # Then upload the file content
-                with open(fpath, "rb") as f:
-                    file_data = f.read()
-                    resp = calkit.invenio.put(
-                        f"/records/{record_id}/draft/files/{filename}/content",
-                        headers={"Content-Type": "application/octet-stream"},
-                        as_json=False,
-                        service=to,  # type: ignore
-                        data=file_data,
-                    )
-                    typer.echo(f"Status code: {resp.status_code}")
-                # Commit the file
-                calkit.invenio.post(
-                    f"/records/{record_id}/draft/files/{filename}/commit",
+                calkit.invenio.upload_file_with_progress(
+                    record_id,
+                    os.path.join(release_files_dir, filename),
                     service=to,  # type: ignore
                 )
             # Reserve a DOI on the draft before publishing. The publish action's

@@ -302,10 +302,10 @@ notebook stage:
 ```yaml
 parameters:
   param1:
-    - range:
-        start: 0
-        stop: 10
-        step: 2
+    - kind: range
+      start: 0
+      stop: 10
+      step: 2
   param2:
     - random-forest
     - lightgbm

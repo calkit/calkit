@@ -66,6 +66,10 @@ formatter inserts, e.g., ruff-format adds one after an in-function import
 block. Don't hoist imports to module scope just to avoid those; imports are
 kept inside functions to keep CLI startup fast.
 
+Put the imports a function always needs at its top, not partway through;
+only an import on a conditional path belongs where it's used.
+Module scope is fine for anything that won't slow CLI startup.
+
 For prose, only use one space after punctuation.
 
 Always put a comma after "i.e." and "e.g.".

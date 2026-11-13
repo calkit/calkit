@@ -9,7 +9,7 @@ import platform as _platform
 import re
 import shutil
 import subprocess
-from typing import Annotated, Callable
+from typing import Annotated, Any, Callable
 
 import dotenv
 import typer
@@ -1700,22 +1700,195 @@ def check_project_requirements(
             ),
         ),
     ] = False,
+    stale_only: Annotated[
+        bool,
+        typer.Option(
+            "--stale",
+            help=(
+                "Only check what 'calkit run' needs now: the project's "
+                "requirements, and those of out-of-date stages and their "
+                "environments."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Check that a project's system-level requirements are met.
+    """Check that this machine meets the project's requirements.
 
-    Subprojects' requirements are checked too, since the host has to meet
-    them for the project's pipeline to run.
+    That's the project's own, and those of every stage and environment, so
+    this says whether the whole project can run here. Subprojects' are
+    checked too. On a terminal, what's missing is offered, as by
+    'calkit run'. Those of an environment on another machine are checked
+    there, by 'calkit run'.
     """
+    import calkit.environments as envs_mod
+    import calkit.markdown
+
+    def check(where: str, **kwargs: Any) -> None:
+        """Check some requirements, noting what's wrong rather than
+        stopping, so everything is reported at once."""
+        if verbose:
+            typer.echo(f"Checking requirements of {where}")
+        try:
+            calkit.check_requirements(
+                use_cache=not no_cache, checked=checked, **kwargs
+            )
+        except Exception as e:
+            problems.append(f"{where}: {e}")
+
+    def add_env(
+        env_name: str, envs: dict, env_names: list[str], where: str
+    ) -> list[str]:
+        """Add an environment to check, and what it picks if a switch,
+        returning them."""
+        env = envs.get(env_name)
+        if not isinstance(env, dict):
+            return []
+        used = [env_name]
+        if env.get("kind") == envs_mod.SWITCH_KIND:
+            try:
+                picked = envs_mod.resolve_switch(env_name, envs)
+            except ValueError as e:
+                problems.append(f"{where}: {e}")
+                picked = None
+            if picked is not None:
+                used.append(picked)
+        env_names.extend(n for n in used if n not in env_names)
+        return used
+
     typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
         calkit.requirements.cache_clear()
-    for wdir, info in calkit.iter_projects():
-        try:
-            with calkit.in_project(wdir):
-                calkit.check_requirements(ck_info=info, use_cache=not no_cache)
-        except Exception as e:
-            raise_error(f"{calkit.describe_project(wdir)}{e}")
+    # Each requirement is checked once, however many declare it
+    checked: dict[str, str | None] = {}
+    problems: list[str] = []
+    projects = list(calkit.iter_projects())
+    # The projects' own first, since what's out of date can't be known
+    # until, e.g., the apps its environments are checked with are here
+    for wdir, info in projects:
+        with calkit.in_project(wdir):
+            check(
+                "the project" if wdir == "." else f"subproject '{wdir}'",
+                ck_info=info,
+            )
+    # Which stages are out of date is asked as 'calkit status' asks it,
+    # which doesn't check the environments of stages whose requirements
+    # aren't met, so nothing here can change the answer
+    stale: set[str] | None = None
+    if stale_only:
+        if problems:
+            raise_error(
+                "This machine doesn't meet these requirements:\n"
+                + "\n".join(f"  {p}" for p in problems)
+            )
+        status = calkit.pipeline.get_status()
+        if status.errors or status.failed_environment_checks:
+            raise_error(
+                "Failed to determine which stages are out of date: "
+                + "; ".join(
+                    status.errors
+                    + [
+                        f"environment '{e}' failed its check"
+                        for e in status.failed_environment_checks
+                    ]
+                )
+            )
+        stale = {name.split("@")[0] for name in status.stale_stage_names}
+    for wdir, info in projects:
+        with calkit.in_project(wdir):
+            try:
+                info = calkit.markdown.expand_ck_info(info).ck_info
+            except Exception as e:
+                problems.append(
+                    f"{calkit.describe_project(wdir)}failed to read markdown "
+                    f"stages: {e}"
+                )
+            envs = info.get("environments") or {}
+            stages = (info.get("pipeline") or {}).get("stages") or {}
+            # The environments to check, i.e., those the stages use, with
+            # what a switch picks here, and the stages, with any of their
+            # environments that's another machine
+            env_names: list[str] = []
+            remote_env_by_stage: dict[str, str | None] = {}
+            for name, stage in stages.items():
+                qualified = calkit.qualify_with_project(wdir, name)
+                if not isinstance(stage, dict) or (
+                    stale is not None and qualified not in stale
+                ):
+                    continue
+                used = []
+                for env_name in str(stage.get("environment") or "").split(
+                    envs_mod.COMPOSITE_ENV_SEP
+                ):
+                    used += add_env(
+                        env_name, envs, env_names, f"stage '{qualified}'"
+                    )
+                remote_env_names = [
+                    n
+                    for n in used
+                    if envs_mod.runs_elsewhere(envs_mod.get_env(n, envs) or {})
+                ]
+                remote_env_by_stage[name] = (
+                    remote_env_names[0] if remote_env_names else None
+                )
+            # Without --stale, those no stage uses too, except a switch's
+            # options it doesn't pick here, which nothing needs
+            if stale is None:
+                options: set[str] = set()
+                for env_name, env in envs.items():
+                    if (
+                        isinstance(env, dict)
+                        and env.get("kind") == envs_mod.SWITCH_KIND
+                    ):
+                        try:
+                            options.update(
+                                envs_mod.get_switch_options(env_name, envs)
+                            )
+                        except ValueError:
+                            # Said when what it picks is resolved
+                            pass
+                for env_name in envs:
+                    if env_name not in options:
+                        add_env(
+                            env_name,
+                            envs,
+                            env_names,
+                            "environment "
+                            f"'{calkit.qualify_with_project(wdir, env_name)}'",
+                        )
+            for env_name in env_names:
+                env = envs_mod.get_env(env_name, envs) or {}
+                if not env.get("requirements"):
+                    continue
+                where = (
+                    "environment "
+                    f"'{calkit.qualify_with_project(wdir, env_name)}'"
+                )
+                if envs_mod.runs_elsewhere(env):
+                    calkit.echo(
+                        f"Not checking {where} here, since it's another "
+                        "machine; 'calkit run' checks it there"
+                    )
+                    continue
+                check(where, requirements=env["requirements"])
+            for name, elsewhere in remote_env_by_stage.items():
+                stage_reqs = stages[name].get("requirements")
+                if not stage_reqs:
+                    continue
+                where = f"stage '{calkit.qualify_with_project(wdir, name)}'"
+                if elsewhere is not None:
+                    calkit.echo(
+                        f"Not checking {where} here, since it runs on "
+                        f"environment '{elsewhere}', which is another "
+                        "machine; 'calkit run' checks it there"
+                    )
+                    continue
+                check(where, requirements=stage_reqs)
+    if problems:
+        raise_error(
+            "This machine doesn't meet these requirements:\n"
+            + "\n".join(f"  {p}" for p in problems)
+        )
     message = "✅ All set!"
     calkit.echo(message)
 
@@ -2072,4 +2245,112 @@ def check_questions(
     else:
         calkit.echo(format_status(status, verbose=verbose))
     if not status.ok:
+        raise typer.Exit(1)
+
+
+@check_app.command(name="references|refs")
+def check_references(
+    path: Annotated[
+        str,
+        typer.Argument(
+            help="What to check: a .tex or Markdown document, a PDF (via "
+            "its source, or its printed reference list if it has none), or "
+            "a .bib file, whose every entry is checked.",
+        ),
+    ],
+    wdir: Annotated[
+        str, typer.Option("--wdir", help="Project working directory.")
+    ] = ".",
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="List every cited reference, not only the ones needing "
+            "attention.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output the report as JSON.")
+    ] = False,
+    output: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Also write the report as JSON to this path.",
+        ),
+    ] = None,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="Use only cached answers instead of calling out to "
+            "Crossref, DataCite, OpenAlex, and arXiv.",
+        ),
+    ] = False,
+    refresh: Annotated[
+        bool,
+        typer.Option(
+            "--refresh",
+            help="Ignore cached answers and ask the services again.",
+        ),
+    ] = False,
+    responses: Annotated[
+        str | None,
+        typer.Option(
+            "--responses",
+            help="Reuse the services' responses from this file instead of "
+            "the local cache, and record there the ones this check used, "
+            "so it can be reproduced.",
+        ),
+    ] = None,
+) -> None:
+    """Check that the references a document cites are real.
+
+    Reads citation keys from the document and the files it inputs, or,
+    for a PDF, from the .tex or Markdown file it's built from, then
+    resolves each against the bibliographies the document names, or the
+    collections calkit.yaml declares if it names none. A .bib file has
+    each of its entries checked instead, and so does the reference list
+    printed in a PDF with no source, e.g., a manuscript sent for review.
+    Each entry is looked up in Crossref, DataCite, OpenAlex, and arXiv.
+    Reports, worst first: a key defined in no bibliography, so the citation
+    cannot resolve; a DOI that isn't registered; an entry whose identifier
+    resolves to a different work than it describes; and an entry no
+    service has, which is what a fabricated citation looks like, though a
+    venue that registers no DOIs looks the same and is named as such.
+
+    Answers are cached, so a rerun needs no network. A references-check
+    pipeline stage runs this with --output and --responses, so its report
+    is an output that goes stale when the document or a bibliography
+    changes, and the responses it was based on are kept with it.
+
+    Exits with an error if a key resolves to no entry, a DOI isn't
+    registered, or an entry contradicts the record it was found in. A
+    reference that simply isn't indexed anywhere is reported but doesn't
+    fail the check.
+    """
+    from calkit.references import check_references as _check_references
+    from calkit.references import compact, format_check, write_report
+
+    try:
+        check = _check_references(
+            path,
+            wdir=wdir,
+            offline=offline,
+            refresh=refresh,
+            responses_path=responses,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        raise_error(str(e))
+    if output is not None:
+        write_report(check, output, wdir=wdir)
+    if json_output:
+        calkit.echo(
+            json.dumps(compact(check.model_dump(mode="json")), indent=2)
+        )
+    else:
+        calkit.echo(format_check(check, verbose=verbose))
+    if not check.ok:
         raise typer.Exit(1)

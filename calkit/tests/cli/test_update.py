@@ -460,6 +460,12 @@ def test_update_agent_skills_renames_skill_name_in_frontmatter(fake_home):
     ):
         content = (skills_dir / skill_name / "SKILL.md").read_text()
         assert f"name: {skill_name}" in content
+    # Frontmatter must be strict YAML, since Codex skips skills that aren't
+    for skill_md in skills_dir.glob("calkit-*/SKILL.md"):
+        frontmatter = skill_md.read_text().split("---")[1]
+        data = calkit.ryaml.load(frontmatter)
+        assert data["name"] == skill_md.parent.name
+        assert data["description"]
 
 
 def test_update_agent_skills_preserves_custom_skill(fake_home):

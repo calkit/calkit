@@ -7,6 +7,8 @@
 - The VS Code extension lives in `vscode-ext`
 - The Chrome extension lives in `browser-ext`
 - The Calkit Assistant desktop app lives in `assistant`
+- The agent plugin for Claude Code, Codex, and OpenCode lives in
+  `agent-plugin`
 - GitHub Actions live in `actions`, e.g., `calkit/calkit/actions/run`
 - Docker images we publish live in `images`, e.g., `images/latex`, which
   is released on its own `latex-image/vX.Y.Z` tag rather than with the CLI

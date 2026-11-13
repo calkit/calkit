@@ -513,6 +513,9 @@ def test_check_requirements_offers_an_apps_setup_command(
     assert str(e.value).endswith("\n  VMs")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Fakes an app with a shell script"
+)
 def test_check_requirements_setup_command_with_registered_installer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

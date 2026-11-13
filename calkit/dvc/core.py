@@ -1637,14 +1637,17 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
     wdir: str | None = None,
 ) -> dict[str, str]:
     """Get the pipeline outputs declared to be stored in Git, each mapped to
-    the name of the stage that makes it.
+    the name of the stage that makes it, as DVC names it from ``wdir``,
+    e.g., ``name@item`` for an iterated stage, or ``sub/dvc.yaml:name`` for
+    an inline subproject's.
 
     Paths are absolute and posix.
     An iterated stage's paths are templates, so its outputs are found in
-    DVC's index, which ``dvc_repo`` can have built, and named as DVC names
-    the stage, e.g., ``name@item``; without a ``dvc_repo``, they're left
-    out.
+    DVC's index, which ``dvc_repo`` can have built; without a ``dvc_repo``,
+    they're left out.
     """
+    import calkit.latex
+    import calkit.markdown
     from calkit.models.pipeline import (
         JsonToLatexStage,
         JupyterNotebookStage,
@@ -1659,8 +1662,10 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
     base = Path(wdir or ".").resolve()
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
+    # Markdown stages stand for the stages their blocks declare
     try:
-        stages = Pipeline.model_validate(ck_info["pipeline"]).stages
+        expanded = calkit.markdown.expand_ck_info(ck_info, wdir=wdir).ck_info
+        stages = Pipeline.model_validate(expanded["pipeline"]).stages
     except Exception:
         stages = {}
     git_out_paths: dict[str, str] = {}
@@ -1676,7 +1681,8 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
             outs += stage.check_outputs
         if stage.scheduler_log_output is not None:
             outs.append(stage.scheduler_log_output)
-        paths = [out.path for out in outs if out.storage == "git"]
+        # By the name of the stage that makes each
+        paths = [(out.path, name) for out in outs if out.storage == "git"]
         # Generated LaTeX and reference reports are stored in Git unless
         # they say otherwise
         if isinstance(
@@ -1684,11 +1690,20 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
             (JsonToLatexStage, QuestionsToLatexStage, ReferencesCheckStage),
         ):
             paths += [
-                out for out in stage.outputs or [] if isinstance(out, str)
+                (out, name)
+                for out in stage.outputs or []
+                if isinstance(out, str)
             ]
-        if isinstance(stage, LatexStage) and stage.pdf_storage == "git":
-            paths.append(stage.pdf_path)
-        for p in paths:
+        if isinstance(stage, LatexStage):
+            if stage.pdf_storage == "git":
+                paths.append((stage.pdf_path, name))
+            # Each diff is a stage of its own
+            if stage.diff_pdf_storage == "git":
+                paths += [
+                    (path, calkit.latex.get_diff_stage_name(name, *pair))
+                    for pair, path in zip(stage.diff_pairs, stage.diff_paths)
+                ]
+        for p, stage_name in paths:
             path = Path(os.path.normpath(base / (stage.wdir or "") / p))
             if stage.iterate_over:
                 # Each {arg} stands for whatever value it takes
@@ -1697,7 +1712,7 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
                 )
                 templates.setdefault(name, []).append(re.compile(pattern))
             else:
-                git_out_paths[path.as_posix()] = name
+                git_out_paths[path.as_posix()] = stage_name
     if templates and dvc_repo is not None:
         dvc_yaml_path = base / "dvc.yaml"
         for out in dvc_repo.index.outs:
@@ -1711,6 +1726,21 @@ def get_git_output_paths(  # type: ignore[no-any-unimported]
             posix = Path(out.fs_path).resolve().as_posix()
             if any(p.fullmatch(posix) for p in patterns):
                 git_out_paths[posix] = out.stage.name
+    # An inline subproject's stages are run from here, but an isolated one,
+    # with its own DVC repo, runs on its own
+    for subproject in ck_info.get("subprojects") or []:
+        if not isinstance(subproject, dict) or not subproject.get("path"):
+            continue
+        sp = Path(subproject["path"]).as_posix().strip("/")
+        sp_dir = base / sp
+        if not sp_dir.is_dir() or (sp_dir / ".dvc").is_dir():
+            continue
+        for sp_out_path, name in get_git_output_paths(
+            dvc_repo=dvc_repo, wdir=str(sp_dir)
+        ).items():
+            lock_dir, lock_name = split_lock_stage_name(name)
+            sp_lock_dir = posixpath.join(sp, lock_dir) if lock_dir else sp
+            git_out_paths[sp_out_path] = f"{sp_lock_dir}/dvc.yaml:{lock_name}"
     return git_out_paths
 
 
@@ -1874,14 +1904,42 @@ def force_add_ignored_files(
     return too_large
 
 
+def stage_git_outputs(repo: git.Repo, paths: list[str]) -> list[str]:
+    """Stage pipeline outputs stored in Git, deletions included, except files
+    Git doesn't track yet that are larger than ``LARGE_MB``, since Git
+    history keeps them for good.
+
+    Returns those too large, relative to the repo's root, which aren't
+    staged.
+    """
+    root = Path(repo.working_dir)
+    too_large = []
+    # Chunked to stay under command line length limits
+    for i in range(0, len(paths), 100):
+        listing = repo.git.ls_files(
+            "-z", "--others", "--exclude-standard", "--", *paths[i : i + 100]
+        )
+        too_large += [
+            p
+            for p in listing.split("\0")
+            if p
+            and os.path.isfile(root / p)
+            and os.path.getsize(root / p) > LARGE_MB * 1024**2
+        ]
+    excludes = [f":(top,literal,exclude){p}" for p in too_large]
+    for i in range(0, len(paths), 100):
+        repo.git.add("-A", "--", *paths[i : i + 100], *excludes)
+    return too_large
+
+
 def get_too_large_text(paths: list[str]) -> str:
-    """Get what to say about files Git ignores in outputs stored in Git that
-    are too large to add to it.
+    """Get what to say about files in outputs stored in Git that are too
+    large to add to it.
     """
     n_files_txt = f"{len(paths)} file{'s' if len(paths) > 1 else ''}"
     return (
-        f"Not adding {n_files_txt} Git ignores in outputs stored in Git, "
-        f"since they're larger than {LARGE_MB} MB: "
+        f"Not adding {n_files_txt} in outputs stored in Git to it, since "
+        f"they're larger than {LARGE_MB} MB: "
         f"{get_unstored_files_text(paths, [])}; add them to the output's "
         "'ignore' list, or store it with DVC"
     )
@@ -1902,7 +1960,8 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
     The kinds are:
 
     - ``both``: tracked by Git and cached by DVC, so it belongs in DVC,
-      unless it was added on its own and differs from its ``.dvc`` file.
+      unless it was added on its own and differs from its ``.dvc`` file,
+      with the ``files`` in both if a directory has others only in Git.
     - ``ignored``: a pipeline output stored in Git that Git ignores, with
       the ``files`` in it Git ignores.
     - ``ignored-files``: a pipeline output stored in Git with ``files`` in
@@ -1957,23 +2016,28 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
             if not out.use_cache or not in_git(path):
                 continue
             # Files Git tracks in a directory that DVC excludes, e.g., added
-            # with 'git add -f', are only in Git
+            # with 'git add -f', are only in Git, so only the rest are in both
+            both_files = None
             if path.is_dir():
                 prefix = path.as_posix() + "/"
                 n = bisect.bisect_left(tracked, prefix)
-                in_dir = itertools.takewhile(
-                    lambda p: p.startswith(prefix),
-                    itertools.islice(tracked, n, None),
+                in_dir = list(
+                    itertools.takewhile(
+                        lambda p: p.startswith(prefix),
+                        itertools.islice(tracked, n, None),
+                    )
                 )
-                if all(
-                    dvc_repo.dvcignore.is_ignored_file(
+                both_files = [
+                    p
+                    for p in in_dir
+                    if not dvc_repo.dvcignore.is_ignored_file(
                         os.path.join(out.fs_path, os.path.relpath(p, path))
                     )
-                    for p in in_dir
-                ):
+                ]
+                if not both_files:
                     continue
             message = f"{rel(path)} is tracked by both Git and DVC"
-            problem = dict(
+            problem: dict[str, Any] = dict(
                 path=rel(path),
                 kind="both",
                 stage=None,
@@ -1981,6 +2045,8 @@ def get_storage_problems(  # type: ignore[no-any-unimported]
                 store_in="dvc",
                 message=message,
             )
+            if both_files is not None and len(both_files) < len(in_dir):
+                problem["files"] = [rel(Path(p)) for p in both_files]
             if out.stage.is_data_source:
                 problem["dvc_file"] = rel(Path(out.stage.path).resolve())
                 # Without a stage to say which is right, differing content

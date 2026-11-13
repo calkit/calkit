@@ -17,6 +17,7 @@ from dvc.config_schema import SCHEMA, Invalid
 from dvc_objects.fs import known_implementations
 
 import calkit
+import calkit.latex
 from calkit.dvc import register_ck_scheme
 from calkit.dvc.core import _tolerate_lock_release_failures
 
@@ -1007,6 +1008,82 @@ def test_get_storage_problems(tmp_dir):
     assert "big.bin" not in large
 
 
+def test_get_git_output_paths(tmp_dir: str) -> None:
+    def get_paths() -> dict[str, str]:
+        base = Path(".").resolve()
+        return {
+            Path(path).relative_to(base).as_posix(): name
+            for path, name in calkit.dvc.get_git_output_paths().items()
+        }
+
+    subprocess.check_call(["calkit", "init"])
+    with open("README.md", "w") as f:
+        f.write(
+            "```sh calkit stage name=plot "
+            "outputs=[{path: figures, storage: git}, other.png]\n"
+            "echo\n"
+            "```\n"
+        )
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "make": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo",
+                "outputs": [
+                    {"path": "results", "storage": "git"},
+                    "data",
+                    {"path": "scratch", "storage": None},
+                ],
+            },
+            # Blocks of Markdown are stages of their own
+            "README.md": {"kind": "markdown", "target_path": "README.md"},
+            # As is each diff of a LaTeX document
+            "paper": {
+                "kind": "latex",
+                "environment": "_system",
+                "target_path": "paper/paper.tex",
+                "pdf_storage": "git",
+                "diffs": ["v1"],
+                "diff_pdf_storage": "git",
+            },
+        }
+    }
+    # An inline subproject's stages are run from here, but not an isolated
+    # one's, which has its own DVC repo
+    for sp, isolated in [("sub", False), ("iso", True)]:
+        os.makedirs(
+            os.path.join(sp, ".dvc" if isolated else ""), exist_ok=True
+        )
+        with open(os.path.join(sp, "calkit.yaml"), "w") as f:
+            calkit.ryaml.dump(
+                {
+                    "pipeline": {
+                        "stages": {
+                            "c": {
+                                "kind": "shell-command",
+                                "environment": "_system",
+                                "command": "echo",
+                                "outputs": [{"path": "out", "storage": "git"}],
+                            }
+                        }
+                    }
+                },
+                f,
+            )
+    ck_info["subprojects"] = [{"path": "sub"}, {"path": "iso"}]
+    calkit.save_calkit_info(ck_info)
+    diff_path = calkit.latex.get_diff_path("paper/paper.tex", "v1", "HEAD")
+    assert get_paths() == {
+        "results": "make",
+        "figures": "README.md/plot",
+        "paper/paper.pdf": "paper",
+        diff_path: calkit.latex.get_diff_stage_name("paper", "v1", "HEAD"),
+        "sub/out": "sub/dvc.yaml:c",
+    }
+
+
 def test_get_unstored_output_files(tmp_dir: str) -> None:
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], text=True)
@@ -1103,9 +1180,36 @@ def test_get_unstored_output_files(tmp_dir: str) -> None:
     assert get_unstored() == {}
     assert get_problems() == {}
     # A file DVC leaves out of a directory it caches, but Git tracks anyway,
-    # isn't tracked by both
+    # isn't tracked by both, though the rest of the directory can be
     git("add", "-f", "data/t.tmp")
     assert get_problems() == {}
+    git("add", "-f", "data/d.csv")
+    problem = get_problems()["data"]
+    assert problem["kind"] == "both"
+    assert problem["files"] == ["data/d.csv"]
+
+
+def test_stage_git_outputs(tmp_dir: str) -> None:
+    repo = git.Repo.init()
+    os.makedirs("out")
+    for fname in ["a.txt", "gone.txt"]:
+        with open(os.path.join("out", fname), "w") as f:
+            f.write(fname)
+    repo.git.add("out")
+    repo.git.commit("-qm", "Add")
+    os.remove(os.path.join("out", "gone.txt"))
+    with open(os.path.join("out", "new.txt"), "w") as f:
+        f.write("new")
+    with open(os.path.join("out", "big.bin"), "wb") as f:
+        f.truncate((calkit.dvc.LARGE_MB + 1) * 1024**2)
+    # Deletions and new files are staged, but not one too large for Git
+    assert calkit.dvc.stage_git_outputs(repo, ["out"]) == ["out/big.bin"]
+    assert repo.git.diff("--cached", "--name-status").split() == [
+        "D",
+        "out/gone.txt",
+        "A",
+        "out/new.txt",
+    ]
 
 
 def test_split_lock_stage_name():

@@ -4372,65 +4372,66 @@ def run(
     # dvc.lock records their hashes, along with any files Git ignores in
     # them, which would otherwise be in neither Git nor DVC, leaving the
     # output modified in a clone and its stage stale
-    # By the directory of the dvc.lock recording each, since a subproject's
-    # stages are declared in its own calkit.yaml, under their names there
-    ran_by_lock_dir: dict[str | None, list[str]] = {}
-    for stage_name in ran:
-        if stage_name is None:
-            continue
-        lock_dir, lock_name = calkit.dvc.split_lock_stage_name(stage_name)
-        ran_by_lock_dir.setdefault(lock_dir, []).append(lock_name)
-    if ran_by_lock_dir and not dry:
+    # As DVC names them from here, e.g., 'sub/dvc.yaml:stage'
+    ran_names = {n.replace("\\", "/") for n in ran if n is not None}
+    if ran_names and not dry:
         try:
             # Whether to stage a subproject's is this project's setting
             autostage = calkit.dvc.autostage_enabled()
             root = Path(repo.working_dir).resolve()
-            unstored = []
-            for lock_dir, lock_names in ran_by_lock_dir.items():
-                run_dvc_repo = calkit.dvc.get_dvc_repo(lock_dir)
-                try:
-                    git_out_paths = [
-                        Path(p).relative_to(root).as_posix()
-                        for p, n in calkit.dvc.get_git_output_paths(
-                            dvc_repo=run_dvc_repo, wdir=lock_dir
-                        ).items()
-                        if n in lock_names and os.path.exists(p)
-                    ]
-                    # An iterated stage's outputs, e.g., can be ignored as a
-                    # whole, since compiling only un-ignores literal paths
-                    # Chunked to stay under command line length limits
-                    ignored_out_paths = [
+            run_dvc_repo = calkit.dvc.get_dvc_repo()
+            try:
+                git_out_paths = [
+                    Path(p).relative_to(root).as_posix()
+                    for p, n in calkit.dvc.get_git_output_paths(
+                        dvc_repo=run_dvc_repo
+                    ).items()
+                    if n in ran_names and os.path.exists(p)
+                ]
+                # An iterated stage's outputs, e.g., can be ignored as a
+                # whole, since compiling only un-ignores literal paths
+                # Chunked to stay under command line length limits
+                ignored_out_paths = [
+                    p
+                    for i in range(0, len(git_out_paths), 100)
+                    for p in calkit.git.get_ignored_by_rule(
+                        repo, *git_out_paths[i : i + 100]
+                    )
+                ]
+                for path in ignored_out_paths:
+                    calkit.git.ensure_path_is_not_ignored(repo, path)
+                too_large = []
+                if autostage:
+                    too_large = calkit.dvc.stage_git_outputs(
+                        repo, git_out_paths
+                    )
+                    # What .dvcignore excludes decides the hashes dvc.lock
+                    # records, so it's committed with it
+                    dvcignores = [
                         p
-                        for i in range(0, len(git_out_paths), 100)
-                        for p in calkit.git.get_ignored_by_rule(
-                            repo, *git_out_paths[i : i + 100]
-                        )
+                        for p in repo.git.ls_files(
+                            "-z",
+                            "--modified",
+                            "--others",
+                            "--exclude-standard",
+                            "--",
+                            ":(glob)**/.dvcignore",
+                        ).split("\0")
+                        if p
                     ]
-                    for path in ignored_out_paths:
-                        calkit.git.ensure_path_is_not_ignored(repo, path)
-                    if autostage:
-                        for i in range(0, len(git_out_paths), 100):
-                            repo.git.add(
-                                "-A", "--", *git_out_paths[i : i + 100]
-                            )
-                    for u in calkit.dvc.get_unstored_output_files(
-                        dvc_repo=run_dvc_repo, wdir=lock_dir, stages=lock_names
-                    ):
-                        # Relative to here rather than the subproject
-                        u["files"] = [
-                            Path(lock_dir or "", f).as_posix()
-                            for f in u["files"]
-                        ]
-                        unstored.append(u)
-                finally:
-                    run_dvc_repo.close()
+                    if dvcignores:
+                        repo.git.add("--", *dvcignores)
+                unstored = calkit.dvc.get_unstored_output_files(
+                    dvc_repo=run_dvc_repo, stages=ran_names
+                )
+            finally:
+                run_dvc_repo.close()
             files = [f for u in unstored for f in u["files"]]
             rules = list(
                 dict.fromkeys(r for u in unstored for r in u["rules"])
             )
-            too_large = []
             if files and autostage:
-                too_large = calkit.dvc.force_add_ignored_files(repo, files)
+                too_large += calkit.dvc.force_add_ignored_files(repo, files)
                 files = [f for f in files if f not in too_large]
             n_files_txt = f"{len(files)} file{'s' if len(files) > 1 else ''}"
             files_txt = calkit.dvc.get_unstored_files_text(files, rules)

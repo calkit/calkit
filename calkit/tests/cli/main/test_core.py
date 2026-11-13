@@ -1097,6 +1097,8 @@ def test_git_outputs_with_ignored_files(
         assert f"runs/{agent}/write.log" in staged
         assert f"runs/{agent}/x.bak" not in staged
         assert f"runs/{agent}/__pycache__/c.pyc" not in staged
+    # With what .dvcignore leaves out, which dvc.lock's hashes depend on
+    assert ".dvcignore" in staged
     git("add", "-A")
     git("commit", "-qm", "Run")
     assert get_storage_problems() == []
@@ -1154,8 +1156,8 @@ def test_git_outputs_with_ignored_files(
         f.truncate(51 * 1024**2)
     out = run("add", "runs")
     assert (
-        "Not adding 1 file Git ignores in outputs stored in Git, since "
-        "they're larger than 50 MB: runs/one/big.log"
+        "Not adding 1 file in outputs stored in Git to it, since they're "
+        "larger than 50 MB: runs/one/big.log"
     ) in out
     assert "runs/one/big.log" not in git("diff", "--cached", "--name-only")
     result = subprocess.run(
@@ -1195,6 +1197,16 @@ def test_git_outputs_with_ignored_files(
     staged = git("diff", "--cached", "--name-only").split()
     assert "sub/out/c.txt" in staged
     assert "sub/out/c.log" in staged
+    git("add", "-A")
+    git("commit", "-qm", "Run sub")
+    # And found from here, with the name it's run by
+    with open(os.path.join("sub", "out", "new.log"), "w") as f:
+        f.write("n")
+    (problem,) = get_storage_problems()
+    assert problem["path"] == "sub/out"
+    assert problem["stage"] == "sub/dvc.yaml:c"
+    run("fix", "storage")
+    assert "sub/out/new.log" in git("diff", "--cached", "--name-only")
 
 
 def test_save_to_git_with_all(tmp_dir):

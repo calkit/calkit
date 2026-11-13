@@ -2166,6 +2166,28 @@ def test_check_storage(tmp_dir):
     ]
     result = check()
     assert result.returncode == 0, result.stdout
+    # A directory tracked by both, with a file DVC leaves out of it that's
+    # only in Git, keeps that one in Git
+    git("commit", "-qm", "Fix")
+    with open(".dvcignore", "a") as f:
+        f.write("*.tmp\n")
+    ck_info["pipeline"]["stages"]["dir"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "mkdir -p dir && echo d > dir/d.csv && echo t > dir/t.tmp",
+        "outputs": ["dir"],
+    }
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["calkit", "run", "dir"])
+    git("add", "-f", "dir")
+    (problem,) = [p for p in json.loads(check("--json").stdout)]
+    assert problem["kind"] == "both"
+    assert problem["files"] == ["dir/d.csv"]
+    result = check("--fix")
+    assert result.returncode == 0, result.stderr
+    assert git("ls-files", "--", "dir").split() == ["dir/t.tmp"]
+    result = check()
+    assert result.returncode == 0, result.stdout
 
 
 def test_check_references(tmp_dir):

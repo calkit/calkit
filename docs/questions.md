@@ -49,6 +49,8 @@ and the natural place to start when reviewing a project.
 
 ## Evidence
 
+<!-- TODO: needs human review: the last item of this list -->
+
 There are a few kinds of evidence:
 
 - `figure`, `table`, and `publication` refer to an artifact by path.
@@ -58,9 +60,13 @@ There are a few kinds of evidence:
   optionally naming several `values` inside it.
 - `value` refers to one value inside a JSON or YAML results file,
   found by its `key`.
+- An entry with no `kind` cites a file as it is, by its `path`,
+  optionally at some `lines`; see [citing a file](#citing-a-file).
 
 A `result` entry with a `key` is the older way of writing a `value` entry.
 It still works, but new entries should use `kind: value`.
+Likewise, an entry with no `kind` that has a `key` or `values` is a
+`result`, since that's how results used to be written.
 
 Evidence should come from somewhere the project records.
 A `value` must be in a file produced by a pipeline stage, or declared
@@ -71,6 +77,12 @@ Other kinds of evidence can also be declared under `figures`, `datasets`,
 or `publications` with `created_by`, e.g., for a hand-drawn schematic.
 Evidence with no record at all is reported as `unattributed`, which is a
 warning.
+
+<!-- TODO: needs human review -->
+
+A file inside a directory that a stage lists as an output is produced by
+that stage, so a stage can write several files into one output directory
+and each can be cited without being listed.
 
 ## Reading values from results
 
@@ -301,6 +313,8 @@ and goes stale when what it vouches for changes:
   including evidence pinned to a branch or tag that has moved since.
 
 Editing a question's `notes` doesn't make either stale.
+Nor does rewrapping its text, since a line break reads as a space,
+though a blank line does, since it starts a new paragraph.
 A stale sign-off fails `calkit check questions` until someone signs off
 again.
 A question nobody has signed off on doesn't fail the check.
@@ -383,6 +397,38 @@ evidence:
     path: docs/notes.md
     section: Method
 ```
+
+<!-- TODO: needs human review -->
+
+## Citing a file
+
+Some evidence is neither a result nor a document,
+e.g., an AI agent's log, an excerpt of a session transcript, a script,
+or a raw output.
+Cite it by its `path` alone, leaving out `kind`,
+and point at the `lines` that matter, as a single line or a range:
+
+```yaml
+evidence:
+  - path: results/trace/run-1/RESULTS.md
+    lines: 8
+    explanation: The write-up states the wrong modulus here.
+  - path: results/trace/run-1/transcript.txt
+    lines: 12-20
+    explanation: The command that printed it, with its output.
+```
+
+A `kind` of `null` means the same as leaving it out.
+`calkit check questions` checks that the file exists, at the `git_ref` if
+there is one, and that the file still has the cited lines,
+reporting a broken reference if it doesn't, since lines that are gone
+mean the citation has rotted.
+Like a figure, a file nothing records the origin of is reported as
+`unattributed`, and one whose stage is out of date is reported stale.
+
+A file inside a directory tracked by DVC as one output is compared with
+the directory's hash in `dvc.lock`, since DVC doesn't record one per file,
+so any change in the directory counts as the file changing.
 
 A question that is still open should have no `answer`.
 Use `notes` to say why it's open and what would settle it.

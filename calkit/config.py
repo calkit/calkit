@@ -663,6 +663,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
     email: str | None = None
+    # Who the user is, to prefill them as the first author of a release
+    first_name: str | None = None
+    last_name: str | None = None
+    affiliation: str | None = None
+    orcid: str | None = None
     # The hub commands target when no hub is otherwise specified; only
     # consulted from the base (unsuffixed) config file
     default_hub: str | None = None
@@ -694,7 +699,8 @@ class Settings(BaseSettings):
     overleaf_token: KeyringOptionalSecret | None = None
     # Browser session cookie, for syncing without Overleaf's Git integration
     overleaf_session: KeyringOptionalSecret | None = None
-
+    # Default archival service for releases
+    default_archival_service: Literal["zenodo", "caltechdata"] = "zenodo"
     # Which fields have been resolved from the keyring, so a secret that
     # is genuinely absent isn't looked up again, and an assignment (even
     # of None) isn't overwritten by what's still stored
@@ -745,6 +751,16 @@ class Settings(BaseSettings):
             # meaning "forget this credential"
             self._resolved_secrets.add(name)
         super().__setattr__(name, value)
+
+    @field_validator("orcid")
+    @classmethod
+    def _normalize_orcid(cls, v: str | None) -> str | None:
+        # Checked when set, rather than when a release is already underway
+        if v is None:
+            return v
+        from calkit.core import normalize_orcid
+
+        return normalize_orcid(v)
 
     @field_validator("default_hub")
     @classmethod
@@ -864,3 +880,70 @@ def read() -> Settings:
         "CALKIT" + get_env_suffix(sep="_") + "_"
     )
     return Settings()
+
+
+# The user's own details as an author, which prefill releases
+USER_AUTHOR_FIELDS = ["first_name", "last_name", "affiliation", "orcid"]
+
+
+def _bare_orcid(orcid: str | None) -> str | None:
+    """Get the bare identifier from an ORCID, checking it on the way."""
+    if not orcid:
+        return None
+    from calkit.core import normalize_orcid
+
+    return normalize_orcid(orcid).removeprefix("https://orcid.org/")
+
+
+def get_user_author(git_fallback: bool = True) -> dict:
+    """Get the user's own author details, with a bare ORCID.
+
+    Unset fields are ``None``. With ``git_fallback``, a name missing from the
+    config is taken from Git's ``user.name``.
+    """
+    settings = read()
+    author = {f: getattr(settings, f) for f in USER_AUTHOR_FIELDS}
+    author["orcid"] = _bare_orcid(author["orcid"])
+    if git_fallback and not (author["first_name"] and author["last_name"]):
+        try:
+            git_name = subprocess.run(
+                ["git", "config", "--get", "user.name"],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except OSError:
+            git_name = ""
+        first, _, last = git_name.rpartition(" ")
+        if first and last:
+            author["first_name"] = author["first_name"] or first
+            author["last_name"] = author["last_name"] or last
+    return author
+
+
+def differs_from_user_author(author: dict) -> bool:
+    """Check whether an author's details differ from the user's saved ones."""
+    saved = get_user_author(git_fallback=False)
+    for field in USER_AUTHOR_FIELDS:
+        value = author.get(field) or None
+        if field == "orcid":
+            value = _bare_orcid(value)
+        if value != saved[field]:
+            return True
+    return False
+
+
+def save_user_author(author: dict) -> None:
+    """Save an author's details as the user's own.
+
+    Fields the author doesn't have are cleared rather than kept, so an old
+    ORCID or affiliation can't end up attached to a new name.
+    """
+    settings = read()
+    for field in USER_AUTHOR_FIELDS:
+        value = author.get(field) or None
+        if field == "orcid" and value is not None:
+            from calkit.core import normalize_orcid
+
+            value = normalize_orcid(value)
+        setattr(settings, field, value)
+    settings.write()

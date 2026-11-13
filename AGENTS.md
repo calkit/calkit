@@ -66,6 +66,10 @@ formatter inserts, e.g., ruff-format adds one after an in-function import
 block. Don't hoist imports to module scope just to avoid those; imports are
 kept inside functions to keep CLI startup fast.
 
+Put the imports a function always needs at its top, not partway through;
+only an import on a conditional path belongs where it's used.
+Module scope is fine for anything that won't slow CLI startup.
+
 For prose, only use one space after punctuation.
 
 Always put a comma after "i.e." and "e.g.".
@@ -78,9 +82,15 @@ write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
 
+Start function names with a verb, e.g., `get_evidence_kind` rather than
+`evidence_kind`.
 Name functions for what they return,
 e.g., `get_image_name` rather than `get_image`,
 which could just as well return an image.
+
+Name a value for what it holds, so the name tells its type:
+a commit hash is `commit_sha`, not `commit`, which reads as an object;
+a path is `*_path`; a count is `n_*`.
 
 No spaces on either side of en or em dashes used for ranges or pauses in prose,
 respectively.

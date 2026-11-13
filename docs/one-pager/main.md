@@ -7,18 +7,16 @@ collaboration platform that
 keeps figures, tables, and values in articles connected to the code and data
 that produced them, for fast iteration and full transparency.**
 
-<!-- calkit values path=results/traction.json -->
-
 ## By the numbers
 
-- **<!-- calkit value key=hub_project_owners -->37<!-- /calkit value -->**
+- **<!-- ckvalue results/traction.json hub_project_owners -->37<!-- /ckvalue -->**
   researchers and groups with projects on [calkit.io](https://calkit.io)
-- **<!-- calkit value key=papers_shipped -->5<!-- /calkit value -->**
+- **<!-- ckvalue results/traction.json papers_shipped -->5<!-- /ckvalue -->**
   reproducible publications shipped
-- **<!-- calkit value key=releases_per_week_last_90_days -->8.8<!-- /calkit value -->**
+- **<!-- ckvalue results/traction.json releases_per_week_last_90_days -->8.9<!-- /ckvalue -->**
   releases per week
 
-as of <!-- calkit value key=date -->2026-11-09<!-- /calkit value -->
+as of <!-- ckvalue results/traction.json date -->2026-11-12<!-- /ckvalue -->
 
 ## The problem
 
@@ -66,21 +64,19 @@ it becomes much easier to review work done by AI agents or humans.
 
 ---[Rebecca (Becca) McCabe](https://scholar.google.com/citations?user=r3eP1gIAAAAJ&hl=en), PhD, Cornell (2026)
 
-<!-- calkit values path=results/2027-budget.json -->
-
-## The ask: \$<!-- calkit value key=total_rounded_thousands format="{:.0f}" -->100<!-- /calkit value -->k to bring Calkit to researchers
+## The ask: \$<!-- ckvalue results/2027-budget.json total_rounded_thousands .0f -->100<!-- /ckvalue -->k to bring Calkit to researchers
 
 So far we've seen the most interest from researchers
 who like Overleaf's ease of use but want to connect it to their analyses
 to eliminate error-prone and tedious manual uploads.
 In 2027 we'll take Calkit on tour, starting at Caltech and several
 universities in Boston.
-In <!-- calkit value key=workshops -->8<!-- /calkit value --> workshops,
-roughly <!-- calkit value key=researchers_trained -->200<!-- /calkit value -->
+In <!-- ckvalue results/2027-budget.json workshops -->8<!-- /ckvalue --> workshops,
+roughly <!-- ckvalue results/2027-budget.json researchers_trained -->200<!-- /ckvalue -->
 researchers will connect their analyses to Overleaf with our new
 [browser extension](https://chromewebstore.google.com/detail/calkit/idhdomgapfolnpffanajdckdaojencal),
 and we expect to provide follow-up support
-for about <!-- calkit value key=projects_supported -->60<!-- /calkit value -->
+for about <!-- ckvalue results/2027-budget.json projects_supported -->60<!-- /ckvalue -->
 of them.
 What we learn will be published openly and will drive Calkit's development.
 

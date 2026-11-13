@@ -846,3 +846,35 @@ def test_detex() -> None:
     assert calkit.latex.get_math_text(r"\arccos x + \liminf_n a") == (
         "arccos x + liminf n a"
     )
+
+
+def test_flatten(tmp_dir):
+    os.makedirs("paper/sections")
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\input{intro}\n"
+            "Text \\input {results} and more \\cite{after}\n"
+            "\\import{sections/}{methods}\n"
+            "\\includegraphics{fig}\n"
+        )
+    with open("paper/intro.tex", "w") as f:
+        f.write("Intro\n")
+    with open("paper/results.tex", "w") as f:
+        f.write("Results\n")
+    with open("paper/sections/methods.tex", "w") as f:
+        f.write("Methods\n")
+    lines = calkit.latex.flatten("paper/main.tex")
+    # An include anywhere in a line is followed, keeping the text around it
+    # on the line it's on, and a line that's only an include isn't kept
+    assert [(ln.path, ln.lineno, ln.text) for ln in lines] == [
+        ("paper/intro.tex", 1, "Intro"),
+        ("paper/intro.tex", 2, ""),
+        ("paper/main.tex", 2, "Text "),
+        ("paper/results.tex", 1, "Results"),
+        ("paper/results.tex", 2, ""),
+        ("paper/main.tex", 2, " and more \\cite{after}"),
+        ("paper/sections/methods.tex", 1, "Methods"),
+        ("paper/sections/methods.tex", 2, ""),
+        ("paper/main.tex", 4, "\\includegraphics{fig}"),
+        ("paper/main.tex", 5, ""),
+    ]

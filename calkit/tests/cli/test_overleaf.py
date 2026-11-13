@@ -1548,6 +1548,14 @@ def test_overleaf_sync_with_session(tmp_dir, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "input")
+    # The first push must work without push.autoSetupRemote, which CI sets
+    # globally, and which no other config can turn back off
+    git_config = os.path.join(tempfile.mkdtemp(), "config")
+    open(git_config, "w").close()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", git_config)
+    for role in ["AUTHOR", "COMMITTER"]:
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Calkit Test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@calkit.org")
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     remote = tempfile.mkdtemp()

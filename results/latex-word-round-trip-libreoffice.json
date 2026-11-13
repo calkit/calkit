@@ -1,0 +1,19 @@
+{
+  "engine": "libreoffice",
+  "source_unchanged": true,
+  "display_equations": {
+    "source": 7,
+    "docx": 7
+  },
+  "inline_equations": {
+    "source": 15,
+    "docx": 15
+  },
+  "comment_threads": {
+    "source": 1,
+    "docx": 1
+  },
+  "edits_merged": 0,
+  "comments_changed": 0,
+  "pdf_unchanged": true
+}

@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from calkit.windows import is_wsl, wsl_run_powershell_cmd
+
 # XML namespaces, named by the prefixes Word gives them: w is the main
 # WordprocessingML namespace, w14 and w15 are Word 2010 and 2013
 # extensions (paragraph IDs, comment threads), r and the package
@@ -1159,7 +1161,7 @@ def word_installed() -> bool:
                 continue
             return True
         return False
-    if _is_wsl():
+    if is_wsl():
         script = r"""
 $paths = @(
     "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Winword.exe",
@@ -1174,58 +1176,6 @@ exit 1
 """
         return wsl_run_powershell_cmd(script, check=False).returncode == 0
     return False
-
-
-def _is_wsl() -> bool:
-    if not sys.platform.startswith("linux"):
-        return False
-    res = subprocess.run(
-        ["uname", "-r"], capture_output=True, text=True, check=False
-    )
-    return "microsoft" in res.stdout.lower()
-
-
-def wsl_run_powershell_cmd(
-    script: str,
-    env_vars: dict[str, str] | None = None,
-    *,
-    timeout: int | None = None,
-    check: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    if not _is_wsl():
-        raise RuntimeError(
-            "Running PowerShell from Linux is only supported via WSL"
-        )
-    env = os.environ.copy()
-    if env_vars:
-        env.update(env_vars)
-        wslenv = env.get("WSLENV", "")
-        converted = [f"{name}/p" for name in env_vars]
-        env["WSLENV"] = ":".join(filter(None, [wslenv, *converted]))
-    res = subprocess.run(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "-",
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-        input=script.replace("\n", "\r\n") + "\r\n",
-        env=env,
-        timeout=timeout,
-    )
-    if check and res.returncode != 0:
-        details = "\n".join(
-            part.strip() for part in (res.stdout, res.stderr) if part
-        )
-        raise RuntimeError(
-            f"Running powershell script from WSL failed: {details or res.returncode}"
-        )
-    return res
 
 
 def find_soffice() -> str | None:
@@ -1559,14 +1509,10 @@ def pdf_to_docx(pdf_path: str, docx_path: str) -> None:
                 if started:
                     word.Quit()
         else:  # Linux
-            if _is_wsl():
+            if is_wsl():
                 POWERSHELL_SCRIPT = r"""
-
 $PdfPath = $env:PDF_PATH
 $OutputPath = $env:OUTPUT_PATH
-
-Write-Host "PDF path: $PdfPath"
-Write-Host "Output path: $OutputPath"
 
 $word = $null
 $doc = $null
@@ -1637,7 +1583,6 @@ try {
 
         # wdNoProtection = -1
         if ($doc.ProtectionType -ne -1) {
-            Write-Host "Unprotecting"
             $doc.Unprotect()
         }
 
@@ -1654,7 +1599,6 @@ try {
                 Out-Null
         }
     }
-
     exit 0
 }
 catch {

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import sys
 
 SMART_APP_CONTROL_DOCS_URL = (
@@ -57,3 +59,55 @@ def app_control_blocked(
     ):
         return True
     return APP_CONTROL_BLOCK_REGEX.search(output) is not None
+
+
+def is_wsl() -> bool:
+    if not sys.platform.startswith("linux"):
+        return False
+    res = subprocess.run(
+        ["uname", "-r"], capture_output=True, text=True, check=False
+    )
+    return "microsoft" in res.stdout.lower()
+
+
+def wsl_run_powershell_cmd(
+    script: str,
+    env_vars: dict[str, str] | None = None,
+    *,
+    timeout: int | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    if not is_wsl():
+        raise RuntimeError(
+            "Running PowerShell from Linux is only supported via WSL"
+        )
+    env = os.environ.copy()
+    if env_vars:
+        env.update(env_vars)
+        wslenv = env.get("WSLENV", "")
+        converted = [f"{name}/p" for name in env_vars]
+        env["WSLENV"] = ":".join(filter(None, [wslenv, *converted]))
+    res = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "-",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        input=script.replace("\n", "\r\n") + "\r\n",
+        env=env,
+        timeout=timeout,
+    )
+    if check and res.returncode != 0:
+        details = "\n".join(
+            part.strip() for part in (res.stdout, res.stderr) if part
+        )
+        raise RuntimeError(
+            f"Running powershell script from WSL failed: {details or res.returncode}"
+        )
+    return res

@@ -559,7 +559,7 @@ def test_stageiteration(monkeypatch, tmp_path):
         wdir=wdir
     )
     assert sorted(
-        str(p.relative_to(git_root)) for p in git_root.rglob("*.json")
+        p.relative_to(git_root).as_posix() for p in git_root.rglob("*.json")
     ) == ["fetch/2026Q4/listing.json", "new/2026Q4/period.json"]
     assert not (git_root / "old").exists()
     assert (tmp_path / ".calkit/local/date-ranges/fetch/2026Q4").is_dir()

@@ -272,20 +272,21 @@ or `--yes` on the command line.
 
 Apps currently in the registry:
 
-| Name               | Installer                                                                                          |
-| ------------------ | -------------------------------------------------------------------------------------------------- |
-| `pixi`             | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                          |
-| `uv`               | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                 |
-| `rustup`, `cargo`  | upstream `rustup` script on Unix, `winget` on Windows                                              |
-| `juliaup`, `julia` | upstream `juliaup` script on Unix, `winget` on Windows                                             |
-| `nix`              | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows |
-| `conda`, `mamba`   | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                 |
-| `git`              | Homebrew on macOS, `winget` on Windows                                                             |
-| `docker`           | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows                             |
-| `code`             | Homebrew cask on macOS, `winget` on Windows                                                        |
-| `R`, `Rscript`     | Homebrew cask on macOS, `winget` on Windows                                                        |
-| `brew`             | the upstream Homebrew script, macOS only                                                           |
-| `choco`            | the upstream Chocolatey script in an elevated shell, Windows only                                  |
+| Name                 | Installer                                                                                          |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| `pixi`               | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                          |
+| `uv`                 | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                 |
+| `rustup`, `cargo`    | upstream `rustup` script on Unix, `winget` on Windows                                              |
+| `juliaup`, `julia`   | upstream `juliaup` script on Unix, `winget` on Windows                                             |
+| `nix`                | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows |
+| `conda`, `mamba`     | [Miniforge](https://conda-forge.org/miniforge/) in batch mode, into `~/miniforge3`                 |
+| `git`                | Homebrew on macOS, `winget` on Windows                                                             |
+| `docker`             | Homebrew cask on macOS, `get.docker.com` on Linux, `winget` on Windows                             |
+| `code`               | Homebrew cask on macOS, `winget` on Windows                                                        |
+| `R`, `Rscript`       | Homebrew cask on macOS, `winget` on Windows                                                        |
+| `node`, `npm`, `npx` | `pixi global install nodejs`, so `pixi` first; also `calkit install nodejs`                        |
+| `brew`               | the upstream Homebrew script, macOS only                                                           |
+| `choco`              | the upstream Chocolatey script in an elevated shell, Windows only                                  |
 
 Run `calkit list installers` for the live list.
 On Linux, Git, VS Code, and R come from the system package manager,

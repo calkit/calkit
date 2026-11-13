@@ -91,6 +91,72 @@ def get_default_branch(repo: git.Repo) -> str | None:
     return None
 
 
+def get_set_upstream_args(
+    repo: git.Repo, push_args: list[str] | None = None
+) -> list[str]:
+    """Arguments that let a plain ``git push`` publish a new branch.
+
+    Git refuses to push a branch with no upstream unless
+    ``push.autoSetupRemote`` is on, so the first push of a project, e.g.,
+    right after connecting it to a hub, would fail. Returns nothing when
+    the branch already tracks one, ``push_args`` say what or where to
+    push, Git pushes to a remote other than the one it pulls from, or
+    there's no obvious remote to choose.
+    """
+
+    def get_config(key: str) -> str:
+        # Through Git, since its keys are case-insensitive and config files
+        # can include others
+        return str(repo.git.config("--get", key, with_exceptions=False))
+
+    # These pick their own refs, so naming the branch would change them
+    ref_flags = {
+        "--all",
+        "--branches",
+        "--mirror",
+        "--tags",
+        "--delete",
+        "-d",
+        "--prune",
+    }
+    for arg in push_args or []:
+        if not arg.startswith("-") or arg in ref_flags:
+            return []
+        # A remote named this way loses to one given as an argument
+        if arg == "--repo" or arg.startswith("--repo="):
+            return []
+    # Neither pushes just the current branch, which naming it would do
+    if get_config("push.default") in ("nothing", "matching"):
+        return []
+    try:
+        branch = repo.active_branch
+    except TypeError:
+        # Detached HEAD
+        return []
+    if branch.tracking_branch() is not None:
+        return []
+    push_remote = get_config(f"branch.{branch.name}.pushRemote") or get_config(
+        "remote.pushDefault"
+    )
+    pull_remote = get_config(f"branch.{branch.name}.remote")
+    # Git already pushes a new branch to a push remote that isn't the one
+    # it pulls from, and setting an upstream would change where it pulls
+    if push_remote and push_remote != (pull_remote or "origin"):
+        return []
+    remote_names = [r.name for r in repo.remotes]
+    if push_remote:
+        remote = push_remote
+    elif pull_remote in remote_names:
+        remote = pull_remote
+    elif "origin" in remote_names:
+        remote = "origin"
+    elif len(remote_names) == 1:
+        remote = remote_names[0]
+    else:
+        return []
+    return ["--set-upstream", remote, branch.name]
+
+
 def check_branch_is_current(
     repo: git.Repo, branch: str | None = None, fetch: bool = True
 ) -> str | None:
